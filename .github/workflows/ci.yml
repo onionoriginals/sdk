@@ -42,7 +42,7 @@ jobs:
         run: |
           mkdir -p public/badges
           if [ -f coverage/coverage-summary.json ]; then
-            bunx coverage-badges --source coverage/coverage-summary.json --output public/badges/coverage.svg --style flat || true
+            bunx coverage-badges --source coverage/coverage-summary.json --output public/badges/coverage.svg --style flat --jsonPath total.lines.pct || true
           fi
 
       - name: Upload Pages artifact (badge)

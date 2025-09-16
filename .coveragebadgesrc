@@ -3,5 +3,6 @@
   "output": "public/badges/coverage.svg",
   "style": "flat",
   "label": "coverage",
-  "jsonPath": "total.lines.pct"
+  "jsonPath": "total.lines.pct",
+  "attribute": "total.lines.pct"
 }
