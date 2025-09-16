@@ -1,5 +1,8 @@
 # Originals SDK
 
+![CI](https://github.com/aviarytech/originals-sdk/actions/workflows/ci.yml/badge.svg)
+![Coverage](./badges/coverage.svg)
+
 A TypeScript SDK for the Originals Protocol - enabling creation, discovery, and transfer of digital assets with cryptographically verifiable provenance.
 
 ## Overview

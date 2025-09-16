@@ -26,4 +26,27 @@ jobs:
       - name: Run tests with coverage
         run: bun run test:ci
 
+      - name: Extract coverage percent
+        id: cov
+        run: |
+          pct=$(jq -r '.total.lines.pct' coverage/coverage-summary.json)
+          echo "percent=$pct" >> $GITHUB_OUTPUT
+
+      - name: Generate coverage badge
+        run: |
+          mkdir -p badges
+          pct=$(printf '%.0f' $(jq -r '.total.lines.pct' coverage/coverage-summary.json))
+          color=red
+          if [ $pct -ge 90 ]; then color=yellow; fi
+          if [ $pct -ge 95 ]; then color=yellowgreen; fi
+          if [ $pct -ge 98 ]; then color=green; fi
+          if [ $pct -ge 100 ]; then color=brightgreen; fi
+          curl -s "https://img.shields.io/badge/coverage-${pct}%-$color.svg" -o badges/coverage.svg
+
+      - name: Upload coverage badge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-badge
+          path: badges/coverage.svg
+
 
