@@ -1,0 +1,7 @@
+{
+  "source": "coverage/coverage-summary.json",
+  "output": "public/badges/coverage.svg",
+  "style": "flat",
+  "label": "coverage",
+  "jsonPath": "total.lines.pct"
+}
