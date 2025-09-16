@@ -40,28 +40,22 @@ jobs:
       - name: Generate coverage badge (coverage-badges-cli)
         if: always()
         run: |
-          mkdir -p public/badges
+          mkdir -p coverage/badges
           if [ -f coverage/coverage-summary.json ]; then
-            bunx coverage-badges --source coverage/coverage-summary.json --output public/badges/coverage.svg --style flat --jsonPath total.lines.pct || true
+            bunx coverage-badges --source coverage/coverage-summary.json --output coverage/badges/coverage.svg --style flat --jsonPath total.lines.pct || true
           fi
-
-      - name: Disable Jekyll
-        if: always()
-        run: |
-          mkdir -p public
-          touch public/.nojekyll
 
       - name: List published files (debug)
         if: always()
         run: |
-          echo "Listing public directory contents:"
-          ls -R public || true
+          echo "Listing coverage directory contents:"
+          ls -R coverage || true
 
       - name: Upload Pages artifact (badge)
         if: always() && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: public
+          path: coverage
 
       - name: Fail if tests failed
         if: steps.tests.outcome == 'failure'
