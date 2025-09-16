@@ -45,8 +45,14 @@ jobs:
             bunx coverage-badges --source coverage/coverage-summary.json --output public/badges/coverage.svg --style flat --jsonPath total.lines.pct || true
           fi
 
-      - name: Upload Pages artifact (badge)
+      - name: List published files (debug)
         if: always()
+        run: |
+          echo "Listing public directory contents:"
+          ls -R public || true
+
+      - name: Upload Pages artifact (badge)
+        if: always() && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
@@ -56,7 +62,7 @@ jobs:
         run: exit 1
 
   deploy-pages:
-    if: always()
+    if: always() && github.ref == 'refs/heads/main'
     needs: test
     environment:
       name: github-pages
