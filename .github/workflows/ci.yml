@@ -45,6 +45,12 @@ jobs:
             bunx coverage-badges --source coverage/coverage-summary.json --output public/badges/coverage.svg --style flat --jsonPath total.lines.pct || true
           fi
 
+      - name: Disable Jekyll
+        if: always()
+        run: |
+          mkdir -p public
+          touch public/.nojekyll
+
       - name: List published files (debug)
         if: always()
         run: |
