@@ -8,11 +8,18 @@ on:
     branches:
       - "**"
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,10 +37,10 @@ jobs:
         continue-on-error: true
         run: bun run test:ci
 
-      - name: Extract coverage percent
+      - name: Build coverage badge (always)
         if: always()
-        id: cov
         run: |
+          mkdir -p public/badges
           if [ -f coverage/coverage-summary.json ]; then
             pct=$(jq -r '.total.lines.pct // 0' coverage/coverage-summary.json)
           else
@@ -45,41 +52,28 @@ jobs:
           if [ "$pct_int" -ge 95 ]; then color=yellowgreen; fi
           if [ "$pct_int" -ge 98 ]; then color=green; fi
           if [ "$pct_int" -ge 100 ]; then color=brightgreen; fi
-          echo "percent=$pct_int" >> $GITHUB_OUTPUT
-          echo "color=$color" >> $GITHUB_OUTPUT
+          curl -s "https://img.shields.io/badge/coverage-${pct_int}%-$color.svg" -o public/badges/coverage.svg
 
-      - name: Generate coverage badge
+      - name: Upload Pages artifact (badge)
         if: always()
-        run: |
-          mkdir -p badges
-          pct='${{ steps.cov.outputs.percent }}'
-          color='${{ steps.cov.outputs.color }}'
-          if [ -z "$pct" ]; then pct=0; fi
-          if [ -z "$color" ]; then color=red; fi
-          curl -s "https://img.shields.io/badge/coverage-${pct}%-$color.svg" -o badges/coverage.svg
-
-      - name: Upload coverage badge artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: coverage-badge
-          path: badges/coverage.svg
-
-      - name: Commit coverage badge (main only)
-        if: always() && github.ref == 'refs/heads/main'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ -n "$(git status --porcelain badges/coverage.svg)" ]; then
-            git add badges/coverage.svg
-            git commit -m "chore(ci): update coverage badge"
-            git push
-          else
-            echo "No coverage badge changes to commit."
-          fi
+          path: public
 
       - name: Fail if tests failed
         if: steps.tests.outcome == 'failure'
         run: exit 1
+
+  deploy-pages:
+    if: always()
+    needs: test
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
 
