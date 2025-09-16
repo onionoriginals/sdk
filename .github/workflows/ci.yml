@@ -37,22 +37,13 @@ jobs:
         continue-on-error: true
         run: bun run test:ci
 
-      - name: Build coverage badge (always)
+      - name: Generate coverage badge (coverage-badges-cli)
         if: always()
         run: |
           mkdir -p public/badges
           if [ -f coverage/coverage-summary.json ]; then
-            pct=$(jq -r '.total.lines.pct // 0' coverage/coverage-summary.json)
-          else
-            pct=0
+            bunx coverage-badges --source coverage/coverage-summary.json --output public/badges/coverage.svg --style flat || true
           fi
-          pct_int=$(printf '%.0f' "$pct")
-          color=red
-          if [ "$pct_int" -ge 90 ]; then color=yellow; fi
-          if [ "$pct_int" -ge 95 ]; then color=yellowgreen; fi
-          if [ "$pct_int" -ge 98 ]; then color=green; fi
-          if [ "$pct_int" -ge 100 ]; then color=brightgreen; fi
-          curl -s "https://img.shields.io/badge/coverage-${pct_int}%-$color.svg" -o public/badges/coverage.svg
 
       - name: Upload Pages artifact (badge)
         if: always()
@@ -72,6 +63,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
