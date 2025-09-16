@@ -26,38 +26,60 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run tests with coverage
+        id: tests
+        continue-on-error: true
         run: bun run test:ci
 
       - name: Extract coverage percent
+        if: always()
         id: cov
         run: |
-          pct=$(jq -r '.total.lines.pct' coverage/coverage-summary.json)
-          echo "percent=$pct" >> $GITHUB_OUTPUT
+          if [ -f coverage/coverage-summary.json ]; then
+            pct=$(jq -r '.total.lines.pct // 0' coverage/coverage-summary.json)
+          else
+            pct=0
+          fi
+          pct_int=$(printf '%.0f' "$pct")
+          color=red
+          if [ "$pct_int" -ge 90 ]; then color=yellow; fi
+          if [ "$pct_int" -ge 95 ]; then color=yellowgreen; fi
+          if [ "$pct_int" -ge 98 ]; then color=green; fi
+          if [ "$pct_int" -ge 100 ]; then color=brightgreen; fi
+          echo "percent=$pct_int" >> $GITHUB_OUTPUT
+          echo "color=$color" >> $GITHUB_OUTPUT
 
       - name: Generate coverage badge
+        if: always()
         run: |
           mkdir -p badges
-          pct=$(printf '%.0f' $(jq -r '.total.lines.pct' coverage/coverage-summary.json))
-          color=red
-          if [ $pct -ge 90 ]; then color=yellow; fi
-          if [ $pct -ge 95 ]; then color=yellowgreen; fi
-          if [ $pct -ge 98 ]; then color=green; fi
-          if [ $pct -ge 100 ]; then color=brightgreen; fi
+          pct='${{ steps.cov.outputs.percent }}'
+          color='${{ steps.cov.outputs.color }}'
+          if [ -z "$pct" ]; then pct=0; fi
+          if [ -z "$color" ]; then color=red; fi
           curl -s "https://img.shields.io/badge/coverage-${pct}%-$color.svg" -o badges/coverage.svg
 
       - name: Upload coverage badge artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-badge
           path: badges/coverage.svg
 
       - name: Commit coverage badge (main only)
-        if: github.ref == 'refs/heads/main'
+        if: always() && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add badges/coverage.svg
-          git commit -m "chore(ci): update coverage badge"
-          git push
+          if [ -n "$(git status --porcelain badges/coverage.svg)" ]; then
+            git add badges/coverage.svg
+            git commit -m "chore(ci): update coverage badge"
+            git push
+          else
+            echo "No coverage badge changes to commit."
+          fi
+
+      - name: Fail if tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
 
 
