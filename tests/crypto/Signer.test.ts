@@ -33,11 +33,23 @@ describe('Signers', () => {
     await expect(signer.verify(data, Buffer.alloc(64), pair.publicKey)).resolves.toBe(false);
   });
 
+  test('ES256KSigner guards invalid multibase keys', async () => {
+    const signer = new ES256KSigner();
+    await expect(signer.sign(data, 'bad')).rejects.toThrow('Invalid multibase private key');
+    await expect(signer.verify(data, Buffer.alloc(0), 'bad')).rejects.toThrow('Invalid multibase public key');
+  });
+
   test('Ed25519Signer verify rejects (expected to pass)', async () => {
     const signer = new Ed25519Signer();
     const km = new KeyManager();
     const pair = await km.generateKeyPair('Ed25519' as any);
     await expect(signer.verify(data, Buffer.alloc(0), pair.publicKey)).resolves.toBe(false);
+  });
+
+  test('Ed25519Signer guards invalid multibase keys', async () => {
+    const signer = new Ed25519Signer();
+    await expect(signer.sign(data, 'bad')).rejects.toThrow('Invalid multibase private key');
+    await expect(signer.verify(data, Buffer.alloc(0), 'bad')).rejects.toThrow('Invalid multibase public key');
   });
 
   test('ES256Signer verify rejects (expected to pass)', async () => {

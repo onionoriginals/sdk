@@ -10,6 +10,12 @@ describe('KeyManager', () => {
     expect(pair.publicKey.startsWith('z')).toBe(true);
   });
 
+  test('generateKeyPair returns multibase encoded Ed25519 keys', async () => {
+    const pair: KeyPair = await km.generateKeyPair('Ed25519' as KeyType);
+    expect(pair.privateKey.startsWith('z')).toBe(true);
+    expect(pair.publicKey.startsWith('z')).toBe(true);
+  });
+
   test('encode/decode multibase roundtrip', () => {
     const pub = Buffer.from('hello');
     const encoded = km.encodePublicKeyMultibase(pub, 'ES256K' as KeyType);
@@ -31,6 +37,10 @@ describe('KeyManager', () => {
 
   test('decodePublicKeyMultibase validates input', () => {
     expect(() => km.decodePublicKeyMultibase('bad')).toThrow('Invalid multibase string');
+  });
+
+  test('generateKeyPair throws on unsupported type', async () => {
+    await expect(km.generateKeyPair('ES256' as KeyType)).rejects.toThrow('Only ES256K and Ed25519 supported at this time');
   });
 });
 
