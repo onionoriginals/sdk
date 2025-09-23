@@ -12,6 +12,7 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "moduleResolution": "node",
+    "types": ["node", "jest"],
     "allowSyntheticDefaultImports": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true
@@ -22,6 +23,7 @@
   "exclude": [
     "node_modules",
     "dist",
+    "coverage",
     "tests"
   ]
 }

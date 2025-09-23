@@ -4,33 +4,33 @@ import { DIDDocument, KeyPair, KeyType } from '../../src/types';
 describe('KeyManager', () => {
   const km = new KeyManager();
 
-  test('generateKeyPair returns multibase encoded keys (expected to fail until implemented)', async () => {
+  test('generateKeyPair returns multibase encoded ES256K keys', async () => {
     const pair: KeyPair = await km.generateKeyPair('ES256K' as KeyType);
     expect(pair.privateKey.startsWith('z')).toBe(true);
     expect(pair.publicKey.startsWith('z')).toBe(true);
   });
 
-  test('encode/decode multibase roundtrip (expected to fail until implemented)', () => {
+  test('encode/decode multibase roundtrip', () => {
     const pub = Buffer.from('hello');
     const encoded = km.encodePublicKeyMultibase(pub, 'ES256K' as KeyType);
     const decoded = km.decodePublicKeyMultibase(encoded);
     expect(decoded.key.equals(pub)).toBe(true);
   });
 
-  test('rotateKeys updates DID document keys (expected to fail until implemented)', async () => {
+  test('rotateKeys updates DID document keys', async () => {
     const didDoc: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:xyz' };
-    const pair: KeyPair = { privateKey: 'zpriv', publicKey: 'zpub' } as any;
+    const pair: KeyPair = await km.generateKeyPair('ES256K' as KeyType);
     const rotated = await km.rotateKeys(didDoc, pair);
-    expect(rotated).toBeDefined();
+    expect(rotated.verificationMethod?.[0].publicKeyMultibase).toBe(pair.publicKey);
   });
 
-  test('recoverFromCompromise handles recovery flow (expected to fail until implemented)', async () => {
+  test('recoverFromCompromise returns doc', async () => {
     const didDoc: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:xyz' };
     await expect(km.recoverFromCompromise(didDoc)).resolves.toBeDefined();
   });
 
-  test('decodePublicKeyMultibase throws (coverage for throw)', () => {
-    expect(() => km.decodePublicKeyMultibase('zabc' as any)).toThrow('Not implemented');
+  test('decodePublicKeyMultibase validates input', () => {
+    expect(() => km.decodePublicKeyMultibase('bad')).toThrow('Invalid multibase string');
   });
 });
 
