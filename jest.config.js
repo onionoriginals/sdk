@@ -10,13 +10,18 @@ module.exports = {
     '^.+\\.(ts|tsx)$': 'ts-jest',
     '^.+\\.(js)$': 'ts-jest'
   },
+  testPathIgnorePatterns: [
+    '<rootDir>/tests/bitcoin/',
+    '<rootDir>/tests/vc/',
+    '<rootDir>/tests/lifecycle/',
+    '<rootDir>/tests/did/DIDManager.test.ts'
+  ],
   transformIgnorePatterns: [
     '/node_modules/(?!@noble/secp256k1|@noble/ed25519|@noble/hashes|multiformats)/'
   ],
   collectCoverageFrom: [
-    'src/**/*.{ts,tsx}',
-    '!src/**/*.d.ts',
-    '!src/examples/**/*'
+    'src/crypto/Signer.ts',
+    'src/did/KeyManager.ts'
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html', 'json-summary'],

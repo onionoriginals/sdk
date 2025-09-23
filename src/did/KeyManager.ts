@@ -10,10 +10,12 @@ export class KeyManager {
 	constructor() {
 		const sAny: any = secp256k1 as any;
 		const eAny: any = ed25519 as any;
+		if (!sAny.utils) sAny.utils = {};
 		if (!sAny.utils.hmacSha256Sync) {
 			sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
 				hmac(sha256, key, concatBytes(...msgs));
 		}
+		if (!eAny.utils) eAny.utils = {};
 		if (!eAny.utils.sha512Sync) {
 			eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
 		}
