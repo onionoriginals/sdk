@@ -39,6 +39,15 @@ describe('Signers', () => {
     await expect(signer.verify(data, Buffer.alloc(0), 'bad')).rejects.toThrow('Invalid multibase public key');
   });
 
+  test('ES256KSigner covers error path in verify try/catch', async () => {
+    const signer = new ES256KSigner();
+    const km = new KeyManager();
+    const pair = await km.generateKeyPair('ES256K' as any);
+    // Corrupt public key bytes
+    const corruptedPub = 'z' + Buffer.from('00', 'hex').toString('base64url');
+    await expect(signer.verify(data, Buffer.alloc(64), corruptedPub)).resolves.toBe(false);
+  });
+
   test('Ed25519Signer verify rejects (expected to pass)', async () => {
     const signer = new Ed25519Signer();
     const km = new KeyManager();
@@ -50,6 +59,13 @@ describe('Signers', () => {
     const signer = new Ed25519Signer();
     await expect(signer.sign(data, 'bad')).rejects.toThrow('Invalid multibase private key');
     await expect(signer.verify(data, Buffer.alloc(0), 'bad')).rejects.toThrow('Invalid multibase public key');
+  });
+
+  test('Ed25519Signer covers error path returning false', async () => {
+    const signer = new Ed25519Signer();
+    // Invalid public key format triggers catch -> false
+    const invalidPub = 'z' + Buffer.from('01', 'hex').toString('base64url');
+    await expect(signer.verify(data, Buffer.alloc(0), invalidPub)).resolves.toBe(false);
   });
 
   test('ES256Signer verify rejects (expected to pass)', async () => {
