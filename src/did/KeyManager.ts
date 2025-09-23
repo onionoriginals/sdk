@@ -1,25 +1,39 @@
 import { DIDDocument, KeyPair, KeyType } from '../types';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
-import { base58btc } from 'multiformats/bases/base58';
+import { sha512 } from '@noble/hashes/sha512';
+import { sha256 } from '@noble/hashes/sha256';
+import { hmac } from '@noble/hashes/hmac';
+import { concatBytes } from '@noble/hashes/utils';
 
 export class KeyManager {
+	constructor() {
+		const sAny: any = secp256k1 as any;
+		const eAny: any = ed25519 as any;
+		if (!sAny.utils.hmacSha256Sync) {
+			sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
+				hmac(sha256, key, concatBytes(...msgs));
+		}
+		if (!eAny.utils.sha512Sync) {
+			eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
+		}
+	}
 	async generateKeyPair(type: KeyType): Promise<KeyPair> {
 		if (type === 'ES256K') {
 			const privateKeyBytes = secp256k1.utils.randomPrivateKey();
 			const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, true);
 			return {
-				privateKey: base58btc.encode(privateKeyBytes),
-				publicKey: base58btc.encode(publicKeyBytes)
+				privateKey: 'z' + Buffer.from(privateKeyBytes).toString('base64url'),
+				publicKey: 'z' + Buffer.from(publicKeyBytes).toString('base64url')
 			};
 		}
 
 		if (type === 'Ed25519') {
 			const privateKeyBytes = ed25519.utils.randomPrivateKey();
-			const publicKeyBytes = await ed25519.getPublicKey(privateKeyBytes);
+			const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
 			return {
-				privateKey: base58btc.encode(privateKeyBytes as Uint8Array),
-				publicKey: base58btc.encode(publicKeyBytes as Uint8Array)
+				privateKey: 'z' + Buffer.from(privateKeyBytes as Uint8Array).toString('base64url'),
+				publicKey: 'z' + Buffer.from(publicKeyBytes as Uint8Array).toString('base64url')
 			};
 		}
 
@@ -50,16 +64,16 @@ export class KeyManager {
 	}
 
 	encodePublicKeyMultibase(publicKey: Buffer, type: KeyType): string {
-		// Use multibase base58btc (prefix 'z') for all supported types
-		return base58btc.encode(publicKey);
+		return 'z' + Buffer.from(publicKey).toString('base64url');
 	}
 
 	decodePublicKeyMultibase(encoded: string): { key: Buffer; type: KeyType } {
 		if (!encoded || typeof encoded !== 'string' || encoded[0] !== 'z') {
 			throw new Error('Invalid multibase string');
 		}
-		const bytes = base58btc.decode(encoded);
-		return { key: Buffer.from(bytes), type: 'ES256K' };
+		const base = encoded.slice(1);
+		const bytes = Buffer.from(base, 'base64url');
+		return { key: bytes, type: 'ES256K' };
 	}
 }
 

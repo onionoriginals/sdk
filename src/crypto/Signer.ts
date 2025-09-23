@@ -3,29 +3,51 @@ export abstract class Signer {
   abstract verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean>;
 }
 
-import { createHash } from 'crypto';
+import { sha256 } from '@noble/hashes/sha256';
+import { sha512 } from '@noble/hashes/sha512';
+import { hmac } from '@noble/hashes/hmac';
+import { concatBytes } from '@noble/hashes/utils';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
-import { base58btc } from 'multiformats/bases/base58';
 
 export class ES256KSigner extends Signer {
+  constructor() {
+    super();
+    // Configure noble hashes for Node environment
+    const sAny: any = secp256k1 as any;
+    const eAny: any = ed25519 as any;
+    if (!sAny.utils.hmacSha256Sync) {
+      sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
+        hmac(sha256, key, concatBytes(...msgs));
+    }
+    if (!eAny.utils.sha512Sync) {
+      eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
+    }
+  }
   // secp256k1 implementation for Bitcoin compatibility
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
     }
-    const privateKey = base58btc.decode(privateKeyMultibase);
-    const hash = createHash('sha256').update(data).digest();
-    const signature = await secp256k1.sign(hash, privateKey, { der: false });
-    return Buffer.from(signature);
+    const privateKey = Buffer.from(privateKeyMultibase.slice(1), 'base64url');
+    const hash = sha256(data);
+    const signatureAny: any = await secp256k1.sign(hash as Uint8Array, privateKey as Uint8Array);
+    const signatureBytes: Uint8Array = signatureAny instanceof Uint8Array
+      ? signatureAny
+      : typeof signatureAny?.toCompactRawBytes === 'function'
+        ? signatureAny.toCompactRawBytes()
+        : typeof signatureAny?.toRawBytes === 'function'
+          ? signatureAny.toRawBytes()
+          : new Uint8Array(signatureAny);
+    return Buffer.from(signatureBytes);
   }
 
   async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase public key');
     }
-    const publicKey = base58btc.decode(publicKeyMultibase);
-    const hash = createHash('sha256').update(data).digest();
+    const publicKey = Buffer.from(publicKeyMultibase.slice(1), 'base64url');
+    const hash = sha256(data);
     return secp256k1.verify(signature, hash, publicKey);
   }
 }
@@ -36,8 +58,8 @@ export class Ed25519Signer extends Signer {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
     }
-    const privateKey = base58btc.decode(privateKeyMultibase);
-    const signature = await ed25519.sign(data, privateKey);
+    const privateKey = Buffer.from(privateKeyMultibase.slice(1), 'base64url');
+    const signature = await (ed25519 as any).signAsync(data, privateKey);
     return Buffer.from(signature);
   }
 
@@ -45,8 +67,8 @@ export class Ed25519Signer extends Signer {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase public key');
     }
-    const publicKey = base58btc.decode(publicKeyMultibase);
-    return ed25519.verify(signature, data, publicKey);
+    const publicKey = Buffer.from(publicKeyMultibase.slice(1), 'base64url');
+    return (ed25519 as any).verifyAsync(signature, data, publicKey);
   }
 }
 
