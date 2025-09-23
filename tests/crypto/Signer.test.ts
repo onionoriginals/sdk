@@ -14,8 +14,10 @@ describe('Signers', () => {
 
   test('Ed25519Signer sign/verify throws until implemented', async () => {
     const signer = new Ed25519Signer();
-    await expect(signer.sign(data, 'zprivkey')).rejects.toThrow('Not implemented');
-    await expect(signer.verify(data, Buffer.alloc(0), 'zpubkey')).rejects.toThrow('Not implemented');
+    const km = new KeyManager();
+    const pair = await km.generateKeyPair('Ed25519' as any);
+    const sig = await signer.sign(data, pair.privateKey);
+    await expect(signer.verify(data, sig, pair.publicKey)).resolves.toBe(true);
   });
 
   test('ES256Signer sign/verify throws until implemented', async () => {
@@ -33,7 +35,9 @@ describe('Signers', () => {
 
   test('Ed25519Signer verify rejects (expected to pass)', async () => {
     const signer = new Ed25519Signer();
-    await expect(signer.verify(data, Buffer.alloc(0), 'zpubkey')).rejects.toThrow('Not implemented');
+    const km = new KeyManager();
+    const pair = await km.generateKeyPair('Ed25519' as any);
+    await expect(signer.verify(data, Buffer.alloc(0), pair.publicKey)).resolves.toBe(false);
   });
 
   test('ES256Signer verify rejects (expected to pass)', async () => {

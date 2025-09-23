@@ -36,13 +36,24 @@ export class ES256KSigner extends Signer {
 export class Ed25519Signer extends Signer {
   // EdDSA implementation
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
-    // Implement Ed25519 signing with multibase private key
-    throw new Error('Not implemented');
+    if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
+      throw new Error('Invalid multibase private key');
+    }
+    const base = privateKeyMultibase.slice(1);
+    const privateKeyPem = Buffer.from(base, 'base64url').toString();
+    // Ed25519 uses internal hashing; pass null for algorithm
+    const signature = require('crypto').sign(null, data, privateKeyPem);
+    return Buffer.from(signature);
   }
 
   async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
-    // Implement Ed25519 verification with multibase public key
-    throw new Error('Not implemented');
+    if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
+      throw new Error('Invalid multibase public key');
+    }
+    const base = publicKeyMultibase.slice(1);
+    const publicKeyPem = Buffer.from(base, 'base64url').toString();
+    const ok = require('crypto').verify(null, data, publicKeyPem, signature);
+    return !!ok;
   }
 }
 

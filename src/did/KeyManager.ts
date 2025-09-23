@@ -3,23 +3,30 @@ import { generateKeyPairSync } from 'crypto';
 
 export class KeyManager {
 	async generateKeyPair(type: KeyType): Promise<KeyPair> {
-		if (type !== 'ES256K') {
-			throw new Error('Only ES256K supported at this time');
+		if (type === 'ES256K') {
+			const { privateKey, publicKey } = generateKeyPairSync('ec', {
+				namedCurve: 'secp256k1',
+				privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
+				publicKeyEncoding: { format: 'pem', type: 'spki' }
+			});
+			return {
+				privateKey: this.encodePublicKeyMultibase(Buffer.from(privateKey), 'ES256K'),
+				publicKey: this.encodePublicKeyMultibase(Buffer.from(publicKey), 'ES256K')
+			};
 		}
 
-    const { privateKey, publicKey } = generateKeyPairSync('ec', {
-      namedCurve: 'secp256k1',
-      privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
-      publicKeyEncoding: { format: 'pem', type: 'spki' }
-    });
+		if (type === 'Ed25519') {
+			const { privateKey, publicKey } = generateKeyPairSync('ed25519', {
+				privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
+				publicKeyEncoding: { format: 'pem', type: 'spki' }
+			});
+			return {
+				privateKey: this.encodePublicKeyMultibase(Buffer.from(privateKey), 'Ed25519'),
+				publicKey: this.encodePublicKeyMultibase(Buffer.from(publicKey), 'Ed25519')
+			};
+		}
 
-    const privateKeyMultibase = this.encodePublicKeyMultibase(Buffer.from(privateKey), 'ES256K');
-    const publicKeyMultibase = this.encodePublicKeyMultibase(Buffer.from(publicKey), type);
-
-		return {
-			privateKey: privateKeyMultibase,
-			publicKey: publicKeyMultibase
-		};
+		throw new Error('Only ES256K and Ed25519 supported at this time');
 	}
 
 	async rotateKeys(didDoc: DIDDocument, newKeyPair: KeyPair): Promise<DIDDocument> {
@@ -46,11 +53,8 @@ export class KeyManager {
 	}
 
 	encodePublicKeyMultibase(publicKey: Buffer, type: KeyType): string {
-    if (type !== 'ES256K') {
-      throw new Error('Only ES256K supported at this time');
-    }
-    // Minimal multibase using base64url with 'z' prefix
-    return 'z' + Buffer.from(publicKey).toString('base64url');
+		// Minimal multibase using base64url with 'z' prefix for all supported types
+		return 'z' + Buffer.from(publicKey).toString('base64url');
 	}
 
 	decodePublicKeyMultibase(encoded: string): { key: Buffer; type: KeyType } {
