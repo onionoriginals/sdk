@@ -4,7 +4,9 @@ export abstract class Signer {
 }
 
 import { createHash } from 'crypto';
-import { createSign, createVerify } from 'crypto';
+import * as secp256k1 from '@noble/secp256k1';
+import * as ed25519 from '@noble/ed25519';
+import { base58btc } from 'multiformats/bases/base58';
 
 export class ES256KSigner extends Signer {
   // secp256k1 implementation for Bitcoin compatibility
@@ -12,24 +14,19 @@ export class ES256KSigner extends Signer {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
     }
-    const base = privateKeyMultibase.slice(1);
-    const privateKeyPem = Buffer.from(base, 'base64url').toString();
-    const signer = createSign('SHA256');
-    signer.update(data);
-    signer.end();
-    return signer.sign({ key: privateKeyPem, dsaEncoding: 'ieee-p1363' });
+    const privateKey = base58btc.decode(privateKeyMultibase);
+    const hash = createHash('sha256').update(data).digest();
+    const signature = await secp256k1.sign(hash, privateKey, { der: false });
+    return Buffer.from(signature);
   }
 
   async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase public key');
     }
-    const base = publicKeyMultibase.slice(1);
-    const publicKeyPem = Buffer.from(base, 'base64url').toString();
-    const verifier = createVerify('SHA256');
-    verifier.update(data);
-    verifier.end();
-    return verifier.verify({ key: publicKeyPem, dsaEncoding: 'ieee-p1363' } as any, signature);
+    const publicKey = base58btc.decode(publicKeyMultibase);
+    const hash = createHash('sha256').update(data).digest();
+    return secp256k1.verify(signature, hash, publicKey);
   }
 }
 
@@ -39,10 +36,8 @@ export class Ed25519Signer extends Signer {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
     }
-    const base = privateKeyMultibase.slice(1);
-    const privateKeyPem = Buffer.from(base, 'base64url').toString();
-    // Ed25519 uses internal hashing; pass null for algorithm
-    const signature = require('crypto').sign(null, data, privateKeyPem);
+    const privateKey = base58btc.decode(privateKeyMultibase);
+    const signature = await ed25519.sign(data, privateKey);
     return Buffer.from(signature);
   }
 
@@ -50,10 +45,8 @@ export class Ed25519Signer extends Signer {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase public key');
     }
-    const base = publicKeyMultibase.slice(1);
-    const publicKeyPem = Buffer.from(base, 'base64url').toString();
-    const ok = require('crypto').verify(null, data, publicKeyPem, signature);
-    return !!ok;
+    const publicKey = base58btc.decode(publicKeyMultibase);
+    return ed25519.verify(signature, data, publicKey);
   }
 }
 

@@ -1,28 +1,25 @@
 import { DIDDocument, KeyPair, KeyType } from '../types';
-import { generateKeyPairSync } from 'crypto';
+import * as secp256k1 from '@noble/secp256k1';
+import * as ed25519 from '@noble/ed25519';
+import { base58btc } from 'multiformats/bases/base58';
 
 export class KeyManager {
 	async generateKeyPair(type: KeyType): Promise<KeyPair> {
 		if (type === 'ES256K') {
-			const { privateKey, publicKey } = generateKeyPairSync('ec', {
-				namedCurve: 'secp256k1',
-				privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
-				publicKeyEncoding: { format: 'pem', type: 'spki' }
-			});
+			const privateKeyBytes = secp256k1.utils.randomPrivateKey();
+			const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, true);
 			return {
-				privateKey: this.encodePublicKeyMultibase(Buffer.from(privateKey), 'ES256K'),
-				publicKey: this.encodePublicKeyMultibase(Buffer.from(publicKey), 'ES256K')
+				privateKey: base58btc.encode(privateKeyBytes),
+				publicKey: base58btc.encode(publicKeyBytes)
 			};
 		}
 
 		if (type === 'Ed25519') {
-			const { privateKey, publicKey } = generateKeyPairSync('ed25519', {
-				privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
-				publicKeyEncoding: { format: 'pem', type: 'spki' }
-			});
+			const privateKeyBytes = ed25519.utils.randomPrivateKey();
+			const publicKeyBytes = await ed25519.getPublicKey(privateKeyBytes);
 			return {
-				privateKey: this.encodePublicKeyMultibase(Buffer.from(privateKey), 'Ed25519'),
-				publicKey: this.encodePublicKeyMultibase(Buffer.from(publicKey), 'Ed25519')
+				privateKey: base58btc.encode(privateKeyBytes as Uint8Array),
+				publicKey: base58btc.encode(publicKeyBytes as Uint8Array)
 			};
 		}
 
@@ -53,17 +50,16 @@ export class KeyManager {
 	}
 
 	encodePublicKeyMultibase(publicKey: Buffer, type: KeyType): string {
-		// Minimal multibase using base64url with 'z' prefix for all supported types
-		return 'z' + Buffer.from(publicKey).toString('base64url');
+		// Use multibase base58btc (prefix 'z') for all supported types
+		return base58btc.encode(publicKey);
 	}
 
 	decodePublicKeyMultibase(encoded: string): { key: Buffer; type: KeyType } {
 		if (!encoded || typeof encoded !== 'string' || encoded[0] !== 'z') {
 			throw new Error('Invalid multibase string');
 		}
-    const base = encoded.slice(1);
-    const bytes = Buffer.from(base, 'base64url');
-    return { key: bytes, type: 'ES256K' };
+		const bytes = base58btc.decode(encoded);
+		return { key: Buffer.from(bytes), type: 'ES256K' };
 	}
 }
 
