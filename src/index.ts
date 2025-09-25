@@ -15,6 +15,7 @@ export { CredentialManager } from './vc/CredentialManager';
 export { LifecycleManager } from './lifecycle/LifecycleManager';
 export { BitcoinManager } from './bitcoin/BitcoinManager';
 export { OrdinalsClient } from './bitcoin/OrdinalsClient';
+export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs';
 
 // Crypto exports
 export { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from './crypto/Signer';
