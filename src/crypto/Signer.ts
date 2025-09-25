@@ -4,24 +4,8 @@ export abstract class Signer {
 }
 
 import { sha256 } from '@noble/hashes/sha256';
-import { sha512 } from '@noble/hashes/sha512';
-import { hmac } from '@noble/hashes/hmac';
-import { concatBytes } from '@noble/hashes/utils';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
-
-// Ensure noble hash utils available in Node (unconditional assignment for coverage)
-const sAny: any = secp256k1 as any;
-const eAny: any = ed25519 as any;
-/* istanbul ignore next */
-if (sAny.utils && !sAny.utils.hmacSha256Sync) {
-  sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
-    hmac(sha256, key, concatBytes(...msgs));
-}
-/* istanbul ignore next */
-if (eAny.utils && !eAny.utils.sha512Sync) {
-  eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
-}
 
 export class ES256KSigner extends Signer {
   // secp256k1 implementation for Bitcoin compatibility
