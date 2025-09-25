@@ -15,7 +15,8 @@ module.exports = {
     '/node_modules/(?!@noble/secp256k1|@noble/ed25519|@noble/hashes|multiformats)/'
   ],
   moduleNameMapper: {
-    '^multiformats/bases/base58$': '<rootDir>/tests/__mocks__/mf-base58.js'
+    '^multiformats/bases/base58$': '<rootDir>/tests/__mocks__/mf-base58.js',
+    '^@digitalbazaar/bbs-signatures$': '<rootDir>/tests/__mocks__/bbs-signatures.js'
   },
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
