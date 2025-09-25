@@ -1,5 +1,5 @@
-import { Verifier } from '../../src/vc/diwings/Verifier';
-import { Issuer } from '../../src/vc/diwings/Issuer';
+import { Verifier } from '../../src/vc/Verifier';
+import { Issuer } from '../../src/vc/Issuer';
 import { DIDManager } from '../../src/did/DIDManager';
 
 describe('diwings Verifier', () => {
@@ -13,7 +13,7 @@ describe('diwings Verifier', () => {
     secretKeyMultibase: 'z6MkiSecretFake'
   };
 
-  test('verifies a credential (v1)', async () => {
+  test('verifies a credential (v2)', async () => {
     const issuer = new Issuer(didManager, vm);
     const vc = await issuer.issueCredential(
       {
@@ -22,7 +22,7 @@ describe('diwings Verifier', () => {
         issuanceDate: new Date().toISOString(),
         credentialSubject: { id: 'did:peer:subject1' }
       } as any,
-      { contextVersion: 'v1', proofPurpose: 'assertionMethod' }
+      { proofPurpose: 'assertionMethod' }
     );
     const verifier = new Verifier(didManager);
     const res = await verifier.verifyCredential(vc);
@@ -38,7 +38,7 @@ describe('diwings Verifier', () => {
         issuanceDate: new Date().toISOString(),
         credentialSubject: { id: 'did:peer:subject2' }
       } as any,
-      { contextVersion: 'v2', proofPurpose: 'assertionMethod' }
+      { proofPurpose: 'assertionMethod' }
     );
     const vp = await issuer.issuePresentation(
       {
@@ -46,7 +46,7 @@ describe('diwings Verifier', () => {
         holder: did,
         verifiableCredential: [vc]
       } as any,
-      { contextVersion: 'v2', proofPurpose: 'authentication' }
+      { proofPurpose: 'authentication' }
     );
     const verifier = new Verifier(didManager);
     const res = await verifier.verifyPresentation(vp);

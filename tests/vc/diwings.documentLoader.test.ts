@@ -1,14 +1,9 @@
 import { DIDManager } from '../../src/did/DIDManager';
-import { createDocumentLoader } from '../../src/vc/diwings/documentLoader';
+import { createDocumentLoader } from '../../src/vc/documentLoader';
 
 describe('diwings documentLoader', () => {
   const didManager = new DIDManager({} as any);
   const loader = createDocumentLoader(didManager);
-
-  test('loads v1 context', async () => {
-    const res = await loader('https://www.w3.org/2018/credentials/v1');
-    expect(res.document['@context']).toBeDefined();
-  });
 
   test('loads v2 context', async () => {
     const res = await loader('https://www.w3.org/ns/credentials/v2');

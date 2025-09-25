@@ -1,5 +1,5 @@
-import { VerifiableCredential, VerifiablePresentation } from '../../types';
-import { DIDManager } from '../../did/DIDManager';
+import { VerifiableCredential, VerifiablePresentation } from '../types';
+import { DIDManager } from '../did/DIDManager';
 import { createDocumentLoader } from './documentLoader';
 
 export type VerificationResult = { verified: boolean; errors: string[] };
@@ -12,7 +12,6 @@ export class Verifier {
       if (!vc || !vc['@context'] || !vc.type) throw new Error('Invalid credential');
       if (!vc.proof) throw new Error('Credential has no proof');
       const loader = options.documentLoader || createDocumentLoader(this.didManager);
-      // touch contexts to validate v1/v2 selection path
       const ctxs: string[] = Array.isArray(vc['@context']) ? (vc['@context'] as any) : [vc['@context'] as any];
       for (const c of ctxs) await loader(c);
       return { verified: true, errors: [] };

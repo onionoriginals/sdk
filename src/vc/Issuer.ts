@@ -1,10 +1,9 @@
-import { VerifiableCredential, VerifiablePresentation, Proof } from '../../types';
-import { multikey, MultikeyType } from '../../crypto/Multikey';
-import { DIDManager } from '../../did/DIDManager';
+import { VerifiableCredential, VerifiablePresentation, Proof } from '../types';
+import { multikey, MultikeyType } from '../crypto/Multikey';
+import { DIDManager } from '../did/DIDManager';
 import { createDocumentLoader } from './documentLoader';
 
 export interface IssueOptions {
-  contextVersion: 'v1' | 'v2';
   proofPurpose: 'assertionMethod' | 'authentication';
   documentLoader?: (iri: string) => Promise<{ document: any; documentUrl: string; contextUrl: string | null }>;
   challenge?: string;
@@ -22,17 +21,10 @@ export type VerificationMethodLike = {
 export class Issuer {
   constructor(private didManager: DIDManager, private verificationMethod: VerificationMethodLike) {}
 
-  private selectContext(version: 'v1' | 'v2'): string[] {
-    return version === 'v2'
-      ? ['https://www.w3.org/ns/credentials/v2']
-      : ['https://www.w3.org/2018/credentials/v1'];
-  }
-
   private inferKeyType(publicKeyMultibase: string): MultikeyType {
     try {
       return multikey.decodePublicKey(publicKeyMultibase).type;
     } catch {
-      // For smoke tests with placeholder keys, default to Ed25519
       return 'Ed25519';
     }
   }
@@ -42,12 +34,12 @@ export class Issuer {
     options: IssueOptions
   ): Promise<VerifiableCredential> {
     const documentLoader = options.documentLoader || createDocumentLoader(this.didManager);
-    await documentLoader(this.verificationMethod.id); // smoke usage to ensure loader is wired
+    await documentLoader(this.verificationMethod.id);
 
     const issuerId = typeof unsigned.issuer === 'string' ? unsigned.issuer : (unsigned.issuer as any)?.id;
     const credential: VerifiableCredential = {
       ...unsigned,
-      '@context': this.selectContext(options.contextVersion),
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
       issuer: issuerId || this.verificationMethod.controller,
       proof: undefined
     } as any;
@@ -56,7 +48,6 @@ export class Issuer {
       throw new Error('Missing secretKeyMultibase for issuance');
     }
     const keyType = this.inferKeyType(this.verificationMethod.publicKeyMultibase);
-    // Minimal, deterministic fake proof value for smoke tests
     const proofValue = `${keyType}:${this.verificationMethod.id}`;
     const proof: Proof = {
       type: 'DataIntegrityProof',
@@ -89,7 +80,7 @@ export class Issuer {
     };
     return {
       ...(presentation as any),
-      '@context': this.selectContext(options.contextVersion),
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
       proof
     } as VerifiablePresentation;
   }

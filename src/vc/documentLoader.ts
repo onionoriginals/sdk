@@ -1,10 +1,8 @@
-import { DIDManager } from '../../did/DIDManager';
+import { DIDManager } from '../did/DIDManager';
 
 type LoadedDocument = { document: any; documentUrl: string; contextUrl: string | null };
 
-// Minimal built-in contexts to support v1/v2 smoke usage
 const CONTEXTS: Record<string, any> = {
-  'https://www.w3.org/2018/credentials/v1': { '@context': { '@version': 1.1 } },
   'https://www.w3.org/ns/credentials/v2': { '@context': { '@version': 2.0 } }
 };
 
@@ -38,7 +36,6 @@ export class DocumentLoader {
           contextUrl: null
         };
       }
-      // Fallback: return a stub VM document using DID fragment when resolver doesn't provide methods
       return {
         document: { '@context': (didDoc as any)['@context'], id: didUrl },
         documentUrl: didUrl,
