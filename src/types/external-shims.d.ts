@@ -29,3 +29,5 @@ declare module '@digitalbazaar/bbs-signatures' {
   }): Promise<boolean>;
 }
 
+declare module 'jsonld';
+
