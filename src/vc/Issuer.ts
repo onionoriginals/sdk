@@ -2,6 +2,7 @@ import { VerifiableCredential, VerifiablePresentation, Proof } from '../types';
 import { multikey, MultikeyType } from '../crypto/Multikey';
 import { DIDManager } from '../did/DIDManager';
 import { createDocumentLoader } from './documentLoader';
+import { DataIntegrityProofManager } from './proofs/data-integrity';
 
 export interface IssueOptions {
   proofPurpose: 'assertionMethod' | 'authentication';
@@ -48,15 +49,18 @@ export class Issuer {
       throw new Error('Missing secretKeyMultibase for issuance');
     }
     const keyType = this.inferKeyType(this.verificationMethod.publicKeyMultibase);
-    const proofValue = `${keyType}:${this.verificationMethod.id}`;
-    const proof: Proof = {
-      type: 'DataIntegrityProof',
-      created: new Date().toISOString(),
+    if (keyType !== 'Ed25519') {
+      throw new Error('Only Ed25519 supported for eddsa-rdfc-2022');
+    }
+    const proof = await DataIntegrityProofManager.createProof(credential, {
       verificationMethod: this.verificationMethod.id,
       proofPurpose: options.proofPurpose,
-      proofValue
-    };
-    return { ...credential, proof };
+      cryptosuite: 'eddsa-rdfc-2022',
+      type: 'DataIntegrityProof',
+      privateKey: this.verificationMethod.secretKeyMultibase,
+      documentLoader
+    });
+    return { ...credential, proof } as any;
   }
 
   async issuePresentation(
@@ -70,14 +74,22 @@ export class Issuer {
       throw new Error('Missing secretKeyMultibase for issuance');
     }
     const keyType = this.inferKeyType(this.verificationMethod.publicKeyMultibase);
-    const proofValue = `${keyType}:${this.verificationMethod.id}:challenge=${options.challenge ?? ''}:domain=${options.domain ?? ''}`;
-    const proof: Proof = {
-      type: 'DataIntegrityProof',
-      created: new Date().toISOString(),
-      verificationMethod: this.verificationMethod.id,
-      proofPurpose: options.proofPurpose,
-      proofValue
-    };
+    if (keyType !== 'Ed25519') {
+      throw new Error('Only Ed25519 supported for eddsa-rdfc-2022');
+    }
+    const proof = await DataIntegrityProofManager.createProof(
+      { ...(presentation as any), '@context': ['https://www.w3.org/ns/credentials/v2'] },
+      {
+        verificationMethod: this.verificationMethod.id,
+        proofPurpose: options.proofPurpose,
+        cryptosuite: 'eddsa-rdfc-2022',
+        type: 'DataIntegrityProof',
+        privateKey: this.verificationMethod.secretKeyMultibase,
+        challenge: options.challenge,
+        domain: options.domain,
+        documentLoader
+      }
+    );
     return {
       ...(presentation as any),
       '@context': ['https://www.w3.org/ns/credentials/v2'],

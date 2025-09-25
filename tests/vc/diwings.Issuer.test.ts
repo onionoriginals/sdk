@@ -1,15 +1,19 @@
 import { Issuer } from '../../src/vc/Issuer';
+import * as ed25519 from '@noble/ed25519';
+import { multikey } from '../../src/crypto/Multikey';
 import { DIDManager } from '../../src/did/DIDManager';
 
 describe('diwings Issuer', () => {
   const didManager = new DIDManager({} as any);
   const did = 'did:peer:issuer1';
+  const sk = new Uint8Array(32).map((_, i) => (i + 1) & 0xff);
+  const pk = ed25519.getPublicKey(sk);
   const vm = {
     id: `${did}#keys-1`,
     controller: did,
     type: 'Multikey',
-    publicKeyMultibase: 'z6MkiPublicFake',
-    secretKeyMultibase: 'z6MkiSecretFake'
+    publicKeyMultibase: multikey.encodePublicKey(pk, 'Ed25519'),
+    secretKeyMultibase: multikey.encodePrivateKey(sk, 'Ed25519')
   };
 
   const baseCredential = {

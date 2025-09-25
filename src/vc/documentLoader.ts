@@ -3,7 +3,9 @@ import { DIDManager } from '../did/DIDManager';
 type LoadedDocument = { document: any; documentUrl: string; contextUrl: string | null };
 
 const CONTEXTS: Record<string, any> = {
-  'https://www.w3.org/ns/credentials/v2': { '@context': { '@version': 2.0 } }
+  // Provide 1.1-compatible stubs for jsonld canonize
+  'https://www.w3.org/ns/credentials/v2': { '@context': { '@version': 1.1 } },
+  'https://w3id.org/security/data-integrity/v2': { '@context': { '@version': 1.1 } }
 };
 
 export class DocumentLoader {
@@ -27,6 +29,15 @@ export class DocumentLoader {
       throw new Error(`DID not resolved: ${did}`);
     }
     if (fragment) {
+      // If a VM was registered explicitly, prefer it
+      const cached = verificationMethodRegistry.get(didUrl);
+      if (cached) {
+        return {
+          document: { '@context': (didDoc as any)['@context'], ...cached },
+          documentUrl: didUrl,
+          contextUrl: null
+        };
+      }
       const vms = (didDoc as any).verificationMethod as any[] | undefined;
       const vm = vms?.find((m) => m.id === didUrl);
       if (vm) {
@@ -48,4 +59,9 @@ export class DocumentLoader {
 
 export const createDocumentLoader = (didManager: DIDManager) =>
   (iri: string) => new DocumentLoader(didManager).load(iri);
+
+export const verificationMethodRegistry: Map<string, any> = new Map();
+export function registerVerificationMethod(vm: any) {
+  if (vm?.id) verificationMethodRegistry.set(vm.id, vm);
+}
 

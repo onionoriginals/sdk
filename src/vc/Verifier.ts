@@ -1,6 +1,7 @@
 import { VerifiableCredential, VerifiablePresentation } from '../types';
 import { DIDManager } from '../did/DIDManager';
 import { createDocumentLoader } from './documentLoader';
+import { DataIntegrityProofManager } from './proofs/data-integrity';
 
 export type VerificationResult = { verified: boolean; errors: string[] };
 
@@ -14,7 +15,9 @@ export class Verifier {
       const loader = options.documentLoader || createDocumentLoader(this.didManager);
       const ctxs: string[] = Array.isArray(vc['@context']) ? (vc['@context'] as any) : [vc['@context'] as any];
       for (const c of ctxs) await loader(c);
-      return { verified: true, errors: [] };
+      const proof = Array.isArray(vc.proof) ? (vc.proof as any)[0] : (vc.proof as any);
+      const result = await DataIntegrityProofManager.verifyProof(vc, proof, { documentLoader: loader });
+      return result.verified ? { verified: true, errors: [] } : { verified: false, errors: result.errors ?? ['Verification failed'] };
     } catch (e: any) {
       return { verified: false, errors: [e?.message ?? 'Unknown error in verifyCredential'] };
     }
@@ -33,7 +36,9 @@ export class Verifier {
           if (!res.verified) return res;
         }
       }
-      return { verified: true, errors: [] };
+      const proof = Array.isArray(vp.proof) ? (vp.proof as any)[0] : (vp.proof as any);
+      const result = await DataIntegrityProofManager.verifyProof(vp, proof, { documentLoader: loader });
+      return result.verified ? { verified: true, errors: [] } : { verified: false, errors: result.errors ?? ['Verification failed'] };
     } catch (e: any) {
       return { verified: false, errors: [e?.message ?? 'Unknown error in verifyPresentation'] };
     }
