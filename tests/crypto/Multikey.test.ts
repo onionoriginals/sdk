@@ -48,5 +48,18 @@ describe('Multikey encode/decode', () => {
     expect(() => multikey.decodePublicKey(mb)).toThrow('Unsupported key type');
     expect(() => multikey.decodePrivateKey(mb)).toThrow('Unsupported key type');
   });
+
+  test('encode/decode Bls12381G2', () => {
+    const blsPub = new Uint8Array(96).map((_, i) => (i + 5) & 0xff);
+    const blsPriv = new Uint8Array(32).map((_, i) => (i + 6) & 0xff);
+    const pub = multikey.encodePublicKey(blsPub, 'Bls12381G2');
+    const priv = multikey.encodePrivateKey(blsPriv, 'Bls12381G2');
+    const decPub = multikey.decodePublicKey(pub);
+    const decPriv = multikey.decodePrivateKey(priv);
+    expect(Array.from(decPub.key)).toEqual(Array.from(blsPub));
+    expect(decPub.type).toBe('Bls12381G2');
+    expect(Array.from(decPriv.key)).toEqual(Array.from(blsPriv));
+    expect(decPriv.type).toBe('Bls12381G2');
+  });
 });
 

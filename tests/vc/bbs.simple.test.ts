@@ -22,5 +22,17 @@ describe('BbsSimple e2e', () => {
     ];
     await expect(BbsSimple.verify(messages2, sig, pk, header)).resolves.toBe(false);
   });
+
+  test('sign/verify baseline with default header', async () => {
+    const sk = bls.utils.randomPrivateKey();
+    const pk = bls.getPublicKey(sk);
+    const keypair = { privateKey: sk, publicKey: pk };
+    const messages = [
+      new TextEncoder().encode('a'),
+      new TextEncoder().encode('b')
+    ];
+    const sig = await BbsSimple.sign(messages, keypair);
+    await expect(BbsSimple.verify(messages, sig, pk)).resolves.toBe(true);
+  });
 });
 

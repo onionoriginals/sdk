@@ -208,6 +208,16 @@ describe('BBSCryptosuiteUtils', () => {
     )).toThrow('Unsupported feature option');
   });
 
+  test('serializeBaseProofValue throws when signerBlind missing for pseudonym_hidden_pid', () => {
+    expect(() => BBSCryptosuiteUtils.serializeBaseProofValue(
+      u8(8), u8(4), u8(8), u8(4), mandatoryPointers, 'pseudonym_hidden_pid'
+    )).toThrow('signerBlind is required');
+  });
+
+  test('compareBytes length mismatch branch', () => {
+    expect((BBSCryptosuiteUtils as any).compareBytes(new Uint8Array([1, 2]), [1, 2, 3])).toBe(false);
+  });
+
   test('serializeDerivedProofValue throws on invalid labelMap entries', () => {
     expect(() => BBSCryptosuiteUtils.serializeDerivedProofValue(
       u8(4),

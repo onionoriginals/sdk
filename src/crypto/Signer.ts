@@ -10,16 +10,18 @@ import { concatBytes } from '@noble/hashes/utils.js';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 
-// Ensure noble hash utils available in Node (unconditional assignment for coverage)
-let sAny: any = secp256k1 as any;
-let eAny: any = ed25519 as any;
-sAny.utils = sAny.utils || {};
+// Ensure noble hash utils helpers exist without redefining the utils object
+const sAny: any = secp256k1 as any;
+const eAny: any = ed25519 as any;
 /* istanbul ignore next */
-sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
-  hmac(sha256, key, concatBytes(...msgs));
-eAny.utils = eAny.utils || {};
+if (sAny && sAny.utils && typeof sAny.utils.hmacSha256Sync !== 'function') {
+  sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
+    hmac(sha256, key, concatBytes(...msgs));
+}
 /* istanbul ignore next */
-eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
+if (eAny && eAny.utils && typeof eAny.utils.sha512Sync !== 'function') {
+  eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
+}
 
 export class ES256KSigner extends Signer {
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
