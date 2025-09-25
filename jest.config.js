@@ -1,3 +1,5 @@
+const isCI = !!process.env.CI;
+
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
@@ -14,10 +16,11 @@ module.exports = {
   transformIgnorePatterns: [
     '/node_modules/(?!@noble/secp256k1|@noble/ed25519|@noble/hashes|multiformats)/'
   ],
-  moduleNameMapper: {
-    '^multiformats/bases/base58$': '<rootDir>/tests/__mocks__/mf-base58.js',
+  moduleNameMapper: Object.assign({
+    '^multiformats/bases/base58$': '<rootDir>/tests/__mocks__/mf-base58.js'
+  }, isCI ? {} : {
     '^@digitalbazaar/bbs-signatures$': '<rootDir>/tests/__mocks__/bbs-signatures.js'
-  },
+  }),
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
     '!src/**/*.d.ts',
