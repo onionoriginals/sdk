@@ -1,5 +1,6 @@
 import { OrdinalsInscription, BitcoinTransaction } from '../types';
 import { decode as decodeCbor } from '../utils/cbor';
+import { hexToBytes } from '../utils/encoding';
 
 export class OrdinalsClient {
   constructor(
@@ -96,7 +97,7 @@ export class OrdinalsClient {
     // If metadata is hex-encoded CBOR string
     if (info.metadata && typeof info.metadata === 'string') {
       try {
-        const bytes = this.hexToBytes(info.metadata);
+        const bytes = hexToBytes(info.metadata);
         return decodeCbor<Record<string, unknown>>(bytes);
       } catch {
         // fall through
@@ -118,28 +119,11 @@ export class OrdinalsClient {
 
   private async fetchJson<T>(path: string): Promise<T | null> {
     const url = `${this.rpcUrl.replace(/\/$/, '')}${path}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
     if (!res.ok) return null;
     const body: any = await res.json();
     // Accept { data: T } or T
     return (body && typeof body === 'object' && 'data' in body) ? (body as any).data as T : (body as T);
-  }
-
-  private hexToBytes(hex: string): Uint8Array {
-    const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
-    if (clean.length % 2 !== 0) {
-      throw new Error('Invalid hex string length');
-    }
-    const out = new Uint8Array(clean.length / 2);
-    for (let i = 0; i < clean.length; i += 2) {
-      const byteStr = clean.substring(i, i + 2);
-      const value = parseInt(byteStr, 16);
-      if (Number.isNaN(value)) {
-        throw new Error('Invalid hex string');
-      }
-      out[i / 2] = value;
-    }
-    return out;
   }
 }
 
