@@ -1,4 +1,5 @@
 import { OrdinalsInscription, BitcoinTransaction } from '../types';
+import { decode as decodeCbor } from '../utils/cbor';
 
 export class OrdinalsClient {
   constructor(
@@ -7,27 +8,15 @@ export class OrdinalsClient {
   ) {}
 
   async getInscriptionById(id: string): Promise<OrdinalsInscription | null> {
-    return {
-      satoshi: '123',
-      inscriptionId: id,
-      content: Buffer.from(''),
-      contentType: 'text/plain',
-      txid: 'txid',
-      vout: 0
-    };
+    if (!id) return null;
+    return this.resolveInscription(id);
   }
 
   async getInscriptionsBySatoshi(satoshi: string): Promise<OrdinalsInscription[]> {
-    return [
-      {
-        satoshi,
-        inscriptionId: 'insc-' + satoshi,
-        content: Buffer.from(''),
-        contentType: 'text/plain',
-        txid: 'txid',
-        vout: 0
-      }
-    ];
+    const info = await this.getSatInfo(satoshi);
+    if (!info.inscription_ids.length) return [];
+    const inscriptions = await Promise.all(info.inscription_ids.map(id => this.resolveInscription(id)));
+    return inscriptions.filter((x): x is OrdinalsInscription => x !== null);
   }
 
   async broadcastTransaction(tx: BitcoinTransaction): Promise<string> {
@@ -50,30 +39,107 @@ export class OrdinalsClient {
   // Minimal placeholder implementations suitable for unit testing
 
   async getSatInfo(satoshi: string): Promise<{ inscription_ids: string[] }> {
-    // Simulate that a satoshi may have zero or one inscription id linked
-    const has = Boolean(satoshi && satoshi !== '0');
-    return { inscription_ids: has ? [`insc-${satoshi}`] : [] };
+    const data = await this.fetchJson<any>(`/sat/${satoshi}`);
+    if (!data) return { inscription_ids: [] };
+    // Support both {inscription_ids: []} and {data: {inscription_ids: []}} shapes via fetchJson
+    const inscriptionIds = Array.isArray(data.inscription_ids) ? data.inscription_ids : [];
+    return { inscription_ids: inscriptionIds };
   }
 
   async resolveInscription(identifier: string): Promise<OrdinalsInscription | null> {
-    // Accept either an inscription id or a satoshi number and resolve to an inscription
     if (!identifier) return null;
-    const isInscId = identifier.startsWith('insc-');
-    const satoshi = isInscId ? identifier.replace(/^insc-/, '') : identifier;
-    return {
+    const info = await this.fetchJson<any>(`/inscription/${identifier}`);
+    if (!info) return null;
+
+    // Fetch content bytes
+    const contentUrl = info.content_url || `${this.rpcUrl}/content/${identifier}`;
+    const contentRes = await fetch(contentUrl);
+    if (!contentRes.ok) throw new Error(`Failed to fetch inscription content: ${contentRes.status}`);
+    const contentArrayBuf = await contentRes.arrayBuffer();
+    const content = Buffer.from(new Uint8Array(contentArrayBuf));
+
+    // owner_output may be 'txid:vout'
+    let txid = 'unknown';
+    let vout = 0;
+    if (typeof info.owner_output === 'string' && info.owner_output.includes(':')) {
+      const [tid, v] = info.owner_output.split(':');
+      txid = tid;
+      vout = Number(v) || 0;
+    }
+
+    // sat number provided as number or string
+    const satoshi = String(info.sat ?? '');
+
+    const inscription: OrdinalsInscription = {
       satoshi,
-      inscriptionId: `insc-${satoshi}`,
-      content: Buffer.from(''),
-      contentType: 'text/plain',
-      txid: 'txid',
-      vout: 0
+      inscriptionId: info.inscription_id || identifier,
+      content,
+      contentType: info.content_type || 'application/octet-stream',
+      txid,
+      vout,
+      blockHeight: info.block_height
     };
+
+    return inscription;
   }
 
   async getMetadata(inscriptionId: string): Promise<Record<string, unknown> | null> {
-    // For tests we simply return a deterministic object keyed by the id
     if (!inscriptionId) return null;
-    return { id: inscriptionId, type: 'BTCO.DID', network: this.network } as Record<string, unknown>;
+    const info = await this.fetchJson<any>(`/inscription/${inscriptionId}`);
+    if (!info) return null;
+
+    // If API provides metadata directly
+    if (info.metadata && typeof info.metadata === 'object') {
+      return info.metadata as Record<string, unknown>;
+    }
+
+    // If metadata is hex-encoded CBOR string
+    if (info.metadata && typeof info.metadata === 'string') {
+      try {
+        const bytes = this.hexToBytes(info.metadata);
+        return decodeCbor<Record<string, unknown>>(bytes);
+      } catch {
+        // fall through
+      }
+    }
+
+    // Fallback: if content type is CBOR, fetch and decode
+    if (info.content_type === 'application/cbor') {
+      const contentUrl = info.content_url || `${this.rpcUrl}/content/${inscriptionId}`;
+      const res = await fetch(contentUrl);
+      if (res.ok) {
+        const ab = await res.arrayBuffer();
+        return decodeCbor<Record<string, unknown>>(new Uint8Array(ab));
+      }
+    }
+
+    return null;
+  }
+
+  private async fetchJson<T>(path: string): Promise<T | null> {
+    const url = `${this.rpcUrl.replace(/\/$/, '')}${path}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const body: any = await res.json();
+    // Accept { data: T } or T
+    return (body && typeof body === 'object' && 'data' in body) ? (body as any).data as T : (body as T);
+  }
+
+  private hexToBytes(hex: string): Uint8Array {
+    const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+    if (clean.length % 2 !== 0) {
+      throw new Error('Invalid hex string length');
+    }
+    const out = new Uint8Array(clean.length / 2);
+    for (let i = 0; i < clean.length; i += 2) {
+      const byteStr = clean.substring(i, i + 2);
+      const value = parseInt(byteStr, 16);
+      if (Number.isNaN(value)) {
+        throw new Error('Invalid hex string');
+      }
+      out[i / 2] = value;
+    }
+    return out;
   }
 }
 
