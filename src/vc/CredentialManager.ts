@@ -6,6 +6,8 @@ import {
   Proof 
 } from '../types';
 import { canonicalizeDocument } from '../utils/serialization';
+import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer';
 
 export class CredentialManager {
@@ -31,13 +33,15 @@ export class CredentialManager {
     verificationMethod: string
   ): Promise<VerifiableCredential> {
     // Sign credential as JSON-LD with proof
-    const proof: Proof = {
+    const proofBase: Proof = {
       type: 'DataIntegrityProof',
       created: new Date().toISOString(),
       verificationMethod,
       proofPurpose: 'assertionMethod',
-      proofValue: await this.generateProofValue(credential, privateKeyMultibase)
+      proofValue: ''
     };
+    const proofValue = await this.generateProofValue(credential, privateKeyMultibase, proofBase);
+    const proof: Proof = { ...proofBase, proofValue };
 
     return {
       ...credential,
@@ -58,13 +62,17 @@ export class CredentialManager {
     const signature = this.decodeMultibase(proofValue);
     if (!signature) return false;
 
-    const toVerify = { ...credential } as any;
-    delete toVerify.proof;
-    const canonical = canonicalizeDocument(toVerify);
-
+    // di-wings style: hash(hash(c14n(proofSansProofValue)) + hash(c14n(credentialSansProof)))
+    const proofSansValue = { ...proof } as any;
+    delete proofSansValue.proofValue;
+    const c14nProof = canonicalizeDocument(proofSansValue);
+    const c14nCred = canonicalizeDocument({ ...credential, proof: undefined } as any);
+    const hProof = Buffer.from(sha256(Buffer.from(c14nProof)));
+    const hCred = Buffer.from(sha256(Buffer.from(c14nCred)));
+    const digest = Buffer.concat([hProof, hCred]);
     const signer = this.getSigner();
     try {
-      return await signer.verify(Buffer.from(canonical), Buffer.from(signature), verificationMethod);
+      return await signer.verify(Buffer.from(digest), Buffer.from(signature), verificationMethod);
     } catch {
       return false;
     }
@@ -84,15 +92,20 @@ export class CredentialManager {
 
   private async generateProofValue(
     credential: VerifiableCredential, 
-    privateKeyMultibase: string
+    privateKeyMultibase: string,
+    proofBase: Proof
   ): Promise<string> {
-    const toSign = { ...credential } as any;
-    delete toSign.proof;
-    const canonical = canonicalizeDocument(toSign);
-
+    // Construct canonical digest including provided proof sans proofValue
+    const proofSansValue = { ...proofBase } as any;
+    delete proofSansValue.proofValue;
+    const c14nProof = canonicalizeDocument(proofSansValue);
+    const c14nCred = canonicalizeDocument({ ...credential, proof: undefined } as any);
+    const hProof = Buffer.from(sha256(Buffer.from(c14nProof)));
+    const hCred = Buffer.from(sha256(Buffer.from(c14nCred)));
+    const digest = Buffer.concat([hProof, hCred]);
     const signer = this.getSigner();
-    const sig = await signer.sign(Buffer.from(canonical), privateKeyMultibase);
-    return this.encodeMultibase(sig);
+    const sig = await signer.sign(Buffer.from(digest), privateKeyMultibase);
+    return encodeBase64UrlMultibase(sig);
   }
 
   private getSigner(): Signer {
@@ -108,14 +121,9 @@ export class CredentialManager {
     }
   }
 
-  private encodeMultibase(bytes: Buffer): string {
-    return 'z' + Buffer.from(bytes).toString('base64url');
-  }
-
   private decodeMultibase(s: string): Uint8Array | null {
-    if (!s || s[0] !== 'z') return null;
     try {
-      return Buffer.from(s.slice(1), 'base64url');
+      return decodeBase64UrlMultibase(s);
     } catch {
       return null;
     }
