@@ -86,34 +86,36 @@ export class OrdinalsClient {
 
   async getMetadata(inscriptionId: string): Promise<Record<string, unknown> | null> {
     if (!inscriptionId) return null;
-    const info = await this.fetchJson<any>(`/inscription/${inscriptionId}`);
-    if (!info) return null;
-
-    // If API provides metadata directly
-    if (info.metadata && typeof info.metadata === 'object') {
-      return info.metadata as Record<string, unknown>;
-    }
-
-    // If metadata is hex-encoded CBOR string
-    if (info.metadata && typeof info.metadata === 'string') {
-      try {
-        const bytes = hexToBytes(info.metadata);
-        return decodeCbor<Record<string, unknown>>(bytes);
-      } catch {
-        // fall through
-      }
-    }
-
-    // Fallback: if content type is CBOR, fetch and decode
-    if (info.content_type === 'application/cbor') {
-      const contentUrl = info.content_url || `${this.rpcUrl}/content/${inscriptionId}`;
-      const res = await fetch(contentUrl);
+    const base = this.rpcUrl.replace(/\/$/, '');
+    const paths = [
+      `/r/metadata/${inscriptionId}`,
+      `/metadata/${inscriptionId}`,
+      `/inscription/${inscriptionId}/metadata`
+    ];
+    for (const p of paths) {
+      const res = await fetch(`${base}${p}`, { headers: { 'Accept': 'application/json' } });
       if (res.ok) {
-        const ab = await res.arrayBuffer();
-        return decodeCbor<Record<string, unknown>>(new Uint8Array(ab));
+        let text = await res.text();
+        text = text.trim();
+        if (text.startsWith('"') && text.endsWith('"')) {
+          try {
+            text = JSON.parse(text);
+          } catch (_) {
+            // if JSON parsing fails, keep raw
+          }
+        }
+        try {
+          const bytes = hexToBytes(text);
+          return decodeCbor<Record<string, unknown>>(bytes);
+        } catch (_) {
+          return null;
+        }
       }
+      if (typeof (res as any).status === 'number' && (res as any).status === 404) {
+        continue;
+      }
+      return null;
     }
-
     return null;
   }
 

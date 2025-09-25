@@ -5,6 +5,7 @@ const client = new OrdinalsClient('http://localhost:3000', 'regtest');
 
 describe('OrdinalsClient (real HTTP behavior with mocked fetch)', () => {
   const json = (data: any, ok = true) => ({ ok, json: async () => data });
+  const text = (data: string, ok = true, status?: number) => ({ ok, status: status ?? (ok ? 200 : 500), text: async () => data });
   const bin = (bytes: Uint8Array, ok = true) => ({ ok, arrayBuffer: async () => bytes.buffer });
 
   beforeEach(() => {
@@ -126,103 +127,33 @@ describe('OrdinalsClient (real HTTP behavior with mocked fetch)', () => {
           }
         });
       }
-      if (url.endsWith('/inscription/insc-metadata-object')) {
-        return json({
-          data: {
-            inscription_id: 'insc-metadata-object',
-            content_type: 'application/json',
-            content_url: 'http://localhost:3000/content/insc-metadata-object',
-            sat: 42,
-            owner_output: 'tx:0',
-            metadata: { id: 'insc-metadata-object', test: true }
-          }
-        });
+      // metadata endpoints (hex-encoded CBOR)
+      if (url.endsWith('/r/metadata/insc-metadata-object')) {
+        const obj = { id: 'insc-metadata-object', test: true };
+        const hex = Buffer.from(cborEncode(obj)).toString('hex');
+        return text(hex);
       }
-      if (url.endsWith('/inscription/insc-metadata-hex')) {
+      if (url.endsWith('/r/metadata/insc-metadata-hex')) {
         const obj = { id: 'insc-metadata-hex', ok: 1 };
         const hex = Buffer.from(cborEncode(obj)).toString('hex');
-        return json({
-          data: {
-            inscription_id: 'insc-metadata-hex',
-            content_type: 'application/cbor',
-            content_url: 'http://localhost:3000/content/insc-metadata-hex',
-            sat: 99,
-            owner_output: 'tx:0',
-            metadata: hex
-          }
-        });
+        return text(hex);
       }
-      if (url.endsWith('/inscription/insc-metadata-hex0x')) {
+      if (url.endsWith('/r/metadata/insc-metadata-hex0x')) {
         const obj = { id: 'insc-metadata-hex0x', ok: true };
         const hex = '0x' + Buffer.from(cborEncode(obj)).toString('hex');
-        return json({
-          data: {
-            content_type: 'application/cbor',
-            content_url: 'http://localhost:3000/content/insc-metadata-hex0x',
-            sat: 101,
-            owner_output: 'tx:0',
-            metadata: hex
-          }
-        });
+        return text(hex);
       }
-      if (url.endsWith('/inscription/insc-hex-invalid')) {
-        return json({
-          data: {
-            inscription_id: 'insc-hex-invalid',
-            content_type: 'application/cbor',
-            content_url: 'http://localhost:3000/content/insc-hex-invalid',
-            sat: 5,
-            owner_output: 'tx:0',
-            metadata: 'zz' // invalid hex
-          }
-        });
+      if (url.endsWith('/r/metadata/insc-hex-invalid')) {
+        return text('zz');
       }
-      if (url.endsWith('/inscription/insc-hex-odd')) {
-        return json({
-          data: {
-            inscription_id: 'insc-hex-odd',
-            content_type: 'text/plain',
-            content_url: 'http://localhost:3000/content/insc-hex-odd',
-            sat: 7,
-            owner_output: 'tx:0',
-            metadata: 'f' // odd-length
-          }
-        });
+      if (url.endsWith('/r/metadata/insc-hex-odd')) {
+        return text('f');
       }
-      if (url.endsWith('/inscription/insc-m-noinfo')) {
-        return { ok: false, json: async () => ({}) } as any;
+      if (url.endsWith('/r/metadata/insc-m-noinfo')) {
+        return text('', false, 404) as any;
       }
-      if (url.endsWith('/inscription/insc-cbor-fetch-fail')) {
-        return json({
-          data: {
-            inscription_id: 'insc-cbor-fetch-fail',
-            content_type: 'application/cbor',
-            content_url: 'http://localhost:3000/content/insc-cbor-fetch-fail',
-            sat: 8,
-            owner_output: 'tx:0'
-          }
-        });
-      }
-      if (url.endsWith('/inscription/insc-metadata-cbor-content')) {
-        return json({
-          data: {
-            inscription_id: 'insc-metadata-cbor-content',
-            content_type: 'application/cbor',
-            content_url: 'http://localhost:3000/content/insc-metadata-cbor-content',
-            sat: 100,
-            owner_output: 'tx:0'
-          }
-        });
-      }
-      if (url.endsWith('/inscription/insc-cbor-no-content-url')) {
-        return json({
-          data: {
-            inscription_id: 'insc-cbor-no-content-url',
-            content_type: 'application/cbor',
-            sat: 150,
-            owner_output: 'tx:0'
-          }
-        });
+      if (url.endsWith('/r/metadata/insc-cbor-fetch-fail')) {
+        return text('', false, 500) as any;
       }
 
       // content bytes
@@ -391,10 +322,9 @@ describe('OrdinalsClient (real HTTP behavior with mocked fetch)', () => {
     expect(meta).toEqual(expect.objectContaining({ id: 'insc-metadata-hex0x', ok: true }));
   });
 
-  test('getMetadata ignores invalid hex and returns null unless content is CBOR', async () => {
+  test('getMetadata returns null on invalid hex (no fallbacks)', async () => {
     const meta = await client.getMetadata('insc-hex-invalid');
-    // content_type is application/cbor in info, so it should fallback to content fetch and decode
-    expect(meta).toEqual(expect.objectContaining({ fromContentFallback: true }));
+    expect(meta).toBeNull();
   });
 
   test('getMetadata ignores odd-length hex and returns null for non-cbor type', async () => {
@@ -412,15 +342,7 @@ describe('OrdinalsClient (real HTTP behavior with mocked fetch)', () => {
     expect(meta).toBeNull();
   });
 
-  test('getMetadata falls back to fetching CBOR content when type is application/cbor', async () => {
-    const meta = await client.getMetadata('insc-metadata-cbor-content');
-    expect(meta).toEqual(expect.objectContaining({ fromContent: true }));
-  });
-
-  test('getMetadata uses rpcUrl/content when content_url missing and content_type is CBOR', async () => {
-    const meta = await client.getMetadata('insc-cbor-no-content-url');
-    expect(meta).toEqual(expect.objectContaining({ fromContentFallbackRpcUrl: true }));
-  });
+  // getMetadata now only uses metadata endpoints; no content-based fallback
 
   test('resolveInscription returns null for empty identifier', async () => {
     const insc = await client.resolveInscription('');
