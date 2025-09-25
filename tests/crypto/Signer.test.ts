@@ -1,4 +1,5 @@
 import { ES256KSigner, Ed25519Signer, Bls12381G2Signer } from '../../src/crypto/Signer';
+import { bls12_381 as bls } from '@noble/curves/bls12-381';
 
 jest.mock('@noble/secp256k1', () => {
   const real = jest.requireActual('@noble/secp256k1');
@@ -80,6 +81,21 @@ describe('Signer', () => {
     const s = new Bls12381G2Signer();
     await expect(s.sign(Buffer.from('a'), 'xabc')).rejects.toThrow('Invalid multibase private key');
     await expect(s.verify(Buffer.from('a'), Buffer.from('b'), 'xabc')).rejects.toThrow('Invalid multibase public key');
+  });
+
+  test('Bls12381G2Signer sign/verify success and failure paths', async () => {
+    const s = new Bls12381G2Signer();
+    const sk = bls.utils.randomPrivateKey();
+    const pk = bls.getPublicKey(sk);
+    const skMb = 'z' + Buffer.from(sk).toString('base64url');
+    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+
+    const data = Buffer.from('hello');
+    const sig = await s.sign(data, skMb);
+    await expect(s.verify(data, sig, pkMb)).resolves.toBe(true);
+
+    const other = Buffer.from('world');
+    await expect(s.verify(other, sig, pkMb)).resolves.toBe(false);
   });
 });
 
