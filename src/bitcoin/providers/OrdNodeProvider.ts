@@ -59,10 +59,12 @@ export class OrdNodeProvider implements ResourceProvider {
   }
 
   async *getAllResources(_options: ResourceCrawlOptions = {}): AsyncGenerator<LinkedResource[]> {
+    /* istanbul ignore next */
     if (false) yield [];
   }
 
   async *getAllResourcesChronological(_options: ResourceCrawlOptions = {}): AsyncGenerator<LinkedResource[]> {
+    /* istanbul ignore next */
     if (false) yield [];
   }
 
