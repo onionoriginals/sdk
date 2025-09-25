@@ -87,36 +87,22 @@ export class OrdinalsClient {
   async getMetadata(inscriptionId: string): Promise<Record<string, unknown> | null> {
     if (!inscriptionId) return null;
     const base = this.rpcUrl.replace(/\/$/, '');
-    const paths = [
-      `/r/metadata/${inscriptionId}`,
-      `/metadata/${inscriptionId}`,
-      `/inscription/${inscriptionId}/metadata`
-    ];
-    for (const p of paths) {
-      const res = await fetch(`${base}${p}`, { headers: { 'Accept': 'application/json' } });
-      if (res.ok) {
-        let text = await res.text();
-        text = text.trim();
-        if (text.startsWith('"') && text.endsWith('"')) {
-          try {
-            text = JSON.parse(text);
-          } catch (_) {
-            // if JSON parsing fails, keep raw
-          }
-        }
-        try {
-          const bytes = hexToBytes(text);
-          return decodeCbor<Record<string, unknown>>(bytes);
-        } catch (_) {
-          return null;
-        }
-      }
-      if (typeof (res as any).status === 'number' && (res as any).status === 404) {
-        continue;
-      }
+    const res = await fetch(`${base}/r/metadata/${inscriptionId}`, { headers: { 'Accept': 'application/json' } });
+    if (!res.ok) {
       return null;
     }
-    return null;
+    let text = (await res.text()).trim();
+    if (text.startsWith('"') && text.endsWith('"')) {
+      try {
+        text = JSON.parse(text);
+      } catch (_) {}
+    }
+    try {
+      const bytes = hexToBytes(text);
+      return decodeCbor<Record<string, unknown>>(bytes);
+    } catch (_) {
+      return null;
+    }
   }
 
   private async fetchJson<T>(path: string): Promise<T | null> {
