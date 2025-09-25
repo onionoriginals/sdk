@@ -1,7 +1,0 @@
-{
-  "id": "did:key:zQ3shVCkb7inzoon2xbs7ZJbeMPwSiv8DrNAqX169uHDuUFTM#zQ3shVCkb7inzoon2xbs7ZJbeMPwSiv8DrNAqX169uHDuUFTM",
-  "type": "EcdsaSecp256k1VerificationKey2019",
-  "controller": "did:key:zQ3shVCkb7inzoon2xbs7ZJbeMPwSiv8DrNAqX169uHDuUFTM",
-  "publicKeyBase58": "jFbaGaKXVAZ9iWBhBDibXoa159wFZp8Jb5LMbwYnFmbd",
-  "privateKeyBase58": "4sse87M91Z3XBvxuAd9TSnHNvf69at8mHRQYwbXGVyCg"
-}

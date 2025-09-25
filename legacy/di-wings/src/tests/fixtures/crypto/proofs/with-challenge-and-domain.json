@@ -1,9 +1,0 @@
-{
-  "type": "JsonWebSignature2020",
-  "proofPurpose": "assertionMethod",
-  "created": "2021-11-26T17:55:42Z",
-  "challenge": "challenge123",
-  "domain": "domain123",
-  "verificationMethod": "did:example:123#key-1",
-  "jws": "eyJiNjQiOmZhbHNlLCJjcml0IjpbImI2NCJdLCJhbGciOiJFUzI1NksifQ..NRq4A3HJuWbTAln3vPsC_9HEwl9RwQde2ho8y_MUlow0U39zCEK7l7_OFPZ59vTPcQw_kWxV1fGhwSVERF7Yyg"
-}

@@ -1,7 +1,0 @@
-{
-	"id": "did:example:1234#z6LSeRSE5Em5oJpwdk3NBaLVERBS332ULC7EQq5EtMsmXhsM",
-	"controller": "did:example:1234",
-	"type": "X25519KeyAgreementKey2020",
-	"publicKeyMultibase": "z6LSeRSE5Em5oJpwdk3NBaLVERBS332ULC7EQq5EtMsmXhsM",
-	"privateKeyMultibase": "z3weeMD56C1T347EmB6kYNS7trpQwjvtQCpCYRpqGz6mcemT"
-}

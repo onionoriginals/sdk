@@ -1,4 +1,5 @@
-import { hexToBytes } from "@noble/hashes/utils"
+
+import { hexToBytes } from "@noble/hashes/utils.js";
 import { HDKey } from "@scure/bip32"
 
 export const seedToHD = (seed: string) => {
