@@ -1,3 +1,4 @@
+/* istanbul ignore file */
 export abstract class Signer {
   abstract sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer>;
   abstract verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean>;
