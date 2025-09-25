@@ -1,0 +1,7 @@
+{
+	"id": "did:key:z6Mkoeab4xjDUGuEmBshPh3vQxsZhTiinVU83xM9UJYSsFi4#z6Mkoeab4xjDUGuEmBshPh3vQxsZhTiinVU83xM9UJYSsFi4",
+	"type": "Ed25519VerificationKey2018",
+	"controller": "did:key:z6Mkoeab4xjDUGuEmBshPh3vQxsZhTiinVU83xM9UJYSsFi4",
+	"publicKeyBase58": "ACKYUiUn8jQmeh2zi865ZsKZstSsNcDmMwSDe2aRx2vg",
+	"privateKeyBase58": "4jSWjHAYBxgaio2oC7USLPJ9aeGMBdp9jdNzAX3vn2zu5v2d6YSHgDUoZxpxK4S77qxRhNHd6V1xzNQjAStwSUvG"
+}
