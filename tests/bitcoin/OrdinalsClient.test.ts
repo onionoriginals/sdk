@@ -15,6 +15,11 @@ describe('OrdinalsClient', () => {
     await expect(client.broadcastTransaction({ txid: 't', vin: [], vout: [], fee: 0 })).resolves.toEqual(expect.any(String));
   });
 
+  test('broadcastTransaction falls back when txid missing', async () => {
+    // @ts-ignore
+    await expect(client.broadcastTransaction({ vin: [], vout: [], fee: 0 })).resolves.toEqual('txid');
+  });
+
   test('getTransactionStatus returns status (expected to fail until implemented)', async () => {
     const status = await client.getTransactionStatus('txid');
     expect(status.confirmed).toBeDefined();
@@ -26,6 +31,10 @@ describe('OrdinalsClient', () => {
 
   test('estimateFee default parameter path (expected to fail until implemented)', async () => {
     await expect(client.estimateFee()).resolves.toEqual(expect.any(Number));
+  });
+
+  test('estimateFee clamps non-positive blocks to minimum', async () => {
+    await expect(client.estimateFee(0)).resolves.toBeGreaterThanOrEqual(10);
   });
 });
 

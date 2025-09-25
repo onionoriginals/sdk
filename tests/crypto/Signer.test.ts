@@ -74,4 +74,18 @@ describe('Signers', () => {
   });
 });
 
+describe('Signer', () => {
+  test('ES256KSigner invalid key errors', async () => {
+    const s = new ES256KSigner();
+    await expect(s.sign(Buffer.from('a'), 'xabc')).rejects.toThrow('Invalid multibase private key');
+    await expect(s.verify(Buffer.from('a'), Buffer.from('b'), 'xabc')).rejects.toThrow('Invalid multibase public key');
+  });
+
+  test('Ed25519Signer invalid key errors', async () => {
+    const s = new Ed25519Signer();
+    await expect(s.sign(Buffer.from('a'), 'xabc')).rejects.toThrow('Invalid multibase private key');
+    await expect(s.verify(Buffer.from('a'), Buffer.from('b'), 'xabc')).rejects.toThrow('Invalid multibase public key');
+  });
+});
+
 

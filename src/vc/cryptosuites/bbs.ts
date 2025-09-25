@@ -1,4 +1,3 @@
-import { base64url } from 'multiformats/bases/base64';
 import * as cbor from 'cbor-js';
 
 /**
@@ -12,6 +11,19 @@ import * as cbor from 'cbor-js';
  *   (base64url with 'u' prefix) where applicable to match the spec.
  */
 export class BBSCryptosuiteUtils {
+  private static encodeBase64urlNoPad(bytes: Uint8Array): string {
+    const b64 = Buffer.from(bytes).toString('base64');
+    const b64url = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    return 'u' + b64url;
+  }
+
+  private static decodeBase64urlNoPad(s: string): Uint8Array {
+    if (!s.startsWith('u')) throw new Error('Not a multibase base64url (u- prefixed) string');
+    const raw = s.slice(1);
+    const b64 = raw.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4 === 2 ? '==' : b64.length % 4 === 3 ? '=' : '';
+    return new Uint8Array(Buffer.from(b64 + pad, 'base64'));
+  }
   private static compareBytes(a: Uint8Array, b: number[]): boolean {
     if (a.length !== b.length) return false;
     for (let i = 0; i < b.length; i++) {
@@ -45,22 +57,22 @@ export class BBSCryptosuiteUtils {
     switch (featureOption) {
       case 'baseline':
         headerBytes = new Uint8Array([0xd9, 0x5d, 0x02]);
-        components = [bbsSignature, bbsHeader, publicKey, hmacKey, mandatoryPointers as unknown as Uint8Array];
+        components = [bbsSignature, bbsHeader, publicKey, hmacKey, mandatoryPointers];
         break;
       case 'anonymous_holder_binding':
         headerBytes = new Uint8Array([0xd9, 0x5d, 0x04]);
         if (!signerBlind) throw new Error('signerBlind is required for anonymous_holder_binding');
-        components = [bbsSignature, bbsHeader, publicKey, hmacKey, mandatoryPointers as unknown as Uint8Array, signerBlind];
+        components = [bbsSignature, bbsHeader, publicKey, hmacKey, mandatoryPointers, signerBlind];
         break;
       case 'pseudonym_issuer_pid':
         headerBytes = new Uint8Array([0xd9, 0x5d, 0x06]);
         if (!pid) throw new Error('pid is required for pseudonym_issuer_pid');
-        components = [bbsSignature, bbsHeader, publicKey, hmacKey, mandatoryPointers as unknown as Uint8Array, pid];
+        components = [bbsSignature, bbsHeader, publicKey, hmacKey, mandatoryPointers, pid];
         break;
       case 'pseudonym_hidden_pid':
         headerBytes = new Uint8Array([0xd9, 0x5d, 0x08]);
         if (!signerBlind) throw new Error('signerBlind is required for pseudonym_hidden_pid');
-        components = [bbsSignature, bbsHeader, publicKey, hmacKey, mandatoryPointers as unknown as Uint8Array, signerBlind];
+        components = [bbsSignature, bbsHeader, publicKey, hmacKey, mandatoryPointers, signerBlind];
         break;
       default:
         throw new Error(`Unsupported feature option: ${featureOption}`);
@@ -68,7 +80,7 @@ export class BBSCryptosuiteUtils {
 
     const encodedComponents = cbor.encode(components);
     const proofBytes = BBSCryptosuiteUtils.concatBytes(headerBytes, new Uint8Array(encodedComponents));
-    return base64url.encode(proofBytes);
+    return BBSCryptosuiteUtils.encodeBase64urlNoPad(proofBytes);
   }
 
   static parseBaseProofValue(proofValue: string): {
@@ -81,10 +93,7 @@ export class BBSCryptosuiteUtils {
     pid?: Uint8Array;
     signerBlind?: Uint8Array;
   } {
-    if (!proofValue.startsWith('u')) {
-      throw new Error('Proof value must be multibase base64url (u-prefixed)');
-    }
-    const decoded = base64url.decode(proofValue);
+    const decoded = BBSCryptosuiteUtils.decodeBase64urlNoPad(proofValue);
     const header = decoded.slice(0, 3);
     let featureOption: any;
     if (this.compareBytes(header, [0xd9, 0x5d, 0x02])) featureOption = 'baseline';
@@ -201,7 +210,7 @@ export class BBSCryptosuiteUtils {
 
     const encodedComponents = cbor.encode(components);
     const proofBytes = this.concatBytes(headerBytes, new Uint8Array(encodedComponents));
-    return base64url.encode(proofBytes);
+    return this.encodeBase64urlNoPad(proofBytes);
   }
 
   static parseDerivedProofValue(proofValue: string): {
@@ -214,10 +223,7 @@ export class BBSCryptosuiteUtils {
     pseudonym?: string;
     lengthBBSMessages?: number;
   } {
-    if (!proofValue.startsWith('u')) {
-      throw new Error('Proof value must be multibase base64url (u-prefixed)');
-    }
-    const decoded = base64url.decode(proofValue);
+    const decoded = this.decodeBase64urlNoPad(proofValue);
     const header = decoded.slice(0, 3);
     let featureOption: 'baseline' | 'anonymous_holder_binding' | 'pseudonym';
     if (this.compareBytes(header, [0xd9, 0x5d, 0x03])) featureOption = 'baseline';

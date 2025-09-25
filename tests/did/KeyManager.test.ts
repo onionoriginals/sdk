@@ -4,16 +4,20 @@ import { DIDDocument, KeyPair, KeyType } from '../../src/types';
 describe('KeyManager', () => {
   const km = new KeyManager();
 
-  test('generateKeyPair returns multibase encoded ES256K keys', async () => {
-    const pair: KeyPair = await km.generateKeyPair('ES256K' as KeyType);
-    expect(pair.privateKey.startsWith('z')).toBe(true);
-    expect(pair.publicKey.startsWith('z')).toBe(true);
+  test('generateKeyPair ES256K works', async () => {
+    const kp = await km.generateKeyPair('ES256K');
+    expect(kp.privateKey.startsWith('z')).toBe(true);
+    expect(kp.publicKey.startsWith('z')).toBe(true);
   });
 
-  test('generateKeyPair returns multibase encoded Ed25519 keys', async () => {
-    const pair: KeyPair = await km.generateKeyPair('Ed25519' as KeyType);
-    expect(pair.privateKey.startsWith('z')).toBe(true);
-    expect(pair.publicKey.startsWith('z')).toBe(true);
+  test('generateKeyPair Ed25519 works', async () => {
+    const kp = await km.generateKeyPair('Ed25519');
+    expect(kp.privateKey.startsWith('z')).toBe(true);
+    expect(kp.publicKey.startsWith('z')).toBe(true);
+  });
+
+  test('decodePublicKeyMultibase invalid input throws', () => {
+    expect(() => km.decodePublicKeyMultibase('abc')).toThrow('Invalid multibase string');
   });
 
   test('encode/decode multibase roundtrip', () => {
