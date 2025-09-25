@@ -13,13 +13,15 @@ import * as ed25519 from '@noble/ed25519';
 // Ensure noble hash utils available in Node (unconditional assignment for coverage)
 const sAny: any = secp256k1 as any;
 const eAny: any = ed25519 as any;
-sAny.utils = sAny.utils || {};
 /* istanbul ignore next */
-sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
-  hmac(sha256, key, concatBytes(...msgs));
-eAny.utils = eAny.utils || {};
+if (sAny.utils && !sAny.utils.hmacSha256Sync) {
+  sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
+    hmac(sha256, key, concatBytes(...msgs));
+}
 /* istanbul ignore next */
-eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
+if (eAny.utils && !eAny.utils.sha512Sync) {
+  eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
+}
 
 export class ES256KSigner extends Signer {
   // secp256k1 implementation for Bitcoin compatibility
