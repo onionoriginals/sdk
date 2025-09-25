@@ -1,5 +1,6 @@
-import { ES256KSigner, Ed25519Signer, Bls12381G2Signer } from '../../src/crypto/Signer';
+import { ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from '../../src/crypto/Signer';
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
+import { p256 } from '@noble/curves/p256';
 
 jest.mock('@noble/secp256k1', () => {
   const real = jest.requireActual('@noble/secp256k1');
@@ -130,13 +131,45 @@ describe('Signer', () => {
     jest.dontMock('@noble/ed25519');
   });
 
-  test('ES256Signer throws not implemented on sign/verify', async () => {
-    // Import lazily to avoid affecting other tests
+  test('ES256Signer invalid key errors', async () => {
+    const s = new ES256Signer();
+    await expect(s.sign(Buffer.from('a'), 'xabc')).rejects.toThrow('Invalid multibase private key');
+    await expect(s.verify(Buffer.from('a'), Buffer.from('b'), 'xabc')).rejects.toThrow('Invalid multibase public key');
+  });
+
+  test('ES256Signer sign/verify success and failure paths', async () => {
+    const s = new ES256Signer();
+    const sk = p256.utils.randomPrivateKey();
+    const pk = p256.getPublicKey(sk, true);
+    const skMb = 'z' + Buffer.from(sk).toString('base64url');
+    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const data = Buffer.from('hello');
+    const sig = await s.sign(data, skMb);
+    await expect(s.verify(data, sig, pkMb)).resolves.toBe(true);
+    await expect(s.verify(Buffer.from('world'), sig, pkMb)).resolves.toBe(false);
+  });
+
+  test('ES256Signer verify catch path returns false', async () => {
+    const real = jest.requireActual('@noble/curves/p256');
+    jest.resetModules();
+    jest.doMock('@noble/curves/p256', () => ({
+      ...real,
+      p256: {
+        ...real.p256,
+        verify: () => { throw new Error('boom'); },
+        sign: real.p256.sign,
+        utils: real.p256.utils,
+        getPublicKey: real.p256.getPublicKey
+      }
+    }));
     const { ES256Signer } = await import('../../src/crypto/Signer');
     const s = new ES256Signer();
-    await expect(s.sign(Buffer.from('a'), 'z' + Buffer.from('k').toString('base64url'))).rejects.toThrow('Not implemented');
-    await expect(s.verify(Buffer.from('a'), Buffer.from('sig'), 'z' + Buffer.from('p').toString('base64url'))).rejects.toThrow('Not implemented');
+    const pkMb = 'z' + Buffer.from(p256.getPublicKey(p256.utils.randomPrivateKey(), true)).toString('base64url');
+    await expect(s.verify(Buffer.from('a'), Buffer.from('sig'), pkMb)).resolves.toBe(false);
+    jest.dontMock('@noble/curves/p256');
   });
+
+  
 
   test('Bls12381G2Signer verify returns false on internal error (catch path)', async () => {
     const s = new Bls12381G2Signer();

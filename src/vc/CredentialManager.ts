@@ -5,6 +5,8 @@ import {
   OriginalsConfig,
   Proof 
 } from '../types';
+import { canonicalizeDocument } from '../utils/serialization';
+import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer';
 
 export class CredentialManager {
   constructor(private config: OriginalsConfig) {}
@@ -45,10 +47,27 @@ export class CredentialManager {
 
   async verifyCredential(credential: VerifiableCredential): Promise<boolean> {
     // Verify JSON-LD credential signature and integrity
-    if (!credential.proof) {
+    const proof = credential.proof as Proof | undefined;
+    if (!proof) {
       return false;
     }
-    return true;
+
+    const { proofValue, verificationMethod } = proof;
+    if (!proofValue || !verificationMethod) return false;
+
+    const signature = this.decodeMultibase(proofValue);
+    if (!signature) return false;
+
+    const toVerify = { ...credential } as any;
+    delete toVerify.proof;
+    const canonical = canonicalizeDocument(toVerify);
+
+    const signer = this.getSigner();
+    try {
+      return await signer.verify(Buffer.from(canonical), Buffer.from(signature), verificationMethod);
+    } catch {
+      return false;
+    }
   }
 
   async createPresentation(
@@ -67,8 +86,39 @@ export class CredentialManager {
     credential: VerifiableCredential, 
     privateKeyMultibase: string
   ): Promise<string> {
-    // Generate proof value for JSON-LD credential
-    throw new Error('Not implemented');
+    const toSign = { ...credential } as any;
+    delete toSign.proof;
+    const canonical = canonicalizeDocument(toSign);
+
+    const signer = this.getSigner();
+    const sig = await signer.sign(Buffer.from(canonical), privateKeyMultibase);
+    return this.encodeMultibase(sig);
+  }
+
+  private getSigner(): Signer {
+    switch (this.config.defaultKeyType) {
+      case 'ES256K':
+        return new ES256KSigner();
+      case 'Ed25519':
+        return new Ed25519Signer();
+      case 'ES256':
+        return new ES256Signer();
+      default:
+        return new ES256KSigner();
+    }
+  }
+
+  private encodeMultibase(bytes: Buffer): string {
+    return 'z' + Buffer.from(bytes).toString('base64url');
+  }
+
+  private decodeMultibase(s: string): Uint8Array | null {
+    if (!s || s[0] !== 'z') return null;
+    try {
+      return Buffer.from(s.slice(1), 'base64url');
+    } catch {
+      return null;
+    }
   }
 }
 
