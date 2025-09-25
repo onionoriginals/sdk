@@ -53,6 +53,40 @@ describe('KeyManager', () => {
   test('generateKeyPair throws on unsupported type', async () => {
     await expect(km.generateKeyPair('ES256' as KeyType)).rejects.toThrow('Only ES256K and Ed25519 supported at this time');
   });
+
+  test('constructor initializes utils helpers without throwing', () => {
+    const instance = new KeyManager();
+    expect(instance).toBeInstanceOf(KeyManager);
+    // call utils to cover helper branches
+    const secp = require('@noble/secp256k1');
+    const ed = require('@noble/ed25519');
+    if (secp.utils && typeof secp.utils.hmacSha256Sync === 'function') {
+      secp.utils.hmacSha256Sync(new Uint8Array([1]), new Uint8Array([2]));
+    }
+    if (ed.utils && typeof ed.utils.sha512Sync === 'function') {
+      ed.utils.sha512Sync(new Uint8Array([3]));
+    }
+  });
+
+  test('constructor covers utils undefined branch (creates helpers when missing)', () => {
+    const secp = require('@noble/secp256k1');
+    const ed = require('@noble/ed25519');
+    const origSecpUtils = secp.utils;
+    const origEdUtils = ed.utils;
+    try {
+      // Remove utils to trigger RHS of `|| {}`
+      secp.utils = undefined;
+      ed.utils = undefined;
+      const km2 = new KeyManager();
+      expect(km2).toBeInstanceOf(KeyManager);
+      expect(secp.utils && typeof secp.utils.hmacSha256Sync).toBe('function');
+      expect(ed.utils && typeof ed.utils.sha512Sync).toBe('function');
+    } finally {
+      // Restore originals
+      secp.utils = origSecpUtils;
+      ed.utils = origEdUtils;
+    }
+  });
 });
 
 

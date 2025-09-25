@@ -14,6 +14,8 @@ jest.mock('@noble/secp256k1', () => {
       .mockResolvedValueOnce({ toCompactRawBytes: () => new Uint8Array([4, 5]) })
       // 3) returns object with toRawBytes
       .mockResolvedValueOnce({ toRawBytes: () => new Uint8Array([6]) })
+      // 4) returns other object to hit default branch
+      .mockResolvedValueOnce({ any: 1 })
   } as any;
 });
 
@@ -60,6 +62,8 @@ describe('Signer', () => {
     expect(b2).toBeInstanceOf(Buffer);
     const b3 = await s.sign(Buffer.from('a'), key);
     expect(b3).toBeInstanceOf(Buffer);
+    const b4 = await s.sign(Buffer.from('a'), key);
+    expect(b4).toBeInstanceOf(Buffer);
   });
 
   test('ES256KSigner verify success path', async () => {
@@ -96,6 +100,55 @@ describe('Signer', () => {
 
     const other = Buffer.from('world');
     await expect(s.verify(other, sig, pkMb)).resolves.toBe(false);
+  });
+
+  test('ES256KSigner verify catch path returns false', async () => {
+    const real = jest.requireActual('@noble/secp256k1');
+    jest.resetModules();
+    jest.doMock('@noble/secp256k1', () => ({
+      ...real,
+      verify: () => { throw new Error('boom'); }
+    }));
+    const { ES256KSigner } = await import('../../src/crypto/Signer');
+    const s = new ES256KSigner();
+    const pub = 'z' + Buffer.from('p').toString('base64url');
+    await expect(s.verify(Buffer.from('a'), Buffer.from('sig'), pub)).resolves.toBe(false);
+    jest.dontMock('@noble/secp256k1');
+  });
+
+  test('Ed25519Signer verify catch path returns false', async () => {
+    const real = jest.requireActual('@noble/ed25519');
+    jest.resetModules();
+    jest.doMock('@noble/ed25519', () => ({
+      ...real,
+      verifyAsync: async () => { throw new Error('boom'); }
+    }));
+    const { Ed25519Signer } = await import('../../src/crypto/Signer');
+    const s = new Ed25519Signer();
+    const pub = 'z' + Buffer.from('p').toString('base64url');
+    await expect(s.verify(Buffer.from('a'), Buffer.from('sig'), pub)).resolves.toBe(false);
+    jest.dontMock('@noble/ed25519');
+  });
+
+  test('ES256Signer throws not implemented on sign/verify', async () => {
+    // Import lazily to avoid affecting other tests
+    const { ES256Signer } = await import('../../src/crypto/Signer');
+    const s = new ES256Signer();
+    await expect(s.sign(Buffer.from('a'), 'z' + Buffer.from('k').toString('base64url'))).rejects.toThrow('Not implemented');
+    await expect(s.verify(Buffer.from('a'), Buffer.from('sig'), 'z' + Buffer.from('p').toString('base64url'))).rejects.toThrow('Not implemented');
+  });
+
+  test('Bls12381G2Signer verify returns false on internal error (catch path)', async () => {
+    const s = new Bls12381G2Signer();
+    const sk = bls.utils.randomPrivateKey();
+    const pk = bls.getPublicKey(sk);
+    const skMb = 'z' + Buffer.from(sk).toString('base64url');
+    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const data = Buffer.from('hello');
+    const sig = await s.sign(data, skMb);
+    const spy = jest.spyOn(bls, 'verify').mockImplementation(() => { throw new Error('boom'); });
+    await expect(s.verify(data, sig, pkMb)).resolves.toBe(false);
+    spy.mockRestore();
   });
 });
 
