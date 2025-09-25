@@ -1,0 +1,57 @@
+{
+  "@context": ["https://www.w3.org/2018/credentials/v1"],
+  "type": ["VerifiablePresentation"],
+  "verifiableCredential": [
+    {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "https://w3id.org/vaccination/v1"
+      ],
+      "type": ["VerifiableCredential", "VaccinationCertificate"],
+      "id": "urn:uvci:af5vshde843jf831j128fj",
+      "name": "COVID-19 Vaccination Certificate",
+      "description": "COVID-19 Vaccination Certificate",
+      "issuanceDate": "2019-12-03T12:19:52Z",
+      "expirationDate": "2029-12-03T12:19:52Z",
+      "issuer": "did:key:z6MkiY62766b1LJkExWMsM3QG4WtX7QpY823dxoYzr9qZvJ3",
+      "credentialSubject": {
+        "id": "did:example:123",
+        "type": "VaccinationEvent",
+        "batchNumber": "1183738569",
+        "administeringCentre": "MoH",
+        "healthProfessional": "MoH",
+        "countryOfVaccination": "NZ",
+        "recipient": {
+          "type": "VaccineRecipient",
+          "givenName": "JOHN",
+          "familyName": "SMITH",
+          "gender": "Male",
+          "birthDate": "1958-07-17"
+        },
+        "vaccine": {
+          "type": "Vaccine",
+          "disease": "COVID-19",
+          "atcCode": "J07BX03",
+          "medicinalProductName": "COVID-19 Vaccine Moderna",
+          "marketingAuthorizationHolder": "Moderna Biotech"
+        }
+      },
+      "proof": {
+        "type": "JsonWebSignature2020",
+        "proofPurpose": "assertionMethod",
+        "created": "2021-11-26T05:19:33Z",
+        "verificationMethod": "did:example:123#key-1",
+        "jws": "eyJiNjQiOmZhbHNlLCJjcml0IjpbImI2NCJdLCJhbGciOiJFUzI1NksifQ..qckXOnj8LXFGqqknJJ6DLBq3289x7IBH1H-ERtwJb4bSLCqtJJNA0Xrxz4rti6QYk-cSCwFSAlTK9hjDQvNCnQ"
+      }
+    }
+  ],
+  "proof": {
+    "type": "JsonWebSignature2020",
+    "proofPurpose": "authentication",
+    "created": "2021-11-26T19:09:31Z",
+    "challenge": "1235",
+    "domain": "1",
+    "verificationMethod": "did:example:123#key-1",
+    "jws": "eyJiNjQiOmZhbHNlLCJjcml0IjpbImI2NCJdLCJhbGciOiJFUzI1NksifQ..WKXXWKjLAuCZxpBg71cAeSc89QhlZs9oIG_pURgkkarVLyjZf3P21N0RHi0wsdPs5QhLsgLh0tehZSN8SRx9qQ"
+  }
+}
