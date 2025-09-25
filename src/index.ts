@@ -18,7 +18,7 @@ export { OrdinalsClient } from './bitcoin/OrdinalsClient';
 export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs';
 
 // Crypto exports
-export { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from './crypto/Signer';
+export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from './crypto/Signer';
 
 // Utility exports
 export * from './utils/validation';
