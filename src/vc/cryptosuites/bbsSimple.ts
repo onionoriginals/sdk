@@ -1,5 +1,5 @@
 import * as bbs from '@digitalbazaar/bbs-signatures';
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@noble/hashes/sha2.js';
 
 export type BbsKeyPair = {
   publicKey: Uint8Array;
