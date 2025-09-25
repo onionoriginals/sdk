@@ -8,7 +8,6 @@ import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 
 export class ES256KSigner extends Signer {
-  // secp256k1 implementation for Bitcoin compatibility
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
@@ -42,7 +41,6 @@ export class ES256KSigner extends Signer {
 }
 
 export class Ed25519Signer extends Signer {
-  // EdDSA implementation
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
@@ -67,14 +65,11 @@ export class Ed25519Signer extends Signer {
 }
 
 export class ES256Signer extends Signer {
-  // ECDSA P-256 implementation
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
-    // Implement ECDSA P-256 signing with multibase private key
     throw new Error('Not implemented');
   }
 
   async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
-    // Implement ECDSA P-256 verification with multibase public key
     throw new Error('Not implemented');
   }
 }
