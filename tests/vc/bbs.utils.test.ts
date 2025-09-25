@@ -14,6 +14,11 @@ describe('BBSCryptosuiteUtils', () => {
   const hmacKey = u8(32, 4);
   const mandatoryPointers = ['/id', '/credentialSubject/id'];
 
+  test('rejects non-u prefix for base/derived parsing', () => {
+    expect(() => (BBSCryptosuiteUtils as any).parseBaseProofValue('xabc')).toThrow('multibase');
+    expect(() => (BBSCryptosuiteUtils as any).parseDerivedProofValue('xabc')).toThrow('multibase');
+  });
+
   test('serialize/parse base proof (baseline)', () => {
     const s = BBSCryptosuiteUtils.serializeBaseProofValue(
       bbsSignature,

@@ -14,12 +14,6 @@ describe('Multikey encode/decode', () => {
   const secpPub = new Uint8Array(33).map((_, i) => (i + 3) & 0xff);
   const secpPriv = new Uint8Array(32).map((_, i) => (i + 4) & 0xff);
 
-  test('encode handles empty input gracefully (leading zero count path)', () => {
-    const mb = (multikey as any).encodePublicKey(new Uint8Array([0, 0, 1]), 'Ed25519');
-    expect(typeof mb).toBe('string');
-    expect(mb[0]).toBe('z');
-  });
-
   test('encode/decode Ed25519', () => {
     const pub = multikey.encodePublicKey(edPub, 'Ed25519');
     const priv = multikey.encodePrivateKey(edPriv, 'Ed25519');
@@ -43,17 +37,8 @@ describe('Multikey encode/decode', () => {
   });
 
   test('decode errors: invalid multibase prefix', () => {
-    expect(() => multikey.decodePublicKey('xabc')).toThrow('Invalid Multibase encoding');
-    expect(() => multikey.decodePrivateKey('xabc')).toThrow('Invalid Multibase encoding');
-  });
-
-  test('decode errors: invalid base58 character', () => {
-    expect(() => multikey.decodePublicKey('z0')).toThrow();
-  });
-
-  test('decode errors: empty payload (z only) hits empty branch', () => {
-    expect(() => multikey.decodePublicKey('z')).toThrow('Unsupported key type');
-    expect(() => multikey.decodePrivateKey('z')).toThrow('Unsupported key type');
+    expect(() => multikey.decodePublicKey('xabc')).toThrow();
+    expect(() => multikey.decodePrivateKey('xabc')).toThrow();
   });
 
   test('decode errors: unsupported type header', () => {

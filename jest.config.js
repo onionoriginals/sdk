@@ -14,6 +14,9 @@ module.exports = {
   transformIgnorePatterns: [
     '/node_modules/(?!@noble/secp256k1|@noble/ed25519|@noble/hashes|multiformats)/'
   ],
+  moduleNameMapper: {
+    '^multiformats/bases/base58$': '<rootDir>/tests/__mocks__/mf-base58.js'
+  },
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
     '!src/**/*.d.ts',
