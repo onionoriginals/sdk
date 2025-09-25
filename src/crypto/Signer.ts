@@ -4,25 +4,11 @@ export abstract class Signer {
 }
 
 import { sha256 } from '@noble/hashes/sha256';
-import { sha512 } from '@noble/hashes/sha512';
-import { hmac } from '@noble/hashes/hmac';
-import { concatBytes } from '@noble/hashes/utils';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
-
-// Ensure noble hash utils available in Node (unconditional assignment for coverage)
-const sAny: any = secp256k1 as any;
-const eAny: any = ed25519 as any;
-sAny.utils = sAny.utils || {};
-/* istanbul ignore next */
-sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
-  hmac(sha256, key, concatBytes(...msgs));
-eAny.utils = eAny.utils || {};
-/* istanbul ignore next */
-eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
+import { bls12_381 as bls } from '@noble/curves/bls12-381';
 
 export class ES256KSigner extends Signer {
-  // secp256k1 implementation for Bitcoin compatibility
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
@@ -56,7 +42,6 @@ export class ES256KSigner extends Signer {
 }
 
 export class Ed25519Signer extends Signer {
-  // EdDSA implementation
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
@@ -81,15 +66,35 @@ export class Ed25519Signer extends Signer {
 }
 
 export class ES256Signer extends Signer {
-  // ECDSA P-256 implementation
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
-    // Implement ECDSA P-256 signing with multibase private key
     throw new Error('Not implemented');
   }
 
   async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
-    // Implement ECDSA P-256 verification with multibase public key
     throw new Error('Not implemented');
+  }
+}
+
+export class Bls12381G2Signer extends Signer {
+  async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
+    if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
+      throw new Error('Invalid multibase private key');
+    }
+    const sk = Buffer.from(privateKeyMultibase.slice(1), 'base64url');
+    const sig = await bls.sign(data, sk);
+    return Buffer.from(sig);
+  }
+
+  async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
+    if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
+      throw new Error('Invalid multibase public key');
+    }
+    const pk = Buffer.from(publicKeyMultibase.slice(1), 'base64url');
+    try {
+      return await bls.verify(signature, data, pk);
+    } catch {
+      return false;
+    }
   }
 }
 
