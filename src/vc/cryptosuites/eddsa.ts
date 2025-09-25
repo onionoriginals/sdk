@@ -2,6 +2,7 @@ import { base58btc } from 'multiformats/bases/base58';
 import * as ed25519 from '@noble/ed25519';
 import { canonize, canonizeProof } from '../utils/jsonld';
 import { multikey } from '../../crypto/Multikey';
+import { sha256Bytes } from '../../utils/hash';
 
 export interface DataIntegrityProof {
   type: 'DataIntegrityProof';
@@ -17,12 +18,6 @@ export interface DataIntegrityProof {
 export interface VerificationResult {
   verified: boolean;
   errors?: string[];
-}
-
-async function sha256Bytes(input: string | Uint8Array): Promise<Uint8Array> {
-  const data = typeof input === 'string' ? new TextEncoder().encode(input) : input;
-  const digest = await (globalThis.crypto as any).subtle.digest('SHA-256', data);
-  return new Uint8Array(digest);
 }
 
 export class EdDSACryptosuiteManager {
