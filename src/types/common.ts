@@ -6,6 +6,12 @@ export interface OriginalsConfig {
   bitcoinRpcUrl?: string;
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
   enableLogging?: boolean;
+  // Optional pluggable adapters
+  storageAdapter?: import('../adapters').StorageAdapter;
+  feeOracle?: import('../adapters').FeeOracleAdapter;
+  ordinalsProvider?: import('../adapters').OrdinalsProvider;
+  // Optional telemetry hooks
+  telemetry?: import('../utils/telemetry').TelemetryHooks;
 }
 
 export interface AssetResource {

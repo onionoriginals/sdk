@@ -1,9 +1,16 @@
-import { OriginalsSDK } from '../index';
+import { OriginalsSDK, MemoryStorageAdapter, MockFeeOracle, MockOrdinalsProvider } from '../index';
 
 async function basicExample() {
   const sdk = OriginalsSDK.create({
     network: 'testnet',
-    enableLogging: true
+    enableLogging: true,
+    storageAdapter: new MemoryStorageAdapter(),
+    feeOracle: new MockFeeOracle(5),
+    ordinalsProvider: new MockOrdinalsProvider(),
+    telemetry: {
+      onEvent: (e) => console.log('[telemetry]', e.name, e.attributes || {}),
+      onError: (err) => console.warn('[error]', err.code, err.message)
+    }
   });
 
   // Create new digital asset
