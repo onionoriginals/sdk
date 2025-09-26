@@ -31,3 +31,7 @@ declare module '@digitalbazaar/bbs-signatures' {
 
 declare module 'jsonld';
 
+// Global shims for non-DOM/node test environments
+declare const global: any;
+declare function setTimeout(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): number;
+
