@@ -15,7 +15,8 @@ module.exports = {
   },
   testPathIgnorePatterns: [],
   transformIgnorePatterns: [
-    '/node_modules/(?!@noble/secp256k1|@noble/ed25519|@noble/hashes|multiformats)/'
+    '/node_modules/(?!@noble/secp256k1|@noble/ed25519|@noble/hashes|multiformats)/',
+    '/tests/__mocks__/'
   ],
   moduleNameMapper: Object.assign({
     '^multiformats/bases/base58$': '<rootDir>/tests/__mocks__/mf-base58.js'
