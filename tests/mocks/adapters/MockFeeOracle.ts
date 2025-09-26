@@ -1,4 +1,4 @@
-import type { FeeOracleAdapter } from '../types';
+import type { FeeOracleAdapter } from '../../../src/adapters/types';
 
 export class MockFeeOracle implements FeeOracleAdapter {
   constructor(private readonly defaultRate: number = 10) {}
@@ -7,4 +7,5 @@ export class MockFeeOracle implements FeeOracleAdapter {
     return this.defaultRate * multiplier;
   }
 }
+
 

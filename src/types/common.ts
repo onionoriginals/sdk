@@ -1,3 +1,6 @@
+import { StorageAdapter, FeeOracleAdapter, OrdinalsProvider } from '../adapters';
+import { TelemetryHooks } from '../utils/telemetry';
+
 // Base types for the Originals protocol
 export type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';
 
@@ -7,11 +10,11 @@ export interface OriginalsConfig {
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
   enableLogging?: boolean;
   // Optional pluggable adapters
-  storageAdapter?: import('../adapters').StorageAdapter;
-  feeOracle?: import('../adapters').FeeOracleAdapter;
-  ordinalsProvider?: import('../adapters').OrdinalsProvider;
+  storageAdapter?: StorageAdapter;
+  feeOracle?: FeeOracleAdapter;
+  ordinalsProvider?: OrdinalsProvider;
   // Optional telemetry hooks
-  telemetry?: import('../utils/telemetry').TelemetryHooks;
+  telemetry?: TelemetryHooks;
 }
 
 export interface AssetResource {

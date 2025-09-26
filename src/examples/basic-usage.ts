@@ -1,12 +1,10 @@
-import { OriginalsSDK, MemoryStorageAdapter, MockFeeOracle, MockOrdinalsProvider } from '../index';
+import { OriginalsSDK } from '../index';
 
 async function basicExample() {
   const sdk = OriginalsSDK.create({
     network: 'testnet',
     enableLogging: true,
-    storageAdapter: new MemoryStorageAdapter(),
-    feeOracle: new MockFeeOracle(5),
-    ordinalsProvider: new MockOrdinalsProvider(),
+    // Example uses defaults; provide adapters in your app or tests
     telemetry: {
       onEvent: (e) => console.log('[telemetry]', e.name, e.attributes || {}),
       onError: (err) => console.warn('[error]', err.code, err.message)

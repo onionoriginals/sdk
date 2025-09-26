@@ -1,4 +1,4 @@
-import type { StorageAdapter, StorageGetResult, StoragePutOptions } from '../types';
+import type { StorageAdapter, StorageGetResult, StoragePutOptions } from '../../../src/adapters/types';
 
 export class MemoryStorageAdapter implements StorageAdapter {
   private readonly keyToObject: Map<string, { content: Buffer; contentType: string }> = new Map();
@@ -20,4 +20,5 @@ export class MemoryStorageAdapter implements StorageAdapter {
     return this.keyToObject.delete(objectKey);
   }
 }
+
 

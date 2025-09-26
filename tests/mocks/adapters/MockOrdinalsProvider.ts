@@ -1,4 +1,4 @@
-import type { OrdinalsProvider } from '../types';
+import type { OrdinalsProvider } from '../../../src/adapters/types';
 
 export class MockOrdinalsProvider implements OrdinalsProvider {
   async getInscriptionById(id: string) {
@@ -30,4 +30,5 @@ export class MockOrdinalsProvider implements OrdinalsProvider {
     return 10 * Math.max(1, blocks);
   }
 }
+
 
