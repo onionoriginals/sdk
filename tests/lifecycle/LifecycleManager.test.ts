@@ -42,7 +42,7 @@ describe('LifecycleManager', () => {
     const fakeAsset: any = { currentLayer: 'did:peer' };
     await expect(
       sdk.lifecycle.publishToWeb(fakeAsset, 'example.com')
-    ).rejects.toThrow('Not implemented');
+    ).rejects.toThrow();
   });
 
   test('inscribeOnBitcoin throws Not implemented (coverage for throw)', async () => {

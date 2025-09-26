@@ -3,6 +3,8 @@ import { BtcoDidResolver } from './BtcoDidResolver';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
 import { createBtcoDidDocument } from './createBtcoDidDocument';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter';
+import { WebVhResolver } from './WebVhResolver';
+import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter';
 
 export class DIDManager {
   constructor(private config: OriginalsConfig) {}
@@ -15,7 +17,12 @@ export class DIDManager {
   }
 
   async migrateToDIDWebVH(didDoc: DIDDocument, domain: string): Promise<DIDDocument> {
-    return { ...didDoc, id: `did:webvh:${domain}:${didDoc.id.split(':').pop()}` };
+    // Basic domain hardening: require valid hostname
+    if (!/^[a-z0-9.-]+$/i.test(domain) || domain.includes('..') || domain.startsWith('-') || domain.endsWith('-')) {
+      throw new Error('Invalid domain');
+    }
+    const slug = didDoc.id.split(':').pop() as string;
+    return { ...didDoc, id: `did:webvh:${domain}:${slug}` };
   }
 
   async migrateToDIDBTCO(didDoc: DIDDocument, satoshi: string): Promise<DIDDocument> {
@@ -32,6 +39,12 @@ export class DIDManager {
         const resolver = new BtcoDidResolver({ provider: adapter });
         const result = await resolver.resolve(did);
         return result.didDocument || null;
+      }
+      if (did.startsWith('did:webvh:')) {
+        const storage = new MemoryStorageAdapter();
+        const resolver = new WebVhResolver({ storage });
+        const doc = await resolver.resolve(did);
+        return doc;
       }
       return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
     } catch {
