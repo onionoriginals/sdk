@@ -1,7 +1,9 @@
 import { 
   OriginalsConfig, 
   OrdinalsInscription, 
-  BitcoinTransaction 
+  BitcoinTransaction,
+  Utxo,
+  DUST_LIMIT_SATS
 } from '../types';
 
 export class BitcoinManager {
@@ -37,10 +39,12 @@ export class BitcoinManager {
     inscription: OrdinalsInscription,
     toAddress: string
   ): Promise<BitcoinTransaction> {
+    // Minimal mock tx for tests, respecting dust limit
+    const value = Math.max(DUST_LIMIT_SATS, 546);
     return {
       txid: 'tx-transfer',
       vin: [{ txid: inscription.txid, vout: inscription.vout }],
-      vout: [{ value: 546, scriptPubKey: 'script', address: toAddress }],
+      vout: [{ value, scriptPubKey: 'script', address: toAddress }],
       fee: 100
     };
   }

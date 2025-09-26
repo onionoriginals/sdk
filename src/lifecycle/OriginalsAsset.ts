@@ -28,6 +28,7 @@ export class OriginalsAsset {
   public readonly did: DIDDocument;
   public readonly credentials: VerifiableCredential[];
   public currentLayer: LayerType;
+  private provenance: ProvenanceChain;
 
   constructor(
     resources: AssetResource[],
@@ -39,6 +40,12 @@ export class OriginalsAsset {
     this.did = did;
     this.credentials = credentials;
     this.currentLayer = this.determineCurrentLayer(did.id);
+    this.provenance = {
+      createdAt: new Date().toISOString(),
+      creator: did.id,
+      migrations: [],
+      transfers: []
+    };
   }
 
   async migrate(toLayer: LayerType): Promise<void> {
@@ -52,16 +59,25 @@ export class OriginalsAsset {
     if (!validTransitions[this.currentLayer].includes(toLayer)) {
       throw new Error(`Invalid migration from ${this.currentLayer} to ${toLayer}`);
     }
+    this.provenance.migrations.push({
+      from: this.currentLayer,
+      to: toLayer,
+      timestamp: new Date().toISOString()
+    });
     this.currentLayer = toLayer;
   }
 
   getProvenance(): ProvenanceChain {
-    return {
-      createdAt: new Date().toISOString(),
-      creator: this.did.id,
-      migrations: [],
-      transfers: []
-    };
+    return this.provenance;
+  }
+
+  recordTransfer(from: string, to: string, transactionId: string): void {
+    this.provenance.transfers.push({
+      from,
+      to,
+      timestamp: new Date().toISOString(),
+      transactionId
+    });
   }
 
   async verify(): Promise<boolean> {
