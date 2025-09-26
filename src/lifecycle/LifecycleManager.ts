@@ -56,7 +56,10 @@ export class LifecycleManager {
       throw new Error('Not implemented');
     }
     // Minimal MVP flow: estimate fee, pretend to build & broadcast, update provenance, migrate
-    const provider = this.deps.ordinalsProvider || new OrdinalsClientProvider(new OrdinalsClient(this.config.bitcoinRpcUrl || 'http://localhost:3000', this.config.network as any));
+    const provider = this.deps.ordinalsProvider || new OrdinalsClientProvider(
+      new OrdinalsClient(this.config.bitcoinRpcUrl || 'http://localhost:3000', this.config.network as any),
+      { baseUrl: this.config.bitcoinRpcUrl || 'http://localhost:3000' }
+    );
     const usedFeeRate = typeof feeRate === 'number' && feeRate > 0 ? feeRate : await provider.estimateFee(1);
     const psbtBuilder = this.deps.psbtBuilder || new PSBTBuilder();
     const broadcast = this.deps.broadcastClient || new BroadcastClient(async (_hex: string) => 'tx-mock', async (_txid: string) => ({ confirmed: true, confirmations: 1 }));

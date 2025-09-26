@@ -9,7 +9,7 @@ export interface OrdinalsProvider {
 }
 
 export class OrdinalsClientProvider implements OrdinalsProvider {
-  constructor(private client: OrdinalsClient, private options?: { retries?: number }) {}
+  constructor(private client: OrdinalsClient, private options?: { retries?: number; baseUrl?: string }) {}
 
   async getSatInfo(satNumber: string): Promise<{ inscription_ids: string[] }> {
     return withRetry(() => this.client.getSatInfo(satNumber), {
@@ -22,11 +22,19 @@ export class OrdinalsClientProvider implements OrdinalsProvider {
     return withRetry(async () => {
       const res = await this.client.getInscriptionById(inscriptionId);
       if (!res) throw new Error('Inscription not found');
+      if (!res.satoshi) throw new Error('Inscription missing satoshi');
+      const sat = Number(String(res.satoshi));
+      if (Number.isNaN(sat)) throw new Error('Invalid satoshi value');
+      if (!res.contentType) throw new Error('Inscription missing contentType');
+      const base = (this.options?.baseUrl || '').replace(/\/$/, '');
+      if (!base) throw new Error('baseUrl is required to construct content_url');
+      const id = res.inscriptionId;
+      const content_url = `${base}/content/${id}`;
       return {
-        id: res.inscriptionId,
-        sat: Number(res.satoshi || 0),
-        content_type: res.contentType || 'application/octet-stream',
-        content_url: `${''}` // content url is not available from the client here; upstream callers should already have it
+        id,
+        sat,
+        content_type: res.contentType,
+        content_url
       };
     }, { maxRetries: this.options?.retries ?? 2, isRetriable: () => true });
   }
