@@ -3,15 +3,33 @@ import {
   OrdinalsInscription, 
   BitcoinTransaction 
 } from '../types';
+import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters';
+import { emitTelemetry, StructuredError } from '../utils/telemetry';
 
 export class BitcoinManager {
-  constructor(private config: OriginalsConfig) {}
+  private readonly feeOracle?: FeeOracleAdapter;
+  private readonly ord?: OrdinalsProvider;
+
+  constructor(private config: OriginalsConfig) {
+    this.feeOracle = config.feeOracle;
+    this.ord = config.ordinalsProvider;
+  }
 
   async inscribeData(
     data: Buffer,
     contentType: string,
     feeRate?: number
   ): Promise<OrdinalsInscription> {
+    let effectiveFeeRate = feeRate;
+    if (effectiveFeeRate == null && this.feeOracle) {
+      try {
+        effectiveFeeRate = await this.feeOracle.estimateFeeRate(1);
+        emitTelemetry(this.config.telemetry, { name: 'bitcoin.fee.estimated', attributes: { feeRate: effectiveFeeRate } });
+      } catch (error) {
+        emitTelemetry(this.config.telemetry, { name: 'bitcoin.fee.error', level: 'warn', attributes: { error: String(error) } });
+      }
+    }
+    // For now, return a mock inscription; integration with a real ord client can be added later
     return {
       satoshi: '123',
       inscriptionId: 'insc-123',
@@ -23,6 +41,18 @@ export class BitcoinManager {
   }
 
   async trackInscription(inscriptionId: string): Promise<OrdinalsInscription | null> {
+    if (this.ord) {
+      const info = await this.ord.getInscriptionById(inscriptionId);
+      if (!info) return null;
+      return {
+        satoshi: info.satoshi ?? '0',
+        inscriptionId: info.inscriptionId,
+        content: info.content,
+        contentType: info.contentType,
+        txid: info.txid,
+        vout: info.vout
+      };
+    }
     return {
       satoshi: '123',
       inscriptionId,
@@ -46,10 +76,20 @@ export class BitcoinManager {
   }
 
   async preventFrontRunning(satoshi: string): Promise<boolean> {
+    if (!satoshi) throw new StructuredError('SATOSHI_REQUIRED', 'Satoshi identifier is required');
+    // Naive implementation: check for multiple inscriptions on same satoshi via provider
+    if (this.ord) {
+      const list = await this.ord.getInscriptionsBySatoshi(satoshi);
+      return list.length <= 1;
+    }
     return true;
   }
 
   async getSatoshiFromInscription(inscriptionId: string): Promise<string | null> {
+    if (this.ord) {
+      const info = await this.ord.getInscriptionById(inscriptionId);
+      return info?.satoshi ?? null;
+    }
     return '123';
   }
 

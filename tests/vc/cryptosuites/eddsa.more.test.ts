@@ -34,5 +34,19 @@ describe('EdDSACryptosuiteManager extra branches', () => {
     } as any, { documentLoader: loader });
     expect(res.verified).toBe(false);
   });
+
+  test('verifyProof returns error on canonizeProof failure path', async () => {
+    const badLoader = async (iri: string) => {
+      if (iri.includes('#')) {
+        return { document: { '@context': ['https://www.w3.org/ns/credentials/v2'], id: iri, publicKeyMultibase: pubMb }, documentUrl: iri, contextUrl: null };
+      }
+      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+    };
+    const proof: any = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:ex#k', proofPurpose: 'assertionMethod', proofValue: 'z1L' };
+    const doc: any = { '@context': ['https://www.w3.org/ns/credentials/v2'] };
+    doc.self = doc;
+    const res = await EdDSACryptosuiteManager.verifyProof(doc, proof, { documentLoader: badLoader });
+    expect(res.verified).toBe(false);
+  });
 });
 

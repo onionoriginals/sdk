@@ -1,12 +1,3 @@
-/**
- * Simple retry and backoff utilities.
- *
- * Note: This implementation intentionally mirrors the approach proven in the
- * ordinalsplus legacy library (legacy/ordinalsplus/packages/ordinalsplus/src/indexer/retry.ts)
- * with exponential backoff and optional jitter. The legacy code is finicky; we
- * keep behavior predictable and minimal here while preserving semantics.
- */
-
 export interface RetryOptions {
   maxRetries?: number;
   baseDelayMs?: number;
@@ -53,4 +44,3 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
   }
   throw lastError;
 }
-

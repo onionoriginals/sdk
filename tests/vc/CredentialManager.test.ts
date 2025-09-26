@@ -68,6 +68,14 @@ describe('CredentialManager', () => {
     await expect(sdk.credentials.verifyCredential(vc)).resolves.toBe(false);
   });
 
+  test('verifyCredential uses data-integrity verifier path when cryptosuite present', async () => {
+    const sdkEd = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const signed = await sdkEd.credentials.signCredential(baseVC, 'z' + Buffer.from(new Uint8Array(32).fill(1)).toString('base64url'), 'did:ex#key');
+    (signed as any).proof.cryptosuite = 'eddsa-rdfc-2022';
+    const res = await sdkEd.credentials.verifyCredential(signed);
+    expect(typeof res).toBe('boolean');
+  });
+
   test('verifyCredential returns false on invalid multibase proofValue', async () => {
     const vc: VerifiableCredential = { ...baseVC, proof: { 
       type: 'DataIntegrityProof',

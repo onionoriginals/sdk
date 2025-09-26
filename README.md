@@ -87,16 +87,16 @@ Manufacturers create product credentials, publish public registries, and inscrib
 
 ```bash
 # Install dependencies
-npm install
+bun install
 
 # Build
-npm run build
+bun run build
 
 # Test  
-npm test
+bun test
 
 # Lint
-npm run lint
+bun run lint
 ```
 
 ## License

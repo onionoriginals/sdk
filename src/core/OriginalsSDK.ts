@@ -3,6 +3,7 @@ import { CredentialManager } from '../vc/CredentialManager';
 import { LifecycleManager } from '../lifecycle/LifecycleManager';
 import { BitcoinManager } from '../bitcoin/BitcoinManager';
 import { OriginalsConfig } from '../types';
+import { emitTelemetry } from '../utils/telemetry';
 
 export class OriginalsSDK {
   public readonly did: DIDManager;
@@ -11,6 +12,7 @@ export class OriginalsSDK {
   public readonly bitcoin: BitcoinManager;
 
   constructor(config: OriginalsConfig) {
+    emitTelemetry(config.telemetry, { name: 'sdk.init', attributes: { network: config.network } });
     this.did = new DIDManager(config);
     this.credentials = new CredentialManager(config, this.did);
     this.lifecycle = new LifecycleManager(config, this.did, this.credentials);

@@ -3,7 +3,12 @@ import { OriginalsSDK } from '../index';
 async function basicExample() {
   const sdk = OriginalsSDK.create({
     network: 'testnet',
-    enableLogging: true
+    enableLogging: true,
+    // Example uses defaults; provide adapters in your app or tests
+    telemetry: {
+      onEvent: (e) => console.log('[telemetry]', e.name, e.attributes || {}),
+      onError: (err) => console.warn('[error]', err.code, err.message)
+    }
   });
 
   // Create new digital asset

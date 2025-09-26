@@ -1,4 +1,3 @@
-/* istanbul ignore file */
 import { VerifiableCredential, VerifiablePresentation } from '../types';
 import { DIDManager } from '../did/DIDManager';
 import { createDocumentLoader } from './documentLoader';
@@ -14,12 +13,15 @@ export class Verifier {
       if (!vc || !vc['@context'] || !vc.type) throw new Error('Invalid credential');
       if (!vc.proof) throw new Error('Credential has no proof');
       const loader = options.documentLoader || createDocumentLoader(this.didManager);
+      /* istanbul ignore next */
       const ctxs: string[] = Array.isArray(vc['@context']) ? (vc['@context'] as any) : [vc['@context'] as any];
       for (const c of ctxs) await loader(c);
+      /* istanbul ignore next */
       const proof = Array.isArray(vc.proof) ? (vc.proof as any)[0] : (vc.proof as any);
       const result = await DataIntegrityProofManager.verifyProof(vc, proof, { documentLoader: loader });
       return result.verified ? { verified: true, errors: [] } : { verified: false, errors: result.errors ?? ['Verification failed'] };
     } catch (e: any) {
+      /* istanbul ignore next */
       return { verified: false, errors: [e?.message ?? 'Unknown error in verifyCredential'] };
     }
   }
@@ -29,6 +31,7 @@ export class Verifier {
       if (!vp || !vp['@context'] || !vp.type) throw new Error('Invalid presentation');
       if (!vp.proof) throw new Error('Presentation has no proof');
       const loader = options.documentLoader || createDocumentLoader(this.didManager);
+      /* istanbul ignore next */
       const ctxs: string[] = Array.isArray(vp['@context']) ? (vp['@context'] as any) : [vp['@context'] as any];
       for (const c of ctxs) await loader(c);
       if (vp.verifiableCredential) {
@@ -37,10 +40,12 @@ export class Verifier {
           if (!res.verified) return res;
         }
       }
+      /* istanbul ignore next */
       const proof = Array.isArray(vp.proof) ? (vp.proof as any)[0] : (vp.proof as any);
       const result = await DataIntegrityProofManager.verifyProof(vp, proof, { documentLoader: loader });
       return result.verified ? { verified: true, errors: [] } : { verified: false, errors: result.errors ?? ['Verification failed'] };
     } catch (e: any) {
+      /* istanbul ignore next */
       return { verified: false, errors: [e?.message ?? 'Unknown error in verifyPresentation'] };
     }
   }
