@@ -12,7 +12,7 @@ export class OriginalsSDK {
 
   constructor(config: OriginalsConfig) {
     this.did = new DIDManager(config);
-    this.credentials = new CredentialManager(config);
+    this.credentials = new CredentialManager(config, this.did);
     this.lifecycle = new LifecycleManager(config, this.did, this.credentials);
     this.bitcoin = new BitcoinManager(config);
   }

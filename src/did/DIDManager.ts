@@ -1,4 +1,8 @@
 import { DIDDocument, OriginalsConfig, AssetResource } from '../types';
+import { BtcoDidResolver } from './BtcoDidResolver';
+import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
+import { createBtcoDidDocument } from './createBtcoDidDocument';
+import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter';
 
 export class DIDManager {
   constructor(private config: OriginalsConfig) {}
@@ -19,7 +23,20 @@ export class DIDManager {
   }
 
   async resolveDID(did: string): Promise<DIDDocument | null> {
-    return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+    try {
+      if (did.startsWith('did:btco:') || did.startsWith('did:btco:test:') || did.startsWith('did:btco:sig:')) {
+        const rpcUrl = this.config.bitcoinRpcUrl || 'http://localhost:3000';
+        const network = this.config.network || 'mainnet';
+        const client = new OrdinalsClient(rpcUrl, network);
+        const adapter = new OrdinalsClientProviderAdapter(client, rpcUrl);
+        const resolver = new BtcoDidResolver({ provider: adapter });
+        const result = await resolver.resolve(did);
+        return result.didDocument || null;
+      }
+      return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+    } catch {
+      return null;
+    }
   }
 
   validateDIDDocument(didDoc: DIDDocument): boolean {
@@ -31,6 +48,14 @@ export class DIDManager {
     if (did.startsWith('did:webvh:')) return 'did:webvh';
     if (did.startsWith('did:btco:')) return 'did:btco';
     throw new Error('Unsupported DID method');
+  }
+
+  createBtcoDidDocument(
+    satNumber: number | string,
+    network: 'mainnet' | 'testnet' | 'signet',
+    options: Parameters<typeof createBtcoDidDocument>[2]
+  ): DIDDocument {
+    return createBtcoDidDocument(satNumber, network, options as any);
   }
 }
 

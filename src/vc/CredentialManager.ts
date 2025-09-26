@@ -9,9 +9,13 @@ import { canonicalizeDocument } from '../utils/serialization';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer';
+import { DIDManager } from '../did/DIDManager';
+import { Issuer, VerificationMethodLike } from './Issuer';
+import { createDocumentLoader } from './documentLoader';
+import { Verifier } from './Verifier';
 
 export class CredentialManager {
-  constructor(private config: OriginalsConfig) {}
+  constructor(private config: OriginalsConfig, private didManager?: DIDManager) {}
 
   async createResourceCredential(
     type: 'ResourceCreated' | 'ResourceUpdated' | 'ResourceMigrated',
@@ -32,7 +36,30 @@ export class CredentialManager {
     privateKeyMultibase: string,
     verificationMethod: string
   ): Promise<VerifiableCredential> {
-    // Sign credential as JSON-LD with proof
+    if (this.didManager && typeof verificationMethod === 'string' && verificationMethod.startsWith('did:')) {
+      try {
+        const loader = createDocumentLoader(this.didManager);
+        const { document } = await loader(verificationMethod);
+        if (document && document.publicKeyMultibase) {
+          const vm: VerificationMethodLike = {
+            id: verificationMethod,
+            controller: typeof credential.issuer === 'string' ? credential.issuer : (credential.issuer as any)?.id,
+            publicKeyMultibase: document.publicKeyMultibase,
+            secretKeyMultibase: privateKeyMultibase,
+            type: document.type || 'Multikey'
+          } as any;
+          const issuer = new Issuer(this.didManager, vm);
+          const unsigned: any = { ...credential };
+          delete unsigned['@context'];
+          delete unsigned.proof;
+          return issuer.issueCredential(unsigned, { proofPurpose: 'assertionMethod' });
+        }
+      } catch {
+        // fall through to legacy signing
+      }
+    }
+
+    // fallback to legacy local signer
     const proofBase: Proof = {
       type: 'DataIntegrityProof',
       created: new Date().toISOString(),
@@ -42,15 +69,19 @@ export class CredentialManager {
     };
     const proofValue = await this.generateProofValue(credential, privateKeyMultibase, proofBase);
     const proof: Proof = { ...proofBase, proofValue };
-
-    return {
-      ...credential,
-      proof
-    };
+    return { ...credential, proof };
   }
 
   async verifyCredential(credential: VerifiableCredential): Promise<boolean> {
-    // Verify JSON-LD credential signature and integrity
+    if (this.didManager) {
+      const proofAny: any = (credential as any).proof;
+      if (proofAny && (proofAny.cryptosuite || (Array.isArray(proofAny) && proofAny[0]?.cryptosuite))) {
+        const verifier = new Verifier(this.didManager);
+        const res = await verifier.verifyCredential(credential);
+        return res.verified;
+      }
+    }
+
     const proof = credential.proof as Proof | undefined;
     if (!proof) {
       return false;
@@ -62,7 +93,6 @@ export class CredentialManager {
     const signature = this.decodeMultibase(proofValue);
     if (!signature) return false;
 
-    // di-wings style: hash(hash(c14n(proofSansProofValue)) + hash(c14n(credentialSansProof)))
     const proofSansValue = { ...proof } as any;
     delete proofSansValue.proofValue;
     const c14nProof = canonicalizeDocument(proofSansValue);
