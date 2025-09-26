@@ -31,6 +31,13 @@ export interface TransactionOutput {
   address?: string;
 }
 
+export interface Utxo {
+  txid: string;
+  vout: number;
+  value: number;
+  scriptPubKey?: string;
+}
+
 export interface KeyPair {
   privateKey: string; // multibase encoded
   publicKey: string;  // multibase encoded
