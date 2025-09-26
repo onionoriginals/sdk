@@ -3,6 +3,7 @@ import { VerifiableCredential, VerifiablePresentation } from '../types';
 import { DIDManager } from '../did/DIDManager';
 import { createDocumentLoader } from './documentLoader';
 import { DataIntegrityProofManager } from './proofs/data-integrity';
+import { isCredentialRevoked } from './status/StatusListRegistry';
 
 export type VerificationResult = { verified: boolean; errors: string[] };
 
@@ -18,26 +19,42 @@ export class Verifier {
       for (const c of ctxs) await loader(c);
       const proof = Array.isArray(vc.proof) ? (vc.proof as any)[0] : (vc.proof as any);
       const result = await DataIntegrityProofManager.verifyProof(vc, proof, { documentLoader: loader });
-      return result.verified ? { verified: true, errors: [] } : { verified: false, errors: result.errors ?? ['Verification failed'] };
+      if (!result.verified) return { verified: false, errors: result.errors ?? ['Verification failed'] };
+      if (isCredentialRevoked(vc)) return { verified: false, errors: ['Credential is revoked'] };
+      return { verified: true, errors: [] };
     } catch (e: any) {
       return { verified: false, errors: [e?.message ?? 'Unknown error in verifyCredential'] };
     }
   }
 
-  async verifyPresentation(vp: VerifiablePresentation, options: { documentLoader?: (iri: string) => Promise<any> } = {}): Promise<VerificationResult> {
+  async verifyPresentation(
+    vp: VerifiablePresentation,
+    options: { documentLoader?: (iri: string) => Promise<any>; expectedChallenge?: string; expectedDomain?: string } = {}
+  ): Promise<VerificationResult> {
     try {
       if (!vp || !vp['@context'] || !vp.type) throw new Error('Invalid presentation');
       if (!vp.proof) throw new Error('Presentation has no proof');
       const loader = options.documentLoader || createDocumentLoader(this.didManager);
       const ctxs: string[] = Array.isArray(vp['@context']) ? (vp['@context'] as any) : [vp['@context'] as any];
       for (const c of ctxs) await loader(c);
+      // Validate presentation challenge/domain when expected provided
+      const proof = Array.isArray(vp.proof) ? (vp.proof as any)[0] : (vp.proof as any);
+      if (options.expectedChallenge !== undefined) {
+        if ((proof as any).challenge !== options.expectedChallenge) {
+          return { verified: false, errors: ['Challenge mismatch'] };
+        }
+      }
+      if (options.expectedDomain !== undefined) {
+        if ((proof as any).domain !== options.expectedDomain) {
+          return { verified: false, errors: ['Domain mismatch'] };
+        }
+      }
       if (vp.verifiableCredential) {
         for (const c of vp.verifiableCredential) {
           const res = await this.verifyCredential(c as any, { documentLoader: loader });
           if (!res.verified) return res;
         }
       }
-      const proof = Array.isArray(vp.proof) ? (vp.proof as any)[0] : (vp.proof as any);
       const result = await DataIntegrityProofManager.verifyProof(vp, proof, { documentLoader: loader });
       return result.verified ? { verified: true, errors: [] } : { verified: false, errors: result.errors ?? ['Verification failed'] };
     } catch (e: any) {

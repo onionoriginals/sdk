@@ -68,7 +68,8 @@ export class EdDSACryptosuiteManager {
       verificationMethod: options.verificationMethod,
       proofPurpose: options.proofPurpose || 'assertionMethod',
       ...(options.challenge && { challenge: options.challenge }),
-      ...(options.domain && { domain: options.domain })
+      ...(options.domain && { domain: options.domain }),
+      ...(options.previousProof && { previousProof: options.previousProof })
     };
   }
 
@@ -94,6 +95,61 @@ export class EdDSACryptosuiteManager {
 
   static async verify({ data, signature, publicKey }: { data: Uint8Array; signature: Uint8Array; publicKey: Uint8Array }): Promise<boolean> {
     return await ed25519.verifyAsync(Buffer.from(signature).toString('hex'), Buffer.from(data).toString('hex'), Buffer.from(publicKey).toString('hex'));
+  }
+
+  // Simple JSON Pointer selection to support basic selective disclosure use cases
+  private static selectByJsonPointers(document: any, pointers?: string[]): any {
+    if (!pointers || pointers.length === 0) {
+      return document;
+    }
+    const result: any = { '@context': document['@context'] };
+    for (const pointer of pointers) {
+      if (!pointer || pointer[0] !== '/') continue;
+      const segments = pointer.split('/').slice(1).map(s => s.replace(/~1/g, '/').replace(/~0/g, '~'));
+      let srcParent: any = document;
+      let dstParent: any = result;
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const isLast = i === segments.length - 1;
+        let key: any = seg;
+        // numeric array index support
+        if (/^\d+$/.test(seg)) {
+          key = parseInt(seg, 10);
+        }
+        const srcVal = srcParent?.[key];
+        if (srcVal === undefined) {
+          break;
+        }
+        if (isLast) {
+          // deep copy leaves
+          if (Array.isArray(dstParent)) {
+            dstParent[key] = JSON.parse(JSON.stringify(srcVal));
+          } else {
+            dstParent[seg] = JSON.parse(JSON.stringify(srcVal));
+          }
+        } else {
+          // ensure container exists on destination
+          const nextIsIndex = /^\d+$/.test(segments[i + 1] || '');
+          const container = Array.isArray(srcVal) || nextIsIndex ? [] : (typeof srcVal === 'object' && srcVal !== null ? {} : {});
+          if (Array.isArray(dstParent)) {
+            if (dstParent[key] === undefined) dstParent[key] = container;
+            dstParent = dstParent[key];
+          } else {
+            if (dstParent[seg] === undefined) dstParent[seg] = container;
+            dstParent = dstParent[seg];
+          }
+          srcParent = srcVal;
+        }
+      }
+    }
+    return result;
+  }
+
+  // Derive a new proof over a selectively disclosed view of the document, chaining to previous proof
+  static async deriveProof(document: any, options: any & { revealPaths?: string[]; previousProof?: string | string[] }): Promise<{ derivedDocument: any; proof: DataIntegrityProof }> {
+    const view = this.selectByJsonPointers(document, options.revealPaths);
+    const proof = await this.createProof(view, options);
+    return { derivedDocument: view, proof };
   }
 }
 
