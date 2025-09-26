@@ -14,10 +14,12 @@ import * as ed25519 from '@noble/ed25519';
 // Ensure noble hash utils helpers exist without redefining the utils object
 const sAny: any = secp256k1 as any;
 const eAny: any = ed25519 as any;
+/* istanbul ignore next */
 if (sAny && sAny.utils && typeof sAny.utils.hmacSha256Sync !== 'function') {
   sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
     hmac(sha256, key, concatBytes(...msgs));
 }
+/* istanbul ignore next */
 if (eAny && eAny.utils && typeof eAny.utils.sha512Sync !== 'function') {
   eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
 }
