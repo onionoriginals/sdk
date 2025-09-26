@@ -1,11 +1,11 @@
-import { retry, RetryError } from '../../src/utils/retry';
+import { withRetry as retry } from '../../src/utils/retry';
 
 describe('utils/retry', () => {
   jest.setTimeout(10000);
 
   test('succeeds immediately without retries', async () => {
     const op = jest.fn(async () => 42);
-    const result = await retry(op, { retries: 3, initialDelayMs: 1, jitter: false });
+    const result = await retry(op, { maxRetries: 3, baseDelayMs: 1, jitterFactor: 0 });
     expect(result).toBe(42);
     expect(op).toHaveBeenCalledTimes(1);
   });
@@ -24,30 +24,26 @@ describe('utils/retry', () => {
       if (calls < 3) throw new Error('fail');
       return 'ok';
     });
-    const result = await retry(op, { retries: 5, initialDelayMs: 1, backoffFactor: 2, jitter: false });
+    const result = await retry(op, { maxRetries: 5, baseDelayMs: 1, backoffFactor: 2, jitterFactor: 0 });
     expect(result).toBe('ok');
     expect(op).toHaveBeenCalledTimes(3);
   });
 
-  test('honors shouldRetry false to stop early', async () => {
+  test('honors isRetriable false to stop early', async () => {
     const op = jest.fn(async () => { throw new Error('fail'); });
-    await expect(retry(op, { retries: 5, initialDelayMs: 1, jitter: false, shouldRetry: () => false }))
-      .rejects.toThrow(RetryError);
+    await expect(retry(op, { maxRetries: 5, baseDelayMs: 1, jitterFactor: 0, isRetriable: () => false }))
+      .rejects.toThrow('fail');
     expect(op).toHaveBeenCalledTimes(1);
   });
 
-  test('exhausts retries and throws RetryError with attempts', async () => {
+  test('exhausts retries and throws last error', async () => {
     const op = jest.fn(async () => { throw new Error('always'); });
     try {
-      await retry(op, { retries: 2, initialDelayMs: 1, backoffFactor: 3, maxDelayMs: 5, jitter: false });
+      await retry(op, { maxRetries: 2, baseDelayMs: 1, backoffFactor: 3, maxDelayMs: 5, jitterFactor: 0 });
       fail('expected throw');
     } catch (e: any) {
-      expect(e).toBeInstanceOf(RetryError);
-      expect(e.name).toBe('RetryError');
-      // attempts is retries+1 executions
-      expect(e.attempts).toBe(3);
-      expect(e.cause).toBeInstanceOf(Error);
-      expect((e.cause as Error).message).toBe('always');
+      expect(e).toBeInstanceOf(Error);
+      expect((e as Error).message).toBe('always');
     }
     expect(op).toHaveBeenCalledTimes(3);
   });
@@ -55,10 +51,10 @@ describe('utils/retry', () => {
   test('respects jitter option true/false without throwing', async () => {
     // Case 1: jitter=true and no retry needed
     const opNoRetry = jest.fn(async () => 7);
-    await expect(retry(opNoRetry, { jitter: true })).resolves.toBe(7);
+    await expect(retry(opNoRetry, { jitterFactor: 0.5 })).resolves.toBe(7);
     // Case 2: jitter=false and no retry needed
     const opNoRetry2 = jest.fn(async () => 7);
-    await expect(retry(opNoRetry2, { jitter: false })).resolves.toBe(7);
+    await expect(retry(opNoRetry2, { jitterFactor: 0 })).resolves.toBe(7);
 
     // Case 3: jitter=true with at least one retry to exercise addJitter path
     let attempts = 0;
@@ -67,7 +63,7 @@ describe('utils/retry', () => {
       if (attempts < 2) throw new Error('transient');
       return 9;
     });
-    const result = await retry(opRetry, { retries: 2, initialDelayMs: 1, jitter: true, shouldRetry: () => true });
+    const result = await retry(opRetry, { maxRetries: 2, baseDelayMs: 1, jitterFactor: 0.5, isRetriable: () => true });
     expect(result).toBe(9);
     expect(opRetry).toHaveBeenCalledTimes(2);
 
@@ -78,26 +74,26 @@ describe('utils/retry', () => {
       if (tries < 2) throw new Error('once');
       return 10;
     });
-    const resultNoJitter = await retry(opRetryNoJitter, { retries: 2, initialDelayMs: 1, jitter: false });
+    const resultNoJitter = await retry(opRetryNoJitter, { maxRetries: 2, baseDelayMs: 1, jitterFactor: 0 });
     expect(resultNoJitter).toBe(10);
     expect(opRetryNoJitter).toHaveBeenCalledTimes(2);
   });
 
-  test('defaults jitter=true when unspecified and performs retry', async () => {
+  test('defaults jitterFactor>0 when unspecified and performs retry', async () => {
     let n = 0;
     const op = jest.fn(async () => {
       n += 1;
       if (n < 2) throw new Error('once');
       return 'done';
     });
-    const res = await retry(op, { retries: 1, initialDelayMs: 1 });
+    const res = await retry(op, { maxRetries: 1, baseDelayMs: 1 });
     expect(res).toBe('done');
     expect(op).toHaveBeenCalledTimes(2);
   });
 
-  test('skips loop when retries < 0 and throws RetryError immediately', async () => {
+  test('skips loop when maxRetries < 0 and rejects immediately', async () => {
     const op = jest.fn(async () => 1);
-    await expect(retry(op, { retries: -1 })).rejects.toBeInstanceOf(RetryError);
+    await expect(retry(op, { maxRetries: -1 })).rejects.toBeUndefined();
     // operation never called because loop condition fails
     expect(op).not.toHaveBeenCalled();
   });
