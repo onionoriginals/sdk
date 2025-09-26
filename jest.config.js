@@ -35,6 +35,12 @@ module.exports = {
       branches: 100,
       functions: 100,
       lines: 100
+    },
+    './src/bitcoin/*.ts': {
+      statements: 100,
+      branches: 100,
+      functions: 100,
+      lines: 100
     }
   }
 };
