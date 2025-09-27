@@ -59,13 +59,13 @@ export class OrdNodeProvider implements ResourceProvider {
   }
 
   async *getAllResources(_options: ResourceCrawlOptions = {}): AsyncGenerator<LinkedResource[]> {
-    /* istanbul ignore next */
-    if (false) yield [];
+    // no-op generator yields nothing
+    return;
   }
 
   async *getAllResourcesChronological(_options: ResourceCrawlOptions = {}): AsyncGenerator<LinkedResource[]> {
-    /* istanbul ignore next */
-    if (false) yield [];
+    // no-op generator yields nothing
+    return;
   }
 
   async getInscriptionLocationsByAddress(_address: string): Promise<{ id: string; location: string }[]> {

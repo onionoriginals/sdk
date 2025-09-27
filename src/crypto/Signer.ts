@@ -49,7 +49,6 @@ export class ES256KSigner extends Signer {
     try {
       return secp256k1.verify(signature, hash, publicKey);
     } catch {
-      /* istanbul ignore next */
       return false;
     }
   }
@@ -73,7 +72,6 @@ export class Ed25519Signer extends Signer {
     try {
       return await (ed25519 as any).verifyAsync(signature, data, publicKey);
     } catch {
-      /* istanbul ignore next */
       return false;
     }
   }
@@ -106,7 +104,6 @@ export class ES256Signer extends Signer {
     try {
       return p256.verify(signature, hash, publicKey);
     } catch {
-      /* istanbul ignore next */
       return false;
     }
   }

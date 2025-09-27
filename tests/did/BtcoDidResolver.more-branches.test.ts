@@ -69,3 +69,30 @@ describe('BtcoDidResolver more branches', () => {
   });
 });
 
+// keep single import; duplicate removed
+
+describe('BtcoDidResolver isValidDidDocument branches', () => {
+  const resolver: any = new BtcoDidResolver({} as any);
+
+  test('rejects non-object', () => {
+    expect(resolver['isValidDidDocument'](null)).toBe(false);
+    expect(resolver['isValidDidDocument']('x')).toBe(false);
+  });
+
+  test('rejects missing id or non-string id', () => {
+    expect(resolver['isValidDidDocument']({ '@context': ['https://www.w3.org/ns/did/v1'] })).toBe(false);
+    expect(resolver['isValidDidDocument']({ '@context': ['https://www.w3.org/ns/did/v1'], id: 123 })).toBe(false);
+  });
+
+  test('rejects missing @context and unsupported context', () => {
+    expect(resolver['isValidDidDocument']({ id: 'did:btco:1' })).toBe(false);
+    expect(resolver['isValidDidDocument']({ id: 'did:btco:1', '@context': ['https://example.org/not-did'] })).toBe(false);
+  });
+
+  test('rejects non-array verificationMethod/authentication', () => {
+    const base = { id: 'did:btco:1', '@context': ['https://www.w3.org/ns/did/v1'] } as any;
+    expect(resolver['isValidDidDocument']({ ...base, verificationMethod: {} })).toBe(false);
+    expect(resolver['isValidDidDocument']({ ...base, authentication: {} })).toBe(false);
+  });
+});
+
