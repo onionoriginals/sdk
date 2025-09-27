@@ -58,12 +58,10 @@ export class LifecycleManager {
       publishedResources.push({ id: res.id, url, hash: res.hash, contentType: res.contentType });
     }
 
-    // Migrate DID to did:webvh. DID document will be resolved via didwebvh-ts using real logs.
-    const didWebDoc = await this.didManager.migrateToDIDWebVH({ ...asset.did }, domain);
-
-    // Resources are now represented on web via a new DID; the asset's identity doesn't change.
+    // New resource identifier for the web representation; the asset DID remains the same.
+    const webDid = `did:webvh:${domain}:${slug}`;
     await asset.migrate('did:webvh');
-    (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:webvh': didWebDoc.id });
+    (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:webvh': webDid });
     return asset;
   }
 
