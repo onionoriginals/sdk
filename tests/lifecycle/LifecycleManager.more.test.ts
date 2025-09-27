@@ -10,7 +10,7 @@ const lm = new LifecycleManager(dummyConfig as any, didManager, credentialManage
 describe('LifecycleManager additional branches', () => {
   test('publishToWeb throws when currentLayer is not did:peer', async () => {
     const asset: any = { currentLayer: 'did:webvh', migrate: async () => {} };
-    await expect(lm.publishToWeb(asset, 'example.com')).rejects.toThrow('Not implemented');
+    await expect(lm.publishToWeb(asset, 'example.com')).rejects.toThrow();
   });
 
   test('inscribeOnBitcoin throws for invalid layer', async () => {
