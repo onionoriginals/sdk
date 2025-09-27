@@ -12,22 +12,7 @@ declare module 'multiformats/bases/base64' {
   };
 }
 
-declare module '@digitalbazaar/bbs-signatures' {
-  export function sign(args: {
-    ciphersuite: string;
-    secretKey: Uint8Array;
-    publicKey: Uint8Array;
-    header: Uint8Array;
-    messages: Uint8Array[];
-  }): Promise<Uint8Array>;
-  export function verifySignature(args: {
-    ciphersuite: string;
-    publicKey: Uint8Array;
-    signature: Uint8Array;
-    header: Uint8Array;
-    messages: Uint8Array[];
-  }): Promise<boolean>;
-}
+// Removed: @digitalbazaar/bbs-signatures declarations no longer needed
 
 declare module 'jsonld';
 

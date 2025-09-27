@@ -1,4 +1,3 @@
-import * as bbs from '@digitalbazaar/bbs-signatures';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 export type BbsKeyPair = {
@@ -11,24 +10,12 @@ export class BbsSimple {
 
   static async sign(messages: Uint8Array[], keypair: BbsKeyPair, header?: Uint8Array): Promise<Uint8Array> {
     const headerBytes = header ?? new Uint8Array(sha256(new Uint8Array(0)));
-    return await bbs.sign({
-      ciphersuite: BbsSimple.CIPHERSUITE,
-      secretKey: keypair.privateKey,
-      publicKey: keypair.publicKey,
-      header: headerBytes,
-      messages
-    });
+    throw new Error('BbsSimple.sign is not implemented');
   }
 
   static async verify(messages: Uint8Array[], signature: Uint8Array, publicKey: Uint8Array, header?: Uint8Array): Promise<boolean> {
     const headerBytes = header ?? new Uint8Array(sha256(new Uint8Array(0)));
-    return await bbs.verifySignature({
-      ciphersuite: BbsSimple.CIPHERSUITE,
-      publicKey,
-      signature,
-      header: headerBytes,
-      messages
-    });
+    throw new Error('BbsSimple.verify is not implemented');
   }
 }
 
