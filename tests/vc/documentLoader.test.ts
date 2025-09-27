@@ -1,5 +1,5 @@
 import { DIDManager } from '../../src/did/DIDManager';
-import { createDocumentLoader } from '../../src/vc/documentLoader';
+import { createDocumentLoader, registerVerificationMethod, verificationMethodRegistry } from '../../src/vc/documentLoader';
 
 describe('diwings documentLoader', () => {
   const didManager = new DIDManager({} as any);
@@ -26,7 +26,7 @@ describe('diwings documentLoader', () => {
 });
 
 /** Inlined from documentLoader.branches.part.ts */
-import { createDocumentLoader, registerVerificationMethod } from '../../src/vc/documentLoader';
+// duplicate imports removed during inlining
 
 describe('documentLoader branches', () => {
   test('throws when DID not resolved', async () => {
@@ -74,7 +74,7 @@ describe('documentLoader missing VM branch', () => {
 
 
 /** Inlined from documentLoader.register-guard.part.ts */
-import { registerVerificationMethod, verificationMethodRegistry } from '../../src/vc/documentLoader';
+// duplicate imports removed during inlining
 
 describe('documentLoader registerVerificationMethod guard', () => {
   test('does not register when vm.id is missing', () => {

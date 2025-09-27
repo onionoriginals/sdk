@@ -199,7 +199,6 @@ describe('CredentialManager DID path fallback when VM doc lacks type', () => {
 
 
 /** Inlined from CredentialManager.local-verify.no-did.part.ts */
-import { VerifiableCredential } from '../../src/types';
 
 describe('CredentialManager local verify path without didManager', () => {
   test('signs and verifies locally when didManager is undefined', async () => {

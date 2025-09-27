@@ -68,7 +68,6 @@ describe('validation utils', () => {
 });
 
 /** Inlined from validation.no-vm.part.ts */
-import { validateDIDDocument } from '../../src/utils/validation';
 
 describe('validateDIDDocument when verificationMethod absent', () => {
   test('returns true for valid doc with no verificationMethod property', () => {

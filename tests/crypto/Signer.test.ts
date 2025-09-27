@@ -232,7 +232,6 @@ describe('Signer classes', () => {
 });
 
 /** Inlined from Signer.branch-extra.part.ts */
-import { ES256Signer } from '../../src/crypto/Signer';
 
 describe('ES256Signer extra branch coverage', () => {
   test('verify catch path when p256.verify throws', async () => {
@@ -313,7 +312,6 @@ describe('Signer module utils injection', () => {
 
 
 /** Inlined from Signer.extra-branch-secp.part.ts */
-import { ES256KSigner } from '../../src/crypto/Signer';
 
 describe('ES256KSigner branch: sign returns direct Uint8Array', () => {
   test('covers instanceof Uint8Array path', async () => {

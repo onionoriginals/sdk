@@ -284,7 +284,7 @@ describe('BtcoDidResolver', () => {
 });
 
 /** Inlined from BtcoDidResolver.branches.part.ts */
-import { BtcoDidResolver, type ResourceProviderLike } from '../../src/did/BtcoDidResolver';
+// duplicate imports removed during inlining
 
 const makeProvider = (overrides: Partial<ResourceProviderLike> = {}): ResourceProviderLike => ({
   async getSatInfo(_sat: string) { return { inscription_ids: ['ins-1'] }; },

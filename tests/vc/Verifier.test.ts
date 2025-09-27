@@ -206,11 +206,9 @@ describe('Verifier with mocked DataIntegrityProofManager', () => {
   });
 
   test('verifyCredential success branch (verified=true)', async () => {
-    jest.doMock('../../src/vc/proofs/data-integrity', () => ({
-      DataIntegrityProofManager: {
-        verifyProof: async () => ({ verified: true })
-      }
-    }));
+    const mod = require('../../src/vc/proofs/data-integrity');
+    const orig = mod.DataIntegrityProofManager.verifyProof;
+    mod.DataIntegrityProofManager.verifyProof = async () => ({ verified: true });
     const { Verifier } = await import('../../src/vc/Verifier');
     const { DIDManager } = await import('../../src/did/DIDManager');
     const verifier = new Verifier(new DIDManager({} as any));
@@ -218,14 +216,13 @@ describe('Verifier with mocked DataIntegrityProofManager', () => {
       documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null })
     });
     expect(res.verified).toBe(true);
+    mod.DataIntegrityProofManager.verifyProof = orig;
   });
 
   test('verifyPresentation failure branch (no errors provided -> default)', async () => {
-    jest.doMock('../../src/vc/proofs/data-integrity', () => ({
-      DataIntegrityProofManager: {
-        verifyProof: async () => ({ verified: false })
-      }
-    }));
+    const mod = require('../../src/vc/proofs/data-integrity');
+    const orig = mod.DataIntegrityProofManager.verifyProof;
+    mod.DataIntegrityProofManager.verifyProof = async () => ({ verified: false });
     const { Verifier } = await import('../../src/vc/Verifier');
     const { DIDManager } = await import('../../src/did/DIDManager');
     const verifier = new Verifier(new DIDManager({} as any));
@@ -234,6 +231,7 @@ describe('Verifier with mocked DataIntegrityProofManager', () => {
     });
     expect(res.verified).toBe(false);
     expect(res.errors[0]).toBe('Verification failed');
+    mod.DataIntegrityProofManager.verifyProof = orig;
   });
 });
 
@@ -291,7 +289,10 @@ describe('Verifier error branches', () => {
     const mod = require('../../src/vc/proofs/data-integrity');
     const orig = mod.DataIntegrityProofManager.verifyProof;
     mod.DataIntegrityProofManager.verifyProof = async () => ({ verified: false, errors: undefined });
-    const res = await verifier.verifyCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], proof: {} } as any, { documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null }) });
+    const { Verifier } = await import('../../src/vc/Verifier');
+    const { DIDManager } = await import('../../src/did/DIDManager');
+    const localVerifier = new Verifier(new DIDManager({} as any));
+    const res = await localVerifier.verifyCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], proof: { cryptosuite: 'eddsa-rdfc-2022' } } as any, { documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null }) });
     expect(res.verified).toBe(false);
     expect(res.errors[0]).toBe('Verification failed');
     mod.DataIntegrityProofManager.verifyProof = orig;
@@ -433,12 +434,15 @@ describe('Verifier success branches', () => {
     const vc: any = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential'],
-      proof: { cryptosuite: 'data-integrity' }
+      proof: { cryptosuite: 'eddsa-rdfc-2022' }
     };
     const mod = require('../../src/vc/proofs/data-integrity');
     const orig = mod.DataIntegrityProofManager.verifyProof;
     mod.DataIntegrityProofManager.verifyProof = async () => ({ verified: true, errors: [] });
-    const res = await verifier.verifyCredential(vc, {
+    const { Verifier } = await import('../../src/vc/Verifier');
+    const { DIDManager } = await import('../../src/did/DIDManager');
+    const localVerifier = new Verifier(new DIDManager({} as any));
+    const res = await localVerifier.verifyCredential(vc, {
       documentLoader: async (iri: string) => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null })
     });
     expect(res.verified).toBe(true);
@@ -455,9 +459,12 @@ describe('Verifier success branches', () => {
     const vp1: any = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiablePresentation'],
-      proof: { cryptosuite: 'data-integrity' }
+      proof: { cryptosuite: 'eddsa-rdfc-2022' }
     };
-    const res1 = await verifier.verifyPresentation(vp1, {
+    const { Verifier } = await import('../../src/vc/Verifier');
+    const { DIDManager } = await import('../../src/did/DIDManager');
+    const localVerifier = new Verifier(new DIDManager({} as any));
+    const res1 = await localVerifier.verifyPresentation(vp1, {
       documentLoader: async (iri: string) => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null })
     });
     expect(res1.verified).toBe(true);
@@ -467,11 +474,11 @@ describe('Verifier success branches', () => {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiablePresentation'],
       verifiableCredential: [
-        { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], proof: { cryptosuite: 'data-integrity' } }
+        { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], proof: { cryptosuite: 'eddsa-rdfc-2022' } }
       ],
-      proof: { cryptosuite: 'data-integrity' }
+      proof: { cryptosuite: 'eddsa-rdfc-2022' }
     };
-    const res2 = await verifier.verifyPresentation(vp2, {
+    const res2 = await localVerifier.verifyPresentation(vp2, {
       documentLoader: async (iri: string) => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null })
     });
     expect(res2.verified).toBe(true);
