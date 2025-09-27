@@ -89,3 +89,13 @@ describe('OrdinalsClientProvider', () => {
   });
 })
 
+/** Inlined from OrdinalsClientProvider.more-branches.part.ts */
+
+describe('OrdinalsClientProvider extra branches', () => {
+  test('resolveInscription throws when client returns null', async () => {
+    const client: jest.Mocked<OrdinalsClient> = new OrdinalsClient('http://ord', 'regtest') as any;
+    (client.getInscriptionById as any) = jest.fn(async () => null as any);
+    const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord' });
+    await expect(p.resolveInscription('missing')).rejects.toThrow('Inscription not found');
+  });
+});

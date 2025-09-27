@@ -1,3 +1,6 @@
+/** Canonical test aggregator created by combine-tests script. */
+
+/** Inlined from OrdinalsClientProviderAdapter.branches.part.ts */
 import { OrdinalsClient } from '../../src/bitcoin/OrdinalsClient';
 import { OrdinalsClientProviderAdapter } from '../../src/did/providers/OrdinalsClientProviderAdapter';
 
@@ -39,4 +42,3 @@ describe('OrdinalsClientProviderAdapter branches', () => {
     (global as any).fetch = originalFetch;
   });
 });
-

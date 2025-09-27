@@ -1,3 +1,6 @@
+/** Canonical test aggregator created by combine-tests script. */
+
+/** Inlined from DIDManager.btco.integration.part.ts */
 import { OriginalsSDK } from '../../src';
 
 describe('Integration: DIDManager btco resolve via OrdinalsClient adapter', () => {
@@ -39,4 +42,3 @@ describe('Integration: DIDManager btco resolve via OrdinalsClient adapter', () =
     fetchMock.mockRestore();
   });
 });
-

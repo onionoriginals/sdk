@@ -1,3 +1,6 @@
+/** Canonical test aggregator created by combine-tests script. */
+
+/** Inlined from data-integrity.branches.part.ts */
 import { DataIntegrityProofManager } from '../../../src/vc/proofs/data-integrity';
 
 describe('DataIntegrityProofManager branches', () => {
@@ -18,4 +21,3 @@ describe('DataIntegrityProofManager branches', () => {
     expect(res.errors?.[0]).toContain('Unsupported cryptosuite');
   });
 });
-

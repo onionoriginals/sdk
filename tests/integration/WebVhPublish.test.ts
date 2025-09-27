@@ -1,3 +1,6 @@
+/** Canonical test aggregator created by combine-tests script. */
+
+/** Inlined from WebVhPublish.integration.part.ts */
 import { OriginalsSDK } from '../../src';
 import { AssetResource } from '../../src/types';
 
@@ -22,4 +25,3 @@ describe('WebVH publish end-to-end', () => {
     expect(resolved?.id).toBe(webBinding);
   });
 });
-

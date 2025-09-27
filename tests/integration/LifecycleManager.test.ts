@@ -1,3 +1,6 @@
+/** Canonical test aggregator created by combine-tests script. */
+
+/** Inlined from LifecycleManager.btco.integration.part.ts */
 import { OriginalsSDK } from '../../src';
 
 describe('Integration: Lifecycle inscribe updates provenance and btco layer', () => {
@@ -11,4 +14,3 @@ describe('Integration: Lifecycle inscribe updates provenance and btco layer', ()
     expect((updated as any).provenance).toEqual(expect.objectContaining({ txid: expect.any(String) }));
   });
 });
-
