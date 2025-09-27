@@ -32,7 +32,7 @@ export function buildTransferTransaction(
   }
 
   const tx: BitcoinTransaction = {
-    txid: 'mock-built-txid',
+    txid: '',
     vin,
     vout: outputs,
     fee: selection.feeSats
