@@ -1,4 +1,5 @@
 import { OrdinalsClient } from '../../src/bitcoin/OrdinalsClient';
+import { expect } from '@jest/globals';
 import { encode as cborEncode } from '../../src/utils/cbor';
 
 const client = new OrdinalsClient('http://localhost:3000', 'regtest');

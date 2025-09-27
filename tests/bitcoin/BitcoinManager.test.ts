@@ -1,4 +1,5 @@
 import { OriginalsSDK } from '../../src';
+import { expect } from '@jest/globals';
 
 const sdk = OriginalsSDK.create({ network: 'regtest' });
 
