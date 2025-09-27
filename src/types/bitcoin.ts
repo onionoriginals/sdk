@@ -34,9 +34,14 @@ export interface TransactionOutput {
 export interface Utxo {
   txid: string;
   vout: number;
-  value: number;
+  value: number; // satoshis
   scriptPubKey?: string;
+  address?: string;
+  inscriptions?: string[]; // inscription ids located on this outpoint
+  locked?: boolean; // if true, cannot be spent due to wallet locks
 }
+
+export const DUST_LIMIT_SATS = 546;
 
 export interface KeyPair {
   privateKey: string; // multibase encoded

@@ -16,6 +16,8 @@ export { CredentialManager } from './vc/CredentialManager';
 export { LifecycleManager } from './lifecycle/LifecycleManager';
 export { BitcoinManager } from './bitcoin/BitcoinManager';
 export { OrdinalsClient } from './bitcoin/OrdinalsClient';
+export { buildTransferTransaction } from './bitcoin/transfer';
+export { selectUtxos, UtxoSelectionError, estimateFeeSats } from './bitcoin/utxo';
 export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs';
 export { BbsSimple } from './vc/cryptosuites/bbsSimple';
 export * from './storage';

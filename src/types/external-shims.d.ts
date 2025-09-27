@@ -14,6 +14,15 @@ declare module 'multiformats/bases/base64' {
 
 declare module 'jsonld';
 
+// Minimal node globals for tests without @types/node
+declare const Buffer: any;
+
+// Minimal jest globals for TS without @types/jest
+declare function describe(name: string, fn: () => void): void;
+declare function test(name: string, fn: () => any): void;
+declare function it(name: string, fn: () => any): void;
+declare function expect(actual: any): any;
+
 // Global shims for non-DOM/node test environments
 declare const global: any;
 declare function setTimeout(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): number;

@@ -72,6 +72,15 @@ export class OriginalsAsset {
     return this.provenance;
   }
 
+  recordTransfer(from: string, to: string, transactionId: string): void {
+    this.provenance.transfers.push({
+      from,
+      to,
+      timestamp: new Date().toISOString(),
+      transactionId
+    });
+  }
+
   async verify(): Promise<boolean> {
     return true;
   }
