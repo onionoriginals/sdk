@@ -1,4 +1,5 @@
 import { BroadcastClient } from '../../src/bitcoin/BroadcastClient';
+import { expect } from '@jest/globals';
 
 describe('BroadcastClient', () => {
   test('broadcastIdempotent deduplicates by key', async () => {

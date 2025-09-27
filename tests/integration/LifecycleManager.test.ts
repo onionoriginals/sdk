@@ -2,6 +2,7 @@
 
 /** Inlined from LifecycleManager.btco.integration.part.ts */
 import { OriginalsSDK } from '../../src';
+import { expect } from '@jest/globals';
 
 describe('Integration: Lifecycle inscribe updates provenance and btco layer', () => {
   test('provenance updated and layer becomes did:btco', async () => {

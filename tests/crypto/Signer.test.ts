@@ -49,7 +49,7 @@ describe('Signer classes', () => {
         toCompactRawBytes: () => bytes
       } as any);
       const sig = await signer.sign(data, mb(sk));
-      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+      expect(sig).toEqual(Buffer.from(bytes));
     });
 
     test('sign handles object with toRawBytes()', async () => {
@@ -60,7 +60,7 @@ describe('Signer classes', () => {
         toRawBytes: () => bytes
       } as any);
       const sig = await signer.sign(data, mb(sk));
-      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+      expect(sig).toEqual(Buffer.from(bytes));
     });
 
     test('sign handles fallback via new Uint8Array(sigAny)', async () => {
@@ -121,7 +121,7 @@ describe('Signer classes', () => {
         toCompactRawBytes: () => bytes
       } as any);
       const sig = await signer.sign(data, mb(sk));
-      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+      expect(sig).toEqual(Buffer.from(bytes));
     });
 
     test('sign handles object with toRawBytes()', async () => {
@@ -132,7 +132,7 @@ describe('Signer classes', () => {
         toRawBytes: () => bytes
       } as any);
       const sig = await signer.sign(data, mb(sk));
-      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+      expect(sig).toEqual(Buffer.from(bytes));
     });
 
     test('sign handles direct Uint8Array return', async () => {
@@ -141,7 +141,7 @@ describe('Signer classes', () => {
       const bytes = new Uint8Array(64).fill(21);
       jest.spyOn(p256, 'sign').mockReturnValue(bytes as any);
       const sig = await signer.sign(data, mb(sk));
-      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+      expect(sig).toEqual(Buffer.from(bytes));
     });
 
     test('sign handles fallback via new Uint8Array(sigAny)', async () => {
@@ -321,7 +321,7 @@ describe('ES256KSigner branch: sign returns direct Uint8Array', () => {
     const spy = jest.spyOn(secp256k1, 'signAsync').mockResolvedValue(bytes as any);
     const sig = await signer.sign(Buffer.from('x'), 'z' + Buffer.from(sk).toString('base64url'));
     expect(Buffer.isBuffer(sig)).toBe(true);
-    expect(sig.equals(Buffer.from(bytes))).toBe(true);
+    expect(sig).toEqual(Buffer.from(bytes));
     spy.mockRestore();
   });
 });
