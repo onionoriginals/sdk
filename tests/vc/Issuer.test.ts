@@ -49,4 +49,5 @@ describe('diwings Issuer', () => {
     expect(vc.proof).toBeDefined();
   });
 });
-
+import './Issuer.more.part';
+import './Issuer.unsupported.part';

@@ -230,4 +230,7 @@ describe('Signer classes', () => {
     });
   });
 });
-
+import './Signer.branch-extra.part';
+import './Signer.env.false-branch.part';
+import './Signer.env.part';
+import './Signer.extra-branch-secp.part';

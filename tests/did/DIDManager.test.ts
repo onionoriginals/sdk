@@ -36,5 +36,10 @@ describe('DIDManager', () => {
     expect(sdk.did.validateDIDDocument(doc)).toBe(true);
   });
 });
-
-
+import './DIDManager.createBtco.part';
+import './DIDManager.getLayer.throw.part';
+import './DIDManager.private.part';
+import './DIDManager.resolve.catch.part';
+import './DIDManager.resolve.defaults.part';
+import './DIDManager.resolve.methods.part';
+import './DIDManager.validate.false.part';

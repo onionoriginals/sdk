@@ -69,4 +69,15 @@ describe('diwings Verifier', () => {
     expect(res.verified).toBe(false);
   });
 });
-
+import './Verifier.array-context-and-proof.part';
+import './Verifier.branches-more.part';
+import './Verifier.context-string.part';
+import './Verifier.default-loader.part';
+import './Verifier.dimock.part';
+import './Verifier.errors.part';
+import './Verifier.more-branches2.part';
+import './Verifier.more.part';
+import './Verifier.proofarray.part';
+import './Verifier.proofarray.presentation.part';
+import './Verifier.success.part';
+import './Verifier.unknown-error-branches.part';

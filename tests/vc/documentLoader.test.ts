@@ -24,4 +24,8 @@ describe('diwings documentLoader', () => {
     await expect(loader('https://unknown.example/context')).rejects.toThrow('Document not found');
   });
 });
-
+import './documentLoader.branches.part';
+import './documentLoader.branches2.part';
+import './documentLoader.register-guard.part';
+import './documentLoader.register-missing-id.part';
+import './documentLoader.vm-in-doc.part';

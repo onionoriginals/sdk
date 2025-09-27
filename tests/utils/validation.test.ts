@@ -66,5 +66,4 @@ describe('validation utils', () => {
     expect(/[0-9a-f]{64}/.test(hash)).toBe(true);
   });
 });
-
-
+import './validation.no-vm.part';

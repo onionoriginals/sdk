@@ -74,5 +74,7 @@ describe('LifecycleManager', () => {
     ).rejects.toThrow('Asset must be inscribed on Bitcoin before transfer');
   });
 });
-
-
+import './LifecycleManager.btco.psbt.part';
+import './LifecycleManager.coverage-branches.part';
+import './LifecycleManager.more.part';
+import './LifecycleManager.no-feeRate.part';

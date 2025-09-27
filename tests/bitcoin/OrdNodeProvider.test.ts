@@ -9,4 +9,4 @@ describe('OrdNodeProvider (stub)', () => {
     expect(insc.content_url).toContain('/content/abc');
   });
 });
-
+import './OrdNodeProvider.more.part';

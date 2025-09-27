@@ -354,5 +354,4 @@ describe('OrdinalsClient (real HTTP behavior with mocked fetch)', () => {
     expect(meta).toBeNull();
   });
 });
-
-
+import './OrdinalsClient.more.part';

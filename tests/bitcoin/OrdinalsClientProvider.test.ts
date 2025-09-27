@@ -88,4 +88,4 @@ describe('OrdinalsClientProvider', () => {
     expect(v.content_url).toBe('http://ord//content/x');
   });
 })
-
+import './OrdinalsClientProvider.more-branches.part';

@@ -282,4 +282,10 @@ describe('BtcoDidResolver', () => {
     expect(prefixMain).toBe('did:btco');
   });
 });
-
+import './BtcoDidResolver.branches.part';
+import './BtcoDidResolver.deactivation-keep-error.part';
+import './BtcoDidResolver.deactivation-preserve-existing-error.part';
+import './BtcoDidResolver.invalid-context.part';
+import './BtcoDidResolver.invalid-doc.part';
+import './BtcoDidResolver.more-branches.part';
+import './BtcoDidResolver.signet.part';

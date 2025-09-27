@@ -55,5 +55,4 @@ describe('BitcoinManager', () => {
     spy.mockRestore();
   });
 });
-
-
+import './BitcoinManager.more.part';

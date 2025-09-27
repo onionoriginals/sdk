@@ -127,5 +127,10 @@ describe('CredentialManager', () => {
     await expect(sdkES256.credentials.verifyCredential(signed)).resolves.toBe(true);
   });
 });
-
-
+import './CredentialManager.did-fallback-present.part';
+import './CredentialManager.did-fallback-with-didmgr.part';
+import './CredentialManager.fallback-branch.part';
+import './CredentialManager.local-verify.no-did.part';
+import './CredentialManager.missing-type-default.part';
+import './CredentialManager.more.part';
+import './CredentialManager.type-fallback.part';
