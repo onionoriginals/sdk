@@ -149,7 +149,6 @@ export class BtcoDidResolver {
 
         if (inscriptionData.content.includes('🔥')) {
           inscriptionData.didDocument = null;
-          /* istanbul ignore next */
           if (!inscriptionData.error) {
             inscriptionData.error = 'DID has been deactivated';
           }

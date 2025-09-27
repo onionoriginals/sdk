@@ -59,7 +59,6 @@ export function validateDIDDocument(didDoc: DIDDocument): boolean {
   }
 
   // Validate verification methods
-  /* istanbul ignore next */
   if (didDoc.verificationMethod) {
     for (const vm of didDoc.verificationMethod) {
       if (!vm.id || !vm.type || !vm.controller || !vm.publicKeyMultibase) {

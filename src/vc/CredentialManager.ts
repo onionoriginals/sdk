@@ -73,7 +73,6 @@ export class CredentialManager {
   }
 
   async verifyCredential(credential: VerifiableCredential): Promise<boolean> {
-    /* istanbul ignore next */
     if (this.didManager) {
       const proofAny: any = (credential as any).proof;
       if (proofAny && (proofAny.cryptosuite || (Array.isArray(proofAny) && proofAny[0]?.cryptosuite))) {

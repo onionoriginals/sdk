@@ -62,7 +62,6 @@ export const createDocumentLoader = (didManager: DIDManager) =>
 
 export const verificationMethodRegistry: Map<string, any> = new Map();
 export function registerVerificationMethod(vm: any) {
-  /* istanbul ignore next */
   if (vm?.id) verificationMethodRegistry.set(vm.id, vm);
 }
 
