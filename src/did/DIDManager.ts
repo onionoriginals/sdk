@@ -4,7 +4,7 @@ import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
 import { createBtcoDidDocument } from './createBtcoDidDocument';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter';
 import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter';
-import { resolveDIDFromLog } from 'didwebvh-ts';
+import { resolveDID as resolveWebvh } from 'didwebvh-ts';
 
 export class DIDManager {
   constructor(private config: OriginalsConfig) {}
@@ -41,51 +41,27 @@ export class DIDManager {
         return result.didDocument || null;
       }
       if (did.startsWith('did:webvh:')) {
+        try {
+          const result = await resolveWebvh(did);
+          if (result && result.doc) return result.doc as DIDDocument;
+        } catch {
+          // Ignore and fallback to manifest-based resolution below
+        }
         const storage = new MemoryStorageAdapter();
         const [, , domainOrScid, slugMaybe] = did.split(':');
-        // Back-compat with our publish format: did:webvh:<domain>:<slug>
         const domain = slugMaybe ? domainOrScid : (did.split(':')[2] || '');
         const slug = slugMaybe || (did.split(':')[3] || '');
         const manifestPath = `.well-known/webvh/${slug}/manifest.json`;
         const manifestObj = await storage.getObject(domain, manifestPath);
-        if (!manifestObj) {
-          return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+        if (manifestObj) {
+          try {
+            const text = new (globalThis as any).TextDecoder().decode(manifestObj.content);
+            const manifest = JSON.parse(text || '{}');
+            const didDoc = (manifest && manifest.didDocument) || { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+            return didDoc;
+          } catch {}
         }
-        const text = new (globalThis as any).TextDecoder().decode(manifestObj.content);
-        const manifest = JSON.parse(text || '{}');
-        const didDoc = (manifest && manifest.didDocument) || { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
-        // Use didwebvh-ts to resolve from a synthetic log, with assertions disabled
-        (process as any).env.IGNORE_ASSERTION_DOCUMENT_STATE_IS_VALID = 'true';
-        (process as any).env.IGNORE_ASSERTION_HASH_CHAIN_IS_VALID = 'true';
-        (process as any).env.IGNORE_ASSERTION_NEW_KEYS_ARE_VALID = 'true';
-        (process as any).env.IGNORE_ASSERTION_SCID_IS_FROM_HASH = 'true';
-        const now = new Date().toISOString();
-        const log = [
-          {
-            versionId: '1-fake',
-            versionTime: now,
-            parameters: {
-              method: 'did:webvh:1.0',
-              scid: 'fake',
-              updateKeys: [],
-              portable: true,
-              nextKeyHashes: [],
-              watchers: [],
-              witness: {}
-            },
-            state: didDoc,
-            proof: [{
-              type: 'DataIntegrityProof',
-              cryptosuite: 'eddsa-jcs-2022',
-              verificationMethod: `${didDoc.id}#vm`,
-              created: now,
-              proofPurpose: 'assertionMethod',
-              proofValue: 'u'
-            }]
-          }
-        ];
-        const result = await (resolveDIDFromLog as any)(log, {});
-        return (result && result.doc) || didDoc;
+        return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
       }
       return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
     } catch {
