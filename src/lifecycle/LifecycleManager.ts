@@ -47,12 +47,7 @@ export class LifecycleManager {
     // Create a slug for this publication based on current peer id suffix
     const slug = asset.id.split(':').pop() as string;
 
-    // Ownership proof: path-based marker and TXT-style file
-    const ownershipPath = `.well-known/webvh/${slug}/ownership.txt`;
-    const proofText = `did=did:webvh:${domain}:${slug}`;
-    await storage.putObject(domain, ownershipPath, proofText);
-
-    // Publish resources under content-addressed paths
+    // Publish resources under content-addressed paths (for hosting outside DID log)
     const publishedResources = [] as { id: string; url: string; hash: string; contentType?: string }[];
     for (const res of asset.resources) {
       const hashBytes = hexToBytes(res.hash);
@@ -63,33 +58,8 @@ export class LifecycleManager {
       publishedResources.push({ id: res.id, url, hash: res.hash, contentType: res.contentType });
     }
 
-    // Integrity manifest and minimal DID doc
+    // Migrate DID to did:webvh. DID document will be resolved via didwebvh-ts using real logs.
     const didWebDoc = await this.didManager.migrateToDIDWebVH({ ...asset.did }, domain);
-    // Add resources service to DID doc
-    (didWebDoc as any).service = [
-      {
-        id: `${didWebDoc.id}#resources`,
-        type: 'OriginalsResources',
-        serviceEndpoint: {
-          base: `mem://${domain}/.well-known/webvh/${slug}`,
-          resources: publishedResources
-        }
-      }
-    ];
-    const manifest = {
-      did: didWebDoc.id,
-      didDocument: didWebDoc,
-      resources: publishedResources,
-      createdAt: new Date().toISOString(),
-      provenanceEvent: {
-        type: 'PublishToWeb',
-        from: 'did:peer',
-        to: 'did:webvh',
-        timestamp: new Date().toISOString()
-      }
-    };
-    const manifestPath = `.well-known/webvh/${slug}/manifest.json`;
-    await storage.putObject(domain, manifestPath, new (globalThis as any).TextEncoder().encode(JSON.stringify(manifest)));
 
     await asset.migrate('did:webvh');
     (asset as any).id = didWebDoc.id;

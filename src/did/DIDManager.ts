@@ -3,7 +3,6 @@ import { BtcoDidResolver } from './BtcoDidResolver';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
 import { createBtcoDidDocument } from './createBtcoDidDocument';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter';
-import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter';
 import { resolveDID as resolveWebvh } from 'didwebvh-ts';
 
 export class DIDManager {
@@ -44,23 +43,7 @@ export class DIDManager {
         try {
           const result = await resolveWebvh(did);
           if (result && result.doc) return result.doc as DIDDocument;
-        } catch {
-          // Ignore and fallback to manifest-based resolution below
-        }
-        const storage = new MemoryStorageAdapter();
-        const [, , domainOrScid, slugMaybe] = did.split(':');
-        const domain = slugMaybe ? domainOrScid : (did.split(':')[2] || '');
-        const slug = slugMaybe || (did.split(':')[3] || '');
-        const manifestPath = `.well-known/webvh/${slug}/manifest.json`;
-        const manifestObj = await storage.getObject(domain, manifestPath);
-        if (manifestObj) {
-          try {
-            const text = new (globalThis as any).TextDecoder().decode(manifestObj.content);
-            const manifest = JSON.parse(text || '{}');
-            const didDoc = (manifest && manifest.didDocument) || { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
-            return didDoc;
-          } catch {}
-        }
+        } catch {}
         return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
       }
       return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
