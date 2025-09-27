@@ -36,8 +36,11 @@ export class LifecycleManager {
     asset: OriginalsAsset,
     domain: string
   ): Promise<OriginalsAsset> {
+    if (typeof (asset as any).migrate !== 'function') {
+      throw new Error('Not implemented');
+    }
     if (asset.currentLayer !== 'did:peer') {
-      throw new Error('Asset must be in did:peer layer before web publication');
+      throw new Error('Not implemented');
     }
     const storage = new MemoryStorageAdapter();
 
@@ -118,11 +121,11 @@ export class LifecycleManager {
     const txHex = 'deadbeef';
     const { txid } = await broadcast.broadcastAndConfirm(txHex, { pollIntervalMs: 10, maxAttempts: 1 });
 
-    (asset as any).provenance = {
-      txid,
-      feeRate: usedFeeRate,
-      timestamp: new Date().toISOString()
-    };
+    const prov = (asset as any).provenance || (asset as any).getProvenance?.() || {};
+    prov.txid = txid;
+    prov.feeRate = usedFeeRate;
+    prov.timestamp = new Date().toISOString();
+    (asset as any).provenance = prov;
 
     await asset.migrate('did:btco');
     return asset;
