@@ -28,6 +28,7 @@ export class OriginalsAsset {
   public readonly did: DIDDocument;
   public readonly credentials: VerifiableCredential[];
   public currentLayer: LayerType;
+  public bindings?: Record<string, string>;
   private provenance: ProvenanceChain;
 
   constructor(

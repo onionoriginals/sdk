@@ -20,6 +20,8 @@ export { buildTransferTransaction } from './bitcoin/transfer';
 export { selectUtxos, UtxoSelectionError, estimateFeeSats } from './bitcoin/utxo';
 export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs';
 export { BbsSimple } from './vc/cryptosuites/bbsSimple';
+export * from './storage';
+// didwebvh-ts is used internally; no re-export to keep API stable
 
 // Crypto exports
 export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from './crypto/Signer';
@@ -27,6 +29,8 @@ export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } fr
 // Utility exports
 export * from './utils/validation';
 export * from './utils/serialization';
+export * from './utils/retry';
+export * from './utils/telemetry';
 
 // Default export
 export default OriginalsSDK;

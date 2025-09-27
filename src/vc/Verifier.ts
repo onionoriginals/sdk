@@ -1,4 +1,3 @@
-/* istanbul ignore file */
 import { VerifiableCredential, VerifiablePresentation } from '../types';
 import { DIDManager } from '../did/DIDManager';
 import { createDocumentLoader } from './documentLoader';

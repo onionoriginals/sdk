@@ -12,23 +12,6 @@ declare module 'multiformats/bases/base64' {
   };
 }
 
-declare module '@digitalbazaar/bbs-signatures' {
-  export function sign(args: {
-    ciphersuite: string;
-    secretKey: Uint8Array;
-    publicKey: Uint8Array;
-    header: Uint8Array;
-    messages: Uint8Array[];
-  }): Promise<Uint8Array>;
-  export function verifySignature(args: {
-    ciphersuite: string;
-    publicKey: Uint8Array;
-    signature: Uint8Array;
-    header: Uint8Array;
-    messages: Uint8Array[];
-  }): Promise<boolean>;
-}
-
 declare module 'jsonld';
 
 // Minimal node globals for tests without @types/node
@@ -39,4 +22,8 @@ declare function describe(name: string, fn: () => void): void;
 declare function test(name: string, fn: () => any): void;
 declare function it(name: string, fn: () => any): void;
 declare function expect(actual: any): any;
+
+// Global shims for non-DOM/node test environments
+declare const global: any;
+declare function setTimeout(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): number;
 

@@ -1,188 +1,233 @@
-import { ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from '../../src/crypto/Signer';
-import { bls12_381 as bls } from '@noble/curves/bls12-381';
+import { ES256KSigner, ES256Signer, Ed25519Signer, Bls12381G2Signer } from '../../src/crypto/Signer';
+import * as secp256k1 from '@noble/secp256k1';
 import { p256 } from '@noble/curves/p256';
+import { bls12_381 as bls } from '@noble/curves/bls12-381';
+import * as ed25519 from '@noble/ed25519';
 
-jest.mock('@noble/secp256k1', () => {
-  const real = jest.requireActual('@noble/secp256k1');
-  return {
-    ...real,
-    verify: jest.fn(() => true),
-    signAsync: jest
-      .fn()
-      // 1) returns Uint8Array
-      .mockResolvedValueOnce(new Uint8Array([1, 2, 3]))
-      // 2) returns object with toCompactRawBytes
-      .mockResolvedValueOnce({ toCompactRawBytes: () => new Uint8Array([4, 5]) })
-      // 3) returns object with toRawBytes
-      .mockResolvedValueOnce({ toRawBytes: () => new Uint8Array([6]) })
-      // 4) returns other object to hit default branch
-      .mockResolvedValueOnce({ any: 1 })
-  } as any;
+const mb = (bytes: Uint8Array) => 'z' + Buffer.from(bytes).toString('base64url');
+
+describe('Signer classes', () => {
+  const data = Buffer.from('hello world');
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  describe('ES256KSigner', () => {
+    test('invalid multibase prefix throws on sign and verify', async () => {
+      const signer = new ES256KSigner();
+      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase private key');
+      await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase public key');
+    });
+
+    test('sign returns bytes path (Uint8Array direct)', async () => {
+      const sk = secp256k1.utils.randomPrivateKey();
+      const pk = secp256k1.getPublicKey(sk);
+      const signer = new ES256KSigner();
+      const sig = await signer.sign(data, mb(sk));
+      expect(Buffer.isBuffer(sig)).toBe(true);
+      const ok = await signer.verify(data, sig, mb(pk));
+      expect(ok).toBe(true);
+    });
+
+    test('verify returns false for bad signature', async () => {
+      const sk = secp256k1.utils.randomPrivateKey();
+      const pk = secp256k1.getPublicKey(sk);
+      const signer = new ES256KSigner();
+      const sig = await signer.sign(data, mb(sk));
+      const bad = Buffer.from(sig);
+      bad[0] ^= 0xff;
+      const ok = await signer.verify(data, bad, mb(pk));
+      expect(ok).toBe(false);
+    });
+
+    test('sign handles object with toCompactRawBytes()', async () => {
+      const sk = secp256k1.utils.randomPrivateKey();
+      const signer = new ES256KSigner();
+      const bytes = new Uint8Array(64).fill(7);
+      jest.spyOn(secp256k1, 'signAsync').mockResolvedValue({
+        toCompactRawBytes: () => bytes
+      } as any);
+      const sig = await signer.sign(data, mb(sk));
+      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+    });
+
+    test('sign handles object with toRawBytes()', async () => {
+      const sk = secp256k1.utils.randomPrivateKey();
+      const signer = new ES256KSigner();
+      const bytes = new Uint8Array(64).fill(9);
+      jest.spyOn(secp256k1, 'signAsync').mockResolvedValue({
+        toRawBytes: () => bytes
+      } as any);
+      const sig = await signer.sign(data, mb(sk));
+      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+    });
+
+    test('sign handles fallback via new Uint8Array(sigAny)', async () => {
+      const sk = secp256k1.utils.randomPrivateKey();
+      const signer = new ES256KSigner();
+      const arr = Array.from({ length: 64 }, (_, i) => (i + 1) & 0xff);
+      jest.spyOn(secp256k1, 'signAsync').mockResolvedValue(arr as any);
+      const sig = await signer.sign(data, mb(sk));
+      expect(sig).toHaveLength(64);
+      expect(sig[0]).toBe(1);
+      expect(sig[63]).toBe(64);
+    });
+
+    test('verify exception path returns false', async () => {
+      const sk = secp256k1.utils.randomPrivateKey();
+      const pk = secp256k1.getPublicKey(sk);
+      const signer = new ES256KSigner();
+      const sig = await signer.sign(data, mb(sk));
+      jest.spyOn(secp256k1, 'verify').mockImplementation(() => { throw new Error('boom'); });
+      const ok = await signer.verify(data, sig, mb(pk));
+      expect(ok).toBe(false);
+    });
+  });
+
+  describe('ES256Signer', () => {
+    test('invalid multibase prefix throws on sign and verify', async () => {
+      const signer = new ES256Signer();
+      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase private key');
+      await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase public key');
+    });
+
+    test('sign returns bytes path (Uint8Array direct)', async () => {
+      const sk = p256.utils.randomPrivateKey();
+      const pk = p256.getPublicKey(sk);
+      const signer = new ES256Signer();
+      const sig = await signer.sign(data, mb(sk));
+      expect(Buffer.isBuffer(sig)).toBe(true);
+      const ok = await signer.verify(data, sig, mb(pk));
+      expect(ok).toBe(true);
+    });
+
+    test('verify returns false for bad signature', async () => {
+      const sk = p256.utils.randomPrivateKey();
+      const pk = p256.getPublicKey(sk);
+      const signer = new ES256Signer();
+      const sig = await signer.sign(data, mb(sk));
+      const bad = Buffer.from(sig);
+      bad[0] ^= 0xff;
+      const ok = await signer.verify(data, bad, mb(pk));
+      expect(ok).toBe(false);
+    });
+
+    test('sign handles object with toCompactRawBytes()', async () => {
+      const sk = p256.utils.randomPrivateKey();
+      const signer = new ES256Signer();
+      const bytes = new Uint8Array(64).fill(11);
+      jest.spyOn(p256, 'sign').mockReturnValue({
+        toCompactRawBytes: () => bytes
+      } as any);
+      const sig = await signer.sign(data, mb(sk));
+      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+    });
+
+    test('sign handles object with toRawBytes()', async () => {
+      const sk = p256.utils.randomPrivateKey();
+      const signer = new ES256Signer();
+      const bytes = new Uint8Array(64).fill(13);
+      jest.spyOn(p256, 'sign').mockReturnValue({
+        toRawBytes: () => bytes
+      } as any);
+      const sig = await signer.sign(data, mb(sk));
+      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+    });
+
+    test('sign handles direct Uint8Array return', async () => {
+      const sk = p256.utils.randomPrivateKey();
+      const signer = new ES256Signer();
+      const bytes = new Uint8Array(64).fill(21);
+      jest.spyOn(p256, 'sign').mockReturnValue(bytes as any);
+      const sig = await signer.sign(data, mb(sk));
+      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+    });
+
+    test('sign handles fallback via new Uint8Array(sigAny)', async () => {
+      const sk = p256.utils.randomPrivateKey();
+      const signer = new ES256Signer();
+      const arr = Array.from({ length: 64 }, (_, i) => (i + 1) & 0xff);
+      jest.spyOn(p256, 'sign').mockReturnValue(arr as any);
+      const sig = await signer.sign(data, mb(sk));
+      expect(sig).toHaveLength(64);
+      expect(sig[0]).toBe(1);
+      expect(sig[63]).toBe(64);
+    });
+
+    test('verify exception path returns false', async () => {
+      const sk = p256.utils.randomPrivateKey();
+      const pk = p256.getPublicKey(sk);
+      const signer = new ES256Signer();
+      const sig = await signer.sign(data, mb(sk));
+      jest.spyOn(p256, 'verify').mockImplementation(() => { throw new Error('boom'); });
+      const ok = await signer.verify(data, sig, mb(pk));
+      expect(ok).toBe(false);
+    });
+  });
+
+  describe('Ed25519Signer', () => {
+    test('invalid multibase prefix throws on sign and verify', async () => {
+      const signer = new Ed25519Signer();
+      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase private key');
+      await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase public key');
+    });
+
+    test('sign and verify success; verify returns false with bad signature', async () => {
+      const sk = ed25519.utils.randomPrivateKey();
+      const pk = await ed25519.getPublicKey(sk);
+      const signer = new Ed25519Signer();
+      const sig = await signer.sign(data, mb(sk));
+      const ok = await signer.verify(data, sig, mb(pk));
+      expect(ok).toBe(true);
+
+      const bad = Buffer.from(sig);
+      bad[0] ^= 0xff;
+      const okBad = await signer.verify(data, bad, mb(pk));
+      expect(okBad).toBe(false);
+    });
+
+    test('verify exception path returns false', async () => {
+      const sk = ed25519.utils.randomPrivateKey();
+      const pk = await ed25519.getPublicKey(sk);
+      const signer = new Ed25519Signer();
+      const sig = await signer.sign(data, mb(sk));
+      jest.spyOn(ed25519, 'verifyAsync').mockImplementation(async () => { throw new Error('boom'); });
+      const ok = await signer.verify(data, sig, mb(pk));
+      expect(ok).toBe(false);
+    });
+  });
+
+  describe('Bls12381G2Signer', () => {
+    test('invalid multibase prefix throws on sign and verify', async () => {
+      const signer = new Bls12381G2Signer();
+      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase private key');
+      await expect(signer.verify(data, Buffer.alloc(96), 'xabc')).rejects.toThrow('Invalid multibase public key');
+    });
+
+    test('sign and verify success; verify returns false with bad signature', async () => {
+      const sk = bls.utils.randomPrivateKey();
+      const pk = await bls.getPublicKey(sk);
+      const signer = new Bls12381G2Signer();
+      const sig = await signer.sign(data, mb(sk));
+      const ok = await signer.verify(data, sig, mb(pk));
+      expect(ok).toBe(true);
+
+      const bad = Buffer.from(sig);
+      bad[0] ^= 0xff;
+      const okBad = await signer.verify(data, bad, mb(pk));
+      expect(okBad).toBe(false);
+    });
+
+    test('verify exception path returns false', async () => {
+      const sk = bls.utils.randomPrivateKey();
+      const pk = await bls.getPublicKey(sk);
+      const signer = new Bls12381G2Signer();
+      const sig = await signer.sign(data, mb(sk));
+      jest.spyOn(bls, 'verify').mockImplementation((_sig: any, _msg: any, _pk: any) => { throw new Error('boom'); });
+      const ok = await signer.verify(data, sig, mb(pk));
+      expect(ok).toBe(false);
+    });
+  });
 });
-
-jest.mock('@noble/ed25519', () => {
-  const real = jest.requireActual('@noble/ed25519');
-  return {
-    ...real,
-    signAsync: jest.fn(async (data: Uint8Array) => new Uint8Array(data)),
-    verifyAsync: jest.fn(async () => true)
-  } as any;
-});
-
-describe('Signer', () => {
-  test('ES256KSigner invalid key errors', async () => {
-    const s = new ES256KSigner();
-    await expect(s.sign(Buffer.from('a'), 'xabc')).rejects.toThrow('Invalid multibase private key');
-    await expect(s.verify(Buffer.from('a'), Buffer.from('b'), 'xabc')).rejects.toThrow('Invalid multibase public key');
-  });
-
-  test('Ed25519Signer invalid key errors', async () => {
-    const s = new Ed25519Signer();
-    await expect(s.sign(Buffer.from('a'), 'xabc')).rejects.toThrow('Invalid multibase private key');
-    await expect(s.verify(Buffer.from('a'), Buffer.from('b'), 'xabc')).rejects.toThrow('Invalid multibase public key');
-  });
-
-  test('ES256KSigner verify returns boolean', async () => {
-    const s = new ES256KSigner();
-    const res = await s.verify(Buffer.from('a'), Buffer.from(''), 'z');
-    expect(typeof res).toBe('boolean');
-  });
-
-  test('Ed25519Signer verify returns boolean', async () => {
-    const s = new Ed25519Signer();
-    const res = await s.verify(Buffer.from('a'), Buffer.from(''), 'z');
-    expect(typeof res).toBe('boolean');
-  });
-
-  test('ES256KSigner sign handles return shapes', async () => {
-    const s = new ES256KSigner();
-    const key = 'z' + Buffer.from('k').toString('base64url');
-    const b1 = await s.sign(Buffer.from('a'), key);
-    expect(b1).toBeInstanceOf(Buffer);
-    const b2 = await s.sign(Buffer.from('a'), key);
-    expect(b2).toBeInstanceOf(Buffer);
-    const b3 = await s.sign(Buffer.from('a'), key);
-    expect(b3).toBeInstanceOf(Buffer);
-    const b4 = await s.sign(Buffer.from('a'), key);
-    expect(b4).toBeInstanceOf(Buffer);
-  });
-
-  test('ES256KSigner verify success path', async () => {
-    const s = new ES256KSigner();
-    const pub = 'z' + Buffer.from('p').toString('base64url');
-    await expect(s.verify(Buffer.from('a'), Buffer.from('sig'), pub)).resolves.toBe(true);
-  });
-
-  test('Ed25519Signer sign/verify success paths', async () => {
-    const s = new Ed25519Signer();
-    const key = 'z' + Buffer.from('k').toString('base64url');
-    const sig = await s.sign(Buffer.from('a'), key);
-    expect(sig).toBeInstanceOf(Buffer);
-    const pub = 'z' + Buffer.from('p').toString('base64url');
-    await expect(s.verify(Buffer.from('a'), Buffer.from('sig'), pub)).resolves.toBe(true);
-  });
-
-  test('Bls12381G2Signer invalid key errors', async () => {
-    const s = new Bls12381G2Signer();
-    await expect(s.sign(Buffer.from('a'), 'xabc')).rejects.toThrow('Invalid multibase private key');
-    await expect(s.verify(Buffer.from('a'), Buffer.from('b'), 'xabc')).rejects.toThrow('Invalid multibase public key');
-  });
-
-  test('Bls12381G2Signer sign/verify success and failure paths', async () => {
-    const s = new Bls12381G2Signer();
-    const sk = bls.utils.randomPrivateKey();
-    const pk = bls.getPublicKey(sk);
-    const skMb = 'z' + Buffer.from(sk).toString('base64url');
-    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
-
-    const data = Buffer.from('hello');
-    const sig = await s.sign(data, skMb);
-    await expect(s.verify(data, sig, pkMb)).resolves.toBe(true);
-
-    const other = Buffer.from('world');
-    await expect(s.verify(other, sig, pkMb)).resolves.toBe(false);
-  });
-
-  test('ES256KSigner verify catch path returns false', async () => {
-    const real = jest.requireActual('@noble/secp256k1');
-    jest.resetModules();
-    jest.doMock('@noble/secp256k1', () => ({
-      ...real,
-      verify: () => { throw new Error('boom'); }
-    }));
-    const { ES256KSigner } = await import('../../src/crypto/Signer');
-    const s = new ES256KSigner();
-    const pub = 'z' + Buffer.from('p').toString('base64url');
-    await expect(s.verify(Buffer.from('a'), Buffer.from('sig'), pub)).resolves.toBe(false);
-    jest.dontMock('@noble/secp256k1');
-  });
-
-  test('Ed25519Signer verify catch path returns false', async () => {
-    const real = jest.requireActual('@noble/ed25519');
-    jest.resetModules();
-    jest.doMock('@noble/ed25519', () => ({
-      ...real,
-      verifyAsync: async () => { throw new Error('boom'); }
-    }));
-    const { Ed25519Signer } = await import('../../src/crypto/Signer');
-    const s = new Ed25519Signer();
-    const pub = 'z' + Buffer.from('p').toString('base64url');
-    await expect(s.verify(Buffer.from('a'), Buffer.from('sig'), pub)).resolves.toBe(false);
-    jest.dontMock('@noble/ed25519');
-  });
-
-  test('ES256Signer invalid key errors', async () => {
-    const s = new ES256Signer();
-    await expect(s.sign(Buffer.from('a'), 'xabc')).rejects.toThrow('Invalid multibase private key');
-    await expect(s.verify(Buffer.from('a'), Buffer.from('b'), 'xabc')).rejects.toThrow('Invalid multibase public key');
-  });
-
-  test('ES256Signer sign/verify success and failure paths', async () => {
-    const s = new ES256Signer();
-    const sk = p256.utils.randomPrivateKey();
-    const pk = p256.getPublicKey(sk, true);
-    const skMb = 'z' + Buffer.from(sk).toString('base64url');
-    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
-    const data = Buffer.from('hello');
-    const sig = await s.sign(data, skMb);
-    await expect(s.verify(data, sig, pkMb)).resolves.toBe(true);
-    await expect(s.verify(Buffer.from('world'), sig, pkMb)).resolves.toBe(false);
-  });
-
-  test('ES256Signer verify catch path returns false', async () => {
-    const real = jest.requireActual('@noble/curves/p256');
-    jest.resetModules();
-    jest.doMock('@noble/curves/p256', () => ({
-      ...real,
-      p256: {
-        ...real.p256,
-        verify: () => { throw new Error('boom'); },
-        sign: real.p256.sign,
-        utils: real.p256.utils,
-        getPublicKey: real.p256.getPublicKey
-      }
-    }));
-    const { ES256Signer } = await import('../../src/crypto/Signer');
-    const s = new ES256Signer();
-    const pkMb = 'z' + Buffer.from(p256.getPublicKey(p256.utils.randomPrivateKey(), true)).toString('base64url');
-    await expect(s.verify(Buffer.from('a'), Buffer.from('sig'), pkMb)).resolves.toBe(false);
-    jest.dontMock('@noble/curves/p256');
-  });
-
-  
-
-  test('Bls12381G2Signer verify returns false on internal error (catch path)', async () => {
-    const s = new Bls12381G2Signer();
-    const sk = bls.utils.randomPrivateKey();
-    const pk = bls.getPublicKey(sk);
-    const skMb = 'z' + Buffer.from(sk).toString('base64url');
-    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
-    const data = Buffer.from('hello');
-    const sig = await s.sign(data, skMb);
-    const spy = jest.spyOn(bls, 'verify').mockImplementation(() => { throw new Error('boom'); });
-    await expect(s.verify(data, sig, pkMb)).resolves.toBe(false);
-    spy.mockRestore();
-  });
-});
-
 

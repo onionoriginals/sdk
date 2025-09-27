@@ -1,8 +1,10 @@
-import { DIDDocument, OriginalsConfig, AssetResource } from '../types';
+import { DIDDocument, OriginalsConfig, AssetResource, VerificationMethod } from '../types';
 import { BtcoDidResolver } from './BtcoDidResolver';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
 import { createBtcoDidDocument } from './createBtcoDidDocument';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter';
+import { resolveDID as resolveWebvh } from 'didwebvh-ts';
+import { multikey } from '../crypto/Multikey';
 
 export class DIDManager {
   constructor(private config: OriginalsConfig) {}
@@ -15,11 +17,49 @@ export class DIDManager {
   }
 
   async migrateToDIDWebVH(didDoc: DIDDocument, domain: string): Promise<DIDDocument> {
-    return { ...didDoc, id: `did:webvh:${domain}:${didDoc.id.split(':').pop()}` };
+    // Basic domain hardening: require valid hostname
+    if (!/^[a-z0-9.-]+$/i.test(domain) || domain.includes('..') || domain.startsWith('-') || domain.endsWith('-')) {
+      throw new Error('Invalid domain');
+    }
+    const slug = didDoc.id.split(':').pop() as string;
+    return { ...didDoc, id: `did:webvh:${domain}:${slug}` };
   }
 
   async migrateToDIDBTCO(didDoc: DIDDocument, satoshi: string): Promise<DIDDocument> {
-    return { ...didDoc, id: `did:btco:${satoshi}` };
+    if (!/^[0-9]+$/.test(String(satoshi))) {
+      throw new Error('Invalid satoshi identifier');
+    }
+    const network = this.config.network || 'mainnet';
+
+    // Try to carry over the first multikey VM if present
+    const firstVm = (didDoc.verificationMethod && didDoc.verificationMethod[0]) as VerificationMethod | undefined;
+    let publicKey: Uint8Array | undefined;
+    let keyType: Parameters<typeof createBtcoDidDocument>[2]['keyType'] | undefined;
+    try {
+      if (firstVm && firstVm.publicKeyMultibase) {
+        const decoded = multikey.decodePublicKey(firstVm.publicKeyMultibase);
+        publicKey = decoded.key;
+        keyType = decoded.type;
+      }
+    } catch {}
+
+    // If no key material is available, generate a minimal btco DID doc without keys
+    let btcoDoc: DIDDocument;
+    if (publicKey && keyType) {
+      btcoDoc = createBtcoDidDocument(satoshi, network as any, { publicKey, keyType });
+    } else {
+      const prefix = network === 'mainnet' ? 'did:btco:' : network === 'testnet' ? 'did:btco:test:' : 'did:btco:sig:';
+      btcoDoc = {
+        '@context': ['https://www.w3.org/ns/did/v1'],
+        id: prefix + String(satoshi)
+      };
+    }
+
+    // Carry over service endpoints if present
+    if (didDoc.service && didDoc.service.length > 0) {
+      btcoDoc.service = didDoc.service;
+    }
+    return btcoDoc;
   }
 
   async resolveDID(did: string): Promise<DIDDocument | null> {
@@ -32,6 +72,13 @@ export class DIDManager {
         const resolver = new BtcoDidResolver({ provider: adapter });
         const result = await resolver.resolve(did);
         return result.didDocument || null;
+      }
+      if (did.startsWith('did:webvh:')) {
+        try {
+          const result = await resolveWebvh(did);
+          if (result && result.doc) return result.doc as DIDDocument;
+        } catch {}
+        return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
       }
       return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
     } catch {
