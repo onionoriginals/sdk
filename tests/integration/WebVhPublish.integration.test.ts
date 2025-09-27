@@ -13,10 +13,13 @@ describe('WebVH publish end-to-end', () => {
     const asset = await sdk.lifecycle.createAsset(resources);
     const published = await sdk.lifecycle.publishToWeb(asset, domain);
     expect(published.currentLayer).toBe('did:webvh');
-    expect(published.id.startsWith(`did:webvh:${domain}:`)).toBe(true);
+    expect(published.id.startsWith('did:peer:')).toBe(true);
+    const webBinding = (published as any).bindings?.['did:webvh'];
+    expect(typeof webBinding).toBe('string');
+    expect(webBinding!.startsWith(`did:webvh:${domain}:`)).toBe(true);
 
-    const resolved = await sdk.did.resolveDID(published.id);
-    expect(resolved?.id).toBe(published.id);
+    const resolved = await sdk.did.resolveDID(webBinding!);
+    expect(resolved?.id).toBe(webBinding);
   });
 });
 

@@ -61,9 +61,9 @@ export class LifecycleManager {
     // Migrate DID to did:webvh. DID document will be resolved via didwebvh-ts using real logs.
     const didWebDoc = await this.didManager.migrateToDIDWebVH({ ...asset.did }, domain);
 
+    // Resources are now represented on web via a new DID; the asset's identity doesn't change.
     await asset.migrate('did:webvh');
-    (asset as any).id = didWebDoc.id;
-    (asset as any).did = didWebDoc;
+    (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:webvh': didWebDoc.id });
     return asset;
   }
 
@@ -97,7 +97,9 @@ export class LifecycleManager {
     prov.timestamp = new Date().toISOString();
     (asset as any).provenance = prov;
 
+    // Only resources migrate; retain original DID identity. Track btco binding.
     await asset.migrate('did:btco');
+    (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:btco': `did:btco:${String(txid)}` });
     return asset;
   }
 
