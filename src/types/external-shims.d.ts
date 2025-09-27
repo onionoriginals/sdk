@@ -12,8 +12,6 @@ declare module 'multiformats/bases/base64' {
   };
 }
 
-// Removed: @digitalbazaar/bbs-signatures declarations no longer needed
-
 declare module 'jsonld';
 
 // Global shims for non-DOM/node test environments
