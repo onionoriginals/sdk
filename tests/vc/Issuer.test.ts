@@ -49,5 +49,58 @@ describe('diwings Issuer', () => {
     expect(vc.proof).toBeDefined();
   });
 });
-import './Issuer.more.part';
-import './Issuer.unsupported.part';
+
+/** Inlined from Issuer.more.part.ts */
+
+describe('Issuer branches', () => {
+  const dm = new DIDManager({} as any);
+  const vm = {
+    id: 'did:ex:1#key-1',
+    controller: 'did:ex:1',
+    publicKeyMultibase: 'z', // force decode failure -> default Ed25519 path
+    secretKeyMultibase: 'z7' // invalid but never used due to loader use only
+  } as any;
+
+  test('throws when missing secretKeyMultibase', async () => {
+    const issuer = new Issuer(dm, { ...vm, secretKeyMultibase: undefined });
+    await expect(issuer.issueCredential({ id: 'urn:cred:1', type: ['VerifiableCredential'], issuer: 'did:ex:1', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any, { proofPurpose: 'assertionMethod' })).rejects.toThrow('Missing secretKeyMultibase');
+  });
+
+  test('issuePresentation throws when secretKeyMultibase missing', async () => {
+    const issuer = new Issuer(dm, { ...vm, secretKeyMultibase: undefined });
+    await expect(issuer.issuePresentation({ holder: 'did:ex:1' } as any, { proofPurpose: 'authentication' })).rejects.toThrow('Missing secretKeyMultibase');
+  });
+
+  test('issueCredential uses issuer object id when provided', async () => {
+    const issuer = new Issuer(dm, { ...vm, secretKeyMultibase: 'z7' });
+    await expect(issuer.issueCredential({ id: 'urn:cred:2', type: ['VerifiableCredential'], issuer: { id: 'did:ex:1' } as any, issuanceDate: new Date().toISOString(), credentialSubject: {} } as any, { proofPurpose: 'assertionMethod' })).rejects.toThrow();
+  });
+
+  test('issueCredential falls back to controller when issuer missing', async () => {
+    const issuer = new Issuer(dm, { ...vm, secretKeyMultibase: 'z7' });
+    await expect(issuer.issueCredential({ id: 'urn:cred:3', type: ['VerifiableCredential'], issuanceDate: new Date().toISOString(), credentialSubject: {} } as any, { proofPurpose: 'assertionMethod' })).rejects.toThrow();
+  });
+});
+
+
+
+
+/** Inlined from Issuer.unsupported.part.ts */
+
+describe('Issuer unsupported key types', () => {
+  const dm = new DIDManager({} as any);
+
+  test('issueCredential throws for non-Ed25519', async () => {
+    const pubMb = multikey.encodePublicKey(new Uint8Array(33).fill(1), 'Secp256k1');
+    const secMb = multikey.encodePrivateKey(new Uint8Array(32).fill(2), 'Secp256k1');
+    const issuer = new Issuer(dm, { id: 'did:ex:3#k', controller: 'did:ex:3', publicKeyMultibase: pubMb, secretKeyMultibase: secMb });
+    await expect(issuer.issueCredential({ id: 'urn:cred:2', type: ['VerifiableCredential'], issuer: 'did:ex:3', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any, { proofPurpose: 'assertionMethod' })).rejects.toThrow('Only Ed25519 supported');
+  });
+
+  test('issuePresentation throws for non-Ed25519', async () => {
+    const pubMb = multikey.encodePublicKey(new Uint8Array(33).fill(1), 'Secp256k1');
+    const secMb = multikey.encodePrivateKey(new Uint8Array(32).fill(2), 'Secp256k1');
+    const issuer = new Issuer(dm, { id: 'did:ex:3#k', controller: 'did:ex:3', publicKeyMultibase: pubMb, secretKeyMultibase: secMb });
+    await expect(issuer.issuePresentation({ holder: 'did:ex:3' } as any, { proofPurpose: 'authentication' })).rejects.toThrow('Only Ed25519 supported');
+  });
+});

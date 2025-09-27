@@ -230,7 +230,100 @@ describe('Signer classes', () => {
     });
   });
 });
-import './Signer.branch-extra.part';
-import './Signer.env.false-branch.part';
-import './Signer.env.part';
-import './Signer.extra-branch-secp.part';
+
+/** Inlined from Signer.branch-extra.part.ts */
+import { ES256Signer } from '../../src/crypto/Signer';
+
+describe('ES256Signer extra branch coverage', () => {
+  test('verify catch path when p256.verify throws', async () => {
+    const signer = new ES256Signer();
+    const sk = p256.utils.randomPrivateKey();
+    const pk = p256.getPublicKey(sk);
+    const sig = await signer.sign(Buffer.from('x'), 'z' + Buffer.from(sk).toString('base64url'));
+    const spy = jest.spyOn(p256, 'verify').mockImplementation(() => { throw new Error('boom'); });
+    const ok = await signer.verify(Buffer.from('x'), sig, 'z' + Buffer.from(pk).toString('base64url'));
+    expect(ok).toBe(false);
+    spy.mockRestore();
+  });
+});
+
+
+
+
+/** Inlined from Signer.env.false-branch.part.ts */
+describe('Signer module env false branches (no injection when already present)', () => {
+  test('does not inject when utils already provide functions', async () => {
+    jest.resetModules();
+    jest.doMock('@noble/secp256k1', () => {
+      return { __esModule: true, utils: { hmacSha256Sync: jest.fn(() => new Uint8Array(32)) } };
+    });
+    jest.doMock('@noble/ed25519', () => {
+      return { __esModule: true, utils: { sha512Sync: jest.fn(() => new Uint8Array(64)) } };
+    });
+
+    // Import inside isolated module context so the top-level checks run with our mocks
+    await import('../../src/crypto/Signer');
+
+    const secp = require('@noble/secp256k1');
+    const ed = require('@noble/ed25519');
+    expect(typeof secp.utils.hmacSha256Sync).toBe('function');
+    expect(typeof ed.utils.sha512Sync).toBe('function');
+  });
+});
+
+
+
+
+/** Inlined from Signer.env.part.ts */
+describe('Signer module utils injection', () => {
+  test('injects hmacSha256Sync when missing', async () => {
+    jest.resetModules();
+    const secp = require('@noble/secp256k1');
+    const prev = secp.utils.hmacSha256Sync;
+    // Remove function to trigger injection on module load
+    delete secp.utils.hmacSha256Sync;
+    const mod = await import('../../src/crypto/Signer');
+    expect(typeof (require('@noble/secp256k1').utils.hmacSha256Sync)).toBe('function');
+    // call the injected function to cover its body
+    const key = new Uint8Array([1,2,3]);
+    const out = require('@noble/secp256k1').utils.hmacSha256Sync(key, new Uint8Array([4,5]), new Uint8Array([6]));
+    expect(out).toBeInstanceOf(Uint8Array);
+    expect(out.length).toBe(32);
+    // restore
+    require('@noble/secp256k1').utils.hmacSha256Sync = prev;
+  });
+
+  test('injects ed25519 sha512Sync when missing', async () => {
+    jest.resetModules();
+    const e = require('@noble/ed25519');
+    const prev = e.utils.sha512Sync;
+    delete e.utils.sha512Sync;
+    await import('../../src/crypto/Signer');
+    expect(typeof (require('@noble/ed25519').utils.sha512Sync)).toBe('function');
+    // call the injected function to cover its body
+    const out = require('@noble/ed25519').utils.sha512Sync(new Uint8Array([1,2,3]));
+    expect(out).toBeInstanceOf(Uint8Array);
+    expect(out.length).toBe(64);
+    // restore
+    require('@noble/ed25519').utils.sha512Sync = prev;
+  });
+});
+
+
+
+
+/** Inlined from Signer.extra-branch-secp.part.ts */
+import { ES256KSigner } from '../../src/crypto/Signer';
+
+describe('ES256KSigner branch: sign returns direct Uint8Array', () => {
+  test('covers instanceof Uint8Array path', async () => {
+    const signer = new ES256KSigner();
+    const sk = secp256k1.utils.randomPrivateKey();
+    const bytes = new Uint8Array(64).fill(5);
+    const spy = jest.spyOn(secp256k1, 'signAsync').mockResolvedValue(bytes as any);
+    const sig = await signer.sign(Buffer.from('x'), 'z' + Buffer.from(sk).toString('base64url'));
+    expect(Buffer.isBuffer(sig)).toBe(true);
+    expect(sig.equals(Buffer.from(bytes))).toBe(true);
+    spy.mockRestore();
+  });
+});
