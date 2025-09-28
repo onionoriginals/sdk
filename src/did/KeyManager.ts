@@ -4,6 +4,21 @@ import * as ed25519 from '@noble/ed25519';
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { concatBytes } from '@noble/hashes/utils.js';
+import { multikey, MultikeyType } from '../crypto/Multikey';
+
+function toMultikeyType(type: KeyType): MultikeyType {
+        if (type === 'ES256K') return 'Secp256k1';
+        if (type === 'Ed25519') return 'Ed25519';
+        if (type === 'ES256') return 'P256';
+        throw new Error(`Unsupported key type: ${type}`);
+}
+
+function fromMultikeyType(type: MultikeyType): KeyType {
+        if (type === 'Secp256k1') return 'ES256K';
+        if (type === 'Ed25519') return 'Ed25519';
+        if (type === 'P256') return 'ES256';
+        throw new Error('Unsupported key type');
+}
 
 export class KeyManager {
 	constructor() {
@@ -16,26 +31,26 @@ export class KeyManager {
 		eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
 	}
 	async generateKeyPair(type: KeyType): Promise<KeyPair> {
-		if (type === 'ES256K') {
-			const privateKeyBytes = secp256k1.utils.randomPrivateKey();
-			const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, true);
-			return {
-				privateKey: 'z' + Buffer.from(privateKeyBytes).toString('base64url'),
-				publicKey: 'z' + Buffer.from(publicKeyBytes).toString('base64url')
-			};
-		}
+                if (type === 'ES256K') {
+                        const privateKeyBytes = secp256k1.utils.randomPrivateKey();
+                        const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, true);
+                        return {
+                                privateKey: multikey.encodePrivateKey(privateKeyBytes, 'Secp256k1'),
+                                publicKey: multikey.encodePublicKey(publicKeyBytes, 'Secp256k1')
+                        };
+                }
 
-		if (type === 'Ed25519') {
-			const privateKeyBytes = ed25519.utils.randomPrivateKey();
-			const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
-			return {
-				privateKey: 'z' + Buffer.from(privateKeyBytes as Uint8Array).toString('base64url'),
-				publicKey: 'z' + Buffer.from(publicKeyBytes as Uint8Array).toString('base64url')
-			};
-		}
+                if (type === 'Ed25519') {
+                        const privateKeyBytes = ed25519.utils.randomPrivateKey();
+                        const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
+                        return {
+                                privateKey: multikey.encodePrivateKey(privateKeyBytes as Uint8Array, 'Ed25519'),
+                                publicKey: multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519')
+                        };
+                }
 
-		throw new Error('Only ES256K and Ed25519 supported at this time');
-	}
+                throw new Error('Only ES256K and Ed25519 supported at this time');
+        }
 
 	async rotateKeys(didDoc: DIDDocument, newKeyPair: KeyPair): Promise<DIDDocument> {
 		// Minimal placeholder rotation that attaches the new public key as a verification method
@@ -44,12 +59,12 @@ export class KeyManager {
 			verificationMethod: [
 				{
 					id: `${didDoc.id}#keys-1`,
-					type: 'EcdsaSecp256k1VerificationKey2019',
-					controller: didDoc.id,
-					publicKeyMultibase: newKeyPair.publicKey
-				}
-			],
-			authentication: [`${didDoc.id}#keys-1`]
+                                        type: 'Multikey',
+                                        controller: didDoc.id,
+                                        publicKeyMultibase: newKeyPair.publicKey
+                                }
+                        ],
+                        authentication: [`${didDoc.id}#keys-1`]
 		};
 
 		return updated;
@@ -60,18 +75,22 @@ export class KeyManager {
 		return { ...didDoc };
 	}
 
-	encodePublicKeyMultibase(publicKey: Buffer, type: KeyType): string {
-		return 'z' + Buffer.from(publicKey).toString('base64url');
-	}
+        encodePublicKeyMultibase(publicKey: Buffer, type: KeyType): string {
+                const mkType = toMultikeyType(type);
+                return multikey.encodePublicKey(new Uint8Array(publicKey), mkType);
+        }
 
-	decodePublicKeyMultibase(encoded: string): { key: Buffer; type: KeyType } {
-		if (!encoded || typeof encoded !== 'string' || encoded[0] !== 'z') {
-			throw new Error('Invalid multibase string');
-		}
-		const base = encoded.slice(1);
-		const bytes = Buffer.from(base, 'base64url');
-		return { key: bytes, type: 'ES256K' };
-	}
+        decodePublicKeyMultibase(encoded: string): { key: Buffer; type: KeyType } {
+                if (!encoded || typeof encoded !== 'string') {
+                        throw new Error('Invalid multibase string');
+                }
+                try {
+                        const decoded = multikey.decodePublicKey(encoded);
+                        return { key: Buffer.from(decoded.key), type: fromMultikeyType(decoded.type) };
+                } catch {
+                        throw new Error('Invalid multibase string');
+                }
+        }
 }
 
 

@@ -3,6 +3,7 @@ import { VerifiableCredential, CredentialSubject } from '../../src/types';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 import { p256 } from '@noble/curves/p256';
+import { multikey } from '../../src/crypto/Multikey';
 
 describe('CredentialManager', () => {
   const sdk = OriginalsSDK.create();
@@ -41,8 +42,8 @@ describe('CredentialManager', () => {
     const sdkES256K = OriginalsSDK.create({ defaultKeyType: 'ES256K' });
     const sk = secp256k1.utils.randomPrivateKey();
     const pk = secp256k1.getPublicKey(sk, true);
-    const skMb = 'z' + Buffer.from(sk).toString('base64url');
-    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
+    const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
     const signed = await sdkES256K.credentials.signCredential(baseVC, skMb, pkMb);
     expect(signed.proof).toBeDefined();
     await expect(sdkES256K.credentials.verifyCredential(signed)).resolves.toBe(true);
@@ -70,7 +71,8 @@ describe('CredentialManager', () => {
 
   test('verifyCredential uses data-integrity verifier path when cryptosuite present', async () => {
     const sdkEd = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
-    const signed = await sdkEd.credentials.signCredential(baseVC, 'z' + Buffer.from(new Uint8Array(32).fill(1)).toString('base64url'), 'did:ex#key');
+    const edSk = new Uint8Array(32).fill(1);
+    const signed = await sdkEd.credentials.signCredential(baseVC, multikey.encodePrivateKey(edSk, 'Ed25519'), 'did:ex#key');
     (signed as any).proof.cryptosuite = 'eddsa-rdfc-2022';
     const res = await sdkEd.credentials.verifyCredential(signed);
     expect(typeof res).toBe('boolean');
@@ -80,7 +82,7 @@ describe('CredentialManager', () => {
     const vc: VerifiableCredential = { ...baseVC, proof: { 
       type: 'DataIntegrityProof',
       created: new Date().toISOString(),
-      verificationMethod: 'z' + Buffer.from('pk').toString('base64url'),
+      verificationMethod: multikey.encodePublicKey(new Uint8Array(33).fill(3), 'Secp256k1'),
       proofPurpose: 'assertionMethod',
       proofValue: 'xnot-multibase'
     } } as any;
@@ -91,7 +93,7 @@ describe('CredentialManager', () => {
     const vc: VerifiableCredential = { ...baseVC, proof: { 
       type: 'DataIntegrityProof',
       created: new Date().toISOString(),
-      verificationMethod: 'z' + Buffer.from('pk').toString('base64url'),
+      verificationMethod: multikey.encodePublicKey(new Uint8Array(33).fill(4), 'Secp256k1'),
       proofPurpose: 'assertionMethod',
       proofValue: 'z' + Buffer.from('sig').toString('base64url')
     } } as any;
@@ -109,8 +111,8 @@ describe('CredentialManager', () => {
     const sdkEd = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
     const sk = ed25519.utils.randomPrivateKey();
     const pk = await (ed25519 as any).getPublicKeyAsync(sk);
-    const skMb = 'z' + Buffer.from(sk).toString('base64url');
-    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
+    const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
     const signed = await sdkEd.credentials.signCredential(baseVC, skMb, pkMb);
     expect(signed.proof).toBeDefined();
     await expect(sdkEd.credentials.verifyCredential(signed)).resolves.toBe(true);
@@ -120,8 +122,8 @@ describe('CredentialManager', () => {
     const sdkES256 = OriginalsSDK.create({ defaultKeyType: 'ES256' });
     const sk = p256.utils.randomPrivateKey();
     const pk = p256.getPublicKey(sk, true);
-    const skMb = 'z' + Buffer.from(sk).toString('base64url');
-    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const skMb = multikey.encodePrivateKey(sk, 'P256');
+    const pkMb = multikey.encodePublicKey(pk, 'P256');
     const signed = await sdkES256.credentials.signCredential(baseVC, skMb, pkMb);
     expect(signed.proof).toBeDefined();
     await expect(sdkES256.credentials.verifyCredential(signed)).resolves.toBe(true);
@@ -202,7 +204,7 @@ describe('CredentialManager verify with didManager present but legacy path', () 
       issuer: 'did:ex',
       issuanceDate: new Date().toISOString(),
       credentialSubject: {},
-      proof: { type: 'DataIntegrityProof', created: new Date().toISOString(), verificationMethod: 'z' + Buffer.from('bad').toString('base64url'), proofPurpose: 'assertionMethod', proofValue: 'z' + Buffer.from('bad').toString('base64url') }
+      proof: { type: 'DataIntegrityProof', created: new Date().toISOString(), verificationMethod: multikey.encodePublicKey(new Uint8Array(33).fill(5), 'Secp256k1'), proofPurpose: 'assertionMethod', proofValue: 'z' + Buffer.from('bad').toString('base64url') }
     };
     const ok = await cm.verifyCredential(vc);
     expect(ok).toBe(false);
@@ -223,7 +225,7 @@ describe('CredentialManager with didManager provided falls back to local signer 
     registerVerificationMethod({ id: 'did:ex:vm#fallback', controller: 'did:ex' } as any);
 
     const sk = secp256k1.utils.randomPrivateKey();
-    const skMb = 'z' + Buffer.from(sk).toString('base64url');
+    const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
 
     const vc: any = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
@@ -250,7 +252,7 @@ describe('CredentialManager DID path fallback when VM doc lacks type', () => {
     const sk = new Uint8Array(32).fill(1);
     const pk = new Uint8Array(33).fill(2);
     const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
-    const signed = await cm.signCredential(vc, 'z' + Buffer.from(sk).toString('base64url'), 'did:ex:vm#x');
+    const signed = await cm.signCredential(vc, multikey.encodePrivateKey(sk, 'Secp256k1'), 'did:ex:vm#x');
     expect(signed.proof).toBeDefined();
   });
 });
@@ -272,8 +274,8 @@ describe('CredentialManager local verify path without didManager', () => {
     } as any;
     const sk = secp256k1.utils.randomPrivateKey();
     const pk = secp256k1.getPublicKey(sk, true);
-    const skMb = 'z' + Buffer.from(sk).toString('base64url');
-    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
+    const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
     const signed = await cm.signCredential(baseVC, skMb, pkMb);
     const ok = await cm.verifyCredential(signed);
     expect(ok).toBe(true);
@@ -284,8 +286,6 @@ describe('CredentialManager local verify path without didManager', () => {
 
 
 /** Inlined from CredentialManager.missing-type-default.part.ts */
-import { multikey } from '../../src/crypto/Multikey';
-
 describe('CredentialManager DID path with VM missing type defaults to Multikey', () => {
   test('uses default type when document.type is absent', async () => {
     const dm = new DIDManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any);
@@ -313,7 +313,7 @@ describe('CredentialManager additional branches', () => {
     const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const sk = new Uint8Array(32).fill(1);
     const pk = new Uint8Array(33).fill(2);
-    const signed = await cm.signCredential(vc, 'z' + Buffer.from(sk).toString('base64url'), 'z' + Buffer.from(pk).toString('base64url'));
+    const signed = await cm.signCredential(vc, multikey.encodePrivateKey(sk, 'Secp256k1'), multikey.encodePublicKey(pk, 'Secp256k1'));
     expect(signed.proof).toBeDefined();
   });
 
@@ -380,7 +380,7 @@ describe('CredentialManager.getSigner default case when config keyType undefined
     const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const sk = new Uint8Array(32).fill(3);
     const pk = new Uint8Array(33).fill(2);
-    const signed = await cm.signCredential(vc, 'z' + Buffer.from(sk).toString('base64url'), 'z' + Buffer.from(pk).toString('base64url'));
+    const signed = await cm.signCredential(vc, multikey.encodePrivateKey(sk, 'Secp256k1'), multikey.encodePublicKey(pk, 'Secp256k1'));
     expect(signed.proof).toBeDefined();
   });
 });
