@@ -54,8 +54,14 @@ export class KeyManager {
 
 	async rotateKeys(didDoc: DIDDocument, newKeyPair: KeyPair): Promise<DIDDocument> {
 		// Minimal placeholder rotation that attaches the new public key as a verification method
+		const multikeyContext = 'https://w3id.org/security/multikey/v1';
+		const updatedContext = didDoc['@context'].includes(multikeyContext) 
+			? didDoc['@context'] 
+			: [...didDoc['@context'], multikeyContext];
+
 		const updated: DIDDocument = {
 			...didDoc,
+			'@context': updatedContext,
 			verificationMethod: [
 				{
 					id: `${didDoc.id}#keys-1`,

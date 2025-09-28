@@ -41,6 +41,23 @@ describe('KeyManager', () => {
     const pair: KeyPair = await km.generateKeyPair('ES256K' as KeyType);
     const rotated = await km.rotateKeys(didDoc, pair);
     expect(rotated.verificationMethod?.[0].publicKeyMultibase).toBe(pair.publicKey);
+    // Verify that multikey context is added when using Multikey verification method
+    expect(rotated['@context']).toContain('https://w3id.org/security/multikey/v1');
+    expect(rotated.verificationMethod?.[0].type).toBe('Multikey');
+  });
+
+  test('rotateKeys does not duplicate multikey context if already present', async () => {
+    const didDoc: DIDDocument = { 
+      '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'], 
+      id: 'did:peer:abc' 
+    };
+    const pair: KeyPair = await km.generateKeyPair('ES256K' as KeyType);
+    const rotated = await km.rotateKeys(didDoc, pair);
+    
+    // Count occurrences of multikey context
+    const contextCount = rotated['@context'].filter(c => c === 'https://w3id.org/security/multikey/v1').length;
+    expect(contextCount).toBe(1);
+    expect(rotated['@context']).toContain('https://w3id.org/security/multikey/v1');
   });
 
   test('recoverFromCompromise returns doc', async () => {
