@@ -102,7 +102,11 @@ export class CredentialManager {
     const digest = Buffer.concat([hProof, hCred]);
     const signer = this.getSigner();
     try {
-      return await signer.verify(Buffer.from(digest), Buffer.from(signature), verificationMethod);
+      const resolvedKey = await this.resolveVerificationMethodMultibase(verificationMethod, proof);
+      if (!resolvedKey) {
+        return false;
+      }
+      return await signer.verify(Buffer.from(digest), Buffer.from(signature), resolvedKey);
     } catch {
       return false;
     }
@@ -149,6 +153,49 @@ export class CredentialManager {
       default:
         return new ES256KSigner();
     }
+  }
+
+  private async resolveVerificationMethodMultibase(
+    verificationMethod: string,
+    proof: Proof
+  ): Promise<string | null> {
+    const proofAny: any = proof;
+    if (typeof proofAny?.publicKeyMultibase === 'string') {
+      return proofAny.publicKeyMultibase;
+    }
+
+    if (typeof verificationMethod === 'string' && verificationMethod.startsWith('z')) {
+      return verificationMethod;
+    }
+
+    if (!this.didManager || typeof verificationMethod !== 'string' || !verificationMethod.startsWith('did:')) {
+      return null;
+    }
+
+    const loader = createDocumentLoader(this.didManager);
+    try {
+      const { document } = await loader(verificationMethod);
+      if (document && typeof document.publicKeyMultibase === 'string') {
+        return document.publicKeyMultibase;
+      }
+    } catch {}
+
+    try {
+      const did = verificationMethod.split('#')[0];
+      if (!did) {
+        return null;
+      }
+      const didDoc = await this.didManager.resolveDID(did);
+      const vms = (didDoc as any)?.verificationMethod;
+      if (Array.isArray(vms)) {
+        const vm = vms.find((m: any) => m?.id === verificationMethod);
+        if (vm && typeof vm.publicKeyMultibase === 'string') {
+          return vm.publicKeyMultibase;
+        }
+      }
+    } catch {}
+
+    return null;
   }
 
   private decodeMultibase(s: string): Uint8Array | null {
