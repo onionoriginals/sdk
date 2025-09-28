@@ -1,4 +1,5 @@
 import { OrdinalsInscription, BitcoinTransaction } from '../types';
+import { emitTelemetry } from '../utils/telemetry';
 import { decode as decodeCbor } from '../utils/cbor';
 import { hexToBytes } from '../utils/encoding';
 
