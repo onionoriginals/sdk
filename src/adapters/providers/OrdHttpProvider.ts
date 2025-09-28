@@ -3,7 +3,6 @@ import type { OrdinalsProvider } from '../types';
 
 interface HttpProviderOptions {
   baseUrl: string;
-  apiKey?: string;
 }
 
 function buildUrl(baseUrl: string, path: string): string {
@@ -11,11 +10,10 @@ function buildUrl(baseUrl: string, path: string): string {
   return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
-async function fetchJson<T>(url: string, apiKey?: string): Promise<T | null> {
+async function fetchJson<T>(url: string): Promise<T | null> {
   const res = await (globalThis as any).fetch(url, {
     headers: {
-      'Accept': 'application/json',
-      ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+      'Accept': 'application/json'
     }
   });
   if (!res.ok) return null;
@@ -24,19 +22,17 @@ async function fetchJson<T>(url: string, apiKey?: string): Promise<T | null> {
 
 export class OrdHttpProvider implements OrdinalsProvider {
   private readonly baseUrl: string;
-  private readonly apiKey?: string;
 
   constructor(options: HttpProviderOptions) {
     if (!options?.baseUrl) {
       throw new Error('OrdHttpProvider requires baseUrl');
     }
     this.baseUrl = options.baseUrl;
-    this.apiKey = options.apiKey;
   }
 
   async getInscriptionById(id: string) {
     if (!id) return null;
-    const data = await fetchJson<any>(buildUrl(this.baseUrl, `/inscription/${id}`), this.apiKey);
+    const data = await fetchJson<any>(buildUrl(this.baseUrl, `/inscription/${id}`));
     if (!data) return null;
     // Expecting a shape similar to Ordinals indexers; adapt minimally
     const ownerOutput: string | undefined = data.owner_output;
@@ -69,7 +65,7 @@ export class OrdHttpProvider implements OrdinalsProvider {
 
   async getInscriptionsBySatoshi(satoshi: string) {
     if (!satoshi) return [];
-    const data = await fetchJson<any>(buildUrl(this.baseUrl, `/sat/${satoshi}`), this.apiKey);
+    const data = await fetchJson<any>(buildUrl(this.baseUrl, `/sat/${satoshi}`));
     const ids: string[] = Array.isArray(data?.inscription_ids) ? data.inscription_ids : [];
     return ids.map((inscriptionId) => ({ inscriptionId }));
   }
@@ -122,8 +118,7 @@ export async function createOrdinalsProviderFromEnv(): Promise<OrdinalsProvider>
   const useLive = String(((globalThis as any).process?.env?.USE_LIVE_ORD_PROVIDER) || '').toLowerCase() === 'true';
   if (useLive) {
     const baseUrl = ((globalThis as any).process?.env?.ORD_PROVIDER_BASE_URL) || 'https://ord.example.com/api';
-    const apiKey = ((globalThis as any).process?.env?.ORD_PROVIDER_API_KEY);
-    return new OrdHttpProvider({ baseUrl, apiKey });
+    return new OrdHttpProvider({ baseUrl });
   }
   const mod = await import('./OrdMockProvider');
   return new mod.OrdMockProvider();
