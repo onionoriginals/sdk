@@ -1,5 +1,6 @@
 import { OrdinalsClientProvider } from '../../src/bitcoin/providers/OrdinalsProvider';
 import { OrdinalsClient } from '../../src/bitcoin/OrdinalsClient';
+import { expect } from '@jest/globals';
 
 describe('OrdinalsClientProvider', () => {
   const client: jest.Mocked<OrdinalsClient> = new OrdinalsClient('http://ord', 'regtest') as any;

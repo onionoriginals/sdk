@@ -24,14 +24,14 @@ describe('KeyManager', () => {
     const pub = Buffer.from('hello');
     const encoded = km.encodePublicKeyMultibase(pub, 'ES256K' as KeyType);
     const decoded = km.decodePublicKeyMultibase(encoded);
-    expect(decoded.key.equals(pub)).toBe(true);
+    expect(decoded.key).toEqual(pub);
   });
 
   test('decodePublicKeyMultibase supports base64url decoding paths', () => {
     const pub = Buffer.from([0, 255, 1, 2, 3, 4, 5]);
     const encoded = km.encodePublicKeyMultibase(pub, 'Ed25519' as KeyType);
     const decoded = km.decodePublicKeyMultibase(encoded);
-    expect(decoded.key.equals(pub)).toBe(true);
+    expect(decoded.key).toEqual(pub);
   });
 
   test('rotateKeys updates DID document keys', async () => {

@@ -1,4 +1,5 @@
 import { OriginalsSDK } from '../../src';
+import { expect } from '@jest/globals';
 import { AssetResource } from '../../src/types';
 
 const resources: AssetResource[] = [
@@ -52,11 +53,13 @@ describe('LifecycleManager', () => {
     ).rejects.toThrow('Not implemented');
   });
 
-  test('transferOwnership throws Not implemented when on btco (coverage for throw)', async () => {
-    const btcoAsset: any = { currentLayer: 'did:btco' };
-    await expect(
-      sdk.lifecycle.transferOwnership(btcoAsset, 'bc1qaddress')
-    ).rejects.toThrow('Not implemented');
+  test('transferOwnership succeeds when on btco (returns tx)', async () => {
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }
+    ]);
+    await asset.migrate('did:btco');
+    const tx = await sdk.lifecycle.transferOwnership(asset as any, 'bc1qaddress');
+    expect(typeof tx.txid).toBe('string');
   });
 
   test('transferOwnership errors if not on btco layer', async () => {
