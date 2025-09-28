@@ -3,6 +3,9 @@ import { webcrypto } from 'node:crypto';
 import * as ed25519 from '@noble/ed25519';
 import { createHash } from 'node:crypto';
 
+// Ensure Jest matchers are properly extended
+import 'jest';
+
 if (typeof globalThis.crypto === 'undefined') {
   // @ts-ignore
   globalThis.crypto = webcrypto as unknown as Crypto;

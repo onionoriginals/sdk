@@ -328,7 +328,10 @@ describe('CredentialManager local verify path without didManager', () => {
     const signedA = await cm.signCredential(credentialA, skMb, pkMb);
     const signedB = await cm.signCredential(credentialB, skMb, pkMb);
 
-    expect(signedA.proof?.proofValue).toEqual(signedB.proof?.proofValue);
+    // Handle both single proof and proof array cases
+    const proofA = Array.isArray(signedA.proof) ? signedA.proof[0] : signedA.proof;
+    const proofB = Array.isArray(signedB.proof) ? signedB.proof[0] : signedB.proof;
+    expect(proofA?.proofValue).toEqual(proofB?.proofValue);
     await expect(cm.verifyCredential(signedA)).resolves.toBe(true);
     await expect(cm.verifyCredential(signedB)).resolves.toBe(true);
   });

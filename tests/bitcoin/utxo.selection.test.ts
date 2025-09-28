@@ -6,50 +6,25 @@ const U = (v: number, opts: Partial<Utxo> = {}): Utxo => ({ txid: 't', vout: Mat
 
 describe('UTXO selection', () => {
   test('throws TOO_LOW_FEE when fee rate is not positive', () => {
-    try {
-      selectUtxos([U(1000)], { targetAmountSats: 600, feeRateSatsPerVb: 0 });
-      throw new Error('expected throw');
-    } catch (e: any) {
-      expect(e.code).toBe('TOO_LOW_FEE');
-    }
+    expect(() => selectUtxos([U(1000)], { targetAmountSats: 600, feeRateSatsPerVb: 0 })).toThrow(expect.objectContaining({ code: 'TOO_LOW_FEE' }));
   });
 
   test('throws DUST_OUTPUT when target is below dust', () => {
-    try {
-      selectUtxos([U(1000)], { targetAmountSats: DUST_LIMIT_SATS - 1, feeRateSatsPerVb: 1 });
-      throw new Error('expected throw');
-    } catch (e: any) {
-      expect(e.code).toBe('DUST_OUTPUT');
-    }
+    expect(() => selectUtxos([U(1000)], { targetAmountSats: DUST_LIMIT_SATS - 1, feeRateSatsPerVb: 1 })).toThrow(expect.objectContaining({ code: 'DUST_OUTPUT' }));
   });
 
-  test('throws DUST_OUTPUT when not enough value to cover fee+amount', () => {
-    try {
-      selectUtxos([U(500)], { targetAmountSats: 500, feeRateSatsPerVb: 2 });
-      throw new Error('expected throw');
-    } catch (e: any) {
-      expect(e.code).toBe('DUST_OUTPUT');
-    }
+  test('throws INSUFFICIENT_FUNDS when not enough value to cover fee+amount', () => {
+    expect(() => selectUtxos([U(500)], { targetAmountSats: 600, feeRateSatsPerVb: 2 })).toThrow(expect.objectContaining({ code: 'INSUFFICIENT_FUNDS' }));
   });
 
   test('throws CONFLICTING_LOCKS when funds exist but are locked', () => {
     const utxos = [U(100000, { locked: true })];
-    try {
-      selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 2 });
-      throw new Error('expected throw');
-    } catch (e: any) {
-      expect(e.code).toBe('CONFLICTING_LOCKS');
-    }
+    expect(() => selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 2 })).toThrow(expect.objectContaining({ code: 'CONFLICTING_LOCKS' }));
   });
 
   test('inscription safety: forbids inscription-bearing inputs if option set', () => {
     const utxos = [U(100000, { inscriptions: ['i1'] })];
-    try {
-      selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 2, forbidInscriptionBearingInputs: true });
-      throw new Error('expected throw');
-    } catch (e: any) {
-      expect(e.code).toBe('INSUFFICIENT_FUNDS');
-    }
+    expect(() => selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 2, forbidInscriptionBearingInputs: true })).toThrow(expect.objectContaining({ code: 'INSUFFICIENT_FUNDS' }));
   });
 
   test('returns selection with change suppressed if dust', () => {

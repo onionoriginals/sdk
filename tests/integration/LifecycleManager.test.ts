@@ -4,6 +4,9 @@
 import { OriginalsSDK } from '../../src';
 import { expect } from '@jest/globals';
 
+// Ensure Jest types are available
+declare const expect: any;
+
 describe('Integration: Lifecycle inscribe updates provenance and btco layer', () => {
   test('provenance updated and layer becomes did:btco', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest', bitcoinRpcUrl: 'http://ord' });
