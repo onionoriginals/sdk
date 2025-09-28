@@ -1,4 +1,12 @@
-import { multikey, MULTICODEC_ED25519_PUB_HEADER, MULTICODEC_ED25519_PRIV_HEADER, MULTICODEC_SECP256K1_PUB_HEADER, MULTICODEC_SECP256K1_PRIV_HEADER } from '../../src/crypto/Multikey';
+import {
+  multikey,
+  MULTICODEC_ED25519_PUB_HEADER,
+  MULTICODEC_ED25519_PRIV_HEADER,
+  MULTICODEC_SECP256K1_PUB_HEADER,
+  MULTICODEC_SECP256K1_PRIV_HEADER,
+  MULTICODEC_P256_PUB_HEADER,
+  MULTICODEC_P256_PRIV_HEADER
+} from '../../src/crypto/Multikey';
 import { base58btc } from 'multiformats/bases/base58';
 
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -13,6 +21,8 @@ describe('Multikey encode/decode', () => {
   const edPriv = new Uint8Array(32).map((_, i) => (i + 2) & 0xff);
   const secpPub = new Uint8Array(33).map((_, i) => (i + 3) & 0xff);
   const secpPriv = new Uint8Array(32).map((_, i) => (i + 4) & 0xff);
+  const p256Pub = new Uint8Array(33).map((_, i) => (i + 7) & 0xff);
+  const p256Priv = new Uint8Array(32).map((_, i) => (i + 8) & 0xff);
 
   test('encode/decode Ed25519', () => {
     const pub = multikey.encodePublicKey(edPub, 'Ed25519');
@@ -34,6 +44,17 @@ describe('Multikey encode/decode', () => {
     expect(decPub.type).toBe('Secp256k1');
     expect(Array.from(decPriv.key)).toEqual(Array.from(secpPriv));
     expect(decPriv.type).toBe('Secp256k1');
+  });
+
+  test('encode/decode P256', () => {
+    const pub = multikey.encodePublicKey(p256Pub, 'P256');
+    const priv = multikey.encodePrivateKey(p256Priv, 'P256');
+    const decPub = multikey.decodePublicKey(pub);
+    const decPriv = multikey.decodePrivateKey(priv);
+    expect(Array.from(decPub.key)).toEqual(Array.from(p256Pub));
+    expect(decPub.type).toBe('P256');
+    expect(Array.from(decPriv.key)).toEqual(Array.from(p256Priv));
+    expect(decPriv.type).toBe('P256');
   });
 
   test('decode errors: invalid multibase prefix', () => {

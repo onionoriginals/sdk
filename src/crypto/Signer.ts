@@ -10,6 +10,7 @@ import { hmac } from '@noble/hashes/hmac.js';
 import { concatBytes } from '@noble/hashes/utils.js';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
+import { multikey } from './Multikey';
 
 // Ensure noble hash utils helpers exist without redefining the utils object
 const sAny: any = secp256k1 as any;
@@ -27,7 +28,16 @@ export class ES256KSigner extends Signer {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
     }
-    const privateKey = Buffer.from(privateKeyMultibase.slice(1), 'base64url');
+    let decoded;
+    try {
+      decoded = multikey.decodePrivateKey(privateKeyMultibase);
+    } catch {
+      throw new Error('Invalid multibase private key');
+    }
+    if (decoded.type !== 'Secp256k1') {
+      throw new Error('Invalid key type for ES256K');
+    }
+    const privateKey = decoded.key;
     const hash = sha256(data);
     const sigAny: any = await (secp256k1 as any).signAsync(hash as Uint8Array, privateKey as Uint8Array);
     const sigBytes: Uint8Array = sigAny instanceof Uint8Array
@@ -44,7 +54,16 @@ export class ES256KSigner extends Signer {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase public key');
     }
-    const publicKey = Buffer.from(publicKeyMultibase.slice(1), 'base64url');
+    let decoded;
+    try {
+      decoded = multikey.decodePublicKey(publicKeyMultibase);
+    } catch {
+      throw new Error('Invalid multibase public key');
+    }
+    if (decoded.type !== 'Secp256k1') {
+      throw new Error('Invalid key type for ES256K');
+    }
+    const publicKey = decoded.key;
     const hash = sha256(data);
     try {
       return secp256k1.verify(signature, hash, publicKey);
@@ -59,7 +78,16 @@ export class Ed25519Signer extends Signer {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
     }
-    const privateKey = Buffer.from(privateKeyMultibase.slice(1), 'base64url');
+    let decoded;
+    try {
+      decoded = multikey.decodePrivateKey(privateKeyMultibase);
+    } catch {
+      throw new Error('Invalid multibase private key');
+    }
+    if (decoded.type !== 'Ed25519') {
+      throw new Error('Invalid key type for Ed25519');
+    }
+    const privateKey = decoded.key;
     const signature = await (ed25519 as any).signAsync(data, privateKey);
     return Buffer.from(signature);
   }
@@ -68,7 +96,16 @@ export class Ed25519Signer extends Signer {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase public key');
     }
-    const publicKey = Buffer.from(publicKeyMultibase.slice(1), 'base64url');
+    let decoded;
+    try {
+      decoded = multikey.decodePublicKey(publicKeyMultibase);
+    } catch {
+      throw new Error('Invalid multibase public key');
+    }
+    if (decoded.type !== 'Ed25519') {
+      throw new Error('Invalid key type for Ed25519');
+    }
+    const publicKey = decoded.key;
     try {
       return await (ed25519 as any).verifyAsync(signature, data, publicKey);
     } catch {
@@ -82,7 +119,16 @@ export class ES256Signer extends Signer {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
     }
-    const privateKey = Buffer.from(privateKeyMultibase.slice(1), 'base64url');
+    let decoded;
+    try {
+      decoded = multikey.decodePrivateKey(privateKeyMultibase);
+    } catch {
+      throw new Error('Invalid multibase private key');
+    }
+    if (decoded.type !== 'P256') {
+      throw new Error('Invalid key type for ES256');
+    }
+    const privateKey = decoded.key;
     const hash = sha256(data);
     const sigAny: any = p256.sign(hash as Uint8Array, privateKey as Uint8Array);
     const sigBytes: Uint8Array = sigAny instanceof Uint8Array
@@ -99,7 +145,16 @@ export class ES256Signer extends Signer {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase public key');
     }
-    const publicKey = Buffer.from(publicKeyMultibase.slice(1), 'base64url');
+    let decoded;
+    try {
+      decoded = multikey.decodePublicKey(publicKeyMultibase);
+    } catch {
+      throw new Error('Invalid multibase public key');
+    }
+    if (decoded.type !== 'P256') {
+      throw new Error('Invalid key type for ES256');
+    }
+    const publicKey = decoded.key;
     const hash = sha256(data);
     try {
       return p256.verify(signature, hash, publicKey);
@@ -114,7 +169,16 @@ export class Bls12381G2Signer extends Signer {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase private key');
     }
-    const sk = Buffer.from(privateKeyMultibase.slice(1), 'base64url');
+    let decoded;
+    try {
+      decoded = multikey.decodePrivateKey(privateKeyMultibase);
+    } catch {
+      throw new Error('Invalid multibase private key');
+    }
+    if (decoded.type !== 'Bls12381G2') {
+      throw new Error('Invalid key type for Bls12381G2');
+    }
+    const sk = decoded.key;
     const sig = await bls.sign(data, sk);
     return Buffer.from(sig);
   }
@@ -123,7 +187,16 @@ export class Bls12381G2Signer extends Signer {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase public key');
     }
-    const pk = Buffer.from(publicKeyMultibase.slice(1), 'base64url');
+    let decoded;
+    try {
+      decoded = multikey.decodePublicKey(publicKeyMultibase);
+    } catch {
+      throw new Error('Invalid multibase public key');
+    }
+    if (decoded.type !== 'Bls12381G2') {
+      throw new Error('Invalid key type for Bls12381G2');
+    }
+    const pk = decoded.key;
     try {
       return await bls.verify(signature, data, pk);
     } catch {

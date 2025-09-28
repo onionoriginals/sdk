@@ -24,14 +24,16 @@ describe('KeyManager', () => {
     const pub = Buffer.from('hello');
     const encoded = km.encodePublicKeyMultibase(pub, 'ES256K' as KeyType);
     const decoded = km.decodePublicKeyMultibase(encoded);
-    expect(decoded.key).toEqual(pub);
+    expect(decoded.key.equals(pub)).toBe(true);
+    expect(decoded.type).toBe('ES256K');
   });
 
-  test('decodePublicKeyMultibase supports base64url decoding paths', () => {
+  test('decodePublicKeyMultibase handles Ed25519 multikey values', () => {
     const pub = Buffer.from([0, 255, 1, 2, 3, 4, 5]);
     const encoded = km.encodePublicKeyMultibase(pub, 'Ed25519' as KeyType);
     const decoded = km.decodePublicKeyMultibase(encoded);
-    expect(decoded.key).toEqual(pub);
+    expect(decoded.key.equals(pub)).toBe(true);
+    expect(decoded.type).toBe('Ed25519');
   });
 
   test('rotateKeys updates DID document keys', async () => {
@@ -39,6 +41,23 @@ describe('KeyManager', () => {
     const pair: KeyPair = await km.generateKeyPair('ES256K' as KeyType);
     const rotated = await km.rotateKeys(didDoc, pair);
     expect(rotated.verificationMethod?.[0].publicKeyMultibase).toBe(pair.publicKey);
+    // Verify that multikey context is added when using Multikey verification method
+    expect(rotated['@context']).toContain('https://w3id.org/security/multikey/v1');
+    expect(rotated.verificationMethod?.[0].type).toBe('Multikey');
+  });
+
+  test('rotateKeys does not duplicate multikey context if already present', async () => {
+    const didDoc: DIDDocument = { 
+      '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'], 
+      id: 'did:peer:abc' 
+    };
+    const pair: KeyPair = await km.generateKeyPair('ES256K' as KeyType);
+    const rotated = await km.rotateKeys(didDoc, pair);
+    
+    // Count occurrences of multikey context
+    const contextCount = rotated['@context'].filter(c => c === 'https://w3id.org/security/multikey/v1').length;
+    expect(contextCount).toBe(1);
+    expect(rotated['@context']).toContain('https://w3id.org/security/multikey/v1');
   });
 
   test('recoverFromCompromise returns doc', async () => {
