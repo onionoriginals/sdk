@@ -1,5 +1,5 @@
 import { OriginalsSDK } from '../../src';
-import { VerifiableCredential, CredentialSubject } from '../../src/types';
+import { VerifiableCredential, CredentialSubject, Proof } from '../../src/types';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 import { p256 } from '@noble/curves/p256';
@@ -279,6 +279,94 @@ describe('CredentialManager local verify path without didManager', () => {
     const signed = await cm.signCredential(baseVC, skMb, pkMb);
     const ok = await cm.verifyCredential(signed);
     expect(ok).toBe(true);
+  });
+
+  test('signCredential is deterministic for reordered credentialSubject properties', async () => {
+    const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any);
+    const seed = new Uint8Array(32).fill(11);
+    const skMb = 'z' + Buffer.from(seed).toString('base64url');
+    const pk = await (ed25519 as any).getPublicKeyAsync(seed);
+    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const issuanceDate = '2024-01-01T00:00:00Z';
+
+    const credentialA: VerifiableCredential = {
+      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:ex',
+      issuanceDate,
+      credentialSubject: {
+        id: 'did:ex:subject',
+        role: 'member',
+        profile: {
+          nickname: 'alice',
+          stats: {
+            followers: 10,
+            posts: 3
+          }
+        }
+      }
+    } as any;
+
+    const credentialB: VerifiableCredential = {
+      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:ex',
+      issuanceDate,
+      credentialSubject: {
+        profile: {
+          stats: {
+            posts: 3,
+            followers: 10
+          },
+          nickname: 'alice'
+        },
+        role: 'member',
+        id: 'did:ex:subject'
+      }
+    } as any;
+
+    const signedA = await cm.signCredential(credentialA, skMb, pkMb);
+    const signedB = await cm.signCredential(credentialB, skMb, pkMb);
+
+    expect(signedA.proof?.proofValue).toEqual(signedB.proof?.proofValue);
+    await expect(cm.verifyCredential(signedA)).resolves.toBe(true);
+    await expect(cm.verifyCredential(signedB)).resolves.toBe(true);
+  });
+
+  test('verifyCredential succeeds when proof fields are reordered', async () => {
+    const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any);
+    const seed = new Uint8Array(32).fill(13);
+    const skMb = 'z' + Buffer.from(seed).toString('base64url');
+    const pk = await (ed25519 as any).getPublicKeyAsync(seed);
+    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+
+    const credential: VerifiableCredential = {
+      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:ex',
+      issuanceDate: '2024-01-01T00:00:00Z',
+      credentialSubject: {
+        id: 'did:ex:subject',
+        role: 'member'
+      }
+    } as any;
+
+    const signed = await cm.signCredential(credential, skMb, pkMb);
+    const proof = signed.proof as Proof;
+    const reorderedProof: Proof = {
+      proofValue: proof.proofValue,
+      verificationMethod: proof.verificationMethod!,
+      proofPurpose: proof.proofPurpose,
+      created: proof.created,
+      type: proof.type
+    };
+
+    const mutatedCredential: VerifiableCredential = {
+      ...signed,
+      proof: reorderedProof
+    } as any;
+
+    await expect(cm.verifyCredential(mutatedCredential)).resolves.toBe(true);
   });
 });
 

@@ -1,4 +1,27 @@
+import jsonld from 'jsonld';
 import { DIDDocument, VerifiableCredential } from '../types';
+
+type DocumentLoader = (url: string) => Promise<{
+  documentUrl: string;
+  document: any;
+  contextUrl: string | null;
+}>;
+
+const PRELOADED_CONTEXTS: Record<string, any> = {
+  'https://www.w3.org/2018/credentials/v1': { '@context': { '@version': 1.1 } },
+  'https://www.w3.org/ns/credentials/v2': { '@context': { '@version': 1.1 } },
+  'https://w3id.org/security/data-integrity/v2': { '@context': { '@version': 1.1 } }
+};
+
+const nodeDocumentLoader = jsonld.documentLoaders.node();
+
+const defaultDocumentLoader: DocumentLoader = async (url: string) => {
+  const preloaded = PRELOADED_CONTEXTS[url];
+  if (preloaded) {
+    return { documentUrl: url, document: preloaded, contextUrl: null };
+  }
+  return nodeDocumentLoader(url);
+};
 
 export function serializeDIDDocument(didDoc: DIDDocument): string {
   // Serialize to JSON-LD with proper context
@@ -30,11 +53,22 @@ export function deserializeCredential(data: string): VerifiableCredential {
   }
 }
 
-export function canonicalizeDocument(doc: any): string {
-  // Canonicalize document for signing (RDF Dataset Canonicalization)
-  // This is a simplified version - production should use proper RDF canonicalization
-  const sorted = JSON.stringify(doc, Object.keys(doc).sort());
-  return sorted;
+export async function canonicalizeDocument(
+  doc: any,
+  options: { documentLoader?: DocumentLoader } = {}
+): Promise<string> {
+  try {
+    return await jsonld.canonize(doc, {
+      algorithm: 'URDNA2015',
+      format: 'application/n-quads',
+      documentLoader: options.documentLoader ?? defaultDocumentLoader,
+      useNative: false,
+      rdfDirection: 'i18n-datatype'
+    } as any);
+  } catch (error: any) {
+    const message = error?.message ?? String(error);
+    throw new Error(`Failed to canonicalize document: ${message}`);
+  }
 }
 
 
