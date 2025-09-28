@@ -13,6 +13,11 @@ export interface ProvenanceChain {
     to: LayerType;
     timestamp: string;
     transactionId?: string;
+    inscriptionId?: string;
+    satoshi?: string;
+    commitTxId?: string;
+    revealTxId?: string;
+    feeRate?: number;
   }>;
   transfers: Array<{
     from: string;
@@ -49,7 +54,17 @@ export class OriginalsAsset {
     };
   }
 
-  async migrate(toLayer: LayerType): Promise<void> {
+  async migrate(
+    toLayer: LayerType,
+    details?: {
+      transactionId?: string;
+      inscriptionId?: string;
+      satoshi?: string;
+      commitTxId?: string;
+      revealTxId?: string;
+      feeRate?: number;
+    }
+  ): Promise<void> {
     // Handle migration between layers
     const validTransitions: Record<LayerType, LayerType[]> = {
       'did:peer': ['did:webvh', 'did:btco'],
@@ -63,7 +78,13 @@ export class OriginalsAsset {
     this.provenance.migrations.push({
       from: this.currentLayer,
       to: toLayer,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      transactionId: details?.transactionId,
+      inscriptionId: details?.inscriptionId,
+      satoshi: details?.satoshi,
+      commitTxId: details?.commitTxId,
+      revealTxId: details?.revealTxId,
+      feeRate: details?.feeRate
     });
     this.currentLayer = toLayer;
   }

@@ -33,5 +33,34 @@ export interface OrdinalsProvider {
   broadcastTransaction(txHexOrObj: unknown): Promise<string>;
   getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }>;
   estimateFee(blocks?: number): Promise<number>;
+  createInscription(params: {
+    data: Buffer;
+    contentType: string;
+    feeRate?: number;
+  }): Promise<{
+    inscriptionId: string;
+    revealTxId: string;
+    commitTxId?: string;
+    satoshi?: string;
+    txid?: string;
+    vout?: number;
+    blockHeight?: number;
+    content?: Buffer;
+    contentType?: string;
+    feeRate?: number;
+  }>;
+  transferInscription(
+    inscriptionId: string,
+    toAddress: string,
+    options?: { feeRate?: number }
+  ): Promise<{
+    txid: string;
+    vin: Array<{ txid: string; vout: number }>;
+    vout: Array<{ value: number; scriptPubKey: string; address?: string }>;
+    fee: number;
+    blockHeight?: number;
+    confirmations?: number;
+    satoshi?: string;
+  }>;
 }
 
