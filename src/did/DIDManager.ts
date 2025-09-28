@@ -21,36 +21,40 @@ export class DIDManager {
     }
     const keyPair = await keyManager.generateKeyPair(keyTypeToUse as any);
 
-    // Stable peer DID suffix derived from public key (truncated hash for readability)
-    const pub = keyPair.publicKey;
-    const pubBytes = multikey.decodePublicKey(pub).key;
-    const hash = await sha256Bytes(pubBytes);
-    const suffix = Array.from(hash)
-      .slice(0, 10)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-    const did = `did:peer:${suffix}`;
-
-    const vmId = `${did}#0`;
-    const document: DIDDocument = {
-      '@context': [
-        'https://www.w3.org/ns/did/v1',
-        'https://w3id.org/security/multikey/v1'
-      ],
-      id: did,
-      verificationMethod: [
+    // Use @aviarytech/did-peer to create a did:peer (variant 4 long-form for full VM+context)
+    const didPeerMod: any = await import('@aviarytech/did-peer');
+    const did: string = await didPeerMod.createNumAlgo4(
+      [
         {
-          id: vmId,
+          // type validated by the library; controller/id not required
           type: 'Multikey',
-          controller: did,
           publicKeyMultibase: keyPair.publicKey
         }
       ],
-      authentication: [vmId],
-      assertionMethod: [vmId]
-    };
+      undefined,
+      undefined
+    );
 
-    return document;
+    // Resolve to DID Document using the same library
+    const resolved: any = await didPeerMod.resolve(did);
+    // Ensure controller is set on VM entries for compatibility
+    if (resolved && Array.isArray(resolved.verificationMethod)) {
+      resolved.verificationMethod = resolved.verificationMethod.map((vm: any) => ({
+        controller: did,
+        ...vm
+      }));
+    }
+    // Ensure relationships exist and reference a VM
+    const vmIds: string[] = Array.isArray(resolved?.verificationMethod)
+      ? resolved.verificationMethod.map((vm: any) => vm.id).filter(Boolean)
+      : [];
+    if (!resolved.authentication || resolved.authentication.length === 0) {
+      if (vmIds.length > 0) resolved.authentication = [vmIds[0]];
+    }
+    if (!resolved.assertionMethod || resolved.assertionMethod.length === 0) {
+      resolved.assertionMethod = resolved.authentication || (vmIds.length > 0 ? [vmIds[0]] : []);
+    }
+    return resolved as DIDDocument;
   }
 
   async migrateToDIDWebVH(didDoc: DIDDocument, domain: string): Promise<DIDDocument> {
@@ -119,6 +123,14 @@ export class DIDManager {
 
   async resolveDID(did: string): Promise<DIDDocument | null> {
     try {
+      if (did.startsWith('did:peer:')) {
+        try {
+          const mod: any = await import('@aviarytech/did-peer');
+          const doc = await mod.resolve(did);
+          return doc as DIDDocument;
+        } catch {}
+        return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+      }
       if (did.startsWith('did:btco:') || did.startsWith('did:btco:test:') || did.startsWith('did:btco:sig:')) {
         const rpcUrl = this.config.bitcoinRpcUrl || 'http://localhost:3000';
         const network = this.config.network || 'mainnet';
