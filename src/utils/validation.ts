@@ -1,4 +1,5 @@
 import { DIDDocument, VerifiableCredential } from '../types';
+import { createHash } from 'crypto';
 
 export function validateDID(did: string): boolean {
   // Validate DID format according to W3C DID spec
@@ -29,6 +30,13 @@ export function validateCredential(vc: VerifiableCredential): boolean {
     return false;
   }
 
+  // Require VC v1 context presence
+  const contextValues = vc['@context'];
+  const hasVcV1 = contextValues.includes('https://www.w3.org/2018/credentials/v1');
+  if (!hasVcV1) {
+    return false;
+  }
+
   if (!vc.type || !Array.isArray(vc.type)) {
     return false;
   }
@@ -38,6 +46,21 @@ export function validateCredential(vc: VerifiableCredential): boolean {
   }
 
   if (!vc.issuer || (!vc.issuanceDate)) {
+    return false;
+  }
+
+  // issuer must be a DID string or an object with DID id
+  const issuerIsValidDid = (iss: any): boolean => {
+    if (typeof iss === 'string') return validateDID(iss);
+    if (iss && typeof iss.id === 'string') return validateDID(iss.id);
+    return false;
+  };
+  if (!issuerIsValidDid(vc.issuer as any)) {
+    return false;
+  }
+
+  // issuanceDate should be a valid ISO timestamp
+  if (typeof vc.issuanceDate !== 'string' || Number.isNaN(Date.parse(vc.issuanceDate))) {
     return false;
   }
 
@@ -64,16 +87,31 @@ export function validateDIDDocument(didDoc: DIDDocument): boolean {
       if (!vm.id || !vm.type || !vm.controller || !vm.publicKeyMultibase) {
         return false;
       }
+      // controller should be a valid DID
+      if (typeof vm.controller !== 'string' || !validateDID(vm.controller)) {
+        return false;
+      }
+      // multibase key presence: require base58-btc multibase indicator 'z'
+      if (typeof vm.publicKeyMultibase !== 'string' || !vm.publicKeyMultibase.startsWith('z')) {
+        return false;
+      }
+    }
+  }
+
+  // If controller array present on the DID Document, validate entries are DIDs
+  if (Array.isArray((didDoc as any).controller)) {
+    const ctrls = (didDoc as any).controller as string[];
+    if (!ctrls.every((c) => typeof c === 'string' && validateDID(c))) {
+      return false;
     }
   }
 
   return true;
 }
 
-export function hashResource(content: Buffer): string {
+export function hashResource(content: Uint8Array): string {
   // Generate SHA-256 hash
-  const crypto = require('crypto');
-  return crypto.createHash('sha256').update(content).digest('hex');
+  return createHash('sha256').update(content).digest('hex');
 }
 
 

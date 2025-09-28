@@ -4,6 +4,9 @@ import {
   VerifiableCredential, 
   LayerType 
 } from '../types';
+import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation';
+import { CredentialManager } from '../vc/CredentialManager';
+import { DIDManager } from '../did/DIDManager';
 
 export interface ProvenanceChain {
   createdAt: string;
@@ -107,8 +110,71 @@ export class OriginalsAsset {
     this.provenance.txid = transactionId;
   }
 
-  async verify(): Promise<boolean> {
-    return true;
+  async verify(deps?: {
+    didManager?: DIDManager;
+    credentialManager?: CredentialManager;
+    fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
+  }): Promise<boolean> {
+    try {
+      // 1) DID Document validation (structure + supported method via validateDID)
+      if (!validateDIDDocument(this.did)) {
+        return false;
+      }
+
+      // 2) Resources integrity
+      for (const res of this.resources) {
+        if (!res || typeof res.id !== 'string' || typeof res.type !== 'string' || typeof res.contentType !== 'string') {
+          return false;
+        }
+        if (typeof res.hash !== 'string' || !/[0-9a-f]+/i.test(res.hash)) {
+          return false;
+        }
+
+        // If inline content is present, verify by hashing it
+        if (typeof res.content === 'string') {
+          const data = Buffer.from(res.content, 'utf8');
+          const computed = hashResource(data);
+          if (computed !== res.hash) {
+            return false;
+          }
+          continue;
+        }
+
+        // If URL present and fetch is provided, attempt to fetch and hash
+        if (typeof res.url === 'string' && deps?.fetch) {
+          try {
+            const response = await deps.fetch(res.url);
+            const buf = Buffer.from(await response.arrayBuffer());
+            const computed = hashResource(buf);
+            if (computed !== res.hash) {
+              return false;
+            }
+          } catch {
+            // On fetch error, treat as unverifiable but do not fail the entire asset
+            // Fall back to structural validation only
+          }
+        }
+      }
+
+      // 3) Credentials validation
+      for (const cred of this.credentials) {
+        if (!validateCredential(cred)) {
+          return false;
+        }
+      }
+
+      // If a credentialManager with didManager is provided, verify each credential cryptographically
+      if (deps?.credentialManager && deps.credentialManager instanceof CredentialManager && deps?.didManager) {
+        for (const cred of this.credentials) {
+          const ok = await deps.credentialManager.verifyCredential(cred);
+          if (!ok) return false;
+        }
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private determineCurrentLayer(didId: string): LayerType {
