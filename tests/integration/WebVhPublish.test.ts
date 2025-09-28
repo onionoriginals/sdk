@@ -23,5 +23,19 @@ describe('WebVH publish end-to-end', () => {
 
     const resolved = await sdk.did.resolveDID(webBinding!);
     expect(resolved?.id).toBe(webBinding);
+
+    // Assert resources have stable URLs
+    expect(Array.isArray(published.resources)).toBe(true);
+    for (const r of published.resources) {
+      expect(typeof r.url).toBe('string');
+      expect((r.url as string).includes('.well-known/webvh/')).toBe(true);
+    }
+
+    // Assert a publication credential was attached
+    const creds = (published as any).credentials || [];
+    expect(Array.isArray(creds)).toBe(true);
+    expect(creds.length).toBeGreaterThan(0);
+    const hasPublication = creds.some((c: any) => Array.isArray(c.type) && (c.type.includes('ResourceMigrated') || c.type.includes('ResourceCreated')));
+    expect(hasPublication).toBe(true);
   });
 });
