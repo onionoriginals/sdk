@@ -3,33 +3,92 @@ import { BtcoDidResolver } from './BtcoDidResolver';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
 import { createBtcoDidDocument } from './createBtcoDidDocument';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter';
-import { resolveDID as resolveWebvh } from 'didwebvh-ts';
 import { multikey } from '../crypto/Multikey';
+import { KeyManager } from './KeyManager';
+import { sha256Bytes } from '../utils/hash';
 
 export class DIDManager {
   constructor(private config: OriginalsConfig) {}
 
   async createDIDPeer(resources: AssetResource[]): Promise<DIDDocument> {
-    return {
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:peer:' + Date.now()
-    };
+    // Generate a multikey keypair according to configured defaultKeyType
+    const keyManager = new KeyManager();
+    const desiredType = this.config.defaultKeyType || 'ES256K';
+    let keyTypeToUse = desiredType;
+    if (desiredType === 'ES256') {
+      // Fallback since ES256 is not yet supported by KeyManager.generateKeyPair
+      keyTypeToUse = 'Ed25519';
+    }
+    const keyPair = await keyManager.generateKeyPair(keyTypeToUse as any);
+
+    // Use @aviarytech/did-peer to create a did:peer (variant 4 long-form for full VM+context)
+    const didPeerMod: any = await import('@aviarytech/did-peer');
+    const did: string = await didPeerMod.createNumAlgo4(
+      [
+        {
+          // type validated by the library; controller/id not required
+          type: 'Multikey',
+          publicKeyMultibase: keyPair.publicKey
+        }
+      ],
+      undefined,
+      undefined
+    );
+
+    // Resolve to DID Document using the same library
+    const resolved: any = await didPeerMod.resolve(did);
+    // Ensure controller is set on VM entries for compatibility
+    if (resolved && Array.isArray(resolved.verificationMethod)) {
+      resolved.verificationMethod = resolved.verificationMethod.map((vm: any) => ({
+        controller: did,
+        ...vm
+      }));
+    }
+    // Ensure relationships exist and reference a VM
+    const vmIds: string[] = Array.isArray(resolved?.verificationMethod)
+      ? resolved.verificationMethod.map((vm: any) => vm.id).filter(Boolean)
+      : [];
+    if (!resolved.authentication || resolved.authentication.length === 0) {
+      if (vmIds.length > 0) resolved.authentication = [vmIds[0]];
+    }
+    if (!resolved.assertionMethod || resolved.assertionMethod.length === 0) {
+      resolved.assertionMethod = resolved.authentication || (vmIds.length > 0 ? [vmIds[0]] : []);
+    }
+    return resolved as DIDDocument;
   }
 
   async migrateToDIDWebVH(didDoc: DIDDocument, domain: string): Promise<DIDDocument> {
-    // Basic domain hardening: require valid hostname
-    if (!/^[a-z0-9.-]+$/i.test(domain) || domain.includes('..') || domain.startsWith('-') || domain.endsWith('-')) {
+    // Rigorous domain validation per RFC-like constraints
+    const normalized = String(domain || '').trim().toLowerCase();
+    const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+    const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
+    if (!domainRegex.test(normalized)) {
       throw new Error('Invalid domain');
     }
-    const slug = didDoc.id.split(':').pop() as string;
-    return { ...didDoc, id: `did:webvh:${domain}:${slug}` };
+
+    // Stable slug derived from original peer DID suffix (or last segment)
+    const parts = (didDoc.id || '').split(':');
+    const method = parts.slice(0, 2).join(':');
+    const originalSuffix = method === 'did:peer' ? parts.slice(2).join(':') : parts[parts.length - 1];
+    const slug = (originalSuffix || '')
+      .toString()
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]/g, '-')
+      .toLowerCase();
+
+    const migrated: DIDDocument = {
+      ...didDoc,
+      id: `did:webvh:${normalized}:${slug}`
+    };
+    return migrated;
   }
 
   async migrateToDIDBTCO(didDoc: DIDDocument, satoshi: string): Promise<DIDDocument> {
     if (!/^[0-9]+$/.test(String(satoshi))) {
       throw new Error('Invalid satoshi identifier');
     }
-    const network = this.config.network || 'mainnet';
+    const net = this.config.network || 'mainnet';
+    const network = (net === 'regtest' ? 'signet' : net) as any;
 
     // Try to carry over the first multikey VM if present
     const firstVm = (didDoc.verificationMethod && didDoc.verificationMethod[0]) as VerificationMethod | undefined;
@@ -64,6 +123,14 @@ export class DIDManager {
 
   async resolveDID(did: string): Promise<DIDDocument | null> {
     try {
+      if (did.startsWith('did:peer:')) {
+        try {
+          const mod: any = await import('@aviarytech/did-peer');
+          const doc = await mod.resolve(did);
+          return doc as DIDDocument;
+        } catch {}
+        return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+      }
       if (did.startsWith('did:btco:') || did.startsWith('did:btco:test:') || did.startsWith('did:btco:sig:')) {
         const rpcUrl = this.config.bitcoinRpcUrl || 'http://localhost:3000';
         const network = this.config.network || 'mainnet';
@@ -75,8 +142,11 @@ export class DIDManager {
       }
       if (did.startsWith('did:webvh:')) {
         try {
-          const result = await resolveWebvh(did);
-          if (result && result.doc) return result.doc as DIDDocument;
+          const mod: any = await import('didwebvh-ts');
+          if (mod && typeof mod.resolveDID === 'function') {
+            const result = await mod.resolveDID(did);
+            if (result && result.doc) return result.doc as DIDDocument;
+          }
         } catch {}
         return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
       }

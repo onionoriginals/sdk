@@ -14,6 +14,20 @@ declare module 'multiformats/bases/base64' {
 
 declare module 'jsonld';
 
+declare module 'didwebvh-ts' {
+  export function resolveDID(did: string): Promise<{ doc?: any } | null>;
+}
+
+declare module '@aviarytech/did-peer' {
+  export type IDIDDocument = any;
+  export type IDIDDocumentVerificationMethod = { id?: string; type: string; controller?: string; publicKeyMultibase?: string };
+  export function create(numalgo: number, authenticationKeys: IDIDDocumentVerificationMethod[], encryptionKeys?: IDIDDocumentVerificationMethod[], service?: any): Promise<string>;
+  export function createNumAlgo0(authenticationKey: IDIDDocumentVerificationMethod): Promise<string>;
+  export function createNumAlgo2(authenticationKeys: IDIDDocumentVerificationMethod[], encryptionKeys?: IDIDDocumentVerificationMethod[], service?: any[]): Promise<string>;
+  export function createNumAlgo4(authenticationKeys: IDIDDocumentVerificationMethod[], encryptionKeys?: IDIDDocumentVerificationMethod[], service?: any[]): Promise<string>;
+  export function resolve(did: string, repository?: any): Promise<IDIDDocument>;
+}
+
 // Minimal node globals for tests without @types/node
 declare const Buffer: any;
 

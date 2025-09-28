@@ -12,12 +12,37 @@ describe('DIDManager', () => {
     const didDoc = await sdk.did.createDIDPeer(resources);
     expect(didDoc.id.startsWith('did:peer:')).toBe(true);
     expect(didDoc['@context']).toBeDefined();
+    // Includes Multikey verification method
+    expect(Array.isArray(didDoc.verificationMethod)).toBe(true);
+    const vm = didDoc.verificationMethod![0];
+    expect(vm.type).toBe('Multikey');
+    expect(vm.publicKeyMultibase[0]).toBe('z');
+    const decoded = multikey.decodePublicKey(vm.publicKeyMultibase);
+    expect(decoded && decoded.key instanceof Uint8Array).toBe(true);
+    // Relationships reference by fragment
+    expect(didDoc.authentication).toContain(vm.id);
+    expect(didDoc.assertionMethod).toContain(vm.id);
   });
 
   test('migrateToDIDWebVH converts to did:webvh (expected to fail until implemented)', async () => {
     const didDoc: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:xyz' };
     const webDoc = await sdk.did.migrateToDIDWebVH(didDoc, 'example.com');
     expect(webDoc.id.startsWith('did:webvh:')).toBe(true);
+  });
+
+  test('migrateToDIDWebVH preserves VMs and services and stable slug', async () => {
+    const peer: DIDDocument = {
+      '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'],
+      id: 'did:peer:abc123',
+      verificationMethod: [{ id: 'did:peer:abc123#0', type: 'Multikey', controller: 'did:peer:abc123', publicKeyMultibase: multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519') }],
+      authentication: ['did:peer:abc123#0'],
+      assertionMethod: ['did:peer:abc123#0'],
+      service: [{ id: '#svc', type: 'Example', serviceEndpoint: 'https://api.example/svc' }]
+    };
+    const web = await sdk.did.migrateToDIDWebVH(peer, 'Example.COM');
+    expect(web.id).toBe('did:webvh:example.com:abc123');
+    expect(web.verificationMethod?.[0].publicKeyMultibase).toBe(peer.verificationMethod![0].publicKeyMultibase);
+    expect(web.service?.[0].id).toBe('#svc');
   });
 
   test('migrateToDIDBTCO converts to did:btco (expected to fail until implemented)', async () => {
