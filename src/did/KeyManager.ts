@@ -49,7 +49,11 @@ export class KeyManager {
                         };
                 }
 
-                throw new Error('Only ES256K and Ed25519 supported at this time');
+			// NOTE: ES256 is allowed in OriginalsConfig.defaultKeyType but is not yet
+			// implemented here. Callers should guard against requesting ES256 until
+			// P-256 support is added to KeyManager and the signing stack.
+			// TODO(keys): Add ES256 (P-256) generation and signing support.
+			throw new Error('Only ES256K and Ed25519 supported at this time');
         }
 
 	async rotateKeys(didDoc: DIDDocument, newKeyPair: KeyPair): Promise<DIDDocument> {

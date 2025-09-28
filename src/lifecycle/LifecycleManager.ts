@@ -80,6 +80,12 @@ export class LifecycleManager {
       const unsigned = await this.credentialManager.createResourceCredential(type, subject, issuer);
 
       // Sign with a fresh key bound to the issuer DID (local signature acceptable for tests)
+      // NOTE: OriginalsConfig.defaultKeyType may be 'ES256', but KeyManager.generateKeyPair
+      // currently supports only 'ES256K' and 'Ed25519'. In such configurations this block
+      // may fail and credential issuance will be skipped by the surrounding try/catch.
+      // TODO(webvh-pub): Guard against unsupported key types or reuse a configured issuer
+      // verification method instead of generating an ephemeral key here.
+      // TODO(webvh-pub): Prefer DID-managed keys via DIDManager/Issuer wiring when available.
       const km = new KeyManager();
       const kp = await km.generateKeyPair(this.config.defaultKeyType || 'ES256K');
       const verificationMethod = `${issuer}#keys-1`;
