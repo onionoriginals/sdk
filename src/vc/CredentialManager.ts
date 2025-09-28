@@ -102,7 +102,7 @@ export class CredentialManager {
     const digest = Buffer.concat([hProof, hCred]);
     const signer = this.getSigner();
     try {
-      const resolvedKey = await this.resolveVerificationMethodMultibase(verificationMethod, proof);
+      const resolvedKey = await this.resolveVerificationMethodMultibase(verificationMethod);
       if (!resolvedKey) {
         return false;
       }
@@ -156,14 +156,8 @@ export class CredentialManager {
   }
 
   private async resolveVerificationMethodMultibase(
-    verificationMethod: string,
-    proof: Proof
+    verificationMethod: string
   ): Promise<string | null> {
-    const proofAny: any = proof;
-    if (typeof proofAny?.publicKeyMultibase === 'string') {
-      return proofAny.publicKeyMultibase;
-    }
-
     if (typeof verificationMethod === 'string' && verificationMethod.startsWith('z')) {
       return verificationMethod;
     }
