@@ -8,6 +8,7 @@ import {
 export interface ProvenanceChain {
   createdAt: string;
   creator: string;
+  txid?: string;
   migrations: Array<{
     from: LayerType;
     to: LayerType;
@@ -86,6 +87,9 @@ export class OriginalsAsset {
       revealTxId: details?.revealTxId,
       feeRate: details?.feeRate
     });
+    if (details?.transactionId) {
+      this.provenance.txid = details.transactionId;
+    }
     this.currentLayer = toLayer;
   }
 
@@ -100,6 +104,7 @@ export class OriginalsAsset {
       timestamp: new Date().toISOString(),
       transactionId
     });
+    this.provenance.txid = transactionId;
   }
 
   async verify(): Promise<boolean> {
