@@ -132,6 +132,66 @@ describe('CredentialManager', () => {
 import { CredentialManager } from '../../src/vc/CredentialManager';
 import { DIDManager } from '../../src/did/DIDManager';
 
+describe('CredentialManager verification method resolution', () => {
+  const baseConfig = { network: 'mainnet', defaultKeyType: 'ES256K' } as any;
+  const credentialTemplate: VerifiableCredential = {
+    '@context': ['https://www.w3.org/2018/credentials/v1'],
+    type: ['VerifiableCredential', 'ResourceCreated'],
+    issuer: 'did:example:issuer',
+    issuanceDate: new Date().toISOString(),
+    credentialSubject: { id: 'did:example:subject' }
+  } as any;
+
+  test('resolves DID verificationMethod to multibase key material', async () => {
+    const signingManager = new CredentialManager(baseConfig);
+    const sk = secp256k1.utils.randomPrivateKey();
+    const pk = secp256k1.getPublicKey(sk, true);
+    const skMb = 'z' + Buffer.from(sk).toString('base64url');
+    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const verificationMethod = 'did:example:123#key-1';
+
+    const signed = await signingManager.signCredential(credentialTemplate, skMb, verificationMethod);
+
+    const dm = new DIDManager(baseConfig);
+    jest.spyOn(dm, 'resolveDID').mockResolvedValue({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:example:123',
+      verificationMethod: [
+        {
+          id: verificationMethod,
+          type: 'Multikey',
+          controller: 'did:example:123',
+          publicKeyMultibase: pkMb
+        }
+      ]
+    } as any);
+
+    const verifyingManager = new CredentialManager(baseConfig, dm);
+    await expect(verifyingManager.verifyCredential(signed)).resolves.toBe(true);
+  });
+
+  test('falls back to proof.publicKeyMultibase when DID resolution lacks key material', async () => {
+    const signingManager = new CredentialManager(baseConfig);
+    const sk = secp256k1.utils.randomPrivateKey();
+    const pk = secp256k1.getPublicKey(sk, true);
+    const skMb = 'z' + Buffer.from(sk).toString('base64url');
+    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const verificationMethod = 'did:example:456#key-1';
+
+    const signed = await signingManager.signCredential(credentialTemplate, skMb, verificationMethod);
+    (signed.proof as any).publicKeyMultibase = pkMb;
+
+    const dm = new DIDManager(baseConfig);
+    jest.spyOn(dm, 'resolveDID').mockResolvedValue({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:example:456'
+    } as any);
+
+    const verifyingManager = new CredentialManager(baseConfig, dm);
+    await expect(verifyingManager.verifyCredential(signed)).resolves.toBe(true);
+  });
+});
+
 describe('CredentialManager verify with didManager present but legacy path', () => {
   test('verifyCredential returns false when legacy proof invalid and didManager present', async () => {
     const dm = new DIDManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
