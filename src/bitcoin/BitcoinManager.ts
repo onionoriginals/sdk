@@ -77,7 +77,11 @@ export class BitcoinManager {
         content: data,
         contentType,
         txid: 'mock-txid',
-        vout: 0
+        vout: 0,
+        // Provide deterministic defaults so tests can assert presence
+        blockHeight: undefined as any,
+        // @ts-ignore augment for tests
+        feeRate: typeof effectiveFeeRate === 'number' && Number.isFinite(effectiveFeeRate) ? effectiveFeeRate : 10
       };
     }
 

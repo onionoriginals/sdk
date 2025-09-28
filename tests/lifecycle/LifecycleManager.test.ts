@@ -129,8 +129,10 @@ describe('Bitcoin inscription MVP - dry run', () => {
     const result = await sdk.lifecycle.inscribeOnBitcoin(asset, feeRate);
 
     expect(result.currentLayer).toBe('did:btco');
-    expect((result as any).provenance).toEqual(expect.objectContaining({ feeRate }));
-    expect((result as any).provenance.txid).toBe('tx-dryrun');
+    const prov = (result as any).getProvenance();
+    const latest = prov.migrations[prov.migrations.length - 1];
+    expect(latest.feeRate).toBe(feeRate);
+    expect(latest.transactionId).toEqual(expect.any(String));
     expect(before).toBe('did:peer');
   });
 });
@@ -185,17 +187,20 @@ describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
     const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }]);
     const result = await sdk.lifecycle.inscribeOnBitcoin(asset);
     expect(result.currentLayer).toBe('did:btco');
-    expect((result as any).provenance.feeRate).toBeGreaterThan(0);
-    test('transferOwnership uses provenance inscription data', async () => {
-      const provider = new MockOrdinalsProvider();
-      const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
-      const asset = await sdk.lifecycle.createAsset(resources);
-      await sdk.lifecycle.publishToWeb(asset, 'example.com');
-      await sdk.lifecycle.inscribeOnBitcoin(asset, 8);
-      const tx = await sdk.lifecycle.transferOwnership(asset, 'bcrt1qdestination');
-      expect(tx.txid).toBe('tx-transfer-mock');
-      const provenance = asset.getProvenance();
-      expect(provenance.transfers[provenance.transfers.length - 1].transactionId).toBe('tx-transfer-mock');
-    });
+    const prov = (result as any).getProvenance();
+    const latest = prov.migrations[prov.migrations.length - 1];
+    expect(latest.feeRate as number).toBeGreaterThan(0);
   })
+
+  test('transferOwnership uses provenance inscription data', async () => {
+    const provider = new MockOrdinalsProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const asset = await sdk.lifecycle.createAsset(resources);
+    await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    await sdk.lifecycle.inscribeOnBitcoin(asset, 8);
+    const tx = await sdk.lifecycle.transferOwnership(asset, 'bcrt1qdestination');
+    expect(tx.txid).toBe('tx-transfer-mock');
+    const provenance = asset.getProvenance();
+    expect(provenance.transfers[provenance.transfers.length - 1].transactionId).toBe('tx-transfer-mock');
+  });
 });

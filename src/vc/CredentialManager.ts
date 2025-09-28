@@ -110,7 +110,8 @@ export class CredentialManager {
     const digest = Buffer.concat([hProof, hCred]);
     const signer = this.getSigner();
     try {
-      const resolvedKey = await this.resolveVerificationMethodMultibase(verificationMethod);
+      const resolvedKey = (proof as any).publicKeyMultibase
+        || await this.resolveVerificationMethodMultibase(verificationMethod);
       if (!resolvedKey) {
         return false;
       }

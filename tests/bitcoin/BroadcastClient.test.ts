@@ -1,5 +1,4 @@
 import { BroadcastClient } from '../../src/bitcoin/BroadcastClient';
-import { expect } from '@jest/globals';
 
 // Ensure Jest types are available
 declare const expect: any;

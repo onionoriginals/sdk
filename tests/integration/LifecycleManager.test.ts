@@ -2,7 +2,6 @@
 
 /** Inlined from LifecycleManager.btco.integration.part.ts */
 import { OriginalsSDK } from '../../src';
-import { expect } from '@jest/globals';
 
 // Ensure Jest types are available
 declare const expect: any;
@@ -15,6 +14,8 @@ describe('Integration: Lifecycle inscribe updates provenance and btco layer', ()
     ]);
     const updated = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
     expect(updated.currentLayer).toBe('did:btco');
-    expect((updated as any).provenance).toEqual(expect.objectContaining({ txid: expect.any(String) }));
+    const prov = (updated as any).getProvenance();
+    const latest = prov.migrations[prov.migrations.length - 1];
+    expect(latest.transactionId).toEqual(expect.any(String));
   });
 });

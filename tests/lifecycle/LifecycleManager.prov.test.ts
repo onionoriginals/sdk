@@ -7,7 +7,9 @@ describe('LifecycleManager provenance fallback', () => {
     // ensure provenance exists but is empty (migrations/transfers arrays present)
     (asset as any).provenance = { createdAt: new Date().toISOString(), creator: asset.id, migrations: [], transfers: [] };
     const updated = await sdk.lifecycle.inscribeOnBitcoin(asset);
-    expect((updated as any).provenance.txid).toBeDefined();
-    expect((updated as any).provenance.feeRate).toBeGreaterThan(0);
+    const prov = (updated as any).getProvenance();
+    const latest = prov.migrations[prov.migrations.length - 1];
+    expect(latest.transactionId).toBeDefined();
+    expect(latest.feeRate as number).toBeGreaterThan(0);
   });
 });
