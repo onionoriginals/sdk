@@ -1,0 +1,23 @@
+{
+  "@context": {
+    "@version": 1.1,
+    "id": "@id",
+    "type": "@type",
+    "VerifiableCollectible": "https://ordinals.plus/vocab/v1#VerifiableCollectible",
+    "VerifiableCollectibleCredential": "https://ordinals.plus/vocab/v1#VerifiableCollectibleCredential",
+    "VerifiableCollectibleTrait": "https://ordinals.plus/vocab/v1#VerifiableCollectibleTrait",
+    "VerifiableCollectibleTraitCredential": "https://ordinals.plus/vocab/v1#VerifiableCollectibleTraitCredential",
+    "CuratedCollection": "https://ordinals.plus/vocab/v1#CuratedCollection",
+    "CuratedCollectionCredential": "https://ordinals.plus/vocab/v1#CuratedCollectionCredential",
+    "attributes": {
+      "@id": "https://ordinals.plus/vocab/v1#attributes",
+      "@container": "@set"
+    },
+    "items": {
+      "@id": "https://ordinals.plus/vocab/v1#items",
+      "@container": "@set"
+    },
+    "traitType": "https://ordinals.plus/vocab/v1#traitType",
+    "value": "https://ordinals.plus/vocab/v1#traitValue"
+  }
+}
