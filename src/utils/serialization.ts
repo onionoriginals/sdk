@@ -1,4 +1,44 @@
+import jsonld from 'jsonld';
 import { DIDDocument, VerifiableCredential } from '../types';
+
+type DocumentLoader = (url: string) => Promise<{
+  documentUrl: string;
+  document: any;
+  contextUrl: string | null;
+}>;
+
+// Import context documents from src/contexts
+import credentialsV1Context from '../contexts/credentials-v1.json';
+import credentialsV2Context from '../contexts/credentials-v2.json';
+import dataIntegrityV2Context from '../contexts/data-integrity-v2.json';
+import didsContext from '../contexts/dids.json';
+import ed255192020Context from '../contexts/ed255192020.json';
+import ordinalsContext from '../contexts/ordinals-plus.json';
+import originalsContext from '../contexts/originals.json';
+
+// Full context documents for proper canonicalization
+const PRELOADED_CONTEXTS: Record<string, any> = {
+  // W3C and standard contexts
+  'https://www.w3.org/2018/credentials/v1': credentialsV1Context,
+  'https://www.w3.org/ns/credentials/v2': credentialsV2Context,
+  'https://w3id.org/security/data-integrity/v2': dataIntegrityV2Context,
+  'https://www.w3.org/ns/did/v1': didsContext,
+  'https://w3id.org/security/suites/ed25519-2020/v1': ed255192020Context,
+  
+  // Custom contexts
+  'https://ordinals.plus/vocab/v1': ordinalsContext,
+  'https://originals.build/context': originalsContext
+};
+
+const nodeDocumentLoader = jsonld.documentLoaders.node();
+
+const defaultDocumentLoader: DocumentLoader = async (url: string) => {
+  const preloaded = PRELOADED_CONTEXTS[url];
+  if (preloaded) {
+    return { documentUrl: url, document: preloaded, contextUrl: null };
+  }
+  return nodeDocumentLoader(url);
+};
 
 export function serializeDIDDocument(didDoc: DIDDocument): string {
   // Serialize to JSON-LD with proper context
@@ -30,11 +70,23 @@ export function deserializeCredential(data: string): VerifiableCredential {
   }
 }
 
-export function canonicalizeDocument(doc: any): string {
-  // Canonicalize document for signing (RDF Dataset Canonicalization)
-  // This is a simplified version - production should use proper RDF canonicalization
-  const sorted = JSON.stringify(doc, Object.keys(doc).sort());
-  return sorted;
+export async function canonicalizeDocument(
+  doc: any,
+  options: { documentLoader?: DocumentLoader } = {}
+): Promise<string> {
+  try {
+    return await jsonld.canonize(doc, {
+      algorithm: 'URDNA2015',
+      format: 'application/n-quads',
+      documentLoader: options.documentLoader ?? defaultDocumentLoader,
+      useNative: false,
+      rdfDirection: 'i18n-datatype',
+      safe: false  // Disable safe mode to allow custom contexts
+    } as any);
+  } catch (error: any) {
+    const message = error?.message ?? String(error);
+    throw new Error(`Failed to canonicalize document: ${message}`);
+  }
 }
 
 

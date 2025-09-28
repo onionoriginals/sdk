@@ -115,6 +115,9 @@ export class LifecycleManager {
     const bm = new BitcoinManager(this.config);
     // We need an inscription identifier; in this simplified scaffold, derive from DID
     const didId = asset.id;
+    if (!didId) {
+      throw new Error('Not implemented');
+    }
     const satoshi = didId.startsWith('did:btco:') ? didId.split(':')[2] : '0';
     // Fake an inscription reference minimal for transfer; in a real impl we'd resolve via OrdinalsClient
     const inscription = {

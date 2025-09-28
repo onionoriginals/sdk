@@ -95,10 +95,18 @@ export class CredentialManager {
 
     const proofSansValue = { ...proof } as any;
     delete proofSansValue.proofValue;
-    const c14nProof = canonicalizeDocument(proofSansValue);
-    const c14nCred = canonicalizeDocument({ ...credential, proof: undefined } as any);
-    const hProof = Buffer.from(sha256(Buffer.from(c14nProof)));
-    const hCred = Buffer.from(sha256(Buffer.from(c14nCred)));
+    const proofInput: any = { ...proofSansValue };
+    const credentialContext = (credential as any)['@context'];
+    if (credentialContext && !proofInput['@context']) {
+      proofInput['@context'] = credentialContext;
+    }
+    const unsignedCredential: any = { ...credential };
+    delete unsignedCredential.proof;
+
+    const c14nProof = await canonicalizeDocument(proofInput);
+    const c14nCred = await canonicalizeDocument(unsignedCredential);
+    const hProof = Buffer.from(sha256(Buffer.from(c14nProof, 'utf8')));
+    const hCred = Buffer.from(sha256(Buffer.from(c14nCred, 'utf8')));
     const digest = Buffer.concat([hProof, hCred]);
     const signer = this.getSigner();
     try {
@@ -132,10 +140,18 @@ export class CredentialManager {
     // Construct canonical digest including provided proof sans proofValue
     const proofSansValue = { ...proofBase } as any;
     delete proofSansValue.proofValue;
-    const c14nProof = canonicalizeDocument(proofSansValue);
-    const c14nCred = canonicalizeDocument({ ...credential, proof: undefined } as any);
-    const hProof = Buffer.from(sha256(Buffer.from(c14nProof)));
-    const hCred = Buffer.from(sha256(Buffer.from(c14nCred)));
+    const proofInput: any = { ...proofSansValue };
+    const credentialContext = (credential as any)['@context'];
+    if (credentialContext && !proofInput['@context']) {
+      proofInput['@context'] = credentialContext;
+    }
+    const unsignedCredential: any = { ...credential };
+    delete unsignedCredential.proof;
+
+    const c14nProof = await canonicalizeDocument(proofInput);
+    const c14nCred = await canonicalizeDocument(unsignedCredential);
+    const hProof = Buffer.from(sha256(Buffer.from(c14nProof, 'utf8')));
+    const hCred = Buffer.from(sha256(Buffer.from(c14nCred, 'utf8')));
     const digest = Buffer.concat([hProof, hCred]);
     const signer = this.getSigner();
     const sig = await signer.sign(Buffer.from(digest), privateKeyMultibase);

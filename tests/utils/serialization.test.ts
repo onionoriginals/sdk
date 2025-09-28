@@ -15,12 +15,50 @@ describe('serialization utils', () => {
     expect(round).toEqual(vc);
   });
 
-  test('canonicalizeDocument sorts keys', () => {
-    const obj: any = { b: 2, a: 1, c: 3 };
-    const canon = canonicalizeDocument(obj);
-    // In our simplified implementation, JSON.stringify with sorted keys should place a,b,c in order
-    expect(canon.indexOf('a')).toBeLessThan(canon.indexOf('b'));
-    expect(canon.indexOf('b')).toBeLessThan(canon.indexOf('c'));
+  test('canonicalizeDocument normalizes nested structures deterministically', async () => {
+    const context = {
+      '@version': 1.1,
+      id: '@id',
+      type: '@type',
+      name: 'https://schema.org/name',
+      details: {
+        '@id': 'https://example.org/details',
+        '@context': {
+          '@version': 1.1,
+          count: 'https://example.org/count',
+          tags: {
+            '@id': 'https://example.org/tags',
+            '@container': '@set'
+          }
+        }
+      }
+    };
+
+    const docA = {
+      '@context': context,
+      id: 'urn:example:1',
+      type: ['ExampleCredential'],
+      name: 'Sample',
+      details: {
+        count: 2,
+        tags: ['b', 'a']
+      }
+    };
+
+    const docB = {
+      name: 'Sample',
+      details: {
+        tags: ['a', 'b'],
+        count: 2
+      },
+      type: ['ExampleCredential'],
+      id: 'urn:example:1',
+      '@context': context
+    };
+
+    const canonA = await canonicalizeDocument(docA);
+    const canonB = await canonicalizeDocument(docB);
+    expect(canonA).toEqual(canonB);
   });
 
   test('deserializeDIDDocument throws on invalid JSON', () => {

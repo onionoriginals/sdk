@@ -1,6 +1,9 @@
 import { BroadcastClient } from '../../src/bitcoin/BroadcastClient';
 import { expect } from '@jest/globals';
 
+// Ensure Jest types are available
+declare const expect: any;
+
 describe('BroadcastClient', () => {
   test('broadcastIdempotent deduplicates by key', async () => {
     const broadcaster = jest.fn(async (hex: string) => 'txid-1');

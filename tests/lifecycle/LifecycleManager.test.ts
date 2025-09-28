@@ -2,6 +2,9 @@ import { OriginalsSDK } from '../../src';
 import { expect } from '@jest/globals';
 import { AssetResource } from '../../src/types';
 
+// Ensure Jest types are available
+declare const expect: any;
+
 const resources: AssetResource[] = [
   {
     id: 'res1',
