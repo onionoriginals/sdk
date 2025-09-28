@@ -18,10 +18,7 @@ export class BitcoinManager {
   }
 
   private async resolveFeeRate(targetBlocks = 1, provided?: number): Promise<number | undefined> {
-    if (typeof provided === 'number' && Number.isFinite(provided) && provided > 0) {
-      return provided;
-    }
-
+    // 1) Prefer external fee oracle
     if (this.feeOracle) {
       try {
         const estimated = await this.feeOracle.estimateFeeRate(targetBlocks);
@@ -41,6 +38,7 @@ export class BitcoinManager {
       }
     }
 
+    // 2) Fallback to ordinals provider if present
     if (this.ord) {
       try {
         const estimated = await this.ord.estimateFee(targetBlocks);
@@ -60,11 +58,16 @@ export class BitcoinManager {
       }
     }
 
-    return provided;
+    // 3) If caller provided a valid non-zero fee rate, use it as last resort
+    if (typeof provided === 'number' && Number.isFinite(provided) && provided > 0) {
+      return provided;
+    }
+
+    return undefined;
   }
 
   async inscribeData(
-    data: Buffer,
+    data: any,
     contentType: string,
     feeRate?: number
   ): Promise<OrdinalsInscription> {
@@ -106,6 +109,15 @@ export class BitcoinManager {
       satoshi = (await this.getSatoshiFromInscription(creation.inscriptionId)) ?? '';
     }
 
+    let recordedFeeRate: number | undefined;
+    if (this.feeOracle) {
+      recordedFeeRate = effectiveFeeRate;
+    } else if (typeof feeRate === 'number' && Number.isFinite(feeRate) && feeRate > 0) {
+      recordedFeeRate = feeRate;
+    } else {
+      recordedFeeRate = creation.feeRate ?? effectiveFeeRate;
+    }
+
     const inscription: OrdinalsInscription & {
       revealTxId?: string;
       commitTxId?: string;
@@ -120,7 +132,7 @@ export class BitcoinManager {
       blockHeight: creation.blockHeight,
       revealTxId: creation.revealTxId,
       commitTxId: creation.commitTxId,
-      feeRate: creation.feeRate ?? effectiveFeeRate
+      feeRate: recordedFeeRate
     };
 
     return inscription;
