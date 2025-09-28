@@ -134,7 +134,8 @@ export class OriginalsAsset {
         if (typeof res.content === 'string') {
           const data = Buffer.from(res.content, 'utf8');
           const computed = hashResource(data);
-          if (computed !== res.hash) {
+          const expected = (res.hash || '').toLowerCase();
+          if (computed.toLowerCase() !== expected) {
             return false;
           }
           continue;
@@ -146,7 +147,8 @@ export class OriginalsAsset {
             const response = await deps.fetch(res.url);
             const buf = Buffer.from(await response.arrayBuffer());
             const computed = hashResource(buf);
-            if (computed !== res.hash) {
+            const expected = (res.hash || '').toLowerCase();
+            if (computed.toLowerCase() !== expected) {
               return false;
             }
           } catch {
