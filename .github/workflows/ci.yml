@@ -1,6 +1,49 @@
 name: CI
 
 on:
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  tests:
+    name: Tests pass
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies (bun)
+        run: bun install
+
+      - name: Run tests
+        run: bun run test
+
+  coverage:
+    name: Coverage meets thresholds
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies (bun)
+        run: bun install
+
+      - name: Run tests with coverage
+        run: bun run test:ci
+
+name: CI
+
+on:
   push:
     branches:
       - "**"
