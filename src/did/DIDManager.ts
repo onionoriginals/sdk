@@ -3,33 +3,88 @@ import { BtcoDidResolver } from './BtcoDidResolver';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
 import { createBtcoDidDocument } from './createBtcoDidDocument';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter';
-import { resolveDID as resolveWebvh } from 'didwebvh-ts';
 import { multikey } from '../crypto/Multikey';
+import { KeyManager } from './KeyManager';
+import { sha256Bytes } from '../utils/hash';
 
 export class DIDManager {
   constructor(private config: OriginalsConfig) {}
 
   async createDIDPeer(resources: AssetResource[]): Promise<DIDDocument> {
-    return {
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:peer:' + Date.now()
+    // Generate a multikey keypair according to configured defaultKeyType
+    const keyManager = new KeyManager();
+    const desiredType = this.config.defaultKeyType || 'ES256K';
+    let keyTypeToUse = desiredType;
+    if (desiredType === 'ES256') {
+      // Fallback since ES256 is not yet supported by KeyManager.generateKeyPair
+      keyTypeToUse = 'Ed25519';
+    }
+    const keyPair = await keyManager.generateKeyPair(keyTypeToUse as any);
+
+    // Stable peer DID suffix derived from public key (truncated hash for readability)
+    const pub = keyPair.publicKey;
+    const pubBytes = multikey.decodePublicKey(pub).key;
+    const hash = await sha256Bytes(pubBytes);
+    const suffix = Array.from(hash)
+      .slice(0, 10)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    const did = `did:peer:${suffix}`;
+
+    const vmId = `${did}#0`;
+    const document: DIDDocument = {
+      '@context': [
+        'https://www.w3.org/ns/did/v1',
+        'https://w3id.org/security/multikey/v1'
+      ],
+      id: did,
+      verificationMethod: [
+        {
+          id: vmId,
+          type: 'Multikey',
+          controller: did,
+          publicKeyMultibase: keyPair.publicKey
+        }
+      ],
+      authentication: [vmId],
+      assertionMethod: [vmId]
     };
+
+    return document;
   }
 
   async migrateToDIDWebVH(didDoc: DIDDocument, domain: string): Promise<DIDDocument> {
-    // Basic domain hardening: require valid hostname
-    if (!/^[a-z0-9.-]+$/i.test(domain) || domain.includes('..') || domain.startsWith('-') || domain.endsWith('-')) {
+    // Rigorous domain validation per RFC-like constraints
+    const normalized = String(domain || '').trim().toLowerCase();
+    const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+    const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
+    if (!domainRegex.test(normalized)) {
       throw new Error('Invalid domain');
     }
-    const slug = didDoc.id.split(':').pop() as string;
-    return { ...didDoc, id: `did:webvh:${domain}:${slug}` };
+
+    // Stable slug derived from original peer DID suffix (or last segment)
+    const parts = (didDoc.id || '').split(':');
+    const method = parts.slice(0, 2).join(':');
+    const originalSuffix = method === 'did:peer' ? parts.slice(2).join(':') : parts[parts.length - 1];
+    const slug = (originalSuffix || '')
+      .toString()
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]/g, '-')
+      .toLowerCase();
+
+    const migrated: DIDDocument = {
+      ...didDoc,
+      id: `did:webvh:${normalized}:${slug}`
+    };
+    return migrated;
   }
 
   async migrateToDIDBTCO(didDoc: DIDDocument, satoshi: string): Promise<DIDDocument> {
     if (!/^[0-9]+$/.test(String(satoshi))) {
       throw new Error('Invalid satoshi identifier');
     }
-    const network = this.config.network || 'mainnet';
+    const net = this.config.network || 'mainnet';
+    const network = (net === 'regtest' ? 'signet' : net) as any;
 
     // Try to carry over the first multikey VM if present
     const firstVm = (didDoc.verificationMethod && didDoc.verificationMethod[0]) as VerificationMethod | undefined;
@@ -75,8 +130,11 @@ export class DIDManager {
       }
       if (did.startsWith('did:webvh:')) {
         try {
-          const result = await resolveWebvh(did);
-          if (result && result.doc) return result.doc as DIDDocument;
+          const mod: any = await import('didwebvh-ts');
+          if (mod && typeof mod.resolveDID === 'function') {
+            const result = await mod.resolveDID(did);
+            if (result && result.doc) return result.doc as DIDDocument;
+          }
         } catch {}
         return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
       }

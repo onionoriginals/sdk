@@ -34,6 +34,9 @@ describe('DIDManager additional branches', () => {
     const vm = pubDoc.verificationMethod![0];
     const doc = await dm.migrateToDIDBTCO({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:webvh:x', verificationMethod: [vm] } as any, '456');
     expect(doc.verificationMethod?.[0].publicKeyMultibase).toBeDefined();
+    // Preserve service endpoints if provided
+    const doc2 = await dm.migrateToDIDBTCO({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:webvh:x', verificationMethod: [vm], service: [{ id: '#s', type: 'X', serviceEndpoint: 'u' }] } as any, '789');
+    expect(doc2.service?.[0].id).toBe('#s');
   });
 });
 

@@ -14,6 +14,10 @@ declare module 'multiformats/bases/base64' {
 
 declare module 'jsonld';
 
+declare module 'didwebvh-ts' {
+  export function resolveDID(did: string): Promise<{ doc?: any } | null>;
+}
+
 // Minimal node globals for tests without @types/node
 declare const Buffer: any;
 
