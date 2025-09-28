@@ -57,7 +57,7 @@ describe('Signer classes', () => {
         toCompactRawBytes: () => bytes
       } as any);
       const sig = await signer.sign(data, secpPrivMb(sk));
-      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+      expect(Buffer.from(sig)).toEqual(Buffer.from(bytes));
     });
 
     test('sign handles object with toRawBytes()', async () => {
@@ -68,7 +68,7 @@ describe('Signer classes', () => {
         toRawBytes: () => bytes
       } as any);
       const sig = await signer.sign(data, secpPrivMb(sk));
-      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+      expect(Buffer.from(sig)).toEqual(Buffer.from(bytes));
     });
 
     test('sign handles fallback via new Uint8Array(sigAny)', async () => {
@@ -129,7 +129,7 @@ describe('Signer classes', () => {
         toCompactRawBytes: () => bytes
       } as any);
       const sig = await signer.sign(data, p256PrivMb(sk));
-      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+      expect(Buffer.from(sig)).toEqual(Buffer.from(bytes));
     });
 
     test('sign handles object with toRawBytes()', async () => {
@@ -140,7 +140,7 @@ describe('Signer classes', () => {
         toRawBytes: () => bytes
       } as any);
       const sig = await signer.sign(data, p256PrivMb(sk));
-      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+      expect(Buffer.from(sig)).toEqual(Buffer.from(bytes));
     });
 
     test('sign handles direct Uint8Array return', async () => {
@@ -149,7 +149,7 @@ describe('Signer classes', () => {
       const bytes = new Uint8Array(64).fill(21);
       jest.spyOn(p256, 'sign').mockReturnValue(bytes as any);
       const sig = await signer.sign(data, p256PrivMb(sk));
-      expect(sig.equals(Buffer.from(bytes))).toBe(true);
+      expect(Buffer.from(sig)).toEqual(Buffer.from(bytes));
     });
 
     test('sign handles fallback via new Uint8Array(sigAny)', async () => {

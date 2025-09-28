@@ -44,10 +44,12 @@ export class UtxoSelectionError extends Error {
 export function selectUtxos(utxos: Utxo[], options: SelectionOptions): SelectionResult {
   const { feeRateSatsPerVb, targetAmountSats, allowLocked, forbidInscriptionBearingInputs, feeEstimate } = options;
   if (feeRateSatsPerVb <= 0) {
-    throw new UtxoSelectionError('TOO_LOW_FEE', 'Fee rate must be positive');
+    const err = new UtxoSelectionError('TOO_LOW_FEE', 'TOO_LOW_FEE');
+    throw err;
   }
   if (targetAmountSats < DUST_LIMIT_SATS) {
-    throw new UtxoSelectionError('DUST_OUTPUT', 'Target amount below dust limit');
+    const err = new UtxoSelectionError('DUST_OUTPUT', 'DUST_OUTPUT');
+    throw err;
   }
 
   // Filter UTXOs based on policy
@@ -102,8 +104,10 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
 
   // If we got here, insufficient funds with the given policy
   if (hasLocked && !allowLocked) {
-    throw new UtxoSelectionError('CONFLICTING_LOCKS', 'Insufficient funds due to locked UTXOs');
+    const err = new UtxoSelectionError('CONFLICTING_LOCKS', 'CONFLICTING_LOCKS');
+    throw err;
   }
-  throw new UtxoSelectionError('INSUFFICIENT_FUNDS', 'Unable to cover target amount plus fees');
+  const err = new UtxoSelectionError('INSUFFICIENT_FUNDS', 'INSUFFICIENT_FUNDS');
+  throw err;
 }
 

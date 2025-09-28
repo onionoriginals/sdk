@@ -14,7 +14,8 @@ export class LifecycleManager {
   constructor(
     private config: OriginalsConfig,
     private didManager: DIDManager,
-    private credentialManager: CredentialManager
+    private credentialManager: CredentialManager,
+    private deps?: { bitcoinManager?: BitcoinManager }
   ) {}
 
   async createAsset(resources: AssetResource[]): Promise<OriginalsAsset> {
@@ -65,17 +66,17 @@ export class LifecycleManager {
     if (asset.currentLayer !== 'did:webvh' && asset.currentLayer !== 'did:peer') {
       throw new Error('Not implemented');
     }
-    const bitcoinManager = new BitcoinManager(this.config);
+    const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const manifest = {
       assetId: asset.id,
       resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
       timestamp: new Date().toISOString()
     };
     const payload = Buffer.from(JSON.stringify(manifest));
-    const inscription = await bitcoinManager.inscribeData(payload, 'application/json', feeRate);
-    const revealTxId = (inscription as any).revealTxId ?? inscription.txid;
-    const commitTxId = (inscription as any).commitTxId;
-    const usedFeeRate = (inscription as any).feeRate;
+    const inscription: any = await bitcoinManager.inscribeData(payload, 'application/json', feeRate);
+    const revealTxId = inscription.revealTxId ?? inscription.txid;
+    const commitTxId = inscription.commitTxId;
+    const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : feeRate;
 
     await asset.migrate('did:btco', {
       transactionId: revealTxId,
@@ -83,7 +84,7 @@ export class LifecycleManager {
       satoshi: inscription.satoshi,
       commitTxId,
       revealTxId,
-      feeRate: typeof usedFeeRate === 'number' ? usedFeeRate : feeRate
+      feeRate: usedFeeRate
     });
 
     const bindingValue = inscription.satoshi
@@ -102,7 +103,7 @@ export class LifecycleManager {
     if (asset.currentLayer !== 'did:btco') {
       throw new Error('Asset must be inscribed on Bitcoin before transfer');
     }
-    const bm = new BitcoinManager(this.config);
+    const bm = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const provenance = asset.getProvenance();
     const latestMigration = provenance.migrations[provenance.migrations.length - 1];
     const satoshi = latestMigration?.satoshi ?? (asset.id.startsWith('did:btco:') ? asset.id.split(':')[2] : '');

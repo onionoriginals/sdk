@@ -1,6 +1,5 @@
 import { OrdinalsClientProvider } from '../../src/bitcoin/providers/OrdinalsProvider';
 import { OrdinalsClient } from '../../src/bitcoin/OrdinalsClient';
-import { expect } from '@jest/globals';
 
 // Ensure Jest types are available
 declare const expect: any;

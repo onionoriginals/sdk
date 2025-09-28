@@ -148,8 +148,8 @@ describe('CredentialManager verification method resolution', () => {
     const signingManager = new CredentialManager(baseConfig);
     const sk = secp256k1.utils.randomPrivateKey();
     const pk = secp256k1.getPublicKey(sk, true);
-    const skMb = 'z' + Buffer.from(sk).toString('base64url');
-    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
+    const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
     const verificationMethod = 'did:example:123#key-1';
 
     const signed = await signingManager.signCredential(credentialTemplate, skMb, verificationMethod);
@@ -176,8 +176,8 @@ describe('CredentialManager verification method resolution', () => {
     const signingManager = new CredentialManager(baseConfig);
     const sk = secp256k1.utils.randomPrivateKey();
     const pk = secp256k1.getPublicKey(sk, true);
-    const skMb = 'z' + Buffer.from(sk).toString('base64url');
-    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
+    const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
     const verificationMethod = 'did:example:456#key-1';
 
     const signed = await signingManager.signCredential(credentialTemplate, skMb, verificationMethod);
@@ -284,9 +284,9 @@ describe('CredentialManager local verify path without didManager', () => {
   test('signCredential is deterministic for reordered credentialSubject properties', async () => {
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any);
     const seed = new Uint8Array(32).fill(11);
-    const skMb = 'z' + Buffer.from(seed).toString('base64url');
+    const skMb = multikey.encodePrivateKey(seed, 'Ed25519');
     const pk = await (ed25519 as any).getPublicKeyAsync(seed);
-    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
     const issuanceDate = '2024-01-01T00:00:00Z';
 
     const credentialA: VerifiableCredential = {
@@ -339,9 +339,9 @@ describe('CredentialManager local verify path without didManager', () => {
   test('verifyCredential succeeds when proof fields are reordered', async () => {
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any);
     const seed = new Uint8Array(32).fill(13);
-    const skMb = 'z' + Buffer.from(seed).toString('base64url');
+    const skMb = multikey.encodePrivateKey(seed, 'Ed25519');
     const pk = await (ed25519 as any).getPublicKeyAsync(seed);
-    const pkMb = 'z' + Buffer.from(pk).toString('base64url');
+    const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
 
     const credential: VerifiableCredential = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
