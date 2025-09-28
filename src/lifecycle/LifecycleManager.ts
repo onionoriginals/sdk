@@ -1,31 +1,20 @@
-import { 
-  OriginalsConfig, 
-  AssetResource, 
-  BitcoinTransaction 
+import {
+  OriginalsConfig,
+  AssetResource,
+  BitcoinTransaction
 } from '../types';
-import { PSBTBuilder } from '../bitcoin/PSBTBuilder';
-import { BroadcastClient } from '../bitcoin/BroadcastClient';
 import { BitcoinManager } from '../bitcoin/BitcoinManager';
-import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
-import { OrdinalsClientProvider } from '../bitcoin/providers/OrdinalsProvider';
 import { DIDManager } from '../did/DIDManager';
 import { CredentialManager } from '../vc/CredentialManager';
 import { OriginalsAsset } from './OriginalsAsset';
 import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding';
 
-type LifecycleDeps = {
-  psbtBuilder?: PSBTBuilder;
-  broadcastClient?: BroadcastClient;
-  ordinalsProvider?: OrdinalsClientProvider;
-};
-
 export class LifecycleManager {
   constructor(
     private config: OriginalsConfig,
     private didManager: DIDManager,
-    private credentialManager: CredentialManager,
-    private deps: LifecycleDeps = {}
+    private credentialManager: CredentialManager
   ) {}
 
   async createAsset(resources: AssetResource[]): Promise<OriginalsAsset> {
@@ -76,29 +65,31 @@ export class LifecycleManager {
     if (asset.currentLayer !== 'did:webvh' && asset.currentLayer !== 'did:peer') {
       throw new Error('Not implemented');
     }
-    // Minimal MVP flow: estimate fee, pretend to build & broadcast, update provenance, migrate
-    const provider = this.deps.ordinalsProvider || new OrdinalsClientProvider(
-      new OrdinalsClient(this.config.bitcoinRpcUrl || 'http://localhost:3000', this.config.network as any),
-      { baseUrl: this.config.bitcoinRpcUrl || 'http://localhost:3000' }
-    );
-    const usedFeeRate = typeof feeRate === 'number' && feeRate > 0 ? feeRate : await provider.estimateFee(1);
-    const psbtBuilder = this.deps.psbtBuilder || new PSBTBuilder();
-    const broadcast = this.deps.broadcastClient || new BroadcastClient(async (_hex: string) => 'tx-mock', async (_txid: string) => ({ confirmed: true, confirmations: 1 }));
+    const bitcoinManager = new BitcoinManager(this.config);
+    const manifest = {
+      assetId: asset.id,
+      resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
+      timestamp: new Date().toISOString()
+    };
+    const payload = Buffer.from(JSON.stringify(manifest));
+    const inscription = await bitcoinManager.inscribeData(payload, 'application/json', feeRate);
+    const revealTxId = (inscription as any).revealTxId ?? inscription.txid;
+    const commitTxId = (inscription as any).commitTxId;
+    const usedFeeRate = (inscription as any).feeRate;
 
-    // For SDK-level MVP we do not own UTXO selection here; callers inject when needed.
-    // We record provenance with the used fee rate and a mock txid if not provided.
-    const txHex = 'deadbeef';
-    const { txid } = await broadcast.broadcastAndConfirm(txHex, { pollIntervalMs: 10, maxAttempts: 1 });
+    await asset.migrate('did:btco', {
+      transactionId: revealTxId,
+      inscriptionId: inscription.inscriptionId,
+      satoshi: inscription.satoshi,
+      commitTxId,
+      revealTxId,
+      feeRate: typeof usedFeeRate === 'number' ? usedFeeRate : feeRate
+    });
 
-    const prov = (asset as any).provenance || (asset as any).getProvenance?.() || {};
-    prov.txid = txid;
-    prov.feeRate = usedFeeRate;
-    prov.timestamp = new Date().toISOString();
-    (asset as any).provenance = prov;
-
-    // Only resources migrate; retain original DID identity. Track btco binding.
-    await asset.migrate('did:btco');
-    (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:btco': `did:btco:${String(txid)}` });
+    const bindingValue = inscription.satoshi
+      ? `did:btco:${inscription.satoshi}`
+      : `did:btco:${inscription.inscriptionId}`;
+    (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:btco': bindingValue });
     return asset;
   }
 
@@ -111,32 +102,19 @@ export class LifecycleManager {
     if (asset.currentLayer !== 'did:btco') {
       throw new Error('Asset must be inscribed on Bitcoin before transfer');
     }
-    // For this SDK scaffold, delegate to BitcoinManager to produce a transfer tx
     const bm = new BitcoinManager(this.config);
-    // We need an inscription identifier; in this simplified scaffold, derive from DID
-    const didId = asset.id;
-    if (!didId) {
-      throw new Error('Not implemented');
-    }
-    const satoshi = didId.startsWith('did:btco:') ? didId.split(':')[2] : '0';
-    // Fake an inscription reference minimal for transfer; in a real impl we'd resolve via OrdinalsClient
+    const provenance = asset.getProvenance();
+    const latestMigration = provenance.migrations[provenance.migrations.length - 1];
+    const satoshi = latestMigration?.satoshi ?? (asset.id.startsWith('did:btco:') ? asset.id.split(':')[2] : '');
     const inscription = {
       satoshi,
-      inscriptionId: `insc-${satoshi}`,
+      inscriptionId: latestMigration?.inscriptionId ?? `insc-${satoshi || 'unknown'}`,
       content: Buffer.alloc(0),
       contentType: 'application/octet-stream',
-      txid: 'prev-txid',
+      txid: latestMigration?.transactionId ?? 'unknown-tx',
       vout: 0
     };
     const tx = await bm.transferInscription(inscription as any, newOwner);
-
-    // Simulate confirmation polling via OrdinalsClient
-    const client = new OrdinalsClient(this.config.bitcoinRpcUrl || 'http://localhost:3000', this.config.network || 'mainnet');
-    const status = await client.getTransactionStatus(tx.txid);
-    const confirmations = status.confirmations ?? 0;
-    (tx as any).confirmations = confirmations;
-
-    // Update provenance
     asset.recordTransfer(asset.id, newOwner, tx.txid);
     return tx;
   }
