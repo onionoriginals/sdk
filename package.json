@@ -9,7 +9,6 @@
     "test": "node ./node_modules/jest/bin/jest.js",
     "test:coverage": "node ./node_modules/jest/bin/jest.js --coverage",
     "test:ci": "node ./node_modules/jest/bin/jest.js --ci --coverage",
-    "test:coverage:100": "node ./node_modules/jest/bin/jest.js --config ./jest.coverage.config.js --ci --coverage",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts"
   },

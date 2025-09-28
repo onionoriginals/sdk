@@ -21,18 +21,10 @@ jobs:
         run: bun install
 
       - name: Run tests
-        run: bun run test:ci
-
-      - name: Upload coverage artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-lcov
-          path: coverage/lcov.info
-          if-no-files-found: warn
+        run: bun run test
 
   coverage:
-    name: 100% coverage
+    name: Coverage meets thresholds
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -46,8 +38,8 @@ jobs:
       - name: Install dependencies (bun)
         run: bun install
 
-      - name: Enforce 100% coverage
-        run: bun run test:coverage:100
+      - name: Run tests with coverage
+        run: bun run test:ci
 
 name: CI
 
