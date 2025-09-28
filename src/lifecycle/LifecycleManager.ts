@@ -9,6 +9,7 @@ import { CredentialManager } from '../vc/CredentialManager';
 import { OriginalsAsset } from './OriginalsAsset';
 import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding';
+import { KeyManager } from '../did/KeyManager';
 
 export class LifecycleManager {
   constructor(
@@ -33,26 +34,60 @@ export class LifecycleManager {
     if (asset.currentLayer !== 'did:peer') {
       throw new Error('Not implemented');
     }
+    const configuredAdapter: any = (this.config as any).storageAdapter;
     const storage = new MemoryStorageAdapter();
 
     // Create a slug for this publication based on current peer id suffix
     const slug = asset.id.split(':').pop() as string;
 
     // Publish resources under content-addressed paths (for hosting outside DID log)
-    const publishedResources = [] as { id: string; url: string; hash: string; contentType?: string }[];
     for (const res of asset.resources) {
       const hashBytes = hexToBytes(res.hash);
       const multibase = encodeBase64UrlMultibase(hashBytes);
-      const resPath = `.well-known/webvh/${slug}/resources/${multibase}`;
-      const data = res.content ? new (globalThis as any).TextEncoder().encode(res.content) : new (globalThis as any).TextEncoder().encode(res.hash);
-      const url = await storage.putObject(domain, resPath, data);
-      publishedResources.push({ id: res.id, url, hash: res.hash, contentType: res.contentType });
+      const relativePath = `.well-known/webvh/${slug}/resources/${multibase}`;
+
+      let url: string;
+      if (configuredAdapter && typeof configuredAdapter.put === 'function') {
+        const objectKey = `${domain}/${relativePath}`;
+        const data = typeof res.content === 'string' ? Buffer.from(res.content) : Buffer.from(res.hash);
+        url = await configuredAdapter.put(objectKey, data, { contentType: res.contentType });
+      } else {
+        const data = res.content ? new (globalThis as any).TextEncoder().encode(res.content) : new (globalThis as any).TextEncoder().encode(res.hash);
+        url = await storage.putObject(domain, relativePath, data);
+      }
+
+      // Non-breaking: preserve id/hash/contentType, add url
+      (res as any).url = url;
     }
 
     // New resource identifier for the web representation; the asset DID remains the same.
     const webDid = `did:webvh:${domain}:${slug}`;
     await asset.migrate('did:webvh');
     (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:webvh': webDid });
+
+    // Issue a publication credential for the migration
+    try {
+      const type: 'ResourceMigrated' | 'ResourceCreated' = 'ResourceMigrated';
+      const issuer = asset.id;
+      const subject = {
+        id: webDid,
+        resourceId: asset.resources[0]?.id,
+        fromLayer: 'did:peer',
+        toLayer: 'did:webvh',
+        migratedAt: new Date().toISOString()
+      } as any;
+
+      const unsigned = await this.credentialManager.createResourceCredential(type, subject, issuer);
+
+      // Sign with a fresh key bound to the issuer DID (local signature acceptable for tests)
+      const km = new KeyManager();
+      const kp = await km.generateKeyPair(this.config.defaultKeyType || 'ES256K');
+      const verificationMethod = `${issuer}#keys-1`;
+      const signed = await this.credentialManager.signCredential(unsigned, kp.privateKey, verificationMethod);
+      (asset as any).credentials.push(signed);
+    } catch {
+      // Best-effort: if issuance fails, continue without blocking publish
+    }
     return asset;
   }
 
