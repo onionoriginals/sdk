@@ -1,0 +1,63 @@
+import { sql } from "drizzle-orm";
+import { pgTable, text, varchar, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+export const users = pgTable("users", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
+});
+
+export const assets = pgTable("assets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id),
+  title: text("title").notNull(),
+  description: text("description"),
+  category: varchar("category"),
+  tags: text("tags").array(),
+  mediaUrl: text("media_url"),
+  metadata: jsonb("metadata"),
+  credentials: jsonb("credentials"),
+  status: varchar("status").notNull().default("draft"), // draft, pending, completed
+  assetType: varchar("asset_type").notNull(), // original, migrated
+  originalReference: text("original_reference"), // for migrated assets
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const walletConnections = pgTable("wallet_connections", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id),
+  walletAddress: text("wallet_address").notNull(),
+  walletType: varchar("wallet_type").notNull(), // unisat, xverse, etc.
+  isActive: varchar("is_active").notNull().default("true"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertUserSchema = createInsertSchema(users).pick({
+  username: true,
+  password: true,
+});
+
+export const insertAssetSchema = createInsertSchema(assets).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  title: z.string().min(1, "Title is required"),
+  category: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+export const insertWalletConnectionSchema = createInsertSchema(walletConnections).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;
+export type InsertAsset = z.infer<typeof insertAssetSchema>;
+export type Asset = typeof assets.$inferSelect;
+export type InsertWalletConnection = z.infer<typeof insertWalletConnectionSchema>;
+export type WalletConnection = typeof walletConnections.$inferSelect;
