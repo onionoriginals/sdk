@@ -1,6 +1,6 @@
 const isCI = !!process.env.CI;
 
-module.exports = {
+export default {
   preset: 'ts-jest',
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/tests/setup.jest.ts'],
