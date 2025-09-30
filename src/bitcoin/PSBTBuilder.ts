@@ -10,7 +10,7 @@ export interface BuildPsbtParams {
   outputs: PsbtOutput[];
   changeAddress: string;
   feeRate: number; // sat/vB
-  network: 'mainnet' | 'testnet' | 'regtest';
+  network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
   dustLimit?: number;
 }
 

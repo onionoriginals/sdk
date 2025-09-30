@@ -8,11 +8,13 @@ The Originals SDK team takes security seriously. We appreciate your efforts to r
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-Instead, please report security vulnerabilities by emailing:
+Instead, please report security vulnerabilities by using GitHub's private vulnerability reporting feature:
 
-**security@aviarytech.com**
+1. Go to the **Security** tab of this repository
+2. Click on **Report a vulnerability**
+3. Fill out the form with details about the vulnerability
 
-You should receive a response within 48 hours. If for some reason you do not, please follow up via email to ensure we received your original message.
+You should receive a response within 48 hours. If for some reason you do not, please create a private security advisory.
 
 Please include the following information in your report:
 
@@ -85,14 +87,6 @@ We recommend using automated dependency update tools (Dependabot, Renovate) to s
 ### Bug Bounty Program
 
 At this time, we do not have a formal bug bounty program. However, we deeply appreciate security researchers who help us improve the security of the Originals SDK. We will acknowledge your contributions in our security advisories (with your permission).
-
-### PGP Key
-
-For encrypted communication, you may use our PGP key:
-
-```
-[PGP key would be published here when available]
-```
 
 ---
 
