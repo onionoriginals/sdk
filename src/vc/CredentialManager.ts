@@ -189,7 +189,12 @@ export class CredentialManager {
       if (document && typeof document.publicKeyMultibase === 'string') {
         return document.publicKeyMultibase;
       }
-    } catch {}
+    } catch (err) {
+      // Document loader failed; will try alternative resolution method
+      if (this.config.enableLogging) {
+        console.warn('Failed to load verification method via document loader:', err);
+      }
+    }
 
     try {
       const did = verificationMethod.split('#')[0];
@@ -204,7 +209,12 @@ export class CredentialManager {
           return vm.publicKeyMultibase;
         }
       }
-    } catch {}
+    } catch (err) {
+      // Failed to resolve DID document
+      if (this.config.enableLogging) {
+        console.warn('Failed to resolve DID for verification method:', err);
+      }
+    }
 
     return null;
   }

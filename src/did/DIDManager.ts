@@ -14,12 +14,7 @@ export class DIDManager {
     // Generate a multikey keypair according to configured defaultKeyType
     const keyManager = new KeyManager();
     const desiredType = this.config.defaultKeyType || 'ES256K';
-    let keyTypeToUse = desiredType;
-    if (desiredType === 'ES256') {
-      // Fallback since ES256 is not yet supported by KeyManager.generateKeyPair
-      keyTypeToUse = 'Ed25519';
-    }
-    const keyPair = await keyManager.generateKeyPair(keyTypeToUse as any);
+    const keyPair = await keyManager.generateKeyPair(desiredType);
 
     // Use @aviarytech/did-peer to create a did:peer (variant 4 long-form for full VM+context)
     const didPeerMod: any = await import('@aviarytech/did-peer');
@@ -100,7 +95,12 @@ export class DIDManager {
         publicKey = decoded.key;
         keyType = decoded.type;
       }
-    } catch {}
+    } catch (err) {
+      // Unable to decode public key from verification method; will proceed without key material
+      if (this.config.enableLogging) {
+        console.warn('Failed to decode verification method public key:', err);
+      }
+    }
 
     // If no key material is available, generate a minimal btco DID doc without keys
     let btcoDoc: DIDDocument;
@@ -128,7 +128,12 @@ export class DIDManager {
           const mod: any = await import('@aviarytech/did-peer');
           const doc = await mod.resolve(did);
           return doc as DIDDocument;
-        } catch {}
+        } catch (err) {
+          // Failed to resolve did:peer; returning minimal document
+          if (this.config.enableLogging) {
+            console.warn('Failed to resolve did:peer:', err);
+          }
+        }
         return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
       }
       if (did.startsWith('did:btco:') || did.startsWith('did:btco:test:') || did.startsWith('did:btco:sig:')) {
@@ -147,11 +152,20 @@ export class DIDManager {
             const result = await mod.resolveDID(did);
             if (result && result.doc) return result.doc as DIDDocument;
           }
-        } catch {}
+        } catch (err) {
+          // Failed to resolve did:webvh; returning minimal document
+          if (this.config.enableLogging) {
+            console.warn('Failed to resolve did:webvh:', err);
+          }
+        }
         return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
       }
       return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
-    } catch {
+    } catch (err) {
+      // DID resolution failed
+      if (this.config.enableLogging) {
+        console.error('Failed to resolve DID:', err);
+      }
       return null;
     }
   }

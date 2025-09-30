@@ -1,6 +1,7 @@
 import { DIDDocument, KeyPair, KeyType } from '../types';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
+import { p256 } from '@noble/curves/p256';
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { concatBytes } from '@noble/hashes/utils.js';
@@ -49,11 +50,16 @@ export class KeyManager {
                         };
                 }
 
-			// NOTE: ES256 is allowed in OriginalsConfig.defaultKeyType but is not yet
-			// implemented here. Callers should guard against requesting ES256 until
-			// P-256 support is added to KeyManager and the signing stack.
-			// TODO(keys): Add ES256 (P-256) generation and signing support.
-			throw new Error('Only ES256K and Ed25519 supported at this time');
+                if (type === 'ES256') {
+                        const privateKeyBytes = p256.utils.randomPrivateKey();
+                        const publicKeyBytes = p256.getPublicKey(privateKeyBytes, true);
+                        return {
+                                privateKey: multikey.encodePrivateKey(privateKeyBytes, 'P256'),
+                                publicKey: multikey.encodePublicKey(publicKeyBytes, 'P256')
+                        };
+                }
+
+		throw new Error(`Unsupported key type: ${type}`);
         }
 
 	async rotateKeys(didDoc: DIDDocument, newKeyPair: KeyPair): Promise<DIDDocument> {
