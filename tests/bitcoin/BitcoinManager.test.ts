@@ -10,12 +10,12 @@ const createMockProvider = () => {
     async createInscription({ data, contentType, feeRate }) {
       const inscriptionId = counter === 0 ? 'insc-test' : `insc-test-${counter}`;
       counter += 1;
-      inscriptions[inscriptionId] = { satoshi: 'sat-123' };
+      inscriptions[inscriptionId] = { satoshi: '123456789' };
       return {
         inscriptionId,
         revealTxId: 'tx-reveal-1',
         commitTxId: 'tx-commit-1',
-        satoshi: 'sat-123',
+        satoshi: '123456789',
         txid: 'tx-output-1',
         vout: 1,
         blockHeight: 100,
@@ -80,7 +80,7 @@ describe('BitcoinManager integration with providers', () => {
 
     const result = await sdk.bitcoin.inscribeData(Buffer.from('hello'), 'text/plain');
     expect(result.inscriptionId).toBe('insc-test');
-    expect(result.satoshi).toBe('sat-123');
+    expect(result.satoshi).toBe('123456789');
     expect((result as any).revealTxId).toBe('tx-reveal-1');
     expect((result as any).feeRate).toBe(7);
   });
@@ -90,7 +90,7 @@ describe('BitcoinManager integration with providers', () => {
     const provider: OrdinalsProvider = {
       async createInscription({ data, contentType }) {
         const inscriptionId = 'insc-no-sat';
-        inscriptions[inscriptionId] = { satoshi: 'sat-999' };
+        inscriptions[inscriptionId] = { satoshi: '999888777' };
         return {
           inscriptionId,
           revealTxId: 'tx-reveal-2',
@@ -132,7 +132,7 @@ describe('BitcoinManager integration with providers', () => {
 
     const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
     const result = await sdk.bitcoin.inscribeData(Buffer.from('x'), 'text/plain');
-    expect(result.satoshi).toBe('sat-999');
+    expect(result.satoshi).toBe('999888777');
   });
 
   test('inscribeData propagates provider errors', async () => {
@@ -210,8 +210,8 @@ describe('BitcoinManager integration with providers', () => {
     const provider = createMockProvider();
     const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
     await sdk.bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
-    await expect(sdk.bitcoin.validateBTCODID('did:btco:sat-123')).resolves.toBe(true);
-    await expect(sdk.bitcoin.validateBTCODID('did:btco:missing')).resolves.toBe(false);
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:123456789')).resolves.toBe(true);
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:999999999')).resolves.toBe(false);
   });
 
   test('preventFrontRunning returns false when multiple inscriptions exist on same satoshi', async () => {
@@ -219,7 +219,7 @@ describe('BitcoinManager integration with providers', () => {
     const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
     await sdk.bitcoin.inscribeData(Buffer.from('payload1'), 'text/plain');
     await sdk.bitcoin.inscribeData(Buffer.from('payload2'), 'text/plain');
-    const canProceed = await sdk.bitcoin.preventFrontRunning('sat-123');
+    const canProceed = await sdk.bitcoin.preventFrontRunning('123456789');
     expect(canProceed).toBe(false);
   });
 

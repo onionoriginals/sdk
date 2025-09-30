@@ -7,6 +7,7 @@ import {
 } from '../types';
 import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters';
 import { emitTelemetry, StructuredError } from '../utils/telemetry';
+import { validateSatoshiNumber, parseSatoshiIdentifier } from '../utils/satoshi-validation';
 
 export class BitcoinManager {
   private readonly feeOracle?: FeeOracleAdapter;
@@ -122,6 +123,17 @@ export class BitcoinManager {
     let satoshi = creation.satoshi ?? '';
     if (!satoshi) {
       satoshi = (await this.getSatoshiFromInscription(creation.inscriptionId)) ?? '';
+    }
+
+    // Validate satoshi before using it
+    if (satoshi) {
+      const validation = validateSatoshiNumber(satoshi);
+      if (!validation.valid) {
+        throw new StructuredError(
+          'INVALID_SATOSHI',
+          `Ordinals provider returned invalid satoshi identifier: ${validation.error}`
+        );
+      }
     }
 
     let recordedFeeRate: number | undefined;
@@ -262,7 +274,18 @@ export class BitcoinManager {
   async getSatoshiFromInscription(inscriptionId: string): Promise<string | null> {
     if (this.ord) {
       const info = await this.ord.getInscriptionById(inscriptionId);
-      return info?.satoshi ?? null;
+      const satoshi = info?.satoshi;
+      
+      // Validate satoshi before returning
+      if (satoshi) {
+        const validation = validateSatoshiNumber(satoshi);
+        if (!validation.valid) {
+          // Return null if validation fails (don't return empty or invalid string)
+          return null;
+        }
+        return satoshi;
+      }
+      return null;
     }
     return null;
   }
@@ -271,6 +294,11 @@ export class BitcoinManager {
     // Validate that a did:btco DID exists on Bitcoin
     const satoshi = this.extractSatoshiFromBTCODID(didId);
     if (!satoshi) return false;
+    
+    // Validate the extracted satoshi number
+    const validation = validateSatoshiNumber(satoshi);
+    if (!validation.valid) return false;
+    
     if (!this.ord) return false;
     const inscriptions = await this.ord.getInscriptionsBySatoshi(satoshi);
     return inscriptions.length > 0;
@@ -281,7 +309,26 @@ export class BitcoinManager {
     if (!didId.startsWith('did:btco:')) return null;
     
     const parts = didId.split(':');
-    return parts.length >= 3 ? parts[2] : null;
+    let satoshi: string | null = null;
+    
+    // Handle different network prefixes:
+    // did:btco:123456 (mainnet) - 3 parts
+    // did:btco:test:123456 or did:btco:sig:123456 - 4 parts
+    if (parts.length === 3) {
+      satoshi = parts[2];
+    } else if (parts.length === 4) {
+      satoshi = parts[3];
+    }
+    
+    // Validate the extracted satoshi format
+    if (satoshi) {
+      const validation = validateSatoshiNumber(satoshi);
+      if (!validation.valid) {
+        return null;
+      }
+    }
+    
+    return satoshi;
   }
 }
 
