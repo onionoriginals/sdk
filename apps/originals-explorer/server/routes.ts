@@ -19,6 +19,9 @@ const googleClient = new OAuth2Client(
   process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/auth/google/callback'
 );
 
+console.log("PRIVY_APP_ID:", process.env.PRIVY_APP_ID);
+console.log("PRIVY_APP_SECRET:", process.env.PRIVY_APP_SECRET);
+
 // Initialize Privy client
 const privyClient = new PrivyClient(
   process.env.PRIVY_APP_ID!,

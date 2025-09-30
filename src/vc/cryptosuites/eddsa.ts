@@ -1,4 +1,4 @@
-import { base58btc } from 'multiformats/bases/base58';
+import { base58 } from '@scure/base';
 import * as ed25519 from '@noble/ed25519';
 import { canonize, canonizeProof } from '../utils/jsonld';
 import { multikey } from '../../crypto/Multikey';
@@ -38,7 +38,7 @@ export class EdDSACryptosuiteManager {
     }
     const proofValueBytes = await this.sign({ data: hashData, privateKey });
     delete (proofConfig as any)['@context'];
-    return { ...proofConfig, proofValue: base58btc.encode(proofValueBytes) } as DataIntegrityProof;
+    return { ...proofConfig, proofValue: base58.encode(proofValueBytes) } as DataIntegrityProof;
   }
 
   static async verifyProof(document: any, proof: DataIntegrityProof, options: any): Promise<VerificationResult> {
@@ -51,7 +51,7 @@ export class EdDSACryptosuiteManager {
       const pk = vmDoc.document.publicKeyMultibase as string;
       const dec = multikey.decodePublicKey(pk);
       if (dec.type !== 'Ed25519') throw new Error('Invalid key type for EdDSA');
-      const signature = base58btc.decode(proof.proofValue);
+      const signature = base58.decode(proof.proofValue);
       const verified = await this.verify({ data: hashData, signature, publicKey: dec.key });
       return verified ? { verified: true } : { verified: false, errors: ['Proof verification failed'] };
     } catch (e: any) {

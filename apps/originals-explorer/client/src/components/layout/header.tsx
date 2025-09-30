@@ -1,9 +1,12 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import { WalletConnector } from "@/components/wallet/wallet-connector";
 import { useAuth } from "@/hooks/useAuth";
-import { Menu, X, FolderTree, FileText, Upload, LogOut, User as UserIcon } from "lucide-react";
+import { Menu, X, FolderTree, FileText, Upload, LogOut, User as UserIcon, MoreHorizontal, Hash, Copy } from "lucide-react";
+import { sha256Hex } from "@/lib/hash";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 interface Document {
   id: string;
@@ -18,7 +21,12 @@ export default function Header() {
   const [currentDocument, setCurrentDocument] = useState<Document | null>(null);
   const [lastViewedDocId, setLastViewedDocId] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const { isAuthenticated, user, logout } = useAuth();
+  const [contentHash, setContentHash] = useState<string | null>(null);
+  const [didUrl, setDidUrl] = useState<string | null>(null);
+  const [jsonOpen, setJsonOpen] = useState(false);
+  const [vcJson, setVcJson] = useState<string>("");
 
   const getDocuments = (): Document[] => {
     const saved = localStorage.getItem("originals-documents");
@@ -66,6 +74,25 @@ export default function Header() {
       window.removeEventListener('originals-documents-updated', updateCurrentDocument);
     };
   }, [location]);
+
+  useEffect(() => {
+    const computeHash = async () => {
+      try {
+        if (currentDocument && currentDocument.content) {
+          const hex = await sha256Hex(currentDocument.content);
+          setContentHash(hex);
+          setDidUrl(`did:webvh:sha256:${hex}`);
+        } else if (!currentDocument) {
+          setContentHash(null);
+          setDidUrl(null);
+        }
+      } catch {
+        setContentHash(null);
+        setDidUrl(null);
+      }
+    };
+    computeHash();
+  }, [currentDocument]);
 
   return (
     <header className="border-b border-gray-200 bg-white">
@@ -149,7 +176,41 @@ export default function Header() {
                 </button>
               </Link>
             )}
+
+            {/* Spreadsheet link */}
+            {location === "/assets" ? (
+              <Link href="/dashboard">
+                <button className="flex items-center text-gray-600 hover:text-gray-900 transition-colors" data-testid="button-dashboard">
+                  <FileText className="w-4 h-4 mr-2" />
+                  <span className="hidden lg:inline">Dashboard</span>
+                  <span className="lg:hidden">Dash</span>
+                </button>
+              </Link>
+            ) : (
+              <Link href="/assets">
+                <button className="flex items-center text-gray-600 hover:text-gray-900 transition-colors" data-testid="button-assets">
+                  <FileText className="w-4 h-4 mr-2" />
+                  <span className="hidden lg:inline">Assets</span>
+                  <span className="lg:hidden">Assets</span>
+                </button>
+              </Link>
+            )}
             
+            {/* Details Button - Desktop */}
+            {location === "/" && (
+              <button
+                className="flex items-center text-gray-600 hover:text-gray-900 transition-colors"
+                data-testid="button-details"
+                onClick={() => setDetailsOpen(true)}
+                disabled={!currentDocument}
+                title={currentDocument ? "View Originals Details" : "No document selected"}
+              >
+                <MoreHorizontal className="w-4 h-4 mr-2" />
+                <span className="hidden lg:inline">Details</span>
+                <span className="lg:hidden">Info</span>
+              </button>
+            )}
+
             {/* Publish Button - Desktop */}
             {currentDocument && location === "/" && (currentDocument.layer || 'private') === 'private' && isAuthenticated && (
               <button
@@ -256,6 +317,23 @@ export default function Header() {
                   </Link>
                 )}
                 
+                {/* Details - Mobile */}
+                {location === "/" && (
+                  <button 
+                    className="flex items-center text-gray-600 hover:text-gray-900 transition-colors w-full" 
+                    data-testid="mobile-button-details"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      setDetailsOpen(true);
+                    }}
+                    disabled={!currentDocument}
+                    title={currentDocument ? "View Originals Details" : "No document selected"}
+                  >
+                    <MoreHorizontal className="w-4 h-4 mr-3" />
+                    Details
+                  </button>
+                )}
+
                 {/* Publish Button - Mobile */}
                 {currentDocument && location === "/" && (currentDocument.layer || 'private') === 'private' && isAuthenticated && (
                   <button
@@ -309,6 +387,121 @@ export default function Header() {
           </div>
         )}
       </div>
+
+          {/* Details Sheet */}
+      <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle>Originals Details</SheetTitle>
+            <SheetDescription>
+              View metadata and identifiers for the current document.
+            </SheetDescription>
+          </SheetHeader>
+              <div className="mt-4 text-sm text-gray-700">
+                {!currentDocument ? (
+                  <div>No document selected.</div>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="text-xs uppercase text-gray-500 mb-1">Title</div>
+                      <div className="font-medium break-words">{currentDocument.title}</div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <div className="text-xs uppercase text-gray-500 mb-1">Layer</div>
+                        <div className="capitalize">{(currentDocument.layer || 'private')}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs uppercase text-gray-500 mb-1">Updated</div>
+                        <div>{new Date(currentDocument.updatedAt).toLocaleString()}</div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="text-xs uppercase text-gray-500">Content Hash (SHA‑256)</div>
+                        {contentHash && (
+                          <button
+                            className="p-1 text-gray-500 hover:text-gray-800"
+                            onClick={() => navigator.clipboard.writeText(contentHash)}
+                            title="Copy hash"
+                            data-testid="copy-hash"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                      <div className="font-mono text-xs break-all bg-gray-50 p-2 rounded border border-gray-200 min-h-6">
+                        {contentHash || '—'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="text-xs uppercase text-gray-500">DID URL</div>
+                        {didUrl && (
+                          <button
+                            className="p-1 text-gray-500 hover:text-gray-800"
+                            onClick={() => navigator.clipboard.writeText(didUrl)}
+                            title="Copy DID URL"
+                            data-testid="copy-did-url"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                      <div className="font-mono text-xs break-all bg-gray-50 p-2 rounded border border-gray-200 min-h-6">
+                        {didUrl || '—'}
+                      </div>
+                    </div>
+                    <div className="pt-1">
+                      <button
+                        className="w-full bg-gray-900 hover:bg-gray-800 text-white px-3 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => {
+                          if (!didUrl) return;
+                          const vc: any = {
+                            '@context': ['https://www.w3.org/2018/credentials/v1'],
+                            type: ['VerifiableCredential', 'OriginalsDocument'],
+                            issuer: didUrl,
+                            issuanceDate: new Date().toISOString(),
+                            credentialSubject: {
+                              id: didUrl,
+                              title: currentDocument.title,
+                              layer: (currentDocument.layer || 'private'),
+                              updatedAt: currentDocument.updatedAt,
+                              hash: contentHash,
+                            },
+                          };
+                          setVcJson(JSON.stringify(vc, null, 2));
+                          setJsonOpen(true);
+                        }}
+                        disabled={!didUrl || !currentDocument}
+                        data-testid="button-view-json-vc"
+                        title={didUrl ? 'View verifiable credential JSON' : 'DID not available'}
+                      >
+                        View JSON VC
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* VC JSON Dialog */}
+      <Dialog open={jsonOpen} onOpenChange={setJsonOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Verifiable Credential (Preview)</DialogTitle>
+            <DialogDescription>
+              This is a locally generated preview referencing the document DID.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-2">
+            <pre className="font-mono text-xs bg-gray-50 p-3 rounded border border-gray-200 overflow-auto max-h-[60vh] whitespace-pre-wrap break-words">
+{vcJson}
+            </pre>
+          </div>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 }

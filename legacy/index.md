@@ -5,7 +5,7 @@ This document maps working implementations in `legacy/` to their integration poi
 ### Scope at a glance
 - di-wings (`legacy/di-wings/`): cryptography, Multikey, VC issuance/verification (v1/v2), VC workflow orchestration.
 - ordinalsplus monorepo (`legacy/ordinalsplus/`): BTCO DID method, Ordinals resource providers/resolution, API patterns, Explorer examples.
-- Originals-Explorer (`legacy/Originals-Explorer/`): reference UI + API app demonstrating SDK usage (BTCO DID, Originals asset lifecycle, VC flows). Use as an implementation reference; prefer wiring via `src/` SDK modules.
+ - Originals-Explorer (`apps/originals-explorer/`): reference UI + API app demonstrating SDK usage (BTCO DID, Originals asset lifecycle, VC flows). Use as an implementation reference; prefer wiring via `src/` SDK modules.
 
 ---
 
@@ -158,33 +158,4 @@ export async function createDidDocument(
 
 ## When in doubt
 Use the ordinalsplus specs (`legacy/ordinalsplus/specs/*.txt`) and the explorer `CreateDidButton.tsx` as canonical examples for BTCO DID document structure and Multikey usage. The di-wings VC classes are the shortest path to working VC issuance and verification in the SDK.
-
-
----
-
-## Originals Explorer app – reference UI/API
-
-- Location:
-  - `legacy/Originals-Explorer/`
-
-- Purpose:
-  - A full-stack reference app (React + Vite UI with an Express server) that demonstrates how to use the SDK for BTCO DID flows, Originals asset lifecycle, and VC issuance/verification in a product-like setting.
-  - Treat this as an example of UI/UX and API composition. For production SDK features, prefer the modules under `src/`.
-
-- How to run locally (from repo root):
-  - Dev server:
-    ```bash
-    cd /Users/brian/Projects/originals/sdk/legacy/Originals-Explorer
-    npm install
-    npm run dev
-    ```
-  - Build and start (production):
-    ```bash
-    npm run build
-    npm start
-    ```
-
-- Notes:
-  - The Explorer relies on environment configuration for its backend (database/session/storage/auth, etc.). Consult the code to supply any required environment variables before running in production mode.
-  - Use this app to see end-to-end flows; when porting logic into the SDK, map behaviors to `src/did/DIDManager.ts`, `src/lifecycle/LifecycleManager.ts`, `src/vc/CredentialManager.ts`, and `src/bitcoin/*`.
 

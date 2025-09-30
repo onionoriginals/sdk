@@ -15,6 +15,7 @@ import Profile from "@/pages/profile";
 import Login from "@/pages/login";
 import Register from "@/pages/register";
 import NotFound from "@/pages/not-found";
+import AssetsSpreadsheet from "@/pages/assets-spreadsheet";
 
 function AuthSetup() {
   const { getAccessToken } = usePrivy();
@@ -36,6 +37,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Homepage} />
       <Route path="/dir" component={Directory} />
+      <Route path="/assets" component={AssetsSpreadsheet} />
       <Route path="/profile" component={Profile} />
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
@@ -50,27 +52,14 @@ function Router() {
 function App() {
   return (
     <PrivyProvider 
-      appId={import.meta.env.VITE_PRIVY_APP_ID || "cmf541evb01akjp0cwiatgnqw"}
+      appId={import.meta.env.VITE_PRIVY_APP_ID}
       config={{
         appearance: {
           theme: 'light',
           accentColor: '#1f2937',
           logo: undefined,
         },
-        embeddedWallets: {
-          createOnLogin: 'users-without-wallets',
-        },
         loginMethods: ['email', 'wallet', 'google'],
-        // Configure for Solana-first operation
-        solana: {
-          enabled: true,
-        },
-        // Simplify to default configuration but prioritize Solana
-        externalWallets: {
-          metamask: { enabled: false },
-          coinbaseWallet: { enabled: false },
-          walletConnect: { enabled: false },
-        },
       }}
     >
       <QueryClientProvider client={queryClient}>

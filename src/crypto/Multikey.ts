@@ -1,4 +1,4 @@
-import { base58btc } from 'multiformats/bases/base58';
+import { base58 } from '@scure/base';
 
 // Multicodec headers (varints) for supported key types
 export const MULTICODEC_ED25519_PUB_HEADER = new Uint8Array([0xed, 0x01]);
@@ -30,7 +30,7 @@ export const multikey = {
             ? MULTICODEC_BLS12381_G2_PUB_HEADER
             : MULTICODEC_P256_PUB_HEADER;
     const mcBytes = concatBytes(header, publicKey);
-    return base58btc.encode(mcBytes);
+    return 'z' + base58.encode(mcBytes);
   },
 
   encodePrivateKey: (privateKey: Uint8Array, type: MultikeyType): string => {
@@ -43,14 +43,14 @@ export const multikey = {
             ? MULTICODEC_BLS12381_G2_PRIV_HEADER
             : MULTICODEC_P256_PRIV_HEADER;
     const mcBytes = concatBytes(header, privateKey);
-    return base58btc.encode(mcBytes);
+    return 'z' + base58.encode(mcBytes);
   },
 
   decodePublicKey: (publicKeyMultibase: string): { key: Uint8Array; type: MultikeyType } => {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid Multibase encoding');
     }
-    const mc = base58btc.decode(publicKeyMultibase);
+    const mc = base58.decode(publicKeyMultibase.slice(1));
     const header = mc.slice(0, 2);
     const key = mc.slice(2);
     if (header[0] === MULTICODEC_ED25519_PUB_HEADER[0] && header[1] === MULTICODEC_ED25519_PUB_HEADER[1]) {
@@ -72,7 +72,7 @@ export const multikey = {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid Multibase encoding');
     }
-    const mc = base58btc.decode(privateKeyMultibase);
+    const mc = base58.decode(privateKeyMultibase.slice(1));
     const header = mc.slice(0, 2);
     const key = mc.slice(2);
     if (header[0] === MULTICODEC_ED25519_PRIV_HEADER[0] && header[1] === MULTICODEC_ED25519_PRIV_HEADER[1]) {
