@@ -24,8 +24,8 @@ describe('Signer classes', () => {
   describe('ES256KSigner', () => {
     test('invalid multibase prefix throws on sign and verify', async () => {
       const signer = new ES256KSigner();
-      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase private key');
-      await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase public key');
+      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+      await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
     });
 
     test('sign returns bytes path (Uint8Array direct)', async () => {
@@ -96,8 +96,8 @@ describe('Signer classes', () => {
   describe('ES256Signer', () => {
     test('invalid multibase prefix throws on sign and verify', async () => {
       const signer = new ES256Signer();
-      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase private key');
-      await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase public key');
+      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+      await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
     });
 
     test('sign returns bytes path (Uint8Array direct)', async () => {
@@ -177,8 +177,8 @@ describe('Signer classes', () => {
   describe('Ed25519Signer', () => {
     test('invalid multibase prefix throws on sign and verify', async () => {
       const signer = new Ed25519Signer();
-      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase private key');
-      await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase public key');
+      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+      await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
     });
 
     test('sign and verify success; verify returns false with bad signature', async () => {
@@ -209,8 +209,8 @@ describe('Signer classes', () => {
   describe('Bls12381G2Signer', () => {
     test('invalid multibase prefix throws on sign and verify', async () => {
       const signer = new Bls12381G2Signer();
-      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase private key');
-      await expect(signer.verify(data, Buffer.alloc(96), 'xabc')).rejects.toThrow('Invalid multibase public key');
+      await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+      await expect(signer.verify(data, Buffer.alloc(96), 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
     });
 
     test('sign and verify success; verify returns false with bad signature', async () => {
