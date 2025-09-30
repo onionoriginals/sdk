@@ -5,7 +5,7 @@ import { TelemetryHooks } from '../utils/telemetry';
 export type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';
 
 export interface OriginalsConfig {
-  network: 'mainnet' | 'testnet' | 'regtest';
+  network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
   bitcoinRpcUrl?: string;
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
   enableLogging?: boolean;

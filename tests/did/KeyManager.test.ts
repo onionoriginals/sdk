@@ -69,8 +69,16 @@ describe('KeyManager', () => {
     expect(() => km.decodePublicKeyMultibase('bad')).toThrow('Invalid multibase string');
   });
 
+  test('generateKeyPair supports ES256 (P-256)', async () => {
+    const kp = await km.generateKeyPair('ES256' as KeyType);
+    expect(kp).toHaveProperty('privateKey');
+    expect(kp).toHaveProperty('publicKey');
+    expect(kp.privateKey).toMatch(/^z/);
+    expect(kp.publicKey).toMatch(/^z/);
+  });
+
   test('generateKeyPair throws on unsupported type', async () => {
-    await expect(km.generateKeyPair('ES256' as KeyType)).rejects.toThrow('Only ES256K and Ed25519 supported at this time');
+    await expect(km.generateKeyPair('UNSUPPORTED' as KeyType)).rejects.toThrow('Unsupported key type');
   });
 
   test('constructor initializes utils helpers without throwing', () => {
