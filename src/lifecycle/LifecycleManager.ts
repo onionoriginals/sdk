@@ -10,6 +10,7 @@ import { OriginalsAsset } from './OriginalsAsset';
 import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding';
 import { KeyManager } from '../did/KeyManager';
+import { validateBitcoinAddress } from '../utils/bitcoin-address';
 
 export class LifecycleManager {
   constructor(
@@ -231,21 +232,12 @@ export class LifecycleManager {
       throw new Error('Invalid newOwner: must be a non-empty string');
     }
     
-    // Validate Bitcoin address format (basic validation)
-    const trimmedAddress = newOwner.trim();
-    // Basic pattern validation for Bitcoin addresses
-    // Accept bech32 (bc1/tb1/bcrt1), legacy (1/3), P2SH (2/m/n) prefixes
-    const hasValidPrefix = /^(bc1|tb1|bcrt1|[123mn])/i.test(trimmedAddress);
-    if (!hasValidPrefix && trimmedAddress.length > 0) {
-      // Allow mock/test addresses that don't match Bitcoin format
-      const isMockAddress = /^(mock-|test-)/i.test(trimmedAddress);
-      if (!isMockAddress) {
-        throw new Error('Invalid Bitcoin address format: must start with bc1, tb1, bcrt1, 1, 3, 2, m, or n');
-      }
-    }
-    // Length validation (relaxed for test/mock addresses)
-    if (trimmedAddress.length > 90) {
-      throw new Error('Invalid Bitcoin address: too long');
+    // Validate Bitcoin address format and checksum
+    try {
+      validateBitcoinAddress(newOwner, this.config.network);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid Bitcoin address';
+      throw new Error(`Invalid Bitcoin address for ownership transfer: ${message}`);
     }
     
     // Transfer Bitcoin-anchored asset ownership

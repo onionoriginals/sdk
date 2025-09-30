@@ -12,11 +12,11 @@ describe('Integration: Lifecycle.transferOwnership for did:btco', () => {
       []
     );
 
-    const tx = await sdk.lifecycle.transferOwnership(asset, 'bcrt1qrecipient');
+    const tx = await sdk.lifecycle.transferOwnership(asset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
     expect(typeof tx.txid).toBe('string');
     const prov = asset.getProvenance();
     expect(prov.transfers.length).toBe(1);
-    expect(prov.transfers[0].to).toBe('bcrt1qrecipient');
+    expect(prov.transfers[0].to).toBe('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
     expect(prov.transfers[0].transactionId).toBe(tx.txid);
   });
 });

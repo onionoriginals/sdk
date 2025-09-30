@@ -7,6 +7,7 @@ import {
 } from '../types';
 import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters';
 import { emitTelemetry, StructuredError } from '../utils/telemetry';
+import { validateBitcoinAddress } from '../utils/bitcoin-address';
 
 export class BitcoinManager {
   private readonly feeOracle?: FeeOracleAdapter;
@@ -185,21 +186,12 @@ export class BitcoinManager {
       throw new StructuredError('INVALID_INPUT', 'Destination address must be a non-empty string');
     }
     
-    // Validate Bitcoin address format
-    const trimmedAddress = toAddress.trim();
-    // Basic pattern validation for Bitcoin addresses
-    // Accept bech32 (bc1/tb1/bcrt1), legacy (1/3), P2SH (2/m/n) prefixes
-    const hasValidPrefix = /^(bc1|tb1|bcrt1|[123mn])/i.test(trimmedAddress);
-    if (!hasValidPrefix && trimmedAddress.length > 0) {
-      // Allow mock/test addresses that don't match Bitcoin format
-      const isMockAddress = /^(mock-|test-)/i.test(trimmedAddress);
-      if (!isMockAddress) {
-        throw new StructuredError('INVALID_INPUT', 'Invalid Bitcoin address format: must start with bc1, tb1, bcrt1, 1, 3, 2, m, or n');
-      }
-    }
-    // Length validation (relaxed for test/mock addresses)
-    if (trimmedAddress.length > 90) {
-      throw new StructuredError('INVALID_INPUT', 'Invalid Bitcoin address: too long');
+    // Validate Bitcoin address format and checksum
+    try {
+      validateBitcoinAddress(toAddress, this.config.network);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid Bitcoin address';
+      throw new StructuredError('INVALID_ADDRESS', message);
     }
     
     const effectiveFeeRate = await this.resolveFeeRate(1);

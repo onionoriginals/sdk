@@ -229,7 +229,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(inscription?.contentType).toBe('application/json');
 
       // ===== PHASE 4: Transfer Ownership =====
-      const recipientAddress = 'bcrt1qrecipient123456789abcdefghijklmnopqrst';
+      const recipientAddress = 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx';
       const transferResult = await sdk.lifecycle.transferOwnership(btcoAsset, recipientAddress);
 
       // Verify transfer transaction
@@ -302,7 +302,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify can transfer after direct migration
       const transferResult = await sdk.lifecycle.transferOwnership(
         btcoAsset,
-        'bcrt1qanother123456789abcdefghijklmnopqrstuvw'
+        'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7'
       );
       expect(transferResult.txid).toBeDefined();
       expect(provenance.transfers).toHaveLength(1);
@@ -332,7 +332,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
       expect(await btcoAsset.verify()).toBe(true);
 
-      await sdk.lifecycle.transferOwnership(btcoAsset, 'bcrt1qtest123');
+      await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
       expect(await btcoAsset.verify()).toBe(true);
     });
   });
@@ -416,7 +416,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Test transfer
       const transferResult = await ordinalsProvider.transferInscription(
         inscription.inscriptionId,
-        'bcrt1qtest',
+        'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
         { feeRate: 6 }
       );
       expect(transferResult.txid).toBeDefined();
@@ -478,13 +478,13 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
       // Try to transfer peer layer asset
       await expect(
-        sdk.lifecycle.transferOwnership(asset, 'bcrt1qtest')
+        sdk.lifecycle.transferOwnership(asset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx')
       ).rejects.toThrow('Asset must be inscribed on Bitcoin before transfer');
 
       // Try to transfer webvh layer asset
       const webAsset = await sdk.lifecycle.publishToWeb(asset, 'error.test');
       await expect(
-        sdk.lifecycle.transferOwnership(webAsset, 'bcrt1qtest')
+        sdk.lifecycle.transferOwnership(webAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx')
       ).rejects.toThrow('Asset must be inscribed on Bitcoin before transfer');
     });
 
@@ -496,12 +496,12 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
 
       // First transfer
-      const recipient1 = 'bcrt1qrecipient1';
+      const recipient1 = 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx';
       const tx1 = await sdk.lifecycle.transferOwnership(btcoAsset, recipient1);
       expect(tx1.txid).toBeDefined();
 
       // Second transfer
-      const recipient2 = 'bcrt1qrecipient2';
+      const recipient2 = 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7';
       const tx2 = await sdk.lifecycle.transferOwnership(btcoAsset, recipient2);
       expect(tx2.txid).toBeDefined();
       expect(tx2.txid).not.toBe(tx1.txid);
@@ -567,7 +567,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(btcoBindings['did:webvh']).toBe(webBindings['did:webvh']);
 
       // After transfer (bindings should still exist)
-      await sdk.lifecycle.transferOwnership(btcoAsset, 'bcrt1qtest');
+      await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
       const finalBindings = (btcoAsset as any).bindings;
       expect(finalBindings['did:webvh']).toBe(webBindings['did:webvh']);
       expect(finalBindings['did:btco']).toBe(btcoBindings['did:btco']);
@@ -645,7 +645,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
       const webAsset = await sdk.lifecycle.publishToWeb(asset, 'audit.test');
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 8); // Request 8, but oracle returns 7
-      await sdk.lifecycle.transferOwnership(btcoAsset, 'bcrt1qrecipient');
+      await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
 
       const provenance = btcoAsset.getProvenance();
 
@@ -677,7 +677,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(provenance.transfers).toHaveLength(1);
       const transfer = provenance.transfers[0];
       expect(transfer.from).toBeDefined();
-      expect(transfer.to).toBe('bcrt1qrecipient');
+      expect(transfer.to).toBe('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
       expect(transfer.timestamp).toBeDefined();
       expect(transfer.transactionId).toBeDefined();
     });
@@ -694,7 +694,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
       
       await new Promise(resolve => setTimeout(resolve, 10)); // Small delay
-      await sdk.lifecycle.transferOwnership(btcoAsset, 'bcrt1qtest');
+      await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
 
       const provenance = btcoAsset.getProvenance();
       
