@@ -3,13 +3,14 @@ import { CredentialManager } from '../vc/CredentialManager';
 import { LifecycleManager } from '../lifecycle/LifecycleManager';
 import { BitcoinManager } from '../bitcoin/BitcoinManager';
 import { OriginalsConfig } from '../types';
-import { emitTelemetry } from '../utils/telemetry';
+import { emitTelemetry, StructuredError } from '../utils/telemetry';
 
 export class OriginalsSDK {
   public readonly did: DIDManager;
   public readonly credentials: CredentialManager;
   public readonly lifecycle: LifecycleManager;
   public readonly bitcoin: BitcoinManager;
+  private config: OriginalsConfig;
 
   constructor(config: OriginalsConfig) {
     // Input validation
@@ -23,11 +24,29 @@ export class OriginalsSDK {
       throw new Error('Invalid defaultKeyType: must be ES256K, Ed25519, or ES256');
     }
     
+    this.config = config;
     emitTelemetry(config.telemetry, { name: 'sdk.init', attributes: { network: config.network } });
     this.did = new DIDManager(config);
     this.credentials = new CredentialManager(config, this.did);
     this.lifecycle = new LifecycleManager(config, this.did, this.credentials);
     this.bitcoin = new BitcoinManager(config);
+  }
+
+  /**
+   * Validates that the SDK is properly configured for Bitcoin operations.
+   * Throws a StructuredError if ordinalsProvider is not configured.
+   * 
+   * @throws {StructuredError} When ordinalsProvider is not configured
+   */
+  validateBitcoinConfig(): void {
+    if (!this.config.ordinalsProvider) {
+      throw new StructuredError(
+        'ORD_PROVIDER_REQUIRED',
+        'Bitcoin operations require an ordinalsProvider to be configured. ' +
+        'Please provide an ordinalsProvider when creating the SDK. ' +
+        'See README.md for configuration examples.'
+      );
+    }
   }
 
   static create(config?: Partial<OriginalsConfig>): OriginalsSDK {

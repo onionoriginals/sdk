@@ -25,10 +25,13 @@ npm install @originals/sdk
 
 ```typescript
 import { OriginalsSDK } from '@originals/sdk';
+import { OrdMockProvider } from '@originals/sdk/adapters/providers';
 
+// For testing/development - use mock provider
 const originals = OriginalsSDK.create({
   network: 'testnet',
-  enableLogging: true
+  enableLogging: true,
+  ordinalsProvider: new OrdMockProvider()
 });
 
 // Create a digital asset
@@ -82,6 +85,109 @@ Issue member credentials privately, make public for recognition, and inscribe ke
 
 ### Supply Chain
 Manufacturers create product credentials, publish public registries, and inscribe final ownership for anti-counterfeiting.
+
+## Configuration
+
+### Bitcoin Operations
+
+Bitcoin operations (inscribing and transferring) require an `ordinalsProvider` to be configured. The SDK provides several options:
+
+#### Testing and Development
+
+For testing and local development, use the built-in mock provider:
+
+```typescript
+import { OriginalsSDK } from '@originals/sdk';
+import { OrdMockProvider } from '@originals/sdk/adapters/providers';
+
+const sdk = OriginalsSDK.create({
+  network: 'regtest',
+  ordinalsProvider: new OrdMockProvider()
+});
+```
+
+#### Bitcoin Networks
+
+**Mainnet (Production):**
+```typescript
+import { OrdinalsClient } from '@originals/sdk';
+
+const sdk = OriginalsSDK.create({
+  network: 'mainnet',
+  ordinalsProvider: new OrdinalsClient({
+    network: 'mainnet',
+    apiUrl: 'https://your-ord-api.com',
+    walletPrivateKey: process.env.BITCOIN_PRIVATE_KEY
+  })
+});
+```
+
+**Testnet:**
+```typescript
+const sdk = OriginalsSDK.create({
+  network: 'testnet',
+  ordinalsProvider: new OrdinalsClient({
+    network: 'testnet',
+    apiUrl: 'https://testnet.ord-api.com',
+    walletPrivateKey: process.env.TESTNET_PRIVATE_KEY
+  })
+});
+```
+
+**Signet:**
+```typescript
+const sdk = OriginalsSDK.create({
+  network: 'signet',
+  ordinalsProvider: new OrdinalsClient({
+    network: 'signet',
+    apiUrl: 'https://signet.ord-api.com',
+    walletPrivateKey: process.env.SIGNET_PRIVATE_KEY
+  })
+});
+```
+
+#### Fee Management
+
+Optionally configure a fee oracle for dynamic fee estimation:
+
+```typescript
+const sdk = OriginalsSDK.create({
+  network: 'mainnet',
+  ordinalsProvider: new OrdinalsClient({...}),
+  feeOracle: {
+    estimateFeeRate: async (targetBlocks: number) => {
+      // Fetch current fee rates from your preferred source
+      const response = await fetch('https://mempool.space/api/v1/fees/recommended');
+      const fees = await response.json();
+      return targetBlocks <= 1 ? fees.fastestFee : fees.halfHourFee;
+    }
+  }
+});
+```
+
+#### Error Handling
+
+If you attempt Bitcoin operations without configuring an `ordinalsProvider`, you'll receive a clear error:
+
+```typescript
+const sdk = OriginalsSDK.create({ network: 'mainnet' });
+
+// This will throw StructuredError with code 'ORD_PROVIDER_REQUIRED'
+await sdk.bitcoin.inscribeData(data, 'application/json');
+// Error: Ordinals provider must be configured to inscribe data on Bitcoin.
+// Please provide an ordinalsProvider in your SDK configuration.
+```
+
+You can also validate the configuration before attempting operations:
+
+```typescript
+try {
+  sdk.validateBitcoinConfig();
+  // Safe to perform Bitcoin operations
+} catch (error) {
+  console.error('Bitcoin operations not available:', error.message);
+}
+```
 
 ## Development
 

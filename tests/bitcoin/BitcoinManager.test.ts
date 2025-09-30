@@ -233,4 +233,45 @@ describe('BitcoinManager integration with providers', () => {
     const res: any = await sdk.bitcoin.inscribeData(Buffer.from('hello'), 'text/plain', 2);
     expect(res.feeRate).toBe(9);
   });
+
+  test('inscribeData throws ORD_PROVIDER_REQUIRED when provider not configured', async () => {
+    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    try {
+      await sdk.bitcoin.inscribeData(Buffer.from('data'), 'text/plain');
+      throw new Error('Expected error to be thrown');
+    } catch (error: any) {
+      expect(error.code).toBe('ORD_PROVIDER_REQUIRED');
+      expect(error.message).toContain('Ordinals provider must be configured');
+    }
+  });
+
+  test('transferInscription throws ORD_PROVIDER_REQUIRED when provider not configured', async () => {
+    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const mockInscription = {
+      inscriptionId: 'test-id',
+      satoshi: 'sat-123',
+      content: Buffer.from('test'),
+      contentType: 'text/plain',
+      txid: 'tx-123',
+      vout: 0
+    };
+    try {
+      await sdk.bitcoin.transferInscription(mockInscription, 'bc1qtest');
+      throw new Error('Expected error to be thrown');
+    } catch (error: any) {
+      expect(error.code).toBe('ORD_PROVIDER_REQUIRED');
+      expect(error.message).toContain('Ordinals provider must be configured');
+    }
+  });
+
+  test('validateBitcoinConfig throws when ordinalsProvider not configured', () => {
+    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    expect(() => sdk.validateBitcoinConfig()).toThrow('Bitcoin operations require an ordinalsProvider');
+  });
+
+  test('validateBitcoinConfig passes when ordinalsProvider is configured', () => {
+    const provider = createMockProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    expect(() => sdk.validateBitcoinConfig()).not.toThrow();
+  });
 });
