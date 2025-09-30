@@ -10,7 +10,9 @@ import { sha256Bytes } from '../utils/hash';
 export class DIDManager {
   constructor(private config: OriginalsConfig) {}
 
-  async createDIDPeer(resources: AssetResource[]): Promise<DIDDocument> {
+  async createDIDPeer(resources: AssetResource[], returnKeyPair?: false): Promise<DIDDocument>;
+  async createDIDPeer(resources: AssetResource[], returnKeyPair: true): Promise<{ didDocument: DIDDocument; keyPair: { privateKey: string; publicKey: string } }>;
+  async createDIDPeer(resources: AssetResource[], returnKeyPair?: boolean): Promise<DIDDocument | { didDocument: DIDDocument; keyPair: { privateKey: string; publicKey: string } }> {
     // Generate a multikey keypair according to configured defaultKeyType
     const keyManager = new KeyManager();
     const desiredType = this.config.defaultKeyType || 'ES256K';
@@ -48,6 +50,10 @@ export class DIDManager {
     }
     if (!resolved.assertionMethod || resolved.assertionMethod.length === 0) {
       resolved.assertionMethod = resolved.authentication || (vmIds.length > 0 ? [vmIds[0]] : []);
+    }
+    
+    if (returnKeyPair) {
+      return { didDocument: resolved as DIDDocument, keyPair };
     }
     return resolved as DIDDocument;
   }

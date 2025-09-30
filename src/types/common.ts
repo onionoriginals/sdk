@@ -27,4 +27,9 @@ export interface AssetResource {
   size?: number;
 }
 
+export interface KeyStore {
+  getPrivateKey(verificationMethodId: string): Promise<string | null>;
+  setPrivateKey(verificationMethodId: string, privateKey: string): Promise<void>;
+}
+
 
