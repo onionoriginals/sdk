@@ -32,5 +32,10 @@ export * from './utils/serialization';
 export * from './utils/retry';
 export * from './utils/telemetry';
 
+// Adapter exports (for testing and custom integrations)
+export { OrdMockProvider } from './adapters/providers/OrdMockProvider';
+export { FeeOracleMock } from './adapters/FeeOracleMock';
+export type { OrdinalsProvider, FeeOracleAdapter, StorageAdapter } from './adapters/types';
+
 // Default export
 export default OriginalsSDK;

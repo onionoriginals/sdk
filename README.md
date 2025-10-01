@@ -24,8 +24,7 @@ npm install @originals/sdk
 ## Quick Start
 
 ```typescript
-import { OriginalsSDK } from '@originals/sdk';
-import { OrdMockProvider } from '@originals/sdk/adapters/providers';
+import { OriginalsSDK, OrdMockProvider } from '@originals/sdk';
 
 // For testing/development - use mock provider
 const originals = OriginalsSDK.create({
@@ -97,8 +96,7 @@ Bitcoin operations (inscribing and transferring) require an `ordinalsProvider` t
 For testing and local development, use the built-in mock provider:
 
 ```typescript
-import { OriginalsSDK } from '@originals/sdk';
-import { OrdMockProvider } from '@originals/sdk/adapters/providers';
+import { OriginalsSDK, OrdMockProvider } from '@originals/sdk';
 
 const sdk = OriginalsSDK.create({
   network: 'regtest',
