@@ -125,7 +125,8 @@ export class KeyManager {
 
 	async recoverFromCompromise(didDoc: DIDDocument): Promise<{ 
 		didDocument: DIDDocument; 
-		recoveryCredential: KeyRecoveryCredential 
+		recoveryCredential: KeyRecoveryCredential;
+		newKeyPair: KeyPair;
 	}> {
 		// Determine key type from existing verification methods or default to Ed25519
 		let keyType: KeyType = 'Ed25519';
@@ -216,7 +217,7 @@ export class KeyManager {
 			}
 		};
 
-		return { didDocument: updatedDidDocument, recoveryCredential };
+		return { didDocument: updatedDidDocument, recoveryCredential, newKeyPair };
 	}
 
         encodePublicKeyMultibase(publicKey: Buffer, type: KeyType): string {

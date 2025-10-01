@@ -102,10 +102,10 @@ const keyManager = new KeyManager();
 const result = await keyManager.recoverFromCompromise(compromisedDidDoc);
 
 // Extract results
-const { didDocument, recoveryCredential } = result;
+const { didDocument, recoveryCredential, newKeyPair } = result;
 
-// CRITICAL: Securely store the new private key generated during recovery
-// The new key pair is embedded in the didDocument verification methods
+// CRITICAL: Securely store the new private key immediately
+await storePrivateKeySecurely(didDocument.id, newKeyPair.privateKey);
 
 // Publish the recovery credential to provide transparency
 // Store it in a verifiable credential registry or publish to a public ledger
@@ -234,7 +234,10 @@ async function emergencyRecovery(did: string) {
   const compromisedDoc = await loadDidDocument(did);
   
   // Perform recovery
-  const { didDocument, recoveryCredential } = await keyManager.recoverFromCompromise(compromisedDoc);
+  const { didDocument, recoveryCredential, newKeyPair } = await keyManager.recoverFromCompromise(compromisedDoc);
+  
+  // CRITICAL: Securely store the new private key immediately
+  await storePrivateKeySecurely(did, newKeyPair.privateKey);
   
   // Store recovery credential
   await storeRecoveryCredential(recoveryCredential);

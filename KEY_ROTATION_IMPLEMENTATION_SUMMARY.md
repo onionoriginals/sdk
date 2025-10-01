@@ -42,7 +42,7 @@ Implements emergency recovery with:
 - ✅ Creates recovery credential proving the recovery action
 - ✅ Updates authentication and assertionMethod to use new key
 - ✅ Preserves all optional DID document properties
-- ✅ Returns both updated DID document and recovery credential
+- ✅ Returns updated DID document, recovery credential, AND the new key pair (private + public keys)
 
 ### 3. Comprehensive Test Suite
 
@@ -137,6 +137,17 @@ Coverage:    96.03% lines, 95.49% statements, 100% functions
 - Maintains service endpoints
 - Updates only authentication and assertionMethod for security operations
 
+### Recovery Return Structure
+
+The `recoverFromCompromise()` method returns:
+```typescript
+{
+  didDocument: DIDDocument,           // Updated DID document with new key
+  recoveryCredential: KeyRecoveryCredential,  // Verifiable proof of recovery
+  newKeyPair: KeyPair                 // NEW: The generated key pair (with private key)
+}
+```
+
 ### Recovery Credential Structure
 ```json
 {
@@ -153,6 +164,8 @@ Coverage:    96.03% lines, 95.49% statements, 100% functions
   }
 }
 ```
+
+**Important**: The caller now receives the `newKeyPair` containing both the public and private keys, allowing them to securely store the private key immediately after recovery.
 
 ## Integration Points
 

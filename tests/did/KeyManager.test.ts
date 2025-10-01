@@ -179,12 +179,18 @@ describe('KeyManager', () => {
     // Verify result structure
     expect(result).toHaveProperty('didDocument');
     expect(result).toHaveProperty('recoveryCredential');
+    expect(result).toHaveProperty('newKeyPair');
 
     // Verify new key was generated
     expect(result.didDocument.verificationMethod).toHaveLength(2);
     const newKey = result.didDocument.verificationMethod?.[1];
     expect(newKey?.publicKeyMultibase).toBeDefined();
     expect(newKey?.publicKeyMultibase).not.toBe(initialPair.publicKey);
+    
+    // Verify new key pair is returned and matches the verification method
+    expect(result.newKeyPair).toBeDefined();
+    expect(result.newKeyPair.publicKey).toBe(newKey?.publicKeyMultibase);
+    expect(result.newKeyPair.privateKey).toBeDefined();
   });
 
   test('recoverFromCompromise marks all existing keys as compromised', async () => {
