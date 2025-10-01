@@ -278,7 +278,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'resource-direct',
           type: 'data',
           contentType: 'application/json',
-          hash: 'abcdef123456789abcdef1234567890abcdef1234567890abcdef1234567890',
+          hash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
           content: '{"test": "data"}'
         }
       ];
@@ -515,7 +515,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
     });
 
     test('handles empty resources array', async () => {
-      // Validate that empty resources array throws error
+      // Empty resources should throw an error per validation rules
       await expect(sdk.lifecycle.createAsset([])).rejects.toThrow('At least one resource is required');
     });
 

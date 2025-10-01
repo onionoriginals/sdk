@@ -44,11 +44,10 @@ describe('LifecycleManager', () => {
     expect(btco.bindings?.['did:btco']).toBe('did:btco:123');
   });
 
-  test('inscribeOnBitcoin without provider still migrates', async () => {
+  test('inscribeOnBitcoin without provider throws error', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset(resources);
-    const btco = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
-    expect(btco.currentLayer).toBe('did:btco');
+    await expect(sdk.lifecycle.inscribeOnBitcoin(asset, 5)).rejects.toThrow('Ordinals provider must be configured');
   });
 
   test('inscribeOnBitcoin enforces migration guard', async () => {
@@ -74,7 +73,8 @@ describe('LifecycleManager', () => {
   });
 
   test('transferOwnership succeeds when on btco (returns tx)', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const provider = new MockOrdinalsProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }
     ]);
@@ -106,7 +106,8 @@ import { PSBTBuilder } from '../../src/bitcoin/PSBTBuilder';
 
 describe('Bitcoin inscription MVP - dry run', () => {
   test('dry-run using mocked provider and broadcaster', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest', bitcoinRpcUrl: 'http://ord' });
+    const provider = new MockOrdinalsProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
 
     // Inject mocked dependencies
     const mockBroadcast = new BroadcastClient(async (_hex) => 'tx-dryrun', async (_txid) => ({ confirmed: true, confirmations: 1 }));
@@ -183,7 +184,8 @@ describe('LifecycleManager additional branches', () => {
 
 describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
   test('uses provider.estimateFee when feeRate not provided', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest', bitcoinRpcUrl: 'http://ord' });
+    const provider = new MockOrdinalsProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }]);
     const result = await sdk.lifecycle.inscribeOnBitcoin(asset);
     expect(result.currentLayer).toBe('did:btco');

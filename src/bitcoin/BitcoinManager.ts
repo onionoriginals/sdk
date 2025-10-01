@@ -90,18 +90,12 @@ export class BitcoinManager {
     const effectiveFeeRate = await this.resolveFeeRate(1, feeRate);
 
     if (!this.ord) {
-      return {
-        satoshi: 'mock-sat',
-        inscriptionId: 'mock-inscription',
-        content: data,
-        contentType,
-        txid: 'mock-txid',
-        vout: 0,
-        // Provide deterministic defaults so tests can assert presence
-        blockHeight: undefined as any,
-        // @ts-ignore augment for tests
-        feeRate: typeof effectiveFeeRate === 'number' && Number.isFinite(effectiveFeeRate) ? effectiveFeeRate : 10
-      };
+      throw new StructuredError(
+        'ORD_PROVIDER_REQUIRED',
+        'Ordinals provider must be configured to inscribe data on Bitcoin. ' +
+        'Please provide an ordinalsProvider in your SDK configuration. ' +
+        'For testing, use: import { OrdMockProvider } from \'@originals/sdk\';'
+      );
     }
 
     if (typeof this.ord.createInscription !== 'function') {
@@ -217,13 +211,12 @@ export class BitcoinManager {
     const effectiveFeeRate = await this.resolveFeeRate(1);
 
     if (!this.ord) {
-      const value = Math.max(DUST_LIMIT_SATS, 546);
-      return {
-        txid: 'mock-transfer-txid',
-        vin: [{ txid: inscription.txid, vout: inscription.vout }],
-        vout: [{ value, scriptPubKey: 'script', address: toAddress }],
-        fee: 100
-      };
+      throw new StructuredError(
+        'ORD_PROVIDER_REQUIRED',
+        'Ordinals provider must be configured to transfer inscriptions on Bitcoin. ' +
+        'Please provide an ordinalsProvider in your SDK configuration. ' +
+        'For testing, use: import { OrdMockProvider } from \'@originals/sdk\';'
+      );
     }
 
     if (typeof this.ord.transferInscription !== 'function') {

@@ -3,7 +3,7 @@ import { CredentialManager } from '../vc/CredentialManager';
 import { LifecycleManager } from '../lifecycle/LifecycleManager';
 import { BitcoinManager } from '../bitcoin/BitcoinManager';
 import { OriginalsConfig, KeyStore } from '../types';
-import { emitTelemetry } from '../utils/telemetry';
+import { emitTelemetry, StructuredError } from '../utils/telemetry';
 
 export interface OriginalsSDKOptions extends Partial<OriginalsConfig> {
   keyStore?: KeyStore;
@@ -14,6 +14,7 @@ export class OriginalsSDK {
   public readonly credentials: CredentialManager;
   public readonly lifecycle: LifecycleManager;
   public readonly bitcoin: BitcoinManager;
+  private config: OriginalsConfig;
 
   constructor(config: OriginalsConfig, keyStore?: KeyStore) {
     // Input validation
@@ -27,6 +28,7 @@ export class OriginalsSDK {
       throw new Error('Invalid defaultKeyType: must be ES256K, Ed25519, or ES256');
     }
     
+    this.config = config;
     emitTelemetry(config.telemetry, { name: 'sdk.init', attributes: { network: config.network } });
     this.did = new DIDManager(config);
     this.credentials = new CredentialManager(config, this.did);
@@ -34,7 +36,25 @@ export class OriginalsSDK {
     this.bitcoin = new BitcoinManager(config);
   }
 
-  static create(options?: OriginalsSDKOptions): OriginalsSDK {
+
+  /**
+   * Validates that the SDK is properly configured for Bitcoin operations.
+   * Throws a StructuredError if ordinalsProvider is not configured.
+   * 
+   * @throws {StructuredError} When ordinalsProvider is not configured
+   */
+  validateBitcoinConfig(): void {
+    if (!this.config.ordinalsProvider) {
+      throw new StructuredError(
+        'ORD_PROVIDER_REQUIRED',
+        'Bitcoin operations require an ordinalsProvider to be configured. ' +
+        'Please provide an ordinalsProvider when creating the SDK. ' +
+        'See README.md for configuration examples.'
+      );
+    }
+  }
+
+  static create(config?: Partial<OriginalsConfig>): OriginalsSDK {
     const { keyStore, ...configOptions } = options || {};
     const defaultConfig: OriginalsConfig = {
       network: 'mainnet',

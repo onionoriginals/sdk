@@ -1,9 +1,11 @@
 /* istanbul ignore file */
 declare const describe: any, test: any, expect: any;
 import { OriginalsSDK, OriginalsAsset } from '../../src';
+import { MockOrdinalsProvider } from '../mocks/adapters';
 
 describe('LifecycleManager.transferOwnership unit edge cases', () => {
-  const sdk = OriginalsSDK.create({ network: 'regtest' });
+  const provider = new MockOrdinalsProvider();
+  const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
 
   test('throws if not on btco layer', async () => {
     const asset = new OriginalsAsset(

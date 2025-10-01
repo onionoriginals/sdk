@@ -1,9 +1,11 @@
 /* istanbul ignore file */
 declare const describe: any, test: any, expect: any;
 import { OriginalsSDK, OriginalsAsset } from '../../src';
+import { MockOrdinalsProvider } from '../mocks/adapters';
 
 describe('Integration: Lifecycle.transferOwnership for did:btco', () => {
-  const sdk = OriginalsSDK.create({ network: 'regtest', bitcoinRpcUrl: 'http://ord' });
+  const provider = new MockOrdinalsProvider();
+  const sdk = OriginalsSDK.create({ network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
 
   test('returns txid and records provenance transfer', async () => {
     const asset = new OriginalsAsset(

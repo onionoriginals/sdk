@@ -92,6 +92,25 @@ describe('OriginalsAsset', () => {
     spy.mockRestore();
   });
 
+  test('verify returns false when credentialManager verification fails', async () => {
+    const goodVc: any = {
+      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:peer:issuer',
+      issuanceDate: new Date().toISOString(),
+      credentialSubject: { id: 'did:peer:xyz' },
+      proof: { type: 'DataIntegrityProof', created: new Date().toISOString(), verificationMethod: 'did:peer:issuer#key', proofPurpose: 'assertionMethod', proofValue: 'zabc' }
+    };
+    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), [goodVc]);
+    const { CredentialManager } = await import('../../src/vc/CredentialManager');
+    const { DIDManager } = await import('../../src/did/DIDManager');
+    const didManager = new DIDManager({} as any);
+    const cm = new CredentialManager({ defaultKeyType: 'ES256K', network: 'regtest' } as any, didManager);
+    const spy = jest.spyOn(cm, 'verifyCredential').mockResolvedValue(false);
+    await expect(asset.verify({ credentialManager: cm, didManager })).resolves.toBe(false);
+    spy.mockRestore();
+  });
+
   test('verify does not fail if fetch throws when URL present', async () => {
     const resWithUrl: AssetResource = {
       id: 'r3', type: 'text', url: 'https://example.com/missing', contentType: 'text/plain', hash: resources[0].hash
@@ -99,6 +118,54 @@ describe('OriginalsAsset', () => {
     const asset = new OriginalsAsset([resWithUrl], buildDid('did:peer:abc'), emptyCreds);
     const failingFetch = async () => { throw new Error('network'); };
     await expect(asset.verify({ fetch: failingFetch as any })).resolves.toBe(true);
+  });
+
+  test('verify returns false when resource has invalid id type', async () => {
+    const badResource: any = { id: 123, type: 'text', contentType: 'text/plain', hash: 'abc' };
+    const asset = new OriginalsAsset([badResource], buildDid('did:peer:abc'), emptyCreds);
+    await expect(asset.verify()).resolves.toBe(false);
+  });
+
+  test('verify returns false when resource hash has non-hex characters', async () => {
+    const badResource: AssetResource = { id: 'r', type: 'text', contentType: 'text/plain', hash: 'zzzz' };
+    const asset = new OriginalsAsset([badResource], buildDid('did:peer:abc'), emptyCreds);
+    await expect(asset.verify()).resolves.toBe(false);
+  });
+
+  test('verify returns false when inline content hash mismatch', async () => {
+    const badResource: AssetResource = {
+      id: 'r',
+      type: 'text',
+      content: 'hello',
+      contentType: 'text/plain',
+      hash: 'wrong0000000000000000000000000000000000000000000000000000000000'
+    };
+    const asset = new OriginalsAsset([badResource], buildDid('did:peer:abc'), emptyCreds);
+    await expect(asset.verify()).resolves.toBe(false);
+  });
+
+  test('verify returns false when fetched URL content hash mismatch', async () => {
+    const resWithUrl: AssetResource = {
+      id: 'r4',
+      type: 'text',
+      url: 'https://example.com/data',
+      contentType: 'text/plain',
+      hash: 'wrong0000000000000000000000000000000000000000000000000000000000'
+    };
+    const asset = new OriginalsAsset([resWithUrl], buildDid('did:peer:abc'), emptyCreds);
+    const mockFetch = async () => ({ arrayBuffer: async () => Buffer.from('test').buffer }) as any;
+    await expect(asset.verify({ fetch: mockFetch })).resolves.toBe(false);
+  });
+
+  test('verify catches and returns false on unexpected error', async () => {
+    const asset = new OriginalsAsset(resources, buildDid('did:peer:abc'), emptyCreds);
+    // Force an error by mocking validateDIDDocument to throw
+    const validateDIDDocument = require('../../src/utils/validation').validateDIDDocument;
+    jest.spyOn(require('../../src/utils/validation'), 'validateDIDDocument').mockImplementationOnce(() => {
+      throw new Error('unexpected');
+    });
+    await expect(asset.verify()).resolves.toBe(false);
+    jest.restoreAllMocks();
   });
 
   test('constructor throws on unknown DID method (coverage for error path)', () => {
