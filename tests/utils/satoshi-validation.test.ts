@@ -259,6 +259,17 @@ describe('satoshi-validation', () => {
         expect(() => parseSatoshiIdentifier('did:btco:invalid:123')).toThrow(StructuredError);
         expect(() => parseSatoshiIdentifier('did:btco:invalid:123')).toThrow('unsupported network');
       });
+
+      test('throws on mainnet prefix in 4-part format', () => {
+        // mainnet should use 3-part format (did:btco:123), not 4-part (did:btco:mainnet:123)
+        expect(() => parseSatoshiIdentifier('did:btco:mainnet:123')).toThrow(StructuredError);
+        expect(() => parseSatoshiIdentifier('did:btco:mainnet:123')).toThrow('unsupported network');
+      });
+
+      test('throws on regtest prefix', () => {
+        expect(() => parseSatoshiIdentifier('did:btco:regtest:123')).toThrow(StructuredError);
+        expect(() => parseSatoshiIdentifier('did:btco:regtest:123')).toThrow('unsupported network');
+      });
     });
 
     describe('validation integration', () => {

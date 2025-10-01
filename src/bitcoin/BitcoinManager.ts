@@ -317,6 +317,11 @@ export class BitcoinManager {
     if (parts.length === 3) {
       satoshi = parts[2];
     } else if (parts.length === 4) {
+      // Validate network prefix - only 'test' and 'sig' are allowed
+      const network = parts[2];
+      if (network !== 'test' && network !== 'sig') {
+        return null;
+      }
       satoshi = parts[3];
     }
     

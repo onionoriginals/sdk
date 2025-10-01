@@ -214,6 +214,21 @@ describe('BitcoinManager integration with providers', () => {
     await expect(sdk.bitcoin.validateBTCODID('did:btco:999999999')).resolves.toBe(false);
   });
 
+  test('validateBTCODID rejects invalid network prefixes', async () => {
+    const provider = createMockProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    await sdk.bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
+    
+    // Valid networks should work
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:test:123456789')).resolves.toBe(true);
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:sig:123456789')).resolves.toBe(true);
+    
+    // Invalid network prefix should be rejected
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:invalid:123456789')).resolves.toBe(false);
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:mainnet:123456789')).resolves.toBe(false);
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:regtest:123456789')).resolves.toBe(false);
+  });
+
   test('preventFrontRunning returns false when multiple inscriptions exist on same satoshi', async () => {
     const provider = createMockProvider();
     const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
