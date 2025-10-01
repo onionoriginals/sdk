@@ -37,6 +37,17 @@ describe('validation utils', () => {
     expect(validateCredential(vc)).toBe(true);
   });
 
+  test('validateCredential returns false when issuer object has no id', () => {
+    const vc: any = {
+      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      type: ['VerifiableCredential'],
+      issuer: { name: 'Test Issuer' },
+      issuanceDate: new Date().toISOString(),
+      credentialSubject: { id: 'did:webvh:example.com:abc' }
+    };
+    expect(validateCredential(vc)).toBe(false);
+  });
+
   test('validateCredential negative cases', () => {
     expect(validateCredential({} as any)).toBe(false);
     // Fails on missing type array
@@ -84,6 +95,13 @@ describe('validation utils', () => {
       verificationMethod: [{ id: '#key', type: 'Ed25519VerificationKey2020', controller: 'did:peer:abc', publicKeyMultibase: 'xabc' }]
     };
     expect(validateDIDDocument(badMultibase)).toBe(false);
+    // invalid controller on verificationMethod
+    const badVmController: any = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:peer:abc',
+      verificationMethod: [{ id: '#key', type: 'Ed25519VerificationKey2020', controller: 'not-a-did', publicKeyMultibase: 'zabc' }]
+    };
+    expect(validateDIDDocument(badVmController)).toBe(false);
     // invalid controller array
     const badControllers: any = {
       '@context': ['https://www.w3.org/ns/did/v1'],
