@@ -278,7 +278,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'resource-direct',
           type: 'data',
           contentType: 'application/json',
-          hash: 'direct123456789abcdef1234567890abcdef1234567890abcdef1234567890',
+          hash: 'abcdef123456789abcdef1234567890abcdef1234567890abcdef1234567890',
           content: '{"test": "data"}'
         }
       ];
@@ -515,11 +515,8 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
     });
 
     test('handles empty resources array', async () => {
-      const asset = await sdk.lifecycle.createAsset([]);
-      
-      expect(asset).toBeInstanceOf(OriginalsAsset);
-      expect(asset.resources).toHaveLength(0);
-      expect(asset.currentLayer).toBe('did:peer');
+      // Validate that empty resources array throws error
+      await expect(sdk.lifecycle.createAsset([])).rejects.toThrow('At least one resource is required');
     });
 
     test('handles multiple resources with different content types', async () => {
