@@ -28,6 +28,7 @@ export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } fr
 
 // Utility exports
 export * from './utils/validation';
+export * from './utils/satoshi-validation';
 export * from './utils/serialization';
 export * from './utils/retry';
 export * from './utils/telemetry';

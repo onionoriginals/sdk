@@ -1,5 +1,6 @@
 import { DIDDocument, VerificationMethod } from '../types/did';
 import { multikey, MultikeyType } from '../crypto/Multikey';
+import { validateSatoshiNumber } from '../utils/satoshi-validation';
 
 export type BitcoinNetwork = 'mainnet' | 'testnet' | 'signet';
 
@@ -33,6 +34,12 @@ export function createBtcoDidDocument(
 	network: BitcoinNetwork,
 	params: CreateBtcoDidDocumentParams
 ): DIDDocument {
+	// Validate satNumber parameter at entry
+	const validation = validateSatoshiNumber(satNumber);
+	if (!validation.valid) {
+		throw new Error(`Invalid satoshi number: ${validation.error}`);
+	}
+
 	const did = `${getDidPrefix(network)}:${String(satNumber)}`;
 	const vm = buildVerificationMethod(did, params);
 

@@ -6,6 +6,7 @@ import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProvide
 import { multikey } from '../crypto/Multikey';
 import { KeyManager } from './KeyManager';
 import { sha256Bytes } from '../utils/hash';
+import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation';
 
 export class DIDManager {
   constructor(private config: OriginalsConfig) {}
@@ -79,9 +80,21 @@ export class DIDManager {
   }
 
   async migrateToDIDBTCO(didDoc: DIDDocument, satoshi: string): Promise<DIDDocument> {
-    if (!/^[0-9]+$/.test(String(satoshi))) {
-      throw new Error('Invalid satoshi identifier');
+    // Validate satoshi parameter
+    const validation = validateSatoshiNumber(satoshi);
+    if (!validation.valid) {
+      throw new Error(`Invalid satoshi identifier: ${validation.error}`);
     }
+
+    // Additional range validation for positive values within Bitcoin supply
+    const satoshiNum = Number(satoshi);
+    if (satoshiNum < 0) {
+      throw new Error('Satoshi identifier must be positive (>= 0)');
+    }
+    if (satoshiNum > MAX_SATOSHI_SUPPLY) {
+      throw new Error(`Satoshi identifier must be within Bitcoin's total supply (0 to ${MAX_SATOSHI_SUPPLY.toLocaleString()})`);
+    }
+
     const net = this.config.network || 'mainnet';
     const network = (net === 'regtest' ? 'signet' : net) as any;
 

@@ -51,7 +51,8 @@ export class OrdMockProvider implements OrdinalsProvider {
   async createInscription(params: { data: Buffer; contentType: string; feeRate?: number; }) {
     const inscriptionId = `insc-${Math.random().toString(36).slice(2)}`;
     const txid = `tx-${Math.random().toString(36).slice(2)}`;
-    const satoshi = `sat-${Math.floor(Math.random() * 1e6)}`;
+    // Generate a valid numeric satoshi identifier (not sat-123 format)
+    const satoshi = `${Math.floor(Math.random() * 1e12)}`;
     const vout = 0;
     const record = {
       inscriptionId,
