@@ -3,6 +3,7 @@ import { OriginalsSDK } from './core/OriginalsSDK';
 
 // Main exports
 export { OriginalsSDK } from './core/OriginalsSDK';
+export type { OriginalsSDKOptions } from './core/OriginalsSDK';
 export { OriginalsAsset } from './lifecycle/OriginalsAsset';
 export type { ProvenanceChain } from './lifecycle/OriginalsAsset';
 

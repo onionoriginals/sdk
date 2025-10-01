@@ -19,10 +19,6 @@ const googleClient = new OAuth2Client(
   process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/auth/google/callback'
 );
 
-console.log("PRIVY_APP_ID:", process.env.PRIVY_APP_ID);
-console.log("PRIVY_APP_SECRET:", process.env.PRIVY_APP_SECRET);
-
-// Initialize Privy client
 const privyClient = new PrivyClient(
   process.env.PRIVY_APP_ID!,
   process.env.PRIVY_APP_SECRET!
@@ -156,6 +152,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error("Error connecting wallet:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Create a Privy Bitcoin wallet for the authenticated user
+  app.post("/api/wallets/bitcoin", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user?.id) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      // Read policy IDs from environment; these must be configured in Privy Console
+      const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
+      const policyIds = rawPolicyIds
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+      const result = await privyClient.createWallets({
+        userId: user.id,
+        wallets: [
+          {
+            chainType: "bitcoin-segwit",
+            policyIds,
+          },
+        ],
+      });
+
+      // result may contain the updated user and wallets; return minimal info
+      return res.status(201).json({
+        success: true,
+        userId: user.id,
+      });
+    } catch (error: any) {
+      console.error("Error creating Privy BTC wallet:", error);
+      const message = error?.message || "Failed to create BTC wallet";
+      return res.status(500).json({ error: message });
     }
   });
 
