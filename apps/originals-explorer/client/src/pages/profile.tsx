@@ -1,12 +1,15 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { User, Mail, Wallet, Settings, LogOut, X, Plus } from "lucide-react";
 import { Link } from "wouter";
 
 export default function Profile() {
   const { user, authenticated, ready, logout } = usePrivy();
+  const { toast } = useToast();
   
   const isLoading = !ready;
   const isAuthenticated = ready && authenticated;
@@ -118,6 +121,30 @@ export default function Profile() {
               data-testid="profile-add-funds-button"
             >
               Add funds
+            </Button>
+
+            {/* Create BTC Wallet Button */}
+            <Button
+              className="w-full bg-gray-900 hover:bg-gray-800 text-white rounded-lg mb-6"
+              onClick={async () => {
+                try {
+                  const res = await apiRequest("POST", "/api/wallets/bitcoin");
+                  await res.json();
+                  toast({
+                    title: "Bitcoin Wallet Created",
+                    description: "Your embedded BTC wallet has been created.",
+                  });
+                } catch (e: any) {
+                  toast({
+                    title: "Failed to create wallet",
+                    description: e?.message || "Please try again.",
+                    variant: "destructive",
+                  });
+                }
+              }}
+              data-testid="profile-create-btc-wallet"
+            >
+              Create Bitcoin Wallet
             </Button>
 
             {/* Quick Actions */}
