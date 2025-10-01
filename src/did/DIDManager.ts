@@ -6,11 +6,14 @@ import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProvide
 import { multikey } from '../crypto/Multikey';
 import { KeyManager } from './KeyManager';
 import { sha256Bytes } from '../utils/hash';
+import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation';
 
 export class DIDManager {
   constructor(private config: OriginalsConfig) {}
 
-  async createDIDPeer(resources: AssetResource[]): Promise<DIDDocument> {
+  async createDIDPeer(resources: AssetResource[], returnKeyPair?: false): Promise<DIDDocument>;
+  async createDIDPeer(resources: AssetResource[], returnKeyPair: true): Promise<{ didDocument: DIDDocument; keyPair: { privateKey: string; publicKey: string } }>;
+  async createDIDPeer(resources: AssetResource[], returnKeyPair?: boolean): Promise<DIDDocument | { didDocument: DIDDocument; keyPair: { privateKey: string; publicKey: string } }> {
     // Generate a multikey keypair according to configured defaultKeyType
     const keyManager = new KeyManager();
     const desiredType = this.config.defaultKeyType || 'ES256K';
@@ -49,6 +52,10 @@ export class DIDManager {
     if (!resolved.assertionMethod || resolved.assertionMethod.length === 0) {
       resolved.assertionMethod = resolved.authentication || (vmIds.length > 0 ? [vmIds[0]] : []);
     }
+    
+    if (returnKeyPair) {
+      return { didDocument: resolved as DIDDocument, keyPair };
+    }
     return resolved as DIDDocument;
   }
 
@@ -79,9 +86,21 @@ export class DIDManager {
   }
 
   async migrateToDIDBTCO(didDoc: DIDDocument, satoshi: string): Promise<DIDDocument> {
-    if (!/^[0-9]+$/.test(String(satoshi))) {
-      throw new Error('Invalid satoshi identifier');
+    // Validate satoshi parameter
+    const validation = validateSatoshiNumber(satoshi);
+    if (!validation.valid) {
+      throw new Error(`Invalid satoshi identifier: ${validation.error}`);
     }
+
+    // Additional range validation for positive values within Bitcoin supply
+    const satoshiNum = Number(satoshi);
+    if (satoshiNum < 0) {
+      throw new Error('Satoshi identifier must be positive (>= 0)');
+    }
+    if (satoshiNum > MAX_SATOSHI_SUPPLY) {
+      throw new Error(`Satoshi identifier must be within Bitcoin's total supply (0 to ${MAX_SATOSHI_SUPPLY.toLocaleString()})`);
+    }
+
     const net = this.config.network || 'mainnet';
     const network = (net === 'regtest' ? 'signet' : net) as any;
 

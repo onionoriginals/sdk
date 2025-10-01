@@ -75,4 +75,14 @@ export interface ResourceMigratedCredential extends VerifiableCredential {
   };
 }
 
+export interface KeyRecoveryCredential extends VerifiableCredential {
+  credentialSubject: {
+    id: string; // DID that was recovered
+    recoveredAt: string; // ISO 8601 timestamp
+    recoveryReason: string; // "key_compromise" or other reason
+    previousVerificationMethods: string[]; // IDs of compromised keys
+    newVerificationMethod: string; // ID of new key
+  };
+}
+
 

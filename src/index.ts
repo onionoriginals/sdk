@@ -3,6 +3,7 @@ import { OriginalsSDK } from './core/OriginalsSDK';
 
 // Main exports
 export { OriginalsSDK } from './core/OriginalsSDK';
+export type { OriginalsSDKOptions } from './core/OriginalsSDK';
 export { OriginalsAsset } from './lifecycle/OriginalsAsset';
 export type { ProvenanceChain } from './lifecycle/OriginalsAsset';
 
@@ -28,6 +29,7 @@ export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } fr
 
 // Utility exports
 export * from './utils/validation';
+export * from './utils/satoshi-validation';
 export * from './utils/serialization';
 export * from './utils/retry';
 export * from './utils/telemetry';

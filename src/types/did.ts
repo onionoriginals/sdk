@@ -18,6 +18,8 @@ export interface VerificationMethod {
   type: string;
   controller: string;
   publicKeyMultibase: string;
+  revoked?: string; // ISO 8601 timestamp when the key was revoked
+  compromised?: string; // ISO 8601 timestamp when the key was marked as compromised
 }
 
 export interface ServiceEndpoint {

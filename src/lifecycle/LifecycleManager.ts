@@ -1,7 +1,8 @@
 import {
   OriginalsConfig,
   AssetResource,
-  BitcoinTransaction
+  BitcoinTransaction,
+  KeyStore
 } from '../types';
 import { BitcoinManager } from '../bitcoin/BitcoinManager';
 import { DIDManager } from '../did/DIDManager';
@@ -11,14 +12,41 @@ import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding';
 import { KeyManager } from '../did/KeyManager';
 import { validateBitcoinAddress } from '../utils/bitcoin-address';
+import { multikey } from '../crypto/Multikey';
 
 export class LifecycleManager {
   constructor(
     private config: OriginalsConfig,
     private didManager: DIDManager,
     private credentialManager: CredentialManager,
-    private deps?: { bitcoinManager?: BitcoinManager }
+    private deps?: { bitcoinManager?: BitcoinManager },
+    private keyStore?: KeyStore
   ) {}
+
+  async registerKey(verificationMethodId: string, privateKey: string): Promise<void> {
+    if (!this.keyStore) {
+      throw new Error('KeyStore not configured. Provide keyStore to LifecycleManager constructor.');
+    }
+    
+    // Validate verification method ID format
+    if (!verificationMethodId || typeof verificationMethodId !== 'string') {
+      throw new Error('Invalid verificationMethodId: must be a non-empty string');
+    }
+    
+    // Validate private key format (should be multibase encoded)
+    if (!privateKey || typeof privateKey !== 'string') {
+      throw new Error('Invalid privateKey: must be a non-empty string');
+    }
+    
+    // Validate that it's a valid multibase-encoded private key
+    try {
+      multikey.decodePrivateKey(privateKey);
+    } catch (err) {
+      throw new Error('Invalid privateKey format: must be a valid multibase-encoded private key');
+    }
+    
+    await this.keyStore.setPrivateKey(verificationMethodId, privateKey);
+  }
 
   async createAsset(resources: AssetResource[]): Promise<OriginalsAsset> {
     // Input validation
@@ -52,8 +80,31 @@ export class LifecycleManager {
       }
     }
     
-    const didDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:' + Date.now() } as any;
-    return new OriginalsAsset(resources, didDoc, []);
+    // Create a proper DID:peer document with verification methods
+    // If keyStore is provided, request the key pair to be returned
+    if (this.keyStore) {
+      const result = await this.didManager.createDIDPeer(resources, true);
+      const didDoc = result.didDocument;
+      const keyPair = result.keyPair;
+      
+      // Register the private key in the keyStore
+      if (didDoc.verificationMethod && didDoc.verificationMethod.length > 0) {
+        let verificationMethodId = didDoc.verificationMethod[0].id;
+        
+        // Ensure VM ID is absolute (not just a fragment like #key-0)
+        if (verificationMethodId.startsWith('#')) {
+          verificationMethodId = `${didDoc.id}${verificationMethodId}`;
+        }
+        
+        await this.keyStore.setPrivateKey(verificationMethodId, keyPair.privateKey);
+      }
+      
+      return new OriginalsAsset(resources, didDoc, []);
+    } else {
+      // No keyStore, just create the DID document
+      const didDoc = await this.didManager.createDIDPeer(resources);
+      return new OriginalsAsset(resources, didDoc, []);
+    }
   }
 
   async publishToWeb(
@@ -127,34 +178,28 @@ export class LifecycleManager {
 
       const unsigned = await this.credentialManager.createResourceCredential(type, subject, issuer);
 
-      // Try to use DID-managed keys from the asset's DID document
-      let privateKey: string;
-      let verificationMethod: string;
-      let keyPairGenerated = false;
+      // Resolve the DID and extract verification method
+      const didDoc = await this.didManager.resolveDID(issuer);
+      if (!didDoc || !didDoc.verificationMethod || didDoc.verificationMethod.length === 0) {
+        throw new Error('No verification method found in DID document');
+      }
+
+      const vm = didDoc.verificationMethod[0];
+      let verificationMethod = vm.id;
       
-      try {
-        // Attempt to resolve the DID and extract verification method
-        const didDoc = await this.didManager.resolveDID(issuer);
-        if (didDoc && didDoc.verificationMethod && didDoc.verificationMethod.length > 0) {
-          const vm = didDoc.verificationMethod[0];
-          verificationMethod = vm.id;
-          
-          // Check if we have the private key stored (this would require external key management)
-          // For now, we still generate ephemeral keys but keep the VM reference aligned
-          const km = new KeyManager();
-          const kp = await km.generateKeyPair(this.config.defaultKeyType || 'ES256K');
-          privateKey = kp.privateKey;
-          keyPairGenerated = true;
-        } else {
-          throw new Error('No verification method found in DID document');
-        }
-      } catch {
-        // Fallback: generate ephemeral key pair
-        const km = new KeyManager();
-        const kp = await km.generateKeyPair(this.config.defaultKeyType || 'ES256K');
-        privateKey = kp.privateKey;
-        verificationMethod = `${issuer}#keys-1`;
-        keyPairGenerated = true;
+      // Ensure VM ID is absolute (not just a fragment like #key-0)
+      if (verificationMethod.startsWith('#')) {
+        verificationMethod = `${issuer}${verificationMethod}`;
+      }
+
+      // Retrieve private key from keyStore
+      if (!this.keyStore) {
+        throw new Error('Private key not available for signing. Provide keyStore to LifecycleManager.');
+      }
+
+      const privateKey = await this.keyStore.getPrivateKey(verificationMethod);
+      if (!privateKey) {
+        throw new Error('Private key not available for signing. Provide keyStore to LifecycleManager.');
       }
 
       const signed = await this.credentialManager.signCredential(unsigned, privateKey, verificationMethod);
