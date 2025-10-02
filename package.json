@@ -14,8 +14,8 @@
   "scripts": {
     "build": "tsc",
     "test": "bun test tests/integration && bun test tests/unit",
-    "test:coverage": "bun test --coverage",
-    "test:ci": "bun test --coverage",
+    "test:coverage": "bun test tests/integration tests/unit --coverage",
+    "test:ci": "bun run scripts/check-coverage.ts",
     "lint": "eslint src/**/*.ts",
     "prepare": "npm run build",
     "format": "prettier --write src/**/*.ts"

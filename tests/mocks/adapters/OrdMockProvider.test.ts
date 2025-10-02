@@ -65,5 +65,112 @@ describe('OrdMockProvider', () => {
     expect(inscription).toBeDefined();
     expect(inscription?.inscriptionId).toBe('test-id');
   });
+
+  test('getInscriptionById returns null for non-existent id', async () => {
+    const prov = new OrdMockProvider();
+    const inscription = await prov.getInscriptionById('non-existent');
+    expect(inscription).toBeNull();
+  });
+
+  test('getInscriptionsBySatoshi returns empty array for non-existent satoshi', async () => {
+    const prov = new OrdMockProvider();
+    const inscriptions = await prov.getInscriptionsBySatoshi('999999');
+    expect(inscriptions).toEqual([]);
+  });
+
+  test('getInscriptionsBySatoshi returns list of inscriptions for satoshi', async () => {
+    const prov = new OrdMockProvider();
+    const data = Buffer.from('test data');
+    const res = await prov.createInscription({ data, contentType: 'text/plain' });
+    
+    // Get the satoshi from the created inscription
+    const inscriptions = await prov.getInscriptionsBySatoshi(res.satoshi!);
+    expect(inscriptions.length).toBeGreaterThan(0);
+    expect(inscriptions[0].inscriptionId).toBe(res.inscriptionId);
+  });
+
+  test('createInscription with custom feeRate', async () => {
+    const prov = new OrdMockProvider();
+    const data = Buffer.from('test data');
+    const res = await prov.createInscription({ 
+      data, 
+      contentType: 'text/plain',
+      feeRate: 15 
+    });
+    expect(res.feeRate).toBe(15);
+  });
+
+  test('createInscription returns all expected fields', async () => {
+    const prov = new OrdMockProvider();
+    const data = Buffer.from('test data');
+    const res = await prov.createInscription({ data, contentType: 'text/plain' });
+    
+    expect(res.inscriptionId).toBeDefined();
+    expect(res.revealTxId).toBeDefined();
+    expect(res.commitTxId).toBeUndefined();
+    expect(res.satoshi).toBeDefined();
+    expect(res.txid).toBeDefined();
+    expect(res.vout).toBe(0);
+    expect(res.blockHeight).toBe(1);
+    expect(res.content).toEqual(data);
+    expect(res.contentType).toBe('text/plain');
+  });
+
+  test('transferInscription returns proper transaction details', async () => {
+    const prov = new OrdMockProvider();
+    const data = Buffer.from('test data');
+    const res = await prov.createInscription({ data, contentType: 'text/plain' });
+    
+    const transfer = await prov.transferInscription(res.inscriptionId, 'bc1qaddress', { feeRate: 10 });
+    
+    expect(transfer.txid).toBeDefined();
+    expect(transfer.vin).toBeDefined();
+    expect(transfer.vin.length).toBeGreaterThan(0);
+    expect(transfer.vin[0].txid).toBe(res.txid);
+    expect(transfer.vin[0].vout).toBe(res.vout);
+    expect(transfer.vout).toBeDefined();
+    expect(transfer.vout[0].value).toBe(546);
+    expect(transfer.vout[0].scriptPubKey).toBe('script');
+    expect(transfer.fee).toBe(100);
+    expect(transfer.blockHeight).toBe(1);
+    expect(transfer.confirmations).toBe(0);
+    expect(transfer.satoshi).toBe(res.satoshi);
+  });
+
+  test('transferInscription without options', async () => {
+    const prov = new OrdMockProvider();
+    const data = Buffer.from('test data');
+    const res = await prov.createInscription({ data, contentType: 'text/plain' });
+    
+    const transfer = await prov.transferInscription(res.inscriptionId, 'bc1qaddress');
+    
+    expect(transfer.txid).toBeDefined();
+  });
+
+  test('constructor with partial state including inscriptionsBySatoshi', async () => {
+    const inscriptionsBySatoshi = new Map();
+    inscriptionsBySatoshi.set('12345', ['insc-1', 'insc-2']);
+    
+    const prov = new OrdMockProvider({
+      inscriptionsBySatoshi,
+      feeRate: 8
+    });
+
+    const inscriptions = await prov.getInscriptionsBySatoshi('12345');
+    expect(inscriptions.length).toBe(2);
+    expect(inscriptions[0].inscriptionId).toBe('insc-1');
+    expect(inscriptions[1].inscriptionId).toBe('insc-2');
+  });
+
+  test('createInscription generates numeric satoshi identifier', async () => {
+    const prov = new OrdMockProvider();
+    const data = Buffer.from('test');
+    const res = await prov.createInscription({ data, contentType: 'text/plain' });
+    
+    // Verify satoshi is numeric
+    expect(res.satoshi).toBeDefined();
+    expect(Number.isNaN(Number(res.satoshi))).toBe(false);
+    expect(Number(res.satoshi!)).toBeGreaterThan(0);
+  });
 });
 

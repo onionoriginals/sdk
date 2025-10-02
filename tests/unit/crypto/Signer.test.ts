@@ -15,6 +15,17 @@ const p256PubMb = (bytes: Uint8Array) => multikey.encodePublicKey(bytes, 'P256')
 const blsPrivMb = (bytes: Uint8Array) => multikey.encodePrivateKey(bytes, 'Bls12381G2');
 const blsPubMb = (bytes: Uint8Array) => multikey.encodePublicKey(bytes, 'Bls12381G2');
 
+describe('Signer abstract class', () => {
+  test('abstract class methods are defined', () => {
+    // This tests the abstract class definition at lines 1-4
+    // Since we can't instantiate an abstract class in TypeScript,
+    // we'll verify that the concrete implementations exist
+    const signer = new ES256KSigner();
+    expect(typeof signer.sign).toBe('function');
+    expect(typeof signer.verify).toBe('function');
+  });
+});
+
 describe('Signer classes', () => {
   const data = Buffer.from('hello world');
 
@@ -27,6 +38,14 @@ describe('Signer classes', () => {
       const signer = new ES256KSigner();
       await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
       await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+    });
+
+    test('wrong key type throws on sign and verify', async () => {
+      const signer = new ES256KSigner();
+      const edPriv = ed25519.utils.randomPrivateKey();
+      const edPub = await ed25519.getPublicKey(edPriv);
+      await expect(signer.sign(data, edPrivMb(edPriv))).rejects.toThrow('Invalid key type for ES256K');
+      await expect(signer.verify(data, Buffer.alloc(64), edPubMb(edPub))).rejects.toThrow('Invalid key type for ES256K');
     });
 
     test('sign returns bytes path (Uint8Array direct)', async () => {
@@ -100,6 +119,14 @@ describe('Signer classes', () => {
       const signer = new ES256Signer();
       await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
       await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+    });
+
+    test('wrong key type throws on sign and verify', async () => {
+      const signer = new ES256Signer();
+      const edPriv = ed25519.utils.randomPrivateKey();
+      const edPub = await ed25519.getPublicKey(edPriv);
+      await expect(signer.sign(data, edPrivMb(edPriv))).rejects.toThrow('Invalid key type for ES256');
+      await expect(signer.verify(data, Buffer.alloc(64), edPubMb(edPub))).rejects.toThrow('Invalid key type for ES256');
     });
 
     test('sign returns bytes path (Uint8Array direct)', async () => {
@@ -188,6 +215,14 @@ describe('Signer classes', () => {
       await expect(signer.verify(data, Buffer.alloc(64), 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
     });
 
+    test('wrong key type throws on sign and verify', async () => {
+      const signer = new Ed25519Signer();
+      const sk = secp256k1.utils.randomPrivateKey();
+      const pk = secp256k1.getPublicKey(sk);
+      await expect(signer.sign(data, secpPrivMb(sk))).rejects.toThrow('Invalid key type for Ed25519');
+      await expect(signer.verify(data, Buffer.alloc(64), secpPubMb(pk))).rejects.toThrow('Invalid key type for Ed25519');
+    });
+
     test('sign and verify success; verify returns false with bad signature', async () => {
       const sk = ed25519.utils.randomPrivateKey();
       const pk = await ed25519.getPublicKey(sk);
@@ -219,6 +254,14 @@ describe('Signer classes', () => {
       const signer = new Bls12381G2Signer();
       await expect(signer.sign(data, 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
       await expect(signer.verify(data, Buffer.alloc(96), 'xabc')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+    });
+
+    test('wrong key type throws on sign and verify', async () => {
+      const signer = new Bls12381G2Signer();
+      const edPriv = ed25519.utils.randomPrivateKey();
+      const edPub = await ed25519.getPublicKey(edPriv);
+      await expect(signer.sign(data, edPrivMb(edPriv))).rejects.toThrow('Invalid key type for Bls12381G2');
+      await expect(signer.verify(data, Buffer.alloc(96), edPubMb(edPub))).rejects.toThrow('Invalid key type for Bls12381G2');
     });
 
     test('sign and verify success; verify returns false with bad signature', async () => {
