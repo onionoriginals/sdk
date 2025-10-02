@@ -109,6 +109,8 @@ export async function createUserDID(
     console.log(`Generated DID: ${did}`);
 
     // Step 7: Create DID document
+    // Note: For DID:WebVH, the update key is stored separately in did.jsonl
+    // and is NOT included in the main DID document (did.jsonld)
     const didDocument = {
       "@context": [
         "https://www.w3.org/ns/did/v1",
@@ -127,17 +129,10 @@ export async function createUserDID(
           "type": "Multikey",
           "controller": did,
           "publicKeyMultibase": assertionKeyMultibase
-        },
-        {
-          "id": `${did}#update-key`,
-          "type": "Multikey",
-          "controller": did,
-          "publicKeyMultibase": updateKeyMultibase
         }
       ],
       "authentication": [`${did}#auth-key`],
-      "assertionMethod": [`${did}#assertion-key`],
-      "capabilityInvocation": [`${did}#update-key`]
+      "assertionMethod": [`${did}#assertion-key`]
     };
 
     console.log('DID document created successfully');

@@ -259,21 +259,11 @@ export default function Profile() {
                         </div>
                       </div>
 
-                      <div className="bg-white p-2 rounded border border-gray-200">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Key className="w-3 h-3 text-purple-600" />
-                          <span className="text-xs font-medium text-gray-700">Update Key</span>
-                        </div>
-                        <div className="text-xs text-gray-600 ml-5">
-                          Type: Stellar (Ed25519)
-                        </div>
-                        <div className="text-xs text-gray-500 ml-5 font-mono break-all mt-1">
-                          {didDocument.verificationMethod?.[2]?.publicKeyMultibase?.slice(0, 20)}...
-                        </div>
-                      </div>
-
                       <div className="text-xs text-gray-500 italic mt-2">
                         🔒 All private keys are securely managed by Privy
+                      </div>
+                      <div className="text-xs text-gray-500 italic">
+                        ℹ️ Update key is managed separately in did.jsonl
                       </div>
                     </div>
                   )}

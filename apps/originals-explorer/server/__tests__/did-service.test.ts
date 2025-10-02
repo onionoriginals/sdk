@@ -86,11 +86,11 @@ describe('DID Service', () => {
         'https://w3id.org/security/multikey/v1',
       ]);
 
-      // Verify verification methods
-      expect(result.didDocument.verificationMethod).toHaveLength(3);
+      // Verify verification methods (only auth and assertion in did.jsonld)
+      // Note: Update key is stored separately in did.jsonl for DID:WebVH
+      expect(result.didDocument.verificationMethod).toHaveLength(2);
       expect(result.didDocument.verificationMethod[0].id).toContain('#auth-key');
       expect(result.didDocument.verificationMethod[1].id).toContain('#assertion-key');
-      expect(result.didDocument.verificationMethod[2].id).toContain('#update-key');
 
       // Verify wallet IDs are stored
       expect(result.authWalletId).toBe('btc-wallet-id-123');
@@ -164,6 +164,11 @@ describe('DID Service', () => {
       expect(result.didDocument.assertionMethod).toEqual([
         `${result.did}#assertion-key`,
       ]);
+      
+      // Update key should NOT be in the DID document
+      // It's stored separately in did.jsonl for DID:WebVH
+      expect(result.didDocument.capabilityInvocation).toBeUndefined();
+      expect(result.didDocument.verificationMethod).toHaveLength(2);
     });
   });
 
@@ -212,6 +217,12 @@ describe('DID Service', () => {
       expect(doc).toHaveProperty('verificationMethod');
       expect(doc).toHaveProperty('authentication');
       expect(doc).toHaveProperty('assertionMethod');
+      
+      // Should NOT have capabilityInvocation (update key in did.jsonl)
+      expect(doc).not.toHaveProperty('capabilityInvocation');
+      
+      // Should have exactly 2 verification methods
+      expect(doc.verificationMethod).toHaveLength(2);
 
       // Verification methods should have required fields
       doc.verificationMethod.forEach((vm: any) => {
