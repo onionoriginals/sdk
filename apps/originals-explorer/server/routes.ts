@@ -375,17 +375,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Auto-create asset type if it doesn't exist
       if (createdAssets.length > 0) {
-        const assetTypeName = rows[0].assetType;
-        const existingTypes = await storage.getAssetTypesByUserId(user.id);
-        const typeExists = existingTypes.some(t => t.name === assetTypeName);
+        // Find the first successfully created asset to get the asset type info
+        const firstAsset = createdAssets[0];
+        const assetTypeName = firstAsset.metadata?.assetTypeName;
+        
+        if (assetTypeName) {
+          const existingTypes = await storage.getAssetTypesByUserId(user.id);
+          const typeExists = existingTypes.some(t => t.name === assetTypeName);
 
-        if (!typeExists) {
-          // Extract property keys from custom properties
-          const sampleRow = rows[0];
-          const standardFields = ['title', 'description', 'category', 'tags', 'mediaUrl', 'status', 'assetType'];
-          const properties = Object.keys(sampleRow)
-            .filter(key => !standardFields.includes(key))
-            .map((key, index) => ({
+          if (!typeExists) {
+            // Use the custom properties from the first created asset
+            const customProperties = firstAsset.metadata?.customProperties || {};
+            const properties = Object.keys(customProperties).map((key, index) => ({
               id: `prop_${index}`,
               key,
               label: key.charAt(0).toUpperCase() + key.slice(1),
@@ -393,12 +394,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
               required: false,
             }));
 
-          await storage.createAssetType({
-            userId: user.id,
-            name: assetTypeName,
-            description: `Auto-created from spreadsheet upload`,
-            properties,
-          });
+            await storage.createAssetType({
+              userId: user.id,
+              name: assetTypeName,
+              description: `Auto-created from spreadsheet upload`,
+              properties,
+            });
+          }
         }
       }
 
