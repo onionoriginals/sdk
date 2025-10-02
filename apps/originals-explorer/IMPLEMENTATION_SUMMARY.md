@@ -123,7 +123,7 @@ Successfully implemented automatic DID:WebVH creation for non-wallet users using
 ```typescript
 // Added to users table
 {
-  did: text | null,                    // "did:webvh:localhost:5000:user123"
+  did: text | null,                    // "did:webvh:localhost%3A5000:user123"
   didDocument: jsonb | null,           // Complete DID document
   authWalletId: text | null,           // Bitcoin wallet ID
   assertionWalletId: text | null,      // Stellar wallet #1 ID
@@ -240,29 +240,29 @@ The `signing-service.ts` has placeholders for actual Privy signing. Need to:
     "https://www.w3.org/ns/did/v1",
     "https://w3id.org/security/multikey/v1"
   ],
-  "id": "did:webvh:localhost:5000:cltest123456",
+  "id": "did:webvh:localhost%3A5000:cltest123456",
   "verificationMethod": [
     {
-      "id": "did:webvh:localhost:5000:cltest123456#auth-key",
+      "id": "did:webvh:localhost%3A5000:cltest123456#auth-key",
       "type": "Multikey",
-      "controller": "did:webvh:localhost:5000:cltest123456",
+      "controller": "did:webvh:localhost%3A5000:cltest123456",
       "publicKeyMultibase": "zQ3s..."
     },
     {
-      "id": "did:webvh:localhost:5000:cltest123456#assertion-key",
+      "id": "did:webvh:localhost%3A5000:cltest123456#assertion-key",
       "type": "Multikey",
-      "controller": "did:webvh:localhost:5000:cltest123456",
+      "controller": "did:webvh:localhost%3A5000:cltest123456",
       "publicKeyMultibase": "z6Mk..."
     },
     {
-      "id": "did:webvh:localhost:5000:cltest123456#update-key",
+      "id": "did:webvh:localhost%3A5000:cltest123456#update-key",
       "type": "Multikey",
-      "controller": "did:webvh:localhost:5000:cltest123456",
+      "controller": "did:webvh:localhost%3A5000:cltest123456",
       "publicKeyMultibase": "z6Mk..."
     }
   ],
-  "authentication": ["did:webvh:localhost:5000:cltest123456#auth-key"],
-  "assertionMethod": ["did:webvh:localhost:5000:cltest123456#assertion-key"]
+  "authentication": ["did:webvh:localhost%3A5000:cltest123456#auth-key"],
+  "assertionMethod": ["did:webvh:localhost%3A5000:cltest123456#assertion-key"]
 }
 ```
 

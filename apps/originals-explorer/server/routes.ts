@@ -510,11 +510,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // IMPORTANT: This catch-all route must be registered LAST to avoid conflicts
   // 
   // According to DID:WebVH spec transformation:
-  // - DID format: did:webvh:domain:path:segments
-  // - Resolves to: https://domain/path/segments/did.jsonld
+  // - DID format: did:webvh:{url-encoded-domain}:{path-segments}
+  // - The domain is URL-encoded (ports use %3A instead of :)
+  // - Resolves to: https://{domain}/{path-segments}/did.jsonld
   // 
-  // Our DID format: did:webvh:localhost:5000:user123
-  // Resolves to: http://localhost:5000/user123/did.jsonld
+  // Example:
+  // - DID: did:webvh:localhost%3A5000:user123
+  // - Resolves to: http://localhost:5000/user123/did.jsonld
   app.get("/:userSlug/did.jsonld", async (req, res) => {
     try {
       const { userSlug } = req.params;

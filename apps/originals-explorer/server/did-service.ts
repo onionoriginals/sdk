@@ -112,7 +112,11 @@ export async function createUserDID(
 
     // Step 6: Generate user slug and DID
     const userSlug = generateUserSlug(privyUserId);
-    const did = `did:webvh:${domain}:${userSlug}`;
+    
+    // URL-encode the domain to handle ports (e.g., localhost:5000 -> localhost%3A5000)
+    // This is required by the DID:WebVH spec for proper transformation
+    const encodedDomain = encodeURIComponent(domain);
+    const did = `did:webvh:${encodedDomain}:${userSlug}`;
 
     console.log(`Generated DID: ${did}`);
 
@@ -169,10 +173,21 @@ export async function createUserDID(
 
 /**
  * Get user slug from a DID
- * @param did - The full DID (e.g., "did:webvh:example.com:user-123")
+ * @param did - The full DID (e.g., "did:webvh:localhost%3A5000:user-123")
  * @returns The user slug or null if invalid format
  */
 export function getUserSlugFromDID(did: string): string | null {
-  const match = did.match(/^did:webvh:[^:]+:(.+)$/);
-  return match ? match[1] : null;
+  // DID format: did:webvh:{encoded-domain}:{slug}
+  // The domain is URL-encoded, so colons in ports become %3A
+  // We split on ':' and take the last segment as the slug
+  const parts = did.split(':');
+  
+  // Valid format: ['did', 'webvh', '{encoded-domain}', '{slug}']
+  // Minimum 4 parts, last part is the slug
+  if (parts.length < 4 || parts[0] !== 'did' || parts[1] !== 'webvh') {
+    return null;
+  }
+  
+  // Return the last segment (the user slug)
+  return parts[parts.length - 1];
 }

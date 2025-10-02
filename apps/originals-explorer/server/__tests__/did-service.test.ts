@@ -78,8 +78,8 @@ describe('DID Service', () => {
         policyIds: [],
       });
 
-      // Verify DID structure
-      expect(result.did).toMatch(/^did:webvh:localhost:5000:cltest123456$/);
+      // Verify DID structure (domain should be URL-encoded)
+      expect(result.did).toMatch(/^did:webvh:localhost%3A5000:cltest123456$/);
       expect(result.didDocument).toBeDefined();
       expect(result.didDocument['@context']).toEqual([
         'https://www.w3.org/ns/did/v1',
@@ -118,7 +118,8 @@ describe('DID Service', () => {
       const result = await createUserDID(userId, mockPrivyClient);
 
       // Should remove "did:privy:" prefix and sanitize special chars
-      expect(result.did).toMatch(/^did:webvh:localhost:5000:cl-test-user-123$/);
+      // Domain with port should be URL-encoded
+      expect(result.did).toMatch(/^did:webvh:localhost%3A5000:cl-test-user-123$/);
     });
 
     it('should use custom domain from environment', async () => {
@@ -133,6 +134,7 @@ describe('DID Service', () => {
 
       const result = await createUserDID('user123', mockPrivyClient);
 
+      // Domain without port doesn't need encoding (no special chars)
       expect(result.did).toMatch(/^did:webvh:app\.example\.com:user123$/);
     });
 
@@ -166,8 +168,14 @@ describe('DID Service', () => {
   });
 
   describe('getUserSlugFromDID', () => {
-    it('should extract user slug from valid DID', () => {
-      const did = 'did:webvh:localhost:5000:user123';
+    it('should extract user slug from valid DID with URL-encoded domain', () => {
+      const did = 'did:webvh:localhost%3A5000:user123';
+      const slug = getUserSlugFromDID(did);
+      expect(slug).toBe('user123');
+    });
+
+    it('should extract slug from DID without port', () => {
+      const did = 'did:webvh:app.example.com:user123';
       const slug = getUserSlugFromDID(did);
       expect(slug).toBe('user123');
     });
@@ -181,6 +189,7 @@ describe('DID Service', () => {
     it('should return null for invalid DID format', () => {
       expect(getUserSlugFromDID('invalid-did')).toBeNull();
       expect(getUserSlugFromDID('did:web:example.com')).toBeNull();
+      expect(getUserSlugFromDID('did:webvh:domain')).toBeNull(); // Missing slug
       expect(getUserSlugFromDID('')).toBeNull();
     });
   });

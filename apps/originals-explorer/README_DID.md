@@ -95,7 +95,7 @@ apps/originals-explorer/
 ## Example DID
 
 ```
-did:webvh:localhost:5000:cltest123456
+did:webvh:localhost%3A5000:cltest123456
 ```
 
 Resolves to:
@@ -103,7 +103,7 @@ Resolves to:
 http://localhost:5000/cltest123456/did.jsonld
 ```
 
-The path-based resolution follows the DID:WebVH specification.
+**Note:** The domain `localhost:5000` is URL-encoded as `localhost%3A5000` in the DID (`:` becomes `%3A`). This is required by the DID:WebVH specification for proper path-based resolution.
 
 ## Security Features
 
