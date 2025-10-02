@@ -155,7 +155,115 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Create both Bitcoin and Stellar wallets automatically in one call
+  app.post("/api/wallets/create-both", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user?.id) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      // Read policy IDs from environment (may be required by Privy)
+      const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
+      const policyIds = rawPolicyIds
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      
+      // Use Privy to create both Bitcoin and Stellar wallets using individual calls
+      // Privy manages all keys - we never see or store private keys
+      // The API will automatically handle HD wallet indexing
+      let btcWallet = await privyClient.walletApi.createWallet({
+        owner: {
+          userId: user.id,
+        },
+        chainType: "bitcoin-segwit",
+        policyIds: policyIds.length > 0 ? policyIds : [],
+      });
+      console.log("Bitcoin wallet created:", btcWallet);
+      
+      let stellarWallet = await privyClient.walletApi.createWallet({
+        owner: {
+          userId: user.id,
+        },
+        chainType: "stellar",
+        policyIds: policyIds.length > 0 ? policyIds : [],
+      });
+      console.log("Stellar wallet created:", stellarWallet);
+
+      // Fetch updated user to get all wallets (since there could be multiple)
+      const updatedUser = await privyClient.getUserById(user.id);
+      const allWallets = updatedUser.linkedAccounts?.filter((a: any) => a.type === 'wallet') || [];
+
+      console.log("Bitcoin and Stellar wallets created. User now has", allWallets.length, "wallets");
+
+      // Privy returns the wallet info with public keys
+      // Private keys are managed entirely by Privy's infrastructure
+      return res.status(201).json({
+        success: true,
+        message: "Bitcoin and Stellar wallets created and managed by Privy",
+        userId: user.id,
+        wallets: allWallets,
+        btcWallet,
+        stellarWallet,
+      });
+    } catch (error: any) {
+      console.error("Error creating Bitcoin and Stellar wallets:", error);
+      return res.status(500).json({ error: error.message || "Failed to create wallets" });
+    }
+  });
+
   // Create a Privy Bitcoin wallet for the authenticated user
+  // Create Stellar wallet (uses ED25519 for signing)
+  // Automatically handles being first wallet or additional wallet
+  app.post("/api/wallets/stellar", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user?.id) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      // Get user to check existing wallets
+      const privyUser = await privyClient.getUserById(user.id);
+      
+      // Read policy IDs from environment (may be required by Privy)
+      const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
+      const policyIds = rawPolicyIds
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      
+      // Use Privy to create a Stellar wallet (ED25519-based)
+      // Privy manages all keys - we never see or store private keys
+      // The API will automatically handle HD wallet indexing
+      const result = await privyClient.createWallets({
+        userId: user.id,
+        wallets: [
+          {
+            chainType: "stellar",
+            policyIds: policyIds.length > 0 ? policyIds : [],
+          },
+        ],
+      });
+
+      console.log("Stellar wallet created. User now has", result.linkedAccounts?.filter((a: any) => a.type === 'wallet').length, "wallets");
+
+      // Privy returns the wallet info with public key
+      // Private key is managed entirely by Privy's infrastructure
+      return res.status(201).json({
+        success: true,
+        message: "Stellar wallet created with ED25519 keys managed by Privy",
+        userId: user.id,
+        wallets: result.linkedAccounts?.filter((a: any) => a.type === 'wallet'),
+      });
+    } catch (error: any) {
+      console.error("Error creating Stellar wallet:", error);
+      return res.status(500).json({ error: error.message || "Failed to create Stellar wallet" });
+    }
+  });
+
+  // Create Bitcoin wallet
+  // Automatically handles being first wallet or additional wallet
   app.post("/api/wallets/bitcoin", authenticateUser, async (req, res) => {
     try {
       const user = (req as any).user;
@@ -163,13 +271,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "Unauthorized" });
       }
 
+      // Get user to check existing wallets
+      const privyUser = await privyClient.getUserById(user.id);
+
       // Read policy IDs from environment; these must be configured in Privy Console
       const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
       const policyIds = rawPolicyIds
         .split(",")
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
-
+      
+      // Privy's createWallets API automatically handles HD wallet indexing
+      // The first wallet will be at index 0, subsequent wallets at higher indices
       const result = await privyClient.createWallets({
         userId: user.id,
         wallets: [
@@ -180,10 +293,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ],
       });
 
-      // result may contain the updated user and wallets; return minimal info
+      console.log("Bitcoin wallet created. User now has", result.linkedAccounts?.filter((a: any) => a.type === 'wallet').length, "wallets");
+
+      // result contains the updated user and wallets
       return res.status(201).json({
         success: true,
+        message: "Bitcoin wallet created and managed by Privy",
         userId: user.id,
+        wallets: result.linkedAccounts?.filter((a: any) => a.type === 'wallet'),
       });
     } catch (error: any) {
       console.error("Error creating Privy BTC wallet:", error);

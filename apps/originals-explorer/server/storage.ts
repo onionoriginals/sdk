@@ -1,6 +1,14 @@
 import { type User, type InsertUser, type Asset, type InsertAsset, type WalletConnection, type InsertWalletConnection } from "@shared/schema";
 import { randomUUID } from "crypto";
 
+export interface SigningKey {
+  publicKey: string;
+  privateKey: string;
+  publicKeyHex: string;
+  algorithm: string;
+  createdAt: string;
+}
+
 export interface IStorage {
   // User methods
   getUser(id: string): Promise<User | undefined>;
@@ -18,6 +26,10 @@ export interface IStorage {
   createWalletConnection(connection: InsertWalletConnection): Promise<WalletConnection>;
   updateWalletConnection(userId: string, updates: Partial<WalletConnection>): Promise<WalletConnection | undefined>;
   
+  // Signing key methods
+  storeSigningKey(userId: string, key: SigningKey): Promise<void>;
+  getSigningKeys(userId: string): Promise<SigningKey[]>;
+  
   // Statistics
   getStats(): Promise<{
     totalAssets: number;
@@ -30,11 +42,13 @@ export class MemStorage implements IStorage {
   private users: Map<string, User>;
   private assets: Map<string, Asset>;
   private walletConnections: Map<string, WalletConnection>;
+  private signingKeys: Map<string, SigningKey[]>;
 
   constructor() {
     this.users = new Map();
     this.assets = new Map();
     this.walletConnections = new Map();
+    this.signingKeys = new Map();
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -120,6 +134,16 @@ export class MemStorage implements IStorage {
     const updatedConnection = { ...connection, ...updates };
     this.walletConnections.set(connection.id, updatedConnection);
     return updatedConnection;
+  }
+
+  async storeSigningKey(userId: string, key: SigningKey): Promise<void> {
+    const userKeys = this.signingKeys.get(userId) || [];
+    userKeys.push(key);
+    this.signingKeys.set(userId, userKeys);
+  }
+
+  async getSigningKeys(userId: string): Promise<SigningKey[]> {
+    return this.signingKeys.get(userId) || [];
   }
 
   async getStats(): Promise<{ totalAssets: number; verifiedAssets: number; migratedAssets: number; }> {

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import { WalletConnector } from "@/components/wallet/wallet-connector";
 import { useAuth } from "@/hooks/useAuth";
-import { Menu, X, FolderTree, FileText, Upload, LogOut, User as UserIcon, MoreHorizontal, Hash, Copy } from "lucide-react";
+import { Menu, X, FolderTree, FileText, Upload, LogOut, User as UserIcon, MoreHorizontal, Hash, Copy, Settings } from "lucide-react";
 import { sha256Hex } from "@/lib/hash";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
@@ -195,6 +195,15 @@ export default function Header() {
                 </button>
               </Link>
             )}
+
+            {/* Setup link */}
+            <Link href="/setup">
+              <button className="flex items-center text-gray-600 hover:text-gray-900 transition-colors" data-testid="button-setup">
+                <Settings className="w-4 h-4 mr-2" />
+                <span className="hidden lg:inline">Setup</span>
+                <span className="lg:hidden">Setup</span>
+              </button>
+            </Link>
             
             {/* Details Button - Desktop */}
             {location === "/" && (
@@ -316,6 +325,18 @@ export default function Header() {
                     </button>
                   </Link>
                 )}
+            
+            {/* Setup - Mobile */}
+            <Link href="/setup">
+              <button 
+                className="flex items-center text-gray-600 hover:text-gray-900 transition-colors w-full" 
+                data-testid="mobile-button-setup"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Settings className="w-4 h-4 mr-3" />
+                Setup
+              </button>
+            </Link>
                 
                 {/* Details - Mobile */}
                 {location === "/" && (

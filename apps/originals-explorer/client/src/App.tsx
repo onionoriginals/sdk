@@ -16,6 +16,7 @@ import Login from "@/pages/login";
 import Register from "@/pages/register";
 import NotFound from "@/pages/not-found";
 import AssetsSpreadsheet from "@/pages/assets-spreadsheet";
+import Setup from "@/pages/setup";
 
 function AuthSetup() {
   const { getAccessToken } = usePrivy();
@@ -38,6 +39,7 @@ function Router() {
       <Route path="/" component={Homepage} />
       <Route path="/dir" component={Directory} />
       <Route path="/assets" component={AssetsSpreadsheet} />
+      <Route path="/setup" component={Setup} />
       <Route path="/profile" component={Profile} />
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />

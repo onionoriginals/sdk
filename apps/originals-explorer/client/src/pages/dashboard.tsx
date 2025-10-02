@@ -5,9 +5,6 @@ import { Plus, ArrowRight, ArrowRightLeft, Check, ArrowRightLeft as Exchange } f
 import { useQuery } from "@tanstack/react-query";
 
 export default function Dashboard() {
-  // Mock user ID for now - in real app would come from auth
-  const mockUserId = "user_123";
-
   const { data: stats } = useQuery<{ 
     totalAssets: number; 
     verifiedAssets: number; 
@@ -23,23 +20,36 @@ export default function Dashboard() {
     status: string;
     createdAt: string;
   }>>({
-    queryKey: ["/api/assets", { userId: mockUserId }],
-    enabled: !!mockUserId,
+    queryKey: ["/api/assets"],
   });
 
   return (
     <main className="max-w-4xl mx-auto px-8 py-16">
       {/* Simple Header */}
-      <div className="mb-20">
+      <div className="mb-12">
         <h1 className="page-title">
           Digital Asset Authentication
         </h1>
-        <p className="text-gray-500 text-base leading-relaxed max-w-2xl">
+        <p className="text-gray-500 text-base leading-relaxed max-w-2xl mb-8">
           Create authenticated digital assets or migrate existing Ordinals with verifiable credentials.
         </p>
+        
+        {/* Action Buttons */}
+        <div className="flex gap-4">
+          <Link href="/create">
+            <Button className="minimal-button" data-testid="create-asset-button">
+              <Plus className="w-4 h-4 mr-2" />
+              Create Asset
+            </Button>
+          </Link>
+          <Link href="/migrate">
+            <Button variant="outline" className="border-gray-200 hover:bg-gray-50" data-testid="migrate-asset-button">
+              <Exchange className="w-4 h-4 mr-2" />
+              Migrate Ordinal
+            </Button>
+          </Link>
+        </div>
       </div>
-
-
 
       {/* Stats in minimal format */}
       <div className="grid grid-cols-3 gap-12 mb-16">
