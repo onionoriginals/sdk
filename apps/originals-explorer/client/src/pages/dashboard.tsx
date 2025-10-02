@@ -1,7 +1,7 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, ArrowRight, ArrowRightLeft, Check, ArrowRightLeft as Exchange } from "lucide-react";
+import { Plus, ArrowRight, ArrowRightLeft, Check, ArrowRightLeft as Exchange, FileSpreadsheet } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 export default function Dashboard() {
@@ -40,6 +40,12 @@ export default function Dashboard() {
             <Button className="minimal-button" data-testid="create-asset-button">
               <Plus className="w-4 h-4 mr-2" />
               Create Asset
+            </Button>
+          </Link>
+          <Link href="/upload-assets">
+            <Button variant="outline" className="border-gray-200 hover:bg-gray-50" data-testid="upload-spreadsheet-button">
+              <FileSpreadsheet className="w-4 h-4 mr-2" />
+              Upload Spreadsheet
             </Button>
           </Link>
           <Link href="/migrate">

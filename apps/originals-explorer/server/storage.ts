@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Asset, type InsertAsset, type WalletConnection, type InsertWalletConnection } from "@shared/schema";
+import { type User, type InsertUser, type Asset, type InsertAsset, type WalletConnection, type InsertWalletConnection, type AssetType, type InsertAssetType } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface SigningKey {
@@ -34,6 +34,12 @@ export interface IStorage {
   storeSigningKey(userId: string, key: SigningKey): Promise<void>;
   getSigningKeys(userId: string): Promise<SigningKey[]>;
   
+  // Asset type methods
+  getAssetType(id: string): Promise<AssetType | undefined>;
+  getAssetTypesByUserId(userId: string): Promise<AssetType[]>;
+  createAssetType(assetType: InsertAssetType): Promise<AssetType>;
+  updateAssetType(id: string, updates: Partial<AssetType>): Promise<AssetType | undefined>;
+  
   // Statistics
   getStats(): Promise<{
     totalAssets: number;
@@ -47,12 +53,14 @@ export class MemStorage implements IStorage {
   private assets: Map<string, Asset>;
   private walletConnections: Map<string, WalletConnection>;
   private signingKeys: Map<string, SigningKey[]>;
+  private assetTypes: Map<string, AssetType>;
 
   constructor() {
     this.users = new Map();
     this.assets = new Map();
     this.walletConnections = new Map();
     this.signingKeys = new Map();
+    this.assetTypes = new Map();
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -207,6 +215,39 @@ export class MemStorage implements IStorage {
 
   async getSigningKeys(userId: string): Promise<SigningKey[]> {
     return this.signingKeys.get(userId) || [];
+  }
+
+  async getAssetType(id: string): Promise<AssetType | undefined> {
+    return this.assetTypes.get(id);
+  }
+
+  async getAssetTypesByUserId(userId: string): Promise<AssetType[]> {
+    return Array.from(this.assetTypes.values()).filter(
+      (assetType) => assetType.userId === userId,
+    );
+  }
+
+  async createAssetType(insertAssetType: InsertAssetType): Promise<AssetType> {
+    const id = randomUUID();
+    const assetType: AssetType = {
+      ...insertAssetType,
+      id,
+      description: insertAssetType.description || null,
+      properties: insertAssetType.properties || [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.assetTypes.set(id, assetType);
+    return assetType;
+  }
+
+  async updateAssetType(id: string, updates: Partial<AssetType>): Promise<AssetType | undefined> {
+    const assetType = this.assetTypes.get(id);
+    if (!assetType) return undefined;
+
+    const updatedAssetType = { ...assetType, ...updates, updatedAt: new Date() };
+    this.assetTypes.set(id, updatedAssetType);
+    return updatedAssetType;
   }
 
   async getStats(): Promise<{ totalAssets: number; verifiedAssets: number; migratedAssets: number; }> {

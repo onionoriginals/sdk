@@ -17,6 +17,7 @@ import Register from "@/pages/register";
 import NotFound from "@/pages/not-found";
 import AssetsSpreadsheet from "@/pages/assets-spreadsheet";
 import Setup from "@/pages/setup";
+import UploadAssets from "@/pages/upload-assets";
 
 function AuthSetup() {
   const { getAccessToken } = usePrivy();
@@ -46,6 +47,7 @@ function Router() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/create" component={CreateAsset} />
       <Route path="/migrate" component={MigrateAsset} />
+      <Route path="/upload-assets" component={UploadAssets} />
       <Route component={NotFound} />
     </Switch>
   );
