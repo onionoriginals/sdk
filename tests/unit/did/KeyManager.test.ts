@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { DIDDocument, KeyPair, KeyType } from '../../../src/types';
 

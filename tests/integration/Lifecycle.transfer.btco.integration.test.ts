@@ -1,5 +1,5 @@
 /* istanbul ignore file */
-declare const describe: any, test: any, expect: any;
+import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK, OriginalsAsset } from '../../src';
 import { MockOrdinalsProvider } from '../mocks/adapters';
 

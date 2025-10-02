@@ -1,11 +1,11 @@
-import { describe, it, expect, jest, beforeEach, afterAll } from 'bun:test';
+import { describe, it, expect, mock, beforeEach, afterAll } from 'bun:test';
 import { createUserDID, getUserSlugFromDID } from '../did-service';
 import { convertToMultibase } from '../key-utils';
 
 // Mock the PrivyClient
 const mockPrivyClient = {
   walletApi: {
-    createWallet: jest.fn(),
+    createWallet: mock(),
   },
 } as any;
 
@@ -14,7 +14,7 @@ const originalEnv = process.env;
 
 describe('DID Service', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockPrivyClient.walletApi.createWallet.mockClear();
     process.env = { ...originalEnv };
     process.env.DID_DOMAIN = 'localhost:5000';
   });

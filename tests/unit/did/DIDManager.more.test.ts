@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { createBtcoDidDocument } from '../../../src/did/createBtcoDidDocument';
 

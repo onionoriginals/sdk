@@ -1,7 +1,8 @@
+import { describe, test, expect } from 'bun:test';
 import { OrdNodeProvider } from '../../../src/bitcoin/providers/OrdNodeProvider';
 
 describe('OrdNodeProvider (stub)', () => {
-  it('constructs and returns defaults', async () => {
+  test('constructs and returns defaults', async () => {
     const p = new OrdNodeProvider({ nodeUrl: 'https://ord.example' });
     const info = await p.getSatInfo('1');
     expect(info.inscription_ids).toEqual([]);

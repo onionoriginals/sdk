@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import { estimateFeeSats, selectUtxos } from '../../../src/bitcoin/utxo';
 import { DUST_LIMIT_SATS, Utxo } from '../../../src/types';
 

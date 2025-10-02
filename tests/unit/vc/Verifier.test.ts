@@ -1,9 +1,9 @@
-import { describe, test, expect, beforeAll, afterEach } from 'bun:test';
+import { describe, test, expect, beforeAll, afterEach, afterAll, beforeEach } from 'bun:test';
 import { Verifier } from '../../../src/vc/Verifier';
 import { Issuer } from '../../../src/vc/Issuer';
 import * as ed25519 from '@noble/ed25519';
 import { multikey } from '../../../src/crypto/Multikey';
-import { registerVerificationMethod } from '../../../src/vc/documentLoader';
+import { registerVerificationMethod, verificationMethodRegistry } from '../../../src/vc/documentLoader';
 import { DIDManager } from '../../../src/did/DIDManager';
 
 describe('diwings Verifier', () => {
@@ -18,7 +18,10 @@ describe('diwings Verifier', () => {
     publicKeyMultibase: multikey.encodePublicKey(pk, 'Ed25519'),
     secretKeyMultibase: multikey.encodePrivateKey(sk, 'Ed25519')
   };
-  registerVerificationMethod(vm);
+  
+  beforeEach(() => {
+    registerVerificationMethod(vm);
+  });
 
   test('verifies a credential (v2)', async () => {
     const issuer = new Issuer(didManager, vm);
@@ -138,7 +141,7 @@ describe('Verifier with string @context branches', () => {
     secretKeyMultibase: multikey.encodePrivateKey(sk, 'Ed25519')
   };
 
-  beforeAll(() => registerVerificationMethod(vm));
+  beforeEach(() => registerVerificationMethod(vm));
 
   test('verifyCredential accepts string @context', async () => {
     const issuer = new Issuer(dm, vm);

@@ -18,6 +18,7 @@
  * confidence that all adapter interfaces work correctly together in a realistic flow.
  */
 
+import { describe, test, expect, beforeEach } from 'bun:test';
 import { OriginalsSDK } from '../../src/core/OriginalsSDK';
 import { OriginalsAsset } from '../../src/lifecycle/OriginalsAsset';
 import { AssetResource, OriginalsConfig } from '../../src/types';

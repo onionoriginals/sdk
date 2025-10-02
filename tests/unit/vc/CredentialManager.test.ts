@@ -1,3 +1,4 @@
+import { describe, test, expect, afterEach, spyOn } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import { VerifiableCredential, CredentialSubject, Proof } from '../../../src/types';
 import * as secp256k1 from '@noble/secp256k1';
@@ -7,9 +8,6 @@ import { multikey } from '../../../src/crypto/Multikey';
 
 describe('CredentialManager', () => {
   const sdk = OriginalsSDK.create();
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
 
   const subject: CredentialSubject = {
     id: 'did:peer:subject',
@@ -155,7 +153,7 @@ describe('CredentialManager verification method resolution', () => {
     const signed = await signingManager.signCredential(credentialTemplate, skMb, verificationMethod);
 
     const dm = new DIDManager(baseConfig);
-    jest.spyOn(dm, 'resolveDID').mockResolvedValue({
+    spyOn(dm, 'resolveDID').mockResolvedValue({
       '@context': ['https://www.w3.org/ns/did/v1'],
       id: 'did:example:123',
       verificationMethod: [
@@ -184,7 +182,7 @@ describe('CredentialManager verification method resolution', () => {
     (signed.proof as any).publicKeyMultibase = pkMb;
 
     const dm = new DIDManager(baseConfig);
-    jest.spyOn(dm, 'resolveDID').mockResolvedValue({
+    spyOn(dm, 'resolveDID').mockResolvedValue({
       '@context': ['https://www.w3.org/ns/did/v1'],
       id: 'did:example:456'
     } as any);
@@ -215,9 +213,12 @@ describe('CredentialManager verify with didManager present but legacy path', () 
 
 
 /** Inlined from CredentialManager.did-fallback-with-didmgr.part.ts */
-import { registerVerificationMethod } from '../../../src/vc/documentLoader';
+import { registerVerificationMethod, verificationMethodRegistry } from '../../../src/vc/documentLoader';
 
 describe('CredentialManager with didManager provided falls back to local signer when VM incomplete', () => {
+  afterEach(() => {
+    verificationMethodRegistry.clear();
+  });
   test('covers didManager gate with fallback path', async () => {
     const dm = new DIDManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any, dm);
@@ -244,6 +245,9 @@ describe('CredentialManager with didManager provided falls back to local signer 
 /** Inlined from CredentialManager.fallback-branch.part.ts */
 
 describe('CredentialManager DID path fallback when VM doc lacks type', () => {
+  afterEach(() => {
+    verificationMethodRegistry.clear();
+  });
   test('falls back to legacy signing if DID loader returns VM missing fields', async () => {
     const dm = new DIDManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any, dm);
@@ -378,6 +382,9 @@ describe('CredentialManager local verify path without didManager', () => {
 
 /** Inlined from CredentialManager.missing-type-default.part.ts */
 describe('CredentialManager DID path with VM missing type defaults to Multikey', () => {
+  afterEach(() => {
+    verificationMethodRegistry.clear();
+  });
   test('uses default type when document.type is absent', async () => {
     const dm = new DIDManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any);
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any, dm);
@@ -399,6 +406,9 @@ describe('CredentialManager DID path with VM missing type defaults to Multikey',
 /** Inlined from CredentialManager.more.part.ts */
 
 describe('CredentialManager additional branches', () => {
+  afterEach(() => {
+    verificationMethodRegistry.clear();
+  });
   test('getSigner default case used for unknown key type', async () => {
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Unknown' as any });
     const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };

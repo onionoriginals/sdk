@@ -1,3 +1,4 @@
+import { describe, test, expect, spyOn } from 'bun:test';
 import { validateDID, validateCredential, validateDIDDocument, hashResource } from '../../../src/utils/validation';
 
 describe('validation utils', () => {
@@ -8,8 +9,8 @@ describe('validation utils', () => {
     expect(validateDID('did:web:example.com')).toBe(false);
     expect(validateDID('invalid')).toBe(false);
     // Cover defensive branch: regex.test returns true but match returns null
-    const testSpy = jest.spyOn(RegExp.prototype, 'test').mockReturnValueOnce(true);
-    const matchSpy = jest.spyOn(String.prototype, 'match').mockReturnValueOnce(null as any);
+    const testSpy = spyOn(RegExp.prototype, 'test').mockReturnValueOnce(true);
+    const matchSpy = spyOn(String.prototype, 'match').mockReturnValueOnce(null as any);
     expect(validateDID('did:peer:abc')).toBe(false);
     testSpy.mockRestore();
     matchSpy.mockRestore();

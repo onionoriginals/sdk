@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import { sha256Bytes } from '../../../src/utils/hash';
 
 describe('sha256Bytes', () => {

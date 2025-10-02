@@ -1,6 +1,7 @@
 /** Canonical test aggregator created by combine-tests script. */
 
 /** Inlined from WebVhPublish.integration.part.ts */
+import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../src';
 import { AssetResource } from '../../src/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';

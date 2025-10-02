@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { describe, test, expect } from 'bun:test';
 import { validateBitcoinAddress, isValidBitcoinAddress } from '../../../src/utils/bitcoin-address';
 import * as bitcoin from 'bitcoinjs-lib';
 

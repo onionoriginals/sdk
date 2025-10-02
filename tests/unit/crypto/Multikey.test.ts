@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import {
   multikey,
   MULTICODEC_ED25519_PUB_HEADER,

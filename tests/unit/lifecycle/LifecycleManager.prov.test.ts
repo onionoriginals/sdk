@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
 

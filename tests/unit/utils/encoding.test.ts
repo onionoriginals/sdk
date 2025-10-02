@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import { hexToBytes } from '../../../src/utils/encoding';
 
 describe('utils/encoding', () => {

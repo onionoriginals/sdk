@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import { buildTransferTransaction } from '../../../src/bitcoin/transfer';
 import { DUST_LIMIT_SATS, Utxo } from '../../../src/types';
 

@@ -1,3 +1,4 @@
+import { describe, test, expect, spyOn } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import { DIDDocument, AssetResource } from '../../../src/types';
 
@@ -121,7 +122,7 @@ import { BtcoDidResolver } from '../../../src/did/BtcoDidResolver';
 describe('DIDManager.resolveDID catch path', () => {
   test('returns null when resolver throws', async () => {
     const sdk = OriginalsSDK.create({ bitcoinRpcUrl: 'http://localhost:3000', network: 'mainnet' });
-    const spy = jest.spyOn(BtcoDidResolver.prototype as any, 'resolve');
+    const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
     spy.mockImplementationOnce(async () => { throw new Error('resolver failed'); });
     const res = await sdk.did.resolveDID('did:btco:123');
     expect(res).toBeNull();
@@ -137,7 +138,7 @@ describe('DIDManager.resolveDID catch path', () => {
 describe('DIDManager.resolveDID uses default rpcUrl and network fallbacks', () => {
   test('falls back to http://localhost:3000 and mainnet when config missing', async () => {
     const dm = new DIDManager({} as any);
-    const spy = jest.spyOn(BtcoDidResolver.prototype as any, 'resolve');
+    const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
     spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:xyz' } });
     const res = await dm.resolveDID('did:btco:xyz');
     expect(res?.id).toBe('did:btco:xyz');
@@ -153,7 +154,7 @@ describe('DIDManager.resolveDID uses default rpcUrl and network fallbacks', () =
 describe('DIDManager.resolveDID covers btco method variants', () => {
   test('resolves did:btco:test:* via resolver', async () => {
     const sdk = OriginalsSDK.create({ bitcoinRpcUrl: 'http://x', network: 'mainnet' });
-    const spy = jest.spyOn(BtcoDidResolver.prototype as any, 'resolve');
+    const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
     spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:test:1' } });
     const res = await sdk.did.resolveDID('did:btco:test:1');
     expect(res?.id).toBe('did:btco:test:1');
@@ -162,7 +163,7 @@ describe('DIDManager.resolveDID covers btco method variants', () => {
 
   test('resolves did:btco:sig:* via resolver', async () => {
     const sdk = OriginalsSDK.create({ bitcoinRpcUrl: 'http://x', network: 'mainnet' });
-    const spy = jest.spyOn(BtcoDidResolver.prototype as any, 'resolve');
+    const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
     spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:sig:2' } });
     const res = await sdk.did.resolveDID('did:btco:sig:2');
     expect(res?.id).toBe('did:btco:sig:2');

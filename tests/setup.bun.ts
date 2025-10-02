@@ -5,6 +5,8 @@ import * as secp256k1 from '@noble/secp256k1';
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { concatBytes } from '@noble/hashes/utils.js';
+import { afterEach } from 'bun:test';
+import { verificationMethodRegistry } from '../src/vc/documentLoader';
 
 // Ensure globalThis.crypto is available for noble libraries
 if (typeof globalThis.crypto === 'undefined') {
@@ -27,4 +29,9 @@ ed25519Any.utils.sha512Sync = sha512Impl;
 const secp256k1Any = secp256k1 as any;
 if (!secp256k1Any.utils) secp256k1Any.utils = {};
 secp256k1Any.utils.hmacSha256Sync = hmacSha256Impl;
+
+// Global cleanup: Clear verification method registry after each test to prevent pollution
+afterEach(() => {
+  verificationMethodRegistry.clear();
+});
 

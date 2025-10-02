@@ -1,3 +1,4 @@
+import { describe, test, expect, spyOn } from 'bun:test';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { createDocumentLoader, registerVerificationMethod, verificationMethodRegistry } from '../../../src/vc/documentLoader';
 
@@ -31,14 +32,14 @@ describe('diwings documentLoader', () => {
 describe('documentLoader branches', () => {
   test('throws when DID not resolved', async () => {
     const dm = new DIDManager({} as any);
-    jest.spyOn(dm, 'resolveDID').mockResolvedValueOnce(null as any);
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce(null as any);
     const loader = createDocumentLoader(dm);
     await expect(loader('did:ex:404')).rejects.toThrow('DID not resolved');
   });
 
   test('returns cached verification method for fragment', async () => {
     const dm = new DIDManager({} as any);
-    jest.spyOn(dm, 'resolveDID').mockResolvedValueOnce({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:ex:1' } as any);
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:ex:1' } as any);
     const loader = createDocumentLoader(dm);
     registerVerificationMethod({ id: 'did:ex:1#key-1', type: 'Multikey', controller: 'did:ex:1', publicKeyMultibase: 'zAb' });
     const res = await loader('did:ex:1#key-1');
@@ -48,7 +49,7 @@ describe('documentLoader branches', () => {
 
   test('loads base DID without fragment', async () => {
     const dm = new DIDManager({} as any);
-    jest.spyOn(dm, 'resolveDID').mockResolvedValueOnce({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:ex:2' } as any);
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:ex:2' } as any);
     const loader = createDocumentLoader(dm);
     const res = await loader('did:ex:2');
     expect(res.document.id).toBe('did:ex:2');
@@ -63,7 +64,7 @@ describe('documentLoader branches', () => {
 describe('documentLoader missing VM branch', () => {
   test('returns stub VM when fragment not found in DID document', async () => {
     const dm = new DIDManager({} as any);
-    jest.spyOn(dm, 'resolveDID').mockResolvedValueOnce({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:ex:stub', verificationMethod: [] } as any);
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:ex:stub', verificationMethod: [] } as any);
     const loader = createDocumentLoader(dm);
     const res = await loader('did:ex:stub#not-present');
     expect(res.document.id).toBe('did:ex:stub#not-present');
@@ -104,7 +105,7 @@ describe('registerVerificationMethod with missing id', () => {
 describe('documentLoader finds VM inside DID Document', () => {
   test('returns the vm when present in verificationMethod array', async () => {
     const dm = new DIDManager({} as any);
-    jest.spyOn(dm, 'resolveDID').mockResolvedValueOnce({
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce({
       '@context': ['https://www.w3.org/ns/did/v1'],
       id: 'did:ex:4',
       verificationMethod: [

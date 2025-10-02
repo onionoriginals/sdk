@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 
 describe('OriginalsSDK', () => {

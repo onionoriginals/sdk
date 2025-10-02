@@ -1,3 +1,4 @@
+import { describe, test, expect, spyOn } from 'bun:test';
 import { OriginalsAsset } from '../../../src/lifecycle/OriginalsAsset';
 import { AssetResource, DIDDocument, VerifiableCredential, LayerType } from '../../../src/types';
 
@@ -87,7 +88,7 @@ describe('OriginalsAsset', () => {
     const { DIDManager } = await import('../../../src/did/DIDManager');
     const didManager = new DIDManager({} as any);
     const cm = new CredentialManager({ defaultKeyType: 'ES256K', network: 'regtest' } as any, didManager);
-    const spy = jest.spyOn(cm, 'verifyCredential').mockResolvedValue(true);
+    const spy = spyOn(cm, 'verifyCredential').mockResolvedValue(true);
     await expect(asset.verify({ credentialManager: cm, didManager })).resolves.toBe(true);
     spy.mockRestore();
   });
@@ -106,7 +107,7 @@ describe('OriginalsAsset', () => {
     const { DIDManager } = await import('../../../src/did/DIDManager');
     const didManager = new DIDManager({} as any);
     const cm = new CredentialManager({ defaultKeyType: 'ES256K', network: 'regtest' } as any, didManager);
-    const spy = jest.spyOn(cm, 'verifyCredential').mockResolvedValue(false);
+    const spy = spyOn(cm, 'verifyCredential').mockResolvedValue(false);
     await expect(asset.verify({ credentialManager: cm, didManager })).resolves.toBe(false);
     spy.mockRestore();
   });
@@ -161,11 +162,10 @@ describe('OriginalsAsset', () => {
     const asset = new OriginalsAsset(resources, buildDid('did:peer:abc'), emptyCreds);
     // Force an error by mocking validateDIDDocument to throw
     const validateDIDDocument = require('../../../src/utils/validation').validateDIDDocument;
-    jest.spyOn(require('../../../src/utils/validation'), 'validateDIDDocument').mockImplementationOnce(() => {
+    spyOn(require('../../../src/utils/validation'), 'validateDIDDocument').mockImplementationOnce(() => {
       throw new Error('unexpected');
     });
     await expect(asset.verify()).resolves.toBe(false);
-    jest.restoreAllMocks();
   });
 
   test('constructor throws on unknown DID method (coverage for error path)', () => {

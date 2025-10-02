@@ -1,6 +1,7 @@
 /** Canonical test aggregator created by combine-tests script. */
 
 /** Inlined from eddsa.branch-more.part.ts */
+import { describe, test, expect } from 'bun:test';
 import { EdDSACryptosuiteManager } from '../../../../src/vc/cryptosuites/eddsa';
 import { multikey } from '../../../../src/crypto/Multikey';
 

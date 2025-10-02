@@ -1,6 +1,7 @@
 /** Canonical test aggregator created by combine-tests script. */
 
 /** Inlined from data-integrity.branches.part.ts */
+import { describe, test, expect } from 'bun:test';
 import { DataIntegrityProofManager } from '../../../../src/vc/proofs/data-integrity';
 
 describe('DataIntegrityProofManager branches', () => {

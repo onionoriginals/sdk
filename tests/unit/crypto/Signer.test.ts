@@ -88,9 +88,10 @@ describe('Signer classes', () => {
       const pk = secp256k1.getPublicKey(sk);
       const signer = new ES256KSigner();
       const sig = await signer.sign(data, secpPrivMb(sk));
-      spyOn(secp256k1, 'verify').mockImplementation(() => { throw new Error('boom'); });
+      const spy = spyOn(secp256k1, 'verify').mockImplementation(() => { throw new Error('boom'); });
       const ok = await signer.verify(data, sig, secpPubMb(pk));
       expect(ok).toBe(false);
+      spy.mockRestore();
     });
   });
 
@@ -126,42 +127,46 @@ describe('Signer classes', () => {
       const sk = p256.utils.randomPrivateKey();
       const signer = new ES256Signer();
       const bytes = new Uint8Array(64).fill(11);
-      spyOn(p256, 'sign').mockReturnValue({
+      const spy = spyOn(p256, 'sign').mockReturnValue({
         toCompactRawBytes: () => bytes
       } as any);
       const sig = await signer.sign(data, p256PrivMb(sk));
       expect(Buffer.from(sig)).toEqual(Buffer.from(bytes));
+      spy.mockRestore();
     });
 
     test('sign handles object with toRawBytes()', async () => {
       const sk = p256.utils.randomPrivateKey();
       const signer = new ES256Signer();
       const bytes = new Uint8Array(64).fill(13);
-      spyOn(p256, 'sign').mockReturnValue({
+      const spy = spyOn(p256, 'sign').mockReturnValue({
         toRawBytes: () => bytes
       } as any);
       const sig = await signer.sign(data, p256PrivMb(sk));
       expect(Buffer.from(sig)).toEqual(Buffer.from(bytes));
+      spy.mockRestore();
     });
 
     test('sign handles direct Uint8Array return', async () => {
       const sk = p256.utils.randomPrivateKey();
       const signer = new ES256Signer();
       const bytes = new Uint8Array(64).fill(21);
-      spyOn(p256, 'sign').mockReturnValue(bytes as any);
+      const spy = spyOn(p256, 'sign').mockReturnValue(bytes as any);
       const sig = await signer.sign(data, p256PrivMb(sk));
       expect(Buffer.from(sig)).toEqual(Buffer.from(bytes));
+      spy.mockRestore();
     });
 
     test('sign handles fallback via new Uint8Array(sigAny)', async () => {
       const sk = p256.utils.randomPrivateKey();
       const signer = new ES256Signer();
       const arr = Array.from({ length: 64 }, (_, i) => (i + 1) & 0xff);
-      spyOn(p256, 'sign').mockReturnValue(arr as any);
+      const spy = spyOn(p256, 'sign').mockReturnValue(arr as any);
       const sig = await signer.sign(data, p256PrivMb(sk));
       expect(sig).toHaveLength(64);
       expect(sig[0]).toBe(1);
       expect(sig[63]).toBe(64);
+      spy.mockRestore();
     });
 
     test('verify exception path returns false', async () => {
@@ -169,9 +174,10 @@ describe('Signer classes', () => {
       const pk = p256.getPublicKey(sk);
       const signer = new ES256Signer();
       const sig = await signer.sign(data, p256PrivMb(sk));
-      spyOn(p256, 'verify').mockImplementation(() => { throw new Error('boom'); });
+      const spy = spyOn(p256, 'verify').mockImplementation(() => { throw new Error('boom'); });
       const ok = await signer.verify(data, sig, p256PubMb(pk));
       expect(ok).toBe(false);
+      spy.mockRestore();
     });
   });
 
@@ -201,9 +207,10 @@ describe('Signer classes', () => {
       const pk = await ed25519.getPublicKey(sk);
       const signer = new Ed25519Signer();
       const sig = await signer.sign(data, edPrivMb(sk));
-      spyOn(ed25519, 'verifyAsync').mockImplementation(async () => { throw new Error('boom'); });
+      const spy = spyOn(ed25519, 'verifyAsync').mockImplementation(async () => { throw new Error('boom'); });
       const ok = await signer.verify(data, sig, edPubMb(pk));
       expect(ok).toBe(false);
+      spy.mockRestore();
     });
   });
 

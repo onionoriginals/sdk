@@ -1,4 +1,5 @@
 /* istanbul ignore file */
+import { describe, test, expect } from 'bun:test';
 import { DUST_LIMIT_SATS, Utxo } from '../../../src/types';
 import { selectUtxos, UtxoSelectionError } from '../../../src';
 

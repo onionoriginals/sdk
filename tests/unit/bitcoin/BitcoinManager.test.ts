@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import type { OrdinalsProvider } from '../../../src/adapters';
 import { DUST_LIMIT_SATS } from '../../../src/types';

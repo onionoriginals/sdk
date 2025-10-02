@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import { serializeDIDDocument, deserializeDIDDocument, serializeCredential, deserializeCredential, canonicalizeDocument } from '../../../src/utils/serialization';
 
 describe('serialization utils', () => {

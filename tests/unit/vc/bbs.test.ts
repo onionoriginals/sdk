@@ -1,6 +1,7 @@
 /** Canonical test aggregator created by combine-tests script. */
 
 /** Inlined from bbs.simple.part.ts */
+import { describe, test, expect } from 'bun:test';
 import { BbsSimple } from '../../../src';
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
 

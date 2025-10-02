@@ -1,11 +1,9 @@
 /** Canonical test aggregator created by combine-tests script. */
 
 /** Inlined from LifecycleManager.btco.integration.part.ts */
+import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../src';
 import { MockOrdinalsProvider } from '../mocks/adapters';
-
-// Ensure Jest types are available
-declare const expect: any;
 
 describe('Integration: Lifecycle inscribe updates provenance and btco layer', () => {
   test('provenance updated and layer becomes did:btco', async () => {

@@ -1,20 +1,17 @@
 /** Canonical test aggregator created by combine-tests script. */
 
 /** Inlined from DIDManager.btco.integration.part.ts */
+import { describe, test, expect, afterEach, spyOn } from 'bun:test';
 import { OriginalsSDK } from '../../src';
 
 describe('Integration: DIDManager btco resolve via OrdinalsClient adapter', () => {
   const sdk = OriginalsSDK.create({ network: 'mainnet', bitcoinRpcUrl: 'http://ord' });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
   test('resolves did:btco using adapter with mocked fetch', async () => {
     const sat = '123456';
     const did = `did:btco:${sat}`;
 
-    const fetchMock = jest.spyOn(global as any, 'fetch').mockImplementation(async (url: any) => {
+    const fetchMock = spyOn(global as any, 'fetch').mockImplementation(async (url: any) => {
       if (url === 'http://ord/sat/' + sat) {
         return new Response(JSON.stringify({ inscription_ids: ['i1', 'i2'] }), { status: 200 });
       }

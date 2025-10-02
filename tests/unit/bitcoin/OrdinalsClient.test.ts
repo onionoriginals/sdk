@@ -1,8 +1,6 @@
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 import { OrdinalsClient } from '../../../src/bitcoin/OrdinalsClient';
 import { encode as cborEncode } from '../../../src/utils/cbor';
-
-// Ensure Jest types are available
-declare const expect: any;
 
 const client = new OrdinalsClient('http://localhost:3000', 'regtest');
 
@@ -12,7 +10,7 @@ describe('OrdinalsClient (real HTTP behavior with mocked fetch)', () => {
   const bin = (bytes: Uint8Array, ok = true) => ({ ok, arrayBuffer: async () => bytes.buffer });
 
   beforeEach(() => {
-    jest.spyOn(global, 'fetch' as any).mockImplementation(async (input: any) => {
+    spyOn(global, 'fetch' as any).mockImplementation(async (input: any) => {
       const url = String(input);
       // sat info
       if (url.endsWith('/sat/123')) {
@@ -372,7 +370,7 @@ describe('OrdinalsClient additional branches', () => {
 
   test('getMetadata handles quoted json string and bad hex', async () => {
     const c = new OrdinalsClient('http://ord', 'mainnet');
-    (global as any).fetch = jest.fn(async (u: string) => {
+    (global as any).fetch = mock(async (u: string) => {
       if (u.endsWith('/r/metadata/ins-1')) return { ok: true, text: async () => '"not-hex"' } as any;
       if (u.includes('/sat/')) return { ok: true, json: async () => ({ inscription_ids: [] }) } as any;
       return { ok: true, json: async () => ({}) } as any;

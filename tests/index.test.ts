@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import * as SDK from '../src';
 
 describe('package exports', () => {

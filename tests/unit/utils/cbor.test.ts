@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'bun:test';
 import { encode, decode } from '../../../src/utils/cbor';
 
 describe('utils/cbor', () => {

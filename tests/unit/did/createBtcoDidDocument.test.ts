@@ -1,3 +1,4 @@
+import { describe, test, expect, it } from 'bun:test';
 import { createBtcoDidDocument } from '../../../src/did/createBtcoDidDocument';
 import { multikey } from '../../../src/crypto/Multikey';
 

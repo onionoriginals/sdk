@@ -1,3 +1,4 @@
+import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { KeyManager } from '../../src/did/KeyManager';
 import { createBtcoDidDocument } from '../../src/did/createBtcoDidDocument';
 import { multikey } from '../../src/crypto/Multikey';
@@ -30,7 +31,7 @@ describe('Multikey end-to-end pipeline', () => {
     registerVerificationMethod(vm);
 
     const didManager = new DIDManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any);
-    const resolveSpy = jest.spyOn(didManager, 'resolveDID').mockResolvedValue(didDoc);
+    const resolveSpy = spyOn(didManager, 'resolveDID').mockResolvedValue(didDoc);
 
     const issuer = new Issuer(didManager, { ...vm, secretKeyMultibase: keyPair.privateKey });
     const unsigned: any = {
