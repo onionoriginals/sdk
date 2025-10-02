@@ -1,6 +1,7 @@
 import { usePrivy, useCreateWallet } from "@privy-io/react-auth";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -9,34 +10,34 @@ import { Link } from "wouter";
 import { useState, useEffect } from "react";
 
 export default function Profile() {
-  const { user, authenticated, ready, logout } = usePrivy();
+  const { user: privyUser, authenticated, ready, logout } = usePrivy();
   const { createWallet } = useCreateWallet();
   const { toast } = useToast();
+  const { user, isUserLoading, isAuthenticated } = useAuth();
   const [did, setDid] = useState<string | null>(null);
   const [didDocument, setDidDocument] = useState<any>(null);
   const [didLoading, setDidLoading] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   
-  const isLoading = !ready;
-  const isAuthenticated = ready && authenticated;
+  const isLoading = !ready || isUserLoading;
 
   // Clear DID state when user changes or logs out
   useEffect(() => {
-    if (!isAuthenticated || !user) {
+    if (!isAuthenticated || !privyUser) {
       setDid(null);
       setDidDocument(null);
       setQrCodeUrl(null);
       setShowKeys(false);
     }
-  }, [isAuthenticated, user?.id]);
+  }, [isAuthenticated, privyUser?.id]);
 
   // Auto-create DID when user is authenticated
   useEffect(() => {
-    if (isAuthenticated && user && !did && !didLoading) {
+    if (isAuthenticated && privyUser && !did && !didLoading) {
       ensureDid();
     }
-  }, [isAuthenticated, user?.id]);
+  }, [isAuthenticated, privyUser?.id]);
 
   const ensureDid = async () => {
     setDidLoading(true);
@@ -114,7 +115,7 @@ export default function Profile() {
     );
   }
 
-  if (!isAuthenticated || !user) {
+  if (!isAuthenticated || !privyUser) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Card className="w-full max-w-md">
@@ -136,8 +137,8 @@ export default function Profile() {
     );
   }
 
-  const initials = user?.email?.address 
-    ? user.email.address.split('@')[0].slice(0, 2).toUpperCase()
+  const initials = privyUser?.email?.address 
+    ? privyUser.email.address.split('@')[0].slice(0, 2).toUpperCase()
     : 'U';
 
   return (
@@ -162,7 +163,7 @@ export default function Profile() {
             <div className="flex items-center gap-3 mb-4 p-3 hover:bg-gray-50 rounded-lg transition-colors">
               <Mail className="w-4 h-4 text-gray-500" />
               <span className="text-sm text-gray-900" data-testid="profile-email-display">
-                {user?.email?.address || 'No email address'}
+                {privyUser?.email?.address || 'No email address'}
               </span>
             </div>
 
@@ -302,9 +303,9 @@ export default function Profile() {
             {/* Wallet Section */}
             <div className="mb-6">
               <div className="text-xs text-gray-500 mb-3">Your wallets</div>
-              {user?.linkedAccounts?.some((account: any) => account.type === 'wallet') ? (
+              {privyUser?.linkedAccounts?.some((account: any) => account.type === 'wallet') ? (
                 <div className="space-y-2">
-                  {user.linkedAccounts
+                  {privyUser.linkedAccounts
                     .filter((account: any) => account.type === 'wallet')
                     .map((wallet: any, index: number) => (
                       <div key={wallet.address || index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
@@ -322,12 +323,12 @@ export default function Profile() {
                       </div>
                     ))}
                 </div>
-              ) : user?.wallet?.address ? (
+              ) : privyUser?.wallet?.address ? (
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div className="flex items-center gap-2">
                     <Wallet className="w-4 h-4 text-gray-500" />
                     <span className="text-sm font-mono text-gray-900" data-testid="profile-wallet-address">
-                      {user.wallet.address.slice(0, 6)}...{user.wallet.address.slice(-4)}
+                      {privyUser.wallet.address.slice(0, 6)}...{privyUser.wallet.address.slice(-4)}
                     </span>
                   </div>
                   <div className="text-xs text-gray-500">0.063 ETH</div>
