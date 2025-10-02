@@ -25,6 +25,7 @@ import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { FeeOracleMock } from '../../src/adapters/FeeOracleMock';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { StorageAdapter as ConfigStorageAdapter } from '../../src/adapters/types';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 /**
  * Helper to generate valid SHA-256 hashes (64 hex characters)
@@ -86,6 +87,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
   let storageAdapter: ConfigStorageAdapter;
   let feeOracle: FeeOracleMock;
   let ordinalsProvider: OrdMockProvider;
+  let keyStore: MockKeyStore;
 
   beforeEach(() => {
     // Setup real adapters (not mocks in the sense of jest.mock, but functional test doubles)
@@ -93,6 +95,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
     storageAdapter = new StorageAdapterBridge(memoryStorage);
     feeOracle = new FeeOracleMock(7); // 7 sats/vB
     ordinalsProvider = new OrdMockProvider();
+    keyStore = new MockKeyStore();
 
     const config: OriginalsConfig = {
       network: 'regtest',
@@ -103,7 +106,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       ordinalsProvider
     };
 
-    sdk = new OriginalsSDK(config);
+    sdk = new OriginalsSDK(config, keyStore);
   });
 
   describe('Complete Lifecycle: peer → webvh → btco → transfer', () => {

@@ -3,9 +3,11 @@
 /** Inlined from WebVhPublish.integration.part.ts */
 import { OriginalsSDK } from '../../src';
 import { AssetResource } from '../../src/types';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 describe('WebVH publish end-to-end', () => {
-  const sdk = OriginalsSDK.create({ network: 'regtest' });
+  const keyStore = new MockKeyStore();
+  const sdk = OriginalsSDK.create({ network: 'regtest', keyStore });
   const domain = 'example.com';
 
   test('createAsset → publishToWeb yields did:webvh and provenance event', async () => {

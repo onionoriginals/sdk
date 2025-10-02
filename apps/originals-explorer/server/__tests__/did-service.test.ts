@@ -1,4 +1,4 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterAll } from 'bun:test';
 import { createUserDID, getUserSlugFromDID } from '../did-service';
 import { convertToMultibase } from '../key-utils';
 

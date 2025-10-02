@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from '@jest/globals';
+import { expect, describe, test, beforeEach } from 'bun:test';
 import { LifecycleManager } from '../../../src/lifecycle/LifecycleManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';

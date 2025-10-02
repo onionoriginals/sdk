@@ -271,7 +271,7 @@ describe('BitcoinManager integration with providers', () => {
       vout: 0
     };
     try {
-      await sdk.bitcoin.transferInscription(mockInscription, 'bc1qtest');
+      await sdk.bitcoin.transferInscription(mockInscription, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
       throw new Error('Expected error to be thrown');
     } catch (error: any) {
       expect(error.code).toBe('ORD_PROVIDER_REQUIRED');
