@@ -78,10 +78,10 @@ export default function UploadAssets() {
     
     // Read first few rows for preview
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
-        const text = e.target?.result as string;
         if (file.name.endsWith('.csv')) {
+          const text = e.target?.result as string;
           const lines = text.split('\n').filter(line => line.trim());
           if (lines.length > 0) {
             const headers = lines[0].split(',').map(h => h.trim());
@@ -95,12 +95,38 @@ export default function UploadAssets() {
             });
             setPreviewData(preview);
           }
+        } else if (file.name.match(/\.(xlsx|xls)$/)) {
+          // For XLSX files, we'll import the library dynamically to reduce bundle size
+          try {
+            const XLSX = await import('xlsx');
+            const arrayBuffer = e.target?.result as ArrayBuffer;
+            const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet) as PreviewRow[];
+            setPreviewData(jsonData.slice(0, 5));
+          } catch (error) {
+            console.error("Error parsing XLSX file:", error);
+            toast({
+              title: "Preview Error",
+              description: "Could not preview XLSX file, but you can still upload it",
+              variant: "destructive",
+            });
+            // Set a minimal preview to enable upload button
+            setPreviewData([{ note: "Preview not available for XLSX files" }]);
+          }
         }
       } catch (error) {
         console.error("Error previewing file:", error);
       }
     };
-    reader.readAsText(file);
+    
+    // Read as text for CSV, as ArrayBuffer for XLSX
+    if (file.name.endsWith('.csv')) {
+      reader.readAsText(file);
+    } else {
+      reader.readAsArrayBuffer(file);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
