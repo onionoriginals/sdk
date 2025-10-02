@@ -8,6 +8,7 @@ export interface OriginalsConfig {
   network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
   bitcoinRpcUrl?: string;
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
+  keyStore?: KeyStore;
   enableLogging?: boolean;
   // Optional pluggable adapters
   storageAdapter?: StorageAdapter;
