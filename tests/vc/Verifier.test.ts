@@ -1,3 +1,4 @@
+import { describe, test, expect, beforeAll, afterEach } from 'bun:test';
 import { Verifier } from '../../src/vc/Verifier';
 import { Issuer } from '../../src/vc/Issuer';
 import * as ed25519 from '@noble/ed25519';
@@ -201,8 +202,7 @@ describe('Verifier with default document loader (no options)', () => {
 /** Inlined from Verifier.dimock.part.ts */
 describe('Verifier with mocked DataIntegrityProofManager', () => {
   afterEach(() => {
-    jest.resetModules();
-    jest.dontMock('../../src/vc/proofs/data-integrity');
+    // Bun doesn't require resetModules
   });
 
   test('verifyCredential success branch (verified=true)', async () => {

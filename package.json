@@ -13,9 +13,9 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "node ./node_modules/jest/bin/jest.js",
-    "test:coverage": "node ./node_modules/jest/bin/jest.js --coverage",
-    "test:ci": "node ./node_modules/jest/bin/jest.js --ci --coverage",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage",
+    "test:ci": "bun test --coverage",
     "lint": "eslint src/**/*.ts",
     "prepare": "npm run build",
     "format": "prettier --write src/**/*.ts"

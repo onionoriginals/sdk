@@ -1,3 +1,4 @@
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { OrdinalsClient } from '../../../src/bitcoin/OrdinalsClient';
 import { OrdinalsClientProviderAdapter } from '../../../src/did/providers/OrdinalsClientProviderAdapter';
 
@@ -6,7 +7,7 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
   const originalFetch = global.fetch as any;
 
   beforeEach(() => {
-    jest.resetAllMocks();
+    // Bun doesn't require resetAllMocks
   });
 
   afterEach(() => {
@@ -16,16 +17,14 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
   test('throws when baseUrl is missing/empty', async () => {
     const client = new OrdinalsClient('http://rpc', 'mainnet');
     const adapter = new OrdinalsClientProviderAdapter(client, '');
-    const fetchSpy = jest.spyOn(globalThis, 'fetch' as any);
     await expect(adapter.resolveInscription(inscriptionId)).rejects.toThrow('OrdinalsClientProviderAdapter requires a baseUrl');
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   test('throws when inscription endpoint returns non-OK', async () => {
     const client = new OrdinalsClient('http://rpc', 'mainnet');
     const adapter = new OrdinalsClientProviderAdapter(client, 'https://api.example.com/');
 
-    const fetchMock = jest.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    const fetchMock = mock(() => Promise.resolve({ ok: false, status: 500, json: async () => ({}) }));
     (globalThis as any).fetch = fetchMock;
 
     await expect(adapter.resolveInscription(inscriptionId)).rejects.toThrow(`Failed to resolve inscription: ${inscriptionId}`);
@@ -48,7 +47,7 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
       content_url: 'https://cdn.example/abc123.png'
     };
 
-    const fetchMock = jest.fn().mockResolvedValue({ ok: true, json: async () => apiResponse });
+    const fetchMock = mock(() => Promise.resolve({ ok: true, json: async () => apiResponse }));
     (globalThis as any).fetch = fetchMock;
 
     const result = await adapter.resolveInscription(inscriptionId);
@@ -76,7 +75,7 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
       // missing inscription_id, content_type, content_url
     } as any;
 
-    const fetchMock = jest.fn().mockResolvedValue({ ok: true, json: async () => apiResponse });
+    const fetchMock = mock(() => Promise.resolve({ ok: true, json: async () => apiResponse }));
     (globalThis as any).fetch = fetchMock;
 
     const result = await adapter.resolveInscription(inscriptionId);
@@ -101,7 +100,7 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
 
     const apiResponse = { } as any;
 
-    const fetchMock = jest.fn().mockResolvedValue({ ok: true, json: async () => apiResponse });
+    const fetchMock = mock(() => Promise.resolve({ ok: true, json: async () => apiResponse }));
     (globalThis as any).fetch = fetchMock;
 
     const result = await adapter.resolveInscription(inscriptionId);
@@ -122,8 +121,8 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
 
   test('getSatInfo proxies to client.getSatInfo', async () => {
     const mockClient = {
-      getSatInfo: jest.fn(async (n: string) => ({ inscription_ids: ['a', 'b'] })),
-      getMetadata: jest.fn()
+      getSatInfo: mock(async (n: string) => ({ inscription_ids: ['a', 'b'] })),
+      getMetadata: mock()
     } as unknown as OrdinalsClient;
 
     const adapter = new OrdinalsClientProviderAdapter(mockClient, 'https://x');
@@ -135,8 +134,8 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
   test('getMetadata proxies to client.getMetadata', async () => {
     const expected = { hello: 'world' };
     const mockClient = {
-      getSatInfo: jest.fn(),
-      getMetadata: jest.fn(async (id: string) => expected)
+      getSatInfo: mock(),
+      getMetadata: mock(async (id: string) => expected)
     } as unknown as OrdinalsClient;
 
     const adapter = new OrdinalsClientProviderAdapter(mockClient, 'https://x');

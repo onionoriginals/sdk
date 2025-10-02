@@ -1,8 +1,9 @@
+import { describe, test, expect, mock } from 'bun:test';
 import { emitTelemetry, emitError, StructuredError } from '../../src/utils/telemetry';
 
 describe('utils/telemetry', () => {
   test('emitTelemetry invokes onEvent with default level info', () => {
-    const onEvent = jest.fn();
+    const onEvent = mock();
     emitTelemetry({ onEvent }, { name: 'event-1' });
     expect(onEvent).toHaveBeenCalledTimes(1);
     const arg = onEvent.mock.calls[0][0];
@@ -11,7 +12,7 @@ describe('utils/telemetry', () => {
   });
 
   test('emitTelemetry respects provided level', () => {
-    const onEvent = jest.fn();
+    const onEvent = mock();
     emitTelemetry({ onEvent }, { name: 'event-2', level: 'debug' });
     expect(onEvent).toHaveBeenCalledTimes(1);
     expect(onEvent.mock.calls[0][0].level).toBe('debug');
@@ -23,7 +24,7 @@ describe('utils/telemetry', () => {
   });
 
   test('emitTelemetry swallows handler exceptions', () => {
-    const onEvent = jest.fn(() => { throw new Error('boom'); });
+    const onEvent = mock(() => { throw new Error('boom'); });
     expect(() => emitTelemetry({ onEvent }, { name: 'err' })).not.toThrow();
   });
 
@@ -37,12 +38,12 @@ describe('utils/telemetry', () => {
   });
 
   test('emitError calls onError and swallows handler exceptions', () => {
-    const onErrorOk = jest.fn();
+    const onErrorOk = mock();
     const se = new StructuredError('E', 'm');
     emitError({ onError: onErrorOk }, se);
     expect(onErrorOk).toHaveBeenCalledWith(se);
 
-    const onErrorThrow = jest.fn(() => { throw new Error('boom'); });
+    const onErrorThrow = mock(() => { throw new Error('boom'); });
     expect(() => emitError({ onError: onErrorThrow }, se)).not.toThrow();
     expect(() => emitError(undefined, se)).not.toThrow();
     expect(() => emitError({}, se)).not.toThrow();

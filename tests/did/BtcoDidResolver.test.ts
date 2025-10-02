@@ -1,24 +1,24 @@
+import { describe, test, expect, beforeEach, afterEach, afterAll, mock } from 'bun:test';
 import { BtcoDidResolver } from '../../src/did/BtcoDidResolver';
 import type { ResourceProviderLike, BtcoInscriptionData } from '../../src/did/BtcoDidResolver';
 import type { DIDDocument } from '../../src/types/did';
 
 describe('BtcoDidResolver', () => {
-  let provider: jest.Mocked<ResourceProviderLike>;
+  let provider: ResourceProviderLike;
   let originalFetch: any;
 
   beforeEach(() => {
     provider = {
-      getSatInfo: jest.fn(),
-      resolveInscription: jest.fn(),
-      getMetadata: jest.fn()
+      getSatInfo: mock(),
+      resolveInscription: mock(),
+      getMetadata: mock()
     };
     originalFetch = (global as any).fetch;
-    (global as any).fetch = jest.fn();
+    (global as any).fetch = mock();
   });
 
   afterEach(() => {
     (global as any).fetch = originalFetch;
-    jest.resetAllMocks();
   });
 
   test('invalid DID format path', async () => {
@@ -241,7 +241,7 @@ describe('BtcoDidResolver', () => {
       content_type: 'text/plain',
       content_url: 'http://local/content-fallback'
     });
-    (global as any).fetch = jest.fn().mockRejectedValue('netdown');
+    (global as any).fetch = mock(() => Promise.reject('netdown'));
 
     const resolver = new BtcoDidResolver({ provider });
     const res = await resolver.resolve('did:btco:300');
@@ -296,7 +296,7 @@ const makeProvider = (overrides: Partial<ResourceProviderLike> = {}): ResourcePr
 describe('BtcoDidResolver branches', () => {
   const originalFetch = global.fetch as any;
   beforeEach(() => {
-    (global as any).fetch = jest.fn(async (url: string) => ({ ok: true, status: 200, statusText: 'OK', text: async () => `BTCO DID: did:btco:1` }));
+    (global as any).fetch = mock(async (url: string) => ({ ok: true, status: 200, statusText: 'OK', text: async () => `BTCO DID: did:btco:1` }));
   });
   afterAll(() => {
     (global as any).fetch = originalFetch;
@@ -337,7 +337,7 @@ describe('BtcoDidResolver branches', () => {
   });
 
   test('fetch not ok', async () => {
-    (global as any).fetch = jest.fn(async () => ({ ok: false, status: 500, statusText: 'ERR', text: async () => '' }));
+    (global as any).fetch = mock(async () => ({ ok: false, status: 500, statusText: 'ERR', text: async () => '' }));
     const provider = makeProvider();
     const r = new BtcoDidResolver({ provider });
     const res = await r.resolve('did:btco:1');
@@ -345,7 +345,7 @@ describe('BtcoDidResolver branches', () => {
   });
 
   test('metadata throws and content does not match pattern', async () => {
-    (global as any).fetch = jest.fn(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'hello world' }));
+    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'hello world' }));
     const provider = makeProvider({ getMetadata: async () => { throw new Error('x'); } });
     const r = new BtcoDidResolver({ provider });
     const res = await r.resolve('did:btco:1');
@@ -353,7 +353,7 @@ describe('BtcoDidResolver branches', () => {
   });
 
   test('valid did doc selected as latest and network prefixes', async () => {
-    (global as any).fetch = jest.fn(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:test:2' }));
+    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:test:2' }));
     const provider = makeProvider({
       getSatInfo: async () => ({ inscription_ids: ['ins-a', 'ins-b'] }),
       getMetadata: async (id: string) => ({ '@context': ['https://www.w3.org/ns/did/v1'], id: id === 'ins-b' ? 'did:btco:test:2' : 'did:btco:test:999' })
@@ -365,7 +365,7 @@ describe('BtcoDidResolver branches', () => {
   });
 
   test('deactivated content with flame emoji', async () => {
-    (global as any).fetch = jest.fn(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => '🔥' }));
+    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => '🔥' }));
     const provider = makeProvider();
     const r = new BtcoDidResolver({ provider });
     const res = await r.resolve('did:btco:1');
@@ -439,7 +439,7 @@ describe('BtcoDidResolver invalid @context branch', () => {
 
   const originalFetch = global.fetch as any;
   beforeEach(() => {
-    (global as any).fetch = jest.fn(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:1' }));
+    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:1' }));
   });
   afterAll(() => { (global as any).fetch = originalFetch; });
 
@@ -580,7 +580,7 @@ describe('BtcoDidResolver isValidDidDocument branches', () => {
 describe('BtcoDidResolver signet and error branches', () => {
   const originalFetch = global.fetch as any;
   beforeEach(() => {
-    (global as any).fetch = jest.fn(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:sig:3' }));
+    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:sig:3' }));
   });
   afterAll(() => {
     (global as any).fetch = originalFetch;

@@ -1,15 +1,13 @@
+import { describe, test, expect, mock } from 'bun:test';
 import { OrdinalsClientProvider } from '../../src/bitcoin/providers/OrdinalsProvider';
 import { OrdinalsClient } from '../../src/bitcoin/OrdinalsClient';
 
-// Ensure Jest types are available
-declare const expect: any;
-
 describe('OrdinalsClientProvider', () => {
-  const client: jest.Mocked<OrdinalsClient> = new OrdinalsClient('http://ord', 'regtest') as any;
-  (client.getSatInfo as any) = jest.fn(async (_: string) => ({ inscription_ids: ['a'] }));
-  (client.getInscriptionById as any) = jest.fn(async (id: string) => ({ inscriptionId: id, satoshi: '1', content: Buffer.alloc(0), contentType: 'text/plain', txid: 't', vout: 0 }));
-  (client.getMetadata as any) = jest.fn(async (_: string) => ({ ok: true } as any));
-  (client.estimateFee as any) = jest.fn(async (_?: number) => 123);
+  const client: OrdinalsClient = new OrdinalsClient('http://ord', 'regtest') as any;
+  (client.getSatInfo as any) = mock(async (_: string) => ({ inscription_ids: ['a'] }));
+  (client.getInscriptionById as any) = mock(async (id: string) => ({ inscriptionId: id, satoshi: '1', content: Buffer.alloc(0), contentType: 'text/plain', txid: 't', vout: 0 }));
+  (client.getMetadata as any) = mock(async (_: string) => ({ ok: true } as any));
+  (client.estimateFee as any) = mock(async (_?: number) => 123);
 
   test('getSatInfo proxies with retry', async () => {
     const p = new OrdinalsClientProvider(client, { retries: 0, baseUrl: 'http://ord' });
@@ -96,8 +94,8 @@ describe('OrdinalsClientProvider', () => {
 
 describe('OrdinalsClientProvider extra branches', () => {
   test('resolveInscription throws when client returns null', async () => {
-    const client: jest.Mocked<OrdinalsClient> = new OrdinalsClient('http://ord', 'regtest') as any;
-    (client.getInscriptionById as any) = jest.fn(async () => null as any);
+    const client: OrdinalsClient = new OrdinalsClient('http://ord', 'regtest') as any;
+    (client.getInscriptionById as any) = mock(async () => null as any);
     const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord' });
     await expect(p.resolveInscription('missing')).rejects.toThrow('Inscription not found');
   });

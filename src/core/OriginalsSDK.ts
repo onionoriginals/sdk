@@ -54,8 +54,8 @@ export class OriginalsSDK {
     }
   }
 
-  static create(config?: Partial<OriginalsConfig>): OriginalsSDK {
-    const { keyStore, ...configOptions } = config || {};
+  static create(options?: OriginalsSDKOptions): OriginalsSDK {
+    const { keyStore, ...configOptions } = options || {};
     const defaultConfig: OriginalsConfig = {
       network: 'mainnet',
       defaultKeyType: 'ES256K',

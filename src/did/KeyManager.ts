@@ -25,11 +25,45 @@ export class KeyManager {
 	constructor() {
 		const sAny: any = secp256k1 as any;
 		const eAny: any = ed25519 as any;
-		sAny.utils = sAny.utils || {};
-		sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
-			hmac(sha256, key, concatBytes(...msgs));
-		eAny.utils = eAny.utils || {};
-		eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
+		
+		// Handle Bun's readonly utils property by checking if it's writable
+		try {
+			sAny.utils = sAny.utils || {};
+			sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
+				hmac(sha256, key, concatBytes(...msgs));
+		} catch (e) {
+			// In Bun, utils might be readonly, so we try to set the property directly
+			if (sAny.utils && !sAny.utils.hmacSha256Sync) {
+				try {
+					Object.defineProperty(sAny.utils, 'hmacSha256Sync', {
+						value: (key: Uint8Array, ...msgs: Uint8Array[]) =>
+							hmac(sha256, key, concatBytes(...msgs)),
+						writable: true,
+						configurable: true
+					});
+				} catch (e2) {
+					// If we still can't set it, it's okay - the library might already have it set
+				}
+			}
+		}
+		
+		try {
+			eAny.utils = eAny.utils || {};
+			eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
+		} catch (e) {
+			// In Bun, utils might be readonly, so we try to set the property directly
+			if (eAny.utils && !eAny.utils.sha512Sync) {
+				try {
+					Object.defineProperty(eAny.utils, 'sha512Sync', {
+						value: (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs)),
+						writable: true,
+						configurable: true
+					});
+				} catch (e2) {
+					// If we still can't set it, it's okay - the library might already have it set
+				}
+			}
+		}
 	}
 	async generateKeyPair(type: KeyType): Promise<KeyPair> {
                 if (type === 'ES256K') {
