@@ -4,10 +4,18 @@
 import { OriginalsSDK } from '../../src';
 import * as ed25519 from '@noble/ed25519';
 import { multikey } from '../../src/crypto/Multikey';
-import { registerVerificationMethod } from '../../src/vc/documentLoader';
+import { registerVerificationMethod, verificationMethodRegistry } from '../../src/vc/documentLoader';
 
 describe('Integration: CredentialManager issue/verify roundtrip', () => {
   const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+
+  beforeEach(() => {
+    verificationMethodRegistry.clear();
+  });
+
+  afterEach(() => {
+    verificationMethodRegistry.clear();
+  });
 
   test('issue and verify using Issuer/Verifier wiring', async () => {
     const did = 'did:peer:issuer1';

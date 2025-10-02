@@ -7,6 +7,10 @@ import { Verifier } from '../../src/vc/Verifier';
 import { registerVerificationMethod, verificationMethodRegistry } from '../../src/vc/documentLoader';
 
 describe('Multikey end-to-end pipeline', () => {
+  beforeEach(() => {
+    verificationMethodRegistry.clear();
+  });
+
   afterEach(() => {
     verificationMethodRegistry.clear();
   });

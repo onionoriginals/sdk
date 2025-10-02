@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "bun test",
+    "test": "bun test tests/integration && bun test tests/unit",
     "test:coverage": "bun test --coverage",
     "test:ci": "bun test --coverage",
     "lint": "eslint src/**/*.ts",
@@ -53,6 +53,7 @@
   "devDependencies": {
     "@babel/core": "^7.28.4",
     "@babel/preset-env": "^7.28.3",
+    "@types/bun": "^1.2.23",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.19.17",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
