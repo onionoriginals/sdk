@@ -230,6 +230,7 @@ The `signing-service.ts` has placeholders for actual Privy signing. Need to:
 - [x] Signing service ready for future credential signing
 - [x] Tests written and passing
 - [x] Documentation notes Privy manages all keys
+- [x] **Code review fixes applied**: User persistence and route ordering
 
 ## Example DID Document
 

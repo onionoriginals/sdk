@@ -90,6 +90,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = (req as any).user;
       
+      // Ensure user record exists (creates if new Privy user)
+      await storage.ensureUser(user.id);
+      
       // Check if user already has a DID
       const existingUser = await storage.getUser(user.id);
       if (existingUser?.did) {
@@ -106,7 +109,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create DID using Privy wallets
       const didData = await createUserDID(user.id, privyClient);
       
-      // Store DID data in user record
+      // Store DID data in user record (now guaranteed to exist)
       await storage.updateUser(user.id, didData);
       
       console.log(`DID created successfully: ${didData.did}`);
@@ -122,32 +125,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: "Failed to create DID",
         message: error instanceof Error ? error.message : String(error)
       });
-    }
-  });
-
-  // Serve DID document at path-based endpoint
-  // According to DID:WebVH spec: did:webvh:example.com:user:bob
-  // transforms to: https://example.com/user/bob/did.jsonld
-  // 
-  // For did:webvh:localhost:5000:user123
-  // Resolves to: http://localhost:5000/user123/did.jsonld
-  app.get("/:userSlug/did.jsonld", async (req, res) => {
-    try {
-      const { userSlug } = req.params;
-      
-      // Look up user by DID slug
-      const user = await storage.getUserByDidSlug(userSlug);
-      
-      if (!user?.didDocument) {
-        return res.status(404).json({ error: "DID not found" });
-      }
-
-      // Set proper content type for DID documents
-      res.setHeader("Content-Type", "application/did+ld+json");
-      res.json(user.didDocument);
-    } catch (error) {
-      console.error("Error serving DID document:", error);
-      res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -526,6 +503,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error in Google OAuth callback:", error);
       res.redirect('/?auth=error');
+    }
+  });
+
+  // Serve DID document at path-based endpoint
+  // IMPORTANT: This catch-all route must be registered LAST to avoid conflicts
+  // 
+  // According to DID:WebVH spec transformation:
+  // - DID format: did:webvh:domain:path:segments
+  // - Resolves to: https://domain/path/segments/did.jsonld
+  // 
+  // Our DID format: did:webvh:localhost:5000:user123
+  // Resolves to: http://localhost:5000/user123/did.jsonld
+  app.get("/:userSlug/did.jsonld", async (req, res) => {
+    try {
+      const { userSlug } = req.params;
+      
+      // Look up user by DID slug
+      const user = await storage.getUserByDidSlug(userSlug);
+      
+      if (!user?.didDocument) {
+        return res.status(404).json({ error: "DID not found" });
+      }
+
+      // Set proper content type for DID documents
+      res.setHeader("Content-Type", "application/did+ld+json");
+      res.json(user.didDocument);
+    } catch (error) {
+      console.error("Error serving DID document:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 

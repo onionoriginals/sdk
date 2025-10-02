@@ -93,6 +93,32 @@ export class MemStorage implements IStorage {
     return updatedUser;
   }
 
+  async ensureUser(userId: string): Promise<User> {
+    // Check if user already exists
+    const existing = this.users.get(userId);
+    if (existing) {
+      return existing;
+    }
+
+    // Create a new user with Privy ID as both id and username
+    const user: User = {
+      id: userId,
+      username: userId,
+      password: '', // Not used for Privy users
+      did: null,
+      didDocument: null,
+      authWalletId: null,
+      assertionWalletId: null,
+      updateWalletId: null,
+      authKeyPublic: null,
+      assertionKeyPublic: null,
+      updateKeyPublic: null,
+      didCreatedAt: null,
+    };
+    this.users.set(userId, user);
+    return user;
+  }
+
   async getUserByDidSlug(slug: string): Promise<User | undefined> {
     return Array.from(this.users.values()).find(
       (user) => user.did && user.did.endsWith(`:${slug}`)
