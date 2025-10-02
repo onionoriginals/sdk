@@ -331,5 +331,23 @@ describe('satoshi-validation', () => {
       expect(validateSatoshiNumber('  123  ').valid).toBe(true);
       expect(parseSatoshiIdentifier('  123  ')).toBe(123);
     });
+
+    test('rejects Infinity in validateSatoshiNumber', () => {
+      const result = validateSatoshiNumber(Infinity);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    test('rejects decimal number', () => {
+      const result = validateSatoshiNumber(123.5);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    test('rejects negative number', () => {
+      const result = validateSatoshiNumber(-5);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBeDefined();
+    });
   });
 });
