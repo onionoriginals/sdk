@@ -1,17 +1,41 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertAssetSchema, insertWalletConnectionSchema } from "@shared/schema";
+import { insertAssetSchema, insertAssetTypeSchema, insertWalletConnectionSchema } from "@shared/schema";
 import { z } from "zod";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import { PrivyClient } from "@privy-io/server-auth";
 import { originalsSdk } from "./originals";
-import { createUserDID, getUserSlugFromDID } from "./did-service";
+import { createUserDID } from "./did-service";
+import multer from "multer";
+import { parse as csvParse } from "csv-parse/sync";
+import * as XLSX from "xlsx";
+import { VerifiableCredential } from "@originals/sdk";
 
 // Temporary in-memory storage for OTP codes
 const otpStorage = new Map<string, { code: string; expires: number }>();
+
+// Configure multer for file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (_req, file, cb) => {
+    const allowedMimes = [
+      'text/csv',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
+    if (allowedMimes.includes(file.mimetype) || file.originalname.match(/\.(csv|xlsx|xls)$/)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only CSV and XLSX files are allowed.'));
+    }
+  },
+});
 
 // Google OAuth2 client
 const googleClient = new OAuth2Client(
@@ -181,6 +205,216 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating asset:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Asset Types routes
+  app.get("/api/asset-types", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const assetTypes = await storage.getAssetTypesByUserId(user.id);
+      res.json(assetTypes);
+    } catch (error) {
+      console.error("Error fetching asset types:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/asset-types", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const validatedData = insertAssetTypeSchema.parse({
+        ...req.body,
+        userId: user.id,
+      });
+      const assetType = await storage.createAssetType(validatedData);
+      res.status(201).json(assetType);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating asset type:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Spreadsheet upload route
+  app.post("/api/assets/upload-spreadsheet", authenticateUser, upload.single('file'), async (req, res) => {
+    try {
+      const user = (req as any).user;
+      
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const fileBuffer = req.file.buffer;
+      const fileType = req.file.mimetype;
+      let rows: any[] = [];
+
+      // Parse spreadsheet based on file type
+      if (fileType === 'text/csv' || req.file.originalname.endsWith('.csv')) {
+        rows = csvParse(fileBuffer, {
+          columns: true,
+          skip_empty_lines: true,
+          trim: true,
+        });
+      } else {
+        // Parse XLSX
+        const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        rows = XLSX.utils.sheet_to_json(worksheet);
+      }
+
+      if (rows.length === 0) {
+        return res.status(400).json({ error: "Spreadsheet is empty" });
+      }
+
+      // Process each row and create assets
+      const createdAssets = [];
+      const errors: Array<{ row: number; error: string }> = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        try {
+          // Validate required fields
+          if (!row.title || !row.assetType || !row.category) {
+            errors.push({
+              row: i + 2, // +2 because row 1 is header, and i starts at 0
+              error: "Missing required fields (title, assetType, category)"
+            });
+            continue;
+          }
+
+          // Parse tags if provided
+          let tags: string[] = [];
+          if (row.tags) {
+            tags = typeof row.tags === 'string' 
+              ? row.tags.split(',').map((t: string) => t.trim())
+              : row.tags;
+          }
+
+          // Extract custom properties (any columns not in standard fields)
+          const standardFields = ['title', 'description', 'category', 'tags', 'mediaUrl', 'status', 'assetType'];
+          const customProperties: Record<string, any> = {};
+          for (const [key, value] of Object.entries(row)) {
+            if (!standardFields.includes(key)) {
+              customProperties[key] = value;
+            }
+          }
+
+          // Create asset data
+          const assetData = {
+            title: row.title,
+            description: row.description || "",
+            category: row.category,
+            tags,
+            mediaUrl: row.mediaUrl || "",
+            metadata: {
+              assetTypeId: row.assetType,
+              assetTypeName: row.assetType,
+              customProperties,
+              uploadedViaSpreadsheet: true,
+            },
+            userId: user.id,
+            assetType: "original",
+            status: row.status || "draft",
+            credentials: [] as VerifiableCredential[],
+          };
+
+          // Create did:peer for the asset using Originals SDK
+          try {
+            // Create a resource representation for the asset
+            const assetContent = JSON.stringify({
+              title: row.title,
+              description: row.description || "",
+              category: row.category,
+              tags,
+              customProperties,
+            });
+            
+            const assetBuffer = Buffer.from(assetContent, 'utf-8');
+            const assetHash = crypto.createHash('sha256').update(assetBuffer).digest('hex');
+            
+            const resources = [{
+              id: `asset-${Date.now()}-${i}`,
+              type: 'AssetMetadata',
+              contentType: 'application/json',
+              hash: assetHash,
+              content: assetContent,
+            }];
+
+            // Create the asset with did:peer using the SDK
+            const originalsAsset = await originalsSdk.lifecycle.createAsset(resources);
+            
+            // Store the DID document in credentials
+            // assetData.credentials = [{
+            //   didDocument: originalsAsset.did,
+            //   did: originalsAsset.id,
+            // }];
+
+            console.log(`Created did:peer for asset "${row.title}": ${originalsAsset.id}`);
+          } catch (didError: any) {
+            console.error(`Failed to create did:peer for row ${i + 2}:`, didError);
+            // Continue with asset creation even if DID creation fails
+            // This allows partial success
+          }
+
+          // Validate and create asset
+          const validatedAsset = insertAssetSchema.parse(assetData);
+          const asset = await storage.createAsset(validatedAsset);
+          createdAssets.push(asset);
+
+        } catch (error: any) {
+          errors.push({
+            row: i + 2,
+            error: error.message || "Failed to create asset"
+          });
+        }
+      }
+
+      // Auto-create asset type if it doesn't exist
+      if (createdAssets.length > 0) {
+        // Find the first successfully created asset to get the asset type info
+        const firstAsset = createdAssets[0];
+        const assetTypeName = firstAsset.metadata?.assetTypeName;
+        
+        if (assetTypeName) {
+          const existingTypes = await storage.getAssetTypesByUserId(user.id);
+          const typeExists = existingTypes.some(t => t.name === assetTypeName);
+
+          if (!typeExists) {
+            // Use the custom properties from the first created asset
+            const customProperties = firstAsset.metadata?.customProperties || {};
+            const properties = Object.keys(customProperties).map((key, index) => ({
+              id: `prop_${index}`,
+              key,
+              label: key.charAt(0).toUpperCase() + key.slice(1),
+              type: "text" as const,
+              required: false,
+            }));
+
+            await storage.createAssetType({
+              userId: user.id,
+              name: assetTypeName,
+              description: `Auto-created from spreadsheet upload`,
+              properties,
+            });
+          }
+        }
+      }
+
+      res.status(201).json({
+        success: true,
+        created: createdAssets.length,
+        failed: errors.length,
+        assets: createdAssets,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+
+    } catch (error: any) {
+      console.error("Error processing spreadsheet:", error);
+      res.status(500).json({ error: error.message || "Failed to process spreadsheet" });
     }
   });
 

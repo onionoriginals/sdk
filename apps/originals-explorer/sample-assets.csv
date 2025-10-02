@@ -1,0 +1,6 @@
+title,assetType,category,description,tags,mediaUrl,status,serialNumber,manufacturer,yearProduced
+Vintage Camera 001,Camera,collectible,Rare vintage camera from 1950s,"vintage,camera,photography",https://example.com/camera1.jpg,completed,CAM-1950-001,Leica,1952
+Guitar Collection Item,Guitar,music,Classic electric guitar,"music,guitar,instrument",https://example.com/guitar1.jpg,completed,GTR-1965-042,Fender,1965
+Rare Vinyl Record,Vinyl,music,Limited edition vinyl from legendary band,"music,vinyl,collectible",https://example.com/vinyl1.jpg,draft,VNL-1970-123,Columbia Records,1970
+Antique Watch,Watch,collectible,Swiss mechanical watch from early 1900s,"watch,antique,luxury",https://example.com/watch1.jpg,completed,WTH-1920-089,Patek Philippe,1925
+Signed Baseball,Baseball,collectible,Baseball signed by hall of fame player,"sports,baseball,memorabilia",https://example.com/baseball1.jpg,completed,BSB-1998-456,Rawlings,1998

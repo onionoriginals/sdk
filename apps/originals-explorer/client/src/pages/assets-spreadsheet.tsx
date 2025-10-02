@@ -4,6 +4,9 @@ import { SpreadsheetView } from "@/components/spreadsheet/SpreadsheetView";
 import { defaultAssetColumns, type AssetRow } from "@/components/spreadsheet/columns";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
+import { Button } from "@/components/ui/button";
+import { FileSpreadsheet } from "lucide-react";
+import { Link } from "wouter";
 
 export default function AssetsSpreadsheet() {
   const { user, isAuthenticated } = useAuth();
@@ -48,9 +51,17 @@ export default function AssetsSpreadsheet() {
 
   return (
     <main className="max-w-6xl mx-auto px-8 py-8">
-      <div className="mb-6">
-        <h1 className="page-title">Assets</h1>
-        <p className="text-gray-500 text-sm">Spreadsheet view of your Originals assets</p>
+      <div className="mb-6 flex justify-between items-start">
+        <div>
+          <h1 className="page-title">Assets</h1>
+          <p className="text-gray-500 text-sm">Spreadsheet view of your Originals assets</p>
+        </div>
+        <Link href="/upload-assets">
+          <Button variant="outline" className="border-gray-200 hover:bg-gray-50">
+            <FileSpreadsheet className="w-4 h-4 mr-2" />
+            Upload Spreadsheet
+          </Button>
+        </Link>
       </div>
 
       <SpreadsheetView columns={defaultAssetColumns} rows={rows} />

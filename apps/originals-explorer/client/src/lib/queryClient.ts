@@ -34,15 +34,21 @@ export async function apiRequest(
   data?: unknown | undefined,
 ): Promise<Response> {
   const token = await getAuthToken();
+  
+  // Check if data is FormData to handle file uploads
+  const isFormData = data instanceof FormData;
+  
   const headers: Record<string, string> = {
-    ...(data ? { "Content-Type": "application/json" } : {}),
+    // Don't set Content-Type for FormData (browser will set it with boundary)
+    ...(data && !isFormData ? { "Content-Type": "application/json" } : {}),
     ...(token ? { "Authorization": `Bearer ${token}` } : {}),
   };
 
   const res = await fetch(url, {
     method,
     headers,
-    body: data ? JSON.stringify(data) : undefined,
+    // Don't JSON.stringify FormData
+    body: data ? (isFormData ? data as FormData : JSON.stringify(data)) : undefined,
     credentials: "include",
   });
 

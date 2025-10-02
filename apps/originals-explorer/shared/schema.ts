@@ -45,6 +45,16 @@ export const walletConnections = pgTable("wallet_connections", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const assetTypes = pgTable("asset_types", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id),
+  name: text("name").notNull(),
+  description: text("description"),
+  properties: jsonb("properties").notNull().default('[]'), // Array of AssetProperty objects
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -65,9 +75,27 @@ export const insertWalletConnectionSchema = createInsertSchema(walletConnections
   createdAt: true,
 });
 
+export const insertAssetTypeSchema = createInsertSchema(assetTypes).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  name: z.string().min(1, "Asset type name is required"),
+  properties: z.array(z.object({
+    id: z.string(),
+    key: z.string(),
+    label: z.string(),
+    type: z.enum(["text", "number", "boolean", "date", "select"]),
+    required: z.boolean().optional(),
+    options: z.array(z.string()).optional(),
+  })).optional(),
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertAsset = z.infer<typeof insertAssetSchema>;
 export type Asset = typeof assets.$inferSelect;
 export type InsertWalletConnection = z.infer<typeof insertWalletConnectionSchema>;
 export type WalletConnection = typeof walletConnections.$inferSelect;
+export type InsertAssetType = z.infer<typeof insertAssetTypeSchema>;
+export type AssetType = typeof assetTypes.$inferSelect;
