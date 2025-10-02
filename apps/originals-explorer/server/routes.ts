@@ -529,8 +529,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Set proper content type for DID documents
-      res.setHeader("Content-Type", "application/did+ld+json");
-      res.json(user.didDocument);
+      // Use res.type().send() instead of res.json() to preserve the content type
+      // Express's res.json() overwrites Content-Type to application/json
+      res.type("application/did+ld+json").send(JSON.stringify(user.didDocument, null, 2));
     } catch (error) {
       console.error("Error serving DID document:", error);
       res.status(500).json({ error: "Internal server error" });
