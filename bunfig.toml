@@ -3,5 +3,6 @@ preload = ["./tests/setup.bun.ts"]
 coveragePathIgnorePatterns = [
   "tests/mocks/**",
   "tests/setup.bun.ts",
-  "dist/**"
+  "dist/**",
+  "apps/**"
 ]
