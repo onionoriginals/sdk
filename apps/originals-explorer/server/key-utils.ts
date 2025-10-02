@@ -49,21 +49,26 @@ export function bytesToHex(bytes: Uint8Array): string {
 /**
  * Extract public key from Privy wallet object
  * @param wallet - Privy wallet object
- * @returns Public key in hex format or null if not found
+ * @returns Public key in hex format
+ * @throws Error if no public key is available
  */
-export function extractPublicKeyFromWallet(wallet: any): string | null {
+export function extractPublicKeyFromWallet(wallet: any): string {
   // Privy wallet structure varies by chain type
-  // Try common fields
+  // Try common fields for public key
   if (wallet.publicKey) {
     return wallet.publicKey;
   }
   if (wallet.public_key) {
     return wallet.public_key;
   }
-  if (wallet.address) {
-    // For some chains, the address itself contains or is derived from the public key
-    // This is chain-specific, so we may need to handle differently
-    return wallet.address;
-  }
-  return null;
+  
+  // If no public key is available, throw an error
+  // DO NOT fall back to wallet.address as it's not in hex format
+  // (Bitcoin addresses are bech32/base58, Stellar addresses are base32)
+  throw new Error(
+    `No public key available in wallet object. ` +
+    `Wallet ID: ${wallet.id || 'unknown'}, ` +
+    `Chain type: ${wallet.chainType || 'unknown'}. ` +
+    `The wallet object must contain a 'publicKey' or 'public_key' field.`
+  );
 }

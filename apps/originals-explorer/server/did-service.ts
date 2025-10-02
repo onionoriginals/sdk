@@ -86,23 +86,11 @@ export async function createUserDID(
     // Step 4: Extract public keys from wallets
     console.log('Extracting public keys...');
     
-    // For Bitcoin, we need to extract the public key from the wallet
-    // Privy returns the address, but we need the actual public key
-    // The wallet object should contain the public key or we derive it from address
+    // extractPublicKeyFromWallet will throw if no public key is available
+    // This prevents using wallet addresses (which are not hex) as public keys
     const btcPublicKeyHex = extractPublicKeyFromWallet(btcWallet);
-    if (!btcPublicKeyHex) {
-      throw new Error('Failed to extract Bitcoin public key from wallet');
-    }
-
     const stellarAssertionKeyHex = extractPublicKeyFromWallet(stellarAssertionWallet);
-    if (!stellarAssertionKeyHex) {
-      throw new Error('Failed to extract Stellar assertion public key from wallet');
-    }
-
     const stellarUpdateKeyHex = extractPublicKeyFromWallet(stellarUpdateWallet);
-    if (!stellarUpdateKeyHex) {
-      throw new Error('Failed to extract Stellar update public key from wallet');
-    }
 
     // Step 5: Convert public keys to multibase format
     console.log('Converting keys to multibase format...');
@@ -148,7 +136,8 @@ export async function createUserDID(
         }
       ],
       "authentication": [`${did}#auth-key`],
-      "assertionMethod": [`${did}#assertion-key`]
+      "assertionMethod": [`${did}#assertion-key`],
+      "capabilityInvocation": [`${did}#update-key`]
     };
 
     console.log('DID document created successfully');
