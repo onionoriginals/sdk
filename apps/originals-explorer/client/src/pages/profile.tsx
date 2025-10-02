@@ -21,12 +21,22 @@ export default function Profile() {
   const isLoading = !ready;
   const isAuthenticated = ready && authenticated;
 
+  // Clear DID state when user changes or logs out
+  useEffect(() => {
+    if (!isAuthenticated || !user) {
+      setDid(null);
+      setDidDocument(null);
+      setQrCodeUrl(null);
+      setShowKeys(false);
+    }
+  }, [isAuthenticated, user?.id]);
+
   // Auto-create DID when user is authenticated
   useEffect(() => {
     if (isAuthenticated && user && !did && !didLoading) {
       ensureDid();
     }
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user?.id]);
 
   const ensureDid = async () => {
     setDidLoading(true);
