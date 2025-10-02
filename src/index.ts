@@ -26,6 +26,8 @@ export * from './storage';
 
 // Crypto exports
 export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from './crypto/Signer';
+export { multikey } from './crypto/Multikey';
+export type { MultikeyType } from './crypto/Multikey';
 
 // Utility exports
 export * from './utils/validation';

@@ -14,6 +14,9 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUser(userId: string, updates: Partial<User>): Promise<User | undefined>;
+  getUserByDidSlug(slug: string): Promise<User | undefined>;
+  getUserByDid(did: string): Promise<User | undefined>;
   
   // Asset methods
   getAsset(id: string): Promise<Asset | undefined>;
@@ -63,9 +66,42 @@ export class MemStorage implements IStorage {
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
-    const user: User = { ...insertUser, id };
+    const user: User = { 
+      ...insertUser, 
+      id,
+      did: null,
+      didDocument: null,
+      authWalletId: null,
+      assertionWalletId: null,
+      updateWalletId: null,
+      authKeyPublic: null,
+      assertionKeyPublic: null,
+      updateKeyPublic: null,
+      didCreatedAt: null,
+    };
     this.users.set(id, user);
     return user;
+  }
+
+  async updateUser(userId: string, updates: Partial<User>): Promise<User | undefined> {
+    const user = this.users.get(userId);
+    if (!user) return undefined;
+
+    const updatedUser = { ...user, ...updates };
+    this.users.set(userId, updatedUser);
+    return updatedUser;
+  }
+
+  async getUserByDidSlug(slug: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(
+      (user) => user.did && user.did.endsWith(`:${slug}`)
+    );
+  }
+
+  async getUserByDid(did: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(
+      (user) => user.did === did
+    );
   }
 
   async getAsset(id: string): Promise<Asset | undefined> {

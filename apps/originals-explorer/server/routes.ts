@@ -8,6 +8,7 @@ import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import { PrivyClient } from "@privy-io/server-auth";
 import { originalsSdk } from "./originals";
+import { createUserDID, getUserSlugFromDID } from "./did-service";
 
 // Temporary in-memory storage for OTP codes
 const otpStorage = new Map<string, { code: string; expires: number }>();
@@ -80,6 +81,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error("Error fetching user:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Ensure user has a DID (create if doesn't exist)
+  app.post("/api/user/ensure-did", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      
+      // Check if user already has a DID
+      const existingUser = await storage.getUser(user.id);
+      if (existingUser?.did) {
+        console.log(`User ${user.id} already has DID: ${existingUser.did}`);
+        return res.json({ 
+          did: existingUser.did, 
+          didDocument: existingUser.didDocument,
+          created: false 
+        });
+      }
+
+      console.log(`Creating DID for user ${user.id}...`);
+      
+      // Create DID using Privy wallets
+      const didData = await createUserDID(user.id, privyClient);
+      
+      // Store DID data in user record
+      await storage.updateUser(user.id, didData);
+      
+      console.log(`DID created successfully: ${didData.did}`);
+      
+      return res.json({ 
+        did: didData.did, 
+        didDocument: didData.didDocument,
+        created: true 
+      });
+    } catch (error) {
+      console.error("Error ensuring user DID:", error);
+      return res.status(500).json({ 
+        error: "Failed to create DID",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Serve DID document at .well-known endpoint
+  app.get("/.well-known/did/:userSlug", async (req, res) => {
+    try {
+      const { userSlug } = req.params;
+      
+      // Look up user by DID slug
+      const user = await storage.getUserByDidSlug(userSlug);
+      
+      if (!user?.didDocument) {
+        return res.status(404).json({ error: "DID not found" });
+      }
+
+      // Set proper content type for DID documents
+      res.setHeader("Content-Type", "application/did+ld+json");
+      res.json(user.didDocument);
+    } catch (error) {
+      console.error("Error serving DID document:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
