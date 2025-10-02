@@ -179,9 +179,9 @@ describe('BitcoinManager integration with providers', () => {
     const provider = createMockProvider();
     const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
     const inscription = await sdk.bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
-    const tx = await sdk.bitcoin.transferInscription(inscription, 'bcrt1qexample');
+    const tx = await sdk.bitcoin.transferInscription(inscription, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
     expect(tx.txid).toBe('tx-transfer-1');
-    expect(tx.vout[0].address).toBe('bcrt1qexample');
+    expect(tx.vout[0].address).toBe('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
   });
 
   test('transferInscription enforces dust limit on fallback vout', async () => {
@@ -196,9 +196,9 @@ describe('BitcoinManager integration with providers', () => {
       }
     } as OrdinalsProvider;
     const sdk2 = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider2 } as any);
-    const tx2 = await sdk2.bitcoin.transferInscription(inscription, 'bcrt1qdust');
+    const tx2 = await sdk2.bitcoin.transferInscription(inscription, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
     expect(tx2.vout[0].value).toBeGreaterThanOrEqual(DUST_LIMIT_SATS);
-    expect(tx2.vout[0].address).toBe('bcrt1qdust');
+    expect(tx2.vout[0].address).toBe('tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
   });
 
   test('getSatoshiFromInscription returns null when provider missing', async () => {

@@ -79,7 +79,7 @@ describe('LifecycleManager', () => {
       { id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }
     ]);
     await asset.migrate('did:btco');
-    const tx = await sdk.lifecycle.transferOwnership(asset as any, 'bc1qaddress');
+    const tx = await sdk.lifecycle.transferOwnership(asset as any, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
     expect(typeof tx.txid).toBe('string');
   });
 
@@ -95,7 +95,7 @@ describe('LifecycleManager', () => {
       }
     })();
     await expect(
-      sdk.lifecycle.transferOwnership(asset as any, 'bc1qnewowner')
+      sdk.lifecycle.transferOwnership(asset as any, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx')
     ).rejects.toThrow('Asset must be inscribed on Bitcoin before transfer');
   });
 });
@@ -200,7 +200,7 @@ describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
     const asset = await sdk.lifecycle.createAsset(resources);
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     await sdk.lifecycle.inscribeOnBitcoin(asset, 8);
-    const tx = await sdk.lifecycle.transferOwnership(asset, 'bcrt1qdestination');
+    const tx = await sdk.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
     expect(tx.txid).toBe('tx-transfer-mock');
     const provenance = asset.getProvenance();
     expect(provenance.transfers[provenance.transfers.length - 1].transactionId).toBe('tx-transfer-mock');
