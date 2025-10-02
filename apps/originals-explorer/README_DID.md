@@ -6,7 +6,7 @@
 ✅ **Three Privy-managed wallets** per user (1 Bitcoin, 2 Stellar)  
 ✅ **Secure key management** - All private keys managed by Privy, never exposed  
 ✅ **Beautiful profile UI** - DID display with QR code, copy, and export  
-✅ **DID resolution endpoint** - Standard `.well-known/did/{slug}` endpoint  
+✅ **DID resolution endpoint** - Spec-compliant `/{slug}/did.jsonld` endpoint  
 ✅ **Full test coverage** - Unit tests for all DID services  
 
 ## Quick Start
@@ -50,10 +50,12 @@ Your profile page will show:
 
 Visit:
 ```
-http://localhost:5000/.well-known/did/{your-slug}
+http://localhost:5000/{your-slug}/did.jsonld
 ```
 
 You should see your DID document in JSON-LD format!
+
+**Note:** The `/did.jsonld` suffix is required by the DID:WebVH specification.
 
 ## File Structure
 
@@ -98,8 +100,10 @@ did:webvh:localhost:5000:cltest123456
 
 Resolves to:
 ```
-http://localhost:5000/.well-known/did/cltest123456
+http://localhost:5000/cltest123456/did.jsonld
 ```
+
+The path-based resolution follows the DID:WebVH specification.
 
 ## Security Features
 
@@ -125,7 +129,7 @@ Response:
 
 ### Resolve DID
 ```bash
-GET /.well-known/did/{userSlug}
+GET /{userSlug}/did.jsonld
 
 Response:
 {

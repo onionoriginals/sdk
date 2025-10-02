@@ -125,8 +125,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Serve DID document at .well-known endpoint
-  app.get("/.well-known/did/:userSlug", async (req, res) => {
+  // Serve DID document at path-based endpoint
+  // According to DID:WebVH spec: did:webvh:example.com:user:bob
+  // transforms to: https://example.com/user/bob/did.jsonld
+  // 
+  // For did:webvh:localhost:5000:user123
+  // Resolves to: http://localhost:5000/user123/did.jsonld
+  app.get("/:userSlug/did.jsonld", async (req, res) => {
     try {
       const { userSlug } = req.params;
       

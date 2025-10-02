@@ -62,15 +62,18 @@ When the user visits their profile page, the frontend automatically calls `/api/
 
 ### 4. DID Resolution
 
-The DID document is served at:
-```
-https://your-domain.com/.well-known/did/{user-slug}
-```
+According to the DID:WebVH specification, DIDs are resolved using path-based transformation:
+
+**DID Format:** `did:webvh:domain:identifier`  
+**Resolves to:** `https://domain/identifier/did.jsonld`
 
 For example:
 ```
-http://localhost:5000/.well-known/did/cltest123456
+DID: did:webvh:localhost:5000:cltest123456
+Resolves to: http://localhost:5000/cltest123456/did.jsonld
 ```
+
+**Note:** The `/did.jsonld` suffix is required by the DID:WebVH spec.
 
 ## Environment Variables
 
@@ -200,14 +203,14 @@ The tests mock Privy wallet creation and verify:
 ### DID resolution fails
 - Verify the DID document is stored in the database
 - Check that the user slug matches the DID
-- Verify the `.well-known/did/:userSlug` endpoint is accessible
+- Verify the `/:userSlug` endpoint is accessible
 
 ## Production Deployment
 
 1. Update `DID_DOMAIN` to your production domain
 2. Ensure Privy is configured for production
 3. Set up proper HTTPS (required for production)
-4. Test DID resolution at `https://your-domain.com/.well-known/did/{slug}`
+4. Test DID resolution at `https://your-domain.com/{slug}/did.jsonld`
 5. Consider setting up monitoring for DID creation failures
 
 ## Additional Resources

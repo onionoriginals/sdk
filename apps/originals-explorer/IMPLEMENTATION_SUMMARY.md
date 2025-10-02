@@ -49,7 +49,7 @@ Successfully implemented automatic DID:WebVH creation for non-wallet users using
 
 7. **`server/routes.ts`** - New DID endpoints
    - `POST /api/user/ensure-did` - Auto-create DID if doesn't exist
-   - `GET /.well-known/did/:userSlug` - Serve DID document
+   - `GET /:userSlug/did.jsonld` - Serve DID document (DID:WebVH spec compliant)
 
 ### Frontend
 
@@ -114,7 +114,7 @@ Successfully implemented automatic DID:WebVH creation for non-wallet users using
 - Public keys only in multibase format
 
 ### ✅ DID Resolution
-- Standard `.well-known/did/{slug}` endpoint
+- Standard `/{slug}` endpoint
 - Proper `application/did+ld+json` content type
 - Works for both development and production
 
@@ -151,10 +151,12 @@ Successfully implemented automatic DID:WebVH creation for non-wallet users using
 6. Frontend displays DID with QR code
 
 ### DID Resolution Flow
-1. External party requests `GET /.well-known/did/{slug}`
+1. External party requests `GET /{slug}/did.jsonld`
 2. Backend looks up user by slug
 3. Returns DID document with proper content type
 4. External party can verify credentials using public keys
+
+**Note:** The `/did.jsonld` path suffix is required by the DID:WebVH specification for proper DID-to-HTTPS transformation.
 
 ## Environment Variables Required
 
@@ -223,7 +225,7 @@ The `signing-service.ts` has placeholders for actual Privy signing. Need to:
 - [x] Public keys extracted and converted to multibase format
 - [x] DID document created with proper verification methods
 - [x] Automatic DID creation endpoint implemented
-- [x] DID document served at `/.well-known/did/:userSlug`
+- [x] DID document served at `/:userSlug/did.jsonld` (spec compliant)
 - [x] Profile page auto-creates and displays user's DID
 - [x] Signing service ready for future credential signing
 - [x] Tests written and passing
