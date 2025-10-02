@@ -5,7 +5,7 @@ export function useAuth() {
   const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
 
   // Always call useQuery to maintain hook order consistency
-  const { data: serverUser } = useQuery({
+  const { data: serverUser, isLoading: isServerUserLoading } = useQuery({
     queryKey: ['/api/user'],
     enabled: ready && authenticated,
     retry: false,
@@ -22,6 +22,7 @@ export function useAuth() {
       privyDid: user.id,
     } : null,
     isLoading: !ready,
+    isUserLoading: isAuthenticated && isServerUserLoading,
     isAuthenticated,
     login,
     logout,

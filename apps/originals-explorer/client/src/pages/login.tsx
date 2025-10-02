@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useEffect } from "react";
 
 export default function Login() {
-  const { user, isLoading, isAuthenticated, login } = useAuth();
+  const { user, isLoading, isUserLoading, isAuthenticated, login } = useAuth();
   const { toast } = useToast();
 
   // Store return path and redirect after login
@@ -41,7 +41,7 @@ export default function Login() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || isUserLoading) {
     return (
       <main className="min-h-screen bg-white flex items-center justify-center px-4">
         <div className="text-center">
