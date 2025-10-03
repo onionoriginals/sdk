@@ -170,6 +170,11 @@ export class WebVHManager {
     };
     const { createDID, prepareDataForSigning } = mod;
 
+    // Runtime validation of imported module
+    if (typeof createDID !== 'function' || typeof prepareDataForSigning !== 'function') {
+      throw new Error('Failed to load didwebvh-ts: invalid module exports');
+    }
+
     // Create signer using our adapter
     const signer = new OriginalsWebVHSigner(
       keyPair.privateKey,
@@ -195,6 +200,11 @@ export class WebVHManager {
       assertionMethod: ['#key-0'],
     });
 
+    // Validate the returned DID document
+    if (!this.isDIDDocument(result.doc)) {
+      throw new Error('Invalid DID document returned from createDID');
+    }
+
     // Save the log to did.jsonl if output directory is provided
     let logPath: string | undefined;
     if (outputDir) {
@@ -203,7 +213,7 @@ export class WebVHManager {
 
     return {
       did: result.did,
-      didDocument: result.doc as unknown as DIDDocument,
+      didDocument: result.doc,
       log: result.log,
       keyPair,
       logPath,
@@ -235,6 +245,30 @@ export class WebVHManager {
   }
 
   /**
+   * Type guard to validate a DID document structure
+   * @param doc - Object to validate
+   * @returns true if the object is a valid DIDDocument
+   */
+  private isDIDDocument(doc: unknown): doc is DIDDocument {
+    if (!doc || typeof doc !== 'object') {
+      return false;
+    }
+    
+    const d = doc as Record<string, unknown>;
+    
+    // Check required fields
+    if (!Array.isArray(d['@context']) || d['@context'].length === 0) {
+      return false;
+    }
+    
+    if (typeof d.id !== 'string' || !d.id.startsWith('did:')) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  /**
    * Saves the DID log to the appropriate did.jsonl path
    * @param did - The DID identifier
    * @param log - The DID log to save
@@ -259,17 +293,25 @@ export class WebVHManager {
       }
     }
 
-    // Construct the file path
-    // For did:webvh:example.com:user:alice -> .well-known/did/user/alice/did.jsonl
-    // For did:webvh:example.com:alice -> .well-known/did/alice/did.jsonl
-    const didPath = pathParts.length > 0 
-      ? path.join(baseDir, 'did', ...pathParts, 'did.jsonl')
-      : path.join(baseDir, 'did', 'did.jsonl');
+    // Extract and sanitize domain for filesystem safety
+    const rawDomain = decodeURIComponent(didParts[2]);
+    // Replace colons and other unsafe characters for filesystem compatibility
+    const safeDomain = rawDomain.replace(/[:]/g, '_');
+    if (!this.isValidPathSegment(safeDomain)) {
+      throw new Error(`Invalid domain segment in DID: "${rawDomain}"`);
+    }
+
+    // Construct the file path with domain isolation
+    // For did:webvh:example.com:user:alice -> baseDir/did/example.com/user/alice/did.jsonl
+    // For did:webvh:example.com:alice -> baseDir/did/example.com/alice/did.jsonl
+    const segments = [safeDomain, ...pathParts];
+    const didPath = path.join(baseDir, 'did', ...segments, 'did.jsonl');
 
     // Verify the resolved path is still within baseDir (defense in depth)
-    const resolvedPath = path.resolve(didPath);
     const resolvedBaseDir = path.resolve(baseDir);
-    if (!resolvedPath.startsWith(resolvedBaseDir)) {
+    const resolvedPath = path.resolve(didPath);
+    const relativePath = path.relative(resolvedBaseDir, resolvedPath);
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
       throw new Error('Invalid DID path: resolved path is outside base directory');
     }
 
