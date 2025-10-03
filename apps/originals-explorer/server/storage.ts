@@ -80,13 +80,13 @@ export class MemStorage implements IStorage {
       id,
       did: null,
       didDocument: null,
-      didCreatedAt: null,
       authWalletId: null,
       assertionWalletId: null,
       updateWalletId: null,
       authKeyPublic: null,
       assertionKeyPublic: null,
       updateKeyPublic: null,
+      didCreatedAt: null,
     };
     this.users.set(id, user);
     return user;
@@ -115,13 +115,13 @@ export class MemStorage implements IStorage {
       password: '', // Not used for Privy users
       did: null,
       didDocument: null,
-      didCreatedAt: null,
       authWalletId: null,
       assertionWalletId: null,
       updateWalletId: null,
       authKeyPublic: null,
       assertionKeyPublic: null,
       updateKeyPublic: null,
+      didCreatedAt: null,
     };
     this.users.set(userId, user);
     return user;
