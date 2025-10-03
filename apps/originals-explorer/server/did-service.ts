@@ -15,15 +15,12 @@ export interface DIDCreationResult {
 
 /**
  * Generate a sanitized user slug from Privy user ID
- * @param privyUserId - The Privy user ID (e.g., "did:privy:...")
+ * @param privyUserId - The Privy user ID (e.g., "cltest123456")
  * @returns Sanitized slug for use in did:webvh
  */
 function generateUserSlug(privyUserId: string): string {
-  // Strip "did:privy:" prefix if present
-  let slug = privyUserId.replace(/^did:privy:/, '');
-  
   // Convert to lowercase and replace invalid characters with hyphens
-  slug = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  let slug = privyUserId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
   
   // Remove consecutive hyphens and trim
   slug = slug.replace(/-+/g, '-').replace(/^-|-$/g, '');

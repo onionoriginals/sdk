@@ -29,10 +29,10 @@ const mockPrivyClient = {
 describe("DID:WebVH Service", () => {
   describe("createUserDIDWebVH", () => {
     test("creates did:webvh with correct format", async () => {
-      const userId = "did:privy:cltest123";
+      const userId = "cltest123";
       const result = await createUserDIDWebVH(userId, mockPrivyClient, "localhost:5000");
 
-      expect(result.did).toBe("did:webvh:localhost%3A5000:p-cltest123");
+      expect(result.did).toBe("did:webvh:localhost%3A5000:cltest123");
       expect(result.didDocument).toBeDefined();
       expect(result.didDocument.id).toBe(result.did);
       expect(result.authWalletId).toBe("btc-wallet-1");
@@ -41,7 +41,7 @@ describe("DID:WebVH Service", () => {
     });
 
     test("creates did:webvh with proper DID document structure", async () => {
-      const userId = "did:privy:cltest123";
+      const userId = "cltest123";
       const result = await createUserDIDWebVH(userId, mockPrivyClient, "example.com");
 
       expect(result.didDocument["@context"]).toContain("https://www.w3.org/ns/did/v1");
@@ -52,7 +52,7 @@ describe("DID:WebVH Service", () => {
     });
 
     test("creates stable slug from user ID", async () => {
-      const userId = "did:privy:cltest123";
+      const userId = "cltest123";
       const result1 = await createUserDIDWebVH(userId, mockPrivyClient);
       const result2 = await createUserDIDWebVH(userId, mockPrivyClient);
 
@@ -60,15 +60,15 @@ describe("DID:WebVH Service", () => {
       const slug2 = getUserSlugFromDID(result2.did);
 
       expect(slug1).toBe(slug2);
-      expect(slug1).toBe("p-cltest123");
+      expect(slug1).toBe("cltest123");
     });
 
     test("handles special characters in user ID", async () => {
-      const userId = "did:privy:cl_test@user#123";
+      const userId = "cl_test@user#123";
       const result = await createUserDIDWebVH(userId, mockPrivyClient);
 
       const slug = getUserSlugFromDID(result.did);
-      expect(slug).toBe("p-cl-test-user-123"); // Special chars replaced with hyphens
+      expect(slug).toBe("cl-test-user-123"); // Special chars replaced with hyphens
       expect(result.did).toMatch(/^did:webvh:/);
     });
 
@@ -87,12 +87,12 @@ describe("DID:WebVH Service", () => {
 
   describe("getUserSlugFromDID", () => {
     test("extracts slug from did:webvh", () => {
-      const slug = getUserSlugFromDID("did:webvh:localhost%3A5000:p-abc123");
-      expect(slug).toBe("p-abc123");
+      const slug = getUserSlugFromDID("did:webvh:localhost%3A5000:abc123");
+      expect(slug).toBe("abc123");
     });
 
     test("returns null for invalid DID format", () => {
-      const slug = getUserSlugFromDID("did:privy:abc123");
+      const slug = getUserSlugFromDID("invalid:format:abc123");
       expect(slug).toBeNull();
     });
 
@@ -144,7 +144,7 @@ describe("DID:WebVH Service", () => {
 
   describe("Idempotency", () => {
     test("generates same slug for same user ID", async () => {
-      const userId = "did:privy:cltest123";
+      const userId = "cltest123";
 
       const result1 = await createUserDIDWebVH(userId, mockPrivyClient);
       const result2 = await createUserDIDWebVH(userId, mockPrivyClient);

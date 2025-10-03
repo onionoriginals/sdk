@@ -52,7 +52,7 @@ describe('DID Service', () => {
         .mockResolvedValueOnce(mockStellarWallet1)
         .mockResolvedValueOnce(mockStellarWallet2);
 
-      const userId = 'did:privy:cltest123456';
+      const userId = 'cltest123456';
       const result = await createUserDID(userId, mockPrivyClient);
 
       // Verify all three wallets were created
@@ -114,10 +114,10 @@ describe('DID Service', () => {
 
       mockPrivyClient.walletApi.createWallet.mockResolvedValue(mockWallet);
 
-      const userId = 'did:privy:cl_test@user#123';
+      const userId = 'cl_test@user#123';
       const result = await createUserDID(userId, mockPrivyClient);
 
-      // Should remove "did:privy:" prefix and sanitize special chars
+      // Should sanitize special chars
       // Domain with port should be URL-encoded
       expect(result.did).toMatch(/^did:webvh:localhost%3A5000:cl-test-user-123$/);
     });

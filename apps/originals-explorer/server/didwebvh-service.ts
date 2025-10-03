@@ -17,19 +17,15 @@ export interface DIDWebVHCreationResult {
 
 /**
  * Generate a sanitized user slug from Privy user ID
- * @param privyUserId - The Privy user ID (e.g., "did:privy:123456")
- * @returns Sanitized slug for use in did:webvh (e.g., "p-123456")
+ * @param privyUserId - The Privy user ID (e.g., "cltest123456")
+ * @returns Sanitized slug for use in did:webvh (e.g., "cltest123456" or sanitized version)
  */
 function generateUserSlug(privyUserId: string): string {
-  // Extract the ID part from did:privy:123456
-  // If it's already just an ID, use it as-is
-  const id = privyUserId.replace(/^did:privy:/, '');
-  
   // Sanitize: lowercase and replace any non-alphanumeric with hyphens
-  const sanitized = id.toLowerCase().replace(/[^a-z0-9]/g, '-');
+  const sanitized = privyUserId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
   
-  // Prefix with 'p-' to indicate Privy origin
-  return `p-${sanitized}`;
+  // Remove consecutive hyphens and trim
+  return sanitized.replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
 /**
