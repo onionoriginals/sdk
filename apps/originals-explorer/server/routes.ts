@@ -91,7 +91,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = (req as any).user;
       res.json({
         id: user.id,
-        privyDid: user.privyDid,
+        privyId: user.privyId,
       });
     } catch (error) {
       console.error("Error fetching user:", error);
