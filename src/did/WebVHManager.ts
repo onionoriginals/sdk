@@ -16,8 +16,8 @@ interface VerificationMethod {
 }
 
 interface SigningInput {
-  document: any;
-  proof: any;
+  document: Record<string, unknown>;
+  proof: Record<string, unknown>;
 }
 
 interface SigningOutput {
@@ -41,9 +41,9 @@ interface Verifier {
 interface DIDLogEntry {
   versionId: string;
   versionTime: string;
-  parameters: any;
-  state: any;
-  proof?: any[];
+  parameters: Record<string, unknown>;
+  state: Record<string, unknown>;
+  proof?: Record<string, unknown>[];
 }
 
 type DIDLog = DIDLogEntry[];
@@ -56,12 +56,12 @@ class OriginalsWebVHSigner implements Signer, Verifier {
   private signer: Ed25519Signer;
   protected verificationMethod?: VerificationMethod | null;
   protected useStaticId: boolean;
-  private prepareDataForSigning: any;
+  private prepareDataForSigning: (document: Record<string, unknown>, proof: Record<string, unknown>) => Promise<Uint8Array>;
 
   constructor(
     privateKeyMultibase: string,
     verificationMethod: VerificationMethod,
-    prepareDataForSigning: any,
+    prepareDataForSigning: (document: Record<string, unknown>, proof: Record<string, unknown>) => Promise<Uint8Array>,
     options: SignerOptions = {}
   ) {
     this.privateKeyMultibase = privateKeyMultibase;
@@ -153,7 +153,17 @@ export class WebVHManager {
     ];
 
     // Dynamically import didwebvh-ts to avoid module resolution issues
-    const mod: any = await import('didwebvh-ts');
+    const mod = await import('didwebvh-ts') as unknown as {
+      createDID: (options: Record<string, unknown>) => Promise<{
+        did: string;
+        doc: Record<string, unknown>;
+        log: DIDLog;
+      }>;
+      prepareDataForSigning: (
+        document: Record<string, unknown>,
+        proof: Record<string, unknown>
+      ) => Promise<Uint8Array>;
+    };
     const { createDID, prepareDataForSigning } = mod;
 
     // Create signer using our adapter
@@ -189,7 +199,7 @@ export class WebVHManager {
 
     return {
       did: result.did,
-      didDocument: result.doc as DIDDocument,
+      didDocument: result.doc as unknown as DIDDocument,
       log: result.log,
       keyPair,
       logPath,
@@ -264,7 +274,7 @@ export class WebVHManager {
     await fs.promises.mkdir(dirPath, { recursive: true });
 
     // Convert log to JSONL format (one JSON object per line)
-    const jsonlContent = log.map((entry: any) => JSON.stringify(entry)).join('\n');
+    const jsonlContent = log.map((entry: DIDLogEntry) => JSON.stringify(entry)).join('\n');
 
     // Write the log file
     await fs.promises.writeFile(didPath, jsonlContent, 'utf8');
