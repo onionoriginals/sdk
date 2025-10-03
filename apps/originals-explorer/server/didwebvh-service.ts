@@ -42,7 +42,7 @@ function generateUserSlug(privyUserId: string): string {
 export async function createUserDIDWebVH(
   privyUserId: string,
   privyClient: PrivyClient,
-  domain: string = process.env.DID_DOMAIN || 'localhost:5000'
+  domain: string = process.env.DID_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000'
 ): Promise<DIDWebVHCreationResult> {
   try {
     console.log(`Creating DID:WebVH for user ${privyUserId}...`);
