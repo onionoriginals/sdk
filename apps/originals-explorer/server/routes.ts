@@ -132,6 +132,128 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // DID Management API Endpoints
+  
+  // Get DID document for authenticated user
+  app.get("/api/did/me", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const userData = await storage.getUserByDid(user.did);
+      
+      if (!userData?.didDocument) {
+        return res.status(404).json({ error: "DID document not found" });
+      }
+      
+      res.json({
+        did: userData.did,
+        didDocument: userData.didDocument,
+        createdAt: userData.didCreatedAt,
+      });
+    } catch (error) {
+      console.error("Error fetching DID document:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Get DID log for authenticated user (did.jsonl content)
+  app.get("/api/did/me/log", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const userData = await storage.getUserByDid(user.did);
+      
+      if (!userData?.didLog) {
+        return res.status(404).json({ error: "DID log not found" });
+      }
+      
+      res.json({
+        did: userData.did,
+        log: userData.didLog,
+      });
+    } catch (error) {
+      console.error("Error fetching DID log:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Resolve a DID:WebVH (public endpoint)
+  app.get("/api/did/resolve/:did(*)", async (req, res) => {
+    try {
+      const did = req.params.did;
+      
+      // Validate DID format
+      if (!did.startsWith('did:webvh:')) {
+        return res.status(400).json({ error: "Invalid DID format. Must be did:webvh:..." });
+      }
+      
+      // Try to find user by DID
+      const user = await storage.getUserByDid(did);
+      
+      if (!user?.didDocument) {
+        return res.status(404).json({ error: "DID not found" });
+      }
+      
+      res.json({
+        did: user.did,
+        didDocument: user.didDocument,
+        createdAt: user.didCreatedAt,
+      });
+    } catch (error) {
+      console.error("Error resolving DID:", error);
+      res.status(500).json({ error: "Failed to resolve DID" });
+    }
+  });
+
+  // Advanced: Create DID with SDK-managed keys (alternative to Privy)
+  // This endpoint is for advanced users who want full control over key management
+  app.post("/api/did/create-with-sdk", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      
+      // Check if user already has a DID
+      const existingUser = await storage.getUserByDid(user.did);
+      if (existingUser?.did) {
+        return res.status(400).json({ 
+          error: "User already has a DID",
+          did: existingUser.did 
+        });
+      }
+
+      // Import the WebVH integration service
+      const { webvhService } = await import('./webvh-integration');
+      
+      // Create DID using SDK
+      const result = await webvhService.createDIDWithSDK(user.privyId);
+      
+      // Update user with SDK-created DID
+      await storage.updateUser(user.privyId, {
+        did: result.did,
+        didDocument: result.didDocument as any,
+        didLog: result.log as any,
+        didSlug: user.privyId.replace(/^did:privy:/, ''),
+        didCreatedAt: new Date(),
+      });
+      
+      res.status(201).json({
+        success: true,
+        did: result.did,
+        didDocument: result.didDocument,
+        logPath: result.logPath,
+        message: "DID created with SDK-managed keys. Keep your private key secure!",
+        keyPair: {
+          publicKey: result.keyPair.publicKey,
+          // Never expose private key in response for production
+          // privateKey: result.keyPair.privateKey,
+        },
+      });
+    } catch (error) {
+      console.error("Error creating DID with SDK:", error);
+      res.status(500).json({ 
+        error: "Failed to create DID",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Assets routes
   app.get("/api/assets", authenticateUser, async (req, res) => {
     try {
@@ -728,17 +850,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Serve DID log at path-based endpoint (did.jsonl)
+  // According to DID:WebVH spec:
+  // - Domain-only DID: did:webvh:example.com -> /.well-known/did.jsonl
+  // - Path-based DID: did:webvh:example.com:alice -> /alice/did.jsonl (NO .well-known!)
+  app.get("/:userSlug/did.jsonl", async (req, res) => {
+    try {
+      const { userSlug } = req.params;
+      
+      // Look up user by DID slug
+      const user = await storage.getUserByDidSlug(userSlug);
+      
+      if (!user?.didLog) {
+        return res.status(404).json({ error: "DID log not found" });
+      }
+
+      // Convert log array to JSONL format (one JSON object per line)
+      const logArray = Array.isArray(user.didLog) ? user.didLog : [user.didLog];
+      const jsonlContent = logArray.map((entry: any) => JSON.stringify(entry)).join('\n');
+
+      // Set proper content type for JSONL
+      res.type("application/jsonl").send(jsonlContent);
+    } catch (error) {
+      console.error("Error serving DID log:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Serve DID document at path-based endpoint
-  // IMPORTANT: This catch-all route must be registered LAST to avoid conflicts
+  // IMPORTANT: These catch-all routes must be registered LAST to avoid conflicts
   // 
   // According to DID:WebVH spec transformation:
   // - DID format: did:webvh:{url-encoded-domain}:{path-segments}
   // - The domain is URL-encoded (ports use %3A instead of :)
-  // - Resolves to: https://{domain}/{path-segments}/did.jsonld
+  // - Path-based DIDs resolve to: https://{domain}/{path-segments}/did.jsonld
+  // - Domain-only DIDs would use: https://{domain}/.well-known/did.jsonld
   // 
   // Example:
-  // - DID: did:webvh:localhost%3A5000:user123
-  // - Resolves to: http://localhost:5000/user123/did.jsonld
+  // - DID: did:webvh:localhost%3A5000:alice
+  // - Resolves to: http://localhost:5000/alice/did.jsonld
+  // - Log at: http://localhost:5000/alice/did.jsonl
   app.get("/:userSlug/did.jsonld", async (req, res) => {
     try {
       const { userSlug } = req.params;

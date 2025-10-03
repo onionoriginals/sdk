@@ -10,6 +10,8 @@ export const users = pgTable("users", {
   // DID-related fields (Privy-managed keys)
   did: text("did"), // did:webvh identifier
   didDocument: jsonb("did_document"), // Complete DID document
+  didLog: jsonb("did_log"), // DID log (did.jsonl content)
+  didSlug: text("did_slug"), // User slug extracted from DID
   authWalletId: text("auth_wallet_id"), // Privy wallet ID for authentication (Bitcoin)
   assertionWalletId: text("assertion_wallet_id"), // Privy wallet ID for assertions (Stellar/ED25519)
   updateWalletId: text("update_wallet_id"), // Privy wallet ID for DID updates (Stellar/ED25519)
