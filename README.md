@@ -61,6 +61,10 @@ await originals.lifecycle.inscribeOnBitcoin(asset);
 - **LifecycleManager** - Asset migration between layers
 - **BitcoinManager** - Bitcoin/Ordinals integration
 
+### Further Reference
+
+- Inputs/Outputs reference: [Originals SDK — Inputs and Outputs](docs/ORIGINALS_SDK_INPUTS_AND_OUTPUTS.md)
+
 ### Key Features
 
 - ✅ W3C DID and Verifiable Credential compliance
