@@ -204,6 +204,200 @@ describe('WebVHManager', () => {
     }, 10000);
   });
 
+  describe('saveDIDLog error handling', () => {
+    test('throws error for invalid DID format (missing parts)', async () => {
+      const validLog = [{
+        versionId: '1',
+        versionTime: new Date().toISOString(),
+        parameters: {},
+        state: {}
+      }];
+
+      await expect(
+        manager.saveDIDLog('invalid:did', validLog, tempDir)
+      ).rejects.toThrow('Invalid did:webvh format');
+    }, 10000);
+
+    test('throws error for non-webvh DID', async () => {
+      const validLog = [{
+        versionId: '1',
+        versionTime: new Date().toISOString(),
+        parameters: {},
+        state: {}
+      }];
+
+      await expect(
+        manager.saveDIDLog('did:key:abc123', validLog, tempDir)
+      ).rejects.toThrow('Invalid did:webvh format');
+    }, 10000);
+
+    test('saves DID without path parts correctly', async () => {
+      const validLog = [{
+        versionId: '1',
+        versionTime: new Date().toISOString(),
+        parameters: {},
+        state: {}
+      }];
+
+      const logPath = await manager.saveDIDLog('did:webvh:example.com', validLog, tempDir);
+      
+      expect(logPath).toContain('did.jsonl');
+      expect(logPath.startsWith(tempDir)).toBe(true);
+      
+      // Verify file exists
+      const fileExists = await fs.promises.access(logPath)
+        .then(() => true)
+        .catch(() => false);
+      expect(fileExists).toBe(true);
+    }, 10000);
+
+    test('handles URL-encoded domain correctly', async () => {
+      const validLog = [{
+        versionId: '1',
+        versionTime: new Date().toISOString(),
+        parameters: {},
+        state: {}
+      }];
+
+      const logPath = await manager.saveDIDLog('did:webvh:localhost%3A5000:test', validLog, tempDir);
+      
+      expect(logPath).toBeDefined();
+      expect(logPath.startsWith(tempDir)).toBe(true);
+    }, 10000);
+
+    test('rejects empty path segments', async () => {
+      const validLog = [{
+        versionId: '1',
+        versionTime: new Date().toISOString(),
+        parameters: {},
+        state: {}
+      }];
+
+      await expect(
+        manager.saveDIDLog('did:webvh:example.com::test', validLog, tempDir)
+      ).rejects.toThrow('Invalid path segment in DID');
+    }, 10000);
+
+    test('throws error when resolved path escapes base directory', async () => {
+      const validLog = [{
+        versionId: '1',
+        versionTime: new Date().toISOString(),
+        parameters: {},
+        state: {}
+      }];
+
+      // This should be caught by the validation, but testing defense in depth
+      // Create a mock DID that would try to escape (though validation prevents it)
+      await expect(
+        manager.saveDIDLog('did:webvh:example.com:..', validLog, tempDir)
+      ).rejects.toThrow();
+    }, 10000);
+  });
+
+  describe('security: path traversal prevention', () => {
+    test('rejects DIDs with ".." in path segments', async () => {
+      await expect(
+        manager.createDIDWebVH({
+          domain: 'example.com',
+          paths: ['..', 'etc', 'passwd'],
+          outputDir: tempDir,
+        })
+      ).rejects.toThrow('Invalid path segment in DID');
+    }, 10000);
+
+    test('rejects DIDs with "." in path segments', async () => {
+      await expect(
+        manager.createDIDWebVH({
+          domain: 'example.com',
+          paths: ['.', 'secret'],
+          outputDir: tempDir,
+        })
+      ).rejects.toThrow('Invalid path segment in DID');
+    }, 10000);
+
+    test('rejects DIDs with path separators in segments', async () => {
+      await expect(
+        manager.createDIDWebVH({
+          domain: 'example.com',
+          paths: ['users/../../etc', 'passwd'],
+          outputDir: tempDir,
+        })
+      ).rejects.toThrow('Invalid path segment in DID');
+    }, 10000);
+
+    test('rejects DIDs with backslashes in path segments', async () => {
+      await expect(
+        manager.createDIDWebVH({
+          domain: 'example.com',
+          paths: ['users\\..\\..\\etc', 'passwd'],
+          outputDir: tempDir,
+        })
+      ).rejects.toThrow('Invalid path segment in DID');
+    }, 10000);
+
+    test('rejects DIDs with null bytes in path segments', async () => {
+      await expect(
+        manager.createDIDWebVH({
+          domain: 'example.com',
+          paths: ['users\0etc', 'passwd'],
+          outputDir: tempDir,
+        })
+      ).rejects.toThrow('Invalid path segment in DID');
+    }, 10000);
+
+    test('rejects DIDs with absolute paths (Unix)', async () => {
+      await expect(
+        manager.createDIDWebVH({
+          domain: 'example.com',
+          paths: ['/etc/passwd'],
+          outputDir: tempDir,
+        })
+      ).rejects.toThrow('Invalid path segment in DID');
+    }, 10000);
+
+    test('rejects DIDs with absolute paths (Windows)', async () => {
+      await expect(
+        manager.createDIDWebVH({
+          domain: 'example.com',
+          paths: ['C:\\Windows\\System32'],
+          outputDir: tempDir,
+        })
+      ).rejects.toThrow('Invalid path segment in DID');
+    }, 10000);
+
+    test('accepts valid alphanumeric path segments', async () => {
+      const result = await manager.createDIDWebVH({
+        domain: 'example.com',
+        paths: ['users', 'alice123', 'profile'],
+        outputDir: tempDir,
+      });
+
+      expect(result.did).toBeDefined();
+      expect(result.logPath).toBeDefined();
+      
+      // Verify file was created in the correct location
+      const fileExists = await fs.promises.access(result.logPath!)
+        .then(() => true)
+        .catch(() => false);
+      expect(fileExists).toBe(true);
+      
+      // Verify path is within temp directory
+      expect(result.logPath!.startsWith(tempDir)).toBe(true);
+    }, 10000);
+
+    test('accepts valid path segments with hyphens and underscores', async () => {
+      const result = await manager.createDIDWebVH({
+        domain: 'example.com',
+        paths: ['my-org', 'user_name', 'test-123'],
+        outputDir: tempDir,
+      });
+
+      expect(result.did).toBeDefined();
+      expect(result.logPath).toBeDefined();
+      expect(result.logPath!.startsWith(tempDir)).toBe(true);
+    }, 10000);
+  });
+
   describe('integration with didwebvh-ts', () => {
     test('creates cryptographically valid DID with proper proofs', async () => {
       const result = await manager.createDIDWebVH({

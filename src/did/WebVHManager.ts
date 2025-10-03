@@ -144,10 +144,6 @@ export class WebVHManager {
     // Generate or use provided key pair (Ed25519 for did:webvh)
     const keyPair = providedKeyPair || await this.keyManager.generateKeyPair('Ed25519');
 
-    // Decode the public key to get raw bytes
-    const decodedPublicKey = multikey.decodePublicKey(keyPair.publicKey);
-    const publicKeyBytes = decodedPublicKey.key;
-
     // Create verification methods
     const verificationMethods: VerificationMethod[] = [
       {
@@ -238,9 +234,6 @@ export class WebVHManager {
       throw new Error('Invalid did:webvh format');
     }
 
-    // Extract domain (handle URL-encoded ports like localhost%3A5000)
-    const domainPart = decodeURIComponent(didParts[2]);
-    
     // Extract path parts (everything after domain)
     const pathParts = didParts.slice(3);
 
