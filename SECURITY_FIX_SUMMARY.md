@@ -78,7 +78,22 @@
 - The `OriginalsWebVHSigner` already implements both `Signer` and `Verifier` interfaces
 - Reuses the same instance for both signing and verification
 
-**Location**: `src/did/WebVHManager.ts` line 171
+**Location**: `src/did/WebVHManager.ts` line 185
+
+### 6. Bug Fix: Verification Method Format ✅
+
+**Issue**: Tests failing with "Unsupported verification method" error
+- `didwebvh-ts` requires verification method IDs to be in `did:key:` or `did:webvh:` format
+- Was returning relative references like `#key-0` instead
+
+**Fixes Applied**:
+- Updated `getVerificationMethodId()` to return `did:key:{publicKeyMultibase}` format
+- Updated `updateKeys` array to use `did:key:` format: `did:key:{publicKeyMultibase}`
+- This aligns with didwebvh-ts's key authorization mechanism
+
+**Locations**: 
+- `src/did/WebVHManager.ts` lines 102-111 (getVerificationMethodId)
+- `src/did/WebVHManager.ts` line 186 (updateKeys)
 
 ### 5. Code Quality: TypeScript Linting Fixes ✅
 

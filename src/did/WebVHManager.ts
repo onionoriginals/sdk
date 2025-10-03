@@ -100,10 +100,14 @@ class OriginalsWebVHSigner implements Signer, Verifier {
   }
 
   getVerificationMethodId(): string {
-    if (this.useStaticId) {
-      return '#key-0';
+    // didwebvh-ts requires verification method to be a did:key: identifier
+    // Extract the multibase key from the verification method
+    const publicKeyMultibase = this.verificationMethod?.publicKeyMultibase;
+    if (!publicKeyMultibase) {
+      throw new Error('Verification method must have publicKeyMultibase');
     }
-    return this.verificationMethod?.id || '#key-0';
+    // Return as did:key format which didwebvh-ts expects
+    return `did:key:${publicKeyMultibase}`;
   }
 }
 
@@ -179,7 +183,7 @@ export class WebVHManager {
       domain,
       signer,
       verifier: signer, // Use the same signer as verifier (it implements both interfaces)
-      updateKeys: [keyPair.publicKey], // Use the same key for updates
+      updateKeys: [`did:key:${keyPair.publicKey}`], // Use did:key format for authorization
       verificationMethods,
       context: [
         'https://www.w3.org/ns/did/v1',
