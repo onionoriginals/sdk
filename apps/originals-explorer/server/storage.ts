@@ -91,6 +91,8 @@ export class MemStorage implements IStorage {
       id,
       did: null,
       didDocument: null,
+      didLog: null,
+      didSlug: null,
       authWalletId: null,
       assertionWalletId: null,
       updateWalletId: null,
@@ -126,6 +128,8 @@ export class MemStorage implements IStorage {
       password: '', // Not used for Privy users
       did: null,
       didDocument: null,
+      didLog: null,
+      didSlug: null,
       authWalletId: null,
       assertionWalletId: null,
       updateWalletId: null,
@@ -146,6 +150,8 @@ export class MemStorage implements IStorage {
       password: '', // Not used for Privy users
       did: did,
       didDocument: didData.didDocument,
+      didLog: didData.didLog || null,
+      didSlug: didData.didSlug || null,
       authWalletId: didData.authWalletId,
       assertionWalletId: didData.assertionWalletId,
       updateWalletId: didData.updateWalletId,
