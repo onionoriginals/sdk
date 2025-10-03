@@ -168,6 +168,7 @@ export class WebVHManager {
     const result = await createDID({
       domain,
       signer,
+      verifier: signer, // Use the same signer as verifier (it implements both interfaces)
       updateKeys: [keyPair.publicKey], // Use the same key for updates
       verificationMethods,
       context: [
