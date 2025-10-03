@@ -76,7 +76,7 @@ class OriginalsWebVHSigner implements Signer, Verifier {
     const dataToSign = await this.prepareDataForSigning(input.document, input.proof);
     
     // Sign using our Ed25519 signer
-    const signature = await this.signer.sign(
+    const signature: Buffer = await this.signer.sign(
       Buffer.from(dataToSign),
       this.privateKeyMultibase
     );
@@ -92,9 +92,12 @@ class OriginalsWebVHSigner implements Signer, Verifier {
     const publicKeyMultibase = multikey.encodePublicKey(publicKey, 'Ed25519');
     
     // Verify using our Ed25519 signer
+    const messageBuffer: Buffer = Buffer.from(message);
+    const signatureBuffer: Buffer = Buffer.from(signature);
+    
     return this.signer.verify(
-      Buffer.from(message),
-      Buffer.from(signature),
+      messageBuffer,
+      signatureBuffer,
       publicKeyMultibase
     );
   }

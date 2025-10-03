@@ -140,9 +140,38 @@
 
 **Locations**: Throughout `src/did/WebVHManager.ts`
 
+### 8. Bug Fix: Test DID Format Expectations ✅
+
+**Issue**: Tests failing due to incorrect DID format expectations
+- Tests expected: `did:webvh:example.com:{hash}`
+- Actual format from `didwebvh-ts`: `did:webvh:{hash}:example.com`
+- The SCID (Self-Certifying Identifier) hash comes before the domain, not after
+
+**Fix Applied**:
+- Updated test regex patterns to match actual DID format
+- Changed from `/^did:webvh:example\.com:[a-z0-9]+$/` 
+- To `/^did:webvh:[A-Za-z0-9]+:example\.com$/`
+- Updated both basic and path-based DID tests
+
+**Location**: `tests/unit/did/WebVHManager.test.ts` lines 34, 80
+
+### 9. Code Quality: Additional Type Safety Improvements ✅
+
+**Issue**: Linting warnings about implicit `any` types in Buffer operations
+
+**Fix Applied**:
+- Added explicit `Buffer` type annotations for signature and message variables
+- `const signature: Buffer = await this.signer.sign(...)`
+- `const messageBuffer: Buffer = Buffer.from(message)`
+- `const signatureBuffer: Buffer = Buffer.from(signature)`
+
+**Location**: `src/did/WebVHManager.ts` lines 79, 95-96
+
 ## Build Status
 
 ✅ TypeScript compilation successful
-✅ No breaking changes
+✅ No breaking changes in WebVHManager
 ✅ Verifier requirement fixed
-✅ Ready for testing
+✅ Test expectations updated to match actual DID format
+✅ All type safety improvements applied
+✅ Ready for testing with Bun test runner

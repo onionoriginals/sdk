@@ -30,8 +30,8 @@ describe('WebVHManager', () => {
         outputDir: tempDir,
       });
 
-      // Verify DID format
-      expect(result.did).toMatch(/^did:webvh:example\.com:[a-z0-9]+$/);
+      // Verify DID format (includes SCID hash before domain)
+      expect(result.did).toMatch(/^did:webvh:[A-Za-z0-9]+:example\.com$/);  
       
       // Verify DID document structure
       expect(result.didDocument).toBeDefined();
@@ -77,7 +77,7 @@ describe('WebVHManager', () => {
         outputDir: tempDir,
       });
 
-      expect(result.did).toMatch(/^did:webvh:example\.com:users:alice:[a-z0-9]+$/);
+      expect(result.did).toMatch(/^did:webvh:[A-Za-z0-9]+:example\.com:users:alice$/);
     }, 10000);
 
     test('creates portable DID when specified', async () => {
