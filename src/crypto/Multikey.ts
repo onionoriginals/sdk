@@ -143,6 +143,10 @@ export const multikey = {
     return 'z' + base58.encode(mcBytes);
   },
 
+  encodeMultibase: (data: Uint8Array | Buffer): string => {
+    return 'z' + base58.encode(data instanceof Buffer ? new Uint8Array(data) : data);
+  },
+
   decodePublicKey: (publicKeyMultibase: string): { key: Uint8Array; type: MultikeyType } => {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid Multibase encoding');

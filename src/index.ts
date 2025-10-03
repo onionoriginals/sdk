@@ -23,6 +23,7 @@ export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs';
 export { BbsSimple } from './vc/cryptosuites/bbsSimple';
 export * from './storage';
 // didwebvh-ts is used internally; no re-export to keep API stable
+export { WebVHManager, CreateWebVHOptions, CreateWebVHResult } from './did/WebVHManager';
 
 // Crypto exports
 export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from './crypto/Signer';
