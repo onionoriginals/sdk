@@ -9,6 +9,13 @@ import { OAuth2Client } from "google-auth-library";
 import { PrivyClient } from "@privy-io/server-auth";
 import { originalsSdk } from "./originals";
 import { createUserDID } from "./did-service";
+import { 
+  createUserDIDWebVH, 
+  isDidWebVHEnabled, 
+  isDualWriteEnabled,
+  auditLog 
+} from "./didwebvh-service";
+import { createAuthMiddleware } from "./auth-middleware";
 import multer from "multer";
 import { parse as csvParse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
@@ -49,40 +56,8 @@ const privyClient = new PrivyClient(
   process.env.PRIVY_APP_SECRET!
 );
 
-// Middleware to authenticate requests using Privy
-const authenticateUser = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const authorizationHeader = req.headers.authorization;
-    console.log("Authorization header:", authorizationHeader ? `${authorizationHeader.substring(0, 20)}...` : "missing");
-    
-    if (!authorizationHeader) {
-      return res.status(401).json({ error: "Missing authorization header" });
-    }
-
-    if (!authorizationHeader.startsWith('Bearer ')) {
-      console.log("Invalid authorization header format");
-      return res.status(401).json({ error: "Invalid authorization header format" });
-    }
-
-    const token = authorizationHeader.substring(7);
-    console.log("Token length:", token.length);
-    console.log("Token preview:", token.substring(0, 50) + "...");
-    
-    const verifiedClaims = await privyClient.verifyAuthToken(token);
-    console.log("Token verified successfully for user:", verifiedClaims.userId);
-    
-    // Add user info to request
-    (req as any).user = {
-      id: verifiedClaims.userId,
-      privyDid: verifiedClaims.userId,
-    };
-    
-    next();
-  } catch (error) {
-    console.error("Authentication error:", error);
-    return res.status(401).json({ error: "Invalid or expired token" });
-  }
-};
+// Create enhanced authentication middleware with DID:WebVH support
+const authenticateUser = createAuthMiddleware(privyClient);
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Healthcheck for Originals SDK integration
@@ -110,41 +85,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Ensure user has a DID (create if doesn't exist)
+  // Supports both did:webvh and legacy did creation based on feature flags
   app.post("/api/user/ensure-did", authenticateUser, async (req, res) => {
+    const correlationId = (req as any).correlationId || crypto.randomUUID();
+    
     try {
       const user = (req as any).user;
+      const webvhEnabled = isDidWebVHEnabled();
+      const dualWriteEnabled = isDualWriteEnabled();
       
       // Ensure user record exists (creates if new Privy user)
       await storage.ensureUser(user.id);
       
       // Check if user already has a DID
       const existingUser = await storage.getUser(user.id);
-      if (existingUser?.did) {
-        console.log(`User ${user.id} already has DID: ${existingUser.did}`);
+      
+      // Determine what DIDs need to be created
+      const needsWebvh = webvhEnabled && !existingUser?.did_webvh;
+      const needsLegacy = (!webvhEnabled || dualWriteEnabled) && !existingUser?.did;
+
+      // If user has all required DIDs, return existing
+      if (!needsWebvh && !needsLegacy) {
+        const primaryDid = webvhEnabled ? existingUser?.did_webvh : existingUser?.did;
+        console.log(`[${correlationId}] User ${user.id} already has DID: ${primaryDid}`);
+        
+        auditLog('did.already_exists', {
+          userId: user.id,
+          did: primaryDid,
+          type: webvhEnabled ? 'webvh' : 'legacy',
+          correlationId
+        });
+
         return res.json({ 
-          did: existingUser.did, 
-          didDocument: existingUser.didDocument,
+          did: primaryDid, 
+          didDocument: webvhEnabled ? existingUser?.didWebvhDocument : existingUser?.didDocument,
+          did_webvh: existingUser?.did_webvh,
+          did_legacy: existingUser?.did,
           created: false 
         });
       }
 
-      console.log(`Creating DID for user ${user.id}...`);
+      console.log(`[${correlationId}] Creating DID for user ${user.id}...`);
       
-      // Create DID using Privy wallets
-      const didData = await createUserDID(user.id, privyClient);
+      let didData: any = {};
+      let legacyDidData: any = {};
+
+      // Create DID:WebVH if enabled
+      if (needsWebvh) {
+        console.log(`[${correlationId}] Creating DID:WebVH...`);
+        const webvhData = await createUserDIDWebVH(user.id, privyClient);
+        
+        didData = {
+          did_webvh: webvhData.did,
+          didWebvhDocument: webvhData.didDocument,
+          didWebvhCreatedAt: webvhData.didCreatedAt,
+          authWalletId: webvhData.authWalletId,
+          assertionWalletId: webvhData.assertionWalletId,
+          updateWalletId: webvhData.updateWalletId,
+          authKeyPublic: webvhData.authKeyPublic,
+          assertionKeyPublic: webvhData.assertionKeyPublic,
+          updateKeyPublic: webvhData.updateKeyPublic,
+        };
+
+        auditLog('did.webvh_created', {
+          userId: user.id,
+          did: webvhData.did,
+          correlationId
+        });
+      }
+
+      // Create legacy DID if needed (for dual-write or when webvh disabled)
+      if (needsLegacy) {
+        console.log(`[${correlationId}] Creating legacy DID...`);
+        legacyDidData = await createUserDID(user.id, privyClient);
+        
+        didData = {
+          ...didData,
+          did: legacyDidData.did,
+          didDocument: legacyDidData.didDocument,
+          didCreatedAt: legacyDidData.didCreatedAt,
+          // Only set these if not already set by webvh creation
+          authWalletId: didData.authWalletId || legacyDidData.authWalletId,
+          assertionWalletId: didData.assertionWalletId || legacyDidData.assertionWalletId,
+          updateWalletId: didData.updateWalletId || legacyDidData.updateWalletId,
+          authKeyPublic: didData.authKeyPublic || legacyDidData.authKeyPublic,
+          assertionKeyPublic: didData.assertionKeyPublic || legacyDidData.assertionKeyPublic,
+          updateKeyPublic: didData.updateKeyPublic || legacyDidData.updateKeyPublic,
+        };
+
+        auditLog('did.legacy_created', {
+          userId: user.id,
+          did: legacyDidData.did,
+          correlationId
+        });
+      }
       
       // Store DID data in user record (now guaranteed to exist)
       await storage.updateUser(user.id, didData);
       
-      console.log(`DID created successfully: ${didData.did}`);
+      const primaryDid = webvhEnabled ? didData.did_webvh : didData.did;
+      console.log(`[${correlationId}] DID created successfully: ${primaryDid}`);
       
       return res.json({ 
-        did: didData.did, 
-        didDocument: didData.didDocument,
-        created: true 
+        did: primaryDid,
+        didDocument: webvhEnabled ? didData.didWebvhDocument : didData.didDocument,
+        did_webvh: didData.did_webvh,
+        did_legacy: didData.did,
+        created: true,
+        mode: webvhEnabled ? 'webvh' : 'legacy',
+        dualWrite: dualWriteEnabled
       });
     } catch (error) {
-      console.error("Error ensuring user DID:", error);
+      console.error(`[${correlationId}] Error ensuring user DID:`, error);
+      
+      auditLog('did.creation_error', {
+        error: error instanceof Error ? error.message : String(error),
+        correlationId
+      });
+
       return res.status(500).json({ 
         error: "Failed to create DID",
         message: error instanceof Error ? error.message : String(error)

@@ -7,16 +7,22 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
-  // DID-related fields (Privy-managed keys)
-  did: text("did"), // did:webvh identifier
-  didDocument: jsonb("did_document"), // Complete DID document
+  // New canonical DID identifier (did:webvh)
+  did_webvh: text("did_webvh").unique(), // did:webvh identifier (canonical after migration)
+  didWebvhDocument: jsonb("did_webvh_document"), // Complete did:webvh DID document
+  didWebvhCreatedAt: timestamp("did_webvh_created_at"), // When did:webvh was created
+  // Legacy DID identifier (did:privy) - kept for migration period
+  did_privy: text("did_privy").unique(), // did:privy identifier (legacy)
+  // DID-related fields (Privy-managed keys - used for both DIDs during migration)
+  did: text("did"), // DEPRECATED: old field, use did_webvh
+  didDocument: jsonb("did_document"), // DEPRECATED: old field, use didWebvhDocument
   authWalletId: text("auth_wallet_id"), // Privy wallet ID for authentication (Bitcoin)
   assertionWalletId: text("assertion_wallet_id"), // Privy wallet ID for assertions (Stellar/ED25519)
   updateWalletId: text("update_wallet_id"), // Privy wallet ID for DID updates (Stellar/ED25519)
   authKeyPublic: text("auth_key_public"), // Bitcoin public key in multibase format
   assertionKeyPublic: text("assertion_key_public"), // ED25519 public key in multibase format
   updateKeyPublic: text("update_key_public"), // ED25519 public key in multibase format
-  didCreatedAt: timestamp("did_created_at"), // When the DID was created
+  didCreatedAt: timestamp("did_created_at"), // DEPRECATED: use didWebvhCreatedAt
 });
 
 export const assets = pgTable("assets", {
