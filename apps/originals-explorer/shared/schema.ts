@@ -7,16 +7,17 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
-  // DID-related fields (Privy-managed keys)
-  did: text("did"), // did:webvh identifier
+  // DID:WebVH identifier (canonical)
+  did: text("did").unique(), // did:webvh identifier
   didDocument: jsonb("did_document"), // Complete DID document
+  didCreatedAt: timestamp("did_created_at"), // When the DID was created
+  // Privy-managed wallet IDs for key material
   authWalletId: text("auth_wallet_id"), // Privy wallet ID for authentication (Bitcoin)
   assertionWalletId: text("assertion_wallet_id"), // Privy wallet ID for assertions (Stellar/ED25519)
   updateWalletId: text("update_wallet_id"), // Privy wallet ID for DID updates (Stellar/ED25519)
   authKeyPublic: text("auth_key_public"), // Bitcoin public key in multibase format
   assertionKeyPublic: text("assertion_key_public"), // ED25519 public key in multibase format
   updateKeyPublic: text("update_key_public"), // ED25519 public key in multibase format
-  didCreatedAt: timestamp("did_created_at"), // When the DID was created
 });
 
 export const assets = pgTable("assets", {

@@ -19,7 +19,7 @@ export function useAuth() {
       id: serverUser.id,
       email: user.email?.address,
       wallet: user.wallet?.address,
-      privyDid: user.id,
+      privyId: user.id,
     } : null,
     isLoading: !ready,
     isUserLoading: isAuthenticated && isServerUserLoading,

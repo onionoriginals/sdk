@@ -8,7 +8,7 @@ import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import { PrivyClient } from "@privy-io/server-auth";
 import { originalsSdk } from "./originals";
-import { createUserDID } from "./did-service";
+import { createUserDIDWebVH } from "./didwebvh-service";
 import multer from "multer";
 import { parse as csvParse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
@@ -49,32 +49,22 @@ const privyClient = new PrivyClient(
   process.env.PRIVY_APP_SECRET!
 );
 
-// Middleware to authenticate requests using Privy
+// Simple authentication middleware
 const authenticateUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authorizationHeader = req.headers.authorization;
-    console.log("Authorization header:", authorizationHeader ? `${authorizationHeader.substring(0, 20)}...` : "missing");
     
-    if (!authorizationHeader) {
-      return res.status(401).json({ error: "Missing authorization header" });
-    }
-
-    if (!authorizationHeader.startsWith('Bearer ')) {
-      console.log("Invalid authorization header format");
-      return res.status(401).json({ error: "Invalid authorization header format" });
+    if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: "Missing or invalid authorization header" });
     }
 
     const token = authorizationHeader.substring(7);
-    console.log("Token length:", token.length);
-    console.log("Token preview:", token.substring(0, 50) + "...");
-    
     const verifiedClaims = await privyClient.verifyAuthToken(token);
-    console.log("Token verified successfully for user:", verifiedClaims.userId);
     
     // Add user info to request
     (req as any).user = {
       id: verifiedClaims.userId,
-      privyDid: verifiedClaims.userId,
+      privyId: verifiedClaims.userId,
     };
     
     next();
@@ -101,7 +91,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = (req as any).user;
       res.json({
         id: user.id,
-        privyDid: user.privyDid,
+        privyId: user.privyId,
       });
     } catch (error) {
       console.error("Error fetching user:", error);
@@ -109,12 +99,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Ensure user has a DID (create if doesn't exist)
+  // Ensure user has a DID:WebVH (create if doesn't exist)
   app.post("/api/user/ensure-did", authenticateUser, async (req, res) => {
     try {
       const user = (req as any).user;
       
-      // Ensure user record exists (creates if new Privy user)
+      // Ensure user record exists
       await storage.ensureUser(user.id);
       
       // Check if user already has a DID
@@ -128,20 +118,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      console.log(`Creating DID for user ${user.id}...`);
+      console.log(`Creating DID:WebVH for user ${user.id}...`);
       
-      // Create DID using Privy wallets
-      const didData = await createUserDID(user.id, privyClient);
+      // Create DID:WebVH using Privy wallets
+      const didData = await createUserDIDWebVH(user.id, privyClient);
       
-      // Store DID data in user record (now guaranteed to exist)
-      await storage.updateUser(user.id, didData);
+      // Store DID data in user record
+      await storage.updateUser(user.id, {
+        did: didData.did,
+        didDocument: didData.didDocument,
+        didCreatedAt: didData.didCreatedAt,
+        authWalletId: didData.authWalletId,
+        assertionWalletId: didData.assertionWalletId,
+        updateWalletId: didData.updateWalletId,
+        authKeyPublic: didData.authKeyPublic,
+        assertionKeyPublic: didData.assertionKeyPublic,
+        updateKeyPublic: didData.updateKeyPublic,
+      });
       
-      console.log(`DID created successfully: ${didData.did}`);
+      console.log(`DID:WebVH created successfully: ${didData.did}`);
       
       return res.json({ 
-        did: didData.did, 
+        did: didData.did,
         didDocument: didData.didDocument,
-        created: true 
+        created: true
       });
     } catch (error) {
       console.error("Error ensuring user DID:", error);
