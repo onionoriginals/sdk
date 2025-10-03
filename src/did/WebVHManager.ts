@@ -200,6 +200,30 @@ export class WebVHManager {
   }
 
   /**
+   * Validates a path segment to prevent directory traversal attacks
+   * @param segment - Path segment to validate
+   * @returns true if valid, false otherwise
+   */
+  private isValidPathSegment(segment: string): boolean {
+    // Reject empty segments, dots, or segments with path separators
+    if (!segment || segment === '.' || segment === '..') {
+      return false;
+    }
+    
+    // Reject segments containing path separators or other dangerous characters
+    if (segment.includes('/') || segment.includes('\\') || segment.includes('\0')) {
+      return false;
+    }
+    
+    // Reject absolute paths (starting with / or drive letter on Windows)
+    if (path.isAbsolute(segment)) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  /**
    * Saves the DID log to the appropriate did.jsonl path
    * @param did - The DID identifier
    * @param log - The DID log to save
@@ -220,12 +244,26 @@ export class WebVHManager {
     // Extract path parts (everything after domain)
     const pathParts = didParts.slice(3);
 
+    // Validate all path segments to prevent directory traversal
+    for (const segment of pathParts) {
+      if (!this.isValidPathSegment(segment)) {
+        throw new Error(`Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`);
+      }
+    }
+
     // Construct the file path
     // For did:webvh:example.com:user:alice -> .well-known/did/user/alice/did.jsonl
     // For did:webvh:example.com:alice -> .well-known/did/alice/did.jsonl
     const didPath = pathParts.length > 0 
       ? path.join(baseDir, 'did', ...pathParts, 'did.jsonl')
       : path.join(baseDir, 'did', 'did.jsonl');
+
+    // Verify the resolved path is still within baseDir (defense in depth)
+    const resolvedPath = path.resolve(didPath);
+    const resolvedBaseDir = path.resolve(baseDir);
+    if (!resolvedPath.startsWith(resolvedBaseDir)) {
+      throw new Error('Invalid DID path: resolved path is outside base directory');
+    }
 
     // Create directories if they don't exist
     const dirPath = path.dirname(didPath);
