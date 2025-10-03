@@ -58,7 +58,7 @@ export class OriginalsAsset {
     };
   }
 
-  async migrate(
+  migrate(
     toLayer: LayerType,
     details?: {
       transactionId?: string;
@@ -68,7 +68,7 @@ export class OriginalsAsset {
       revealTxId?: string;
       feeRate?: number;
     }
-  ): Promise<void> {
+  ): void {
     // Handle migration between layers
     const validTransitions: Record<LayerType, LayerType[]> = {
       'did:peer': ['did:webvh', 'did:btco'],

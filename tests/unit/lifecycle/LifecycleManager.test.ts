@@ -78,7 +78,7 @@ describe('LifecycleManager', () => {
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }
     ]);
-    await asset.migrate('did:btco');
+    asset.migrate('did:btco');
     const tx = await sdk.lifecycle.transferOwnership(asset as any, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
     expect(typeof tx.txid).toBe('string');
   });

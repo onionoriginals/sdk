@@ -27,18 +27,18 @@ describe('OriginalsAsset', () => {
     expect(new OriginalsAsset(resources, buildDid('did:btco:123'), emptyCreds).currentLayer).toBe('did:btco');
   });
 
-  test('rejects invalid migration path', async () => {
+  test('rejects invalid migration path', () => {
     const asset = new OriginalsAsset(resources, buildDid('did:webvh:example.com:xyz'), emptyCreds);
-    await expect(asset.migrate('did:peer' as LayerType)).rejects.toThrow('Invalid migration');
+    expect(() => asset.migrate('did:peer' as LayerType)).toThrow('Invalid migration');
   });
 
-  test('migrates along valid path and updates layer (expected to fail until implemented)', async () => {
+  test('migrates along valid path and updates layer (expected to fail until implemented)', () => {
     const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    await asset.migrate('did:webvh');
+    asset.migrate('did:webvh');
     expect(asset.currentLayer).toBe('did:webvh');
   });
 
-  test('returns provenance chain (expected to fail until implemented)', () => {
+  test('returns provenance chain (expected to fail until implemented)', async () => {
     const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
     const prov = asset.getProvenance();
     expect(prov.createdAt).toBeDefined();
