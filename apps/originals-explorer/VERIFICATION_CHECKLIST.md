@@ -214,8 +214,8 @@ This checklist verifies all components of the WebVHManager integration.
 
 6. **Public DID Log**
    ```bash
-   curl http://localhost:5000/.well-known/did/alice/did.jsonl
-   # Should return JSONL format log
+   curl http://localhost:5000/alice/did.jsonl
+   # Should return JSONL format log (path-based DID, no .well-known)
    ```
 
 ## Migration Verification

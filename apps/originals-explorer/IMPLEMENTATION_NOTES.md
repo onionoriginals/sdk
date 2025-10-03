@@ -39,8 +39,8 @@ This implementation integrates WebVHManager from the Originals SDK to automatica
 
 **Public Endpoints:**
 - `GET /api/did/resolve/:did` - Resolve any DID
-- `GET /:userSlug/did.jsonld` - Serve DID document (DID:WebVH spec)
-- `GET /.well-known/did/:userSlug/did.jsonl` - Serve DID log (DID:WebVH spec)
+- `GET /:userSlug/did.jsonld` - Serve DID document (spec - path-based)
+- `GET /:userSlug/did.jsonl` - Serve DID log (spec - path-based)
 
 ### 4. DID Log (did.jsonl) Support ✅
 
@@ -118,7 +118,7 @@ A comprehensive service that wraps the SDK's WebVHManager:
 │  Public:                                                     │
 │  - GET /api/did/resolve/:did    → Resolve DID                │
 │  - GET /:slug/did.jsonld        → Serve DID doc (spec)       │
-│  - GET /.well-known/did/:slug/did.jsonl → Serve log (spec)   │
+│  - GET /:slug/did.jsonl         → Serve log (spec)           │
 └──────────────────────────────────────────────────────────────┘
                        │
                        ▼

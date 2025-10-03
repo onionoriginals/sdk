@@ -850,10 +850,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Serve DID log at .well-known path (did.jsonl)
-  // According to DID:WebVH spec, the log should be available at:
-  // /.well-known/did/{path-segments}/did.jsonl
-  app.get("/.well-known/did/:userSlug/did.jsonl", async (req, res) => {
+  // Serve DID log at path-based endpoint (did.jsonl)
+  // According to DID:WebVH spec:
+  // - Domain-only DID: did:webvh:example.com -> /.well-known/did.jsonl
+  // - Path-based DID: did:webvh:example.com:alice -> /alice/did.jsonl (NO .well-known!)
+  app.get("/:userSlug/did.jsonl", async (req, res) => {
     try {
       const { userSlug } = req.params;
       
@@ -877,16 +878,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Serve DID document at path-based endpoint
-  // IMPORTANT: This catch-all route must be registered LAST to avoid conflicts
+  // IMPORTANT: These catch-all routes must be registered LAST to avoid conflicts
   // 
   // According to DID:WebVH spec transformation:
   // - DID format: did:webvh:{url-encoded-domain}:{path-segments}
   // - The domain is URL-encoded (ports use %3A instead of :)
-  // - Resolves to: https://{domain}/{path-segments}/did.jsonld
+  // - Path-based DIDs resolve to: https://{domain}/{path-segments}/did.jsonld
+  // - Domain-only DIDs would use: https://{domain}/.well-known/did.jsonld
   // 
   // Example:
-  // - DID: did:webvh:localhost%3A5000:user123
-  // - Resolves to: http://localhost:5000/user123/did.jsonld
+  // - DID: did:webvh:localhost%3A5000:alice
+  // - Resolves to: http://localhost:5000/alice/did.jsonld
+  // - Log at: http://localhost:5000/alice/did.jsonl
   app.get("/:userSlug/did.jsonld", async (req, res) => {
     try {
       const { userSlug } = req.params;

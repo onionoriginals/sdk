@@ -207,15 +207,17 @@ GET /alice/did.jsonld
 
 Public endpoint that serves the DID log (did.jsonl) according to the DID:WebVH specification.
 
-**Endpoint:** `GET /.well-known/did/:userSlug/did.jsonl`
+**Endpoint:** `GET /:userSlug/did.jsonl`
 
 **Authentication:** Not required
 
 **Content-Type:** `application/jsonl`
 
+**Note:** Path-based DIDs do NOT use `.well-known` prefix. Only domain-only DIDs use `/.well-known/did.jsonl`.
+
 **Example:**
 ```
-GET /.well-known/did/alice/did.jsonl
+GET /alice/did.jsonl
 ```
 
 **Response:** (JSONL format - one JSON object per line)
@@ -288,7 +290,7 @@ const result = await webvhService.createDIDWithSDK('alice');
    → Returns DID document
    ```
 
-2. **External Resolution** (DID:WebVH spec):
+2. **External Resolution** (DID:WebVH spec - Path-based):
    ```
    did:webvh:localhost%3A5000:alice
    → Resolves to: http://localhost:5000/alice/did.jsonld
@@ -296,12 +298,17 @@ const result = await webvhService.createDIDWithSDK('alice');
    → Returns DID document
    ```
 
-3. **Log Resolution** (DID:WebVH spec):
+3. **Log Resolution** (DID:WebVH spec - Path-based):
    ```
    did:webvh:localhost%3A5000:alice
-   → Log at: http://localhost:5000/.well-known/did/alice/did.jsonl
+   → Log at: http://localhost:5000/alice/did.jsonl
    → Returns JSONL format log
+   → Note: NO .well-known prefix for path-based DIDs
    ```
+
+**Important:** According to DID:WebVH spec:
+- **Path-based DIDs** (with path segments): Use `/{path}/did.jsonl` and `/{path}/did.jsonld`
+- **Domain-only DIDs** (no path): Use `/.well-known/did.jsonl` and `/.well-known/did.jsonld`
 
 ---
 
@@ -376,8 +383,8 @@ const response = await fetch('https://api.example.com/api/did/me/log', {
 });
 const { log } = await response.json();
 
-// Via DID:WebVH spec (public)
-const logResponse = await fetch('https://example.com/.well-known/did/alice/did.jsonl');
+// Via DID:WebVH spec (public - path-based)
+const logResponse = await fetch('https://example.com/alice/did.jsonl');
 const jsonlContent = await logResponse.text();
 const logEntries = jsonlContent.split('\n').map(line => JSON.parse(line));
 ```

@@ -237,7 +237,7 @@ GET /alice/did.jsonld
 | `/api/did/create-with-sdk` | POST | ✅ | Create with SDK keys |
 | `/api/did/resolve/:did` | GET | ❌ | Resolve any DID |
 | `/:userSlug/did.jsonld` | GET | ❌ | Serve DID doc (spec) |
-| `/.well-known/did/:userSlug/did.jsonl` | GET | ❌ | Serve DID log (spec) |
+| `/:userSlug/did.jsonl` | GET | ❌ | Serve DID log (spec) |
 
 ## Security
 
