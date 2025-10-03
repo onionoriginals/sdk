@@ -95,6 +95,37 @@
 - `src/did/WebVHManager.ts` lines 102-111 (getVerificationMethodId)
 - `src/did/WebVHManager.ts` line 186 (updateKeys)
 
+### 7. Security Enhancement: Improved Path Traversal Prevention ✅
+
+**Issues Fixed**:
+- **Critical**: `startsWith` check was bypassable (e.g., `/var/www/data` vs `/var/www/datadir/`)
+- **Major**: Domain isolation missing - different domains could overwrite each other's logs
+- **Major**: Unsafe type assertions bypassing TypeScript type safety
+
+**Fixes Applied**:
+
+1. **Stronger Path Containment Check**:
+   - Replaced `resolvedPath.startsWith(resolvedBaseDir)` with `path.relative()` based check
+   - Now correctly rejects paths that escape via `..` or absolute paths
+   - Location: `src/did/WebVHManager.ts` lines 311-316
+
+2. **Domain Isolation in DID Log Paths**:
+   - Added domain extraction and sanitization before path construction
+   - Normalizes domain: lowercase + replace non-[a-z0-9._-] chars with `_`
+   - Validates sanitized domain to reject `..` and dangerous patterns
+   - Path structure: `baseDir/did/{sanitized-domain}/{path-parts}/did.jsonl`
+   - Location: `src/did/WebVHManager.ts` lines 296-311
+
+3. **Runtime Type Validation**:
+   - Added `isDIDDocument()` type guard to validate DID document structure
+   - Checks required fields: `@context` array, `id` string starting with `did:`
+   - Added runtime validation for dynamically imported `didwebvh-ts` functions
+   - Replaced unsafe `as unknown as` assertions with validated type narrowing
+   - Locations: 
+     - `src/did/WebVHManager.ts` lines 252-269 (isDIDDocument type guard)
+     - `src/did/WebVHManager.ts` lines 169-172 (module validation)
+     - `src/did/WebVHManager.ts` lines 203-206 (DID document validation)
+
 ### 5. Code Quality: TypeScript Linting Fixes ✅
 
 **Issue**: Multiple `any` types causing linting warnings

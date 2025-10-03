@@ -295,8 +295,12 @@ export class WebVHManager {
 
     // Extract and sanitize domain for filesystem safety
     const rawDomain = decodeURIComponent(didParts[2]);
-    // Replace colons and other unsafe characters for filesystem compatibility
-    const safeDomain = rawDomain.replace(/[:]/g, '_');
+    // Normalize: lowercase and replace any characters not in [a-z0-9._-] with '_'
+    const safeDomain = rawDomain
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]/g, '_');
+    
+    // Validate the sanitized domain (reject '..' and other dangerous patterns)
     if (!this.isValidPathSegment(safeDomain)) {
       throw new Error(`Invalid domain segment in DID: "${rawDomain}"`);
     }
