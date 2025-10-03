@@ -48,40 +48,33 @@ export class PrivyWebVHSigner implements ExternalSigner, ExternalVerifier {
       // Prepare the data for signing using didwebvh-ts's canonical approach
       const dataToSign = await prepareDataForSigning(input.document, input.proof);
       
-      // Convert to hex string for Privy
-      const messageHex = Buffer.from(dataToSign).toString('hex');
+      // Create a hash of the data (Privy expects a hash)
+      const crypto = await import('crypto');
+      const hash = crypto.createHash('sha256').update(dataToSign).digest('hex');
+      const hashWith0x = `0x${hash}`;
       
       // Sign using Privy's wallet API
-      // Note: The exact API method depends on Privy's implementation
-      // This is a placeholder that needs to be updated based on Privy's documentation
+      // Use rawSign method as documented: privy.wallets().rawSign(walletId, { params: { hash } })
+      const { signature, encoding } = await (this.privyClient as any).wallets().rawSign(this.walletId, {
+        params: { hash: hashWith0x },
+      });
       
-      // For Stellar/Ed25519 wallets, Privy should provide a signing method like:
-      // const signature = await this.privyClient.walletApi.sign({
-      //   walletId: this.walletId,
-      //   message: messageHex,
-      // });
+      // Convert signature based on encoding
+      let signatureBytes: Buffer;
+      if (encoding === 'hex' || !encoding) {
+        // Remove 0x prefix if present
+        const cleanSig = signature.startsWith('0x') ? signature.slice(2) : signature;
+        signatureBytes = Buffer.from(cleanSig, 'hex');
+      } else if (encoding === 'base64') {
+        signatureBytes = Buffer.from(signature, 'base64');
+      } else {
+        throw new Error(`Unsupported signature encoding: ${encoding}`);
+      }
       
-      // For now, throw an error with instructions
-      throw new Error(
-        'Privy signing integration requires implementation. ' +
-        'Please implement the Privy wallet signing API call. ' +
-        `Wallet ID: ${this.walletId}, Message length: ${dataToSign.length} bytes. ` +
-        'Refer to Privy documentation for the correct signing method.'
-      );
+      // Encode signature as multibase
+      const proofValue = multikey.encodeMultibase(signatureBytes);
       
-      // After implementing Privy signing, the code should look like:
-      // const signatureHex = await this.privyClient.walletApi.sign({
-      //   walletId: this.walletId,
-      //   message: messageHex,
-      // });
-      // 
-      // // Convert signature to Uint8Array
-      // const signatureBytes = Buffer.from(signatureHex, 'hex');
-      // 
-      // // Encode signature as multibase
-      // const proofValue = multikey.encodeMultibase(signatureBytes);
-      // 
-      // return { proofValue };
+      return { proofValue };
       
     } catch (error) {
       console.error('Error signing with Privy:', error);

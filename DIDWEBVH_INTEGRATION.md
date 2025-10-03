@@ -408,7 +408,7 @@ const didDocument = {
 ### After
 ```typescript
 // Use SDK with proper signing
-const result = await originalsSdk.webvh.createDIDWebVH({
+const result = await originalsSdk.did.createDIDWebVH({
   domain: 'example.com',
   paths: ['alice'],
   // Use external signer for Privy, or omit for SDK-managed keys
@@ -421,6 +421,7 @@ const result = await originalsSdk.webvh.createDIDWebVH({
 - [DID:WebVH Specification](https://identity.foundation/did-webvh/)
 - [Privy Documentation](https://docs.privy.io/)
 - [Originals SDK Documentation](./README.md)
+- [Migration Guide](./MIGRATION_TO_DIDMANAGER.md) - For upgrading from WebVHManager
 
 ## Support
 

@@ -56,8 +56,7 @@ await originals.lifecycle.inscribeOnBitcoin(asset);
 
 - **OriginalsSDK** - Main entry point and orchestration
 - **OriginalsAsset** - Represents a digital asset through its lifecycle
-- **DIDManager** - DID document creation and resolution
-- **WebVHManager** - DID:WebVH creation, updates, and management with external signer support
+- **DIDManager** - DID document creation and resolution (did:peer, did:webvh, did:btco) with external signer support
 - **CredentialManager** - Verifiable Credential handling
 - **LifecycleManager** - Asset migration between layers
 - **BitcoinManager** - Bitcoin/Ordinals integration
@@ -199,7 +198,7 @@ The SDK provides comprehensive support for creating and managing `did:webvh` ide
 ```typescript
 const sdk = OriginalsSDK.create({ network: 'mainnet' });
 
-const result = await sdk.webvh.createDIDWebVH({
+const result = await sdk.did.createDIDWebVH({
   domain: 'example.com',
   paths: ['alice'],
   outputDir: './public/.well-known',
@@ -218,7 +217,7 @@ import { createPrivySigner } from './privy-signer';
 const signer = await createPrivySigner(userId, walletId, privyClient, verificationMethodId);
 
 // Create DID
-const result = await sdk.webvh.createDIDWebVH({
+const result = await sdk.did.createDIDWebVH({
   domain: 'example.com',
   paths: ['alice'],
   externalSigner: signer,
@@ -231,9 +230,9 @@ const result = await sdk.webvh.createDIDWebVH({
 ### Update an existing DID
 
 ```typescript
-const log = await sdk.webvh.loadDIDLog('./path/to/did.jsonl');
+const log = await sdk.did.loadDIDLog('./path/to/did.jsonl');
 
-const result = await sdk.webvh.updateDIDWebVH({
+const result = await sdk.did.updateDIDWebVH({
   did: 'did:webvh:example.com:alice',
   currentLog: log,
   updates: {

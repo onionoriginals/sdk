@@ -2,7 +2,6 @@ import { DIDManager } from '../did/DIDManager';
 import { CredentialManager } from '../vc/CredentialManager';
 import { LifecycleManager } from '../lifecycle/LifecycleManager';
 import { BitcoinManager } from '../bitcoin/BitcoinManager';
-import { WebVHManager } from '../did/WebVHManager';
 import { OriginalsConfig, KeyStore } from '../types';
 import { emitTelemetry, StructuredError } from '../utils/telemetry';
 
@@ -15,7 +14,6 @@ export class OriginalsSDK {
   public readonly credentials: CredentialManager;
   public readonly lifecycle: LifecycleManager;
   public readonly bitcoin: BitcoinManager;
-  public readonly webvh: WebVHManager;
   private config: OriginalsConfig;
 
   constructor(config: OriginalsConfig, keyStore?: KeyStore) {
@@ -36,7 +34,6 @@ export class OriginalsSDK {
     this.credentials = new CredentialManager(config, this.did);
     this.lifecycle = new LifecycleManager(config, this.did, this.credentials, undefined, keyStore);
     this.bitcoin = new BitcoinManager(config);
-    this.webvh = new WebVHManager();
   }
 
 

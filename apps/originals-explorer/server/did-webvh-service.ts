@@ -87,8 +87,8 @@ export async function createUserDIDWebVH(
     const publicDir = process.env.PUBLIC_DIR || path.join(process.cwd(), 'public');
     const outputDir = path.join(publicDir, '.well-known');
 
-    // Create the DID using the Originals SDK with Privy signer
-    const result = await originalsSdk.webvh.createDIDWebVH({
+    // Create the DID using the Originals SDK DIDManager with Privy signer
+    const result = await originalsSdk.did.createDIDWebVH({
       domain,
       paths: [userSlug],
       portable: false,

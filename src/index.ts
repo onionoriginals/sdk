@@ -11,7 +11,7 @@ export type { ProvenanceChain } from './lifecycle/OriginalsAsset';
 export * from './types';
 
 // Manager exports
-export { DIDManager } from './did/DIDManager';
+export { DIDManager, type CreateWebVHOptions, type CreateWebVHResult } from './did/DIDManager';
 export { KeyManager } from './did/KeyManager';
 export { CredentialManager } from './vc/CredentialManager';
 export { LifecycleManager } from './lifecycle/LifecycleManager';
@@ -22,8 +22,6 @@ export { selectUtxos, UtxoSelectionError, estimateFeeSats } from './bitcoin/utxo
 export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs';
 export { BbsSimple } from './vc/cryptosuites/bbsSimple';
 export * from './storage';
-// didwebvh-ts is used internally; no re-export to keep API stable
-export { WebVHManager, type CreateWebVHOptions, type CreateWebVHResult } from './did/WebVHManager';
 
 // Crypto exports
 export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from './crypto/Signer';

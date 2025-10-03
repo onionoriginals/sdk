@@ -2,7 +2,7 @@
  * WebVH Integration Service
  * 
  * This service provides utility methods for managing did:webvh identifiers
- * using the Originals SDK. It's a thin wrapper around the SDK's WebVHManager
+ * using the Originals SDK. It's a thin wrapper around the SDK's DIDManager
  * with some convenience methods for file paths and configuration.
  */
 
@@ -58,8 +58,8 @@ export class WebVHIntegrationService {
       // Sanitize user slug for use in DID
       const sanitizedSlug = this.sanitizeSlug(userSlug);
 
-      // Create the DID using the SDK's WebVHManager
-      const result = await originalsSdk.webvh.createDIDWebVH({
+      // Create the DID using the SDK's DIDManager
+      const result = await originalsSdk.did.createDIDWebVH({
         domain: this.config.domain,
         paths: [sanitizedSlug],
         portable: false,
@@ -85,7 +85,7 @@ export class WebVHIntegrationService {
    */
   async loadDIDLog(logPath: string): Promise<any[]> {
     try {
-      return await originalsSdk.webvh.loadDIDLog(logPath);
+      return await originalsSdk.did.loadDIDLog(logPath);
     } catch (error) {
       console.error('Error loading DID log:', error);
       throw new Error(
@@ -101,7 +101,7 @@ export class WebVHIntegrationService {
    */
   async saveDIDLog(did: string, log: any[]): Promise<string> {
     try {
-      const logPath = await originalsSdk.webvh.saveDIDLog(
+      const logPath = await originalsSdk.did.saveDIDLog(
         did,
         log,
         path.join(this.config.publicDir, '.well-known')
@@ -129,7 +129,7 @@ export class WebVHIntegrationService {
     updates: any,
     signer: any
   ): Promise<{ didDocument: any; log: any[]; logPath?: string }> {
-    return originalsSdk.webvh.updateDIDWebVH({
+    return originalsSdk.did.updateDIDWebVH({
       did,
       currentLog,
       updates,
