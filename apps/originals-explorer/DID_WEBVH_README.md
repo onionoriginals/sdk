@@ -25,12 +25,17 @@ When users log in with Privy, the system automatically creates a `did:webvh` ide
 ### 3. DID Format
 
 ```
-did:webvh:localhost%3A5000:u-abc123def456
+did:webvh:localhost%3A5000:p-cltest123
 ```
 
 - **Method**: `webvh`
 - **Domain**: URL-encoded (ports use `%3A`)
-- **User Slug**: SHA256 hash (16 chars) of Privy user ID, prefixed with `u-`
+- **User Slug**: Privy user ID (without `did:privy:` prefix), prefixed with `p-`
+
+**Example transformation**:
+- Privy ID: `did:privy:cltest123`
+- User Slug: `p-cltest123`
+- Full DID: `did:webvh:localhost%3A5000:p-cltest123`
 
 ### 4. DID Document
 
@@ -42,23 +47,23 @@ The DID document contains two verification methods:
     "https://www.w3.org/ns/did/v1",
     "https://w3id.org/security/multikey/v1"
   ],
-  "id": "did:webvh:example.com:u-abc123",
+  "id": "did:webvh:example.com:p-cltest123",
   "verificationMethod": [
     {
-      "id": "did:webvh:example.com:u-abc123#auth-key",
+      "id": "did:webvh:example.com:p-cltest123#auth-key",
       "type": "Multikey",
-      "controller": "did:webvh:example.com:u-abc123",
+      "controller": "did:webvh:example.com:p-cltest123",
       "publicKeyMultibase": "z6Mk..."
     },
     {
-      "id": "did:webvh:example.com:u-abc123#assertion-key",
+      "id": "did:webvh:example.com:p-cltest123#assertion-key",
       "type": "Multikey",
-      "controller": "did:webvh:example.com:u-abc123",
+      "controller": "did:webvh:example.com:p-cltest123",
       "publicKeyMultibase": "z6Mk..."
     }
   ],
-  "authentication": ["did:webvh:example.com:u-abc123#auth-key"],
-  "assertionMethod": ["did:webvh:example.com:u-abc123#assertion-key"]
+  "authentication": ["did:webvh:example.com:p-cltest123#auth-key"],
+  "assertionMethod": ["did:webvh:example.com:p-cltest123#assertion-key"]
 }
 ```
 
@@ -105,7 +110,7 @@ Creates a `did:webvh` for the user if one doesn't exist, or returns the existing
 **Response:**
 ```json
 {
-  "did": "did:webvh:localhost%3A5000:u-abc123",
+  "did": "did:webvh:localhost%3A5000:p-cltest123",
   "didDocument": { ... },
   "created": true
 }
@@ -117,7 +122,7 @@ Creates a `did:webvh` for the user if one doesn't exist, or returns the existing
 
 Public endpoint that serves the DID document for a user.
 
-Example: `http://localhost:5000/u-abc123/did.jsonld`
+Example: `http://localhost:5000/p-cltest123/did.jsonld`
 
 ## Database Schema
 
@@ -163,7 +168,7 @@ curl -X POST http://localhost:5000/api/user/ensure-did \
   -H "Authorization: Bearer YOUR_PRIVY_TOKEN"
 
 # Get DID document
-curl http://localhost:5000/u-abc123/did.jsonld
+curl http://localhost:5000/p-cltest123/did.jsonld
 ```
 
 ## References

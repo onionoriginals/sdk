@@ -17,13 +17,19 @@ export interface DIDWebVHCreationResult {
 
 /**
  * Generate a sanitized user slug from Privy user ID
- * @param privyUserId - The Privy user ID
- * @returns Sanitized slug for use in did:webvh
+ * @param privyUserId - The Privy user ID (e.g., "did:privy:123456")
+ * @returns Sanitized slug for use in did:webvh (e.g., "p-123456")
  */
 function generateUserSlug(privyUserId: string): string {
-  // Create a hash-based slug for stability and uniqueness
-  const hash = crypto.createHash('sha256').update(privyUserId).digest('hex').substring(0, 16);
-  return `u-${hash}`;
+  // Extract the ID part from did:privy:123456
+  // If it's already just an ID, use it as-is
+  const id = privyUserId.replace(/^did:privy:/, '');
+  
+  // Sanitize: lowercase and replace any non-alphanumeric with hyphens
+  const sanitized = id.toLowerCase().replace(/[^a-z0-9]/g, '-');
+  
+  // Prefix with 'p-' to indicate Privy origin
+  return `p-${sanitized}`;
 }
 
 /**
