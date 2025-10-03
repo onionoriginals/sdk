@@ -13,15 +13,18 @@ export interface IStorage {
   // User methods
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByPrivyId(privyUserId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(userId: string, updates: Partial<User>): Promise<User | undefined>;
   ensureUser(userId: string): Promise<User>;
   getUserByDidSlug(slug: string): Promise<User | undefined>;
   getUserByDid(did: string): Promise<User | undefined>;
+  createUserWithDid(privyUserId: string, did: string, didData: any): Promise<User>;
   
   // Asset methods
   getAsset(id: string): Promise<Asset | undefined>;
   getAssetsByUserId(userId: string): Promise<Asset[]>;
+  getAssetsByUserDid(userDid: string): Promise<Asset[]>;
   createAsset(asset: InsertAsset): Promise<Asset>;
   updateAsset(id: string, updates: Partial<Asset>): Promise<Asset | undefined>;
   
@@ -49,7 +52,8 @@ export interface IStorage {
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+  private users: Map<string, User>; // Key: did:webvh, Value: User
+  private privyToDidMapping: Map<string, string>; // Key: Privy user ID, Value: did:webvh
   private assets: Map<string, Asset>;
   private walletConnections: Map<string, WalletConnection>;
   private signingKeys: Map<string, SigningKey[]>;
@@ -57,6 +61,7 @@ export class MemStorage implements IStorage {
 
   constructor() {
     this.users = new Map();
+    this.privyToDidMapping = new Map();
     this.assets = new Map();
     this.walletConnections = new Map();
     this.signingKeys = new Map();
@@ -71,6 +76,12 @@ export class MemStorage implements IStorage {
     return Array.from(this.users.values()).find(
       (user) => user.username === username,
     );
+  }
+
+  async getUserByPrivyId(privyUserId: string): Promise<User | undefined> {
+    const did = this.privyToDidMapping.get(privyUserId);
+    if (!did) return undefined;
+    return this.users.get(did);
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
@@ -101,17 +112,17 @@ export class MemStorage implements IStorage {
     return updatedUser;
   }
 
-  async ensureUser(userId: string): Promise<User> {
-    // Check if user already exists
-    const existing = this.users.get(userId);
+  async ensureUser(privyUserId: string): Promise<User> {
+    // Check if user already exists by Privy ID
+    const existing = await this.getUserByPrivyId(privyUserId);
     if (existing) {
       return existing;
     }
 
-    // Create a new user with Privy ID as both id and username
+    // Create a temporary user record with Privy ID - DID will be added later
     const user: User = {
-      id: userId,
-      username: userId,
+      id: privyUserId, // Temporary - will be updated to DID
+      username: privyUserId,
       password: '', // Not used for Privy users
       did: null,
       didDocument: null,
@@ -123,7 +134,36 @@ export class MemStorage implements IStorage {
       updateKeyPublic: null,
       didCreatedAt: null,
     };
-    this.users.set(userId, user);
+    this.users.set(privyUserId, user);
+    return user;
+  }
+
+  async createUserWithDid(privyUserId: string, did: string, didData: any): Promise<User> {
+    // Create user with DID as the primary key
+    const user: User = {
+      id: did, // Use DID as primary identifier
+      username: did,
+      password: '', // Not used for Privy users
+      did: did,
+      didDocument: didData.didDocument,
+      authWalletId: didData.authWalletId,
+      assertionWalletId: didData.assertionWalletId,
+      updateWalletId: didData.updateWalletId,
+      authKeyPublic: didData.authKeyPublic,
+      assertionKeyPublic: didData.assertionKeyPublic,
+      updateKeyPublic: didData.updateKeyPublic,
+      didCreatedAt: didData.didCreatedAt,
+    };
+    
+    // Store user with DID as key
+    this.users.set(did, user);
+    
+    // Create mapping from Privy ID to DID
+    this.privyToDidMapping.set(privyUserId, did);
+    
+    // Remove temporary user record if it exists
+    this.users.delete(privyUserId);
+    
     return user;
   }
 
@@ -149,17 +189,30 @@ export class MemStorage implements IStorage {
     );
   }
 
+  async getAssetsByUserDid(userDid: string): Promise<Asset[]> {
+    // Find the user by their DID to get their internal ID
+    const user = await this.getUserByDid(userDid);
+    if (!user) return [];
+    
+    // Use the internal user ID to find assets
+    return this.getAssetsByUserId(user.id);
+  }
+
   async createAsset(insertAsset: InsertAsset): Promise<Asset> {
     const id = `orig_${Date.now()}_${randomUUID().slice(0, 8)}`;
     const asset: Asset = {
       ...insertAsset,
       id,
+      userId: insertAsset.userId || null,
+      title: insertAsset.title || "Untitled Asset",
       description: insertAsset.description || null,
       category: insertAsset.category || null,
       tags: insertAsset.tags || null,
       mediaUrl: insertAsset.mediaUrl || null,
       metadata: insertAsset.metadata || null,
       credentials: insertAsset.credentials || null,
+      status: insertAsset.status || "draft",
+      assetType: insertAsset.assetType || "original",
       originalReference: insertAsset.originalReference || null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -232,6 +285,7 @@ export class MemStorage implements IStorage {
     const assetType: AssetType = {
       ...insertAssetType,
       id,
+      userId: insertAssetType.userId || null,
       description: insertAssetType.description || null,
       properties: insertAssetType.properties || [],
       createdAt: new Date(),

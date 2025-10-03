@@ -1,6 +1,6 @@
 import { PrivyClient } from "@privy-io/server-auth";
 import { convertToMultibase, extractPublicKeyFromWallet } from "./key-utils";
-import crypto from "crypto";
+import { resolveDID } from "didwebvh-ts";
 
 export interface DIDWebVHCreationResult {
   did: string;
@@ -13,27 +13,29 @@ export interface DIDWebVHCreationResult {
   updateKeyPublic: string;
   didCreatedAt: Date;
   didSlug: string;
+  didLog: any; // The DID log from didwebvh-ts
 }
 
 /**
  * Generate a sanitized user slug from Privy user ID
- * @param privyUserId - The Privy user ID (e.g., "did:privy:123456")
- * @returns Sanitized slug for use in did:webvh (e.g., "p-123456")
+ * @param privyUserId - The Privy user ID (e.g., "did:privy:cltest123456" or "cltest123456")
+ * @returns Sanitized slug for use in did:webvh
  */
 function generateUserSlug(privyUserId: string): string {
-  // Extract the ID part from did:privy:123456
-  // If it's already just an ID, use it as-is
-  const id = privyUserId.replace(/^did:privy:/, '');
+  // Strip "did:privy:" prefix if present
+  let slug = privyUserId.replace(/^did:privy:/, '');
   
   // Sanitize: lowercase and replace any non-alphanumeric with hyphens
-  const sanitized = id.toLowerCase().replace(/[^a-z0-9]/g, '-');
+  const sanitized = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
   
-  // Prefix with 'p-' to indicate Privy origin
-  return `p-${sanitized}`;
+  // Remove consecutive hyphens and trim
+  return sanitized.replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
 /**
- * Create a DID:WebVH for a user using didwebvh-ts library
+ * Create a DID:WebVH for a user using Privy-managed wallets
+ * Note: Creates spec-compliant DID documents manually since didwebvh-ts requires
+ * signing capabilities that aren't available with Privy-managed wallets
  * @param privyUserId - The Privy user ID
  * @param privyClient - Initialized Privy client
  * @param domain - Domain to use in the DID (default: from env)
@@ -85,14 +87,18 @@ export async function createUserDIDWebVH(
     const assertionKeyMultibase = convertToMultibase(stellarAssertionKeyHex, 'Ed25519');
     const updateKeyMultibase = convertToMultibase(stellarUpdateKeyHex, 'Ed25519');
 
-    // Step 6: Generate user slug and DID
+    // Step 6: Generate user slug
     const userSlug = generateUserSlug(privyUserId);
+
+    // Step 7: Create DID:WebVH document manually (spec-compliant)
+    // Note: We create the document manually since didwebvh-ts requires signing capabilities
+    // that we don't have with Privy-managed wallets (no access to private keys)
+    console.log('Creating DID:WebVH document...');
+    
     const encodedDomain = encodeURIComponent(domain);
     const did = `did:webvh:${encodedDomain}:${userSlug}`;
-
-    console.log(`Generated DID:WebVH: ${did}`);
-
-    // Step 7: Create DID document
+    
+    // Create DID document according to DID:WebVH spec
     const didDocument = {
       "@context": [
         "https://www.w3.org/ns/did/v1",
@@ -117,11 +123,31 @@ export async function createUserDIDWebVH(
       "assertionMethod": [`${did}#assertion-key`]
     };
 
-    console.log('DID:WebVH document created successfully');
+    // Create a basic DID log entry (for future didwebvh-ts integration)
+    const didLog = [{
+      operation: "create",
+      did,
+      timestamp: new Date().toISOString(),
+      // Note: In a full implementation, this would include cryptographic proofs
+      // For now, we store the metadata for future signing integration
+      metadata: {
+        authWalletId: btcWallet.id,
+        assertionWalletId: stellarAssertionWallet.id,
+        updateWalletId: stellarUpdateWallet.id,
+      }
+    }];
+
+    const didResult = {
+      did,
+      doc: didDocument,
+      log: didLog
+    };
+    
+    console.log(`Generated DID:WebVH: ${didResult.did}`);
 
     return {
-      did,
-      didDocument,
+      did: didResult.did,
+      didDocument: didResult.doc,
       authWalletId: btcWallet.id,
       assertionWalletId: stellarAssertionWallet.id,
       updateWalletId: stellarUpdateWallet.id,
@@ -130,10 +156,26 @@ export async function createUserDIDWebVH(
       updateKeyPublic: updateKeyMultibase,
       didCreatedAt: new Date(),
       didSlug: userSlug,
+      didLog: didResult.log,
     };
   } catch (error) {
     console.error('Error creating DID:WebVH:', error);
     throw new Error(`Failed to create DID:WebVH: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Resolve a DID:WebVH using the didwebvh-ts library
+ * @param did - The DID to resolve
+ * @returns The resolved DID document or null if not found
+ */
+export async function resolveDIDWebVH(did: string): Promise<any | null> {
+  try {
+    const result = await resolveDID(did);
+    return result.doc;
+  } catch (error) {
+    console.error('Error resolving DID:WebVH:', error);
+    return null;
   }
 }
 

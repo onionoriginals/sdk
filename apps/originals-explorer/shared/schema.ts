@@ -65,7 +65,7 @@ export const insertAssetSchema = createInsertSchema(assets).omit({
   createdAt: true,
   updatedAt: true,
 }).extend({
-  title: z.string().min(1, "Title is required"),
+  title: z.string().optional(), // Title is now optional
   category: z.string().optional(),
   tags: z.array(z.string()).optional(),
 });

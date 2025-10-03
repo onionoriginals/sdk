@@ -8,7 +8,7 @@ import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import { PrivyClient } from "@privy-io/server-auth";
 import { originalsSdk } from "./originals";
-import { createUserDIDWebVH } from "./didwebvh-service";
+import { createUserDIDWebVH } from "./did-webvh-service";
 import multer from "multer";
 import { parse as csvParse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
@@ -49,7 +49,7 @@ const privyClient = new PrivyClient(
   process.env.PRIVY_APP_SECRET!
 );
 
-// Simple authentication middleware
+// Authentication middleware that uses did:webvh as primary identifier
 const authenticateUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authorizationHeader = req.headers.authorization;
@@ -61,10 +61,23 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
     const token = authorizationHeader.substring(7);
     const verifiedClaims = await privyClient.verifyAuthToken(token);
     
-    // Add user info to request
+    // Check if user already exists by Privy ID
+    let user = await storage.getUserByPrivyId(verifiedClaims.userId);
+    
+    // If user doesn't exist, create DID:WebVH and user record
+    if (!user) {
+      console.log(`Creating DID:WebVH for new user ${verifiedClaims.userId}...`);
+      const didData = await createUserDIDWebVH(verifiedClaims.userId, privyClient);
+      
+      // Create user with DID as primary identifier
+      user = await storage.createUserWithDid(verifiedClaims.userId, didData.did, didData);
+    }
+    
+    // Add user info to request using did:webvh as primary ID
     (req as any).user = {
-      id: verifiedClaims.userId,
-      privyId: verifiedClaims.userId,
+      id: user.did, // Primary identifier is now did:webvh
+      privyId: verifiedClaims.userId, // Keep Privy ID for wallet operations
+      did: user.did,
     };
     
     next();
@@ -90,8 +103,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = (req as any).user;
       res.json({
-        id: user.id,
-        privyId: user.privyId,
+        id: user.id, // This is now the did:webvh
+        did: user.did,
+        privyId: user.privyId, // Keep for reference
       });
     } catch (error) {
       console.error("Error fetching user:", error);
@@ -99,67 +113,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Ensure user has a DID:WebVH (create if doesn't exist)
+  // Get user's DID:WebVH (automatically created during authentication)
   app.post("/api/user/ensure-did", authenticateUser, async (req, res) => {
     try {
       const user = (req as any).user;
       
-      // Ensure user record exists
-      await storage.ensureUser(user.id);
-      
-      // Check if user already has a DID
-      const existingUser = await storage.getUser(user.id);
-      if (existingUser?.did) {
-        console.log(`User ${user.id} already has DID: ${existingUser.did}`);
-        return res.json({ 
-          did: existingUser.did, 
-          didDocument: existingUser.didDocument,
-          created: false 
-        });
-      }
-
-      console.log(`Creating DID:WebVH for user ${user.id}...`);
-      
-      // Create DID:WebVH using Privy wallets
-      const didData = await createUserDIDWebVH(user.id, privyClient);
-      
-      // Store DID data in user record
-      await storage.updateUser(user.id, {
-        did: didData.did,
-        didDocument: didData.didDocument,
-        didCreatedAt: didData.didCreatedAt,
-        authWalletId: didData.authWalletId,
-        assertionWalletId: didData.assertionWalletId,
-        updateWalletId: didData.updateWalletId,
-        authKeyPublic: didData.authKeyPublic,
-        assertionKeyPublic: didData.assertionKeyPublic,
-        updateKeyPublic: didData.updateKeyPublic,
-      });
-      
-      console.log(`DID:WebVH created successfully: ${didData.did}`);
-      
+      // DID is automatically created during authentication, so just return it
       return res.json({ 
-        did: didData.did,
-        didDocument: didData.didDocument,
-        created: true
+        did: user.did,
+        created: false // Always false since it's created during auth
       });
     } catch (error) {
-      console.error("Error ensuring user DID:", error);
+      console.error("Error getting user DID:", error);
       return res.status(500).json({ 
-        error: "Failed to create DID",
+        error: "Failed to get DID",
         message: error instanceof Error ? error.message : String(error)
       });
     }
   });
 
   // Assets routes
-  app.get("/api/assets", async (req, res) => {
+  app.get("/api/assets", authenticateUser, async (req, res) => {
     try {
-      const { userId } = req.query;
-      if (!userId) {
-        return res.status(400).json({ error: "userId is required" });
-      }
-      const assets = await storage.getAssetsByUserId(userId as string);
+      const user = (req as any).user;
+      // Use the authenticated user's DID as the user identifier
+      const assets = await storage.getAssetsByUserId(user.id);
       res.json(assets);
     } catch (error) {
       console.error("Error fetching assets:", error);
@@ -225,7 +203,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = (req as any).user;
       const validatedData = insertAssetTypeSchema.parse({
         ...req.body,
-        userId: user.id,
+        userId: user.id, // Use did:webvh as user ID
       });
       const assetType = await storage.createAssetType(validatedData);
       res.status(201).json(assetType);
@@ -277,14 +255,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         try {
-          // Validate required fields
-          if (!row.title || !row.assetType || !row.category) {
-            errors.push({
-              row: i + 2, // +2 because row 1 is header, and i starts at 0
-              error: "Missing required fields (title, assetType, category)"
-            });
-            continue;
-          }
+          // No required fields - let users upload whatever they want
+          // The system will handle missing data gracefully
 
           // Parse tags if provided
           let tags: string[] = [];
@@ -295,7 +267,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           // Extract custom properties (any columns not in standard fields)
-          const standardFields = ['title', 'description', 'category', 'tags', 'mediaUrl', 'status', 'assetType'];
+          const standardFields = ['title', 'description', 'category', 'tags', 'mediaUrl', 'status', 'type'];
           const customProperties: Record<string, any> = {};
           for (const [key, value] of Object.entries(row)) {
             if (!standardFields.includes(key)) {
@@ -303,21 +275,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
 
-          // Create asset data
+          // Create asset data with sensible defaults
+          // Generate a meaningful title if none provided
+          let generatedTitle = row.title;
+          if (!generatedTitle) {
+            // Try to create a meaningful title from available data
+            if (row.type) {
+              generatedTitle = `${row.type} ${i + 1}`;
+            } else if (row.category) {
+              generatedTitle = `${row.category} Asset ${i + 1}`;
+            } else if (Object.keys(customProperties).length > 0) {
+              const firstProp = Object.entries(customProperties)[0];
+              generatedTitle = `${firstProp[1]} (Row ${i + 2})`;
+            } else {
+              generatedTitle = `Untitled Asset ${i + 1}`;
+            }
+          }
+
           const assetData = {
-            title: row.title,
+            title: generatedTitle,
             description: row.description || "",
-            category: row.category,
+            category: row.category || "", // Default to empty string if not provided
             tags,
             mediaUrl: row.mediaUrl || "",
             metadata: {
-              assetTypeId: row.assetType,
-              assetTypeName: row.assetType,
+              assetTypeName: row.type || "General", // Use 'type' column for asset type name
               customProperties,
               uploadedViaSpreadsheet: true,
+              originalRowNumber: i + 2, // Track which row this came from
             },
-            userId: user.id,
-            assetType: "original",
+            userId: user.id, // Use did:webvh as user ID
+            assetType: "original", // Always "original" for spreadsheet uploads
             status: row.status || "draft",
             credentials: [] as VerifiableCredential[],
           };
@@ -377,7 +365,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (createdAssets.length > 0) {
         // Find the first successfully created asset to get the asset type info
         const firstAsset = createdAssets[0];
-        const assetTypeName = firstAsset.metadata?.assetTypeName;
+        const assetTypeName = (firstAsset.metadata as any)?.assetTypeName;
         
         if (assetTypeName) {
           const existingTypes = await storage.getAssetTypesByUserId(user.id);
@@ -385,7 +373,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           if (!typeExists) {
             // Use the custom properties from the first created asset
-            const customProperties = firstAsset.metadata?.customProperties || {};
+            const customProperties = (firstAsset.metadata as any)?.customProperties || {};
             const properties = Object.keys(customProperties).map((key, index) => ({
               id: `prop_${index}`,
               key,
@@ -395,7 +383,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }));
 
             await storage.createAssetType({
-              userId: user.id,
+              userId: user.id, // Use did:webvh as user ID
               name: assetTypeName,
               description: `Auto-created from spreadsheet upload`,
               properties,
@@ -453,7 +441,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // The API will automatically handle HD wallet indexing
       let btcWallet = await privyClient.walletApi.createWallet({
         owner: {
-          userId: user.id,
+          userId: user.privyId, // Use Privy ID for wallet operations
         },
         chainType: "bitcoin-segwit",
         policyIds: policyIds.length > 0 ? policyIds : [],
@@ -462,7 +450,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       let stellarWallet = await privyClient.walletApi.createWallet({
         owner: {
-          userId: user.id,
+          userId: user.privyId, // Use Privy ID for wallet operations
         },
         chainType: "stellar",
         policyIds: policyIds.length > 0 ? policyIds : [],
@@ -480,7 +468,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(201).json({
         success: true,
         message: "Bitcoin and Stellar wallets created and managed by Privy",
-        userId: user.id,
+        userId: user.privyId, // Use Privy ID for wallet operations
         wallets: allWallets,
         btcWallet,
         stellarWallet,
@@ -515,7 +503,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Privy manages all keys - we never see or store private keys
       // The API will automatically handle HD wallet indexing
       const result = await privyClient.createWallets({
-        userId: user.id,
+        userId: user.privyId, // Use Privy ID for wallet operations
         wallets: [
           {
             chainType: "stellar",
@@ -531,7 +519,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(201).json({
         success: true,
         message: "Stellar wallet created with ED25519 keys managed by Privy",
-        userId: user.id,
+        userId: user.privyId, // Use Privy ID for wallet operations
         wallets: result.linkedAccounts?.filter((a: any) => a.type === 'wallet'),
       });
     } catch (error: any) {
@@ -562,7 +550,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Privy's createWallets API automatically handles HD wallet indexing
       // The first wallet will be at index 0, subsequent wallets at higher indices
       const result = await privyClient.createWallets({
-        userId: user.id,
+        userId: user.privyId, // Use Privy ID for wallet operations
         wallets: [
           {
             chainType: "bitcoin-segwit",
@@ -577,7 +565,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(201).json({
         success: true,
         message: "Bitcoin wallet created and managed by Privy",
-        userId: user.id,
+        userId: user.privyId, // Use Privy ID for wallet operations
         wallets: result.linkedAccounts?.filter((a: any) => a.type === 'wallet'),
       });
     } catch (error: any) {
