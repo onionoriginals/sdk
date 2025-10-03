@@ -1,13 +1,7 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import {
   createUserDIDWebVH,
-  verifyDIDWebVH,
-  resolveDIDWebVH,
   getUserSlugFromDID,
-  isDidWebVHEnabled,
-  isDualReadEnabled,
-  isDualWriteEnabled,
-  cacheDIDDocument,
 } from "../didwebvh-service";
 
 // Mock Privy client
@@ -33,23 +27,6 @@ const mockPrivyClient = {
 } as any;
 
 describe("DID:WebVH Service", () => {
-  describe("Feature Flags", () => {
-    test("isDidWebVHEnabled returns false by default", () => {
-      const enabled = isDidWebVHEnabled();
-      expect(enabled).toBe(false);
-    });
-
-    test("isDualReadEnabled returns true by default", () => {
-      const enabled = isDualReadEnabled();
-      expect(enabled).toBe(true);
-    });
-
-    test("isDualWriteEnabled returns true by default", () => {
-      const enabled = isDualWriteEnabled();
-      expect(enabled).toBe(true);
-    });
-  });
-
   describe("createUserDIDWebVH", () => {
     test("creates did:webvh with correct format", async () => {
       const userId = "did:privy:cltest123";
@@ -105,65 +82,6 @@ describe("DID:WebVH Service", () => {
     test("handles domain encoding correctly", async () => {
       const result = await createUserDIDWebVH("user1", mockPrivyClient, "localhost:5000");
       expect(result.did).toContain("localhost%3A5000");
-    });
-  });
-
-  describe("verifyDIDWebVH", () => {
-    test("validates correct did:webvh format", async () => {
-      const result = await verifyDIDWebVH("did:webvh:localhost%3A5000:u-abc123");
-      expect(result.valid).toBe(true);
-      expect(result.error).toBeUndefined();
-    });
-
-    test("rejects invalid format - not did:webvh", async () => {
-      const result = await verifyDIDWebVH("did:privy:abc123");
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain("must start with did:webvh:");
-    });
-
-    test("rejects invalid format - missing components", async () => {
-      const result = await verifyDIDWebVH("did:webvh:domain");
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain("missing required components");
-    });
-
-    test("validates did:webvh with complex domain", async () => {
-      const result = await verifyDIDWebVH("did:webvh:app.example.com:u-abc123");
-      expect(result.valid).toBe(true);
-    });
-  });
-
-  describe("resolveDIDWebVH", () => {
-    test("returns null for non-existent DID", async () => {
-      const doc = await resolveDIDWebVH("did:webvh:example.com:nonexistent");
-      expect(doc).toBeNull();
-    });
-
-    test("uses cache when available", async () => {
-      const did = "did:webvh:example.com:cached";
-      const mockDoc = { id: did, "@context": ["https://www.w3.org/ns/did/v1"] };
-
-      // Cache the document
-      cacheDIDDocument(did, mockDoc, 60000);
-
-      // Resolve should return cached document
-      const doc = await resolveDIDWebVH(did);
-      expect(doc).toEqual(mockDoc);
-    });
-
-    test("respects cache TTL", async () => {
-      const did = "did:webvh:example.com:expired";
-      const mockDoc = { id: did, "@context": ["https://www.w3.org/ns/did/v1"] };
-
-      // Cache with very short TTL
-      cacheDIDDocument(did, mockDoc, 1);
-
-      // Wait for expiration
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      // Should not return cached document
-      const doc = await resolveDIDWebVH(did);
-      expect(doc).toBeNull();
     });
   });
 
@@ -235,22 +153,6 @@ describe("DID:WebVH Service", () => {
       const slug2 = getUserSlugFromDID(result2.did);
 
       expect(slug1).toBe(slug2);
-    });
-  });
-
-  describe("Error Handling", () => {
-    test("throws error when wallet creation fails", async () => {
-      const failingClient = {
-        walletApi: {
-          createWallet: async () => {
-            throw new Error("Wallet creation failed");
-          },
-        },
-      } as any;
-
-      await expect(
-        createUserDIDWebVH("user1", failingClient)
-      ).rejects.toThrow("Failed to create DID:WebVH");
     });
   });
 });

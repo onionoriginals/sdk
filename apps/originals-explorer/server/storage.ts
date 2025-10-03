@@ -78,19 +78,15 @@ export class MemStorage implements IStorage {
     const user: User = { 
       ...insertUser, 
       id,
-      did_webvh: null,
-      didWebvhDocument: null,
-      didWebvhCreatedAt: null,
-      did_privy: null,
       did: null,
       didDocument: null,
+      didCreatedAt: null,
       authWalletId: null,
       assertionWalletId: null,
       updateWalletId: null,
       authKeyPublic: null,
       assertionKeyPublic: null,
       updateKeyPublic: null,
-      didCreatedAt: null,
     };
     this.users.set(id, user);
     return user;
@@ -117,19 +113,15 @@ export class MemStorage implements IStorage {
       id: userId,
       username: userId,
       password: '', // Not used for Privy users
-      did_webvh: null,
-      didWebvhDocument: null,
-      didWebvhCreatedAt: null,
-      did_privy: userId, // Store Privy ID as legacy identifier
       did: null,
       didDocument: null,
+      didCreatedAt: null,
       authWalletId: null,
       assertionWalletId: null,
       updateWalletId: null,
       authKeyPublic: null,
       assertionKeyPublic: null,
       updateKeyPublic: null,
-      didCreatedAt: null,
     };
     this.users.set(userId, user);
     return user;
