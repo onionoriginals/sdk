@@ -24,6 +24,47 @@ describe('Signer abstract class', () => {
     expect(typeof signer.sign).toBe('function');
     expect(typeof signer.verify).toBe('function');
   });
+
+  test('ES256KSigner sign catches decode error and wraps it', async () => {
+    const signer = new ES256KSigner();
+    // Pass a key that starts with 'z' but is invalid base58
+    await expect(signer.sign(Buffer.from('test'), 'z!!invalid!!')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+  });
+
+  test('ES256KSigner verify catches decode error and wraps it', async () => {
+    const signer = new ES256KSigner();
+    await expect(signer.verify(Buffer.from('test'), Buffer.alloc(64), 'z!!invalid!!')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+  });
+
+  test('Ed25519Signer sign catches decode error and wraps it', async () => {
+    const signer = new Ed25519Signer();
+    await expect(signer.sign(Buffer.from('test'), 'z!!invalid!!')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+  });
+
+  test('Ed25519Signer verify catches decode error and wraps it', async () => {
+    const signer = new Ed25519Signer();
+    await expect(signer.verify(Buffer.from('test'), Buffer.alloc(64), 'z!!invalid!!')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+  });
+
+  test('ES256Signer sign catches decode error and wraps it', async () => {
+    const signer = new ES256Signer();
+    await expect(signer.sign(Buffer.from('test'), 'z!!invalid!!')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+  });
+
+  test('ES256Signer verify catches decode error and wraps it', async () => {
+    const signer = new ES256Signer();
+    await expect(signer.verify(Buffer.from('test'), Buffer.alloc(64), 'z!!invalid!!')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+  });
+
+  test('Bls12381G2Signer sign catches decode error and wraps it', async () => {
+    const signer = new Bls12381G2Signer();
+    await expect(signer.sign(Buffer.from('test'), 'z!!invalid!!')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+  });
+
+  test('Bls12381G2Signer verify catches decode error and wraps it', async () => {
+    const signer = new Bls12381G2Signer();
+    await expect(signer.verify(Buffer.from('test'), Buffer.alloc(96), 'z!!invalid!!')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers.');
+  });
 });
 
 describe('Signer classes', () => {
@@ -310,11 +351,16 @@ describe('ES256Signer extra branch coverage', () => {
 
 /** Inlined from Signer.env.false-branch.part.ts */
 describe('Signer module env false branches (no injection when already present)', () => {
-  test('does not inject when utils already provide functions', async () => {
-    // Bun doesn't support jest.resetModules() and jest.doMock()
-    // This test is skipped for Bun compatibility
-    // The actual module initialization code handles this case
-    expect(true).toBe(true);
+  test('module initialization ensures utility functions exist', async () => {
+    // After module load, verify the utility functions are available
+    // This validates lines 20-27 run successfully
+    const sAny: any = secp256k1 as any;
+    const eAny: any = ed25519 as any;
+    
+    expect(sAny.utils).toBeDefined();
+    expect(typeof sAny.utils.hmacSha256Sync).toBe('function');
+    expect(eAny.utils).toBeDefined();
+    expect(typeof eAny.utils.sha512Sync).toBe('function');
   });
 });
 
@@ -323,18 +369,23 @@ describe('Signer module env false branches (no injection when already present)',
 
 /** Inlined from Signer.env.part.ts */
 describe('Signer module utils injection', () => {
-  test('injects hmacSha256Sync when missing', async () => {
-    // Bun doesn't support jest.resetModules() and deleting readonly properties
-    // This test is skipped for Bun compatibility
-    // The actual module initialization code handles this case
-    expect(true).toBe(true);
+  test('verifies hmacSha256Sync is callable', async () => {
+    // Verify the injected/existing function works
+    const sAny: any = secp256k1 as any;
+    const result = sAny.utils.hmacSha256Sync(
+      new Uint8Array(32).fill(1), 
+      new Uint8Array(10).fill(2)
+    );
+    expect(result).toBeInstanceOf(Uint8Array);
+    expect(result.length).toBe(32);
   });
 
-  test('injects ed25519 sha512Sync when missing', async () => {
-    // Bun doesn't support jest.resetModules() and deleting readonly properties
-    // This test is skipped for Bun compatibility
-    // The actual module initialization code handles this case
-    expect(true).toBe(true);
+  test('verifies ed25519 sha512Sync is callable', async () => {
+    // Verify the injected/existing function works
+    const eAny: any = ed25519 as any;
+    const result = eAny.utils.sha512Sync(new Uint8Array(10).fill(3));
+    expect(result).toBeInstanceOf(Uint8Array);
+    expect(result.length).toBe(64);
   });
 });
 
