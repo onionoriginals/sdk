@@ -6,7 +6,6 @@ import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProvide
 import { multikey } from '../crypto/Multikey';
 import { KeyManager } from './KeyManager';
 import { Ed25519Signer } from '../crypto/Signer';
-import { sha256Bytes } from '../utils/hash';
 import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation';
 import * as fs from 'fs';
 import * as path from 'path';

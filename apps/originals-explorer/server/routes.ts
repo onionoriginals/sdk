@@ -6,7 +6,7 @@ import { z } from "zod";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
-import { PrivyClient } from "@privy-io/server-auth";
+import { PrivyClient } from "@privy-io/node";
 import { originalsSdk } from "./originals";
 import { createUserDIDWebVH } from "./did-webvh-service";
 import multer from "multer";
@@ -44,10 +44,10 @@ const googleClient = new OAuth2Client(
   process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/auth/google/callback'
 );
 
-const privyClient = new PrivyClient(
-  process.env.PRIVY_APP_ID!,
-  process.env.PRIVY_APP_SECRET!
-);
+const privyClient = new PrivyClient({
+  appId: process.env.PRIVY_APP_ID!,
+  appSecret: process.env.PRIVY_APP_SECRET!
+});
 
 // Authentication middleware that uses did:webvh as primary identifier
 const authenticateUser = async (req: Request, res: Response, next: NextFunction) => {
@@ -59,25 +59,26 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
     }
 
     const token = authorizationHeader.substring(7);
-    const verifiedClaims = await privyClient.verifyAuthToken(token);
+    const verifiedClaims = await privyClient.utils().auth().verifyAuthToken(token);
     
     // Check if user already exists by Privy ID
-    let user = await storage.getUserByPrivyId(verifiedClaims.userId);
+    let user = await storage.getUserByPrivyId(verifiedClaims.user_id);
     
     // If user doesn't exist, create DID:WebVH and user record
     if (!user) {
-      console.log(`Creating DID:WebVH for new user ${verifiedClaims.userId}...`);
-      const didData = await createUserDIDWebVH(verifiedClaims.userId, privyClient);
+      console.log(`Creating DID:WebVH for new user ${verifiedClaims.user_id}...`);
+      const didData = await createUserDIDWebVH(verifiedClaims.user_id, privyClient, token);
       
       // Create user with DID as primary identifier
-      user = await storage.createUserWithDid(verifiedClaims.userId, didData.did, didData);
+      user = await storage.createUserWithDid(verifiedClaims.user_id, didData.did, didData);
     }
     
     // Add user info to request using did:webvh as primary ID
     (req as any).user = {
       id: user.did, // Primary identifier is now did:webvh
-      privyId: verifiedClaims.userId, // Keep Privy ID for wallet operations
+      privyId: verifiedClaims.user_id, // Keep Privy ID for wallet operations
       did: user.did,
+      authToken: token, // Store JWT for Privy authorization context
     };
     
     next();
@@ -561,27 +562,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use Privy to create both Bitcoin and Stellar wallets using individual calls
       // Privy manages all keys - we never see or store private keys
       // The API will automatically handle HD wallet indexing
-      let btcWallet = await privyClient.walletApi.createWallet({
+      let btcWallet = await privyClient.wallets().create({
         owner: {
-          userId: user.privyId, // Use Privy ID for wallet operations
+          user_id: user.privyId, // Use Privy ID for wallet operations
         },
-        chainType: "bitcoin-segwit",
-        policyIds: policyIds.length > 0 ? policyIds : [],
+        chain_type: "bitcoin-segwit",
+        policy_ids: policyIds.length > 0 ? policyIds : [],
       });
       console.log("Bitcoin wallet created:", btcWallet);
       
-      let stellarWallet = await privyClient.walletApi.createWallet({
+      let stellarWallet = await privyClient.wallets().create({
         owner: {
-          userId: user.privyId, // Use Privy ID for wallet operations
+          user_id: user.privyId, // Use Privy ID for wallet operations
         },
-        chainType: "stellar",
-        policyIds: policyIds.length > 0 ? policyIds : [],
+        chain_type: "stellar",
+        policy_ids: policyIds.length > 0 ? policyIds : [],
       });
       console.log("Stellar wallet created:", stellarWallet);
 
       // Fetch updated user to get all wallets (since there could be multiple)
-      const updatedUser = await privyClient.getUserById(user.id);
-      const allWallets = updatedUser.linkedAccounts?.filter((a: any) => a.type === 'wallet') || [];
+      const updatedUser = await privyClient.users()._get(user.privyId);
+      const allWallets = updatedUser.linked_accounts?.filter((a: any) => a.type === 'wallet') || [];
 
       console.log("Bitcoin and Stellar wallets created. User now has", allWallets.length, "wallets");
 
@@ -612,7 +613,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get user to check existing wallets
-      const privyUser = await privyClient.getUserById(user.id);
+      const privyUser = await privyClient.users()._get(user.privyId);
       
       // Read policy IDs from environment (may be required by Privy)
       const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
@@ -624,17 +625,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use Privy to create a Stellar wallet (ED25519-based)
       // Privy manages all keys - we never see or store private keys
       // The API will automatically handle HD wallet indexing
-      const result = await privyClient.createWallets({
-        userId: user.privyId, // Use Privy ID for wallet operations
-        wallets: [
-          {
-            chainType: "stellar",
-            policyIds: policyIds.length > 0 ? policyIds : [],
-          },
-        ],
+      const result = await privyClient.wallets().create({
+        owner: {
+          user_id: user.privyId, // Use Privy ID for wallet operations
+        },
+        chain_type: "stellar",
+        policy_ids: policyIds.length > 0 ? policyIds : [],
       });
-
-      console.log("Stellar wallet created. User now has", result.linkedAccounts?.filter((a: any) => a.type === 'wallet').length, "wallets");
 
       // Privy returns the wallet info with public key
       // Private key is managed entirely by Privy's infrastructure
@@ -642,7 +639,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: true,
         message: "Stellar wallet created with ED25519 keys managed by Privy",
         userId: user.privyId, // Use Privy ID for wallet operations
-        wallets: result.linkedAccounts?.filter((a: any) => a.type === 'wallet'),
+        wallet: result,
       });
     } catch (error: any) {
       console.error("Error creating Stellar wallet:", error);
@@ -660,7 +657,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get user to check existing wallets
-      const privyUser = await privyClient.getUserById(user.id);
+      const privyUser = await privyClient.users()._get(user.privyId);
 
       // Read policy IDs from environment; these must be configured in Privy Console
       const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
@@ -671,24 +668,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Privy's createWallets API automatically handles HD wallet indexing
       // The first wallet will be at index 0, subsequent wallets at higher indices
-      const result = await privyClient.createWallets({
-        userId: user.privyId, // Use Privy ID for wallet operations
-        wallets: [
-          {
-            chainType: "bitcoin-segwit",
-            policyIds,
-          },
-        ],
-      });
+      const result = await privyClient.wallets().create({
+        owner: {
+          user_id: user.privyId, // Use Privy ID for wallet operations
+        },
+        chain_type: "bitcoin-segwit",
+        policy_ids: policyIds.length > 0 ? policyIds : [],
+        });
 
-      console.log("Bitcoin wallet created. User now has", result.linkedAccounts?.filter((a: any) => a.type === 'wallet').length, "wallets");
+      console.log("Bitcoin wallet created. User now has", result.id, " a new wallet");
 
       // result contains the updated user and wallets
       return res.status(201).json({
         success: true,
         message: "Bitcoin wallet created and managed by Privy",
         userId: user.privyId, // Use Privy ID for wallet operations
-        wallets: result.linkedAccounts?.filter((a: any) => a.type === 'wallet'),
+        wallet: result,
       });
     } catch (error: any) {
       console.error("Error creating Privy BTC wallet:", error);

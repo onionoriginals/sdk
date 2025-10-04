@@ -23,9 +23,13 @@ export class WebVHIntegrationService {
   private config: Required<WebVHManagerConfig>;
 
   constructor(config: WebVHManagerConfig = {}) {
+    const domain = config.domain || process.env.DID_DOMAIN || process.env.VITE_APP_DOMAIN;
+    if (!domain) {
+      throw new Error('Domain is required');
+    }
     this.config = {
       publicDir: config.publicDir || path.join(process.cwd(), 'public'),
-      domain: config.domain || process.env.DID_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000',
+      domain,
     };
 
     // Ensure public directory exists
@@ -197,5 +201,24 @@ export class WebVHIntegrationService {
   }
 }
 
-// Export a singleton instance
-export const webvhService = new WebVHIntegrationService();
+// Export a lazy-loaded singleton instance
+// This delays instantiation until first use, avoiding crashes at import time
+// while still enforcing that the domain env var is required
+let _webvhServiceInstance: WebVHIntegrationService | null = null;
+
+export function getWebVHService(): WebVHIntegrationService {
+  if (!_webvhServiceInstance) {
+    _webvhServiceInstance = new WebVHIntegrationService();
+  }
+  return _webvhServiceInstance;
+}
+
+// For backward compatibility, export as webvhService
+export const webvhService = {
+  get createDIDWithSDK() { return getWebVHService().createDIDWithSDK.bind(getWebVHService()); },
+  get loadDIDLog() { return getWebVHService().loadDIDLog.bind(getWebVHService()); },
+  get saveDIDLog() { return getWebVHService().saveDIDLog.bind(getWebVHService()); },
+  get updateDID() { return getWebVHService().updateDID.bind(getWebVHService()); },
+  get getDIDLogPath() { return getWebVHService().getDIDLogPath.bind(getWebVHService()); },
+  get didLogExists() { return getWebVHService().didLogExists.bind(getWebVHService()); },
+};
