@@ -6,7 +6,7 @@ import { z } from "zod";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
-import { PrivyClient } from "@privy-io/server-auth";
+import { PrivyClient } from "@privy-io/node";
 import { originalsSdk } from "./originals";
 import { createUserDIDWebVH } from "./did-webvh-service";
 import multer from "multer";

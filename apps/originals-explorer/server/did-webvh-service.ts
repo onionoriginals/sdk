@@ -1,4 +1,4 @@
-import { PrivyClient } from "@privy-io/server-auth";
+import { PrivyClient } from "@privy-io/node";
 import { convertToMultibase, extractPublicKeyFromWallet } from "./key-utils";
 import { resolveDID } from "didwebvh-ts";
 import { originalsSdk } from "./originals";

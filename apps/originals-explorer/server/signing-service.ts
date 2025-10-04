@@ -1,4 +1,4 @@
-import { PrivyClient } from "@privy-io/server-auth";
+import { PrivyClient } from "@privy-io/node";
 import { storage } from "./storage";
 
 export type KeyPurpose = 'authentication' | 'assertion' | 'update';

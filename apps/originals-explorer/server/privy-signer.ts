@@ -5,7 +5,7 @@
  * keys while maintaining compatibility with the didwebvh-ts library.
  */
 
-import { PrivyClient } from "@privy-io/server-auth";
+import { PrivyClient } from "@privy-io/node";
 import { ExternalSigner, ExternalVerifier } from "@originals/sdk";
 import { multikey } from "@originals/sdk";
 import { extractPublicKeyFromWallet, convertToMultibase } from "./key-utils";
