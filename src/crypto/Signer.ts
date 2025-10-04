@@ -60,7 +60,7 @@ export class ES256KSigner extends Signer {
     return Buffer.from(sigBytes);
   }
 
-  async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
+  verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase key format. Keys must use multicodec headers.');
     }

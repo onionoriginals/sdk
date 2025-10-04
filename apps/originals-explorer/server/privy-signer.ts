@@ -8,7 +8,25 @@
 import { PrivyClient } from "@privy-io/node";
 import { ExternalSigner, ExternalVerifier } from "@originals/sdk";
 import { multikey } from "@originals/sdk";
-import { extractPublicKeyFromWallet, convertToMultibase } from "./key-utils";
+import { extractPublicKeyFromWallet, convertToMultibase, bytesToHex } from "./key-utils";
+import { sha512 } from '@noble/hashes/sha2.js';
+import { concatBytes } from '@noble/hashes/utils.js';
+import * as ed25519 from '@noble/ed25519';
+
+// Configure @noble/ed25519 with required SHA-512 function
+// @noble/ed25519 v2.x requires sha512Sync to be set on utils
+const sha512Fn = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
+
+// Initialize sha512Sync for Ed25519 operations
+if (!(ed25519 as any).utils) {
+  (ed25519 as any).utils = {};
+}
+(ed25519 as any).utils.sha512Sync = sha512Fn;
+
+// Also set on etc for older versions
+if ((ed25519 as any).etc) {
+  (ed25519 as any).etc.sha512Sync = sha512Fn;
+}
 
 /**
  * Privy-based signer for DID:WebVH operations
@@ -19,17 +37,20 @@ export class PrivyWebVHSigner implements ExternalSigner, ExternalVerifier {
   private publicKeyMultibase: string;
   private privyClient: PrivyClient;
   private verificationMethodId: string;
+  private userAuthToken: string;
 
   constructor(
     walletId: string,
     publicKeyMultibase: string,
     privyClient: PrivyClient,
-    verificationMethodId: string
+    verificationMethodId: string,
+    userAuthToken: string
   ) {
     this.walletId = walletId;
     this.publicKeyMultibase = publicKeyMultibase;
     this.privyClient = privyClient;
     this.verificationMethodId = verificationMethodId;
+    this.userAuthToken = userAuthToken;
   }
 
   /**
@@ -48,15 +69,15 @@ export class PrivyWebVHSigner implements ExternalSigner, ExternalVerifier {
       // Prepare the data for signing using didwebvh-ts's canonical approach
       const dataToSign = await prepareDataForSigning(input.document, input.proof);
       
-      // Create a hash of the data (Privy expects a hash)
-      const crypto = await import('crypto');
-      const hash = crypto.createHash('sha256').update(dataToSign).digest('hex');
-      const hashWith0x = `0x${hash}`;
+      // Convert canonical data to hex format for Privy's rawSign API
+      const dataHex = `0x${bytesToHex(dataToSign)}`;
       
-      // Sign using Privy's wallet API
-      // Use rawSign method as documented: privy.wallets().rawSign(walletId, { params: { hash } })
-      const { signature, encoding } = await (this.privyClient as any).wallets().rawSign(this.walletId, {
-        params: { hash: hashWith0x },
+      // Sign using Privy's wallet API with user authorization context
+      const { signature, encoding } = await this.privyClient.wallets().rawSign(this.walletId, {
+        authorization_context: {
+          user_jwts: [this.userAuthToken],
+        },
+        params: { hash: dataHex },
       });
       
       // Convert signature based on encoding
@@ -71,9 +92,16 @@ export class PrivyWebVHSigner implements ExternalSigner, ExternalVerifier {
         throw new Error(`Unsupported signature encoding: ${encoding}`);
       }
       
-      // Encode signature as multibase
-      const proofValue = multikey.encodeMultibase(signatureBytes);
+      // Ed25519 signatures should be exactly 64 bytes
+      if (signatureBytes.length === 65) {
+        // Remove recovery byte if present (common in some implementations)
+        signatureBytes = signatureBytes.slice(0, 64);
+      } else if (signatureBytes.length !== 64) {
+        throw new Error(`Invalid Ed25519 signature length: ${signatureBytes.length} (expected 64 bytes)`);
+      }
       
+      // Encode signature as multibase and return
+      const proofValue = multikey.encodeMultibase(signatureBytes);
       return { proofValue };
       
     } catch (error) {
@@ -97,12 +125,23 @@ export class PrivyWebVHSigner implements ExternalSigner, ExternalVerifier {
     publicKey: Uint8Array
   ): Promise<boolean> {
     try {
-      // For Ed25519 verification, we can use @noble/ed25519 or delegate to didwebvh-ts
-      const { ed25519 } = await import('@noble/ed25519');
+      // Ed25519 public keys must be exactly 32 bytes
+      // Stellar public keys have a version byte prefix, so remove it if present
+      let ed25519PublicKey = publicKey;
+      if (publicKey.length === 33) {
+        ed25519PublicKey = publicKey.slice(1);
+      } else if (publicKey.length !== 32) {
+        return false;
+      }
       
-      return await ed25519.verify(signature, message, publicKey);
+      // Ensure sha512Sync is set (required by @noble/ed25519)
+      if (typeof (ed25519 as any).utils?.sha512Sync !== 'function') {
+        (ed25519 as any).utils.sha512Sync = sha512Fn;
+      }
+      
+      return await ed25519.verify(signature, message, ed25519PublicKey);
     } catch (error) {
-      console.error('Error verifying signature:', error);
+      console.error('Error verifying signature with Privy:', error);
       return false;
     }
   }
@@ -130,17 +169,20 @@ export class PrivyWebVHSigner implements ExternalSigner, ExternalVerifier {
  * @param privyUserId - The Privy user ID
  * @param walletId - The wallet ID to use for signing
  * @param privyClient - Initialized Privy client
+ * @param verificationMethodId - The DID verification method ID
+ * @param userAuthToken - The user's JWT token for authorization
  * @returns A configured PrivyWebVHSigner
  */
 export async function createPrivySigner(
   privyUserId: string,
   walletId: string,
   privyClient: PrivyClient,
-  verificationMethodId: string
+  verificationMethodId: string,
+  userAuthToken: string
 ): Promise<PrivyWebVHSigner> {
   // Get wallet details from Privy
-  const user = await privyClient.getUserById(privyUserId);
-  const wallets = user.linkedAccounts?.filter((a: any) => a.type === 'wallet') || [];
+  const user = await privyClient.users()._get(privyUserId);
+  const wallets = user.linked_accounts?.filter((a: any) => a.type === 'wallet') || [];
   const wallet = wallets.find((w: any) => w.id === walletId);
   
   if (!wallet) {
@@ -155,7 +197,8 @@ export async function createPrivySigner(
     walletId,
     publicKeyMultibase,
     privyClient,
-    verificationMethodId
+    verificationMethodId,
+    userAuthToken
   );
 }
 
@@ -182,8 +225,8 @@ export async function createVerificationMethodsFromPrivy(
   updateWalletId: string;
 }> {
   // Get or create wallets for the user
-  const user = await privyClient.getUserById(privyUserId);
-  let wallets = user.linkedAccounts?.filter((a: any) => a.type === 'wallet') || [];
+  const user = await privyClient.users()._get(privyUserId);
+  let wallets = user.linked_accounts?.filter((a: any) => a.type === 'wallet') || [];
   
   // Get policy IDs from environment
   const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
@@ -193,30 +236,30 @@ export async function createVerificationMethodsFromPrivy(
     .filter((s) => s.length > 0);
 
   // Ensure we have at least 2 Stellar wallets (one for auth, one for updates)
-  const stellarWallets = wallets.filter((w: any) => w.chainType === 'stellar');
+  const stellarWallets = wallets.filter((w: any) => w.chain_type === 'stellar');
   
   let authWallet, updateWallet;
   
   if (stellarWallets.length === 0) {
     // Create both wallets
-    authWallet = await privyClient.walletApi.createWallet({
-      owner: { userId: privyUserId },
-      chainType: "stellar",
-      policyIds: policyIds.length > 0 ? policyIds : [],
+    authWallet = await privyClient.wallets().create({
+      owner: { user_id: privyUserId },
+      chain_type: "stellar",
+      policy_ids: policyIds.length > 0 ? policyIds : [],
     });
     
-    updateWallet = await privyClient.walletApi.createWallet({
-      owner: { userId: privyUserId },
-      chainType: "stellar",
-      policyIds: policyIds.length > 0 ? policyIds : [],
+    updateWallet = await privyClient.wallets().create({
+      owner: { user_id: privyUserId },
+      chain_type: "stellar",
+      policy_ids: policyIds.length > 0 ? policyIds : [],
     });
   } else if (stellarWallets.length === 1) {
     // Use existing wallet for auth, create one for updates
     authWallet = stellarWallets[0];
-    updateWallet = await privyClient.walletApi.createWallet({
-      owner: { userId: privyUserId },
-      chainType: "stellar",
-      policyIds: policyIds.length > 0 ? policyIds : [],
+    updateWallet = await privyClient.wallets().create({
+      owner: { user_id: privyUserId },
+      chain_type: "stellar",
+      policy_ids: policyIds.length > 0 ? policyIds : [],
     });
   } else {
     // Use existing wallets
@@ -243,7 +286,7 @@ export async function createVerificationMethodsFromPrivy(
       }
     ],
     updateKey: `did:key:${updateKeyMultibase}`,
-    authWalletId: authWallet.id,
-    updateWalletId: updateWallet.id,
+    authWalletId: (authWallet as any).id,
+    updateWalletId: (updateWallet as any).id,
   };
 }

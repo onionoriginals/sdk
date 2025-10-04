@@ -23,9 +23,13 @@ export class WebVHIntegrationService {
   private config: Required<WebVHManagerConfig>;
 
   constructor(config: WebVHManagerConfig = {}) {
+    const domain = config.domain || process.env.DID_DOMAIN || process.env.VITE_APP_DOMAIN;
+    if (!domain) {
+      throw new Error('Domain is required');
+    }
     this.config = {
       publicDir: config.publicDir || path.join(process.cwd(), 'public'),
-      domain: config.domain || process.env.DID_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000',
+      domain,
     };
 
     // Ensure public directory exists

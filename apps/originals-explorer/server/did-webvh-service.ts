@@ -6,7 +6,6 @@ import {
   createVerificationMethodsFromPrivy, 
   createPrivySigner 
 } from "./privy-signer";
-import * as path from 'path';
 
 export interface DIDWebVHCreationResult {
   did: string;
@@ -44,17 +43,17 @@ function generateUserSlug(privyUserId: string): string {
  * Uses the Originals SDK with custom Privy signer integration
  * @param privyUserId - The Privy user ID
  * @param privyClient - Initialized Privy client
+ * @param userAuthToken - The user's JWT token for authorization
  * @param domain - Domain to use in the DID (default: from env)
  * @returns DID creation result with all metadata
  */
 export async function createUserDIDWebVH(
   privyUserId: string,
   privyClient: PrivyClient,
+  userAuthToken: string,
   domain: string = process.env.DID_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000'
 ): Promise<DIDWebVHCreationResult> {
   try {
-    console.log(`Creating DID:WebVH for user ${privyUserId} using Originals SDK...`);
-
     // Generate user slug
     const userSlug = generateUserSlug(privyUserId);
 
@@ -80,14 +79,12 @@ export async function createUserDIDWebVH(
       privyUserId,
       updateWalletId,
       privyClient,
-      verificationMethodId
+      verificationMethodId,
+      userAuthToken
     );
 
-    // Determine output directory for DID logs
-    const publicDir = process.env.PUBLIC_DIR || path.join(process.cwd(), 'public');
-    const outputDir = path.join(publicDir, '.well-known');
-
     // Create the DID using the Originals SDK DIDManager with Privy signer
+    // No outputDir - we don't need files on disk, everything is served from the database
     const result = await originalsSdk.did.createDIDWebVH({
       domain,
       paths: [userSlug],
@@ -95,11 +92,8 @@ export async function createUserDIDWebVH(
       externalSigner: signer,
       verificationMethods,
       updateKeys: [updateKey],
-      outputDir,
+      // outputDir: undefined - don't write files to disk, serve from database instead
     });
-
-    console.log(`Created DID:WebVH with SDK: ${result.did}`);
-    console.log(`DID log saved to: ${result.logPath}`);
 
     return {
       did: result.did,
@@ -116,24 +110,7 @@ export async function createUserDIDWebVH(
       logPath: result.logPath,
     };
   } catch (error) {
-    console.error('Error creating DID:WebVH with SDK:', error);
-    
-    // If the SDK method fails due to missing Privy signing implementation,
-    // provide a helpful error message
-    if (error instanceof Error && error.message.includes('Privy signing')) {
-      console.error(
-        '\n' + '='.repeat(80) + '\n' +
-        'PRIVY SIGNING NOT YET IMPLEMENTED\n' +
-        '='.repeat(80) + '\n' +
-        'The DID creation failed because Privy signing is not yet implemented.\n' +
-        'To complete this integration:\n' +
-        '1. Check Privy documentation for the wallet signing API\n' +
-        '2. Update apps/originals-explorer/server/privy-signer.ts\n' +
-        '3. Implement the sign() method with the correct Privy API calls\n' +
-        '='.repeat(80) + '\n'
-      );
-    }
-    
+    console.error('Error creating DID:WebVH:', error);
     throw new Error(`Failed to create DID:WebVH: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

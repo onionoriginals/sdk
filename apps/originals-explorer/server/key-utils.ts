@@ -16,7 +16,13 @@ export function convertToMultibase(
     : publicKeyHex;
   
   // Convert hex string to Uint8Array
-  const publicKeyBytes = hexToBytes(cleanHex);
+  let publicKeyBytes = hexToBytes(cleanHex);
+  
+  // Stellar public keys from Privy include a version byte prefix
+  // Ed25519 keys must be exactly 32 bytes, so remove the prefix if present
+  if (keyType === 'Ed25519' && publicKeyBytes.length === 33) {
+    publicKeyBytes = publicKeyBytes.slice(1);
+  }
   
   // Use SDK's multikey.encodePublicKey() function
   return multikey.encodePublicKey(publicKeyBytes, keyType);
