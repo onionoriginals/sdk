@@ -56,7 +56,7 @@ await originals.lifecycle.inscribeOnBitcoin(asset);
 
 - **OriginalsSDK** - Main entry point and orchestration
 - **OriginalsAsset** - Represents a digital asset through its lifecycle
-- **DIDManager** - DID document creation and resolution
+- **DIDManager** - DID document creation and resolution (did:peer, did:webvh, did:btco) with external signer support
 - **CredentialManager** - Verifiable Credential handling
 - **LifecycleManager** - Asset migration between layers
 - **BitcoinManager** - Bitcoin/Ordinals integration
@@ -70,6 +70,8 @@ await originals.lifecycle.inscribeOnBitcoin(asset);
 - ✅ Three-layer asset lifecycle management: `did:peer` → `did:webvh` → `did:btco`
 - ✅ Cryptographic provenance verification
 - ✅ Front-running protection via unique satoshi assignment
+- ✅ **DID:WebVH integration with didwebvh-ts** - Full support for creating and managing did:webvh identifiers
+- ✅ **External signer support** - Integrate with Privy, AWS KMS, HSMs, and other key management systems
 
 ## Use Cases
 
@@ -186,6 +188,61 @@ try {
   console.error('Bitcoin operations not available:', error.message);
 }
 ```
+
+## DID:WebVH Integration
+
+The SDK provides comprehensive support for creating and managing `did:webvh` identifiers with proper cryptographic signing.
+
+### Create DID with SDK-managed keys
+
+```typescript
+const sdk = OriginalsSDK.create({ network: 'mainnet' });
+
+const result = await sdk.did.createDIDWebVH({
+  domain: 'example.com',
+  paths: ['alice'],
+  outputDir: './public/.well-known',
+});
+
+console.log('DID:', result.did);
+// Store result.keyPair.privateKey securely!
+```
+
+### Create DID with External Key Management (e.g., Privy)
+
+```typescript
+import { createPrivySigner } from './privy-signer';
+
+// Create external signer
+const signer = await createPrivySigner(userId, walletId, privyClient, verificationMethodId);
+
+// Create DID
+const result = await sdk.did.createDIDWebVH({
+  domain: 'example.com',
+  paths: ['alice'],
+  externalSigner: signer,
+  verificationMethods: [{ type: 'Multikey', publicKeyMultibase: '...' }],
+  updateKeys: ['did:key:...'],
+  outputDir: './public/.well-known',
+});
+```
+
+### Update an existing DID
+
+```typescript
+const log = await sdk.did.loadDIDLog('./path/to/did.jsonl');
+
+const result = await sdk.did.updateDIDWebVH({
+  did: 'did:webvh:example.com:alice',
+  currentLog: log,
+  updates: {
+    service: [{ id: '#my-service', type: 'MyService', serviceEndpoint: 'https://...' }]
+  },
+  signer: keyPair, // or externalSigner
+});
+```
+
+For detailed information about the DID:WebVH integration, including Privy setup and external signer implementation, see [DIDWEBVH_INTEGRATION.md](./DIDWEBVH_INTEGRATION.md).
 
 ## Development
 

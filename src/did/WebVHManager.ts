@@ -1,7 +1,7 @@
 import { KeyManager } from './KeyManager';
 import { multikey } from '../crypto/Multikey';
 import { Ed25519Signer } from '../crypto/Signer';
-import { DIDDocument, KeyPair } from '../types';
+import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier } from '../types';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -120,6 +120,10 @@ export interface CreateWebVHOptions {
   paths?: string[];
   portable?: boolean;
   outputDir?: string; // Directory to save the DID log (did.jsonl)
+  externalSigner?: ExternalSigner; // External signer (e.g., Privy integration)
+  externalVerifier?: ExternalVerifier; // External verifier
+  verificationMethods?: VerificationMethod[]; // Pre-configured verification methods
+  updateKeys?: string[]; // Pre-configured update keys (e.g., ["did:key:z6Mk..."])
 }
 
 export interface CreateWebVHResult {
@@ -142,22 +146,21 @@ export class WebVHManager {
 
   /**
    * Creates a new did:webvh DID with proper cryptographic signing
-   * @param options - Creation options including domain and optional key pair
-   * @returns The created DID, document, log, and key pair
+   * @param options - Creation options including domain and optional key pair or external signer
+   * @returns The created DID, document, log, and key pair (if generated)
    */
   async createDIDWebVH(options: CreateWebVHOptions): Promise<CreateWebVHResult> {
-    const { domain, keyPair: providedKeyPair, paths = [], portable = false, outputDir } = options;
-
-    // Generate or use provided key pair (Ed25519 for did:webvh)
-    const keyPair = providedKeyPair || await this.keyManager.generateKeyPair('Ed25519');
-
-    // Create verification methods
-    const verificationMethods: VerificationMethod[] = [
-      {
-        type: 'Multikey',
-        publicKeyMultibase: keyPair.publicKey,
-      }
-    ];
+    const { 
+      domain, 
+      keyPair: providedKeyPair, 
+      paths = [], 
+      portable = false, 
+      outputDir,
+      externalSigner,
+      externalVerifier,
+      verificationMethods: providedVerificationMethods,
+      updateKeys: providedUpdateKeys
+    } = options;
 
     // Dynamically import didwebvh-ts to avoid module resolution issues
     const mod = await import('didwebvh-ts') as unknown as {
@@ -178,20 +181,57 @@ export class WebVHManager {
       throw new Error('Failed to load didwebvh-ts: invalid module exports');
     }
 
-    // Create signer using our adapter
-    const signer = new OriginalsWebVHSigner(
-      keyPair.privateKey,
-      verificationMethods[0],
-      prepareDataForSigning,
-      { verificationMethod: verificationMethods[0] }
-    );
+    let signer: Signer | ExternalSigner;
+    let verifier: Verifier | ExternalVerifier;
+    let keyPair: KeyPair | undefined;
+    let verificationMethods: VerificationMethod[];
+    let updateKeys: string[];
+
+    // Use external signer if provided (e.g., Privy integration)
+    if (externalSigner) {
+      if (!providedVerificationMethods || providedVerificationMethods.length === 0) {
+        throw new Error('verificationMethods are required when using externalSigner');
+      }
+      if (!providedUpdateKeys || providedUpdateKeys.length === 0) {
+        throw new Error('updateKeys are required when using externalSigner');
+      }
+      
+      signer = externalSigner;
+      verifier = externalVerifier || externalSigner as any; // Use signer as verifier if not provided
+      verificationMethods = providedVerificationMethods;
+      updateKeys = providedUpdateKeys;
+      keyPair = undefined; // No key pair when using external signer
+    } else {
+      // Generate or use provided key pair (Ed25519 for did:webvh)
+      keyPair = providedKeyPair || await this.keyManager.generateKeyPair('Ed25519');
+
+      // Create verification methods
+      verificationMethods = [
+        {
+          type: 'Multikey',
+          publicKeyMultibase: keyPair.publicKey,
+        }
+      ];
+
+      // Create signer using our adapter
+      const internalSigner = new OriginalsWebVHSigner(
+        keyPair.privateKey,
+        verificationMethods[0],
+        prepareDataForSigning,
+        { verificationMethod: verificationMethods[0] }
+      );
+
+      signer = internalSigner;
+      verifier = internalSigner; // Use the same signer as verifier
+      updateKeys = [`did:key:${keyPair.publicKey}`]; // Use did:key format for authorization
+    }
 
     // Create the DID using didwebvh-ts
     const result = await createDID({
       domain,
       signer,
-      verifier: signer, // Use the same signer as verifier (it implements both interfaces)
-      updateKeys: [`did:key:${keyPair.publicKey}`], // Use did:key format for authorization
+      verifier,
+      updateKeys,
       verificationMethods,
       context: [
         'https://www.w3.org/ns/did/v1',
@@ -218,7 +258,7 @@ export class WebVHManager {
       did: result.did,
       didDocument: result.doc,
       log: result.log,
-      keyPair,
+      keyPair: keyPair || { publicKey: '', privateKey: '' }, // Return empty keypair if using external signer
       logPath,
     };
   }
@@ -344,5 +384,106 @@ export class WebVHManager {
     const content = await fs.promises.readFile(logPath, 'utf8');
     const lines = content.trim().split('\n');
     return lines.map(line => JSON.parse(line));
+  }
+
+  /**
+   * Updates a DID:WebVH document
+   * @param did - The DID to update
+   * @param currentLog - The current DID log
+   * @param updates - Updates to apply to the DID document
+   * @param signer - The signer to use (must be authorized in updateKeys)
+   * @param verifier - Optional verifier
+   * @param outputDir - Optional directory to save the updated log
+   * @returns Updated DID document and log
+   */
+  async updateDIDWebVH(options: {
+    did: string;
+    currentLog: DIDLog;
+    updates: Partial<DIDDocument>;
+    signer: ExternalSigner | { privateKey: string; publicKey: string };
+    verifier?: ExternalVerifier;
+    outputDir?: string;
+  }): Promise<{ didDocument: DIDDocument; log: DIDLog; logPath?: string }> {
+    const { did, currentLog, updates, signer: providedSigner, verifier: providedVerifier, outputDir } = options;
+
+    // Dynamically import didwebvh-ts
+    const mod = await import('didwebvh-ts') as unknown as {
+      updateDID: (options: Record<string, unknown>) => Promise<{
+        doc: Record<string, unknown>;
+        log: DIDLog;
+      }>;
+      prepareDataForSigning: (
+        document: Record<string, unknown>,
+        proof: Record<string, unknown>
+      ) => Promise<Uint8Array>;
+    };
+    const { updateDID, prepareDataForSigning } = mod;
+
+    if (typeof updateDID !== 'function') {
+      throw new Error('Failed to load didwebvh-ts: invalid module exports');
+    }
+
+    let signer: Signer | ExternalSigner;
+    let verifier: Verifier | ExternalVerifier | undefined;
+
+    // Check if using external signer or internal keypair
+    if ('sign' in providedSigner && 'getVerificationMethodId' in providedSigner) {
+      // External signer
+      signer = providedSigner as ExternalSigner;
+      verifier = providedVerifier;
+    } else {
+      // Internal signer with keypair
+      const keyPair = providedSigner as { privateKey: string; publicKey: string };
+      const verificationMethod: VerificationMethod = {
+        type: 'Multikey',
+        publicKeyMultibase: keyPair.publicKey,
+      };
+      
+      const internalSigner = new OriginalsWebVHSigner(
+        keyPair.privateKey,
+        verificationMethod,
+        prepareDataForSigning,
+        { verificationMethod }
+      );
+      
+      signer = internalSigner;
+      verifier = internalSigner;
+    }
+
+    // Get the current document from the log
+    const currentEntry = currentLog[currentLog.length - 1];
+    const currentDoc = currentEntry.state as unknown as DIDDocument;
+
+    // Merge updates with current document
+    const updatedDoc = {
+      ...currentDoc,
+      ...updates,
+      id: did, // Ensure ID doesn't change
+    };
+
+    // Update the DID using didwebvh-ts
+    const result = await updateDID({
+      log: currentLog,
+      doc: updatedDoc,
+      signer,
+      verifier,
+    });
+
+    // Validate the returned DID document
+    if (!this.isDIDDocument(result.doc)) {
+      throw new Error('Invalid DID document returned from updateDID');
+    }
+
+    // Save the updated log if output directory is provided
+    let logPath: string | undefined;
+    if (outputDir) {
+      logPath = await this.saveDIDLog(did, result.log, outputDir);
+    }
+
+    return {
+      didDocument: result.doc,
+      log: result.log,
+      logPath,
+    };
   }
 }

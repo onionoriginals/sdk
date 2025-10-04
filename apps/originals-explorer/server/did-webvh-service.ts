@@ -1,6 +1,12 @@
 import { PrivyClient } from "@privy-io/server-auth";
 import { convertToMultibase, extractPublicKeyFromWallet } from "./key-utils";
 import { resolveDID } from "didwebvh-ts";
+import { originalsSdk } from "./originals";
+import { 
+  createVerificationMethodsFromPrivy, 
+  createPrivySigner 
+} from "./privy-signer";
+import * as path from 'path';
 
 export interface DIDWebVHCreationResult {
   did: string;
@@ -14,6 +20,7 @@ export interface DIDWebVHCreationResult {
   didCreatedAt: Date;
   didSlug: string;
   didLog: any; // The DID log from didwebvh-ts
+  logPath?: string; // Path where the DID log was saved
 }
 
 /**
@@ -34,8 +41,7 @@ function generateUserSlug(privyUserId: string): string {
 
 /**
  * Create a DID:WebVH for a user using Privy-managed wallets
- * Note: Creates spec-compliant DID documents manually since didwebvh-ts requires
- * signing capabilities that aren't available with Privy-managed wallets
+ * Uses the Originals SDK with custom Privy signer integration
  * @param privyUserId - The Privy user ID
  * @param privyClient - Initialized Privy client
  * @param domain - Domain to use in the DID (default: from env)
@@ -47,135 +53,87 @@ export async function createUserDIDWebVH(
   domain: string = process.env.DID_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000'
 ): Promise<DIDWebVHCreationResult> {
   try {
-    console.log(`Creating DID:WebVH for user ${privyUserId}...`);
+    console.log(`Creating DID:WebVH for user ${privyUserId} using Originals SDK...`);
 
-    // Get policy IDs from environment
-    const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
-    const policyIds = rawPolicyIds
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-
-    // Step 1: Create Bitcoin wallet (for authentication key)
-    const btcWallet = await privyClient.walletApi.createWallet({
-      owner: { userId: privyUserId },
-      chainType: "bitcoin-segwit",
-      policyIds: policyIds.length > 0 ? policyIds : [],
-    });
-
-    // Step 2: Create first Stellar wallet (for assertion method)
-    const stellarAssertionWallet = await privyClient.walletApi.createWallet({
-      owner: { userId: privyUserId },
-      chainType: "stellar",
-      policyIds: policyIds.length > 0 ? policyIds : [],
-    });
-
-    // Step 3: Create second Stellar wallet (for DID updates)
-    const stellarUpdateWallet = await privyClient.walletApi.createWallet({
-      owner: { userId: privyUserId },
-      chainType: "stellar",
-      policyIds: policyIds.length > 0 ? policyIds : [],
-    });
-
-    // Step 4: Extract public keys from wallets
-    const btcPublicKeyHex = extractPublicKeyFromWallet(btcWallet);
-    const stellarAssertionKeyHex = extractPublicKeyFromWallet(stellarAssertionWallet);
-    const stellarUpdateKeyHex = extractPublicKeyFromWallet(stellarUpdateWallet);
-
-    // Step 5: Convert public keys to multibase format
-    const authKeyMultibase = convertToMultibase(btcPublicKeyHex, 'Secp256k1');
-    const assertionKeyMultibase = convertToMultibase(stellarAssertionKeyHex, 'Ed25519');
-    const updateKeyMultibase = convertToMultibase(stellarUpdateKeyHex, 'Ed25519');
-
-    // Step 6: Generate user slug
+    // Generate user slug
     const userSlug = generateUserSlug(privyUserId);
 
-    // Step 7: Create DID:WebVH document manually (spec-compliant)
-    // Note: We create the document manually since didwebvh-ts requires signing capabilities
-    // that we don't have with Privy-managed wallets (no access to private keys)
-    console.log('Creating DID:WebVH document...');
-    
+    // Create verification methods and wallets using Privy
+    const {
+      verificationMethods,
+      updateKey,
+      authWalletId,
+      updateWalletId,
+    } = await createVerificationMethodsFromPrivy(
+      privyUserId,
+      privyClient,
+      domain,
+      userSlug
+    );
+
+    // Create the signer using the update wallet (will be used to sign the DID creation)
     const encodedDomain = encodeURIComponent(domain);
     const did = `did:webvh:${encodedDomain}:${userSlug}`;
-    
-    // Create DID document according to DID:WebVH spec
-    const didDocument = {
-      "@context": [
-        "https://www.w3.org/ns/did/v1",
-        "https://w3id.org/security/multikey/v1"
-      ],
-      "id": did,
-      "verificationMethod": [
-        {
-          "id": `${did}#auth-key`,
-          "type": "Multikey",
-          "controller": did,
-          "publicKeyMultibase": authKeyMultibase
-        },
-        {
-          "id": `${did}#assertion-key`,
-          "type": "Multikey",
-          "controller": did,
-          "publicKeyMultibase": assertionKeyMultibase
-        }
-      ],
-      "authentication": [`${did}#auth-key`],
-      "assertionMethod": [`${did}#assertion-key`]
-    };
+    const verificationMethodId = updateKey; // Use the update key as verification method
 
-    // Create a spec-compliant DID log entry
-    // This follows the DID:WebVH specification format
-    const versionTime = new Date().toISOString();
-    const didLog = [{
-      versionId: `1-${Date.now()}`, // Version 1 with timestamp
-      versionTime,
-      parameters: {
-        method: "did:webvh",
-        updateKeys: [`did:key:${updateKeyMultibase}`],
-        portable: false,
-      },
-      state: didDocument,
-      // Note: Full implementation would include cryptographic proofs
-      // For Privy-managed keys, we store wallet metadata for future signing
-      proof: [{
-        type: "DataIntegrityProof",
-        cryptosuite: "eddsa-jcs-2022",
-        created: versionTime,
-        verificationMethod: `${did}#update-key`,
-        proofPurpose: "authentication",
-        // Placeholder - would contain actual signature with Privy signing integration
-        proofValue: "z...", 
-        metadata: {
-          authWalletId: btcWallet.id,
-          assertionWalletId: stellarAssertionWallet.id,
-          updateWalletId: stellarUpdateWallet.id,
-        }
-      }]
-    }];
+    const signer = await createPrivySigner(
+      privyUserId,
+      updateWalletId,
+      privyClient,
+      verificationMethodId
+    );
 
-    const didResult = {
-      did,
-      doc: didDocument,
-      log: didLog
-    };
-    
-    console.log(`Generated DID:WebVH: ${didResult.did}`);
+    // Determine output directory for DID logs
+    const publicDir = process.env.PUBLIC_DIR || path.join(process.cwd(), 'public');
+    const outputDir = path.join(publicDir, '.well-known');
+
+    // Create the DID using the Originals SDK DIDManager with Privy signer
+    const result = await originalsSdk.did.createDIDWebVH({
+      domain,
+      paths: [userSlug],
+      portable: false,
+      externalSigner: signer,
+      verificationMethods,
+      updateKeys: [updateKey],
+      outputDir,
+    });
+
+    console.log(`Created DID:WebVH with SDK: ${result.did}`);
+    console.log(`DID log saved to: ${result.logPath}`);
 
     return {
-      did: didResult.did,
-      didDocument: didResult.doc,
-      authWalletId: btcWallet.id,
-      assertionWalletId: stellarAssertionWallet.id,
-      updateWalletId: stellarUpdateWallet.id,
-      authKeyPublic: authKeyMultibase,
-      assertionKeyPublic: assertionKeyMultibase,
-      updateKeyPublic: updateKeyMultibase,
+      did: result.did,
+      didDocument: result.didDocument as any,
+      authWalletId,
+      assertionWalletId: authWalletId, // Same as auth for now
+      updateWalletId,
+      authKeyPublic: verificationMethods[0].publicKeyMultibase,
+      assertionKeyPublic: verificationMethods[0].publicKeyMultibase,
+      updateKeyPublic: updateKey.replace('did:key:', ''),
       didCreatedAt: new Date(),
       didSlug: userSlug,
-      didLog: didResult.log,
+      didLog: result.log,
+      logPath: result.logPath,
     };
   } catch (error) {
-    console.error('Error creating DID:WebVH:', error);
+    console.error('Error creating DID:WebVH with SDK:', error);
+    
+    // If the SDK method fails due to missing Privy signing implementation,
+    // provide a helpful error message
+    if (error instanceof Error && error.message.includes('Privy signing')) {
+      console.error(
+        '\n' + '='.repeat(80) + '\n' +
+        'PRIVY SIGNING NOT YET IMPLEMENTED\n' +
+        '='.repeat(80) + '\n' +
+        'The DID creation failed because Privy signing is not yet implemented.\n' +
+        'To complete this integration:\n' +
+        '1. Check Privy documentation for the wallet signing API\n' +
+        '2. Update apps/originals-explorer/server/privy-signer.ts\n' +
+        '3. Implement the sign() method with the correct Privy API calls\n' +
+        '='.repeat(80) + '\n'
+      );
+    }
+    
     throw new Error(`Failed to create DID:WebVH: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
