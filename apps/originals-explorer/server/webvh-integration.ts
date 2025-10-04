@@ -201,5 +201,24 @@ export class WebVHIntegrationService {
   }
 }
 
-// Export a singleton instance
-export const webvhService = new WebVHIntegrationService();
+// Export a lazy-loaded singleton instance
+// This delays instantiation until first use, avoiding crashes at import time
+// while still enforcing that the domain env var is required
+let _webvhServiceInstance: WebVHIntegrationService | null = null;
+
+export function getWebVHService(): WebVHIntegrationService {
+  if (!_webvhServiceInstance) {
+    _webvhServiceInstance = new WebVHIntegrationService();
+  }
+  return _webvhServiceInstance;
+}
+
+// For backward compatibility, export as webvhService
+export const webvhService = {
+  get createDIDWithSDK() { return getWebVHService().createDIDWithSDK.bind(getWebVHService()); },
+  get loadDIDLog() { return getWebVHService().loadDIDLog.bind(getWebVHService()); },
+  get saveDIDLog() { return getWebVHService().saveDIDLog.bind(getWebVHService()); },
+  get updateDID() { return getWebVHService().updateDID.bind(getWebVHService()); },
+  get getDIDLogPath() { return getWebVHService().getDIDLogPath.bind(getWebVHService()); },
+  get didLogExists() { return getWebVHService().didLogExists.bind(getWebVHService()); },
+};

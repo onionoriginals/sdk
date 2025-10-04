@@ -31,7 +31,7 @@ describe("WebVHIntegrationService", () => {
     mockSaveDIDLog.mockClear();
     mockUpdateDIDWebVH.mockClear();
 
-    // Set environment variables
+    // Set environment variables before any test
     process.env.DID_DOMAIN = testDomain;
 
     // Clean up test directory if it exists
@@ -46,7 +46,9 @@ describe("WebVHIntegrationService", () => {
       fs.rmSync(testPublicDir, { recursive: true, force: true });
     }
     
+    // Clean up env var
     delete process.env.DID_DOMAIN;
+    delete process.env.VITE_APP_DOMAIN;
   });
 
   describe("constructor", () => {
