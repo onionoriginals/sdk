@@ -1,102 +1,447 @@
-import { describe, test, expect, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, spyOn } from 'bun:test';
 import { OrdinalsClientProvider } from '../../../src/bitcoin/providers/OrdinalsProvider';
 import { OrdinalsClient } from '../../../src/bitcoin/OrdinalsClient';
+import { withRetry } from '../../../src/utils/retry';
 
 describe('OrdinalsClientProvider', () => {
-  const client: OrdinalsClient = new OrdinalsClient('http://ord', 'regtest') as any;
-  (client.getSatInfo as any) = mock(async (_: string) => ({ inscription_ids: ['a'] }));
-  (client.getInscriptionById as any) = mock(async (id: string) => ({ inscriptionId: id, satoshi: '1', content: Buffer.alloc(0), contentType: 'text/plain', txid: 't', vout: 0 }));
-  (client.getMetadata as any) = mock(async (_: string) => ({ ok: true } as any));
-  (client.estimateFee as any) = mock(async (_?: number) => 123);
+  let mockClient: OrdinalsClient;
 
-  test('getSatInfo proxies with retry', async () => {
-    const p = new OrdinalsClientProvider(client, { retries: 0, baseUrl: 'http://ord' });
-    const v = await p.getSatInfo('1');
-    expect(v.inscription_ids).toEqual(['a']);
+  beforeEach(() => {
+    // Create a mock OrdinalsClient
+    mockClient = {
+      getSatInfo: async () => ({ inscription_ids: [] }),
+      getInscriptionById: async () => null,
+      getMetadata: async () => ({}),
+      estimateFee: async () => 1
+    } as any;
   });
 
-  test('getSatInfo retries once on failure to cover isRetriable', async () => {
-    (client.getSatInfo as any).mockImplementationOnce(async () => { throw new Error('fail'); });
-    const p = new OrdinalsClientProvider(client, { retries: 1, baseUrl: 'http://ord' });
-    const v = await p.getSatInfo('1');
-    expect(v.inscription_ids).toEqual(['a']);
+  describe('constructor', () => {
+    test('creates provider with client only', () => {
+      const provider = new OrdinalsClientProvider(mockClient);
+      expect(provider).toBeDefined();
+    });
+
+    test('creates provider with client and options', () => {
+      const provider = new OrdinalsClientProvider(mockClient, {
+        retries: 5,
+        baseUrl: 'https://api.example.com'
+      });
+      expect(provider).toBeDefined();
+    });
+
+    test('creates provider with empty options', () => {
+      const provider = new OrdinalsClientProvider(mockClient, {});
+      expect(provider).toBeDefined();
+    });
   });
 
-  test('resolveInscription validates fields and builds content_url', async () => {
-    const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord/' });
-    const v = await p.resolveInscription('ins-1');
-    expect(v).toEqual(expect.objectContaining({ id: 'ins-1', content_url: 'http://ord/content/ins-1', content_type: 'text/plain', sat: expect.any(Number) }));
+  describe('getSatInfo', () => {
+    test('calls client.getSatInfo with satNumber', async () => {
+      const getSatInfoSpy = spyOn(mockClient, 'getSatInfo').mockResolvedValue({
+        inscription_ids: ['id1', 'id2']
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient);
+      const result = await provider.getSatInfo('12345');
+
+      expect(getSatInfoSpy).toHaveBeenCalledWith('12345');
+      expect(result.inscription_ids).toEqual(['id1', 'id2']);
+
+      getSatInfoSpy.mockRestore();
+    });
+
+    test('uses default retry count of 2', async () => {
+      let attemptCount = 0;
+      const getSatInfoSpy = spyOn(mockClient, 'getSatInfo').mockImplementation(async () => {
+        attemptCount++;
+        if (attemptCount < 2) {
+          throw new Error('Temporary failure');
+        }
+        return { inscription_ids: ['id1'] };
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient);
+      const result = await provider.getSatInfo('12345');
+
+      expect(attemptCount).toBe(2);
+      expect(result.inscription_ids).toEqual(['id1']);
+
+      getSatInfoSpy.mockRestore();
+    });
+
+    test('uses custom retry count', async () => {
+      let attemptCount = 0;
+      const getSatInfoSpy = spyOn(mockClient, 'getSatInfo').mockImplementation(async () => {
+        attemptCount++;
+        if (attemptCount < 4) {
+          throw new Error('Temporary failure');
+        }
+        return { inscription_ids: ['id1'] };
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient, { retries: 5 });
+      const result = await provider.getSatInfo('12345');
+
+      expect(attemptCount).toBe(4);
+      expect(result.inscription_ids).toEqual(['id1']);
+
+      getSatInfoSpy.mockRestore();
+    });
+
+    test('returns empty inscription_ids array', async () => {
+      const getSatInfoSpy = spyOn(mockClient, 'getSatInfo').mockResolvedValue({
+        inscription_ids: []
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient);
+      const result = await provider.getSatInfo('99999');
+
+      expect(result.inscription_ids).toEqual([]);
+
+      getSatInfoSpy.mockRestore();
+    });
   });
 
-  test('resolveInscription errors when missing baseUrl', async () => {
-    const p = new OrdinalsClientProvider(client, {} as any);
-    await expect(p.resolveInscription('ins-1')).rejects.toThrow('baseUrl is required');
+  describe('resolveInscription', () => {
+    test('throws error when inscription not found', async () => {
+      const getInscriptionSpy = spyOn(mockClient, 'getInscriptionById').mockResolvedValue(null);
+
+      const provider = new OrdinalsClientProvider(mockClient, { baseUrl: 'https://api.example.com' });
+
+      await expect(provider.resolveInscription('missing-id')).rejects.toThrow('Inscription not found');
+
+      getInscriptionSpy.mockRestore();
+    });
+
+    test('throws error when satoshi is missing', async () => {
+      const getInscriptionSpy = spyOn(mockClient, 'getInscriptionById').mockResolvedValue({
+        inscriptionId: 'test-id',
+        content: Buffer.from('data'),
+        contentType: 'text/plain',
+        txid: 'abc',
+        vout: 0
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient, { baseUrl: 'https://api.example.com' });
+
+      await expect(provider.resolveInscription('test-id')).rejects.toThrow('Inscription missing satoshi');
+
+      getInscriptionSpy.mockRestore();
+    });
+
+    test('throws error when satoshi is invalid (NaN)', async () => {
+      const getInscriptionSpy = spyOn(mockClient, 'getInscriptionById').mockResolvedValue({
+        inscriptionId: 'test-id',
+        content: Buffer.from('data'),
+        contentType: 'text/plain',
+        txid: 'abc',
+        vout: 0,
+        satoshi: 'not-a-number'
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient, { baseUrl: 'https://api.example.com' });
+
+      await expect(provider.resolveInscription('test-id')).rejects.toThrow('Invalid satoshi value');
+
+      getInscriptionSpy.mockRestore();
+    });
+
+    test('throws error when contentType is missing', async () => {
+      const getInscriptionSpy = spyOn(mockClient, 'getInscriptionById').mockResolvedValue({
+        inscriptionId: 'test-id',
+        content: Buffer.from('data'),
+        contentType: '',
+        txid: 'abc',
+        vout: 0,
+        satoshi: '12345'
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient, { baseUrl: 'https://api.example.com' });
+
+      await expect(provider.resolveInscription('test-id')).rejects.toThrow('Inscription missing contentType');
+
+      getInscriptionSpy.mockRestore();
+    });
+
+    test('throws error when baseUrl is missing', async () => {
+      const getInscriptionSpy = spyOn(mockClient, 'getInscriptionById').mockResolvedValue({
+        inscriptionId: 'test-id',
+        content: Buffer.from('data'),
+        contentType: 'text/plain',
+        txid: 'abc',
+        vout: 0,
+        satoshi: '12345'
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient); // No baseUrl
+
+      await expect(provider.resolveInscription('test-id')).rejects.toThrow('baseUrl is required to construct content_url');
+
+      getInscriptionSpy.mockRestore();
+    });
+
+    test('throws error when baseUrl is empty string', async () => {
+      const getInscriptionSpy = spyOn(mockClient, 'getInscriptionById').mockResolvedValue({
+        inscriptionId: 'test-id',
+        content: Buffer.from('data'),
+        contentType: 'text/plain',
+        txid: 'abc',
+        vout: 0,
+        satoshi: '12345'
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient, { baseUrl: '' });
+
+      await expect(provider.resolveInscription('test-id')).rejects.toThrow('baseUrl is required to construct content_url');
+
+      getInscriptionSpy.mockRestore();
+    });
+
+    test('successfully resolves inscription', async () => {
+      const getInscriptionSpy = spyOn(mockClient, 'getInscriptionById').mockResolvedValue({
+        inscriptionId: 'insc123',
+        content: Buffer.from('test data'),
+        contentType: 'image/png',
+        txid: 'tx456',
+        vout: 1,
+        satoshi: '987654'
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient, { baseUrl: 'https://api.example.com' });
+      const result = await provider.resolveInscription('insc123');
+
+      expect(result.id).toBe('insc123');
+      expect(result.sat).toBe(987654);
+      expect(result.content_type).toBe('image/png');
+      expect(result.content_url).toBe('https://api.example.com/content/insc123');
+
+      getInscriptionSpy.mockRestore();
+    });
+
+    test('trims trailing slash from baseUrl', async () => {
+      const getInscriptionSpy = spyOn(mockClient, 'getInscriptionById').mockResolvedValue({
+        inscriptionId: 'insc789',
+        content: Buffer.from('data'),
+        contentType: 'text/html',
+        txid: 'tx',
+        vout: 0,
+        satoshi: '111111'
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient, { baseUrl: 'https://api.example.com///' });
+      const result = await provider.resolveInscription('insc789');
+
+      expect(result.content_url).toBe('https://api.example.com/content/insc789');
+      expect(result.content_url).not.toContain('///');
+
+      getInscriptionSpy.mockRestore();
+    });
+
+    test('retries on failure', async () => {
+      let attemptCount = 0;
+      const getInscriptionSpy = spyOn(mockClient, 'getInscriptionById').mockImplementation(async () => {
+        attemptCount++;
+        if (attemptCount < 2) {
+          throw new Error('Temporary network error');
+        }
+        return {
+          inscriptionId: 'insc-retry',
+          content: Buffer.from('data'),
+          contentType: 'text/plain',
+          txid: 'tx',
+          vout: 0,
+          satoshi: '12345'
+        };
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient, { 
+        baseUrl: 'https://api.example.com',
+        retries: 3
+      });
+      const result = await provider.resolveInscription('insc-retry');
+
+      expect(attemptCount).toBe(2);
+      expect(result.id).toBe('insc-retry');
+
+      getInscriptionSpy.mockRestore();
+    });
+
+    test('handles numeric satoshi value', async () => {
+      const getInscriptionSpy = spyOn(mockClient, 'getInscriptionById').mockResolvedValue({
+        inscriptionId: 'insc-num',
+        content: Buffer.from('data'),
+        contentType: 'text/plain',
+        txid: 'tx',
+        vout: 0,
+        satoshi: 555555 as any // Number instead of string
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient, { baseUrl: 'https://api.example.com' });
+      const result = await provider.resolveInscription('insc-num');
+
+      expect(result.sat).toBe(555555);
+
+      getInscriptionSpy.mockRestore();
+    });
   });
 
-  test('resolveInscription errors on missing fields', async () => {
-    (client.getInscriptionById as any).mockImplementationOnce(async () => ({ inscriptionId: 'id' } as any));
-    const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord', retries: 0 } as any);
-    await expect(p.resolveInscription('id')).rejects.toThrow('Inscription missing satoshi');
+  describe('getMetadata', () => {
+    test('calls client.getMetadata with inscriptionId', async () => {
+      const metadata = { foo: 'bar', baz: 123 };
+      const getMetadataSpy = spyOn(mockClient, 'getMetadata').mockResolvedValue(metadata);
+
+      const provider = new OrdinalsClientProvider(mockClient);
+      const result = await provider.getMetadata('test-id');
+
+      expect(getMetadataSpy).toHaveBeenCalledWith('test-id');
+      expect(result).toEqual(metadata);
+
+      getMetadataSpy.mockRestore();
+    });
+
+    test('uses default retry count of 2', async () => {
+      let attemptCount = 0;
+      const getMetadataSpy = spyOn(mockClient, 'getMetadata').mockImplementation(async () => {
+        attemptCount++;
+        if (attemptCount < 2) {
+          throw new Error('Temporary failure');
+        }
+        return { data: 'success' };
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient);
+      const result = await provider.getMetadata('test-id');
+
+      expect(attemptCount).toBe(2);
+      expect(result.data).toBe('success');
+
+      getMetadataSpy.mockRestore();
+    });
+
+    test('uses custom retry count', async () => {
+      let attemptCount = 0;
+      const getMetadataSpy = spyOn(mockClient, 'getMetadata').mockImplementation(async () => {
+        attemptCount++;
+        if (attemptCount < 3) {
+          throw new Error('Temporary failure');
+        }
+        return { data: 'success' };
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient, { retries: 4 });
+      await provider.getMetadata('test-id');
+
+      expect(attemptCount).toBe(3);
+
+      getMetadataSpy.mockRestore();
+    });
+
+    test('returns empty object', async () => {
+      const getMetadataSpy = spyOn(mockClient, 'getMetadata').mockResolvedValue({});
+
+      const provider = new OrdinalsClientProvider(mockClient);
+      const result = await provider.getMetadata('test-id');
+
+      expect(result).toEqual({});
+
+      getMetadataSpy.mockRestore();
+    });
   });
 
-  test('resolveInscription errors on invalid satoshi value', async () => {
-    (client.getInscriptionById as any).mockImplementationOnce(async (id: string) => ({ inscriptionId: id, satoshi: 'NaN', content: Buffer.alloc(0), contentType: 'text/plain', txid: 't', vout: 0 }));
-    const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord', retries: 0 } as any);
-    await expect(p.resolveInscription('id')).rejects.toThrow('Invalid satoshi value');
+  describe('estimateFee', () => {
+    test('calls client.estimateFee without blocks parameter', async () => {
+      const estimateFeeSpy = spyOn(mockClient, 'estimateFee').mockResolvedValue(5);
+
+      const provider = new OrdinalsClientProvider(mockClient);
+      const result = await provider.estimateFee();
+
+      expect(estimateFeeSpy).toHaveBeenCalledWith(undefined);
+      expect(result).toBe(5);
+
+      estimateFeeSpy.mockRestore();
+    });
+
+    test('calls client.estimateFee with blocks parameter', async () => {
+      const estimateFeeSpy = spyOn(mockClient, 'estimateFee').mockResolvedValue(10);
+
+      const provider = new OrdinalsClientProvider(mockClient);
+      const result = await provider.estimateFee(6);
+
+      expect(estimateFeeSpy).toHaveBeenCalledWith(6);
+      expect(result).toBe(10);
+
+      estimateFeeSpy.mockRestore();
+    });
+
+    test('uses default retry count of 2', async () => {
+      let attemptCount = 0;
+      const estimateFeeSpy = spyOn(mockClient, 'estimateFee').mockImplementation(async () => {
+        attemptCount++;
+        if (attemptCount < 2) {
+          throw new Error('Temporary failure');
+        }
+        return 15;
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient);
+      const result = await provider.estimateFee(3);
+
+      expect(attemptCount).toBe(2);
+      expect(result).toBe(15);
+
+      estimateFeeSpy.mockRestore();
+    });
+
+    test('uses custom retry count', async () => {
+      let attemptCount = 0;
+      const estimateFeeSpy = spyOn(mockClient, 'estimateFee').mockImplementation(async () => {
+        attemptCount++;
+        if (attemptCount < 5) {
+          throw new Error('Temporary failure');
+        }
+        return 20;
+      });
+
+      const provider = new OrdinalsClientProvider(mockClient, { retries: 6 });
+      const result = await provider.estimateFee();
+
+      expect(attemptCount).toBe(5);
+      expect(result).toBe(20);
+
+      estimateFeeSpy.mockRestore();
+    });
+
+    test('returns zero fee', async () => {
+      const estimateFeeSpy = spyOn(mockClient, 'estimateFee').mockResolvedValue(0);
+
+      const provider = new OrdinalsClientProvider(mockClient);
+      const result = await provider.estimateFee();
+
+      expect(result).toBe(0);
+
+      estimateFeeSpy.mockRestore();
+    });
   });
 
-  test('resolveInscription errors on missing contentType', async () => {
-    (client.getInscriptionById as any).mockImplementationOnce(async (id: string) => ({ inscriptionId: id, satoshi: '1', content: Buffer.alloc(0), txid: 't', vout: 0 }));
-    const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord', retries: 0 } as any);
-    await expect(p.resolveInscription('id')).rejects.toThrow('Inscription missing contentType');
-  });
+  describe('retry behavior across methods', () => {
+    test('all methods use isRetriable that always returns true', async () => {
+      // Test that errors are retried regardless of type
+      let attemptCount = 0;
+      const getSatInfoSpy = spyOn(mockClient, 'getSatInfo').mockImplementation(async () => {
+        attemptCount++;
+        if (attemptCount < 2) {
+          throw new Error('Any error type');
+        }
+        return { inscription_ids: [] };
+      });
 
-  test('getMetadata proxies with retry', async () => {
-    const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord' });
-    const v = await p.getMetadata('id');
-    expect(v).toEqual({ ok: true });
-  });
+      const provider = new OrdinalsClientProvider(mockClient, { retries: 3 });
+      await provider.getSatInfo('12345');
 
-  test('getMetadata retries on first failure to cover isRetriable', async () => {
-    (client.getMetadata as any).mockImplementationOnce(async () => { throw new Error('fail meta'); });
-    const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord', retries: 1 });
-    const v = await p.getMetadata('id');
-    expect(v).toEqual({ ok: true });
-  });
+      expect(attemptCount).toBe(2);
 
-  test('estimateFee proxies with retry', async () => {
-    const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord' });
-    const v = await p.estimateFee(2);
-    expect(v).toBe(123);
-  });
-
-  test('estimateFee retries on first failure to cover isRetriable', async () => {
-    (client.estimateFee as any).mockImplementationOnce(async () => { throw new Error('fee fail'); });
-    const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord', retries: 1 });
-    const v = await p.estimateFee(2);
-    expect(v).toBe(123);
-  });
-
-  test('retries default when options.retries not provided', async () => {
-    const p = new OrdinalsClientProvider(client as any);
-    const v = await p.getSatInfo('1');
-    expect(v.inscription_ids).toEqual(['a']);
-  });
-
-  test('resolveInscription constructs content_url from baseUrl as-is', async () => {
-    const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord//' });
-    const v = await p.resolveInscription('x');
-    expect(v.content_url).toBe('http://ord//content/x');
-  });
-})
-
-/** Inlined from OrdinalsClientProvider.more-branches.part.ts */
-
-describe('OrdinalsClientProvider extra branches', () => {
-  test('resolveInscription throws when client returns null', async () => {
-    const client: OrdinalsClient = new OrdinalsClient('http://ord', 'regtest') as any;
-    (client.getInscriptionById as any) = mock(async () => null as any);
-    const p = new OrdinalsClientProvider(client, { baseUrl: 'http://ord' });
-    await expect(p.resolveInscription('missing')).rejects.toThrow('Inscription not found');
+      getSatInfoSpy.mockRestore();
+    });
   });
 });

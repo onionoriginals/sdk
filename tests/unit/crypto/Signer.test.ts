@@ -309,32 +309,26 @@ describe('ES256Signer extra branch coverage', () => {
 
 
 /** Inlined from Signer.env.false-branch.part.ts */
-describe('Signer module env false branches (no injection when already present)', () => {
-  test('does not inject when utils already provide functions', async () => {
-    // Bun doesn't support jest.resetModules() and jest.doMock()
-    // This test is skipped for Bun compatibility
-    // The actual module initialization code handles this case
-    expect(true).toBe(true);
-  });
-});
-
-
-
-
-/** Inlined from Signer.env.part.ts */
-describe('Signer module utils injection', () => {
-  test('injects hmacSha256Sync when missing', async () => {
-    // Bun doesn't support jest.resetModules() and deleting readonly properties
-    // This test is skipped for Bun compatibility
-    // The actual module initialization code handles this case
-    expect(true).toBe(true);
+describe('Signer module utils verification', () => {
+  test('verifies secp256k1 utils.hmacSha256Sync exists and is callable', () => {
+    // After module initialization, the utility function should exist
+    const sAny = secp256k1 as any;
+    expect(sAny.utils).toBeDefined();
+    expect(typeof sAny.utils.hmacSha256Sync).toBe('function');
+    // Verify it's callable without error
+    const result = sAny.utils.hmacSha256Sync(new Uint8Array(32), new Uint8Array(10));
+    expect(result).toBeInstanceOf(Uint8Array);
   });
 
-  test('injects ed25519 sha512Sync when missing', async () => {
-    // Bun doesn't support jest.resetModules() and deleting readonly properties
-    // This test is skipped for Bun compatibility
-    // The actual module initialization code handles this case
-    expect(true).toBe(true);
+  test('verifies ed25519 utils.sha512Sync exists and is callable', () => {
+    // After module initialization, the utility function should exist
+    const eAny = ed25519 as any;
+    expect(eAny.utils).toBeDefined();
+    expect(typeof eAny.utils.sha512Sync).toBe('function');
+    // Verify it's callable without error
+    const result = eAny.utils.sha512Sync(new Uint8Array(10));
+    expect(result).toBeInstanceOf(Uint8Array);
+    expect(result.length).toBe(64); // SHA-512 produces 64 bytes
   });
 });
 
@@ -353,5 +347,96 @@ describe('ES256KSigner branch: sign returns direct Uint8Array', () => {
     expect(Buffer.isBuffer(sig)).toBe(true);
     expect(sig).toEqual(Buffer.from(bytes));
     spy.mockRestore();
+  });
+});
+
+describe('Signer error handling with non-Error objects', () => {
+  describe('ES256KSigner', () => {
+    test('sign handles string error from decodePrivateKey', async () => {
+      const signer = new ES256KSigner();
+      const spy = spyOn(multikey, 'decodePrivateKey').mockImplementation(() => {
+        throw 'string error';
+      });
+      await expect(signer.sign(Buffer.from('test'), 'zinvalid')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers. string error');
+      spy.mockRestore();
+    });
+
+    test('verify handles number error from decodePublicKey', async () => {
+      const signer = new ES256KSigner();
+      const spy = spyOn(multikey, 'decodePublicKey').mockImplementation(() => {
+        throw 42;
+      });
+      await expect(signer.verify(Buffer.from('test'), Buffer.alloc(64), 'zinvalid')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers. 42');
+      spy.mockRestore();
+    });
+
+    test('sign handles null error from decodePrivateKey', async () => {
+      const signer = new ES256KSigner();
+      const spy = spyOn(multikey, 'decodePrivateKey').mockImplementation(() => {
+        throw null;
+      });
+      await expect(signer.sign(Buffer.from('test'), 'zinvalid')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers. null');
+      spy.mockRestore();
+    });
+  });
+
+  describe('ES256Signer', () => {
+    test('sign handles object error from decodePrivateKey', async () => {
+      const signer = new ES256Signer();
+      const spy = spyOn(multikey, 'decodePrivateKey').mockImplementation(() => {
+        throw { code: 'CUSTOM_ERROR', details: 'something' };
+      });
+      await expect(signer.sign(Buffer.from('test'), 'zinvalid')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers. [object Object]');
+      spy.mockRestore();
+    });
+
+    test('verify handles undefined error from decodePublicKey', async () => {
+      const signer = new ES256Signer();
+      const spy = spyOn(multikey, 'decodePublicKey').mockImplementation(() => {
+        throw undefined;
+      });
+      await expect(signer.verify(Buffer.from('test'), Buffer.alloc(64), 'zinvalid')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers. undefined');
+      spy.mockRestore();
+    });
+  });
+
+  describe('Ed25519Signer', () => {
+    test('sign handles string error from decodePrivateKey', async () => {
+      const signer = new Ed25519Signer();
+      const spy = spyOn(multikey, 'decodePrivateKey').mockImplementation(() => {
+        throw 'decode failed';
+      });
+      await expect(signer.sign(Buffer.from('test'), 'zinvalid')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers. decode failed');
+      spy.mockRestore();
+    });
+
+    test('verify handles boolean error from decodePublicKey', async () => {
+      const signer = new Ed25519Signer();
+      const spy = spyOn(multikey, 'decodePublicKey').mockImplementation(() => {
+        throw false;
+      });
+      await expect(signer.verify(Buffer.from('test'), Buffer.alloc(64), 'zinvalid')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers. false');
+      spy.mockRestore();
+    });
+  });
+
+  describe('Bls12381G2Signer', () => {
+    test('sign handles array error from decodePrivateKey', async () => {
+      const signer = new Bls12381G2Signer();
+      const spy = spyOn(multikey, 'decodePrivateKey').mockImplementation(() => {
+        throw ['error', 'array'];
+      });
+      await expect(signer.sign(Buffer.from('test'), 'zinvalid')).rejects.toThrow('Invalid multibase key format. Keys must use multicodec headers. error,array');
+      spy.mockRestore();
+    });
+
+    test('verify handles symbol error from decodePublicKey', async () => {
+      const signer = new Bls12381G2Signer();
+      const spy = spyOn(multikey, 'decodePublicKey').mockImplementation(() => {
+        throw Symbol('error');
+      });
+      await expect(signer.verify(Buffer.from('test'), Buffer.alloc(96), 'zinvalid')).rejects.toThrow(/Invalid multibase key format. Keys must use multicodec headers. Symbol\(error\)/);
+      spy.mockRestore();
+    });
   });
 });
