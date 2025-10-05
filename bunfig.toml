@@ -4,5 +4,10 @@ coveragePathIgnorePatterns = [
   "tests/mocks/**",
   "tests/setup.bun.ts",
   "dist/**",
-  "apps/**"
+  "apps/**",
+  "src/types/**",
+  "src/examples/**",
+  "src/index.ts",
+  "src/adapters/index.ts",
+  "src/storage/index.ts"
 ]

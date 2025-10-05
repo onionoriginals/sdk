@@ -1,4 +1,3 @@
-/* istanbul ignore file */
 import type { OrdinalsProvider } from '../types';
 
 interface HttpProviderOptions {
