@@ -7,6 +7,7 @@ import {
 import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation';
 import { CredentialManager } from '../vc/CredentialManager';
 import { DIDManager } from '../did/DIDManager';
+import { ProvenanceQuery, Migration, Transfer } from './ProvenanceQuery';
 
 export interface ProvenanceChain {
   createdAt: string;
@@ -108,6 +109,76 @@ export class OriginalsAsset {
       transactionId
     });
     this.provenance.txid = transactionId;
+  }
+
+  /**
+   * Query provenance with fluent API
+   */
+  queryProvenance(): ProvenanceQuery {
+    return new ProvenanceQuery(this.provenance);
+  }
+
+  /**
+   * Get all migrations to a specific layer
+   */
+  getMigrationsToLayer(layer: LayerType): Migration[] {
+    return this.provenance.migrations.filter(m => m.to === layer);
+  }
+
+  /**
+   * Get all transfers from an address
+   */
+  getTransfersFrom(address: string): Transfer[] {
+    return this.provenance.transfers.filter(t => t.from === address);
+  }
+
+  /**
+   * Get all transfers to an address
+   */
+  getTransfersTo(address: string): Transfer[] {
+    return this.provenance.transfers.filter(t => t.to === address);
+  }
+
+  /**
+   * Get provenance summary
+   */
+  getProvenanceSummary(): {
+    created: string;
+    creator: string;
+    currentLayer: LayerType;
+    migrationCount: number;
+    transferCount: number;
+    lastActivity: string;
+  } {
+    const lastMigration = this.provenance.migrations[this.provenance.migrations.length - 1];
+    const lastTransfer = this.provenance.transfers[this.provenance.transfers.length - 1];
+    
+    return {
+      created: this.provenance.createdAt,
+      creator: this.id,
+      currentLayer: this.currentLayer,
+      migrationCount: this.provenance.migrations.length,
+      transferCount: this.provenance.transfers.length,
+      lastActivity: lastTransfer?.timestamp || lastMigration?.timestamp || this.provenance.createdAt
+    };
+  }
+
+  /**
+   * Find migration or transfer by transaction ID
+   */
+  findByTransactionId(txId: string): Migration | Transfer | null {
+    const migration = this.provenance.migrations.find(m => m.transactionId === txId);
+    if (migration) return migration;
+    
+    const transfer = this.provenance.transfers.find(t => t.transactionId === txId);
+    return transfer || null;
+  }
+
+  /**
+   * Find migration by inscription ID
+   */
+  findByInscriptionId(inscriptionId: string): Migration | null {
+    return this.provenance.migrations.find(m => m.inscriptionId === inscriptionId) || null;
   }
 
   async verify(deps?: {
