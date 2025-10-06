@@ -234,8 +234,8 @@ export class LifecycleManager {
       (res as any).url = url;
       
       // Emit resource published event
-      await (asset as any).eventEmitter.emit({
-        type: 'resource:published',
+      const resourceEvent = {
+        type: 'resource:published' as const,
         timestamp: new Date().toISOString(),
         asset: {
           id: asset.id
@@ -247,7 +247,13 @@ export class LifecycleManager {
           hash: res.hash
         },
         domain
-      });
+      };
+      
+      // Emit from both LifecycleManager and asset emitters
+      await Promise.all([
+        this.eventEmitter.emit(resourceEvent),
+        (asset as any).eventEmitter.emit(resourceEvent)
+      ]);
     }
 
     // New resource identifier for the web representation; the asset DID remains the same.
@@ -297,8 +303,8 @@ export class LifecycleManager {
       (asset as any).credentials.push(signed);
       
       // Emit credential issued event
-      await (asset as any).eventEmitter.emit({
-        type: 'credential:issued',
+      const credentialEvent = {
+        type: 'credential:issued' as const,
         timestamp: new Date().toISOString(),
         asset: {
           id: asset.id
@@ -307,7 +313,13 @@ export class LifecycleManager {
           type: signed.type,
           issuer: signed.issuer
         }
-      });
+      };
+      
+      // Emit from both LifecycleManager and asset emitters
+      await Promise.all([
+        this.eventEmitter.emit(credentialEvent),
+        (asset as any).eventEmitter.emit(credentialEvent)
+      ]);
     } catch (err) {
       // Best-effort: if issuance fails, continue without blocking publish
       // Log the error for debugging purposes

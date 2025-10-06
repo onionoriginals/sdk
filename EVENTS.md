@@ -29,8 +29,23 @@ The event system allows you to subscribe to asset lifecycle events and react to 
 ✅ **Type-Safe**: Full TypeScript support with specific event types  
 ✅ **Async Support**: Handlers can be sync or async  
 ✅ **Error Isolation**: One failing handler doesn't affect others  
-✅ **Performance**: <1ms overhead per event  
+✅ **Performance**: <5ms overhead per event  
 ✅ **Flexible**: Subscribe, unsubscribe, or use once  
+✅ **Dual-Level**: Subscribe at LifecycleManager or asset level  
+
+### Event Sources
+
+Events can be subscribed to at two levels:
+
+1. **LifecycleManager** (`sdk.lifecycle`) - Global events for all operations
+   - Best for monitoring, logging, and cross-asset analytics
+   - `asset:created`, `resource:published`, `credential:issued` events
+
+2. **OriginalsAsset** (`asset`) - Events for specific asset instances
+   - Best for tracking individual asset state changes
+   - All event types available, including `asset:migrated` and `asset:transferred`
+
+**Important**: The `asset:created` event is deferred to the next microtask, allowing you to subscribe immediately after calling `createAsset()`.
 
 ---
 
@@ -54,12 +69,29 @@ Emitted when a new asset is created.
 }
 ```
 
-**Example**:
+**Example (LifecycleManager level)**:
 ```typescript
-asset.on('asset:created', (event) => {
+// Subscribe to all asset creations
+sdk.lifecycle.on('asset:created', (event) => {
   console.log('New asset created:', event.asset.id);
   console.log('Resources:', event.asset.resourceCount);
 });
+
+const asset = await sdk.lifecycle.createAsset(resources);
+// Event will fire on the next microtask
+```
+
+**Example (Asset level)**:
+```typescript
+const asset = await sdk.lifecycle.createAsset(resources);
+
+// Subscribe immediately after creation
+asset.on('asset:created', (event) => {
+  console.log('Asset created:', event.asset.id);
+});
+
+// Event will fire on the next microtask, so your handler will receive it
+await new Promise(resolve => setTimeout(resolve, 0)); // Wait for microtask
 ```
 
 ---
