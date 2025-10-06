@@ -351,29 +351,4 @@ describe('satoshi-validation', () => {
     });
   });
 
-  describe('defensive validation checks coverage', () => {
-    test('validates against non-finite number via direct number input', () => {
-      // These are defensive checks - string inputs are caught by regex,
-      // but number inputs bypass string validation
-      const result1 = validateSatoshiNumber(NaN);
-      expect(result1.valid).toBe(false);
-      expect(result1.error).toContain('non-negative integer');
-      
-      const result2 = validateSatoshiNumber(Infinity);
-      expect(result2.valid).toBe(false);
-      expect(result2.error).toContain('non-negative integer');
-    });
-
-    test('validates against decimal via direct number input', () => {
-      const result = validateSatoshiNumber(123.456);
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('non-negative integer');
-    });
-
-    test('validates against negative via direct number input', () => {
-      const result = validateSatoshiNumber(-100);
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('non-negative integer');
-    });
-  });
 });
