@@ -7,6 +7,8 @@ import {
 import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation';
 import { CredentialManager } from '../vc/CredentialManager';
 import { DIDManager } from '../did/DIDManager';
+import { EventEmitter } from '../events/EventEmitter';
+import type { EventHandler, EventTypeMap } from '../events/types';
 
 export interface ProvenanceChain {
   createdAt: string;
@@ -39,6 +41,7 @@ export class OriginalsAsset {
   public currentLayer: LayerType;
   public bindings?: Record<string, string>;
   private provenance: ProvenanceChain;
+  private eventEmitter: EventEmitter;
 
   constructor(
     resources: AssetResource[],
@@ -56,6 +59,7 @@ export class OriginalsAsset {
       migrations: [],
       transfers: []
     };
+    this.eventEmitter = new EventEmitter();
   }
 
   migrate(
