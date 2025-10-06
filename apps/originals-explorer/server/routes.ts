@@ -340,6 +340,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Helper function to validate URLs against SSRF attacks
+  const isUrlSafe = (urlString: string): { safe: boolean; error?: string } => {
+    try {
+      const url = new URL(urlString);
+      
+      // Only allow http and https schemes
+      if (!['http:', 'https:'].includes(url.protocol)) {
+        return { safe: false, error: 'Only HTTP and HTTPS URLs are allowed' };
+      }
+      
+      // Block localhost and loopback addresses
+      const hostname = url.hostname.toLowerCase();
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+        return { safe: false, error: 'Localhost URLs are not allowed' };
+      }
+      
+      // Block private IP ranges (simplified check)
+      // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 (link-local)
+      const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+      const ipMatch = hostname.match(ipv4Regex);
+      if (ipMatch) {
+        const [, a, b, c, d] = ipMatch.map(Number);
+        
+        // Check for private IP ranges
+        if (a === 10 || // 10.0.0.0/8
+            (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
+            (a === 192 && b === 168) || // 192.168.0.0/16
+            (a === 169 && b === 254)) { // 169.254.0.0/16 (cloud metadata)
+          return { safe: false, error: 'Private IP addresses are not allowed' };
+        }
+      }
+      
+      // Block common localhost variations
+      if (hostname.endsWith('.local') || hostname.endsWith('.localhost')) {
+        return { safe: false, error: 'Local domain names are not allowed' };
+      }
+      
+      return { safe: true };
+    } catch (error) {
+      return { safe: false, error: 'Invalid URL format' };
+    }
+  };
+
   // Create asset with DID integration (uses Originals SDK)
   app.post("/api/assets/create-with-did", authenticateUser, mediaUpload.single('mediaFile'), async (req, res) => {
     try {
@@ -379,21 +422,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const base64Data = fileBuffer.toString('base64');
         actualMediaUrl = `data:${contentType};base64,${base64Data}`;
       } else if (mediaUrl) {
-        // URL provided - fetch and hash
+        // URL provided - validate and fetch
+        // Validate URL to prevent SSRF attacks
+        const urlValidation = isUrlSafe(mediaUrl);
+        if (!urlValidation.safe) {
+          return res.status(400).json({ 
+            error: "Invalid or unsafe URL",
+            details: urlValidation.error 
+          });
+        }
+        
         try {
-          const response = await fetch(mediaUrl);
+          // Fetch with timeout and size limit to prevent DoS
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+          
+          const response = await fetch(mediaUrl, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Originals-SDK/1.0' // Identify ourselves
+            }
+          });
+          
+          clearTimeout(timeoutId);
+          
           if (!response.ok) {
             return res.status(400).json({ 
               error: `Failed to fetch media from URL: ${response.statusText}` 
             });
           }
           
-          const arrayBuffer = await response.arrayBuffer();
-          fileBuffer = Buffer.from(arrayBuffer);
+          // Check content length before downloading
+          const contentLength = response.headers.get('content-length');
+          const maxSize = 10 * 1024 * 1024; // 10MB limit (same as file upload)
+          
+          if (contentLength && parseInt(contentLength) > maxSize) {
+            return res.status(413).json({ 
+              error: "Media file too large",
+              details: `Maximum size is 10MB, URL content is ${Math.round(parseInt(contentLength) / 1024 / 1024)}MB` 
+            });
+          }
+          
+          // Stream the response with size limit
+          const chunks: Buffer[] = [];
+          let downloadedSize = 0;
+          
+          if (response.body) {
+            const reader = response.body.getReader();
+            
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                downloadedSize += value.length;
+                if (downloadedSize > maxSize) {
+                  reader.cancel();
+                  return res.status(413).json({ 
+                    error: "Media file too large",
+                    details: "Maximum size is 10MB" 
+                  });
+                }
+                
+                chunks.push(Buffer.from(value));
+              }
+            } finally {
+              reader.releaseLock();
+            }
+          }
+          
+          fileBuffer = Buffer.concat(chunks);
           contentHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
           contentType = response.headers.get('content-type') || 'application/octet-stream';
           actualMediaUrl = mediaUrl;
         } catch (fetchError: any) {
+          if (fetchError.name === 'AbortError') {
+            return res.status(408).json({ 
+              error: "Request timeout",
+              details: "Failed to fetch media within 30 seconds" 
+            });
+          }
           return res.status(400).json({ 
             error: "Failed to fetch media from URL",
             details: fetchError.message 
