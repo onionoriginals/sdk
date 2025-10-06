@@ -350,4 +350,5 @@ describe('satoshi-validation', () => {
       expect(result.error).toBeDefined();
     });
   });
+
 });
