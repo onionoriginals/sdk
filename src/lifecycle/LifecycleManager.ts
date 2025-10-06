@@ -250,10 +250,17 @@ export class LifecycleManager {
       };
       
       // Emit from both LifecycleManager and asset emitters
-      await Promise.all([
-        this.eventEmitter.emit(resourceEvent),
-        (asset as any).eventEmitter.emit(resourceEvent)
-      ]);
+      try {
+        await Promise.all([
+          this.eventEmitter.emit(resourceEvent),
+          asset._internalEmit(resourceEvent)
+        ]);
+      } catch (err) {
+        if (this.config.enableLogging) {
+          console.error('Event handler error during resource:published:', err);
+        }
+        // Continue execution despite handler errors
+      }
     }
 
     // New resource identifier for the web representation; the asset DID remains the same.
