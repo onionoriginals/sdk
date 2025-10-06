@@ -7,6 +7,8 @@ import {
 import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation';
 import { CredentialManager } from '../vc/CredentialManager';
 import { DIDManager } from '../did/DIDManager';
+import { EventEmitter } from '../events/EventEmitter';
+import type { EventHandler, EventTypeMap } from '../events/types';
 
 export interface ProvenanceChain {
   createdAt: string;
@@ -39,6 +41,7 @@ export class OriginalsAsset {
   public currentLayer: LayerType;
   public bindings?: Record<string, string>;
   private provenance: ProvenanceChain;
+  private eventEmitter: EventEmitter;
 
   constructor(
     resources: AssetResource[],
@@ -56,9 +59,10 @@ export class OriginalsAsset {
       migrations: [],
       transfers: []
     };
+    this.eventEmitter = new EventEmitter();
   }
 
-  migrate(
+  async migrate(
     toLayer: LayerType,
     details?: {
       transactionId?: string;
@@ -68,7 +72,7 @@ export class OriginalsAsset {
       revealTxId?: string;
       feeRate?: number;
     }
-  ): void {
+  ): Promise<void> {
     // Handle migration between layers
     const validTransitions: Record<LayerType, LayerType[]> = {
       'did:peer': ['did:webvh', 'did:btco'],
@@ -79,8 +83,11 @@ export class OriginalsAsset {
     if (!validTransitions[this.currentLayer].includes(toLayer)) {
       throw new Error(`Invalid migration from ${this.currentLayer} to ${toLayer}`);
     }
+    
+    const fromLayer = this.currentLayer;
+    
     this.provenance.migrations.push({
-      from: this.currentLayer,
+      from: fromLayer,
       to: toLayer,
       timestamp: new Date().toISOString(),
       transactionId: details?.transactionId,
@@ -94,13 +101,25 @@ export class OriginalsAsset {
       this.provenance.txid = details.transactionId;
     }
     this.currentLayer = toLayer;
+    
+    // Emit migration event and await handlers
+    await this.eventEmitter.emit({
+      type: 'asset:migrated',
+      timestamp: new Date().toISOString(),
+      asset: {
+        id: this.id,
+        fromLayer,
+        toLayer
+      },
+      details
+    });
   }
 
   getProvenance(): ProvenanceChain {
     return this.provenance;
   }
 
-  recordTransfer(from: string, to: string, transactionId: string): void {
+  async recordTransfer(from: string, to: string, transactionId: string): Promise<void> {
     this.provenance.transfers.push({
       from,
       to,
@@ -108,6 +127,19 @@ export class OriginalsAsset {
       transactionId
     });
     this.provenance.txid = transactionId;
+    
+    // Emit transfer event and await handlers
+    await this.eventEmitter.emit({
+      type: 'asset:transferred',
+      timestamp: new Date().toISOString(),
+      asset: {
+        id: this.id,
+        layer: this.currentLayer
+      },
+      from,
+      to,
+      transactionId
+    });
   }
 
   async verify(deps?: {
@@ -177,6 +209,58 @@ export class OriginalsAsset {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Subscribe to an event
+   * 
+   * @param eventType - The type of event to listen for
+   * @param handler - The handler function to call when the event is emitted
+   * @returns A function to unsubscribe the handler
+   */
+  on<K extends keyof EventTypeMap>(
+    eventType: K,
+    handler: EventHandler<EventTypeMap[K]>
+  ): () => void {
+    return this.eventEmitter.on(eventType, handler);
+  }
+
+  /**
+   * Subscribe to an event for a single emission
+   * 
+   * @param eventType - The type of event to listen for
+   * @param handler - The handler function to call when the event is emitted (only once)
+   * @returns A function to unsubscribe the handler
+   */
+  once<K extends keyof EventTypeMap>(
+    eventType: K,
+    handler: EventHandler<EventTypeMap[K]>
+  ): () => void {
+    return this.eventEmitter.once(eventType, handler);
+  }
+
+  /**
+   * Unsubscribe from an event
+   * 
+   * @param eventType - The type of event to stop listening for
+   * @param handler - The handler function to remove
+   */
+  off<K extends keyof EventTypeMap>(
+    eventType: K,
+    handler: EventHandler<EventTypeMap[K]>
+  ): void {
+    this.eventEmitter.off(eventType, handler);
+  }
+
+  /**
+   * Internal method for LifecycleManager to emit events
+   * This allows type-safe event emission without exposing the internal EventEmitter
+   * 
+   * @internal
+   * @param event - The event to emit
+   */
+  _internalEmit<K extends keyof EventTypeMap>(event: EventTypeMap[K]): Promise<void> {
+    return this.eventEmitter.emit(event);
   }
 
   private determineCurrentLayer(didId: string): LayerType {

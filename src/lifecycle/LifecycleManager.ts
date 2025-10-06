@@ -13,15 +13,50 @@ import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding';
 import { KeyManager } from '../did/KeyManager';
 import { validateBitcoinAddress } from '../utils/bitcoin-address';
 import { multikey } from '../crypto/Multikey';
+import { EventEmitter } from '../events/EventEmitter';
+import type { EventHandler, EventTypeMap } from '../events/types';
 
 export class LifecycleManager {
+  private eventEmitter: EventEmitter;
+
   constructor(
     private config: OriginalsConfig,
     private didManager: DIDManager,
     private credentialManager: CredentialManager,
     private deps?: { bitcoinManager?: BitcoinManager },
     private keyStore?: KeyStore
-  ) {}
+  ) {
+    this.eventEmitter = new EventEmitter();
+  }
+
+  /**
+   * Subscribe to a lifecycle event
+   * @param eventType - The type of event to subscribe to
+   * @param handler - The handler function to call when the event is emitted
+   * @returns A function to unsubscribe from the event
+   */
+  on<K extends keyof EventTypeMap>(eventType: K, handler: EventHandler<EventTypeMap[K]>): () => void {
+    return this.eventEmitter.on(eventType, handler);
+  }
+
+  /**
+   * Subscribe to a lifecycle event once
+   * @param eventType - The type of event to subscribe to
+   * @param handler - The handler function to call when the event is emitted (will only fire once)
+   * @returns A function to unsubscribe from the event
+   */
+  once<K extends keyof EventTypeMap>(eventType: K, handler: EventHandler<EventTypeMap[K]>): () => void {
+    return this.eventEmitter.once(eventType, handler);
+  }
+
+  /**
+   * Unsubscribe from a lifecycle event
+   * @param eventType - The type of event to unsubscribe from
+   * @param handler - The handler function to remove
+   */
+  off<K extends keyof EventTypeMap>(eventType: K, handler: EventHandler<EventTypeMap[K]>): void {
+    this.eventEmitter.off(eventType, handler);
+  }
 
   async registerKey(verificationMethodId: string, privateKey: string): Promise<void> {
     if (!this.keyStore) {
@@ -99,11 +134,51 @@ export class LifecycleManager {
         await this.keyStore.setPrivateKey(verificationMethodId, keyPair.privateKey);
       }
       
-      return new OriginalsAsset(resources, didDoc, []);
+      const asset = new OriginalsAsset(resources, didDoc, []);
+      
+      // Defer asset:created event emission to next microtask so callers can subscribe first
+      queueMicrotask(() => {
+        const event = {
+          type: 'asset:created' as const,
+          timestamp: new Date().toISOString(),
+          asset: {
+            id: asset.id,
+            layer: asset.currentLayer,
+            resourceCount: resources.length,
+            createdAt: asset.getProvenance().createdAt
+          }
+        };
+        
+        // Emit from both LifecycleManager and asset emitters
+        this.eventEmitter.emit(event);
+        (asset as any).eventEmitter.emit(event);
+      });
+      
+      return asset;
     } else {
       // No keyStore, just create the DID document
       const didDoc = await this.didManager.createDIDPeer(resources);
-      return new OriginalsAsset(resources, didDoc, []);
+      const asset = new OriginalsAsset(resources, didDoc, []);
+      
+      // Defer asset:created event emission to next microtask so callers can subscribe first
+      queueMicrotask(() => {
+        const event = {
+          type: 'asset:created' as const,
+          timestamp: new Date().toISOString(),
+          asset: {
+            id: asset.id,
+            layer: asset.currentLayer,
+            resourceCount: resources.length,
+            createdAt: asset.getProvenance().createdAt
+          }
+        };
+        
+        // Emit from both LifecycleManager and asset emitters
+        this.eventEmitter.emit(event);
+        (asset as any).eventEmitter.emit(event);
+      });
+      
+      return asset;
     }
   }
 
@@ -157,11 +232,40 @@ export class LifecycleManager {
 
       // Non-breaking: preserve id/hash/contentType, add url
       (res as any).url = url;
+      
+      // Emit resource published event
+      const resourceEvent = {
+        type: 'resource:published' as const,
+        timestamp: new Date().toISOString(),
+        asset: {
+          id: asset.id
+        },
+        resource: {
+          id: res.id,
+          url,
+          contentType: res.contentType,
+          hash: res.hash
+        },
+        domain
+      };
+      
+      // Emit from both LifecycleManager and asset emitters
+      try {
+        await Promise.all([
+          this.eventEmitter.emit(resourceEvent),
+          asset._internalEmit(resourceEvent)
+        ]);
+      } catch (err) {
+        if (this.config.enableLogging) {
+          console.error('Event handler error during resource:published:', err);
+        }
+        // Continue execution despite handler errors
+      }
     }
 
     // New resource identifier for the web representation; the asset DID remains the same.
     const webDid = `did:webvh:${domain}:${slug}`;
-    asset.migrate('did:webvh');
+    await asset.migrate('did:webvh');
     (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:webvh': webDid });
 
     // Issue a publication credential for the migration
@@ -204,6 +308,24 @@ export class LifecycleManager {
 
       const signed = await this.credentialManager.signCredential(unsigned, privateKey, verificationMethod);
       (asset as any).credentials.push(signed);
+
+      const credentialEvent = {
+        type: 'credential:issued' as const,
+        timestamp: new Date().toISOString(),
+        asset: {
+          id: asset.id
+        },
+        credential: {
+          type: signed.type,
+          issuer: typeof signed.issuer === 'string' ? signed.issuer : signed.issuer.id
+        }
+      };
+
+      // Emit from both LifecycleManager and asset emitters
+      await Promise.all([
+        this.eventEmitter.emit(credentialEvent),
+        asset._internalEmit(credentialEvent)
+      ]);
     } catch (err) {
       // Best-effort: if issuance fails, continue without blocking publish
       // Log the error for debugging purposes
@@ -249,7 +371,7 @@ export class LifecycleManager {
     const commitTxId = inscription.commitTxId;
     const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : feeRate;
 
-    asset.migrate('did:btco', {
+    await asset.migrate('did:btco', {
       transactionId: revealTxId,
       inscriptionId: inscription.inscriptionId,
       satoshi: inscription.satoshi,
@@ -303,7 +425,7 @@ export class LifecycleManager {
       vout: 0
     };
     const tx = await bm.transferInscription(inscription as any, newOwner);
-    asset.recordTransfer(asset.id, newOwner, tx.txid);
+    await asset.recordTransfer(asset.id, newOwner, tx.txid);
     return tx;
   }
 }
