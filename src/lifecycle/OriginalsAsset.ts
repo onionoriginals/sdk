@@ -76,15 +76,32 @@ export class OriginalsAsset {
     this.versionManager = new ResourceVersionManager();
     
     // Initialize version manager with existing resources
+    // Group resources by ID and sort each group by version to handle unsorted persisted data
+    const resourcesByIdMap = new Map<string, AssetResource[]>();
     for (const resource of resources) {
-      const version = resource.version || 1;
-      const previousVersionHash = resource.previousVersionHash;
-      this.versionManager.addVersion(
-        resource.id,
-        resource.hash,
-        resource.contentType,
-        previousVersionHash
-      );
+      const existing = resourcesByIdMap.get(resource.id) || [];
+      existing.push(resource);
+      resourcesByIdMap.set(resource.id, existing);
+    }
+    
+    // Process each resource ID's versions in sorted order
+    for (const [resourceId, resourceVersions] of resourcesByIdMap.entries()) {
+      // Sort by version number (ascending)
+      const sorted = resourceVersions.sort((a, b) => {
+        const versionA = a.version || 1;
+        const versionB = b.version || 1;
+        return versionA - versionB;
+      });
+      
+      // Add versions in correct order to version manager
+      for (const resource of sorted) {
+        this.versionManager.addVersion(
+          resource.id,
+          resource.hash,
+          resource.contentType,
+          resource.previousVersionHash
+        );
+      }
     }
   }
 

@@ -482,6 +482,133 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 });
 
+describe('OriginalsAsset - Unsorted Resource Loading', () => {
+  test('handles unsorted resources correctly when loading persisted data', () => {
+    const hash1 = hashResource(Buffer.from('v1', 'utf-8'));
+    const hash2 = hashResource(Buffer.from('v2', 'utf-8'));
+    const hash3 = hashResource(Buffer.from('v3', 'utf-8'));
+    
+    // Simulate persisted resources loaded in wrong order [v3, v1, v2]
+    const unsortedResources: AssetResource[] = [
+      {
+        id: 'res1',
+        type: 'text',
+        content: 'v3',
+        contentType: 'text/plain',
+        hash: hash3,
+        version: 3,
+        previousVersionHash: hash2,
+        createdAt: '2025-01-03T00:00:00Z'
+      },
+      {
+        id: 'res1',
+        type: 'text',
+        content: 'v1',
+        contentType: 'text/plain',
+        hash: hash1,
+        version: 1,
+        createdAt: '2025-01-01T00:00:00Z'
+      },
+      {
+        id: 'res1',
+        type: 'text',
+        content: 'v2',
+        contentType: 'text/plain',
+        hash: hash2,
+        version: 2,
+        previousVersionHash: hash1,
+        createdAt: '2025-01-02T00:00:00Z'
+      }
+    ];
+    
+    const asset = new OriginalsAsset(unsortedResources, buildDid('did:peer:xyz'), emptyCreds);
+    
+    // Verify version history is correct despite unsorted input
+    const history = asset.getResourceHistory('res1');
+    expect(history).not.toBeNull();
+    expect(history!.versions.length).toBe(3);
+    
+    // Check versions are in correct order
+    expect(history!.versions[0].version).toBe(1);
+    expect(history!.versions[0].hash).toBe(hash1);
+    expect(history!.versions[0].previousVersionHash).toBeUndefined();
+    
+    expect(history!.versions[1].version).toBe(2);
+    expect(history!.versions[1].hash).toBe(hash2);
+    expect(history!.versions[1].previousVersionHash).toBe(hash1);
+    
+    expect(history!.versions[2].version).toBe(3);
+    expect(history!.versions[2].hash).toBe(hash3);
+    expect(history!.versions[2].previousVersionHash).toBe(hash2);
+    
+    // Current version should be v3
+    expect(history!.currentVersion.version).toBe(3);
+    expect(history!.currentVersion.hash).toBe(hash3);
+  });
+
+  test('handles multiple resources with unsorted versions', () => {
+    const res1_v1_hash = hashResource(Buffer.from('res1-v1', 'utf-8'));
+    const res1_v2_hash = hashResource(Buffer.from('res1-v2', 'utf-8'));
+    const res2_v1_hash = hashResource(Buffer.from('res2-v1', 'utf-8'));
+    const res2_v2_hash = hashResource(Buffer.from('res2-v2', 'utf-8'));
+    
+    // Multiple resources, each with unsorted versions
+    const resources: AssetResource[] = [
+      // res2 v2 (out of order)
+      {
+        id: 'res2',
+        type: 'text',
+        content: 'res2-v2',
+        contentType: 'text/plain',
+        hash: res2_v2_hash,
+        version: 2,
+        previousVersionHash: res2_v1_hash
+      },
+      // res1 v2 (out of order)
+      {
+        id: 'res1',
+        type: 'text',
+        content: 'res1-v2',
+        contentType: 'text/plain',
+        hash: res1_v2_hash,
+        version: 2,
+        previousVersionHash: res1_v1_hash
+      },
+      // res2 v1
+      {
+        id: 'res2',
+        type: 'text',
+        content: 'res2-v1',
+        contentType: 'text/plain',
+        hash: res2_v1_hash,
+        version: 1
+      },
+      // res1 v1
+      {
+        id: 'res1',
+        type: 'text',
+        content: 'res1-v1',
+        contentType: 'text/plain',
+        hash: res1_v1_hash,
+        version: 1
+      }
+    ];
+    
+    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    
+    // Verify both resources have correct version chains
+    const res1History = asset.getResourceHistory('res1');
+    expect(res1History!.versions[0].version).toBe(1);
+    expect(res1History!.versions[1].version).toBe(2);
+    expect(res1History!.versions[1].previousVersionHash).toBe(res1_v1_hash);
+    
+    const res2History = asset.getResourceHistory('res2');
+    expect(res2History!.versions[0].version).toBe(1);
+    expect(res2History!.versions[1].version).toBe(2);
+    expect(res2History!.versions[1].previousVersionHash).toBe(res2_v1_hash);
+  });
+});
+
 describe('OriginalsAsset - Credential Integration', () => {
   test('credential can be issued for version creation (integration check)', async () => {
     const resources: AssetResource[] = [
