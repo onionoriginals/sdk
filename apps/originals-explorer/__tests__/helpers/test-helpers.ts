@@ -63,18 +63,15 @@ export async function createTestUser(suffix?: string): Promise<User> {
 }
 
 /**
- * Cleans up test assets created during testing
+ * Gets test assets created during testing
+ * Note: This function does NOT delete assets. MemStorage does not provide
+ * a delete API, so test data persists in memory for the test session.
+ * Each test should use unique user IDs to ensure isolation.
  */
-export async function cleanupTestAssets(userDid: string): Promise<void> {
+export async function getTestAssets(userDid: string): Promise<any[]> {
   // Get all assets for the test user
   const assets = await storage.getAssetsByUserId(userDid);
-  
-  // In a real implementation with delete methods:
-  // for (const asset of assets) {
-  //   await storage.deleteAsset(asset.id);
-  // }
-  
-  console.log(`Would cleanup ${assets.length} test assets for user ${userDid}`);
+  return assets;
 }
 
 /**

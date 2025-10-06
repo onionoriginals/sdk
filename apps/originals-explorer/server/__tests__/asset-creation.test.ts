@@ -73,10 +73,42 @@ async function makeAuthRequest(
   return fetch(url, options);
 }
 
+// Mock Privy module before importing routes
+const mockVerifyAuthToken = mock(async (token: string) => {
+  const userId = token.replace('Bearer ', '').replace('mock-token-', '');
+  return { user_id: `privy-${userId}` };
+});
+
+mock.module('@privy-io/node', () => ({
+  PrivyClient: class MockPrivyClient {
+    utils() {
+      return {
+        auth: () => ({
+          verifyAuthToken: mockVerifyAuthToken,
+        }),
+      };
+    }
+    users() {
+      return {
+        _get: async (userId: string) => ({
+          id: userId,
+          linked_accounts: [],
+        }),
+      };
+    }
+    wallets() {
+      return {
+        create: async () => ({ id: 'test-wallet' }),
+      };
+    }
+  },
+}));
+
 describe('POST /api/assets/create-with-did', () => {
   let app: express.Application;
+  let server: Server;
+  let serverUrl: string;
   let testUser: any;
-  let mockPrivyClient: any;
 
   beforeEach(async () => {
     // Setup Express app
@@ -84,29 +116,31 @@ describe('POST /api/assets/create-with-did', () => {
     app.use(express.json());
     app.use(express.urlencoded({ extended: false }));
     
-    // Mock Privy client
-    mockPrivyClient = {
-      utils: () => ({
-        auth: () => ({
-          verifyAuthToken: mock(async (token: string) => {
-            // Extract user ID from mock token
-            const userId = token.replace('Bearer mock-token-', '');
-            return { user_id: userId };
-          }),
-        }),
-      }),
-    };
+    // Register routes
+    server = await registerRoutes(app);
     
-    // Register routes with mocked Privy
-    await registerRoutes(app);
+    // Start server on random port
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => {
+        const address = server.address();
+        const port = typeof address === 'object' && address ? address.port : 5000;
+        serverUrl = `http://localhost:${port}`;
+        resolve();
+      });
+    });
     
     // Create test user
     testUser = await createTestUser();
   });
 
   afterEach(async () => {
-    // Cleanup: Clear test data
-    // Note: MemStorage doesn't have a clear method, so we'll rely on test isolation
+    // Stop server
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
   });
 
   it('should create asset with file upload', async () => {
@@ -120,7 +154,7 @@ describe('POST /api/assets/create-with-did', () => {
     });
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
@@ -149,7 +183,7 @@ describe('POST /api/assets/create-with-did', () => {
     };
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
@@ -171,7 +205,7 @@ describe('POST /api/assets/create-with-did', () => {
     };
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
@@ -191,7 +225,7 @@ describe('POST /api/assets/create-with-did', () => {
     };
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
@@ -213,7 +247,7 @@ describe('POST /api/assets/create-with-did', () => {
     });
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
@@ -238,7 +272,7 @@ describe('POST /api/assets/create-with-did', () => {
     });
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
@@ -278,7 +312,7 @@ describe('POST /api/assets/create-with-did', () => {
     });
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
@@ -310,7 +344,7 @@ describe('POST /api/assets/create-with-did', () => {
     });
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
@@ -373,7 +407,7 @@ describe('POST /api/assets/create-with-did', () => {
     };
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
@@ -398,7 +432,7 @@ describe('POST /api/assets/create-with-did', () => {
     };
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
@@ -418,7 +452,7 @@ describe('POST /api/assets/create-with-did', () => {
     };
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
@@ -447,7 +481,7 @@ describe('POST /api/assets/create-with-did', () => {
     };
 
     const response = await makeAuthRequest(
-      app,
+      serverUrl,
       'POST',
       '/api/assets/create-with-did',
       testUser.id,
