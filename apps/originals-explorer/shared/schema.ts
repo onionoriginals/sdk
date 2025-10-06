@@ -34,6 +34,13 @@ export const assets = pgTable("assets", {
   status: varchar("status").notNull().default("draft"), // draft, pending, completed
   assetType: varchar("asset_type").notNull(), // original, migrated
   originalReference: text("original_reference"), // for migrated assets
+  // Layer tracking fields
+  currentLayer: text("current_layer").default("did:peer"), // did:peer, did:webvh, or did:btco
+  didPeer: text("did_peer"), // DID identifier for peer layer
+  didWebvh: text("did_webvh"), // DID identifier for web layer
+  didBtco: text("did_btco"), // DID identifier for Bitcoin layer
+  provenance: jsonb("provenance"), // Complete provenance chain
+  didDocument: jsonb("did_document"), // DID document for the asset
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

@@ -23,7 +23,7 @@ export interface IStorage {
   
   // Asset methods
   getAsset(id: string): Promise<Asset | undefined>;
-  getAssetsByUserId(userId: string): Promise<Asset[]>;
+  getAssetsByUserId(userId: string, options?: { layer?: string }): Promise<Asset[]>;
   getAssetsByUserDid(userDid: string): Promise<Asset[]>;
   createAsset(asset: InsertAsset): Promise<Asset>;
   updateAsset(id: string, updates: Partial<Asset>): Promise<Asset | undefined>;
@@ -189,10 +189,17 @@ export class MemStorage implements IStorage {
     return this.assets.get(id);
   }
 
-  async getAssetsByUserId(userId: string): Promise<Asset[]> {
-    return Array.from(this.assets.values()).filter(
+  async getAssetsByUserId(userId: string, options?: { layer?: string }): Promise<Asset[]> {
+    let assets = Array.from(this.assets.values()).filter(
       (asset) => asset.userId === userId,
     );
+    
+    // Filter by layer if specified
+    if (options?.layer && options.layer !== 'all') {
+      assets = assets.filter(asset => asset.currentLayer === options.layer);
+    }
+    
+    return assets;
   }
 
   async getAssetsByUserDid(userDid: string): Promise<Asset[]> {
@@ -220,6 +227,13 @@ export class MemStorage implements IStorage {
       status: insertAsset.status || "draft",
       assetType: insertAsset.assetType || "original",
       originalReference: insertAsset.originalReference || null,
+      // Layer tracking fields
+      currentLayer: (insertAsset as any).currentLayer || "did:peer",
+      didPeer: (insertAsset as any).didPeer || null,
+      didWebvh: (insertAsset as any).didWebvh || null,
+      didBtco: (insertAsset as any).didBtco || null,
+      provenance: (insertAsset as any).provenance || null,
+      didDocument: (insertAsset as any).didDocument || null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
