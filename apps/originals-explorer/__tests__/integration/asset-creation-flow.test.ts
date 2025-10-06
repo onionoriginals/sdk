@@ -273,6 +273,7 @@ describe('Asset Creation E2E Flow', () => {
       await page.waitForTimeout(500);
 
       // Submit form
+      const submitButton = page.locator('[data-testid="create-asset-button"]');
       await submitButton.click();
       await page.waitForTimeout(1000);
 
