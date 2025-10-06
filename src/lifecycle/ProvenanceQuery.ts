@@ -82,7 +82,11 @@ export class ProvenanceQuery {
    * Get all results
    */
   all(): Array<Migration | Transfer> {
-    return [...this.provenance.migrations, ...this.provenance.transfers];
+    const merged = [...this.provenance.migrations, ...this.provenance.transfers];
+    const filtered = this.applyDateFilters(merged);
+    return filtered.sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
   }
 
   /**
