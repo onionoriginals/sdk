@@ -10,7 +10,7 @@ Comprehensive test suite has been created for the asset creation flow with DID i
 - ✅ `server/__tests__/asset-creation.test.ts` - 14 test cases covering API endpoints
 
 ### Frontend Component Tests  
-- ✅ `client/src/pages/__tests__/create-asset-simple.test.tsx` - 16 test cases covering UI interactions
+- ✅ `client/src/pages/__tests__/create-asset-simple.test.tsx` - 14 test cases covering UI interactions
 
 ### E2E Integration Tests
 - ✅ `__tests__/integration/asset-creation-flow.test.ts` - 8 test scenarios covering full user flows
@@ -97,7 +97,7 @@ Comprehensive test suite has been created for the asset creation flow with DID i
 ### Quick Start
 
 ```bash
-cd /workspace/apps/originals-explorer
+cd apps/originals-explorer
 
 # Run all tests
 bun test

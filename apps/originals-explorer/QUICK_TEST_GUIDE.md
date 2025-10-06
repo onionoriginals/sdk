@@ -5,7 +5,7 @@
 ### 1. Install Dependencies (First Time Only)
 
 ```bash
-cd /workspace/apps/originals-explorer
+cd apps/originals-explorer
 
 # Install frontend testing libraries
 bun add -d @testing-library/react @testing-library/user-event @testing-library/jest-dom happy-dom
@@ -66,7 +66,7 @@ bun test --watch
 
 ## 🎯 Test File Locations
 
-```
+```text
 apps/originals-explorer/
 ├── server/__tests__/
 │   └── asset-creation.test.ts          # Backend API tests (14 cases)
@@ -84,7 +84,7 @@ apps/originals-explorer/
 
 When all tests pass, you should see:
 
-```
+```text
 ✓ Backend API Tests: 14/14 passed
 ✓ Frontend Component Tests: 14/14 passed
 ✓ E2E Integration Tests: 8/8 passed

@@ -4,7 +4,7 @@ Comprehensive test suite for the asset creation flow with DID integration.
 
 ## Test Structure
 
-```
+```text
 __tests__/
 ├── helpers/
 │   └── test-helpers.ts       # Shared test utilities
