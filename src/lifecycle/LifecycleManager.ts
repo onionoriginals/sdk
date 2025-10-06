@@ -99,11 +99,40 @@ export class LifecycleManager {
         await this.keyStore.setPrivateKey(verificationMethodId, keyPair.privateKey);
       }
       
-      return new OriginalsAsset(resources, didDoc, []);
+      const asset = new OriginalsAsset(resources, didDoc, []);
+      
+      // Emit asset created event
+      asset.on('asset:created', () => {}); // Initialize event emitter
+      await (asset as any).eventEmitter.emit({
+        type: 'asset:created',
+        timestamp: new Date().toISOString(),
+        asset: {
+          id: asset.id,
+          layer: asset.currentLayer,
+          resourceCount: resources.length,
+          createdAt: asset.getProvenance().createdAt
+        }
+      });
+      
+      return asset;
     } else {
       // No keyStore, just create the DID document
       const didDoc = await this.didManager.createDIDPeer(resources);
-      return new OriginalsAsset(resources, didDoc, []);
+      const asset = new OriginalsAsset(resources, didDoc, []);
+      
+      // Emit asset created event
+      await (asset as any).eventEmitter.emit({
+        type: 'asset:created',
+        timestamp: new Date().toISOString(),
+        asset: {
+          id: asset.id,
+          layer: asset.currentLayer,
+          resourceCount: resources.length,
+          createdAt: asset.getProvenance().createdAt
+        }
+      });
+      
+      return asset;
     }
   }
 
@@ -157,6 +186,22 @@ export class LifecycleManager {
 
       // Non-breaking: preserve id/hash/contentType, add url
       (res as any).url = url;
+      
+      // Emit resource published event
+      await (asset as any).eventEmitter.emit({
+        type: 'resource:published',
+        timestamp: new Date().toISOString(),
+        asset: {
+          id: asset.id
+        },
+        resource: {
+          id: res.id,
+          url,
+          contentType: res.contentType,
+          hash: res.hash
+        },
+        domain
+      });
     }
 
     // New resource identifier for the web representation; the asset DID remains the same.
@@ -204,6 +249,19 @@ export class LifecycleManager {
 
       const signed = await this.credentialManager.signCredential(unsigned, privateKey, verificationMethod);
       (asset as any).credentials.push(signed);
+      
+      // Emit credential issued event
+      await (asset as any).eventEmitter.emit({
+        type: 'credential:issued',
+        timestamp: new Date().toISOString(),
+        asset: {
+          id: asset.id
+        },
+        credential: {
+          type: signed.type,
+          issuer: signed.issuer
+        }
+      });
     } catch (err) {
       // Best-effort: if issuance fails, continue without blocking publish
       // Log the error for debugging purposes

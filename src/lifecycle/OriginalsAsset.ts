@@ -83,8 +83,11 @@ export class OriginalsAsset {
     if (!validTransitions[this.currentLayer].includes(toLayer)) {
       throw new Error(`Invalid migration from ${this.currentLayer} to ${toLayer}`);
     }
+    
+    const fromLayer = this.currentLayer;
+    
     this.provenance.migrations.push({
-      from: this.currentLayer,
+      from: fromLayer,
       to: toLayer,
       timestamp: new Date().toISOString(),
       transactionId: details?.transactionId,
@@ -98,6 +101,18 @@ export class OriginalsAsset {
       this.provenance.txid = details.transactionId;
     }
     this.currentLayer = toLayer;
+    
+    // Emit migration event
+    this.eventEmitter.emit({
+      type: 'asset:migrated',
+      timestamp: new Date().toISOString(),
+      asset: {
+        id: this.id,
+        fromLayer,
+        toLayer
+      },
+      details
+    });
   }
 
   getProvenance(): ProvenanceChain {
@@ -112,6 +127,19 @@ export class OriginalsAsset {
       transactionId
     });
     this.provenance.txid = transactionId;
+    
+    // Emit transfer event
+    this.eventEmitter.emit({
+      type: 'asset:transferred',
+      timestamp: new Date().toISOString(),
+      asset: {
+        id: this.id,
+        layer: this.currentLayer
+      },
+      from,
+      to,
+      transactionId
+    });
   }
 
   async verify(deps?: {
@@ -181,6 +209,47 @@ export class OriginalsAsset {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Subscribe to an event
+   * 
+   * @param eventType - The type of event to listen for
+   * @param handler - The handler function to call when the event is emitted
+   * @returns A function to unsubscribe the handler
+   */
+  on<K extends keyof EventTypeMap>(
+    eventType: K,
+    handler: EventHandler<EventTypeMap[K]>
+  ): () => void {
+    return this.eventEmitter.on(eventType, handler);
+  }
+
+  /**
+   * Subscribe to an event for a single emission
+   * 
+   * @param eventType - The type of event to listen for
+   * @param handler - The handler function to call when the event is emitted (only once)
+   * @returns A function to unsubscribe the handler
+   */
+  once<K extends keyof EventTypeMap>(
+    eventType: K,
+    handler: EventHandler<EventTypeMap[K]>
+  ): () => void {
+    return this.eventEmitter.once(eventType, handler);
+  }
+
+  /**
+   * Unsubscribe from an event
+   * 
+   * @param eventType - The type of event to stop listening for
+   * @param handler - The handler function to remove
+   */
+  off<K extends keyof EventTypeMap>(
+    eventType: K,
+    handler: EventHandler<EventTypeMap[K]>
+  ): void {
+    this.eventEmitter.off(eventType, handler);
   }
 
   private determineCurrentLayer(didId: string): LayerType {
