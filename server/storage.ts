@@ -23,8 +23,8 @@ export interface IStorage {
   
   // Asset methods
   getAsset(id: string): Promise<Asset | undefined>;
-  getAssetsByUserId(userId: string, options?: { layer?: string }): Promise<Asset[]>;
-  getAssetsByUserDid(userDid: string): Promise<Asset[]>;
+  getAssetsByUserId(userId: string, options?: { layer?: AssetLayer | 'all' }): Promise<Asset[]>;
+  getAssetsByUserDid(userDid: string, options?: { layer?: AssetLayer | 'all' }): Promise<Asset[]>;
   createAsset(asset: InsertAsset): Promise<Asset>;
   updateAsset(id: string, updates: Partial<Asset>): Promise<Asset | undefined>;
   
@@ -189,7 +189,7 @@ export class MemStorage implements IStorage {
     return this.assets.get(id);
   }
 
-  async getAssetsByUserId(userId: string, options?: { layer?: string }): Promise<Asset[]> {
+  async getAssetsByUserId(userId: string, options?: { layer?: AssetLayer | 'all' }): Promise<Asset[]> {
     let assets = Array.from(this.assets.values()).filter(
       (asset) => asset.userId === userId,
     );
@@ -202,13 +202,13 @@ export class MemStorage implements IStorage {
     return assets;
   }
 
-  async getAssetsByUserDid(userDid: string): Promise<Asset[]> {
+  async getAssetsByUserDid(userDid: string, options?: { layer?: AssetLayer | 'all' }): Promise<Asset[]> {
     // Find the user by their DID to get their internal ID
     const user = await this.getUserByDid(userDid);
     if (!user) return [];
     
-    // Use the internal user ID to find assets
-    return this.getAssetsByUserId(user.id);
+    // Use the internal user ID to find assets with layer filtering
+    return this.getAssetsByUserId(user.id, options);
   }
 
   async createAsset(insertAsset: InsertAsset): Promise<Asset> {

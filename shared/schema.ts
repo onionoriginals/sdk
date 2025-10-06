@@ -107,6 +107,9 @@ export const insertAssetTypeSchema = createInsertSchema(assetTypes).omit({
   })).optional(),
 });
 
+// Layer type for type-safe layer filtering
+export type AssetLayer = "did:peer" | "did:webvh" | "did:btco";
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertAsset = z.infer<typeof insertAssetSchema>;
@@ -115,6 +118,3 @@ export type InsertWalletConnection = z.infer<typeof insertWalletConnectionSchema
 export type WalletConnection = typeof walletConnections.$inferSelect;
 export type InsertAssetType = z.infer<typeof insertAssetTypeSchema>;
 export type AssetType = typeof assetTypes.$inferSelect;
-
-// Layer type for type-safe layer filtering
-export type AssetLayer = "did:peer" | "did:webvh" | "did:btco";
