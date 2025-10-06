@@ -47,7 +47,10 @@ class StorageAdapterBridge implements ConfigStorageAdapter {
   }
 
   async delete(objectKey: string): Promise<boolean> {
-    return false;
+    const firstSlash = objectKey.indexOf('/');
+    const domain = firstSlash >= 0 ? objectKey.substring(0, firstSlash) : objectKey;
+    const path = firstSlash >= 0 ? objectKey.substring(firstSlash + 1) : '';
+    return await this.memoryAdapter.deleteObject(domain, path);
   }
 }
 
