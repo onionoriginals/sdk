@@ -1,5 +1,7 @@
 import { StorageAdapter, FeeOracleAdapter, OrdinalsProvider } from '../adapters';
 import { TelemetryHooks } from '../utils/telemetry';
+import type { LogLevel, LogOutput } from '../utils/Logger';
+import type { EventLoggingConfig } from '../utils/EventLogger';
 
 // Base types for the Originals protocol
 export type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';
@@ -16,6 +18,21 @@ export interface OriginalsConfig {
   ordinalsProvider?: OrdinalsProvider;
   // Optional telemetry hooks
   telemetry?: TelemetryHooks;
+  // Enhanced logging configuration
+  logging?: {
+    level?: LogLevel;
+    outputs?: LogOutput[];
+    includeTimestamps?: boolean;
+    includeContext?: boolean;
+    eventLogging?: EventLoggingConfig;
+    sanitizeLogs?: boolean; // Remove sensitive data
+  };
+  // Metrics configuration
+  metrics?: {
+    enabled?: boolean;
+    exportFormat?: 'json' | 'prometheus';
+    collectCache?: boolean;
+  };
 }
 
 export interface AssetResource {

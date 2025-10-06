@@ -15,9 +15,13 @@ import { validateBitcoinAddress } from '../utils/bitcoin-address';
 import { multikey } from '../crypto/Multikey';
 import { EventEmitter } from '../events/EventEmitter';
 import type { EventHandler, EventTypeMap } from '../events/types';
+import { Logger } from '../utils/Logger';
+import { MetricsCollector } from '../utils/MetricsCollector';
 
 export class LifecycleManager {
   private eventEmitter: EventEmitter;
+  private logger: Logger;
+  private metrics: MetricsCollector;
 
   constructor(
     private config: OriginalsConfig,
@@ -27,6 +31,8 @@ export class LifecycleManager {
     private keyStore?: KeyStore
   ) {
     this.eventEmitter = new EventEmitter();
+    this.logger = new Logger('LifecycleManager', config);
+    this.metrics = new MetricsCollector();
   }
 
   /**
@@ -84,36 +90,40 @@ export class LifecycleManager {
   }
 
   async createAsset(resources: AssetResource[]): Promise<OriginalsAsset> {
-    // Input validation
-    if (!Array.isArray(resources)) {
-      throw new Error('Resources must be an array');
-    }
-    if (resources.length === 0) {
-      throw new Error('At least one resource is required');
-    }
+    const stopTimer = this.logger.startTimer('createAsset');
+    this.logger.info('Creating asset', { resourceCount: resources.length });
     
-    // Validate each resource
-    for (const resource of resources) {
-      if (!resource || typeof resource !== 'object') {
-        throw new Error('Invalid resource: must be an object');
+    try {
+      // Input validation
+      if (!Array.isArray(resources)) {
+        throw new Error('Resources must be an array');
       }
-      if (!resource.id || typeof resource.id !== 'string') {
-        throw new Error('Invalid resource: missing or invalid id');
+      if (resources.length === 0) {
+        throw new Error('At least one resource is required');
       }
-      if (!resource.type || typeof resource.type !== 'string') {
-        throw new Error('Invalid resource: missing or invalid type');
+      
+      // Validate each resource
+      for (const resource of resources) {
+        if (!resource || typeof resource !== 'object') {
+          throw new Error('Invalid resource: must be an object');
+        }
+        if (!resource.id || typeof resource.id !== 'string') {
+          throw new Error('Invalid resource: missing or invalid id');
+        }
+        if (!resource.type || typeof resource.type !== 'string') {
+          throw new Error('Invalid resource: missing or invalid type');
+        }
+        if (!resource.contentType || typeof resource.contentType !== 'string') {
+          throw new Error('Invalid resource: missing or invalid contentType');
+        }
+        if (!resource.hash || typeof resource.hash !== 'string' || !/^[0-9a-fA-F]+$/.test(resource.hash)) {
+          throw new Error('Invalid resource: missing or invalid hash (must be hex string)');
+        }
+        // Validate contentType is a valid MIME type
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]{0,126}\/[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]{0,126}$/.test(resource.contentType)) {
+          throw new Error(`Invalid resource: invalid contentType MIME format: ${resource.contentType}`);
+        }
       }
-      if (!resource.contentType || typeof resource.contentType !== 'string') {
-        throw new Error('Invalid resource: missing or invalid contentType');
-      }
-      if (!resource.hash || typeof resource.hash !== 'string' || !/^[0-9a-fA-F]+$/.test(resource.hash)) {
-        throw new Error('Invalid resource: missing or invalid hash (must be hex string)');
-      }
-      // Validate contentType is a valid MIME type
-      if (!/^[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]{0,126}\/[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]{0,126}$/.test(resource.contentType)) {
-        throw new Error(`Invalid resource: invalid contentType MIME format: ${resource.contentType}`);
-      }
-    }
     
     // Create a proper DID:peer document with verification methods
     // If keyStore is provided, request the key pair to be returned
@@ -154,6 +164,10 @@ export class LifecycleManager {
         (asset as any).eventEmitter.emit(event);
       });
       
+      stopTimer();
+      this.logger.info('Asset created successfully', { assetId: asset.id });
+      this.metrics.recordAssetCreated();
+      
       return asset;
     } else {
       // No keyStore, just create the DID document
@@ -178,7 +192,17 @@ export class LifecycleManager {
         (asset as any).eventEmitter.emit(event);
       });
       
+      stopTimer();
+      this.logger.info('Asset created successfully', { assetId: asset.id });
+      this.metrics.recordAssetCreated();
+      
       return asset;
+    }
+    } catch (error) {
+      stopTimer();
+      this.logger.error('Asset creation failed', error as Error, { resourceCount: resources.length });
+      this.metrics.recordError('ASSET_CREATION_FAILED', 'createAsset');
+      throw error;
     }
   }
 
@@ -186,13 +210,17 @@ export class LifecycleManager {
     asset: OriginalsAsset,
     domain: string
   ): Promise<OriginalsAsset> {
-    // Input validation
-    if (!asset || typeof asset !== 'object') {
-      throw new Error('Invalid asset: must be a valid OriginalsAsset');
-    }
-    if (!domain || typeof domain !== 'string') {
-      throw new Error('Invalid domain: must be a non-empty string');
-    }
+    const stopTimer = this.logger.startTimer('publishToWeb');
+    this.logger.info('Publishing asset to web', { assetId: asset.id, domain });
+    
+    try {
+      // Input validation
+      if (!asset || typeof asset !== 'object') {
+        throw new Error('Invalid asset: must be a valid OriginalsAsset');
+      }
+      if (!domain || typeof domain !== 'string') {
+        throw new Error('Invalid domain: must be a non-empty string');
+      }
     
     // Validate domain format
     const normalized = domain.trim().toLowerCase();
@@ -333,25 +361,44 @@ export class LifecycleManager {
         console.error('Failed to issue credential during publish:', err);
       }
     }
+    
+    stopTimer();
+    this.logger.info('Asset published to web successfully', { 
+      assetId: asset.id, 
+      domain, 
+      resourceCount: asset.resources.length 
+    });
+    this.metrics.recordMigration('did:peer', 'did:webvh');
+    
     return asset;
+    } catch (error) {
+      stopTimer();
+      this.logger.error('Publish to web failed', error as Error, { assetId: asset.id, domain });
+      this.metrics.recordError('PUBLISH_FAILED', 'publishToWeb');
+      throw error;
+    }
   }
 
   async inscribeOnBitcoin(
     asset: OriginalsAsset,
     feeRate?: number
   ): Promise<OriginalsAsset> {
-    // Input validation
-    if (!asset || typeof asset !== 'object') {
-      throw new Error('Invalid asset: must be a valid OriginalsAsset');
-    }
-    if (feeRate !== undefined) {
-      if (typeof feeRate !== 'number' || feeRate <= 0 || !Number.isFinite(feeRate)) {
-        throw new Error('Invalid feeRate: must be a positive number');
+    const stopTimer = this.logger.startTimer('inscribeOnBitcoin');
+    this.logger.info('Inscribing asset on Bitcoin', { assetId: asset.id, feeRate });
+    
+    try {
+      // Input validation
+      if (!asset || typeof asset !== 'object') {
+        throw new Error('Invalid asset: must be a valid OriginalsAsset');
       }
-      if (feeRate < 1 || feeRate > 1000000) {
-        throw new Error('Invalid feeRate: must be between 1 and 1000000 sat/vB');
+      if (feeRate !== undefined) {
+        if (typeof feeRate !== 'number' || feeRate <= 0 || !Number.isFinite(feeRate)) {
+          throw new Error('Invalid feeRate: must be a positive number');
+        }
+        if (feeRate < 1 || feeRate > 1000000) {
+          throw new Error('Invalid feeRate: must be between 1 and 1000000 sat/vB');
+        }
       }
-    }
     
     if (typeof (asset as any).migrate !== 'function') {
       throw new Error('Not implemented');
@@ -384,28 +431,52 @@ export class LifecycleManager {
       ? `did:btco:${inscription.satoshi}`
       : `did:btco:${inscription.inscriptionId}`;
     (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:btco': bindingValue });
+    
+    stopTimer();
+    this.logger.info('Asset inscribed on Bitcoin successfully', { 
+      assetId: asset.id, 
+      inscriptionId: inscription.inscriptionId,
+      transactionId: revealTxId
+    });
+    
+    // Note: asset.currentLayer is updated after migrate() call above
+    // Migration should be from the layer before migration (webvh or peer) to btco
+    // Since we already migrated, we need to infer the fromLayer
+    // The inscribeOnBitcoin validation ensures currentLayer is webvh or peer before migration
+    this.metrics.recordMigration('did:webvh', 'did:btco');
+    
     return asset;
+    } catch (error) {
+      stopTimer();
+      this.logger.error('Bitcoin inscription failed', error as Error, { assetId: asset.id, feeRate });
+      this.metrics.recordError('INSCRIPTION_FAILED', 'inscribeOnBitcoin');
+      throw error;
+    }
   }
 
   async transferOwnership(
     asset: OriginalsAsset,
     newOwner: string
   ): Promise<BitcoinTransaction> {
-    // Input validation
-    if (!asset || typeof asset !== 'object') {
-      throw new Error('Invalid asset: must be a valid OriginalsAsset');
-    }
-    if (!newOwner || typeof newOwner !== 'string') {
-      throw new Error('Invalid newOwner: must be a non-empty string');
-    }
+    const stopTimer = this.logger.startTimer('transferOwnership');
+    this.logger.info('Transferring asset ownership', { assetId: asset.id, newOwner });
     
-    // Validate Bitcoin address format and checksum
     try {
-      validateBitcoinAddress(newOwner, this.config.network);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Invalid Bitcoin address';
-      throw new Error(`Invalid Bitcoin address for ownership transfer: ${message}`);
-    }
+      // Input validation
+      if (!asset || typeof asset !== 'object') {
+        throw new Error('Invalid asset: must be a valid OriginalsAsset');
+      }
+      if (!newOwner || typeof newOwner !== 'string') {
+        throw new Error('Invalid newOwner: must be a non-empty string');
+      }
+      
+      // Validate Bitcoin address format and checksum
+      try {
+        validateBitcoinAddress(newOwner, this.config.network);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Invalid Bitcoin address';
+        throw new Error(`Invalid Bitcoin address for ownership transfer: ${message}`);
+      }
     
     // Transfer Bitcoin-anchored asset ownership
     // Only works for assets in did:btco layer
@@ -426,7 +497,22 @@ export class LifecycleManager {
     };
     const tx = await bm.transferInscription(inscription as any, newOwner);
     await asset.recordTransfer(asset.id, newOwner, tx.txid);
+    
+    stopTimer();
+    this.logger.info('Asset ownership transferred successfully', { 
+      assetId: asset.id, 
+      newOwner, 
+      transactionId: tx.txid 
+    });
+    this.metrics.recordTransfer();
+    
     return tx;
+    } catch (error) {
+      stopTimer();
+      this.logger.error('Ownership transfer failed', error as Error, { assetId: asset.id, newOwner });
+      this.metrics.recordError('TRANSFER_FAILED', 'transferOwnership');
+      throw error;
+    }
   }
 }
 
