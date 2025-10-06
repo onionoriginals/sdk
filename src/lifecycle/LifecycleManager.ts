@@ -13,15 +13,50 @@ import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding';
 import { KeyManager } from '../did/KeyManager';
 import { validateBitcoinAddress } from '../utils/bitcoin-address';
 import { multikey } from '../crypto/Multikey';
+import { EventEmitter } from '../events/EventEmitter';
+import type { EventHandler, EventTypeMap } from '../events/types';
 
 export class LifecycleManager {
+  private eventEmitter: EventEmitter;
+
   constructor(
     private config: OriginalsConfig,
     private didManager: DIDManager,
     private credentialManager: CredentialManager,
     private deps?: { bitcoinManager?: BitcoinManager },
     private keyStore?: KeyStore
-  ) {}
+  ) {
+    this.eventEmitter = new EventEmitter();
+  }
+
+  /**
+   * Subscribe to a lifecycle event
+   * @param eventType - The type of event to subscribe to
+   * @param handler - The handler function to call when the event is emitted
+   * @returns A function to unsubscribe from the event
+   */
+  on<K extends keyof EventTypeMap>(eventType: K, handler: EventHandler<EventTypeMap[K]>): () => void {
+    return this.eventEmitter.on(eventType, handler);
+  }
+
+  /**
+   * Subscribe to a lifecycle event once
+   * @param eventType - The type of event to subscribe to
+   * @param handler - The handler function to call when the event is emitted (will only fire once)
+   * @returns A function to unsubscribe from the event
+   */
+  once<K extends keyof EventTypeMap>(eventType: K, handler: EventHandler<EventTypeMap[K]>): () => void {
+    return this.eventEmitter.once(eventType, handler);
+  }
+
+  /**
+   * Unsubscribe from a lifecycle event
+   * @param eventType - The type of event to unsubscribe from
+   * @param handler - The handler function to remove
+   */
+  off<K extends keyof EventTypeMap>(eventType: K, handler: EventHandler<EventTypeMap[K]>): void {
+    this.eventEmitter.off(eventType, handler);
+  }
 
   async registerKey(verificationMethodId: string, privateKey: string): Promise<void> {
     if (!this.keyStore) {
@@ -101,17 +136,22 @@ export class LifecycleManager {
       
       const asset = new OriginalsAsset(resources, didDoc, []);
       
-      // Emit asset created event
-      asset.on('asset:created', () => {}); // Initialize event emitter
-      await (asset as any).eventEmitter.emit({
-        type: 'asset:created',
-        timestamp: new Date().toISOString(),
-        asset: {
-          id: asset.id,
-          layer: asset.currentLayer,
-          resourceCount: resources.length,
-          createdAt: asset.getProvenance().createdAt
-        }
+      // Defer asset:created event emission to next microtask so callers can subscribe first
+      queueMicrotask(() => {
+        const event = {
+          type: 'asset:created' as const,
+          timestamp: new Date().toISOString(),
+          asset: {
+            id: asset.id,
+            layer: asset.currentLayer,
+            resourceCount: resources.length,
+            createdAt: asset.getProvenance().createdAt
+          }
+        };
+        
+        // Emit from both LifecycleManager and asset emitters
+        this.eventEmitter.emit(event);
+        (asset as any).eventEmitter.emit(event);
       });
       
       return asset;
@@ -120,16 +160,22 @@ export class LifecycleManager {
       const didDoc = await this.didManager.createDIDPeer(resources);
       const asset = new OriginalsAsset(resources, didDoc, []);
       
-      // Emit asset created event
-      await (asset as any).eventEmitter.emit({
-        type: 'asset:created',
-        timestamp: new Date().toISOString(),
-        asset: {
-          id: asset.id,
-          layer: asset.currentLayer,
-          resourceCount: resources.length,
-          createdAt: asset.getProvenance().createdAt
-        }
+      // Defer asset:created event emission to next microtask so callers can subscribe first
+      queueMicrotask(() => {
+        const event = {
+          type: 'asset:created' as const,
+          timestamp: new Date().toISOString(),
+          asset: {
+            id: asset.id,
+            layer: asset.currentLayer,
+            resourceCount: resources.length,
+            createdAt: asset.getProvenance().createdAt
+          }
+        };
+        
+        // Emit from both LifecycleManager and asset emitters
+        this.eventEmitter.emit(event);
+        (asset as any).eventEmitter.emit(event);
       });
       
       return asset;
