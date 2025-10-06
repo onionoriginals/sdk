@@ -4,6 +4,9 @@ import { LifecycleManager } from '../lifecycle/LifecycleManager';
 import { BitcoinManager } from '../bitcoin/BitcoinManager';
 import { OriginalsConfig, KeyStore } from '../types';
 import { emitTelemetry, StructuredError } from '../utils/telemetry';
+import { Logger } from '../utils/Logger';
+import { MetricsCollector } from '../utils/MetricsCollector';
+import { EventLogger } from '../utils/EventLogger';
 
 export interface OriginalsSDKOptions extends Partial<OriginalsConfig> {
   keyStore?: KeyStore;
@@ -14,6 +17,9 @@ export class OriginalsSDK {
   public readonly credentials: CredentialManager;
   public readonly lifecycle: LifecycleManager;
   public readonly bitcoin: BitcoinManager;
+  public readonly logger: Logger;
+  public readonly metrics: MetricsCollector;
+  private eventLogger: EventLogger;
   private config: OriginalsConfig;
 
   constructor(config: OriginalsConfig, keyStore?: KeyStore) {
@@ -29,11 +35,43 @@ export class OriginalsSDK {
     }
     
     this.config = config;
+    
+    // Initialize logger and metrics
+    this.logger = new Logger('SDK', config);
+    this.metrics = new MetricsCollector();
+    this.eventLogger = new EventLogger(this.logger.child('Events'), this.metrics);
+    
+    // Log SDK initialization
+    this.logger.info('Initializing Originals SDK', { 
+      network: config.network,
+      keyType: config.defaultKeyType 
+    });
+    
     emitTelemetry(config.telemetry, { name: 'sdk.init', attributes: { network: config.network } });
+    
+    // Initialize managers
     this.did = new DIDManager(config);
     this.credentials = new CredentialManager(config, this.did);
     this.lifecycle = new LifecycleManager(config, this.did, this.credentials, undefined, keyStore);
     this.bitcoin = new BitcoinManager(config);
+    
+    // Set up event logging integration
+    this.setupEventLogging();
+    
+    this.logger.info('SDK initialized successfully');
+  }
+  
+  /**
+   * Set up event logging integration
+   */
+  private setupEventLogging(): void {
+    // Configure event logging from config
+    if (this.config.logging?.eventLogging) {
+      this.eventLogger.configureEventLogging(this.config.logging.eventLogging);
+    }
+    
+    // Subscribe to lifecycle events
+    this.eventLogger.subscribeToEvents((this.lifecycle as any).eventEmitter);
   }
 
 
