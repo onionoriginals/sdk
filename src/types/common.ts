@@ -19,13 +19,16 @@ export interface OriginalsConfig {
 }
 
 export interface AssetResource {
-  id: string;
-  type: string; // 'image', 'text', 'code', 'data', etc.
+  id: string;                      // Logical resource ID (stable across versions)
+  type: string;                    // 'image', 'text', 'code', 'data', etc.
   url?: string;
   content?: string;
   contentType: string;
-  hash: string; // SHA-256 hash for integrity
+  hash: string;                    // Content hash (unique per version)
   size?: number;
+  version?: number;                // Version number (default 1)
+  previousVersionHash?: string;    // Link to previous version (by content hash)
+  createdAt?: string;              // ISO timestamp of when this version was created
 }
 
 export interface KeyStore {

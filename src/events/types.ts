@@ -101,6 +101,24 @@ export interface CredentialIssuedEvent extends BaseEvent {
 }
 
 /**
+ * Emitted when a new resource version is created
+ */
+export interface ResourceVersionCreatedEvent extends BaseEvent {
+  type: 'resource:version:created';
+  asset: {
+    id: string;
+  };
+  resource: {
+    id: string;
+    fromVersion: number;
+    toVersion: number;
+    fromHash: string;
+    toHash: string;
+  };
+  changes?: string;
+}
+
+/**
  * Emitted when asset verification is completed
  */
 export interface VerificationCompletedEvent extends BaseEvent {
@@ -170,7 +188,8 @@ export type OriginalsEvent =
   | VerificationCompletedEvent
   | BatchStartedEvent
   | BatchCompletedEvent
-  | BatchFailedEvent;
+  | BatchFailedEvent
+  | ResourceVersionCreatedEvent;
 
 /**
  * Event handler function type
@@ -190,4 +209,5 @@ export interface EventTypeMap {
   'batch:started': BatchStartedEvent;
   'batch:completed': BatchCompletedEvent;
   'batch:failed': BatchFailedEvent;
+  'resource:version:created': ResourceVersionCreatedEvent;
 }
