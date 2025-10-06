@@ -9,6 +9,8 @@ import { CredentialManager } from '../vc/CredentialManager';
 import { DIDManager } from '../did/DIDManager';
 import { EventEmitter } from '../events/EventEmitter';
 import type { EventHandler, EventTypeMap } from '../events/types';
+import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning';
+import type { ResourceVersion } from './ResourceVersioning';
 
 export interface ProvenanceChain {
   createdAt: string;
@@ -31,6 +33,15 @@ export interface ProvenanceChain {
     timestamp: string;
     transactionId: string;
   }>;
+  resourceUpdates: Array<{
+    resourceId: string;
+    fromVersion: number;
+    toVersion: number;
+    fromHash: string;
+    toHash: string;
+    timestamp: string;
+    changes?: string;
+  }>;
 }
 
 export class OriginalsAsset {
@@ -42,6 +53,7 @@ export class OriginalsAsset {
   public bindings?: Record<string, string>;
   private provenance: ProvenanceChain;
   private eventEmitter: EventEmitter;
+  private versionManager: ResourceVersionManager;
 
   constructor(
     resources: AssetResource[],
@@ -57,9 +69,23 @@ export class OriginalsAsset {
       createdAt: new Date().toISOString(),
       creator: did.id,
       migrations: [],
-      transfers: []
+      transfers: [],
+      resourceUpdates: []
     };
     this.eventEmitter = new EventEmitter();
+    this.versionManager = new ResourceVersionManager();
+    
+    // Initialize version manager with existing resources
+    for (const resource of resources) {
+      const version = resource.version || 1;
+      const previousVersionHash = resource.previousVersionHash;
+      this.versionManager.addVersion(
+        resource.id,
+        resource.hash,
+        resource.contentType,
+        previousVersionHash
+      );
+    }
   }
 
   async migrate(
@@ -261,6 +287,143 @@ export class OriginalsAsset {
    */
   _internalEmit<K extends keyof EventTypeMap>(event: EventTypeMap[K]): Promise<void> {
     return this.eventEmitter.emit(event);
+  }
+
+  /**
+   * Add a new version of a resource (immutable versioning).
+   * Creates a new AssetResource with incremented version number and links it to the previous version.
+   * 
+   * @param resourceId - The logical resource ID
+   * @param newContent - The new content (string or Buffer)
+   * @param contentType - The content type
+   * @param changes - Optional description of changes
+   * @returns The newly created AssetResource
+   * @throws Error if content is unchanged or resource not found
+   */
+  addResourceVersion(
+    resourceId: string,
+    newContent: string | Buffer,
+    contentType: string,
+    changes?: string
+  ): AssetResource {
+    // Find the current version of the resource by id
+    const currentResources = this.resources.filter(r => r.id === resourceId);
+    if (currentResources.length === 0) {
+      throw new Error(`Resource with id ${resourceId} not found`);
+    }
+    
+    // Get the latest version
+    const currentResource = currentResources.sort((a, b) => {
+      const versionA = a.version || 1;
+      const versionB = b.version || 1;
+      return versionB - versionA;
+    })[0];
+    
+    // Compute new hash
+    const contentBuffer = typeof newContent === 'string' 
+      ? Buffer.from(newContent, 'utf-8')
+      : newContent;
+    const newHash = hashResource(contentBuffer);
+    
+    // Check if content has actually changed
+    if (newHash === currentResource.hash) {
+      throw new Error('Content unchanged - new version would be identical to current version');
+    }
+    
+    // Create new resource version
+    const newVersion = (currentResource.version || 1) + 1;
+    const newResource: AssetResource = {
+      id: resourceId,
+      type: currentResource.type,
+      content: typeof newContent === 'string' ? newContent : undefined,
+      contentType,
+      hash: newHash,
+      size: contentBuffer.length,
+      version: newVersion,
+      previousVersionHash: currentResource.hash,
+      createdAt: new Date().toISOString()
+    };
+    
+    // Add to resources array (immutable - don't modify old resource)
+    (this.resources as AssetResource[]).push(newResource);
+    
+    // Track in version manager
+    this.versionManager.addVersion(
+      resourceId,
+      newHash,
+      contentType,
+      currentResource.hash,
+      changes
+    );
+    
+    // Update provenance
+    const timestamp = new Date().toISOString();
+    this.provenance.resourceUpdates.push({
+      resourceId,
+      fromVersion: currentResource.version || 1,
+      toVersion: newVersion,
+      fromHash: currentResource.hash,
+      toHash: newHash,
+      timestamp,
+      changes
+    });
+    
+    // Emit version-created event
+    const event = {
+      type: 'resource:version:created' as const,
+      timestamp,
+      asset: {
+        id: this.id
+      },
+      resource: {
+        id: resourceId,
+        fromVersion: currentResource.version || 1,
+        toVersion: newVersion,
+        fromHash: currentResource.hash,
+        toHash: newHash
+      },
+      changes
+    };
+    
+    // Emit asynchronously (don't block)
+    queueMicrotask(() => {
+      this.eventEmitter.emit(event);
+    });
+    
+    return newResource;
+  }
+
+  /**
+   * Get a specific version of a resource
+   * @param resourceId - The logical resource ID
+   * @param version - The version number (1-indexed)
+   * @returns The AssetResource for that version, or null if not found
+   */
+  getResourceVersion(resourceId: string, version: number): AssetResource | null {
+    const resource = this.resources.find(r => 
+      r.id === resourceId && (r.version || 1) === version
+    );
+    return resource || null;
+  }
+
+  /**
+   * Get all versions of a resource
+   * @param resourceId - The logical resource ID
+   * @returns Array of all AssetResource versions, sorted by version number
+   */
+  getAllVersions(resourceId: string): AssetResource[] {
+    return this.resources
+      .filter(r => r.id === resourceId)
+      .sort((a, b) => (a.version || 1) - (b.version || 1));
+  }
+
+  /**
+   * Get the version history for a resource
+   * @param resourceId - The logical resource ID
+   * @returns ResourceHistory or null if resource not found
+   */
+  getResourceHistory(resourceId: string): ResourceHistory | null {
+    return this.versionManager.getHistory(resourceId);
   }
 
   private determineCurrentLayer(didId: string): LayerType {
