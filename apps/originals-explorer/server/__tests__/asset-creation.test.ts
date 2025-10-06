@@ -333,33 +333,35 @@ describe('POST /api/assets/create-with-did', () => {
   it('should handle SDK errors gracefully', async () => {
     // Mock SDK to throw error
     const originalCreateAsset = originalsSdk.lifecycle.createAsset;
-    originalsSdk.lifecycle.createAsset = mock(async () => {
-      throw new Error('SDK Error');
-    });
+    try {
+      originalsSdk.lifecycle.createAsset = mock(async () => {
+        throw new Error('SDK Error');
+      });
 
-    const formData = new FormData();
-    formData.append('title', 'Error Test');
-    formData.append('category', 'art');
-    formData.append('mediaFile', Buffer.from('data'), {
-      filename: 'test.png',
-      contentType: 'image/png',
-    });
+      const formData = new FormData();
+      formData.append('title', 'Error Test');
+      formData.append('category', 'art');
+      formData.append('mediaFile', Buffer.from('data'), {
+        filename: 'test.png',
+        contentType: 'image/png',
+      });
 
-    const response = await makeAuthRequest(
-      app,
-      'POST',
-      '/api/assets/create-with-did',
-      testUser.id,
-      undefined,
-      formData
-    );
+      const response = await makeAuthRequest(
+        app,
+        'POST',
+        '/api/assets/create-with-did',
+        testUser.id,
+        undefined,
+        formData
+      );
 
-    expect(response.status).toBe(500);
-    const body = await response.json();
-    expect(body.error).toContain('SDK');
-
-    // Restore original function
-    originalsSdk.lifecycle.createAsset = originalCreateAsset;
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body.error).toContain('SDK');
+    } finally {
+      // Restore original function
+      originalsSdk.lifecycle.createAsset = originalCreateAsset;
+    }
   });
 
   it('should parse tags correctly', async () => {
