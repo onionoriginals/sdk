@@ -17,9 +17,20 @@ import { EventEmitter } from '../events/EventEmitter';
 import type { EventHandler, EventTypeMap } from '../events/types';
 import { Logger } from '../utils/Logger';
 import { MetricsCollector } from '../utils/MetricsCollector';
+import { 
+  BatchOperationExecutor, 
+  BatchValidator,
+  BatchError,
+  type BatchResult,
+  type BatchOperationOptions,
+  type BatchInscriptionOptions,
+  type BatchInscriptionResult
+} from './BatchOperations';
 
 export class LifecycleManager {
   private eventEmitter: EventEmitter;
+  private batchExecutor: BatchOperationExecutor;
+  private batchValidator: BatchValidator;
   private logger: Logger;
   private metrics: MetricsCollector;
 
@@ -31,6 +42,8 @@ export class LifecycleManager {
     private keyStore?: KeyStore
   ) {
     this.eventEmitter = new EventEmitter();
+    this.batchExecutor = new BatchOperationExecutor();
+    this.batchValidator = new BatchValidator();
     this.logger = new Logger('LifecycleManager', config);
     this.metrics = new MetricsCollector();
   }
@@ -523,6 +536,558 @@ export class LifecycleManager {
       this.metrics.recordError('TRANSFER_FAILED', 'transferOwnership');
       throw error;
     }
+  }
+
+  /**
+   * Create multiple assets in batch
+   * 
+   * @param resourcesList - Array of resource arrays, one per asset to create
+   * @param options - Batch operation options
+   * @returns BatchResult with created assets
+   */
+  async batchCreateAssets(
+    resourcesList: AssetResource[][],
+    options?: BatchOperationOptions
+  ): Promise<BatchResult<OriginalsAsset>> {
+    const batchId = this.batchExecutor.generateBatchId();
+    
+    // Validate first if requested
+    if (options?.validateFirst !== false) {
+      const validationResults = this.batchValidator.validateBatchCreate(resourcesList);
+      const invalid = validationResults.filter(r => !r.isValid);
+      if (invalid.length > 0) {
+        const errors = invalid.flatMap(r => r.errors).join('; ');
+        throw new Error(`Batch validation failed: ${errors}`);
+      }
+    }
+    
+    // Emit batch:started event
+    await this.eventEmitter.emit({
+      type: 'batch:started',
+      timestamp: new Date().toISOString(),
+      operation: 'create',
+      batchId,
+      itemCount: resourcesList.length
+    });
+    
+    try {
+      // Use batch executor to process all asset creations
+      const result = await this.batchExecutor.execute(
+        resourcesList,
+        async (resources, index) => {
+          const asset = await this.createAsset(resources);
+          return asset;
+        },
+        options,
+        batchId // Pass the pre-generated batchId for event correlation
+      );
+      
+      // Emit batch:completed event
+      await this.eventEmitter.emit({
+        type: 'batch:completed',
+        timestamp: new Date().toISOString(),
+        batchId,
+        operation: 'create',
+        results: {
+          successful: result.successful.length,
+          failed: result.failed.length,
+          totalDuration: result.totalDuration
+        }
+      });
+      
+      return result;
+    } catch (error) {
+      // Emit batch:failed event
+      await this.eventEmitter.emit({
+        type: 'batch:failed',
+        timestamp: new Date().toISOString(),
+        batchId,
+        operation: 'create',
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Publish multiple assets to web storage in batch
+   * 
+   * @param assets - Array of assets to publish
+   * @param domain - Domain to publish to
+   * @param options - Batch operation options
+   * @returns BatchResult with published assets
+   */
+  async batchPublishToWeb(
+    assets: OriginalsAsset[],
+    domain: string,
+    options?: BatchOperationOptions
+  ): Promise<BatchResult<OriginalsAsset>> {
+    const batchId = this.batchExecutor.generateBatchId();
+    
+    // Validate domain once
+    if (!domain || typeof domain !== 'string') {
+      throw new Error('Invalid domain: must be a non-empty string');
+    }
+    
+    const normalized = domain.trim().toLowerCase();
+    const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+    const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
+    if (!domainRegex.test(normalized)) {
+      throw new Error(`Invalid domain format: ${domain}`);
+    }
+    
+    // Emit batch:started event
+    await this.eventEmitter.emit({
+      type: 'batch:started',
+      timestamp: new Date().toISOString(),
+      operation: 'publish',
+      batchId,
+      itemCount: assets.length
+    });
+    
+    try {
+      const result = await this.batchExecutor.execute(
+        assets,
+        async (asset, index) => {
+          return await this.publishToWeb(asset, domain);
+        },
+        options,
+        batchId // Pass the pre-generated batchId for event correlation
+      );
+      
+      // Emit batch:completed event
+      await this.eventEmitter.emit({
+        type: 'batch:completed',
+        timestamp: new Date().toISOString(),
+        batchId,
+        operation: 'publish',
+        results: {
+          successful: result.successful.length,
+          failed: result.failed.length,
+          totalDuration: result.totalDuration
+        }
+      });
+      
+      return result;
+    } catch (error) {
+      // Emit batch:failed event
+      await this.eventEmitter.emit({
+        type: 'batch:failed',
+        timestamp: new Date().toISOString(),
+        batchId,
+        operation: 'publish',
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Inscribe multiple assets on Bitcoin with cost optimization
+   * KEY FEATURE: singleTransaction option for 30%+ cost savings
+   * 
+   * @param assets - Array of assets to inscribe
+   * @param options - Batch inscription options
+   * @returns BatchResult with inscribed assets
+   */
+  async batchInscribeOnBitcoin(
+    assets: OriginalsAsset[],
+    options?: BatchInscriptionOptions
+  ): Promise<BatchResult<OriginalsAsset>> {
+    // Validate first if requested
+    if (options?.validateFirst !== false) {
+      const validationResults = this.batchValidator.validateBatchInscription(assets);
+      const invalid = validationResults.filter(r => !r.isValid);
+      if (invalid.length > 0) {
+        const errors = invalid.flatMap(r => r.errors).join('; ');
+        throw new Error(`Batch validation failed: ${errors}`);
+      }
+    }
+    
+    if (options?.singleTransaction) {
+      return this.batchInscribeSingleTransaction(assets, options);
+    } else {
+      return this.batchInscribeIndividualTransactions(assets, options);
+    }
+  }
+
+  /**
+   * CORE INNOVATION: Single-transaction batch inscription
+   * Combines multiple assets into one Bitcoin transaction for 30%+ cost savings
+   * 
+   * @param assets - Array of assets to inscribe
+   * @param options - Batch inscription options
+   * @returns BatchResult with inscribed assets and cost savings data
+   */
+  private async batchInscribeSingleTransaction(
+    assets: OriginalsAsset[],
+    options?: BatchInscriptionOptions
+  ): Promise<BatchResult<OriginalsAsset>> {
+    const batchId = this.batchExecutor.generateBatchId();
+    const startTime = Date.now();
+    const startedAt = new Date().toISOString();
+    
+    // Emit batch:started event
+    await this.eventEmitter.emit({
+      type: 'batch:started',
+      timestamp: startedAt,
+      operation: 'inscribe',
+      batchId,
+      itemCount: assets.length
+    });
+    
+    try {
+      // Calculate total data size for all assets
+      const totalDataSize = this.calculateTotalDataSize(assets);
+      
+      // Estimate savings from batch inscription
+      const estimatedSavings = await this.estimateBatchSavings(assets, options?.feeRate);
+      
+      // Create manifests for all assets
+      const manifests = assets.map(asset => ({
+        assetId: asset.id,
+        resources: asset.resources.map(res => ({
+          id: res.id,
+          hash: res.hash,
+          contentType: res.contentType,
+          url: res.url
+        })),
+        timestamp: new Date().toISOString()
+      }));
+      
+      // Combine all manifests into a single batch payload
+      const batchManifest = {
+        batchId,
+        assets: manifests,
+        timestamp: new Date().toISOString()
+      };
+      
+      const payload = Buffer.from(JSON.stringify(batchManifest));
+      
+      // Inscribe the batch manifest as a single transaction
+      const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+      const inscription: any = await bitcoinManager.inscribeData(
+        payload,
+        'application/json',
+        options?.feeRate
+      );
+      
+      const revealTxId = inscription.revealTxId ?? inscription.txid;
+      const commitTxId = inscription.commitTxId;
+      const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : options?.feeRate;
+      
+      // Calculate fee per asset (split proportionally by data size)
+      const assetSizes = assets.map(asset => 
+        JSON.stringify({
+          assetId: asset.id,
+          resources: asset.resources.map(r => ({ id: r.id, hash: r.hash }))
+        }).length
+      );
+      const totalSize = assetSizes.reduce((sum, size) => sum + size, 0);
+      const feePerAsset = assetSizes.map(size => 
+        Math.floor((inscription.fee ?? 0) * (size / totalSize))
+      );
+      
+      // Update all assets with batch inscription data
+      const individualInscriptionIds: string[] = [];
+      const successful: BatchResult<OriginalsAsset>['successful'] = [];
+      
+      for (let i = 0; i < assets.length; i++) {
+        const asset = assets[i];
+        // Create individual inscription ID for each asset within the batch
+        const individualInscriptionId = `${inscription.inscriptionId}-${i}`;
+        individualInscriptionIds.push(individualInscriptionId);
+        
+        await asset.migrate('did:btco', {
+          transactionId: revealTxId,
+          inscriptionId: individualInscriptionId,
+          satoshi: inscription.satoshi,
+          commitTxId,
+          revealTxId,
+          feeRate: usedFeeRate
+        });
+        
+        // Add batch metadata to provenance
+        const provenance = asset.getProvenance();
+        const latestMigration = provenance.migrations[provenance.migrations.length - 1];
+        (latestMigration as any).batchId = batchId;
+        (latestMigration as any).batchInscription = true;
+        (latestMigration as any).feePaid = feePerAsset[i];
+        
+        const bindingValue = inscription.satoshi
+          ? `did:btco:${inscription.satoshi}`
+          : `did:btco:${individualInscriptionId}`;
+        (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:btco': bindingValue });
+        
+        successful.push({
+          index: i,
+          result: asset,
+          duration: Date.now() - startTime
+        });
+      }
+      
+      const totalDuration = Date.now() - startTime;
+      const completedAt = new Date().toISOString();
+      
+      // Emit batch:completed event with cost savings
+      await this.eventEmitter.emit({
+        type: 'batch:completed',
+        timestamp: completedAt,
+        batchId,
+        operation: 'inscribe',
+        results: {
+          successful: successful.length,
+          failed: 0,
+          totalDuration,
+          costSavings: {
+            amount: estimatedSavings.savings,
+            percentage: estimatedSavings.savingsPercentage
+          }
+        }
+      });
+      
+      return {
+        successful,
+        failed: [],
+        totalProcessed: assets.length,
+        totalDuration,
+        batchId,
+        startedAt,
+        completedAt
+      };
+    } catch (error) {
+      // Emit batch:failed event
+      await this.eventEmitter.emit({
+        type: 'batch:failed',
+        timestamp: new Date().toISOString(),
+        batchId,
+        operation: 'inscribe',
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
+      throw new BatchError(
+        batchId,
+        'inscribe',
+        { successful: 0, failed: assets.length },
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Individual transaction batch inscription (fallback mode)
+   * Each asset is inscribed in its own transaction
+   * 
+   * @param assets - Array of assets to inscribe
+   * @param options - Batch inscription options
+   * @returns BatchResult with inscribed assets
+   */
+  private async batchInscribeIndividualTransactions(
+    assets: OriginalsAsset[],
+    options?: BatchInscriptionOptions
+  ): Promise<BatchResult<OriginalsAsset>> {
+    const batchId = this.batchExecutor.generateBatchId();
+    
+    // Emit batch:started event
+    await this.eventEmitter.emit({
+      type: 'batch:started',
+      timestamp: new Date().toISOString(),
+      operation: 'inscribe',
+      batchId,
+      itemCount: assets.length
+    });
+    
+    try {
+      const result = await this.batchExecutor.execute(
+        assets,
+        async (asset, index) => {
+          return await this.inscribeOnBitcoin(asset, options?.feeRate);
+        },
+        options,
+        batchId // Pass the pre-generated batchId for event correlation
+      );
+      
+      // Emit batch:completed event
+      await this.eventEmitter.emit({
+        type: 'batch:completed',
+        timestamp: new Date().toISOString(),
+        batchId,
+        operation: 'inscribe',
+        results: {
+          successful: result.successful.length,
+          failed: result.failed.length,
+          totalDuration: result.totalDuration
+        }
+      });
+      
+      return result;
+    } catch (error) {
+      // Emit batch:failed event
+      await this.eventEmitter.emit({
+        type: 'batch:failed',
+        timestamp: new Date().toISOString(),
+        batchId,
+        operation: 'inscribe',
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Transfer ownership of multiple assets in batch
+   * 
+   * @param transfers - Array of transfer operations
+   * @param options - Batch operation options
+   * @returns BatchResult with transaction results
+   */
+  async batchTransferOwnership(
+    transfers: Array<{ asset: OriginalsAsset; to: string }>,
+    options?: BatchOperationOptions
+  ): Promise<BatchResult<BitcoinTransaction>> {
+    const batchId = this.batchExecutor.generateBatchId();
+    
+    // Validate first if requested
+    if (options?.validateFirst !== false) {
+      const validationResults = this.batchValidator.validateBatchTransfer(transfers);
+      const invalid = validationResults.filter(r => !r.isValid);
+      if (invalid.length > 0) {
+        const errors = invalid.flatMap(r => r.errors).join('; ');
+        throw new Error(`Batch validation failed: ${errors}`);
+      }
+      
+      // Validate all Bitcoin addresses
+      for (let i = 0; i < transfers.length; i++) {
+        try {
+          validateBitcoinAddress(transfers[i].to, this.config.network);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Invalid Bitcoin address';
+          throw new Error(`Transfer ${i}: Invalid Bitcoin address: ${message}`);
+        }
+      }
+    }
+    
+    // Emit batch:started event
+    await this.eventEmitter.emit({
+      type: 'batch:started',
+      timestamp: new Date().toISOString(),
+      operation: 'transfer',
+      batchId,
+      itemCount: transfers.length
+    });
+    
+    try {
+      const result = await this.batchExecutor.execute(
+        transfers,
+        async (transfer, index) => {
+          return await this.transferOwnership(transfer.asset, transfer.to);
+        },
+        options,
+        batchId // Pass the pre-generated batchId for event correlation
+      );
+      
+      // Emit batch:completed event
+      await this.eventEmitter.emit({
+        type: 'batch:completed',
+        timestamp: new Date().toISOString(),
+        batchId,
+        operation: 'transfer',
+        results: {
+          successful: result.successful.length,
+          failed: result.failed.length,
+          totalDuration: result.totalDuration
+        }
+      });
+      
+      return result;
+    } catch (error) {
+      // Emit batch:failed event
+      await this.eventEmitter.emit({
+        type: 'batch:failed',
+        timestamp: new Date().toISOString(),
+        batchId,
+        operation: 'transfer',
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Calculate total data size for all assets in a batch
+   */
+  private calculateTotalDataSize(assets: OriginalsAsset[]): number {
+    return assets.reduce((total, asset) => {
+      const manifest = {
+        assetId: asset.id,
+        resources: asset.resources.map(res => ({
+          id: res.id,
+          hash: res.hash,
+          contentType: res.contentType,
+          url: res.url
+        })),
+        timestamp: new Date().toISOString()
+      };
+      return total + JSON.stringify(manifest).length;
+    }, 0);
+  }
+
+  /**
+   * Estimate cost savings from batch inscription vs individual inscriptions
+   */
+  private async estimateBatchSavings(
+    assets: OriginalsAsset[],
+    feeRate?: number
+  ): Promise<{
+    batchFee: number;
+    individualFees: number;
+    savings: number;
+    savingsPercentage: number;
+  }> {
+    // Calculate total size for batch
+    const batchSize = this.calculateTotalDataSize(assets);
+    
+    // Estimate individual sizes
+    const individualSizes = assets.map(asset => 
+      JSON.stringify({
+        assetId: asset.id,
+        resources: asset.resources.map(r => ({
+          id: r.id,
+          hash: r.hash,
+          contentType: r.contentType,
+          url: r.url
+        }))
+      }).length
+    );
+    
+    // Rough fee estimation (actual fees depend on many factors)
+    // Base transaction overhead: ~200 bytes
+    // Per inscription overhead: ~150 bytes
+    const effectiveFeeRate = feeRate ?? 10; // default 10 sat/vB
+    
+    // Batch: one transaction overhead + batch data
+    const batchTxSize = 200 + batchSize;
+    const batchFee = batchTxSize * effectiveFeeRate;
+    
+    // Individual: multiple transaction overheads + individual data
+    const individualFees = individualSizes.reduce((total, size) => {
+      const txSize = 200 + size;
+      return total + (txSize * effectiveFeeRate);
+    }, 0);
+    
+    const savings = individualFees - batchFee;
+    const savingsPercentage = (savings / individualFees) * 100;
+    
+    return {
+      batchFee,
+      individualFees,
+      savings,
+      savingsPercentage
+    };
   }
 }
 

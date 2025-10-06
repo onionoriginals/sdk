@@ -135,6 +135,48 @@ export interface VerificationCompletedEvent extends BaseEvent {
 }
 
 /**
+ * Emitted when a batch operation starts
+ */
+export interface BatchStartedEvent extends BaseEvent {
+  type: 'batch:started';
+  operation: 'create' | 'publish' | 'inscribe' | 'transfer';
+  batchId: string;
+  itemCount: number;
+}
+
+/**
+ * Emitted when a batch operation completes successfully
+ */
+export interface BatchCompletedEvent extends BaseEvent {
+  type: 'batch:completed';
+  batchId: string;
+  operation: string;
+  results: {
+    successful: number;
+    failed: number;
+    totalDuration: number;
+    costSavings?: {
+      amount: number;
+      percentage: number;
+    };
+  };
+}
+
+/**
+ * Emitted when a batch operation fails
+ */
+export interface BatchFailedEvent extends BaseEvent {
+  type: 'batch:failed';
+  batchId: string;
+  operation: string;
+  error: string;
+  partialResults?: {
+    successful: number;
+    failed: number;
+  };
+}
+
+/**
  * Union type of all possible events
  */
 export type OriginalsEvent =
@@ -144,6 +186,9 @@ export type OriginalsEvent =
   | ResourcePublishedEvent
   | CredentialIssuedEvent
   | VerificationCompletedEvent
+  | BatchStartedEvent
+  | BatchCompletedEvent
+  | BatchFailedEvent
   | ResourceVersionCreatedEvent;
 
 /**
@@ -161,5 +206,8 @@ export interface EventTypeMap {
   'resource:published': ResourcePublishedEvent;
   'credential:issued': CredentialIssuedEvent;
   'verification:completed': VerificationCompletedEvent;
+  'batch:started': BatchStartedEvent;
+  'batch:completed': BatchCompletedEvent;
+  'batch:failed': BatchFailedEvent;
   'resource:version:created': ResourceVersionCreatedEvent;
 }
