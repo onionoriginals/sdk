@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import CreateAssetSimple from '../create-asset-simple';
+
+// Component will be dynamically imported after mocks are set
 
 // Mock wouter
 const mockSetLocation = mock(() => {});
@@ -45,13 +46,14 @@ const mockLocalStorage = (() => {
   };
 })();
 
-Object.defineProperty(global, 'localStorage', {
+Object.defineProperty(globalThis, 'localStorage', {
   value: mockLocalStorage,
 });
 
 describe('CreateAssetSimple', () => {
   let queryClient: QueryClient;
-  let user: any;
+  let user: ReturnType<typeof userEvent.setup>;
+  const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
     queryClient = new QueryClient({
@@ -89,7 +91,13 @@ describe('CreateAssetSimple', () => {
     mockToast.mockClear();
   });
 
-  const renderComponent = () => {
+  afterEach(() => {
+    // Restore fetch between tests
+    globalThis.fetch = originalFetch;
+  });
+
+  const renderComponent = async () => {
+    const { default: CreateAssetSimple } = await import('../create-asset-simple');
     return render(
       <QueryClientProvider client={queryClient}>
         <CreateAssetSimple />
@@ -125,7 +133,7 @@ describe('CreateAssetSimple', () => {
   });
 
   it('should display custom properties when asset type is selected', async () => {
-    renderComponent();
+    await renderComponent();
 
     const assetTypeSelect = screen.getByTestId('asset-type-select');
     
@@ -143,7 +151,7 @@ describe('CreateAssetSimple', () => {
   });
 
   it('should validate required fields on submit', async () => {
-    renderComponent();
+    await renderComponent();
 
     const submitButton = screen.getByTestId('create-asset-button');
     await user.click(submitButton);
