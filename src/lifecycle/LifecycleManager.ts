@@ -439,11 +439,21 @@ export class LifecycleManager {
       transactionId: revealTxId
     });
     
-    // Note: asset.currentLayer is updated after migrate() call above
-    // Migration should be from the layer before migration (webvh or peer) to btco
-    // Since we already migrated, we need to infer the fromLayer
-    // The inscribeOnBitcoin validation ensures currentLayer is webvh or peer before migration
-    this.metrics.recordMigration('did:webvh', 'did:btco');
+     const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : feeRate;
+ 
+    // Capture the layer before migration for accurate metrics
+    const fromLayer = asset.currentLayer;
+ 
+     await asset.migrate('did:btco', {
+       transactionId: revealTxId,
+       inscriptionId: inscription.inscriptionId,
+     });
+ 
+     // Note: asset.currentLayer is updated after migrate() call above
+     // Migration should be from the layer before migration (webvh or peer) to btco
+     // Since we already migrated, we need to infer the fromLayer
+     // The inscribeOnBitcoin validation ensures currentLayer is webvh or peer before migration
+    this.metrics.recordMigration(fromLayer, 'did:btco');
     
     return asset;
     } catch (error) {
