@@ -1228,6 +1228,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Publish asset to web (migrate from did:peer to did:webvh)
+  app.post("/api/assets/:id/publish-to-web", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const assetId = req.params.id;
+      const { domain } = req.body; // Optional custom domain
+      
+      // Get the asset
+      const asset = await storage.getAsset(assetId);
+      
+      if (!asset) {
+        return res.status(404).json({ error: "Asset not found" });
+      }
+      
+      // Verify ownership
+      if (asset.userId !== user.id) {
+        return res.status(403).json({ error: "You don't own this asset" });
+      }
+      
+      // Check if asset is in did:peer layer
+      if (asset.currentLayer !== 'did:peer') {
+        return res.status(400).json({ 
+          error: "Asset is not in did:peer layer",
+          currentLayer: asset.currentLayer 
+        });
+      }
+      
+      // Check if asset already has didWebvh
+      if (asset.didWebvh) {
+        return res.status(400).json({ 
+          error: "Asset already published to web",
+          didWebvh: asset.didWebvh 
+        });
+      }
+      
+      // Use SDK to publish to web
+      // For now, we'll simulate this by creating a web-resolvable DID
+      // In a full implementation, this would call originalsSdk.lifecycle.publishToWeb()
+      
+      // Generate did:webvh identifier
+      // Format: did:webvh:domain:asset-slug
+      const usedDomain = domain || process.env.WEBVH_DOMAIN || `localhost%3A${process.env.PORT || 5000}`;
+      const assetSlug = `asset-${assetId.replace('orig_', '')}`;
+      const didWebvh = `did:webvh:${usedDomain}:${assetSlug}`;
+      
+      // Update provenance with migration event
+      const currentProvenance = asset.provenance || [];
+      const migrationEvent = {
+        type: 'migration',
+        from: 'did:peer',
+        to: 'did:webvh',
+        timestamp: new Date().toISOString(),
+        actor: user.id,
+        didPeer: asset.didPeer,
+        didWebvh: didWebvh,
+        description: 'Asset published to web layer'
+      };
+      
+      const updatedProvenance = Array.isArray(currentProvenance) 
+        ? [...currentProvenance, migrationEvent]
+        : [migrationEvent];
+      
+      // Update asset in database
+      const updatedAsset = await storage.updateAsset(assetId, {
+        currentLayer: 'did:webvh',
+        didWebvh: didWebvh,
+        provenance: updatedProvenance as any,
+      });
+      
+      if (!updatedAsset) {
+        return res.status(500).json({ error: "Failed to update asset" });
+      }
+      
+      // Generate resolver URL
+      const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+      const resolverDomain = usedDomain.replace('%3A', ':');
+      const resolverUrl = `${protocol}://${resolverDomain}/${assetSlug}/did.jsonld`;
+      
+      console.log(`✅ Published asset ${assetId} to web: ${didWebvh}`);
+      
+      res.json({
+        success: true,
+        message: "Asset published to web successfully",
+        asset: {
+          id: updatedAsset.id,
+          title: updatedAsset.title,
+          currentLayer: updatedAsset.currentLayer,
+          didPeer: updatedAsset.didPeer,
+          didWebvh: updatedAsset.didWebvh,
+          provenance: updatedAsset.provenance,
+        },
+        resolverUrl,
+        migration: migrationEvent,
+      });
+      
+    } catch (error) {
+      console.error("Error publishing asset to web:", error);
+      res.status(500).json({ 
+        error: "Failed to publish asset",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Serve DID document at path-based endpoint
   // IMPORTANT: These catch-all routes must be registered LAST to avoid conflicts
   // 
