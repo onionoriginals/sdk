@@ -187,8 +187,12 @@ export class BatchOperationExecutor {
         }
       }
     } catch (error) {
-      // In fail-fast mode, we've already thrown the error
-      // This catch is here to ensure cleanup
+      // In fail-fast mode, re-throw the error so callers can handle it
+      if (!continueOnError) {
+        throw error instanceof Error ? error : new Error(String(error));
+      }
+      // In continue-on-error mode, the error was already logged in processItem
+      // and we'll return the partial results below
     }
     
     const totalDuration = Date.now() - startTime;
