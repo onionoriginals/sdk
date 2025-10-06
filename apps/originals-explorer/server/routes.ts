@@ -259,8 +259,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/assets", authenticateUser, async (req, res) => {
     try {
       const user = (req as any).user;
+      const { layer } = req.query;
+      
       // Use the authenticated user's DID as the user identifier
-      const assets = await storage.getAssetsByUserId(user.id);
+      // Support optional layer filtering
+      const options = layer ? { layer: layer as any } : undefined;
+      const assets = await storage.getAssetsByUserId(user.id, options);
       res.json(assets);
     } catch (error) {
       console.error("Error fetching assets:", error);
