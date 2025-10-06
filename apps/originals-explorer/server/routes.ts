@@ -8,7 +8,8 @@ import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import { PrivyClient } from "@privy-io/node";
 import { originalsSdk } from "./originals";
-import { createUserDIDWebVH } from "./did-webvh-service";
+import { createUserDIDWebVH, publishDIDDocument } from "./did-webvh-service";
+import { OriginalsAsset } from "@originals/sdk";
 import multer from "multer";
 import { parse as csvParse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
@@ -588,7 +589,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           mediaType: contentType, // Original media MIME type
           mediaFileHash: mediaFileHash, // Hash of the actual media file
           metadataHash: metadataHash, // Hash of the DID resource (metadata JSON)
-          resourceId: resources[0].id
+          resourceId: resources[0].id,
+          resources: resources // Store resources for later reconstruction
         },
         
         // SDK-generated fields
@@ -653,6 +655,134 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (error.message && error.message.includes('file type')) {
+        return res.status(400).json({ 
+          error: error.message 
+        });
+      }
+      
+      res.status(500).json({ 
+        error: "Internal server error",
+        details: error.message 
+      });
+    }
+  });
+
+  // Publish asset to web (did:peer -> did:webvh)
+  app.post("/api/assets/:id/publish-to-web", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const assetId = req.params.id;
+      
+      // Get asset from database
+      const asset = await storage.getAsset(assetId);
+      
+      if (!asset) {
+        return res.status(404).json({ error: 'Asset not found' });
+      }
+      
+      // Check ownership
+      if (asset.userId !== user.id) {
+        return res.status(403).json({ error: 'Not authorized' });
+      }
+      
+      // Check current layer
+      if (asset.currentLayer !== 'did:peer') {
+        return res.status(400).json({ 
+          error: `Asset is already in ${asset.currentLayer} layer. Can only publish from did:peer.`
+        });
+      }
+      
+      // Verify asset has did:peer identifier
+      if (!asset.didPeer) {
+        return res.status(400).json({ 
+          error: 'Asset missing did:peer identifier. Cannot publish.' 
+        });
+      }
+      
+      // Get domain from request body or environment
+      const domain = req.body.domain || process.env.WEBVH_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000';
+      
+      // Reconstruct OriginalsAsset from database
+      const resources = (asset.metadata as any)?.resources || [];
+      const originalsAsset = new OriginalsAsset(
+        resources,
+        asset.didDocument as any,
+        (asset.credentials as any) || []
+      );
+      
+      // Publish to web using SDK
+      let publishedAsset: OriginalsAsset;
+      try {
+        publishedAsset = await originalsSdk.lifecycle.publishToWeb(
+          originalsAsset,
+          domain
+        );
+        console.log('Published to web:', publishedAsset.id);
+      } catch (sdkError: any) {
+        console.error('Publish error:', sdkError);
+        return res.status(500).json({ 
+          error: 'Failed to publish to web',
+          details: sdkError.message 
+        });
+      }
+      
+      // Extract did:webvh from bindings
+      const bindings = (publishedAsset as any).bindings || {};
+      const didWebvh = bindings['did:webvh'];
+      
+      if (!didWebvh) {
+        return res.status(500).json({ 
+          error: 'Failed to generate did:webvh identifier' 
+        });
+      }
+      
+      // Update database with new layer and did:webvh
+      const updatedAsset = await storage.updateAsset(assetId, {
+        currentLayer: 'did:webvh',
+        didWebvh: didWebvh,
+        didDocument: publishedAsset.did as any,
+        credentials: publishedAsset.credentials as any,
+        provenance: publishedAsset.getProvenance() as any,
+        updatedAt: new Date()
+      });
+      
+      if (!updatedAsset) {
+        return res.status(500).json({ 
+          error: 'Failed to update asset in database' 
+        });
+      }
+      
+      // Publish DID document to make it publicly accessible
+      try {
+        await publishDIDDocument({
+          did: didWebvh,
+          didDocument: publishedAsset.did,
+          didLog: publishedAsset.getProvenance()
+        });
+      } catch (publishError: any) {
+        console.error('Failed to publish DID document:', publishError);
+        // Continue even if DID document publishing fails
+      }
+      
+      // Extract slug for resolver URL
+      const slug = didWebvh.split(':').pop();
+      
+      // Return response
+      res.json({
+        asset: updatedAsset,
+        originalsAsset: {
+          did: publishedAsset.id,
+          previousDid: asset.didPeer,
+          resources: publishedAsset.resources,
+          provenance: publishedAsset.getProvenance()
+        },
+        resolverUrl: `http://${domain}/.well-known/did/${slug}`
+      });
+      
+    } catch (error: any) {
+      console.error("Error publishing asset to web:", error);
+      
+      if (error.message && error.message.includes('Invalid migration')) {
         return res.status(400).json({ 
           error: error.message 
         });
@@ -1198,6 +1328,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error in Google OAuth callback:", error);
       res.redirect('/?auth=error');
+    }
+  });
+
+  // DID resolution endpoint for assets (/.well-known/did/:slug)
+  // This resolves asset DIDs published to the web layer
+  app.get("/.well-known/did/:slug", async (req, res) => {
+    try {
+      const { slug } = req.params;
+      
+      // Try to resolve from storage
+      const doc = await storage.getDIDDocument(slug);
+      
+      if (!doc) {
+        return res.status(404).json({ error: 'DID not found' });
+      }
+      
+      // Return DID document
+      res.type("application/did+ld+json").send(JSON.stringify(doc.didDocument, null, 2));
+    } catch (error) {
+      console.error("Error resolving asset DID:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 

@@ -142,3 +142,58 @@ export function getUserSlugFromDID(did: string): string | null {
   }
   return parts[parts.length - 1];
 }
+
+/**
+ * Publish a DID document to make it publicly accessible
+ * @param params - Publishing parameters
+ */
+export async function publishDIDDocument(params: {
+  did: string;
+  didDocument: any;
+  didLog?: any;
+}): Promise<void> {
+  const { did, didDocument, didLog } = params;
+  
+  // Extract slug from did:webvh:domain.com:slug
+  const slug = did.split(':').pop();
+  
+  if (!slug) {
+    throw new Error('Invalid DID format: could not extract slug');
+  }
+  
+  // Import storage dynamically to avoid circular dependency
+  const { storage } = await import('./storage');
+  
+  // Store in database for public access
+  await storage.storeDIDDocument(slug, {
+    didDocument,
+    didLog: didLog || { entries: [] },
+    publishedAt: new Date().toISOString()
+  });
+  
+  console.log(`DID document published: ${did}`);
+}
+
+/**
+ * Resolve a DID document from storage
+ * @param did - The DID to resolve
+ * @returns The DID document or null if not found
+ */
+export async function resolveDIDDocument(did: string): Promise<any> {
+  const slug = did.split(':').pop();
+  
+  if (!slug) {
+    throw new Error('Invalid DID format: could not extract slug');
+  }
+  
+  // Import storage dynamically to avoid circular dependency
+  const { storage } = await import('./storage');
+  
+  const doc = await storage.getDIDDocument(slug);
+  
+  if (!doc) {
+    throw new Error('DID document not found');
+  }
+  
+  return doc.didDocument;
+}
