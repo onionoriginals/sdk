@@ -27,14 +27,14 @@ describe('OriginalsAsset', () => {
     expect(new OriginalsAsset(resources, buildDid('did:btco:123'), emptyCreds).currentLayer).toBe('did:btco');
   });
 
-  test('rejects invalid migration path', () => {
+  test('rejects invalid migration path', async () => {
     const asset = new OriginalsAsset(resources, buildDid('did:webvh:example.com:xyz'), emptyCreds);
-    expect(() => asset.migrate('did:peer' as LayerType)).toThrow('Invalid migration');
+    await expect(asset.migrate('did:peer' as LayerType)).rejects.toThrow('Invalid migration');
   });
 
-  test('migrates along valid path and updates layer (expected to fail until implemented)', () => {
+  test('migrates along valid path and updates layer (expected to fail until implemented)', async () => {
     const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    asset.migrate('did:webvh');
+    await asset.migrate('did:webvh');
     expect(asset.currentLayer).toBe('did:webvh');
   });
 
