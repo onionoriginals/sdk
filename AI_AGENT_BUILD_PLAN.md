@@ -440,30 +440,39 @@ Add batch operation support to LifecycleManager with proper error handling and a
 
 ---
 
-### Task 2.2: Resource Versioning System
+### Task 2.2: Resource Versioning System (Immutable Resources)
 **Agent Role**: Backend Developer  
 **Priority**: HIGH  
 **Estimated Effort**: 10 hours  
 **Dependencies**: Task 1.2 (Validation)
 
-**Objective**: Implement resource versioning with proper provenance tracking.
+**Objective**: Implement immutable resource versioning with proper provenance tracking.
+
+**Core Principle**: Resources are ALWAYS immutable. "Versioning" means creating NEW resources with updated content, not modifying existing ones. This is content-addressed, immutable-by-design.
 
 **Detailed Instructions**:
 ```
-Add support for resource versioning while maintaining immutability guarantees:
+Add support for immutable resource versioning:
+
+CRITICAL: Resources NEVER change once created. Each version is a separate, immutable 
+resource. "Updating" means creating a new resource with:
+  - New content (thus new hash)
+  - Reference to previous version's hash
+  - Incremented version number
 
 1. Update AssetResource type in `src/types/common.ts`:
    ```typescript
    export interface AssetResource {
-     id: string;
+     id: string;              // Logical resource ID (same across versions)
      type: string;
      url?: string;
      content?: string;
      contentType: string;
-     hash: string;
+     hash: string;            // Content hash (unique per version)
      size?: number;
-     version?: number; // NEW: Version number (default: 1)
-     previousVersion?: string; // NEW: Hash of previous version
+     version?: number;        // NEW: Version number (default: 1)
+     previousVersionHash?: string; // NEW: Hash of previous version (for chains)
+     createdAt?: string;      // NEW: When this version was created
    }
    ```
 
@@ -471,23 +480,37 @@ Add support for resource versioning while maintaining immutability guarantees:
    ```typescript
    export interface ResourceVersion {
      version: number;
-     hash: string;
+     hash: string;            // Unique content hash
      timestamp: string;
-     changes?: string; // Optional change description
+     changes?: string;        // Optional change description
+     contentType: string;
+     previousVersionHash?: string; // Link to previous version
    }
    
    export interface ResourceHistory {
-     resourceId: string;
+     resourceId: string;      // Logical ID (same across versions)
      versions: ResourceVersion[];
-     current: ResourceVersion;
+     currentVersion: ResourceVersion;
    }
    
    export class ResourceVersionManager {
-     // Track version history for a resource
-     addVersion(resourceId: string, hash: string, changes?: string): void;
+     // Track immutable version chain for a logical resource
+     addVersion(
+       resourceId: string,
+       hash: string,
+       contentType: string,
+       previousVersionHash?: string,
+       changes?: string
+     ): void;
+     
      getHistory(resourceId: string): ResourceHistory | null;
      getVersion(resourceId: string, version: number): ResourceVersion | null;
      getCurrentVersion(resourceId: string): ResourceVersion | null;
+     
+     // Verify version chain integrity (each version links to previous)
+     verifyChain(resourceId: string): boolean;
+     
+     toJSON(): object;
    }
    ```
 
@@ -495,64 +518,252 @@ Add support for resource versioning while maintaining immutability guarantees:
    ```typescript
    private resourceVersioning: ResourceVersionManager;
    
-   updateResource(
+   /**
+    * Create a new version of a resource (does NOT modify existing resource)
+    * Creates a new immutable resource with updated content
+    * Can be done at ANY layer (did:peer, did:webvh, did:btco)
+    */
+   addResourceVersion(
      resourceId: string,
      newContent: string | Buffer,
+     contentType: string,
      changes?: string
-   ): void {
-     // Validate asset is in did:peer layer (only layer allowing updates)
-     // Compute new hash
-     // Update resource with new version
-     // Track in version history
-     // Emit 'resource:updated' event
+   ): AssetResource {
+     // 1. Find current version of resource
+     const current = this.resources.find(r => r.id === resourceId);
+     if (!current) throw new Error('Resource not found');
+     
+     // 2. Compute new hash for new content
+     const newHash = computeHash(newContent);
+     
+     // 3. Validate hash actually changed
+     if (newHash === current.hash) {
+       throw new Error('Content unchanged - hash matches current version');
+     }
+     
+     // 4. Create NEW resource (doesn't modify existing)
+     const newVersion: AssetResource = {
+       id: resourceId,              // Same logical ID
+       type: current.type,
+       contentType,
+       content: typeof newContent === 'string' ? newContent : undefined,
+       hash: newHash,               // New hash
+       version: (current.version || 1) + 1,
+       previousVersionHash: current.hash,  // Link to previous
+       createdAt: new Date().toISOString()
+     };
+     
+     // 5. Add new resource to asset (old version still exists)
+     this.resources.push(newVersion);
+     
+     // 6. Track in version manager
+     this.versionManager.addVersion(
+       resourceId,
+       newHash,
+       contentType,
+       current.hash,
+       changes
+     );
+     
+     // 7. Update provenance
+     this.provenance.resourceUpdates.push({
+       resourceId,
+       fromVersion: current.version || 1,
+       toVersion: newVersion.version,
+       fromHash: current.hash,
+       toHash: newHash,
+       timestamp: newVersion.createdAt,
+       changes
+     });
+     
+     // 8. Emit event
+     this.eventEmitter.emit({
+       type: 'resource:version:created',
+       timestamp: newVersion.createdAt,
+       asset: { id: this.id },
+       resource: {
+         id: resourceId,
+         fromVersion: current.version || 1,
+         toVersion: newVersion.version,
+         fromHash: current.hash,
+         toHash: newHash
+       },
+       changes
+     });
+     
+     return newVersion;
    }
    
+   // Get specific version of a resource
+   getResourceVersion(resourceId: string, version: number): AssetResource | null;
+   
+   // Get all versions of a resource (immutable history)
+   getAllVersions(resourceId: string): AssetResource[];
+   
+   // Get version history
    getResourceHistory(resourceId: string): ResourceHistory | null;
-   rollbackResource(resourceId: string, toVersion: number): void; // did:peer only
    ```
 
-4. Update LifecycleManager validation:
-   - Prevent resource updates after migration to webvh/btco
-   - Validate version numbers are sequential
-   - Ensure previousVersion hash matches actual previous version
+4. Validation rules:
+   - Hash MUST change between versions (content-addressed)
+   - Version numbers MUST be sequential
+   - previousVersionHash MUST match actual previous version
+   - All versions remain accessible (immutable history)
+   - Works at ALL layers (did:peer, did:webvh, did:btco)
 
-5. Add credential type for resource updates:
+5. Add event type in `src/events/types.ts`:
    ```typescript
-   // In CredentialManager
-   async createResourceUpdatedCredential(
-     resourceId: string,
-     fromVersion: number,
-     toVersion: number,
-     changes: string,
-     issuer: string
-   ): Promise<VerifiableCredential>
+   export interface ResourceVersionCreatedEvent extends BaseEvent {
+     type: 'resource:version:created';
+     asset: { id: string };
+     resource: {
+       id: string;
+       fromVersion: number;
+       toVersion: number;
+       fromHash: string;
+       toHash: string;
+     };
+     changes?: string;
+   }
    ```
 
 6. Provenance integration:
    - Add 'resourceUpdates' array to ProvenanceChain
-   - Track each update with timestamp, version, and changes
+   - Track each new version with timestamp, version numbers, hashes, and changes
+   ```typescript
+   resourceUpdates: Array<{
+     resourceId: string;
+     fromVersion: number;
+     toVersion: number;
+     fromHash: string;        // Hash of previous version
+     toHash: string;          // Hash of new version
+     timestamp: string;
+     changes?: string;
+   }>;
+   ```
 
-7. Tests required:
-   - Resource versioning in did:peer
-   - Prevention of updates in webvh/btco
-   - Version history tracking
-   - Rollback functionality
-   - Credential issuance for updates
+7. Tests required in `tests/unit/lifecycle/ResourceVersioning.test.ts`:
+   - Create asset with resource v1
+   - Add new version v2 (creates new resource, v1 still exists)
+   - Verify both v1 and v2 are accessible
+   - Verify version chain integrity (v2 → v1)
+   - Get resource history (all versions)
+   - Version across layers (did:peer → did:webvh → did:btco)
+   - Verify hash-based content addressing
+   - Event emission verification
    - Provenance tracking
+   - Credential issuance for version creation
 
-8. Documentation:
-   - Resource versioning guide
-   - Best practices for version control
-   - Migration considerations
-   - API examples
+8. Documentation in `RESOURCE_VERSIONING.md`:
+   ```markdown
+   # Resource Versioning (Immutable Resources)
+   
+   ## Core Principle
+   
+   Resources are ALWAYS immutable. They never change once created.
+   
+   "Versioning" means creating NEW resources with updated content:
+   - Each version is a separate, immutable resource
+   - Versions are linked via `previousVersionHash`
+   - Old versions remain accessible forever
+   - Content-addressed by hash
+   
+   ## When to Create New Versions
+   
+   Create a new version when:
+   - Content needs to be updated
+   - Metadata changes
+   - Bug fixes in content
+   - Iterative refinement
+   
+   ## Immutability Rules
+   
+   ✅ Resources are immutable at ALL layers:
+   - did:peer: Immutable (can add new versions)
+   - did:webvh: Immutable (can add new versions)
+   - did:btco: Immutable (can add new versions)
+   
+   ✅ Old versions never disappear:
+   - Version 1 remains accessible after version 2 is created
+   - Complete history is preserved
+   - Provenance tracks all versions
+   
+   ✅ Content-addressed:
+   - Each version has unique hash
+   - Hash changes = new version
+   - Same hash = same content (immutable)
+   
+   ## Version Chains
+   
+   Versions form an immutable linked list:
+   ```
+   v1 (hash: abc123)
+    ↑
+   v2 (hash: def456, previousVersionHash: abc123)
+    ↑
+   v3 (hash: ghi789, previousVersionHash: def456)
+   ```
+   
+   ## API Examples
+   
+   ### Creating a New Version
+   
+   ```typescript
+   const asset = await sdk.lifecycle.createAsset([{
+     id: 'doc1',
+     type: 'document',
+     contentType: 'text/plain',
+     hash: computeHash('Version 1 content'),
+     content: 'Version 1 content'
+   }]);
+   
+   // Create version 2 (v1 still exists!)
+   const v2 = asset.addResourceVersion(
+     'doc1',
+     'Version 2 content with updates',
+     'text/plain',
+     'Fixed typos and added more details'
+   );
+   
+   // Both versions are now accessible
+   const v1 = asset.getResourceVersion('doc1', 1);
+   const v2 = asset.getResourceVersion('doc1', 2);
+   
+   console.log(v1.hash); // Original hash
+   console.log(v2.hash); // New hash
+   console.log(v2.previousVersionHash); // Points to v1.hash
+   ```
+   
+   ### Accessing Version History
+   
+   ```typescript
+   const history = asset.getResourceHistory('doc1');
+   console.log(history.versions); // Array of all versions
+   console.log(history.currentVersion); // Latest version
+   
+   // Get all versions
+   const allVersions = asset.getAllVersions('doc1');
+   allVersions.forEach(v => {
+     console.log(`Version ${v.version}: ${v.hash}`);
+   });
+   ```
+   
+   ### Verifying Chain Integrity
+   
+   ```typescript
+   // Verify each version correctly links to previous
+   const isValid = asset.versionManager.verifyChain('doc1');
+   ```
+   ```
 ```
 
 **Success Criteria**:
-- [ ] Resource versioning works in did:peer layer
-- [ ] Updates blocked in webvh/btco layers
-- [ ] Complete version history tracked
-- [ ] Rollback functionality works
-- [ ] Provenance records all changes
+- [ ] New versions create separate immutable resources
+- [ ] Old versions remain accessible after new versions created
+- [ ] Version chains verified (previousVersionHash links work)
+- [ ] Content-addressed by hash (hash uniquely identifies each version)
+- [ ] Works at all layers (did:peer, did:webvh, did:btco)
+- [ ] Provenance records all version creations
 - [ ] 100% test coverage
 
 **Output Files**:
