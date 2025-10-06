@@ -32,6 +32,11 @@ export interface AssetCreatedEvent extends BaseEvent {
 
 /**
  * Emitted when an asset migrates between layers
+ * 
+ * Note: The `details` field is populated differently based on the target layer:
+ * - For did:webvh migrations: `details` is undefined (web publishing has no transaction details)
+ * - For did:btco migrations: `details` includes Bitcoin transaction information
+ *   (transactionId, inscriptionId, satoshi, commitTxId, revealTxId, feeRate)
  */
 export interface AssetMigratedEvent extends BaseEvent {
   type: 'asset:migrated';

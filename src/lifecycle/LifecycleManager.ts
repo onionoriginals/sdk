@@ -206,7 +206,7 @@ export class LifecycleManager {
 
     // New resource identifier for the web representation; the asset DID remains the same.
     const webDid = `did:webvh:${domain}:${slug}`;
-    asset.migrate('did:webvh');
+    await asset.migrate('did:webvh');
     (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:webvh': webDid });
 
     // Issue a publication credential for the migration
@@ -307,7 +307,7 @@ export class LifecycleManager {
     const commitTxId = inscription.commitTxId;
     const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : feeRate;
 
-    asset.migrate('did:btco', {
+    await asset.migrate('did:btco', {
       transactionId: revealTxId,
       inscriptionId: inscription.inscriptionId,
       satoshi: inscription.satoshi,
@@ -361,7 +361,7 @@ export class LifecycleManager {
       vout: 0
     };
     const tx = await bm.transferInscription(inscription as any, newOwner);
-    asset.recordTransfer(asset.id, newOwner, tx.txid);
+    await asset.recordTransfer(asset.id, newOwner, tx.txid);
     return tx;
   }
 }

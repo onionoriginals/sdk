@@ -28,6 +28,9 @@ export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } fr
 export { multikey } from './crypto/Multikey';
 export type { MultikeyType } from './crypto/Multikey';
 
+// Event system exports
+export * from './events';
+
 // Utility exports
 export * from './utils/validation';
 export * from './utils/satoshi-validation';

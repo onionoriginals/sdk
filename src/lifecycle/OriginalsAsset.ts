@@ -62,7 +62,7 @@ export class OriginalsAsset {
     this.eventEmitter = new EventEmitter();
   }
 
-  migrate(
+  async migrate(
     toLayer: LayerType,
     details?: {
       transactionId?: string;
@@ -72,7 +72,7 @@ export class OriginalsAsset {
       revealTxId?: string;
       feeRate?: number;
     }
-  ): void {
+  ): Promise<void> {
     // Handle migration between layers
     const validTransitions: Record<LayerType, LayerType[]> = {
       'did:peer': ['did:webvh', 'did:btco'],
@@ -102,8 +102,8 @@ export class OriginalsAsset {
     }
     this.currentLayer = toLayer;
     
-    // Emit migration event
-    this.eventEmitter.emit({
+    // Emit migration event and await handlers
+    await this.eventEmitter.emit({
       type: 'asset:migrated',
       timestamp: new Date().toISOString(),
       asset: {
@@ -119,7 +119,7 @@ export class OriginalsAsset {
     return this.provenance;
   }
 
-  recordTransfer(from: string, to: string, transactionId: string): void {
+  async recordTransfer(from: string, to: string, transactionId: string): Promise<void> {
     this.provenance.transfers.push({
       from,
       to,
@@ -128,8 +128,8 @@ export class OriginalsAsset {
     });
     this.provenance.txid = transactionId;
     
-    // Emit transfer event
-    this.eventEmitter.emit({
+    // Emit transfer event and await handlers
+    await this.eventEmitter.emit({
       type: 'asset:transferred',
       timestamp: new Date().toISOString(),
       asset: {
