@@ -308,25 +308,10 @@ export class LifecycleManager {
 
       const signed = await this.credentialManager.signCredential(unsigned, privateKey, verificationMethod);
       (asset as any).credentials.push(signed);
-      // Emit credential issued event
-      const credentialEvent = {
-        type: 'credential:issued' as const,
-        timestamp: new Date().toISOString(),
-        asset: {
-          id: asset.id
-        },
-        credential: {
-          type: signed.type,
-          issuer: typeof signed.issuer === 'string'
-            ? signed.issuer
-            : signed.issuer.id
-        }
-      };
-
       // Emit from both LifecycleManager and asset emitters
       await Promise.all([
         this.eventEmitter.emit(credentialEvent),
-        (asset as any).eventEmitter.emit(credentialEvent)
+        asset._internalEmit(credentialEvent)
       ]);
     } catch (err) {
       // Best-effort: if issuance fails, continue without blocking publish
