@@ -252,6 +252,17 @@ export class OriginalsAsset {
     this.eventEmitter.off(eventType, handler);
   }
 
+  /**
+   * Internal method for LifecycleManager to emit events
+   * This allows type-safe event emission without exposing the internal EventEmitter
+   * 
+   * @internal
+   * @param event - The event to emit
+   */
+  _internalEmit<K extends keyof EventTypeMap>(event: EventTypeMap[K]): Promise<void> {
+    return this.eventEmitter.emit(event);
+  }
+
   private determineCurrentLayer(didId: string): LayerType {
     if (didId.startsWith('did:peer:')) return 'did:peer';
     if (didId.startsWith('did:webvh:')) return 'did:webvh';
