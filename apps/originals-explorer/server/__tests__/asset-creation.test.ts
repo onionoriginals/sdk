@@ -5,6 +5,7 @@ import { storage } from '../storage';
 import { originalsSdk } from '../originals';
 import FormData from 'form-data';
 import { Readable } from 'stream';
+import type { Server } from 'http';
 
 // Helper to create test auth token and user
 async function createTestUser() {
@@ -41,9 +42,9 @@ function createMockAuthHeader(userId: string): string {
   return `Bearer mock-token-${userId}`;
 }
 
-// Helper to make authenticated requests
+// Helper to make authenticated requests against the test server
 async function makeAuthRequest(
-  app: express.Application,
+  serverUrl: string,
   method: string,
   path: string,
   userId: string,
@@ -52,7 +53,6 @@ async function makeAuthRequest(
 ): Promise<any> {
   const authHeader = createMockAuthHeader(userId);
   
-  // Mock fetch for the request
   const headers: Record<string, string> = {
     'Authorization': authHeader,
   };
@@ -63,8 +63,7 @@ async function makeAuthRequest(
     headers['Content-Type'] = 'application/json';
   }
   
-  // Create a mock request
-  const url = `http://localhost:5000${path}`;
+  const url = `${serverUrl}${path}`;
   const options: RequestInit = {
     method,
     headers,
