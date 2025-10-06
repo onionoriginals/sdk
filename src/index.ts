@@ -31,6 +31,18 @@ export type { MultikeyType } from './crypto/Multikey';
 // Event system exports
 export * from './events';
 
+// Batch operations exports
+export {
+  BatchOperationExecutor,
+  BatchValidator,
+  BatchError,
+  type BatchResult,
+  type BatchOperationOptions,
+  type BatchInscriptionOptions,
+  type BatchInscriptionResult,
+  type ValidationResult
+} from './lifecycle/BatchOperations';
+
 // Utility exports
 export * from './utils/validation';
 export * from './utils/satoshi-validation';
