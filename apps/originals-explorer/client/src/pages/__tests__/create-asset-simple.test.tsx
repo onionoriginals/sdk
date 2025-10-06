@@ -163,7 +163,7 @@ describe('CreateAssetSimple', () => {
   });
 
   it('should handle file selection', async () => {
-    renderComponent();
+    await renderComponent();
 
     const file = new File(['test content'], 'test.png', { type: 'image/png' });
     const input = screen.getByTestId('media-upload-input') as HTMLInputElement;
@@ -178,7 +178,7 @@ describe('CreateAssetSimple', () => {
 
   it('should submit form with valid data', async () => {
     // Mock successful API response
-    global.fetch = mock(async () => ({
+    globalThis.fetch = mock(async () => ({
       ok: true,
       status: 201,
       json: async () => ({
@@ -202,7 +202,7 @@ describe('CreateAssetSimple', () => {
       }),
     })) as any;
 
-    renderComponent();
+    await renderComponent();
 
     // Select asset type
     const assetTypeSelect = screen.getByTestId('asset-type-select');
@@ -249,7 +249,7 @@ describe('CreateAssetSimple', () => {
 
   it('should display error when API fails', async () => {
     // Mock API error
-    global.fetch = mock(async () => ({
+    globalThis.fetch = mock(async () => ({
       ok: false,
       status: 500,
       json: async () => ({
@@ -257,7 +257,7 @@ describe('CreateAssetSimple', () => {
       }),
     })) as any;
 
-    renderComponent();
+    await renderComponent();
 
     // Fill form and submit
     const assetTypeSelect = screen.getByTestId('asset-type-select');
@@ -292,7 +292,7 @@ describe('CreateAssetSimple', () => {
   });
 
   it('should disable submit button while uploading', async () => {
-    renderComponent();
+    await renderComponent();
 
     const submitButton = screen.getByTestId('create-asset-button') as HTMLButtonElement;
     
@@ -300,7 +300,7 @@ describe('CreateAssetSimple', () => {
     expect(submitButton.disabled).toBe(false);
 
     // Mock slow API call
-    global.fetch = mock(
+    globalThis.fetch = mock(
       () =>
         new Promise((resolve) => {
           setTimeout(
@@ -347,7 +347,7 @@ describe('CreateAssetSimple', () => {
   });
 
   it('should parse tags from comma-separated string', async () => {
-    global.fetch = mock(async () => ({
+    globalThis.fetch = mock(async () => ({
       ok: true,
       status: 201,
       json: async () => ({
@@ -394,21 +394,21 @@ describe('CreateAssetSimple', () => {
     });
   });
 
-  it('should show authentication required message when not authenticated', () => {
+  it('should show authentication required message when not authenticated', async () => {
     // Mock unauthenticated user
     mockUseAuth.mockReturnValueOnce({
       user: null,
       isAuthenticated: false,
     });
 
-    renderComponent();
+    await renderComponent();
 
     expect(screen.getByText(/Authentication Required/i)).toBeTruthy();
     expect(screen.getByText(/Please sign in to create assets/i)).toBeTruthy();
   });
 
   it('should navigate back to dashboard on back button click', async () => {
-    renderComponent();
+    await renderComponent();
 
     const backButton = screen.getByTestId('back-to-dashboard');
     await user.click(backButton);
@@ -416,8 +416,8 @@ describe('CreateAssetSimple', () => {
     expect(mockSetLocation).toHaveBeenCalledWith('/');
   });
 
-  it('should accept multiple file types', () => {
-    renderComponent();
+  it('should accept multiple file types', async () => {
+    await renderComponent();
 
     const fileInput = screen.getByTestId('media-upload-input');
     const acceptAttr = fileInput.getAttribute('accept');
@@ -430,7 +430,7 @@ describe('CreateAssetSimple', () => {
   it('should include custom properties in asset data', async () => {
     let capturedRequestBody: any;
     
-    global.fetch = mock(async (url, options) => {
+    globalThis.fetch = mock(async (url, options) => {
       if (options?.body) {
         capturedRequestBody = JSON.parse(options.body as string);
       }
@@ -450,7 +450,7 @@ describe('CreateAssetSimple', () => {
       };
     }) as any;
 
-    renderComponent();
+    await renderComponent();
 
     // Select asset type
     const assetTypeSelect = screen.getByTestId('asset-type-select');

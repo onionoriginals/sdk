@@ -109,12 +109,53 @@ describe('POST /api/assets/create-with-did', () => {
   let server: Server;
   let serverUrl: string;
   let testUser: any;
+  const originalFetch = globalThis.fetch;
 
   beforeEach(async () => {
     // Setup Express app
     app = express();
     app.use(express.json());
     app.use(express.urlencoded({ extended: false }));
+    
+    // Mock global fetch for mediaUrl tests
+    globalThis.fetch = mock(async (url: string, options?: any) => {
+      // Mock fetches for URL-based asset creation
+      if (url === 'https://example.com/image.png') {
+        return {
+          ok: true,
+          status: 200,
+          headers: {
+            get: (name: string) => {
+              if (name === 'content-type') return 'image/png';
+              if (name === 'content-length') return '1024';
+              return null;
+            },
+          },
+          body: {
+            getReader: () => {
+              let sent = false;
+              return {
+                read: async () => {
+                  if (sent) return { done: true, value: undefined };
+                  sent = true;
+                  return { done: false, value: new Uint8Array(Buffer.from('fake-image-data')) };
+                },
+                releaseLock: () => {},
+                cancel: () => {},
+              };
+            },
+          },
+        } as any;
+      }
+      
+      // For localhost/private IP tests, return error (shouldn't be called due to validation)
+      if (url.includes('localhost') || url.includes('192.168') || url.includes('10.')) {
+        throw new Error('Fetch to unsafe URL should be blocked by validation');
+      }
+      
+      // Default: unmocked fetch
+      return originalFetch(url, options);
+    }) as any;
     
     // Register routes
     server = await registerRoutes(app);
@@ -134,6 +175,9 @@ describe('POST /api/assets/create-with-did', () => {
   });
 
   afterEach(async () => {
+    // Restore fetch
+    globalThis.fetch = originalFetch;
+    
     // Stop server
     await new Promise<void>((resolve, reject) => {
       server.close((err) => {
