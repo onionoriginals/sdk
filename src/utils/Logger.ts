@@ -89,6 +89,10 @@ export class FileLogOutput implements LogOutput {
     }
   }
   
+// At the top of src/utils/Logger.ts
+import { appendFile } from 'node:fs/promises';
+import type { OriginalsConfig } from '../types';
+
   private async flush(): Promise<void> {
     if (this.buffer.length === 0) {
       return;
@@ -98,23 +102,25 @@ export class FileLogOutput implements LogOutput {
     this.buffer = [];
     this.flushTimeout = null;
     
+-    try {
+-      // Use Bun's file API for efficient file writing
+-      const file = Bun.file(this.filePath);
+-      const exists = await file.exists();
+-      
+-      if (exists) {
+-        // Append to existing file
+-        const content = await file.text();
+-        await Bun.write(this.filePath, content + lines);
+-      } else {
+-        // Create new file
+-        await Bun.write(this.filePath, lines);
+-      }
     try {
-      // Use Bun's file API for efficient file writing
-      const file = Bun.file(this.filePath);
-      const exists = await file.exists();
-      
-      if (exists) {
-        // Append to existing file
-        const content = await file.text();
-        await Bun.write(this.filePath, content + lines);
-      } else {
-        // Create new file
-        await Bun.write(this.filePath, lines);
-      }
+      await appendFile(this.filePath, lines);
     } catch (err) {
-      // Fallback to console on file write error
-      console.error('Failed to write log file:', err);
-    }
+       // Fallback to console on file write error
+       console.error('Failed to write log file:', err);
+     }
   }
 }
 
