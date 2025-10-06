@@ -37,6 +37,33 @@ const upload = multer({
   },
 });
 
+// Configure multer for image/media uploads
+const mediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (_req, file, cb) => {
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png', 
+      'image/gif',
+      'image/webp',
+      'image/svg+xml',
+      'video/mp4',
+      'video/webm',
+      'audio/mpeg',
+      'audio/wav',
+      'application/pdf'
+    ];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Allowed types: images, videos, audio, PDF.'));
+    }
+  },
+});
+
 // Google OAuth2 client
 const googleClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
@@ -310,6 +337,223 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating asset:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Create asset with DID integration (uses Originals SDK)
+  app.post("/api/assets/create-with-did", authenticateUser, mediaUpload.single('mediaFile'), async (req, res) => {
+    try {
+      const user = (req as any).user;
+      
+      // Parse request body (form data)
+      const { title, description, category, tags, mediaUrl, metadata } = req.body;
+      
+      // Validate that we have either a file or URL
+      if (!req.file && !mediaUrl) {
+        return res.status(400).json({ 
+          error: "No media provided. Please provide either a mediaFile upload or mediaUrl." 
+        });
+      }
+
+      // Validate title
+      if (!title || typeof title !== 'string' || title.trim().length === 0) {
+        return res.status(400).json({ 
+          error: "Title is required and must be a non-empty string." 
+        });
+      }
+
+      let contentHash: string;
+      let fileBuffer: Buffer;
+      let contentType: string;
+      let actualMediaUrl: string | null = null;
+
+      // Step 1: Hash Media Content
+      if (req.file) {
+        // File uploaded
+        fileBuffer = req.file.buffer;
+        contentHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+        contentType = req.file.mimetype;
+        
+        // For uploaded files, we could store them and generate a URL
+        // For now, we'll use data URI
+        const base64Data = fileBuffer.toString('base64');
+        actualMediaUrl = `data:${contentType};base64,${base64Data}`;
+      } else if (mediaUrl) {
+        // URL provided - fetch and hash
+        try {
+          const response = await fetch(mediaUrl);
+          if (!response.ok) {
+            return res.status(400).json({ 
+              error: `Failed to fetch media from URL: ${response.statusText}` 
+            });
+          }
+          
+          const arrayBuffer = await response.arrayBuffer();
+          fileBuffer = Buffer.from(arrayBuffer);
+          contentHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+          contentType = response.headers.get('content-type') || 'application/octet-stream';
+          actualMediaUrl = mediaUrl;
+        } catch (fetchError: any) {
+          return res.status(400).json({ 
+            error: "Failed to fetch media from URL",
+            details: fetchError.message 
+          });
+        }
+      } else {
+        return res.status(400).json({ error: "No media provided" });
+      }
+
+      // Parse tags if provided
+      let parsedTags: string[] = [];
+      if (tags) {
+        try {
+          parsedTags = typeof tags === 'string' 
+            ? JSON.parse(tags) 
+            : Array.isArray(tags) 
+            ? tags 
+            : [];
+        } catch {
+          parsedTags = typeof tags === 'string' ? [tags] : [];
+        }
+      }
+
+      // Parse metadata if provided
+      let parsedMetadata: Record<string, any> = {};
+      if (metadata) {
+        try {
+          parsedMetadata = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
+        } catch {
+          parsedMetadata = {};
+        }
+      }
+
+      // Step 2: Create AssetResource Array
+      // For binary files, we'll create a metadata representation for the DID
+      // The actual content is stored via URL or data URI
+      const assetMetadata = {
+        title: title,
+        description: description || '',
+        category: category || '',
+        tags: parsedTags,
+        contentType: contentType,
+        contentHash: contentHash,
+        ...parsedMetadata
+      };
+      
+      const metadataString = JSON.stringify(assetMetadata);
+      const metadataHash = crypto.createHash('sha256').update(metadataString).digest('hex');
+      
+      const resources = [{
+        id: `resource-${Date.now()}`,
+        type: contentType.startsWith('image/') ? 'image' : 
+              contentType.startsWith('video/') ? 'video' :
+              contentType.startsWith('audio/') ? 'audio' : 'file',
+        contentType: 'application/json', // Metadata is JSON
+        hash: metadataHash,
+        content: metadataString, // Store metadata as content for DID generation
+        url: actualMediaUrl || undefined
+      }];
+
+      // Step 3: Call SDK to Create Asset with DID
+      console.log(`Creating asset with Originals SDK for user ${user.id}...`);
+      let originalsAsset;
+      try {
+        originalsAsset = await originalsSdk.lifecycle.createAsset(resources);
+        console.log(`✅ Created did:peer: ${originalsAsset.id}`);
+      } catch (sdkError: any) {
+        console.error('SDK creation error:', sdkError);
+        return res.status(500).json({ 
+          error: "Failed to create asset with Originals SDK",
+          details: sdkError.message 
+        });
+      }
+
+      // Step 4: Store in Database
+      const assetData = {
+        userId: user.id,
+        title: title,
+        description: description || null,
+        category: category || null,
+        tags: parsedTags.length > 0 ? parsedTags : null,
+        mediaUrl: actualMediaUrl,
+        metadata: {
+          ...parsedMetadata,
+          contentType: contentType,
+          contentHash: contentHash,
+          resourceId: resources[0].id
+        },
+        
+        // SDK-generated fields
+        currentLayer: 'did:peer' as const,
+        didPeer: originalsAsset.id,
+        didDocument: originalsAsset.did as any,
+        credentials: originalsAsset.credentials as any,
+        provenance: originalsAsset.getProvenance() as any,
+        
+        status: 'completed',
+        assetType: 'original'
+      };
+
+      let asset;
+      try {
+        const validatedAsset = insertAssetSchema.parse(assetData);
+        asset = await storage.createAsset(validatedAsset);
+        console.log(`✅ Stored asset in database: ${asset.id}`);
+      } catch (dbError: any) {
+        console.error('Database storage error:', dbError);
+        return res.status(500).json({ 
+          error: "Failed to store asset in database",
+          details: dbError.message 
+        });
+      }
+
+      // Step 5: Return Complete Response
+      res.status(201).json({
+        asset: {
+          id: asset.id,
+          title: asset.title,
+          description: asset.description,
+          category: asset.category,
+          tags: asset.tags,
+          mediaUrl: asset.mediaUrl,
+          currentLayer: asset.currentLayer,
+          didPeer: asset.didPeer,
+          didDocument: asset.didDocument,
+          credentials: asset.credentials,
+          provenance: asset.provenance,
+          status: asset.status,
+          assetType: asset.assetType,
+          createdAt: asset.createdAt,
+          metadata: asset.metadata
+        },
+        originalsAsset: {
+          did: originalsAsset.id,
+          resources: originalsAsset.resources,
+          provenance: originalsAsset.getProvenance()
+        }
+      });
+
+    } catch (error: any) {
+      console.error("Error creating asset with DID:", error);
+      
+      // Handle specific error types
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: "Validation error", 
+          details: error.errors 
+        });
+      }
+      
+      if (error.message && error.message.includes('file type')) {
+        return res.status(400).json({ 
+          error: error.message 
+        });
+      }
+      
+      res.status(500).json({ 
+        error: "Internal server error",
+        details: error.message 
+      });
     }
   });
 
