@@ -1,10 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -13,7 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { ArrowLeft, Upload } from "lucide-react";
+import { ArrowLeft, Upload, Check, AlertCircle, Loader2 } from "lucide-react";
+import { LayerBadge } from "@/components/LayerBadge";
 import type { InsertAsset } from "../../../shared/schema";
 
 type PropertyType = "text" | "number" | "boolean" | "date" | "select";
@@ -47,11 +47,12 @@ function readConfigs(): AssetTypeConfig[] {
 
 const createAssetSchema = z.object({
   assetTypeId: z.string().min(1, "Asset type is required"),
-  title: z.string().min(1, "Title is required"),
-  description: z.string().optional(),
+  title: z.string().min(1, "Title is required").max(100, "Title too long"),
+  description: z.string().max(1000, "Description too long").optional(),
   category: z.string().min(1, "Category is required"),
   tags: z.string().optional(),
   mediaFile: z.instanceof(File).optional(),
+  mediaUrl: z.string().url("Invalid URL").optional().or(z.literal("")),
   customProperties: z.record(z.any()).optional(),
 });
 
@@ -59,9 +60,14 @@ export default function CreateAssetSimple() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { user, isAuthenticated } = useAuth();
-  const [isUploading, setIsUploading] = useState(false);
+  const { user, isAuthenticated, getAccessToken } = useAuth();
+  const [isCreating, setIsCreating] = useState(false);
   const [assetTypes, setAssetTypes] = useState<AssetTypeConfig[]>(() => readConfigs());
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [successResult, setSuccessResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<any>(null);
 
   const form = useForm<z.infer<typeof createAssetSchema>>({
     resolver: zodResolver(createAssetSchema),
@@ -92,8 +98,42 @@ export default function CreateAssetSimple() {
   }, []);
 
   const createAssetMutation = useMutation({
-    mutationFn: async (data: InsertAsset) => {
-      const response = await apiRequest("POST", "/api/assets", data);
+    mutationFn: async (formData: FormData) => {
+      // Get fresh access token from Privy
+      const token = await getAccessToken();
+      
+      // Conditionally add Authorization header only if token exists
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch('/api/assets/create-with-did', {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: formData
+      });
+      
+      if (!response.ok) {
+        // Handle error responses gracefully (may be JSON, plain text, or HTML)
+        const raw = await response.text();
+        let message = 'Failed to create asset';
+        
+        if (raw) {
+          try {
+            // Try to parse as JSON to extract error fields
+            const parsed = JSON.parse(raw);
+            message = parsed.error || parsed.details || parsed.message || message;
+          } catch {
+            // If parsing fails, use the raw text (truncate if too long)
+            message = raw.length > 200 ? raw.substring(0, 200) + '...' : raw;
+          }
+        }
+        
+        throw new Error(message);
+      }
+      
       const result = await response.json();
       console.log("SDK Output:", result);
       return result;
@@ -102,13 +142,20 @@ export default function CreateAssetSimple() {
       console.log("Asset created successfully:", data);
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      setSuccessResult(data);
+      setError(null);
+      setErrorDetails(null);
+      setIsCreating(false);
       toast({
         title: "Success",
-        description: "Asset created successfully",
+        description: "Asset created successfully with DID identifier",
       });
-      setLocation("/dashboard");
     },
-    onError: (e) => {
+    onError: (e: any) => {
+      console.error("Asset creation error:", e);
+      setError(e.message || "Failed to create asset. Please try again.");
+      setErrorDetails(e);
+      setIsCreating(false);
       toast({
         title: "Error",
         description: e.message || "Failed to create asset. Please try again.",
@@ -127,28 +174,62 @@ export default function CreateAssetSimple() {
       return;
     }
 
-    setIsUploading(true);
-    
-    const assetData: InsertAsset = {
-      title: values.title,
-      description: values.description || "",
-      category: values.category,
-      tags: values.tags ? values.tags.split(",").map(tag => tag.trim()) : [],
-      mediaUrl: values.mediaFile ? URL.createObjectURL(values.mediaFile) : "",
-      metadata: {
-        fileType: values.mediaFile?.type || "",
-        fileSize: values.mediaFile?.size || 0,
-        assetTypeId: values.assetTypeId,
-        assetTypeName: selectedAssetType?.name || "",
-        customProperties: values.customProperties || {},
-      },
-      userId: user.id,
-      assetType: "original",
-      status: "completed",
-    };
+    // Validate that we have either a file or URL
+    if (!selectedFile && !values.mediaUrl) {
+      setError("Please upload a file or provide a media URL");
+      toast({
+        title: "Validation Error",
+        description: "Please upload a file or provide a media URL",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    createAssetMutation.mutate(assetData);
-    setIsUploading(false);
+    setIsCreating(true);
+    setError(null);
+    setErrorDetails(null);
+    
+    // Create FormData for file upload
+    const formData = new FormData();
+    formData.append('title', values.title);
+    formData.append('description', values.description || '');
+    formData.append('category', values.category);
+    
+    const tags = values.tags ? values.tags.split(",").map(tag => tag.trim()) : [];
+    formData.append('tags', JSON.stringify(tags));
+    
+    if (selectedFile) {
+      formData.append('mediaFile', selectedFile);
+    } else if (values.mediaUrl) {
+      formData.append('mediaUrl', values.mediaUrl);
+    }
+    
+    const metadata = {
+      assetTypeId: values.assetTypeId,
+      assetTypeName: selectedAssetType?.name || "",
+      customProperties: values.customProperties || {},
+    };
+    formData.append('metadata', JSON.stringify(metadata));
+
+    createAssetMutation.mutate(formData);
+  };
+
+  // File input handler
+  const handleFileChange = (file: File | undefined) => {
+    if (file) {
+      setSelectedFile(file);
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreviewUrl(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+      // Clear URL if file is selected
+      form.setValue('mediaUrl', '');
+    } else {
+      setSelectedFile(null);
+      setPreviewUrl(null);
+    }
   };
 
   if (!isAuthenticated) {
@@ -426,25 +507,53 @@ export default function CreateAssetSimple() {
                 <FormItem>
                   <FormLabel className="text-sm font-medium text-gray-700">Media File</FormLabel>
                   <FormControl>
-                    <div className="border-2 border-dashed border-gray-200 rounded-sm p-6 text-center hover:border-gray-300 transition-colors">
-                      <input
-                        {...field}
-                        type="file"
-                        accept="image/*,video/*,audio/*"
-                        onChange={(e) => onChange(e.target.files?.[0])}
-                        className="hidden"
-                        id="media-upload"
-                        data-testid="media-upload-input"
-                      />
-                      <label
-                        htmlFor="media-upload"
-                        className="cursor-pointer flex flex-col items-center space-y-2"
-                      >
-                        <Upload className="w-6 h-6 text-gray-400" />
-                        <span className="text-sm text-gray-500">
-                          {value ? value.name : "Click to upload file"}
-                        </span>
-                      </label>
+                    <div className="space-y-4">
+                      {/* File input */}
+                      <div className="border-2 border-dashed border-gray-200 rounded-sm p-6 text-center hover:border-gray-300 transition-colors">
+                        <input
+                          {...field}
+                          type="file"
+                          accept="image/*,video/*,audio/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            onChange(file);
+                            handleFileChange(file);
+                          }}
+                          className="hidden"
+                          id="media-upload"
+                          data-testid="media-upload-input"
+                        />
+                        <label
+                          htmlFor="media-upload"
+                          className="cursor-pointer flex flex-col items-center space-y-2"
+                        >
+                          <Upload className="w-6 h-6 text-gray-400" />
+                          <span className="text-sm text-gray-500">
+                            {selectedFile ? selectedFile.name : "Click to upload file"}
+                          </span>
+                        </label>
+                      </div>
+                      
+                      {/* Preview */}
+                      {previewUrl && (
+                        <div className="relative w-full h-48 border border-gray-200 rounded-sm overflow-hidden">
+                          <img 
+                            src={previewUrl} 
+                            alt="Preview" 
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                      )}
+                      
+                      {/* OR divider */}
+                      <div className="relative">
+                        <div className="absolute inset-0 flex items-center">
+                          <div className="w-full border-t border-gray-200"></div>
+                        </div>
+                        <div className="relative flex justify-center text-xs uppercase">
+                          <span className="bg-white px-2 text-gray-500">Or</span>
+                        </div>
+                      </div>
                     </div>
                   </FormControl>
                   <FormMessage />
@@ -452,18 +561,139 @@ export default function CreateAssetSimple() {
               )}
             />
 
+            <FormField
+              control={form.control}
+              name="mediaUrl"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-sm font-medium text-gray-700">Media URL</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="url"
+                      placeholder="https://example.com/image.jpg"
+                      {...field}
+                      className="border-gray-200 focus:border-gray-400 rounded-sm"
+                      data-testid="media-url-input"
+                      onChange={(e) => {
+                        field.onChange(e);
+                        if (e.target.value) {
+                          setSelectedFile(null);
+                          setPreviewUrl(null);
+                        }
+                      }}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Error Display */}
+            {error && (
+              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertCircle className="w-4 h-4 text-red-600" />
+                  <h4 className="font-medium text-red-900">Creation Failed</h4>
+                </div>
+                <p className="text-sm text-red-700">{error}</p>
+                {errorDetails && (
+                  <details className="mt-2">
+                    <summary className="text-xs text-red-600 cursor-pointer">Technical details</summary>
+                    <pre className="mt-2 text-xs text-red-800 bg-white p-2 rounded-sm overflow-x-auto">
+                      {JSON.stringify(errorDetails, null, 2)}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+
             <div className="pt-6 border-t border-gray-200">
+              {/* Loading State */}
+              {isCreating && (
+                <div className="flex items-center justify-center gap-2 text-sm text-gray-600 mb-4">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Creating asset with DID identifier...</span>
+                </div>
+              )}
+              
               <button 
                 type="submit" 
-                disabled={isUploading || createAssetMutation.isPending}
+                disabled={isCreating || createAssetMutation.isPending}
                 className="minimal-button w-full"
                 data-testid="create-asset-button"
               >
-                {isUploading || createAssetMutation.isPending ? "Creating..." : "Create Asset"}
+                {isCreating || createAssetMutation.isPending ? "Creating..." : "Create Asset"}
               </button>
             </div>
           </form>
         </Form>
+
+        {/* Success State Display */}
+        {successResult && (
+          <div className="mt-6 p-6 bg-green-50 border border-green-200 rounded-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <Check className="w-5 h-5 text-green-600" />
+              <h3 className="font-medium text-green-900">Asset Created Successfully!</h3>
+            </div>
+            
+            {/* Layer Badge */}
+            <div className="mb-4">
+              <LayerBadge layer="did:peer" size="md" />
+            </div>
+            
+            {/* DID Information */}
+            <div className="space-y-3">
+              <div>
+                <div className="text-xs text-green-700 mb-1">DID Identifier</div>
+                <div className="font-mono text-sm text-green-900 break-all bg-white p-2 rounded-sm border border-green-200">
+                  {successResult.asset.didPeer}
+                </div>
+              </div>
+              
+              {/* Credentials */}
+              {successResult.asset.credentials && (
+                <div>
+                  <div className="text-xs text-green-700 mb-1">Verifiable Credentials</div>
+                  <div className="text-xs font-mono text-green-800 bg-white p-2 rounded-sm border border-green-200 max-h-32 overflow-y-auto">
+                    {JSON.stringify(successResult.asset.credentials, null, 2)}
+                  </div>
+                </div>
+              )}
+              
+              {/* Provenance */}
+              {successResult.asset.provenance && (
+                <div>
+                  <div className="text-xs text-green-700 mb-1">Provenance</div>
+                  <div className="text-xs text-green-800 bg-white p-2 rounded-sm border border-green-200">
+                    {successResult.asset.provenance.events?.length || 0} event(s) recorded
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {/* Actions */}
+            <div className="flex gap-3 mt-4">
+              <Link href="/dashboard">
+                <Button size="sm" variant="outline">View Dashboard</Button>
+              </Link>
+              <Link href={`/assets/${successResult.asset.id}`}>
+                <Button size="sm">View Asset</Button>
+              </Link>
+              <Button 
+                size="sm" 
+                variant="outline"
+                onClick={() => {
+                  setSuccessResult(null);
+                  setSelectedFile(null);
+                  setPreviewUrl(null);
+                  form.reset();
+                }}
+              >
+                Create Another
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );
