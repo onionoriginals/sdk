@@ -482,7 +482,8 @@ export class LifecycleManager {
           const asset = await this.createAsset(resources);
           return asset;
         },
-        options
+        options,
+        batchId // Pass the pre-generated batchId for event correlation
       );
       
       // Emit batch:completed event
@@ -555,7 +556,8 @@ export class LifecycleManager {
         async (asset, index) => {
           return await this.publishToWeb(asset, domain);
         },
-        options
+        options,
+        batchId // Pass the pre-generated batchId for event correlation
       );
       
       // Emit batch:completed event
@@ -807,7 +809,8 @@ export class LifecycleManager {
         async (asset, index) => {
           return await this.inscribeOnBitcoin(asset, options?.feeRate);
         },
-        options
+        options,
+        batchId // Pass the pre-generated batchId for event correlation
       );
       
       // Emit batch:completed event
@@ -886,7 +889,8 @@ export class LifecycleManager {
         async (transfer, index) => {
           return await this.transferOwnership(transfer.asset, transfer.to);
         },
-        options
+        options,
+        batchId // Pass the pre-generated batchId for event correlation
       );
       
       // Emit batch:completed event

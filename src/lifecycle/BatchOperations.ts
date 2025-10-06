@@ -99,12 +99,14 @@ export class BatchOperationExecutor {
    * @param items - Array of items to process
    * @param operation - Function to execute on each item
    * @param options - Batch operation options
+   * @param predeterminedBatchId - Optional pre-generated batch ID for event correlation
    * @returns BatchResult with successful and failed operations
    */
   async execute<T, R>(
     items: T[],
     operation: (item: T, index: number) => Promise<R>,
-    options?: BatchOperationOptions
+    options?: BatchOperationOptions,
+    predeterminedBatchId?: string
   ): Promise<BatchResult<R>> {
     const opts = { ...this.defaultOptions, ...options };
     const {
@@ -115,7 +117,7 @@ export class BatchOperationExecutor {
       timeoutMs = 30000
     } = opts;
     
-    const batchId = this.generateBatchId();
+    const batchId = predeterminedBatchId || this.generateBatchId();
     const startedAt = new Date().toISOString();
     const startTime = Date.now();
     
