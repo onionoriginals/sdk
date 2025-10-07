@@ -79,7 +79,7 @@ bun test apps/originals-explorer/server/__tests__/publish-to-web.test.ts
 ```
 
 Expected output when implemented:
-```
+```text
 ✓ should publish asset from did:peer to did:webvh
 ✓ should update provenance with publish event
 ✓ should make DID document publicly resolvable
@@ -106,7 +106,7 @@ bun test apps/originals-explorer/client/src/pages/__tests__/publish-to-web.test.
 ```
 
 Expected output when implemented:
-```
+```text
 ✓ should show publish button for did:peer assets
 ✓ should not show publish button for did:webvh assets
 ✓ should not show publish button for did:btco assets
@@ -134,7 +134,7 @@ bun test apps/originals-explorer/__tests__/integration/publish-flow.test.ts
 ```
 
 Expected output when implemented:
-```
+```text
 ✓ should complete full publish flow
 ✓ should prevent publishing already published asset
 ✓ should handle publish errors gracefully

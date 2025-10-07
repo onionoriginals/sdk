@@ -96,13 +96,13 @@ bun test apps/originals-explorer/__tests__/integration/publish-flow.test.ts
 ### Individual Test Suites
 ```bash
 # Backend tests
-bun test server/__tests__/publish-to-web.test.ts
+bun test apps/originals-explorer/server/__tests__/publish-to-web.test.ts
 
 # Frontend tests
-bun test client/src/pages/__tests__/publish-to-web.test.tsx
+bun test apps/originals-explorer/client/src/pages/__tests__/publish-to-web.test.tsx
 
 # E2E tests
-bun test __tests__/integration/publish-flow.test.ts
+bun test apps/originals-explorer/__tests__/integration/publish-flow.test.ts
 ```
 
 ### All Tests

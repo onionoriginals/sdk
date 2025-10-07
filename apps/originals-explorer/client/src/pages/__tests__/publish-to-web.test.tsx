@@ -84,29 +84,13 @@ describe('Publish to Web UI', () => {
   const renderAssetDetailPage = async () => {
     // Import the asset detail component
     // Note: This assumes the component exists at this path
-    // If it doesn't exist yet, tests will fail appropriately
-    try {
-      const { default: AssetDetailPage } = await import('../asset-detail');
-      return render(
-        <QueryClientProvider client={queryClient}>
-          <AssetDetailPage />
-        </QueryClientProvider>
-      );
-    } catch (e) {
-      // If component doesn't exist, create a mock for testing
-      const MockAssetDetail = () => (
-        <div>
-          <h1>Test Asset</h1>
-          <div data-testid="layer-badge">Private</div>
-          <button data-testid="publish-to-web-button">Publish to Web</button>
-        </div>
-      );
-      return render(
-        <QueryClientProvider client={queryClient}>
-          <MockAssetDetail />
-        </QueryClientProvider>
-      );
-    }
+    // If it doesn't exist yet, tests will fail (as expected for TDD)
+    const { default: AssetDetailPage } = await import('../asset-detail');
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <AssetDetailPage />
+      </QueryClientProvider>
+    );
   };
 
   it('should show publish button for did:peer assets', async () => {

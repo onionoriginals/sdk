@@ -208,20 +208,21 @@ describe('Publish to Web E2E', () => {
       await page.goto(`${BASE_URL}/dashboard`);
       await page.waitForLoadState('networkidle');
 
-      // Find an asset that's already published (if any)
+      // Find an asset that's already published (must exist for this test)
       const publishedBadge = page.locator('[data-testid="layer-badge"]:has-text("Published")').first();
       
-      if (await publishedBadge.isVisible()) {
-        // Click on published asset
-        await publishedBadge.locator('..').click(); // Click parent element
-        await page.waitForTimeout(1000);
+      // Assert prerequisite: published asset must exist
+      await expect(publishedBadge).toBeVisible({ timeout: 5000 });
+      
+      // Click on published asset
+      await publishedBadge.locator('..').click(); // Click parent element
+      await page.waitForTimeout(1000);
 
-        // Publish button should not be visible
-        const publishButton = page.locator('button:has-text("Publish to Web")');
-        const isVisible = await publishButton.isVisible().catch(() => false);
-        
-        expect(isVisible).toBe(false);
-      }
+      // Publish button should not be visible
+      const publishButton = page.locator('button:has-text("Publish to Web")');
+      const isVisible = await publishButton.isVisible().catch(() => false);
+      
+      expect(isVisible).toBe(false);
 
     } finally {
       await page.close();
@@ -244,38 +245,39 @@ describe('Publish to Web E2E', () => {
       await page.goto(`${BASE_URL}/dashboard`);
       await page.waitForLoadState('networkidle');
 
-      // Find a private asset
+      // Find a private asset (must exist for this test)
       const privateBadge = page.locator('[data-testid="layer-badge"]:has-text("Private")').first();
       
-      if (await privateBadge.isVisible()) {
-        // Click to view details
-        await privateBadge.locator('..').click();
-        await page.waitForTimeout(1000);
+      // Assert prerequisite
+      await expect(privateBadge).toBeVisible({ timeout: 5000 });
+      
+      // Click to view details
+      await privateBadge.locator('..').click();
+      await page.waitForTimeout(1000);
 
-        // Try to publish
-        const publishButton = page.locator('button:has-text("Publish to Web")');
-        if (await publishButton.isVisible()) {
-          await publishButton.click();
-          
-          // Confirm in modal
-          await page.waitForTimeout(500);
-          const confirmButton = page.locator('button:has-text("Publish to Web")').last();
-          await confirmButton.click();
+      // Try to publish
+      const publishButton = page.locator('button:has-text("Publish to Web")');
+      await expect(publishButton).toBeVisible({ timeout: 5000 });
+      
+      await publishButton.click();
+      
+      // Confirm in modal
+      await page.waitForTimeout(500);
+      const confirmButton = page.locator('button:has-text("Publish to Web")').last();
+      await confirmButton.click();
 
-          // Wait for error message
-          await page.waitForTimeout(1000);
-          
-          // Should show error toast
-          const errorMessage = page.locator('text=/error|failed/i');
-          const hasError = await errorMessage.isVisible().catch(() => false);
-          expect(hasError).toBe(true);
+      // Wait for error message
+      await page.waitForTimeout(1000);
+      
+      // Should show error toast
+      const errorMessage = page.locator('text=/error|failed/i');
+      const hasError = await errorMessage.isVisible().catch(() => false);
+      expect(hasError).toBe(true);
 
-          // Asset should still be in did:peer
-          const layerBadge = page.locator('[data-testid="layer-badge"]');
-          const badgeText = await layerBadge.textContent();
-          expect(badgeText).toMatch(/Private|did:peer/i);
-        }
-      }
+      // Asset should still be in did:peer
+      const layerBadge = page.locator('[data-testid="layer-badge"]');
+      const badgeText = await layerBadge.textContent();
+      expect(badgeText).toMatch(/Private|did:peer/i);
 
     } finally {
       await page.close();
@@ -295,31 +297,29 @@ describe('Publish to Web E2E', () => {
       await page.goto(`${BASE_URL}/dashboard`);
       await page.waitForLoadState('networkidle');
 
-      // Find a private asset and click to view
+      // Find a private asset and click to view (must exist for this test)
       const privateBadge = page.locator('[data-testid="layer-badge"]:has-text("Private")').first();
       
-      if (await privateBadge.isVisible()) {
-        await privateBadge.locator('..').click();
-        await page.waitForTimeout(1000);
+      // Assert prerequisite
+      await expect(privateBadge).toBeVisible({ timeout: 5000 });
+      await privateBadge.locator('..').click();
+      await page.waitForTimeout(1000);
 
-        const publishButton = page.locator('button:has-text("Publish to Web")');
-        if (await publishButton.isVisible()) {
-          await publishButton.click();
-          
-          // Confirm
-          await page.waitForTimeout(500);
-          const confirmButton = page.locator('button:has-text("Publish to Web")').last();
-          await confirmButton.click();
+      const publishButton = page.locator('button:has-text("Publish to Web")');
+      await expect(publishButton).toBeVisible({ timeout: 5000 });
+      
+      await publishButton.click();
+      
+      // Confirm
+      await page.waitForTimeout(500);
+      const confirmButton = page.locator('button:has-text("Publish to Web")').last();
+      await confirmButton.click();
 
-          // Should show loading indicator
-          await page.waitForTimeout(500);
-          const loadingIndicator = page.locator('text=/Publishing|Loading/i');
-          const isLoading = await loadingIndicator.isVisible().catch(() => false);
-          
-          // At least briefly, the loading state should be visible
-          expect(isLoading || true).toBe(true); // Fallback to true since timing is difficult
-        }
-      }
+      // Should show loading indicator
+      await page.waitForTimeout(500);
+      const loadingIndicator = page.locator('text=/Publishing|Loading/i');
+      const isLoading = await loadingIndicator.isVisible().catch(() => false);
+      expect(isLoading).toBe(true);
 
     } finally {
       await page.close();
@@ -333,35 +333,34 @@ describe('Publish to Web E2E', () => {
       await page.goto(`${BASE_URL}/dashboard`);
       await page.waitForLoadState('networkidle');
 
-      // Find a published asset
+      // Find a published asset (must exist for this test)
       const publishedBadge = page.locator('[data-testid="layer-badge"]:has-text("Published")').first();
       
-      if (await publishedBadge.isVisible()) {
-        await publishedBadge.locator('..').click();
-        await page.waitForTimeout(1000);
+      // Assert prerequisite
+      await expect(publishedBadge).toBeVisible({ timeout: 5000 });
+      await publishedBadge.locator('..').click();
+      await page.waitForTimeout(1000);
 
-        // Get the resolver URL
-        const resolverLink = page.locator('a[href*=".well-known/did"]').first();
+      // Get the resolver URL
+      const resolverLink = page.locator('a[href*=".well-known/did"]').first();
+      
+      await expect(resolverLink).toBeVisible({ timeout: 5000 });
+      const resolverUrl = await resolverLink.getAttribute('href');
+      expect(resolverUrl).toBeDefined();
+
+      // Visit the resolver URL
+      if (resolverUrl) {
+        const fullUrl = resolverUrl.startsWith('http') ? resolverUrl : `${BASE_URL}${resolverUrl}`;
+        await page.goto(fullUrl);
+        await page.waitForLoadState('networkidle');
+
+        // Should return JSON DID document
+        const content = await page.textContent('body');
+        expect(content).toContain('did:webvh:');
         
-        if (await resolverLink.isVisible()) {
-          const resolverUrl = await resolverLink.getAttribute('href');
-          expect(resolverUrl).toBeDefined();
-
-          // Visit the resolver URL
-          if (resolverUrl) {
-            const fullUrl = resolverUrl.startsWith('http') ? resolverUrl : `${BASE_URL}${resolverUrl}`;
-            await page.goto(fullUrl);
-            await page.waitForLoadState('networkidle');
-
-            // Should return JSON DID document
-            const content = await page.textContent('body');
-            expect(content).toContain('did:webvh:');
-            
-            // Try to parse as JSON
-            const didDoc = JSON.parse(content || '{}');
-            expect(didDoc.id).toMatch(/^did:webvh:/);
-          }
-        }
+        // Try to parse as JSON
+        const didDoc = JSON.parse(content || '{}');
+        expect(didDoc.id).toMatch(/^did:webvh:/);
       }
 
     } finally {
@@ -376,22 +375,22 @@ describe('Publish to Web E2E', () => {
       await page.goto(`${BASE_URL}/dashboard`);
       await page.waitForLoadState('networkidle');
 
-      // Find a published asset
+      // Find a published asset (must exist for this test)
       const publishedBadge = page.locator('[data-testid="layer-badge"]:has-text("Published")').first();
       
-      if (await publishedBadge.isVisible()) {
-        await publishedBadge.locator('..').click();
-        await page.waitForTimeout(1000);
+      // Assert prerequisite
+      await expect(publishedBadge).toBeVisible({ timeout: 5000 });
+      await publishedBadge.locator('..').click();
+      await page.waitForTimeout(1000);
 
-        // Look for provenance section
-        const provenanceHeading = page.locator('text=/Provenance|History/i');
-        if (await provenanceHeading.isVisible()) {
-          // Should show migration from did:peer to did:webvh
-          const pageContent = await page.textContent('body');
-          
-          expect(pageContent).toMatch(/did:peer|Private/i);
-          expect(pageContent).toMatch(/did:webvh|Published|Web/i);
-        }
+      // Look for provenance section
+      const provenanceHeading = page.locator('text=/Provenance|History/i');
+      if (await provenanceHeading.isVisible()) {
+        // Should show migration from did:peer to did:webvh
+        const pageContent = await page.textContent('body');
+        
+        expect(pageContent).toMatch(/did:peer|Private/i);
+        expect(pageContent).toMatch(/did:webvh|Published|Web/i);
       }
 
     } finally {
@@ -417,25 +416,25 @@ describe('Publish to Web E2E', () => {
 
       const privateBadge = page.locator('[data-testid="layer-badge"]:has-text("Private")').first();
       
-      if (await privateBadge.isVisible()) {
-        await privateBadge.locator('..').click();
-        await page.waitForTimeout(1000);
+      // Assert prerequisite
+      await expect(privateBadge).toBeVisible({ timeout: 5000 });
+      await privateBadge.locator('..').click();
+      await page.waitForTimeout(1000);
 
-        const publishButton = page.locator('button:has-text("Publish to Web")');
-        if (await publishButton.isVisible()) {
-          await publishButton.click();
-          await page.waitForTimeout(500);
-          
-          const confirmButton = page.locator('button:has-text("Publish to Web")').last();
-          await confirmButton.click();
-          await page.waitForTimeout(1000);
+      const publishButton = page.locator('button:has-text("Publish to Web")');
+      await expect(publishButton).toBeVisible({ timeout: 5000 });
+      
+      await publishButton.click();
+      await page.waitForTimeout(500);
+      
+      const confirmButton = page.locator('button:has-text("Publish to Web")').last();
+      await confirmButton.click();
+      await page.waitForTimeout(1000);
 
-          // Should show authorization error
-          const errorMessage = page.locator('text=/authorized|permission/i');
-          const hasError = await errorMessage.isVisible().catch(() => false);
-          expect(hasError).toBe(true);
-        }
-      }
+      // Should show authorization error
+      const errorMessage = page.locator('text=/authorized|permission/i');
+      const hasError = await errorMessage.isVisible().catch(() => false);
+      expect(hasError).toBe(true);
 
     } finally {
       await page.close();
@@ -449,35 +448,35 @@ describe('Publish to Web E2E', () => {
       await page.goto(`${BASE_URL}/dashboard`);
       await page.waitForLoadState('networkidle');
 
-      // Find a private asset
+      // Find a private asset (must exist for this test)
       const privateBadge = page.locator('[data-testid="layer-badge"]:has-text("Private")').first();
       
-      if (await privateBadge.isVisible()) {
-        await privateBadge.locator('..').click();
-        await page.waitForTimeout(1000);
+      // Assert prerequisite
+      await expect(privateBadge).toBeVisible({ timeout: 5000 });
+      await privateBadge.locator('..').click();
+      await page.waitForTimeout(1000);
 
-        // Capture original asset data
-        const originalTitle = await page.locator('h1').first().textContent();
-        const originalDescription = await page.locator('[data-testid="asset-description"]').textContent().catch(() => '');
+      // Capture original asset data
+      const originalTitle = await page.locator('h1').first().textContent();
+      const originalDescription = await page.locator('[data-testid="asset-description"]').textContent().catch(() => '');
 
-        // Publish the asset
-        const publishButton = page.locator('button:has-text("Publish to Web")');
-        if (await publishButton.isVisible()) {
-          await publishButton.click();
-          await page.waitForTimeout(500);
-          
-          const confirmButton = page.locator('button:has-text("Publish to Web")').last();
-          await confirmButton.click();
-          await page.waitForTimeout(2000);
+      // Publish the asset
+      const publishButton = page.locator('button:has-text("Publish to Web")');
+      await expect(publishButton).toBeVisible({ timeout: 5000 });
+      
+      await publishButton.click();
+      await page.waitForTimeout(500);
+      
+      const confirmButton = page.locator('button:has-text("Publish to Web")').last();
+      await confirmButton.click();
+      await page.waitForTimeout(2000);
 
-          // Verify asset data is preserved
-          const newTitle = await page.locator('h1').first().textContent();
-          const newDescription = await page.locator('[data-testid="asset-description"]').textContent().catch(() => '');
+      // Verify asset data is preserved
+      const newTitle = await page.locator('h1').first().textContent();
+      const newDescription = await page.locator('[data-testid="asset-description"]').textContent().catch(() => '');
 
-          expect(newTitle).toBe(originalTitle);
-          expect(newDescription).toBe(originalDescription);
-        }
-      }
+      expect(newTitle).toBe(originalTitle);
+      expect(newDescription).toBe(originalDescription);
 
     } finally {
       await page.close();
