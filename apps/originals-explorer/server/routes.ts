@@ -1290,10 +1290,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? [...currentProvenance, migrationEvent]
         : [migrationEvent];
       
+      // Update the DID document to reflect the new did:webvh identifier
+      const updatedDidDocument = asset.didDocument ? {
+        ...asset.didDocument,
+        id: didWebvh,
+        // Update any verification methods or other fields that reference the DID
+        ...(asset.didDocument.verificationMethod && {
+          verificationMethod: (asset.didDocument.verificationMethod as any[]).map((vm: any) => ({
+            ...vm,
+            controller: didWebvh,
+            id: vm.id ? vm.id.replace(asset.didPeer || '', didWebvh) : vm.id
+          }))
+        })
+      } : null;
+      
       // Update asset in database
       const updatedAsset = await storage.updateAsset(assetId, {
         currentLayer: 'did:webvh',
         didWebvh: didWebvh,
+        didDocument: updatedDidDocument as any,
         provenance: updatedProvenance as any,
       });
       
