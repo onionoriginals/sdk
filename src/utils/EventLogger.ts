@@ -42,7 +42,7 @@ const DEFAULT_EVENT_CONFIG: EventLoggingConfig = {
   'verification:completed': 'info',
   'batch:started': 'info',
   'batch:completed': 'info',
-  'batch:failed': 'error'
+  'batch:failed': 'warn'
 };
 
 /**

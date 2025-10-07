@@ -5,7 +5,7 @@ import { defaultAssetColumns, type AssetRow } from "@/components/spreadsheet/col
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
-import { FileSpreadsheet } from "lucide-react";
+import { LayoutDashboard } from "lucide-react";
 import { Link } from "wouter";
 
 export default function AssetsSpreadsheet() {
@@ -56,10 +56,10 @@ export default function AssetsSpreadsheet() {
           <h1 className="page-title">Assets</h1>
           <p className="text-gray-500 text-sm">Spreadsheet view of your Originals assets</p>
         </div>
-        <Link href="/upload-assets">
+        <Link href="/dashboard">
           <Button variant="outline" className="border-gray-200 hover:bg-gray-50">
-            <FileSpreadsheet className="w-4 h-4 mr-2" />
-            Upload Spreadsheet
+            <LayoutDashboard className="w-4 h-4 mr-2" />
+            Dashboard
           </Button>
         </Link>
       </div>

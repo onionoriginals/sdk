@@ -27,15 +27,7 @@ export default function Dashboard() {
     createdAt: string;
     currentLayer?: AssetLayer;
   }>>({
-    queryKey: ["/api/assets", { layer: selectedLayer }],
-    queryFn: async () => {
-      const params = selectedLayer !== 'all' ? `?layer=${selectedLayer}` : '';
-      const response = await fetch(`/api/assets${params}`, {
-        credentials: 'include'
-      });
-      if (!response.ok) throw new Error('Failed to fetch assets');
-      return response.json();
-    }
+    queryKey: selectedLayer !== 'all' ? [`/api/assets?layer=${selectedLayer}`] : ["/api/assets"],
   });
 
   return (

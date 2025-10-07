@@ -582,7 +582,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         title: title,
         description: description || null,
         category: category || null,
-        tags: parsedTags.length > 0 ? parsedTags : null,
+        tags: parsedTags,
         mediaUrl: actualMediaUrl,
         metadata: {
           ...parsedMetadata,

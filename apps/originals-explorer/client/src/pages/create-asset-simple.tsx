@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { ArrowLeft, Upload, Check, AlertCircle, Loader2 } from "lucide-react";
 import { LayerBadge } from "@/components/LayerBadge";
+import { apiRequest } from "@/lib/queryClient";
 import type { InsertAsset } from "../../../shared/schema";
 
 type PropertyType = "text" | "number" | "boolean" | "date" | "select";
@@ -60,7 +61,7 @@ export default function CreateAssetSimple() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { user, isAuthenticated, getAccessToken } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const [isCreating, setIsCreating] = useState(false);
   const [assetTypes, setAssetTypes] = useState<AssetTypeConfig[]>(() => readConfigs());
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -99,41 +100,7 @@ export default function CreateAssetSimple() {
 
   const createAssetMutation = useMutation({
     mutationFn: async (formData: FormData) => {
-      // Get fresh access token from Privy
-      const token = await getAccessToken();
-      
-      // Conditionally add Authorization header only if token exists
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      
-      const response = await fetch('/api/assets/create-with-did', {
-        method: 'POST',
-        credentials: 'include',
-        headers,
-        body: formData
-      });
-      
-      if (!response.ok) {
-        // Handle error responses gracefully (may be JSON, plain text, or HTML)
-        const raw = await response.text();
-        let message = 'Failed to create asset';
-        
-        if (raw) {
-          try {
-            // Try to parse as JSON to extract error fields
-            const parsed = JSON.parse(raw);
-            message = parsed.error || parsed.details || parsed.message || message;
-          } catch {
-            // If parsing fails, use the raw text (truncate if too long)
-            message = raw.length > 200 ? raw.substring(0, 200) + '...' : raw;
-          }
-        }
-        
-        throw new Error(message);
-      }
-      
+      const response = await apiRequest('POST', '/api/assets/create-with-did', formData);
       const result = await response.json();
       console.log("SDK Output:", result);
       return result;

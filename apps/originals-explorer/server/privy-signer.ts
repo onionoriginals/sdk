@@ -17,15 +17,19 @@ import * as ed25519 from '@noble/ed25519';
 // @noble/ed25519 v2.x requires sha512Sync to be set on utils
 const sha512Fn = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
 
-// Initialize sha512Sync for Ed25519 operations
-if (!(ed25519 as any).utils) {
-  (ed25519 as any).utils = {};
-}
-(ed25519 as any).utils.sha512Sync = sha512Fn;
-
-// Also set on etc for older versions
-if ((ed25519 as any).etc) {
-  (ed25519 as any).etc.sha512Sync = sha512Fn;
+// Initialize Ed25519 configuration
+// This must be done before using any ed25519 functions
+try {
+  // Try to configure utils if it exists
+  const ed25519Module = ed25519 as any;
+  if (ed25519Module.utils) {
+    ed25519Module.utils.sha512Sync = sha512Fn;
+  }
+  if (ed25519Module.etc) {
+    ed25519Module.etc.sha512Sync = sha512Fn;
+  }
+} catch (error) {
+  console.warn('Failed to configure ed25519 utils:', error);
 }
 
 /**

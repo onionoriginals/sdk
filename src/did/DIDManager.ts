@@ -62,12 +62,28 @@ export class DIDManager {
   }
 
   async migrateToDIDWebVH(didDoc: DIDDocument, domain: string): Promise<DIDDocument> {
-    // Rigorous domain validation per RFC-like constraints
+    // Flexible domain validation - allow development domains with ports
     const normalized = String(domain || '').trim().toLowerCase();
-    const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
-    const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
-    if (!domainRegex.test(normalized)) {
-      throw new Error('Invalid domain');
+    
+    // Split domain and port if present
+    const [domainPart, portPart] = normalized.split(':');
+    
+    // Validate port if present
+    if (portPart && (!/^\d+$/.test(portPart) || parseInt(portPart) < 1 || parseInt(portPart) > 65535)) {
+      throw new Error(`Invalid domain: ${domain} - invalid port`);
+    }
+    
+    // Allow localhost and IP addresses for development
+    const isLocalhost = domainPart === 'localhost';
+    const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(domainPart);
+    
+    if (!isLocalhost && !isIP) {
+      // For non-localhost domains, require proper domain format
+      const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+      const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
+      if (!domainRegex.test(domainPart)) {
+        throw new Error('Invalid domain');
+      }
     }
 
     // Stable slug derived from original peer DID suffix (or last segment)

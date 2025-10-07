@@ -220,7 +220,7 @@ export class MemStorage implements IStorage {
       title: insertAsset.title || "Untitled Asset",
       description: insertAsset.description || null,
       category: insertAsset.category || null,
-      tags: insertAsset.tags || null,
+      tags: insertAsset.tags || [],
       mediaUrl: insertAsset.mediaUrl || null,
       metadata: insertAsset.metadata || null,
       credentials: insertAsset.credentials || null,

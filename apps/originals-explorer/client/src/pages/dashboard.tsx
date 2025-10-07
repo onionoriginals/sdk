@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayerBadge } from "@/components/LayerBadge";
 import { LayerFilter } from "@/components/LayerFilter";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import type { AssetLayer } from "../../../shared/schema";
 
 interface PublishResult {
@@ -55,15 +56,7 @@ export default function Dashboard() {
     didPeer?: string | null;
     didWebvh?: string | null;
   }>>({
-    queryKey: ["/api/assets", { layer: selectedLayer }],
-    queryFn: async () => {
-      const params = selectedLayer !== 'all' ? `?layer=${selectedLayer}` : '';
-      const response = await fetch(`/api/assets${params}`, {
-        credentials: 'include'
-      });
-      if (!response.ok) throw new Error('Failed to fetch assets');
-      return response.json();
-    }
+    queryKey: selectedLayer !== 'all' ? [`/api/assets?layer=${selectedLayer}`] : ["/api/assets"],
   });
 
   // Get current user
@@ -85,19 +78,9 @@ export default function Dashboard() {
     setPublishError(null);
     
     try {
-      const response = await fetch(`/api/assets/${selectedAssetForPublish.id}/publish-to-web`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          // Optional: domain: 'custom.domain.com'
-        })
+      const response = await apiRequest('POST', `/api/assets/${selectedAssetForPublish.id}/publish-to-web`, {
+        // Optional: domain: 'custom.domain.com'
       });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to publish');
-      }
       
       const result = await response.json();
       setPublishResult(result);
@@ -282,7 +265,7 @@ export default function Dashboard() {
                   <div className="bg-yellow-50 border border-yellow-200 rounded-sm p-3">
                     <h4 className="text-sm font-medium text-yellow-900 mb-2">Note:</h4>
                     <p className="text-sm text-yellow-800">
-                      Once published, your asset will be publicly visible. This action cannot be reversed.
+                      Once published, your asset will be publicly visible.
                     </p>
                   </div>
                 </>
@@ -335,12 +318,14 @@ export default function Dashboard() {
                     )}
                     
                     {/* Provenance Update */}
-                    <div>
-                      <div className="text-xs text-blue-700 mb-1">Provenance</div>
-                      <div className="text-xs text-blue-800 bg-white p-2 rounded-sm border border-blue-200">
-                        Migration event recorded: {new Date(publishResult.migration.timestamp).toLocaleString()}
+                    {publishResult.migration?.timestamp && (
+                      <div>
+                        <div className="text-xs text-blue-700 mb-1">Provenance</div>
+                        <div className="text-xs text-blue-800 bg-white p-2 rounded-sm border border-blue-200">
+                          Migration event recorded: {new Date(publishResult.migration.timestamp).toLocaleString()}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               )}
