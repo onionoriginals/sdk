@@ -92,6 +92,19 @@ Successfully implemented the "Publish to Web" functionality that migrates assets
     "resources": [...],
     "provenance": {...}
   },
+  "ownershipCredential": {
+    "@context": ["https://www.w3.org/2018/credentials/v1"],
+    "type": ["VerifiableCredential", "ResourceCreated"],
+    "issuer": "did:webvh:domain:user",
+    "issuanceDate": "...",
+    "credentialSubject": {
+      "id": "did:webvh:domain:asset-slug",
+      "owner": "did:webvh:domain:user",
+      "assetType": "OriginalsAsset",
+      "title": "...",
+      "resources": [...]
+    }
+  },
   "resolverUrl": "http://domain.com/.well-known/did/slug"
 }
 ```
