@@ -208,7 +208,7 @@ describe('POST /api/assets/:id/publish-to-web', () => {
     const slug = didWebvh.split(':').pop();
     
     // Verify DID resolution works (public endpoint, no auth needed)
-    const resolveResponse = await fetch(`${serverUrl}/.well-known/did/${slug}`);
+    const resolveResponse = await fetch(`${serverUrl}/${slug}/did.jsonld`);
     
     expect(resolveResponse.status).toBe(200);
     const resolveBody = await resolveResponse.json();
