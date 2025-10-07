@@ -428,4 +428,172 @@ describe('POST /api/assets/:id/publish-to-web', () => {
     expect(statuses).toContain(200); // At least one succeeds
     expect(statuses).toContain(400); // At least one fails with "already published"
   });
+
+  it('should reject if asset missing did:peer identifier', async () => {
+    // Create an asset without did:peer (manually manipulate database)
+    const brokenAsset = await storage.createAsset({
+      userId: testUser.did,
+      title: 'Broken Asset',
+      description: 'No did:peer',
+      category: 'test',
+      tags: null,
+      mediaUrl: 'https://example.com/test.png',
+      metadata: {},
+      currentLayer: 'did:peer',
+      didPeer: null, // Missing!
+      didWebvh: null,
+      didBtco: null,
+      didDocument: {} as any,
+      credentials: [],
+      provenance: {} as any,
+      status: 'completed',
+      assetType: 'original',
+    });
+
+    const response = await makeAuthRequest(
+      serverUrl,
+      'POST',
+      `/api/assets/${brokenAsset.id}/publish-to-web`,
+      testUser.did,
+      {}
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('did:peer');
+  });
+
+  it('should reject if asset missing resources data', async () => {
+    // Create an asset without proper resources
+    const brokenAsset = await storage.createAsset({
+      userId: testUser.did,
+      title: 'No Resources Asset',
+      description: 'Missing resources',
+      category: 'test',
+      tags: null,
+      mediaUrl: 'https://example.com/test.png',
+      metadata: { resources: [] }, // Empty resources!
+      currentLayer: 'did:peer',
+      didPeer: 'did:peer:xyz789',
+      didWebvh: null,
+      didBtco: null,
+      didDocument: {} as any,
+      credentials: [],
+      provenance: {} as any,
+      status: 'completed',
+      assetType: 'original',
+    });
+
+    const response = await makeAuthRequest(
+      serverUrl,
+      'POST',
+      `/api/assets/${brokenAsset.id}/publish-to-web`,
+      testUser.did,
+      {}
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('resources');
+  });
+
+  it('should include all expected response fields', async () => {
+    const response = await makeAuthRequest(
+      serverUrl,
+      'POST',
+      `/api/assets/${peerAssetId}/publish-to-web`,
+      testUser.did,
+      {}
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    
+    // Check all top-level fields
+    expect(body.asset).toBeDefined();
+    expect(body.originalsAsset).toBeDefined();
+    expect(body.resolverUrl).toBeDefined();
+    expect(body.ownershipCredential !== undefined).toBe(true); // Can be null
+    
+    // Check asset fields
+    expect(body.asset.currentLayer).toBe('did:webvh');
+    expect(body.asset.didPeer).toBeDefined();
+    expect(body.asset.didWebvh).toBeDefined();
+    expect(body.asset.didDocument).toBeDefined();
+    expect(body.asset.provenance).toBeDefined();
+    
+    // Check originalsAsset fields
+    expect(body.originalsAsset.did).toBeDefined();
+    expect(body.originalsAsset.previousDid).toBeDefined();
+    expect(body.originalsAsset.resources).toBeDefined();
+    expect(body.originalsAsset.provenance).toBeDefined();
+    
+    // Check resolver URL format
+    expect(body.resolverUrl).toMatch(/^https?:\/\/.+\/.well-known\/did\/.+$/);
+  });
+
+  it('should update DID document with new id', async () => {
+    const response = await makeAuthRequest(
+      serverUrl,
+      'POST',
+      `/api/assets/${peerAssetId}/publish-to-web`,
+      testUser.did,
+      {}
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    
+    // DID document should have the new did:webvh as its id
+    expect(body.asset.didDocument.id).toBe(body.asset.didWebvh);
+  });
+
+  it('should preserve provenance through publish', async () => {
+    const originalAsset = await storage.getAsset(peerAssetId);
+    const originalProvenance = originalAsset?.provenance;
+
+    const response = await makeAuthRequest(
+      serverUrl,
+      'POST',
+      `/api/assets/${peerAssetId}/publish-to-web`,
+      testUser.did,
+      {}
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    
+    // Should have original provenance data plus new migration
+    expect(body.asset.provenance).toBeDefined();
+    expect(body.asset.provenance.migrations).toBeDefined();
+    expect(body.asset.provenance.migrations.length).toBeGreaterThan(0);
+    
+    // Find the webvh migration
+    const webvhMigration = body.asset.provenance.migrations.find(
+      (m: any) => m.to === 'did:webvh'
+    );
+    expect(webvhMigration).toBeDefined();
+    expect(webvhMigration.from).toBe('did:peer');
+  });
+
+  it('should set updatedAt timestamp', async () => {
+    const beforeTime = new Date();
+
+    const response = await makeAuthRequest(
+      serverUrl,
+      'POST',
+      `/api/assets/${peerAssetId}/publish-to-web`,
+      testUser.did,
+      {}
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    
+    const afterTime = new Date();
+    const updatedAt = new Date(body.asset.updatedAt);
+    
+    expect(updatedAt >= beforeTime).toBe(true);
+    expect(updatedAt <= afterTime).toBe(true);
+  });
 });

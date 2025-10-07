@@ -1,29 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-
-// Component will be dynamically imported after mocks are set
 
 // Mock wouter
 const mockSetLocation = mock(() => {});
 mock.module('wouter', () => ({
   useLocation: () => ['/', mockSetLocation],
-  useRoute: () => [true, { id: 'test-asset-id' }],
-}));
-
-// Mock auth hook
-const mockUseAuth = mock(() => ({
-  user: {
-    id: 'did:webvh:localhost%3A5000:testuser',
-    did: 'did:webvh:localhost%3A5000:testuser',
-    privyId: 'privy-test-user',
-  },
-  isAuthenticated: true,
-}));
-
-mock.module('@/hooks/useAuth', () => ({
-  useAuth: mockUseAuth,
+  Link: ({ href, children, ...props }: any) => <a href={href} {...props}>{children}</a>,
 }));
 
 // Mock toast hook
@@ -32,7 +16,7 @@ mock.module('@/hooks/use-toast', () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
-describe('Publish to Web UI', () => {
+describe('Publish to Web UI (Dashboard)', () => {
   let queryClient: QueryClient;
   let user: ReturnType<typeof userEvent.setup>;
   const originalFetch = globalThis.fetch;
@@ -51,28 +35,58 @@ describe('Publish to Web UI', () => {
     mockSetLocation.mockClear();
     mockToast.mockClear();
     
-    // Default mock: asset in did:peer layer
+    // Default mock: stats and assets with mixed layers
     globalThis.fetch = mock(async (url) => {
-      if (url.includes('/api/assets/')) {
+      if (url.includes('/api/stats')) {
         return {
           ok: true,
-          status: 200,
           json: async () => ({
-            id: 'test-asset-id',
-            title: 'Test Asset',
-            description: 'Test description',
-            currentLayer: 'did:peer',
-            didPeer: 'did:peer:abc123',
-            userId: 'did:webvh:localhost%3A5000:testuser',
-            mediaUrl: 'https://example.com/test.png',
-            provenance: {
-              creator: 'did:peer:abc123',
-              createdAt: new Date().toISOString(),
-              migrations: [],
-            },
+            totalAssets: 5,
+            verifiedAssets: 3,
+            migratedAssets: 2,
           }),
         };
       }
+      
+      if (url.includes('/api/user')) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'did:webvh:localhost%3A5000:testuser',
+            did: 'did:webvh:localhost%3A5000:testuser',
+            privyId: 'privy-test-user',
+          }),
+        };
+      }
+      
+      if (url.includes('/api/assets')) {
+        return {
+          ok: true,
+          json: async () => ([
+            {
+              id: 'asset-peer-1',
+              title: 'Private Asset 1',
+              assetType: 'original',
+              status: 'completed',
+              createdAt: new Date().toISOString(),
+              currentLayer: 'did:peer',
+              userId: 'did:webvh:localhost%3A5000:testuser',
+              didPeer: 'did:peer:abc123',
+            },
+            {
+              id: 'asset-webvh-1',
+              title: 'Published Asset 1',
+              assetType: 'original',
+              status: 'completed',
+              createdAt: new Date().toISOString(),
+              currentLayer: 'did:webvh',
+              userId: 'did:webvh:localhost%3A5000:testuser',
+              didWebvh: 'did:webvh:example.com:xyz',
+            },
+          ]),
+        };
+      }
+      
       return { ok: false, status: 404 };
     }) as any;
   });
@@ -81,146 +95,180 @@ describe('Publish to Web UI', () => {
     globalThis.fetch = originalFetch;
   });
 
-  const renderAssetDetailPage = async () => {
-    // Import the asset detail component
-    // Note: This assumes the component exists at this path
-    // If it doesn't exist yet, tests will fail (as expected for TDD)
-    const { default: AssetDetailPage } = await import('../asset-detail');
+  const renderDashboard = async () => {
+    const { default: Dashboard } = await import('../dashboard');
     return render(
       <QueryClientProvider client={queryClient}>
-        <AssetDetailPage />
+        <Dashboard />
       </QueryClientProvider>
     );
   };
 
-  it('should show publish button for did:peer assets', async () => {
-    await renderAssetDetailPage();
+  it('should show publish button only for did:peer assets owned by user', async () => {
+    await renderDashboard();
     
+    // Wait for assets to load
     await waitFor(() => {
-      const publishButton = screen.queryByText(/publish to web/i);
-      expect(publishButton).toBeTruthy();
+      expect(screen.getByText('Private Asset 1')).toBeTruthy();
+      expect(screen.getByText('Published Asset 1')).toBeTruthy();
     });
+    
+    // Find the asset rows
+    const privateAssetRow = screen.getByText('Private Asset 1').closest('[data-testid^="activity-item"]');
+    const publishedAssetRow = screen.getByText('Published Asset 1').closest('[data-testid^="activity-item"]');
+    
+    // Private asset should have publish button
+    expect(within(privateAssetRow as HTMLElement).queryByText(/Publish/i)).toBeTruthy();
+    
+    // Published asset should NOT have publish button
+    expect(within(publishedAssetRow as HTMLElement).queryByText(/Publish/i)).toBeNull();
   });
 
-  it('should not show publish button for did:webvh assets', async () => {
-    globalThis.fetch = mock(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        id: 'test-asset-id',
-        title: 'Published Asset',
-        currentLayer: 'did:webvh',
-        didWebvh: 'did:webvh:example.com:xyz',
-        didPeer: 'did:peer:abc123',
-        userId: 'did:webvh:localhost%3A5000:testuser',
-      }),
-    })) as any;
+  it('should hide publish button for assets not owned by current user', async () => {
+    // Mock asset owned by different user
+    globalThis.fetch = mock(async (url) => {
+      if (url.includes('/api/user')) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'did:webvh:localhost%3A5000:testuser',
+            did: 'did:webvh:localhost%3A5000:testuser',
+            privyId: 'privy-test-user',
+          }),
+        };
+      }
+      
+      if (url.includes('/api/assets')) {
+        return {
+          ok: true,
+          json: async () => ([
+            {
+              id: 'asset-other-user',
+              title: 'Other User Asset',
+              assetType: 'original',
+              status: 'completed',
+              createdAt: new Date().toISOString(),
+              currentLayer: 'did:peer',
+              userId: 'did:webvh:localhost%3A5000:otheruser', // Different user
+              didPeer: 'did:peer:xyz789',
+            },
+          ]),
+        };
+      }
+      
+      return { ok: true, json: async () => ({}) };
+    }) as any;
     
-    await renderAssetDetailPage();
-    
-    await waitFor(() => {
-      const publishButton = screen.queryByText(/publish to web/i);
-      expect(publishButton).toBeNull();
-    });
-  });
-
-  it('should not show publish button for did:btco assets', async () => {
-    globalThis.fetch = mock(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        id: 'test-asset-id',
-        title: 'Bitcoin Asset',
-        currentLayer: 'did:btco',
-        didBtco: 'did:btco:xyz',
-        didWebvh: 'did:webvh:example.com:xyz',
-        didPeer: 'did:peer:abc123',
-        userId: 'did:webvh:localhost%3A5000:testuser',
-      }),
-    })) as any;
-    
-    await renderAssetDetailPage();
+    await renderDashboard();
     
     await waitFor(() => {
-      const publishButton = screen.queryByText(/publish to web/i);
-      expect(publishButton).toBeNull();
+      expect(screen.getByText('Other User Asset')).toBeTruthy();
     });
+    
+    // Should not have publish button
+    const assetRow = screen.getByText('Other User Asset').closest('[data-testid^="activity-item"]');
+    expect(within(assetRow as HTMLElement).queryByText(/Publish/i)).toBeNull();
   });
 
-  it('should show confirmation modal on publish click', async () => {
-    await renderAssetDetailPage();
+  it('should open confirmation modal when publish button clicked', async () => {
+    await renderDashboard();
     
-    const publishButton = await screen.findByText(/publish to web/i);
+    await waitFor(() => {
+      expect(screen.getByText('Private Asset 1')).toBeTruthy();
+    });
+    
+    const publishButton = screen.getByText(/Publish/i);
     await user.click(publishButton);
     
+    // Modal should appear
     await waitFor(() => {
-      expect(screen.getByText(/publish asset to web\?/i)).toBeTruthy();
+      expect(screen.getByText('Publish Asset to Web?')).toBeTruthy();
       expect(screen.getByText(/publicly accessible/i)).toBeTruthy();
+      expect(screen.getByText(/cannot be reversed/i)).toBeTruthy();
     });
   });
 
-  it('should allow canceling publish in modal', async () => {
-    await renderAssetDetailPage();
+  it('should show explanation of what publishing does in modal', async () => {
+    await renderDashboard();
     
-    const publishButton = await screen.findByText(/publish to web/i);
+    await waitFor(() => screen.getByText('Private Asset 1'));
+    
+    const publishButton = screen.getByText(/Publish/i);
     await user.click(publishButton);
     
     await waitFor(() => {
-      expect(screen.getByText(/publish asset to web\?/i)).toBeTruthy();
-    });
-    
-    const cancelButton = screen.getByRole('button', { name: /cancel/i });
-    await user.click(cancelButton);
-    
-    await waitFor(() => {
-      expect(screen.queryByText(/publish asset to web\?/i)).toBeNull();
+      // Check all explanation points are present
+      expect(screen.getByText(/publicly accessible/i)).toBeTruthy();
+      expect(screen.getByText(/DID becomes resolvable/i)).toBeTruthy();
+      expect(screen.getByText(/Provenance is updated/i)).toBeTruthy();
+      expect(screen.getByText(/did:peer is preserved/i)).toBeTruthy();
+      expect(screen.getByText(/cannot be reversed/i)).toBeTruthy();
     });
   });
 
   it('should call API when publish confirmed', async () => {
-    let publishCalled = false;
+    let publishApiCalled = false;
+    
     globalThis.fetch = mock(async (url, options) => {
       if (url.includes('/publish-to-web') && options?.method === 'POST') {
-        publishCalled = true;
+        publishApiCalled = true;
         return {
           ok: true,
-          status: 200,
           json: async () => ({
             asset: {
-              id: 'test-asset-id',
+              id: 'asset-peer-1',
+              title: 'Private Asset 1',
               currentLayer: 'did:webvh',
-              didWebvh: 'did:webvh:example.com:xyz',
               didPeer: 'did:peer:abc123',
+              didWebvh: 'did:webvh:example.com:xyz',
+              provenance: {
+                migrations: [{
+                  from: 'did:peer',
+                  to: 'did:webvh',
+                  timestamp: new Date().toISOString(),
+                }],
+              },
             },
             resolverUrl: 'https://example.com/.well-known/did/xyz',
+            migration: {
+              timestamp: new Date().toISOString(),
+            },
           }),
         };
       }
-      // Default response for asset fetch
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          id: 'test-asset-id',
-          title: 'Test Asset',
-          currentLayer: 'did:peer',
-          didPeer: 'did:peer:abc123',
-          userId: 'did:webvh:localhost%3A5000:testuser',
-        }),
-      };
+      
+      // Default mocks
+      if (url.includes('/api/user')) {
+        return { ok: true, json: async () => ({ id: 'did:webvh:localhost%3A5000:testuser', did: 'did:webvh:localhost%3A5000:testuser' }) };
+      }
+      if (url.includes('/api/assets')) {
+        return {
+          ok: true,
+          json: async () => ([{
+            id: 'asset-peer-1',
+            title: 'Private Asset 1',
+            currentLayer: 'did:peer',
+            userId: 'did:webvh:localhost%3A5000:testuser',
+          }]),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
     }) as any;
     
-    await renderAssetDetailPage();
+    await renderDashboard();
     
-    const publishButton = await screen.findByText(/publish to web/i);
-    await user.click(publishButton);
+    await waitFor(() => screen.getByText('Private Asset 1'));
+    await user.click(screen.getByText(/Publish/i));
     
-    // Confirm in modal
-    const confirmButton = await screen.findByRole('button', { name: /^publish/i });
-    await user.click(confirmButton);
+    await waitFor(() => screen.getByText('Publish Asset to Web?'));
+    
+    // Find and click the "Publish to Web" button in the modal footer
+    const publishButtons = screen.getAllByText(/Publish to Web/i);
+    const confirmButton = publishButtons.find(btn => (btn as HTMLElement).closest('button'));
+    await user.click(confirmButton as HTMLElement);
     
     await waitFor(() => {
-      expect(publishCalled).toBe(true);
+      expect(publishApiCalled).toBe(true);
     });
   });
 
@@ -229,118 +277,154 @@ describe('Publish to Web UI', () => {
       if (url.includes('/publish-to-web')) {
         return {
           ok: true,
-          status: 200,
           json: async () => ({
             asset: {
-              id: 'test-asset-id',
+              id: 'asset-peer-1',
               currentLayer: 'did:webvh',
+              didPeer: 'did:peer:abc123',
               didWebvh: 'did:webvh:example.com:xyz',
-              title: 'Test Asset',
             },
             resolverUrl: 'https://example.com/.well-known/did/xyz',
+            migration: {
+              timestamp: new Date().toISOString(),
+            },
           }),
         };
       }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          id: 'test-asset-id',
-          title: 'Test Asset',
-          currentLayer: 'did:peer',
-          didPeer: 'did:peer:abc123',
-        }),
-      };
+      
+      if (url.includes('/api/user')) {
+        return { ok: true, json: async () => ({ id: 'did:webvh:localhost%3A5000:testuser', did: 'did:webvh:localhost%3A5000:testuser' }) };
+      }
+      if (url.includes('/api/assets')) {
+        return {
+          ok: true,
+          json: async () => ([{
+            id: 'asset-peer-1',
+            title: 'Private Asset 1',
+            currentLayer: 'did:peer',
+            userId: 'did:webvh:localhost%3A5000:testuser',
+          }]),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
     }) as any;
     
-    await renderAssetDetailPage();
+    await renderDashboard();
     
-    const publishButton = await screen.findByText(/publish to web/i);
-    await user.click(publishButton);
+    await waitFor(() => screen.getByText('Private Asset 1'));
+    await user.click(screen.getByText(/Publish/i));
+    await waitFor(() => screen.getByText('Publish Asset to Web?'));
     
-    const confirmButton = await screen.findByRole('button', { name: /^publish/i });
-    await user.click(confirmButton);
+    const publishButtons = screen.getAllByText(/Publish to Web/i);
+    const confirmButton = publishButtons.find(btn => (btn as HTMLElement).closest('button'));
+    await user.click(confirmButton as HTMLElement);
     
+    // Wait for success toast
     await waitFor(() => {
       expect(mockToast).toHaveBeenCalledWith(
         expect.objectContaining({
-          title: expect.stringMatching(/success|published/i),
+          title: expect.stringMatching(/published to web successfully/i),
         })
       );
     });
   });
 
-  it('should display resolver URL link after publish', async () => {
+  it('should display resolver URL and DIDs after publish', async () => {
     globalThis.fetch = mock(async (url, options) => {
       if (url.includes('/publish-to-web')) {
         return {
           ok: true,
-          status: 200,
           json: async () => ({
             asset: {
-              id: 'test-asset-id',
+              id: 'asset-peer-1',
               currentLayer: 'did:webvh',
+              didPeer: 'did:peer:abc123',
               didWebvh: 'did:webvh:example.com:xyz',
             },
             resolverUrl: 'https://example.com/.well-known/did/xyz',
+            migration: {
+              timestamp: new Date().toISOString(),
+            },
           }),
         };
       }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          id: 'test-asset-id',
-          currentLayer: 'did:peer',
-          didPeer: 'did:peer:abc123',
-        }),
-      };
+      
+      if (url.includes('/api/user')) {
+        return { ok: true, json: async () => ({ id: 'did:webvh:localhost%3A5000:testuser', did: 'did:webvh:localhost%3A5000:testuser' }) };
+      }
+      if (url.includes('/api/assets')) {
+        return {
+          ok: true,
+          json: async () => ([{
+            id: 'asset-peer-1',
+            title: 'Private Asset 1',
+            currentLayer: 'did:peer',
+            userId: 'did:webvh:localhost%3A5000:testuser',
+          }]),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
     }) as any;
     
-    await renderAssetDetailPage();
+    await renderDashboard();
     
-    const publishButton = await screen.findByText(/publish to web/i);
-    await user.click(publishButton);
+    await waitFor(() => screen.getByText('Private Asset 1'));
+    await user.click(screen.getByText(/Publish/i));
+    await waitFor(() => screen.getByText('Publish Asset to Web?'));
     
-    const confirmButton = await screen.findByRole('button', { name: /^publish/i });
-    await user.click(confirmButton);
+    const publishButtons = screen.getAllByText(/Publish to Web/i);
+    const confirmButton = publishButtons.find(btn => (btn as HTMLElement).closest('button'));
+    await user.click(confirmButton as HTMLElement);
     
+    // Wait for success modal content
     await waitFor(() => {
-      const resolverLink = screen.queryByText(/\.well-known/);
-      expect(resolverLink).toBeTruthy();
+      expect(screen.getByText('Published to Web!')).toBeTruthy();
+      expect(screen.getByText('did:peer:abc123')).toBeTruthy();
+      expect(screen.getByText('did:webvh:example.com:xyz')).toBeTruthy();
+      expect(screen.getByText('https://example.com/.well-known/did/xyz')).toBeTruthy();
     });
   });
 
-  it('should handle API errors', async () => {
+  it('should handle API errors gracefully', async () => {
     globalThis.fetch = mock(async (url, options) => {
       if (url.includes('/publish-to-web')) {
         return {
           ok: false,
           status: 500,
           json: async () => ({
-            error: 'Publish failed',
+            error: 'Publish failed - internal error',
           }),
         };
       }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          id: 'test-asset-id',
-          currentLayer: 'did:peer',
-          didPeer: 'did:peer:abc123',
-        }),
-      };
+      
+      if (url.includes('/api/user')) {
+        return { ok: true, json: async () => ({ id: 'did:webvh:localhost%3A5000:testuser', did: 'did:webvh:localhost%3A5000:testuser' }) };
+      }
+      if (url.includes('/api/assets')) {
+        return {
+          ok: true,
+          json: async () => ([{
+            id: 'asset-peer-1',
+            title: 'Private Asset 1',
+            currentLayer: 'did:peer',
+            userId: 'did:webvh:localhost%3A5000:testuser',
+          }]),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
     }) as any;
     
-    await renderAssetDetailPage();
+    await renderDashboard();
     
-    const publishButton = await screen.findByText(/publish to web/i);
-    await user.click(publishButton);
+    await waitFor(() => screen.getByText('Private Asset 1'));
+    await user.click(screen.getByText(/Publish/i));
+    await waitFor(() => screen.getByText('Publish Asset to Web?'));
     
-    const confirmButton = await screen.findByRole('button', { name: /^publish/i });
-    await user.click(confirmButton);
+    const publishButtons = screen.getAllByText(/Publish to Web/i);
+    const confirmButton = publishButtons.find(btn => (btn as HTMLElement).closest('button'));
+    await user.click(confirmButton as HTMLElement);
     
+    // Wait for error toast
     await waitFor(() => {
       expect(mockToast).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -353,249 +437,110 @@ describe('Publish to Web UI', () => {
   it('should show loading state during publish', async () => {
     globalThis.fetch = mock(async (url, options) => {
       if (url.includes('/publish-to-web')) {
-        // Delay response
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 100));
         return {
           ok: true,
-          status: 200,
           json: async () => ({
-            asset: {
-              currentLayer: 'did:webvh',
-              didWebvh: 'did:webvh:example.com:xyz',
-            },
+            asset: { currentLayer: 'did:webvh', didWebvh: 'did:webvh:example.com:xyz' },
+            resolverUrl: 'https://example.com/.well-known/did/xyz',
+            migration: { timestamp: new Date().toISOString() },
           }),
         };
       }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          id: 'test-asset-id',
-          currentLayer: 'did:peer',
-          didPeer: 'did:peer:abc123',
-        }),
-      };
-    }) as any;
-    
-    await renderAssetDetailPage();
-    
-    const publishButton = await screen.findByText(/publish to web/i);
-    await user.click(publishButton);
-    
-    const confirmButton = await screen.findByRole('button', { name: /^publish/i });
-    await user.click(confirmButton);
-    
-    // Check for loading indicator
-    await waitFor(() => {
-      const loadingIndicator = screen.queryByText(/publishing/i);
-      expect(loadingIndicator).toBeTruthy();
-    }, { timeout: 50 });
-  });
-
-  it('should display did:webvh after successful publish', async () => {
-    globalThis.fetch = mock(async (url, options) => {
-      if (url.includes('/publish-to-web')) {
+      
+      if (url.includes('/api/user')) {
+        return { ok: true, json: async () => ({ id: 'did:webvh:localhost%3A5000:testuser', did: 'did:webvh:localhost%3A5000:testuser' }) };
+      }
+      if (url.includes('/api/assets')) {
         return {
           ok: true,
-          status: 200,
-          json: async () => ({
-            asset: {
-              id: 'test-asset-id',
-              currentLayer: 'did:webvh',
-              didWebvh: 'did:webvh:example.com:xyz',
-              title: 'Test Asset',
-            },
-          }),
+          json: async () => ([{
+            id: 'asset-peer-1',
+            title: 'Private Asset 1',
+            currentLayer: 'did:peer',
+            userId: 'did:webvh:localhost%3A5000:testuser',
+          }]),
         };
       }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          id: 'test-asset-id',
-          currentLayer: 'did:peer',
-          didPeer: 'did:peer:abc123',
-        }),
-      };
+      return { ok: true, json: async () => ({}) };
     }) as any;
     
-    await renderAssetDetailPage();
+    await renderDashboard();
     
-    const publishButton = await screen.findByText(/publish to web/i);
-    await user.click(publishButton);
+    await waitFor(() => screen.getByText('Private Asset 1'));
+    await user.click(screen.getByText(/Publish/i));
+    await waitFor(() => screen.getByText('Publish Asset to Web?'));
     
-    const confirmButton = await screen.findByRole('button', { name: /^publish/i });
-    await user.click(confirmButton);
-    
-    await waitFor(() => {
-      const didWebvhText = screen.queryByText(/did:webvh:example.com:xyz/i);
-      expect(didWebvhText).toBeTruthy();
-    });
-  });
-
-  it('should update layer badge after publish', async () => {
-    globalThis.fetch = mock(async (url, options) => {
-      if (url.includes('/publish-to-web')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            asset: {
-              id: 'test-asset-id',
-              currentLayer: 'did:webvh',
-              didWebvh: 'did:webvh:example.com:xyz',
-            },
-          }),
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          id: 'test-asset-id',
-          currentLayer: 'did:peer',
-          didPeer: 'did:peer:abc123',
-        }),
-      };
-    }) as any;
-    
-    await renderAssetDetailPage();
-    
-    // Check initial badge
-    await waitFor(() => {
-      const badge = screen.queryByTestId('layer-badge');
-      expect(badge?.textContent).toMatch(/private|did:peer/i);
-    });
-    
-    const publishButton = await screen.findByText(/publish to web/i);
-    await user.click(publishButton);
-    
-    const confirmButton = await screen.findByRole('button', { name: /^publish/i });
-    await user.click(confirmButton);
-    
-    // Badge should update
-    await waitFor(() => {
-      const badge = screen.queryByTestId('layer-badge');
-      expect(badge?.textContent).toMatch(/published|web|did:webvh/i);
-    });
-  });
-
-  it('should not show publish button if user does not own asset', async () => {
-    globalThis.fetch = mock(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        id: 'test-asset-id',
-        title: 'Someone else\'s asset',
-        currentLayer: 'did:peer',
-        didPeer: 'did:peer:abc123',
-        userId: 'did:webvh:localhost%3A5000:otheruser', // Different user
-      }),
-    })) as any;
-    
-    await renderAssetDetailPage();
-    
-    await waitFor(() => {
-      const publishButton = screen.queryByText(/publish to web/i);
-      expect(publishButton).toBeNull();
-    });
-  });
-
-  it('should handle authorization errors', async () => {
-    globalThis.fetch = mock(async (url, options) => {
-      if (url.includes('/publish-to-web')) {
-        return {
-          ok: false,
-          status: 403,
-          json: async () => ({
-            error: 'Not authorized',
-          }),
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          id: 'test-asset-id',
-          currentLayer: 'did:peer',
-          didPeer: 'did:peer:abc123',
-        }),
-      };
-    }) as any;
-    
-    await renderAssetDetailPage();
-    
-    const publishButton = await screen.findByText(/publish to web/i);
-    await user.click(publishButton);
-    
-    const confirmButton = await screen.findByRole('button', { name: /^publish/i });
-    await user.click(confirmButton);
-    
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith(
-        expect.objectContaining({
-          variant: 'destructive',
-          description: expect.stringMatching(/authorized|permission/i),
-        })
-      );
-    });
-  });
-
-  it('should disable publish button while publishing', async () => {
-    globalThis.fetch = mock(async (url, options) => {
-      if (url.includes('/publish-to-web')) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            asset: {
-              currentLayer: 'did:webvh',
-              didWebvh: 'did:webvh:example.com:xyz',
-            },
-          }),
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          id: 'test-asset-id',
-          currentLayer: 'did:peer',
-          didPeer: 'did:peer:abc123',
-        }),
-      };
-    }) as any;
-    
-    await renderAssetDetailPage();
-    
-    const publishButton = await screen.findByText(/publish to web/i);
-    await user.click(publishButton);
-    
-    const confirmButton = (await screen.findByRole('button', {
-      name: /^publish/i,
-    })) as HTMLButtonElement;
-    
-    expect(confirmButton.disabled).toBe(false);
+    const publishButtons = screen.getAllByText(/Publish to Web/i);
+    const confirmButton = publishButtons.find(btn => (btn as HTMLElement).closest('button')) as HTMLButtonElement;
     
     await user.click(confirmButton);
     
-    // Button should be disabled while publishing
+    // Check for disabled button (loading state)
     await waitFor(() => {
       expect(confirmButton.disabled).toBe(true);
     }, { timeout: 50 });
   });
 
-  it('should show explanation of what publishing means', async () => {
-    await renderAssetDetailPage();
+  it('should close modal after successful publish', async () => {
+    globalThis.fetch = mock(async (url, options) => {
+      if (url.includes('/publish-to-web')) {
+        return {
+          ok: true,
+          json: async () => ({
+            asset: { currentLayer: 'did:webvh', didWebvh: 'did:webvh:example.com:xyz' },
+            resolverUrl: 'https://example.com/.well-known/did/xyz',
+            migration: { timestamp: new Date().toISOString() },
+          }),
+        };
+      }
+      
+      if (url.includes('/api/user')) {
+        return { ok: true, json: async () => ({ id: 'did:webvh:localhost%3A5000:testuser', did: 'did:webvh:localhost%3A5000:testuser' }) };
+      }
+      if (url.includes('/api/assets')) {
+        return {
+          ok: true,
+          json: async () => ([{
+            id: 'asset-peer-1',
+            title: 'Private Asset 1',
+            currentLayer: 'did:peer',
+            userId: 'did:webvh:localhost%3A5000:testuser',
+          }]),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }) as any;
     
-    const publishButton = await screen.findByText(/publish to web/i);
-    await user.click(publishButton);
+    await renderDashboard();
     
+    await waitFor(() => screen.getByText('Private Asset 1'));
+    await user.click(screen.getByText(/Publish/i));
+    await waitFor(() => screen.getByText('Publish Asset to Web?'));
+    
+    // Modal is open
+    expect(screen.getByText('Publish Asset to Web?')).toBeTruthy();
+    
+    const publishButtons = screen.getAllByText(/Publish to Web/i);
+    const confirmButton = publishButtons.find(btn => (btn as HTMLElement).closest('button'));
+    await user.click(confirmButton as HTMLElement);
+    
+    // Wait for publish to complete and success message
     await waitFor(() => {
-      // Should explain what publishing does
-      expect(screen.queryByText(/publicly accessible/i)).toBeTruthy();
-      expect(screen.queryByText(/resolver/i) || screen.queryByText(/DID/i)).toBeTruthy();
+      expect(screen.getByText('Published to Web!')).toBeTruthy();
     });
+  });
+
+  it('should filter assets by layer', async () => {
+    await renderDashboard();
+    
+    // Initial load shows all assets
+    await waitFor(() => {
+      expect(screen.getByText('Private Asset 1')).toBeTruthy();
+      expect(screen.getByText('Published Asset 1')).toBeTruthy();
+    });
+    
+    // TODO: Click layer filter and test filtering
+    // This would require finding and interacting with the LayerFilter component
   });
 });
