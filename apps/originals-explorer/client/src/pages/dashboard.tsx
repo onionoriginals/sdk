@@ -338,7 +338,7 @@ export default function Dashboard() {
                     <div>
                       <div className="text-xs text-blue-700 mb-1">Provenance</div>
                       <div className="text-xs text-blue-800 bg-white p-2 rounded-sm border border-blue-200">
-                        Migration event recorded: {new Date().toLocaleString()}
+                        Migration event recorded: {new Date(publishResult.migration.timestamp).toLocaleString()}
                       </div>
                     </div>
                   </div>

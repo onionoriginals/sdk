@@ -1345,12 +1345,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // - DID: did:webvh:localhost%3A5000:alice
   // - Resolves to: http://localhost:5000/alice/did.jsonld
   // - Log at: http://localhost:5000/alice/did.jsonl
-  app.get("/:userSlug/did.jsonld", async (req, res) => {
+  app.get("/:slug/did.jsonld", async (req, res) => {
     try {
-      const { userSlug } = req.params;
+      const { slug } = req.params;
       
-      // Look up user by DID slug
-      const user = await storage.getUserByDidSlug(userSlug);
+      // Check if this is an asset slug (format: asset-{id})
+      if (slug.startsWith('asset-')) {
+        // Extract asset ID from slug
+        const assetIdPart = slug.replace('asset-', '');
+        const assetId = `orig_${assetIdPart}`;
+        
+        // Look up asset
+        const asset = await storage.getAsset(assetId);
+        
+        if (!asset?.didDocument) {
+          return res.status(404).json({ error: "Asset DID document not found" });
+        }
+        
+        // Return asset's DID document
+        res.type("application/did+ld+json").send(JSON.stringify(asset.didDocument, null, 2));
+        return;
+      }
+      
+      // Otherwise, look up user by DID slug
+      const user = await storage.getUserByDidSlug(slug);
       
       if (!user?.didDocument) {
         return res.status(404).json({ error: "DID not found" });
