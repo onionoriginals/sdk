@@ -22,7 +22,11 @@ export interface EventLoggingConfig {
   'asset:transferred'?: LogLevel | false;
   'resource:published'?: LogLevel | false;
   'credential:issued'?: LogLevel | false;
+  'resource:version:created'?: LogLevel | false;
   'verification:completed'?: LogLevel | false;
+  'batch:started'?: LogLevel | false;
+  'batch:completed'?: LogLevel | false;
+  'batch:failed'?: LogLevel | false;
 }
 
 /**
@@ -34,7 +38,11 @@ const DEFAULT_EVENT_CONFIG: EventLoggingConfig = {
   'asset:transferred': 'info',
   'resource:published': 'info',
   'credential:issued': 'info',
-  'verification:completed': 'info'
+  'resource:version:created': 'info',
+  'verification:completed': 'info',
+  'batch:started': 'info',
+  'batch:completed': 'info',
+  'batch:failed': 'error'
 };
 
 /**
@@ -62,7 +70,11 @@ export class EventLogger {
       'asset:transferred',
       'resource:published',
       'credential:issued',
-      'verification:completed'
+      'resource:version:created',
+      'verification:completed',
+      'batch:started',
+      'batch:completed',
+      'batch:failed'
     ];
     
     for (const eventType of eventTypes) {
@@ -169,12 +181,51 @@ export class EventLogger {
         };
         break;
         
+      case 'resource:version:created':
+        message = 'Resource version created';
+        data = {
+          assetId: event.asset.id,
+          resourceId: event.resource.id,
+          fromVersion: event.resource.fromVersion,
+          toVersion: event.resource.toVersion,
+          changes: event.changes
+        };
+        break;
+        
       case 'verification:completed':
         message = 'Verification completed';
         data = {
           assetId: event.asset.id,
           result: event.result,
           checks: event.checks
+        };
+        break;
+        
+      case 'batch:started':
+        message = 'Batch operation started';
+        data = {
+          batchId: event.batchId,
+          operation: event.operation,
+          itemCount: event.itemCount
+        };
+        break;
+        
+      case 'batch:completed':
+        message = 'Batch operation completed';
+        data = {
+          batchId: event.batchId,
+          operation: event.operation,
+          results: event.results
+        };
+        break;
+        
+      case 'batch:failed':
+        message = 'Batch operation failed';
+        data = {
+          batchId: event.batchId,
+          operation: event.operation,
+          error: event.error,
+          partialResults: event.partialResults
         };
         break;
         
