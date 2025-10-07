@@ -749,6 +749,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         id: didWebvh
       };
       
+      // Store original values for potential rollback
+      const originalDidDocument = asset.didDocument;
+      const originalCredentials = asset.credentials;
+      const originalProvenance = asset.provenance;
+      
       // Update database with new layer and did:webvh
       const updatedAsset = await storage.updateAsset(assetId, {
         currentLayer: 'did:webvh',
@@ -928,10 +933,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } catch (publishError: any) {
         console.error('Failed to publish DID document:', publishError);
-        // Rollback database changes
+        // Rollback database changes - restore all original values
         await storage.updateAsset(assetId, {
           currentLayer: 'did:peer',
           didWebvh: null,
+          didDocument: originalDidDocument,
+          credentials: originalCredentials,
+          provenance: originalProvenance,
         });
         return res.status(500).json({ 
           error: 'Failed to publish DID document',
