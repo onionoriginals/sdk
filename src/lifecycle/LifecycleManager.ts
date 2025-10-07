@@ -431,6 +431,9 @@ export class LifecycleManager {
     const commitTxId = inscription.commitTxId;
     const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : feeRate;
 
+    // Capture the layer before migration for accurate metrics
+    const fromLayer = asset.currentLayer;
+
     await asset.migrate('did:btco', {
       transactionId: revealTxId,
       inscriptionId: inscription.inscriptionId,
@@ -451,21 +454,6 @@ export class LifecycleManager {
       inscriptionId: inscription.inscriptionId,
       transactionId: revealTxId
     });
-    
-     const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : feeRate;
- 
-    // Capture the layer before migration for accurate metrics
-    const fromLayer = asset.currentLayer;
- 
-     await asset.migrate('did:btco', {
-       transactionId: revealTxId,
-       inscriptionId: inscription.inscriptionId,
-     });
- 
-     // Note: asset.currentLayer is updated after migrate() call above
-     // Migration should be from the layer before migration (webvh or peer) to btco
-     // Since we already migrated, we need to infer the fromLayer
-     // The inscribeOnBitcoin validation ensures currentLayer is webvh or peer before migration
     this.metrics.recordMigration(fromLayer, 'did:btco');
     
     return asset;
@@ -779,15 +767,41 @@ export class LifecycleManager {
       const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : options?.feeRate;
       
       // Calculate fee per asset (split proportionally by data size)
-      const assetSizes = assets.map(asset => 
-        JSON.stringify({
+      // Include both metadata and resource content size for accurate fee distribution
+      const assetSizes = assets.map(asset => {
+        // Calculate metadata size
+        const metadataSize = JSON.stringify({
           assetId: asset.id,
-          resources: asset.resources.map(r => ({ id: r.id, hash: r.hash }))
-        }).length
-      );
+          resources: asset.resources.map(r => ({
+            id: r.id,
+            hash: r.hash,
+            contentType: r.contentType,
+            url: r.url
+          }))
+        }).length;
+        
+        // Add resource content sizes
+        const contentSize = asset.resources.reduce((sum, r) => {
+          const content = (r as any).content;
+          if (content) {
+            return sum + (typeof content === 'string' ? Buffer.byteLength(content) : content.length || 0);
+          }
+          return sum;
+        }, 0);
+        
+        return metadataSize + contentSize;
+      });
       const totalSize = assetSizes.reduce((sum, size) => sum + size, 0);
+      
+      // Calculate total fee from batch transaction size and fee rate
+      // Estimate transaction size: base overhead (200 bytes) + batch payload size
+      const batchTxSize = 200 + totalDataSize;
+      const effectiveFeeRate = usedFeeRate ?? 10;
+      const totalFee = batchTxSize * effectiveFeeRate;
+      
+      // Split fees proportionally by asset data size
       const feePerAsset = assetSizes.map(size => 
-        Math.floor((inscription.fee ?? 0) * (size / totalSize))
+        Math.floor(totalFee * (size / totalSize))
       );
       
       // Update all assets with batch inscription data
@@ -796,8 +810,9 @@ export class LifecycleManager {
       
       for (let i = 0; i < assets.length; i++) {
         const asset = assets[i];
-        // Create individual inscription ID for each asset within the batch
-        const individualInscriptionId = `${inscription.inscriptionId}-${i}`;
+        // For batch inscriptions, use the base inscription ID for all assets
+        // The batch index is stored as metadata, not in the ID
+        const individualInscriptionId = inscription.inscriptionId;
         individualInscriptionIds.push(individualInscriptionId);
         
         await asset.migrate('did:btco', {
@@ -814,6 +829,7 @@ export class LifecycleManager {
         const latestMigration = provenance.migrations[provenance.migrations.length - 1];
         (latestMigration as any).batchId = batchId;
         (latestMigration as any).batchInscription = true;
+        (latestMigration as any).batchIndex = i; // Store index as metadata
         (latestMigration as any).feePaid = feePerAsset[i];
         
         const bindingValue = inscription.satoshi
@@ -1064,18 +1080,24 @@ export class LifecycleManager {
       }).length
     );
     
-    // Rough fee estimation (actual fees depend on many factors)
-    // Base transaction overhead: ~200 bytes
-    // Per inscription overhead: ~150 bytes
+    // Realistic fee estimation based on Bitcoin transaction structure
+    // Base transaction overhead: ~200 bytes (inputs, outputs, etc.)
+    // Per inscription witness overhead: ~120 bytes (script, envelope, etc.)
+    // In batch mode: shared transaction overhead + minimal per-asset overhead
     const effectiveFeeRate = feeRate ?? 10; // default 10 sat/vB
     
-    // Batch: one transaction overhead + batch data
-    const batchTxSize = 200 + batchSize;
+    // Batch: one transaction overhead + batch data + minimal per-asset overhead
+    // The batch manifest is more efficient as it shares structure
+    const batchTxSize = 200 + batchSize + (assets.length * 5); // 5 bytes per asset for array/object overhead
     const batchFee = batchTxSize * effectiveFeeRate;
     
-    // Individual: multiple transaction overheads + individual data
+    // Individual: each inscription needs full transaction overhead + witness overhead + data
     const individualFees = individualSizes.reduce((total, size) => {
-      const txSize = 200 + size;
+      // Each individual inscription has:
+      // - Full transaction overhead: 200 bytes
+      // - Witness/inscription overhead: 122 bytes
+      // - Asset data: size bytes
+      const txSize = 200 + 122 + size;
       return total + (txSize * effectiveFeeRate);
     }, 0);
     

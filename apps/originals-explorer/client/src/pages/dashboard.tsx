@@ -2,14 +2,39 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, ArrowRight, ArrowRightLeft, Check, ArrowRightLeft as Exchange, FileSpreadsheet } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Plus, ArrowRight, ArrowRightLeft, Check, ArrowRightLeft as Exchange, FileSpreadsheet, Globe, Loader2, CheckCircle, AlertCircle, ExternalLink } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayerBadge } from "@/components/LayerBadge";
 import { LayerFilter } from "@/components/LayerFilter";
+import { useToast } from "@/hooks/use-toast";
 import type { AssetLayer } from "../../../shared/schema";
+
+interface PublishResult {
+  success: boolean;
+  message: string;
+  asset: {
+    id: string;
+    title: string;
+    currentLayer: AssetLayer;
+    didPeer: string | null;
+    didWebvh: string | null;
+    provenance: any;
+  };
+  resolverUrl: string;
+  migration: any;
+}
 
 export default function Dashboard() {
   const [selectedLayer, setSelectedLayer] = useState<AssetLayer | 'all'>('all');
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [selectedAssetForPublish, setSelectedAssetForPublish] = useState<any | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
+  
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { data: stats } = useQuery<{ 
     totalAssets: number; 
@@ -26,6 +51,9 @@ export default function Dashboard() {
     status: string;
     createdAt: string;
     currentLayer?: AssetLayer;
+    userId?: string;
+    didPeer?: string | null;
+    didWebvh?: string | null;
   }>>({
     queryKey: ["/api/assets", { layer: selectedLayer }],
     queryFn: async () => {
@@ -37,6 +65,72 @@ export default function Dashboard() {
       return response.json();
     }
   });
+
+  // Get current user
+  const { data: currentUser } = useQuery<{ id: string; did: string; privyId: string }>({
+    queryKey: ["/api/user"],
+  });
+
+  const handlePublishToWeb = (asset: any) => {
+    setSelectedAssetForPublish(asset);
+    setPublishError(null);
+    setPublishResult(null);
+    setShowPublishModal(true);
+  };
+
+  const confirmPublish = async () => {
+    if (!selectedAssetForPublish) return;
+    
+    setIsPublishing(true);
+    setPublishError(null);
+    
+    try {
+      const response = await fetch(`/api/assets/${selectedAssetForPublish.id}/publish-to-web`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          // Optional: domain: 'custom.domain.com'
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to publish');
+      }
+      
+      const result = await response.json();
+      setPublishResult(result);
+      
+      // Refresh assets list
+      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      
+      // Show success notification
+      toast({
+        title: "Asset published to web successfully!",
+        description: `Your asset is now publicly accessible at ${result.asset.didWebvh}`,
+      });
+      
+    } catch (error: any) {
+      console.error('Publish error:', error);
+      setPublishError(error.message);
+      toast({
+        title: "Publish failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  const closePublishModal = () => {
+    setShowPublishModal(false);
+    setSelectedAssetForPublish(null);
+    setPublishError(null);
+    setPublishResult(null);
+  };
 
   return (
     <main className="max-w-4xl mx-auto px-8 py-16">
@@ -134,6 +228,18 @@ export default function Dashboard() {
                   <div className="text-xs text-gray-400 px-2 py-1 bg-gray-50 rounded-sm">
                     {asset.status === 'completed' ? 'Complete' : 'In Progress'}
                   </div>
+                  {/* Publish to Web button - only for did:peer assets owned by current user */}
+                  {asset.currentLayer === 'did:peer' && currentUser && asset.userId === currentUser.id && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handlePublishToWeb(asset)}
+                      className="text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                    >
+                      <Globe className="w-3 h-3 mr-1" />
+                      Publish
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -149,6 +255,141 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Publish Confirmation Modal */}
+      <Dialog open={showPublishModal} onOpenChange={setShowPublishModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Publish Asset to Web?</DialogTitle>
+            <DialogDescription className="space-y-3 pt-4">
+              {!publishResult ? (
+                <>
+                  <p>
+                    This will migrate your asset from <LayerBadge layer="did:peer" size="sm" />
+                    {' '}to <LayerBadge layer="did:webvh" size="sm" />
+                  </p>
+                  
+                  <div className="bg-blue-50 border border-blue-200 rounded-sm p-3">
+                    <h4 className="text-sm font-medium text-blue-900 mb-2">What happens:</h4>
+                    <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                      <li>Asset becomes publicly accessible via HTTPS</li>
+                      <li>DID becomes resolvable on the web</li>
+                      <li>Provenance is updated with migration event</li>
+                      <li>Original did:peer is preserved for history</li>
+                    </ul>
+                  </div>
+                  
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-sm p-3">
+                    <h4 className="text-sm font-medium text-yellow-900 mb-2">Note:</h4>
+                    <p className="text-sm text-yellow-800">
+                      Once published, your asset will be publicly visible. This action cannot be reversed.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <CheckCircle className="w-5 h-5 text-blue-600" />
+                    <h4 className="font-medium text-blue-900">Published to Web!</h4>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    {/* New Layer */}
+                    <div>
+                      <div className="text-xs text-blue-700 mb-1">Current Layer</div>
+                      <LayerBadge layer="did:webvh" size="md" />
+                    </div>
+                    
+                    {/* Original DID */}
+                    {publishResult.asset.didPeer && (
+                      <div>
+                        <div className="text-xs text-blue-700 mb-1">Original DID (did:peer)</div>
+                        <div className="font-mono text-xs text-blue-800 bg-white p-2 rounded-sm border border-blue-200 break-all">
+                          {publishResult.asset.didPeer}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* New DID */}
+                    <div>
+                      <div className="text-xs text-blue-700 mb-1">Web DID (did:webvh)</div>
+                      <div className="font-mono text-xs text-blue-900 bg-white p-2 rounded-sm border border-blue-200 break-all">
+                        {publishResult.asset.didWebvh}
+                      </div>
+                    </div>
+                    
+                    {/* Resolution URL */}
+                    {publishResult.resolverUrl && (
+                      <div>
+                        <div className="text-xs text-blue-700 mb-1">Resolver URL</div>
+                        <a 
+                          href={publishResult.resolverUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-blue-600 hover:text-blue-800 underline flex items-center gap-1"
+                        >
+                          {publishResult.resolverUrl}
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    )}
+                    
+                    {/* Provenance Update */}
+                    <div>
+                      <div className="text-xs text-blue-700 mb-1">Provenance</div>
+                      <div className="text-xs text-blue-800 bg-white p-2 rounded-sm border border-blue-200">
+                        Migration event recorded: {new Date(publishResult.migration.timestamp).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Error Display */}
+              {publishError && (
+                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertCircle className="w-4 h-4 text-red-600" />
+                    <h4 className="font-medium text-red-900">Publish Failed</h4>
+                  </div>
+                  <p className="text-sm text-red-700">{publishError}</p>
+                </div>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <DialogFooter>
+            {!publishResult ? (
+              <>
+                <Button 
+                  variant="outline" 
+                  onClick={closePublishModal}
+                  disabled={isPublishing}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={confirmPublish}
+                  disabled={isPublishing}
+                >
+                  {isPublishing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Publishing...
+                    </>
+                  ) : (
+                    'Publish to Web'
+                  )}
+                </Button>
+              </>
+            ) : (
+              <Button onClick={closePublishModal}>
+                Close
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

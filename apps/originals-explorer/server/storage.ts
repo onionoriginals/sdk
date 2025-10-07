@@ -43,6 +43,10 @@ export interface IStorage {
   createAssetType(assetType: InsertAssetType): Promise<AssetType>;
   updateAssetType(id: string, updates: Partial<AssetType>): Promise<AssetType | undefined>;
   
+  // DID document methods
+  storeDIDDocument(slug: string, data: { didDocument: any; didLog?: any; publishedAt: string }): Promise<void>;
+  getDIDDocument(slug: string): Promise<{ didDocument: any; didLog?: any; publishedAt: string } | undefined>;
+  
   // Statistics
   getStats(): Promise<{
     totalAssets: number;
@@ -58,6 +62,7 @@ export class MemStorage implements IStorage {
   private walletConnections: Map<string, WalletConnection>;
   private signingKeys: Map<string, SigningKey[]>;
   private assetTypes: Map<string, AssetType>;
+  private didDocuments: Map<string, { didDocument: any; didLog?: any; publishedAt: string }>;
 
   constructor() {
     this.users = new Map();
@@ -66,6 +71,7 @@ export class MemStorage implements IStorage {
     this.walletConnections = new Map();
     this.signingKeys = new Map();
     this.assetTypes = new Map();
+    this.didDocuments = new Map();
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -322,6 +328,14 @@ export class MemStorage implements IStorage {
     const updatedAssetType = { ...assetType, ...updates, updatedAt: new Date() };
     this.assetTypes.set(id, updatedAssetType);
     return updatedAssetType;
+  }
+
+  async storeDIDDocument(slug: string, data: { didDocument: any; didLog?: any; publishedAt: string }): Promise<void> {
+    this.didDocuments.set(slug, data);
+  }
+
+  async getDIDDocument(slug: string): Promise<{ didDocument: any; didLog?: any; publishedAt: string } | undefined> {
+    return this.didDocuments.get(slug);
   }
 
   async getStats(): Promise<{ totalAssets: number; verifiedAssets: number; migratedAssets: number; }> {

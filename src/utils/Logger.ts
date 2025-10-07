@@ -10,6 +10,9 @@
  * - Async-safe operations
  */
 
+
+import { appendFile } from 'node:fs/promises';
+
 import type { OriginalsConfig } from '../types';
 
 /**
@@ -99,7 +102,18 @@ export class FileLogOutput implements LogOutput {
     this.flushTimeout = null;
     
     try {
-      const { appendFile } = await import('node:fs/promises');
+      // Use Bun's file API for efficient file writing
+      const file = Bun.file(this.filePath);
+      const exists = await file.exists();
+      
+      if (exists) {
+        // Append to existing file
+        const content = await file.text();
+        await Bun.write(this.filePath, content + lines);
+      } else {
+        // Create new file
+        await Bun.write(this.filePath, lines);
+      }
       await appendFile(this.filePath, lines);
     } catch (err) {
       // Fallback to console on file write error

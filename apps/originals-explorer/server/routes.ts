@@ -8,7 +8,8 @@ import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import { PrivyClient } from "@privy-io/node";
 import { originalsSdk } from "./originals";
-import { createUserDIDWebVH } from "./did-webvh-service";
+import { createUserDIDWebVH, publishDIDDocument } from "./did-webvh-service";
+import { OriginalsAsset } from "@originals/sdk";
 import multer from "multer";
 import { parse as csvParse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
@@ -588,7 +589,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           mediaType: contentType, // Original media MIME type
           mediaFileHash: mediaFileHash, // Hash of the actual media file
           metadataHash: metadataHash, // Hash of the DID resource (metadata JSON)
-          resourceId: resources[0].id
+          resourceId: resources[0].id,
+          resources: resources // Store resources for later reconstruction
         },
         
         // SDK-generated fields
@@ -653,6 +655,328 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (error.message && error.message.includes('file type')) {
+        return res.status(400).json({ 
+          error: error.message 
+        });
+      }
+      
+      res.status(500).json({ 
+        error: "Internal server error",
+        details: error.message 
+      });
+    }
+  });
+
+  // Publish asset to web (did:peer -> did:webvh)
+  app.post("/api/assets/:id/publish-to-web", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const assetId = req.params.id;
+      
+      // Get asset from database
+      const asset = await storage.getAsset(assetId);
+      
+      if (!asset) {
+        return res.status(404).json({ error: 'Asset not found' });
+      }
+      
+      // Check ownership
+      if (asset.userId !== user.id) {
+        return res.status(403).json({ error: 'Not authorized' });
+      }
+      
+      // Check current layer
+      if (asset.currentLayer !== 'did:peer') {
+        return res.status(400).json({ 
+          error: `Asset is already in ${asset.currentLayer} layer. Can only publish from did:peer.`
+        });
+      }
+      
+      // Verify asset has did:peer identifier
+      if (!asset.didPeer) {
+        return res.status(400).json({ 
+          error: 'Asset missing did:peer identifier. Cannot publish.' 
+        });
+      }
+      
+      // Get domain from request body or environment
+      const domain = req.body.domain || process.env.WEBVH_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000';
+      
+      // Reconstruct OriginalsAsset from database
+      const resources = (asset.metadata as any)?.resources;
+      
+      if (!resources || !Array.isArray(resources) || resources.length === 0) {
+        return res.status(400).json({ 
+          error: 'Asset missing resources data. Cannot reconstruct for publishing.' 
+        });
+      }
+      
+      const originalsAsset = new OriginalsAsset(
+        resources,
+        asset.didDocument as any,
+        (asset.credentials as any) || []
+      );
+      
+      // Publish to web using SDK
+      let publishedAsset: OriginalsAsset;
+      try {
+        publishedAsset = await originalsSdk.lifecycle.publishToWeb(
+          originalsAsset,
+          domain
+        );
+        console.log('Published to web:', publishedAsset.id);
+      } catch (sdkError: any) {
+        console.error('Publish error:', sdkError);
+        return res.status(500).json({ 
+          error: 'Failed to publish to web',
+          details: sdkError.message 
+        });
+      }
+      
+      // Extract did:webvh from bindings
+      const bindings = (publishedAsset as any).bindings || {};
+      const didWebvh = bindings['did:webvh'];
+      
+      if (!didWebvh) {
+        return res.status(500).json({ 
+          error: 'Failed to generate did:webvh identifier' 
+        });
+      }
+      
+      // Create a proper did:webvh document by updating the id field
+      const didWebvhDocument = {
+        ...publishedAsset.did,
+        id: didWebvh
+      };
+      
+      // Store original values for potential rollback
+      const originalDidDocument = asset.didDocument;
+      const originalCredentials = asset.credentials;
+      const originalProvenance = asset.provenance;
+      
+      // Update database with new layer and did:webvh
+      const updatedAsset = await storage.updateAsset(assetId, {
+        currentLayer: 'did:webvh',
+        didWebvh: didWebvh,
+        didDocument: didWebvhDocument as any,
+        credentials: publishedAsset.credentials as any,
+        provenance: publishedAsset.getProvenance() as any,
+        updatedAt: new Date()
+      });
+      
+      if (!updatedAsset) {
+        return res.status(500).json({ 
+          error: 'Failed to update asset in database' 
+        });
+      }
+      
+      // Issue ownership credential from user's DID to asset's DID
+      let ownershipCredential;
+      try {
+        // Get full user data to access their wallets
+        const userData = await storage.getUserByDid(user.did);
+        
+        if (!userData || !userData.assertionWalletId || !userData.assertionKeyPublic) {
+          throw new Error('User missing assertion key for signing');
+        }
+        
+        // Create ownership credential
+        const credentialSubject = {
+          id: didWebvh, // The asset's DID
+          owner: user.did, // The user's DID
+          assetType: 'OriginalsAsset',
+          title: asset.title,
+          publishedAt: new Date().toISOString(),
+          resources: publishedAsset.resources.map(r => ({
+            id: r.id,
+            hash: r.hash,
+            contentType: r.contentType
+          }))
+        };
+        
+        const unsignedCredential = await originalsSdk.credential.createResourceCredential(
+          'ResourceCreated',
+          credentialSubject,
+          user.did // Issued by the user
+        );
+        
+        // Import credential signing utilities
+        const { createPrivySigner } = await import('./privy-signer');
+        const { base58 } = await import('@scure/base');
+        const { canonize, canonizeProof } = await import('@originals/sdk/dist/vc/utils/jsonld');
+        const { sha256Bytes } = await import('@originals/sdk/dist/utils/hash');
+        
+        // Get verification method ID for the user's assertion key
+        const verificationMethodId = `${user.did}#assertion-key`;
+        
+        // Create a signer for the user's assertion wallet
+        const userSigner = await createPrivySigner(
+          user.privyId,
+          userData.assertionWalletId,
+          privyClient,
+          verificationMethodId,
+          user.authToken
+        );
+        
+        // Create proof configuration
+        const proofConfig = {
+          '@context': 'https://w3id.org/security/data-integrity/v2',
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-rdfc-2022',
+          created: new Date().toISOString(),
+          verificationMethod: verificationMethodId,
+          proofPurpose: 'assertionMethod'
+        };
+        
+        // Prepare credential for signing (without proof)
+        const credentialToSign = {
+          '@context': ['https://www.w3.org/ns/credentials/v2'],
+          ...unsignedCredential
+        };
+        delete (credentialToSign as any)['@context'];
+        credentialToSign['@context'] = ['https://www.w3.org/ns/credentials/v2'];
+        
+        // Canonicalize document and proof
+        const documentLoader = (iri: string) => {
+          // Basic document loader for standard contexts
+          if (iri === 'https://www.w3.org/ns/credentials/v2') {
+            return Promise.resolve({
+              document: {},
+              documentUrl: iri,
+              contextUrl: null
+            });
+          }
+          if (iri === 'https://w3id.org/security/data-integrity/v2') {
+            return Promise.resolve({
+              document: {},
+              documentUrl: iri,
+              contextUrl: null
+            });
+          }
+          return Promise.resolve({
+            document: {},
+            documentUrl: iri,
+            contextUrl: null
+          });
+        };
+        
+        const transformedData = await canonize(credentialToSign, { documentLoader });
+        const canonicalProofConfig = await canonizeProof(proofConfig, { documentLoader });
+        
+        // Hash the data
+        const proofConfigHash = await sha256Bytes(canonicalProofConfig);
+        const documentHash = await sha256Bytes(transformedData);
+        const hashData = new Uint8Array([...proofConfigHash, ...documentHash]);
+        
+        // Sign using Privy signer
+        // The signer expects document and proof, but we already have the hash
+        // We need to sign the hash directly using Privy's raw API
+        const { bytesToHex } = await import('./key-utils');
+        const dataHex = `0x${bytesToHex(hashData)}`;
+        
+        const { signature, encoding } = await privyClient.wallets().rawSign(userData.assertionWalletId, {
+          authorization_context: {
+            user_jwts: [user.authToken],
+          },
+          params: { hash: dataHex },
+        });
+        
+        // Convert signature to bytes
+        let signatureBytes: Buffer;
+        if (encoding === 'hex' || !encoding) {
+          const cleanSig = signature.startsWith('0x') ? signature.slice(2) : signature;
+          signatureBytes = Buffer.from(cleanSig, 'hex');
+        } else if (encoding === 'base64') {
+          signatureBytes = Buffer.from(signature, 'base64');
+        } else {
+          throw new Error(`Unsupported signature encoding: ${encoding}`);
+        }
+        
+        // Ed25519 signatures should be exactly 64 bytes
+        if (signatureBytes.length === 65) {
+          signatureBytes = signatureBytes.slice(0, 64);
+        } else if (signatureBytes.length !== 64) {
+          throw new Error(`Invalid Ed25519 signature length: ${signatureBytes.length}`);
+        }
+        
+        // Encode signature as base58 (used by eddsa-rdfc-2022)
+        const proofValue = base58.encode(signatureBytes);
+        
+        // Create the signed credential
+        const proof = {
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-rdfc-2022',
+          created: proofConfig.created,
+          verificationMethod: verificationMethodId,
+          proofPurpose: 'assertionMethod',
+          proofValue
+        };
+        
+        ownershipCredential = {
+          ...credentialToSign,
+          proof
+        };
+        
+        console.log(`✅ Ownership credential signed by user ${user.did} for asset ${didWebvh}`);
+      } catch (credError: any) {
+        console.error('Failed to issue ownership credential:', credError);
+        // Don't fail the whole operation, but log the error
+        console.warn('Asset published but ownership credential not issued');
+      }
+      
+      // Publish DID document to make it publicly accessible
+      try {
+        await publishDIDDocument({
+          did: didWebvh,
+          didDocument: didWebvhDocument,
+          didLog: publishedAsset.getProvenance()
+        });
+      } catch (publishError: any) {
+        console.error('Failed to publish DID document:', publishError);
+        // Rollback database changes - restore all original values
+        await storage.updateAsset(assetId, {
+          currentLayer: 'did:peer',
+          didWebvh: null,
+          didDocument: originalDidDocument,
+          credentials: originalCredentials,
+          provenance: originalProvenance,
+        });
+        return res.status(500).json({ 
+          error: 'Failed to publish DID document',
+          details: publishError.message 
+        });
+      }
+      
+      // Extract slug for resolver URL with validation
+      const didParts = didWebvh.split(':');
+      if (didParts.length < 4) {
+        console.error('Invalid did:webvh format:', didWebvh);
+        return res.status(500).json({ 
+          error: 'Generated invalid did:webvh identifier' 
+        });
+      }
+      const slug = didParts[didParts.length - 1];
+      
+      // Use request protocol or environment variable
+      const protocol = process.env.APP_PROTOCOL || req.protocol || 'http';
+      
+      // Return response
+      res.json({
+        asset: updatedAsset,
+        originalsAsset: {
+          did: publishedAsset.id,
+          previousDid: asset.didPeer,
+          resources: publishedAsset.resources,
+          provenance: publishedAsset.getProvenance()
+        },
+        resolverUrl: `${protocol}://${domain}/.well-known/did/${slug}`,
+        ownershipCredential: ownershipCredential || null
+      });
+      
+    } catch (error: any) {
+      console.error("Error publishing asset to web:", error);
+      
+      if (error.message && error.message.includes('Invalid migration')) {
         return res.status(400).json({ 
           error: error.message 
         });
@@ -1201,6 +1525,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // DID resolution endpoint for assets (/.well-known/did/:slug)
+  // This resolves asset DIDs published to the web layer
+  app.get("/.well-known/did/:slug", async (req, res) => {
+    try {
+      const { slug } = req.params;
+      
+      // Try to resolve from storage
+      const doc = await storage.getDIDDocument(slug);
+      
+      if (!doc) {
+        return res.status(404).json({ error: 'DID not found' });
+      }
+      
+      // Return DID document
+      res.type("application/did+ld+json").send(JSON.stringify(doc.didDocument, null, 2));
+    } catch (error) {
+      console.error("Error resolving asset DID:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Serve DID log at path-based endpoint (did.jsonl)
   // According to DID:WebVH spec:
   // - Domain-only DID: did:webvh:example.com -> /.well-known/did.jsonl
@@ -1228,6 +1573,125 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Publish asset to web (migrate from did:peer to did:webvh)
+  app.post("/api/assets/:id/publish-to-web", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const assetId = req.params.id;
+      const { domain } = req.body; // Optional custom domain
+      
+      // Get the asset
+      const asset = await storage.getAsset(assetId);
+      
+      if (!asset) {
+        return res.status(404).json({ error: "Asset not found" });
+      }
+      
+      // Verify ownership
+      if (asset.userId !== user.id) {
+        return res.status(403).json({ error: "You don't own this asset" });
+      }
+      
+      // Check if asset is in did:peer layer
+      if (asset.currentLayer !== 'did:peer') {
+        return res.status(400).json({ 
+          error: "Asset is not in did:peer layer",
+          currentLayer: asset.currentLayer 
+        });
+      }
+      
+      // Check if asset already has didWebvh
+      if (asset.didWebvh) {
+        return res.status(400).json({ 
+          error: "Asset already published to web",
+          didWebvh: asset.didWebvh 
+        });
+      }
+      
+      // Use SDK to publish to web
+      // For now, we'll simulate this by creating a web-resolvable DID
+      // In a full implementation, this would call originalsSdk.lifecycle.publishToWeb()
+      
+      // Generate did:webvh identifier
+      // Format: did:webvh:domain:asset-slug
+      const usedDomain = domain || process.env.WEBVH_DOMAIN || `localhost%3A${process.env.PORT || 5000}`;
+      const assetSlug = `asset-${assetId.replace('orig_', '')}`;
+      const didWebvh = `did:webvh:${usedDomain}:${assetSlug}`;
+      
+      // Update provenance with migration event
+      const currentProvenance = asset.provenance || [];
+      const migrationEvent = {
+        type: 'migration',
+        from: 'did:peer',
+        to: 'did:webvh',
+        timestamp: new Date().toISOString(),
+        actor: user.id,
+        didPeer: asset.didPeer,
+        didWebvh: didWebvh,
+        description: 'Asset published to web layer'
+      };
+      
+      const updatedProvenance = Array.isArray(currentProvenance) 
+        ? [...currentProvenance, migrationEvent]
+        : [migrationEvent];
+      
+      // Update the DID document to reflect the new did:webvh identifier
+      const updatedDidDocument = asset.didDocument ? {
+        ...asset.didDocument,
+        id: didWebvh,
+        // Update any verification methods or other fields that reference the DID
+        ...(asset.didDocument.verificationMethod && {
+          verificationMethod: (asset.didDocument.verificationMethod as any[]).map((vm: any) => ({
+            ...vm,
+            controller: didWebvh,
+            id: vm.id ? vm.id.replace(asset.didPeer || '', didWebvh) : vm.id
+          }))
+        })
+      } : null;
+      
+      // Update asset in database
+      const updatedAsset = await storage.updateAsset(assetId, {
+        currentLayer: 'did:webvh',
+        didWebvh: didWebvh,
+        didDocument: updatedDidDocument as any,
+        provenance: updatedProvenance as any,
+      });
+      
+      if (!updatedAsset) {
+        return res.status(500).json({ error: "Failed to update asset" });
+      }
+      
+      // Generate resolver URL
+      const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+      const resolverDomain = usedDomain.replace('%3A', ':');
+      const resolverUrl = `${protocol}://${resolverDomain}/${assetSlug}/did.jsonld`;
+      
+      console.log(`✅ Published asset ${assetId} to web: ${didWebvh}`);
+      
+      res.json({
+        success: true,
+        message: "Asset published to web successfully",
+        asset: {
+          id: updatedAsset.id,
+          title: updatedAsset.title,
+          currentLayer: updatedAsset.currentLayer,
+          didPeer: updatedAsset.didPeer,
+          didWebvh: updatedAsset.didWebvh,
+          provenance: updatedAsset.provenance,
+        },
+        resolverUrl,
+        migration: migrationEvent,
+      });
+      
+    } catch (error) {
+      console.error("Error publishing asset to web:", error);
+      res.status(500).json({ 
+        error: "Failed to publish asset",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Serve DID document at path-based endpoint
   // IMPORTANT: These catch-all routes must be registered LAST to avoid conflicts
   // 
@@ -1241,12 +1705,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // - DID: did:webvh:localhost%3A5000:alice
   // - Resolves to: http://localhost:5000/alice/did.jsonld
   // - Log at: http://localhost:5000/alice/did.jsonl
-  app.get("/:userSlug/did.jsonld", async (req, res) => {
+  app.get("/:slug/did.jsonld", async (req, res) => {
     try {
-      const { userSlug } = req.params;
+      const { slug } = req.params;
       
-      // Look up user by DID slug
-      const user = await storage.getUserByDidSlug(userSlug);
+      // Check if this is an asset slug (format: asset-{id})
+      if (slug.startsWith('asset-')) {
+        // Extract asset ID from slug
+        const assetIdPart = slug.replace('asset-', '');
+        const assetId = `orig_${assetIdPart}`;
+        
+        // Look up asset
+        const asset = await storage.getAsset(assetId);
+        
+        if (!asset?.didDocument) {
+          return res.status(404).json({ error: "Asset DID document not found" });
+        }
+        
+        // Return asset's DID document
+        res.type("application/did+ld+json").send(JSON.stringify(asset.didDocument, null, 2));
+        return;
+      }
+      
+      // Otherwise, look up user by DID slug
+      const user = await storage.getUserByDidSlug(slug);
       
       if (!user?.didDocument) {
         return res.status(404).json({ error: "DID not found" });
