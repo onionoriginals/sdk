@@ -1,12 +1,59 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, mock } from 'bun:test';
 import express from 'express';
-import { registerRoutes } from '../routes';
-import { storage } from '../storage';
-import { originalsSdk } from '../originals';
 import FormData from 'form-data';
 import { Readable } from 'stream';
 import type { Server } from 'http';
 import { createTestUser, createMockAuthToken, createTestFile } from '../../__tests__/helpers/test-helpers';
+
+// Mock Privy module BEFORE importing routes
+const mockVerifyAuthToken = mock(async (token: string) => {
+  const userId = token.replace('Bearer ', '').replace('mock-token-', '');
+  return { user_id: `privy-${userId}` };
+});
+
+mock.module('@privy-io/node', () => ({
+  PrivyClient: class MockPrivyClient {
+    utils() {
+      return {
+        auth: () => ({
+          verifyAuthToken: mockVerifyAuthToken,
+        }),
+      };
+    }
+    users() {
+      return {
+        _get: async (userId: string) => ({
+          id: userId,
+          linked_accounts: [],
+        }),
+      };
+    }
+    wallets() {
+      return {
+        create: async () => ({ id: 'test-wallet' }),
+        rawSign: async () => ({
+          signature: '0x' + 'a'.repeat(128), // 64-byte signature as hex
+          encoding: 'hex',
+        }),
+      };
+    }
+  },
+}));
+
+// Dynamic imports after mocks are set up
+let registerRoutes: typeof import('../routes').registerRoutes;
+let storage: typeof import('../storage').storage;
+let originalsSdk: typeof import('../originals').originalsSdk;
+
+beforeAll(async () => {
+  const routesModule = await import('../routes');
+  const storageModule = await import('../storage');
+  const originalsModule = await import('../originals');
+  
+  registerRoutes = routesModule.registerRoutes;
+  storage = storageModule.storage;
+  originalsSdk = originalsModule.originalsSdk;
+});
 
 // Helper to make authenticated requests against the test server
 async function makeAuthRequest(
@@ -44,37 +91,6 @@ async function getTestAuthCookie(userSuffix?: string): Promise<string> {
   const testUser = await createTestUser(userSuffix);
   return createMockAuthToken(testUser.did);
 }
-
-// Mock Privy module before importing routes
-const mockVerifyAuthToken = mock(async (token: string) => {
-  const userId = token.replace('Bearer ', '').replace('mock-token-', '');
-  return { user_id: `privy-${userId}` };
-});
-
-mock.module('@privy-io/node', () => ({
-  PrivyClient: class MockPrivyClient {
-    utils() {
-      return {
-        auth: () => ({
-          verifyAuthToken: mockVerifyAuthToken,
-        }),
-      };
-    }
-    users() {
-      return {
-        _get: async (userId: string) => ({
-          id: userId,
-          linked_accounts: [],
-        }),
-      };
-    }
-    wallets() {
-      return {
-        create: async () => ({ id: 'test-wallet' }),
-      };
-    }
-  },
-}));
 
 describe('POST /api/assets/:id/publish-to-web', () => {
   let app: express.Application;
