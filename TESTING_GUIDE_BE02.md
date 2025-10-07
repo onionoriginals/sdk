@@ -259,7 +259,7 @@ GROUP BY current_layer;
 
 Watch the server console for these log messages:
 
-```
+```text
 Creating asset with Originals SDK for user did:webvh:...
 ✅ Created did:peer: did:peer:2.Ez...
 ✅ Stored asset in database: orig_1234567890_abcd1234

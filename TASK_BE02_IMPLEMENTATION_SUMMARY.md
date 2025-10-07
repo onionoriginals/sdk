@@ -58,13 +58,15 @@ Successfully implemented the "Publish to Web" functionality that migrates assets
 **Processing Flow:**
 1. Retrieves asset from database
 2. Validates asset state and ownership
-3. Determines domain (from request or environment variables)
-4. Reconstructs `OriginalsAsset` from stored data
-5. Calls SDK's `lifecycle.publishToWeb()` method
-6. Extracts `did:webvh` identifier from bindings
-7. Updates database with new layer and identifiers
-8. Publishes DID document to storage for public access
-9. Returns complete response with updated asset and resolver URL
+3. Validates that resources exist in metadata (returns 400 if missing)
+4. Determines domain (from request or environment variables)
+5. Reconstructs `OriginalsAsset` from stored data
+6. Calls SDK's `lifecycle.publishToWeb()` method
+7. Extracts `did:webvh` identifier from bindings
+8. Creates proper `did:webvh` DID document (with webvh ID, not peer ID)
+9. Updates database with new layer and identifiers
+10. Publishes DID document to storage for public access (with rollback on failure)
+11. Returns complete response with updated asset and resolver URL
 
 **Response:**
 ```json
@@ -163,7 +165,9 @@ Successfully implemented the "Publish to Web" functionality that migrates assets
 ### ✅ Error Handling
 - Comprehensive validation at each step
 - Detailed error messages with appropriate HTTP status codes
-- Graceful degradation (continues if DID publish fails)
+- Rollback on DID publish failure to maintain consistency
+- Validates DID format before publishing
+- Validates resources exist before reconstruction
 
 ## Testing Recommendations
 
@@ -260,9 +264,27 @@ LIMIT 1;
 
 ## Files Modified
 
-1. `apps/originals-explorer/server/storage.ts` - Added DID document storage
-2. `apps/originals-explorer/server/did-webvh-service.ts` - Added publish/resolve functions
-3. `apps/originals-explorer/server/routes.ts` - Added publish and resolution endpoints
+1. `apps/originals-explorer/server/storage.ts` - Added DID document storage methods
+2. `apps/originals-explorer/server/did-webvh-service.ts` - Added publish/resolve functions with DID validation
+3. `apps/originals-explorer/server/routes.ts` - Added publish and resolution endpoints with proper did:webvh document creation
+4. `TESTING_GUIDE_BE02.md` - Fixed markdown linting issue
+
+## Critical Fixes Applied
+
+### P1: Correct did:webvh Document Storage
+- **Issue**: The original implementation stored the did:peer document under the did:webvh resolver
+- **Fix**: Now creates a proper did:webvh document by updating the `id` field to use the webvh identifier
+- **Impact**: DID resolution now returns documents with matching IDs, enabling proper signature verification
+
+### Enhanced Validation
+- Added strict DID format validation in `publishDIDDocument` and `resolveDIDDocument`
+- Validates resources exist before asset reconstruction
+- Validates slug extraction from did:webvh identifiers
+
+### Improved Error Handling
+- Rollback database changes if DID document publishing fails
+- Maintains system consistency (asset not marked as published if publishing fails)
+- Uses request protocol or environment variable for resolver URLs
 
 ## Next Steps
 

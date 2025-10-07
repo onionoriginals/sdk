@@ -703,7 +703,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const domain = req.body.domain || process.env.WEBVH_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000';
       
       // Reconstruct OriginalsAsset from database
-      const resources = (asset.metadata as any)?.resources || [];
+      const resources = (asset.metadata as any)?.resources;
+      
+      if (!resources || !Array.isArray(resources) || resources.length === 0) {
+        return res.status(400).json({ 
+          error: 'Asset missing resources data. Cannot reconstruct for publishing.' 
+        });
+      }
+      
       const originalsAsset = new OriginalsAsset(
         resources,
         asset.didDocument as any,
@@ -736,11 +743,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
+      // Create a proper did:webvh document by updating the id field
+      const didWebvhDocument = {
+        ...publishedAsset.did,
+        id: didWebvh
+      };
+      
       // Update database with new layer and did:webvh
       const updatedAsset = await storage.updateAsset(assetId, {
         currentLayer: 'did:webvh',
         didWebvh: didWebvh,
-        didDocument: publishedAsset.did as any,
+        didDocument: didWebvhDocument as any,
         credentials: publishedAsset.credentials as any,
         provenance: publishedAsset.getProvenance() as any,
         updatedAt: new Date()
@@ -756,16 +769,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         await publishDIDDocument({
           did: didWebvh,
-          didDocument: publishedAsset.did,
+          didDocument: didWebvhDocument,
           didLog: publishedAsset.getProvenance()
         });
       } catch (publishError: any) {
         console.error('Failed to publish DID document:', publishError);
-        // Continue even if DID document publishing fails
+        // Rollback database changes
+        await storage.updateAsset(assetId, {
+          currentLayer: 'did:peer',
+          didWebvh: null,
+        });
+        return res.status(500).json({ 
+          error: 'Failed to publish DID document',
+          details: publishError.message 
+        });
       }
       
-      // Extract slug for resolver URL
-      const slug = didWebvh.split(':').pop();
+      // Extract slug for resolver URL with validation
+      const didParts = didWebvh.split(':');
+      if (didParts.length < 4) {
+        console.error('Invalid did:webvh format:', didWebvh);
+        return res.status(500).json({ 
+          error: 'Generated invalid did:webvh identifier' 
+        });
+      }
+      const slug = didParts[didParts.length - 1];
+      
+      // Use request protocol or environment variable
+      const protocol = process.env.APP_PROTOCOL || req.protocol || 'http';
       
       // Return response
       res.json({
@@ -776,7 +807,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           resources: publishedAsset.resources,
           provenance: publishedAsset.getProvenance()
         },
-        resolverUrl: `http://${domain}/.well-known/did/${slug}`
+        resolverUrl: `${protocol}://${domain}/.well-known/did/${slug}`
       });
       
     } catch (error: any) {
