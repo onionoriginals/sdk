@@ -65,8 +65,9 @@ Successfully implemented the "Publish to Web" functionality that migrates assets
 7. Extracts `did:webvh` identifier from bindings
 8. Creates proper `did:webvh` DID document (with webvh ID, not peer ID)
 9. Updates database with new layer and identifiers
-10. Publishes DID document to storage for public access (with rollback on failure)
-11. Returns complete response with updated asset and resolver URL
+10. **Issues ownership credential**: User's DID signs a VC proving ownership of asset's DID
+11. Publishes DID document to storage for public access (with rollback on failure)
+12. Returns complete response with asset, resolver URL, and signed ownership credential
 
 **Response:**
 ```json

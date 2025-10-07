@@ -795,8 +795,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           user.did // Issued by the user
         );
         
-        // Import privy-signer to sign the credential
+        // Import credential signing utilities
         const { createPrivySigner } = await import('./privy-signer');
+        const { base58 } = await import('@scure/base');
+        const { canonize, canonizeProof } = await import('@originals/sdk/dist/vc/utils/jsonld');
+        const { sha256Bytes } = await import('@originals/sdk/dist/utils/hash');
         
         // Get verification method ID for the user's assertion key
         const verificationMethodId = `${user.did}#assertion-key`;
@@ -810,12 +813,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
           user.authToken
         );
         
-        // Sign the credential using Privy signer
-        // Note: We need to convert the signer to work with signCredential
-        // For now, we'll add the unsigned credential and note it needs signing
-        ownershipCredential = unsignedCredential;
+        // Create proof configuration
+        const proofConfig = {
+          '@context': 'https://w3id.org/security/data-integrity/v2',
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-rdfc-2022',
+          created: new Date().toISOString(),
+          verificationMethod: verificationMethodId,
+          proofPurpose: 'assertionMethod'
+        };
         
-        console.log(`✅ Ownership credential created for asset ${didWebvh} by user ${user.did}`);
+        // Prepare credential for signing (without proof)
+        const credentialToSign = {
+          '@context': ['https://www.w3.org/ns/credentials/v2'],
+          ...unsignedCredential
+        };
+        delete (credentialToSign as any)['@context'];
+        credentialToSign['@context'] = ['https://www.w3.org/ns/credentials/v2'];
+        
+        // Canonicalize document and proof
+        const documentLoader = (iri: string) => {
+          // Basic document loader for standard contexts
+          if (iri === 'https://www.w3.org/ns/credentials/v2') {
+            return Promise.resolve({
+              document: {},
+              documentUrl: iri,
+              contextUrl: null
+            });
+          }
+          if (iri === 'https://w3id.org/security/data-integrity/v2') {
+            return Promise.resolve({
+              document: {},
+              documentUrl: iri,
+              contextUrl: null
+            });
+          }
+          return Promise.resolve({
+            document: {},
+            documentUrl: iri,
+            contextUrl: null
+          });
+        };
+        
+        const transformedData = await canonize(credentialToSign, { documentLoader });
+        const canonicalProofConfig = await canonizeProof(proofConfig, { documentLoader });
+        
+        // Hash the data
+        const proofConfigHash = await sha256Bytes(canonicalProofConfig);
+        const documentHash = await sha256Bytes(transformedData);
+        const hashData = new Uint8Array([...proofConfigHash, ...documentHash]);
+        
+        // Sign using Privy signer
+        // The signer expects document and proof, but we already have the hash
+        // We need to sign the hash directly using Privy's raw API
+        const { bytesToHex } = await import('./key-utils');
+        const dataHex = `0x${bytesToHex(hashData)}`;
+        
+        const { signature, encoding } = await privyClient.wallets().rawSign(userData.assertionWalletId, {
+          authorization_context: {
+            user_jwts: [user.authToken],
+          },
+          params: { hash: dataHex },
+        });
+        
+        // Convert signature to bytes
+        let signatureBytes: Buffer;
+        if (encoding === 'hex' || !encoding) {
+          const cleanSig = signature.startsWith('0x') ? signature.slice(2) : signature;
+          signatureBytes = Buffer.from(cleanSig, 'hex');
+        } else if (encoding === 'base64') {
+          signatureBytes = Buffer.from(signature, 'base64');
+        } else {
+          throw new Error(`Unsupported signature encoding: ${encoding}`);
+        }
+        
+        // Ed25519 signatures should be exactly 64 bytes
+        if (signatureBytes.length === 65) {
+          signatureBytes = signatureBytes.slice(0, 64);
+        } else if (signatureBytes.length !== 64) {
+          throw new Error(`Invalid Ed25519 signature length: ${signatureBytes.length}`);
+        }
+        
+        // Encode signature as base58 (used by eddsa-rdfc-2022)
+        const proofValue = base58.encode(signatureBytes);
+        
+        // Create the signed credential
+        const proof = {
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-rdfc-2022',
+          created: proofConfig.created,
+          verificationMethod: verificationMethodId,
+          proofPurpose: 'assertionMethod',
+          proofValue
+        };
+        
+        ownershipCredential = {
+          ...credentialToSign,
+          proof
+        };
+        
+        console.log(`✅ Ownership credential signed by user ${user.did} for asset ${didWebvh}`);
       } catch (credError: any) {
         console.error('Failed to issue ownership credential:', credError);
         // Don't fail the whole operation, but log the error

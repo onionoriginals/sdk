@@ -117,25 +117,61 @@ Credentials are the **glue** between user and asset DIDs:
 ✅ User DID creation (at auth)  
 ✅ Asset DID lifecycle (`did:peer` → `did:webvh` → `did:btco`)  
 ✅ Asset resources stored publicly  
-🟡 Ownership credential issuance (created but not yet signed with Privy)  
-⚠️ Credential signing needs Privy integration completion  
-📝 Credential should be stored in a linked document structure  
+✅ Ownership credential issuance and signing with Privy  
+✅ Credential uses eddsa-rdfc-2022 cryptosuite  
+✅ User's assertion key signs the credential  
+📝 Credential returned in API response  
 
-### Next Steps
+### Credential Signing Implementation
 
-1. **Complete Credential Signing**: 
-   - Integrate Privy signer to actually sign the ownership credential
-   - Currently creates unsigned credential as placeholder
+**Flow:**
+1. Create unsigned credential with subject (asset DID) and issuer (user DID)
+2. Canonicalize credential using JSON-LD canonicalization
+3. Create proof configuration with eddsa-rdfc-2022 cryptosuite
+4. Hash: SHA-256(proof config) + SHA-256(document)
+5. Sign hash using Privy's `rawSign` API with user's assertion wallet
+6. Encode signature as base58
+7. Attach DataIntegrityProof to credential
 
-2. **Credential Storage**:
+**Result:**
+```json
+{
+  "@context": ["https://www.w3.org/ns/credentials/v2"],
+  "type": ["VerifiableCredential", "ResourceCreated"],
+  "issuer": "did:webvh:domain:user",
+  "credentialSubject": {
+    "id": "did:webvh:domain:asset",
+    "owner": "did:webvh:domain:user",
+    "assetType": "OriginalsAsset",
+    "resources": [...]
+  },
+  "proof": {
+    "type": "DataIntegrityProof",
+    "cryptosuite": "eddsa-rdfc-2022",
+    "created": "2025-10-06T...",
+    "verificationMethod": "did:webvh:domain:user#assertion-key",
+    "proofPurpose": "assertionMethod",
+    "proofValue": "base58-encoded-signature"
+  }
+}
+```
+
+### Future Enhancements
+
+1. **Credential Storage**:
    - Store issued credentials in a separate linked document
    - Make credentials publicly queryable
    - Link from user's DID document to their issued credentials
 
-3. **Credential Verification**:
+2. **Credential Verification Endpoint**:
    - Endpoint to verify ownership credentials
    - Query all assets owned by a user via credentials
    - Verify credential chain for transferred assets
+
+3. **Credential Updates**:
+   - Issue new credentials when asset ownership transfers
+   - Revocation support for transferred assets
+   - Credential history tracking
 
 ## Summary
 
