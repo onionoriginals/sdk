@@ -15,7 +15,9 @@ import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 
 // Helper to create a valid hash
 function makeHash(prefix: string): string {
-  return prefix.padEnd(64, '0');
+  // Create a valid hex string by converting prefix to hex and padding with zeros
+  const hexPrefix = Buffer.from(prefix).toString('hex');
+  return hexPrefix.padEnd(64, '0');
 }
 
 // Storage adapter bridge
