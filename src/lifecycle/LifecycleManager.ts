@@ -2,7 +2,8 @@ import {
   OriginalsConfig,
   AssetResource,
   BitcoinTransaction,
-  KeyStore
+  KeyStore,
+  ExternalSigner
 } from '../types';
 import { BitcoinManager } from '../bitcoin/BitcoinManager';
 import { DIDManager } from '../did/DIDManager';
@@ -221,61 +222,84 @@ export class LifecycleManager {
 
   async publishToWeb(
     asset: OriginalsAsset,
-    domain: string
+    publisherDidOrSigner: string | ExternalSigner
   ): Promise<OriginalsAsset> {
     const stopTimer = this.logger.startTimer('publishToWeb');
-    this.logger.info('Publishing asset to web', { assetId: asset.id, domain });
     
     try {
       // Input validation
       if (!asset || typeof asset !== 'object') {
         throw new Error('Invalid asset: must be a valid OriginalsAsset');
       }
-      if (!domain || typeof domain !== 'string') {
-        throw new Error('Invalid domain: must be a non-empty string');
+      if (!publisherDidOrSigner) {
+        throw new Error('Invalid publisherDidOrSigner: must provide a DID or signer object');
       }
     
-    // Validate domain format - allow development domains with ports
-    const normalized = domain.trim().toLowerCase();
+    // Extract publisher DID
+    let publisherDid: string;
+    let signer: ExternalSigner | undefined;
     
-    // Split domain and port if present
-    const [domainPart, portPart] = normalized.split(':');
-    
-    // Validate port if present
-    if (portPart && (!/^\d+$/.test(portPart) || parseInt(portPart) < 1 || parseInt(portPart) > 65535)) {
-      throw new Error(`Invalid domain format: ${domain} - invalid port`);
-    }
-    
-    // Allow localhost and IP addresses for development
-    const isLocalhost = domainPart === 'localhost';
-    const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(domainPart);
-    
-    if (!isLocalhost && !isIP) {
-      // For non-localhost domains, require proper domain format
-      const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
-      const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
-      if (!domainRegex.test(domainPart)) {
-        throw new Error(`Invalid domain format: ${domain}`);
+    if (typeof publisherDidOrSigner === 'string') {
+      publisherDid = publisherDidOrSigner;
+      
+      // Validate it's a did:webvh
+      if (!publisherDid.startsWith('did:webvh:')) {
+        throw new Error('Invalid publisherDid: must be a did:webvh identifier');
+      }
+    } else {
+      // It's a signer object
+      signer = publisherDidOrSigner;
+      const vmId = await signer.getVerificationMethodId();
+      
+      // Extract DID from verification method ID
+      // Verification method IDs are typically in format: did:webvh:domain:user#key-0
+      if (vmId.includes('#')) {
+        publisherDid = vmId.split('#')[0];
+      } else if (vmId.startsWith('did:key:')) {
+        // If it's a did:key, we need the actual webvh DID to be provided separately
+        throw new Error('Signer must have a did:webvh verification method ID, or provide publisherDid separately');
+      } else {
+        publisherDid = vmId;
+      }
+      
+      if (!publisherDid.startsWith('did:webvh:')) {
+        throw new Error('Invalid signer: verification method must be associated with a did:webvh identifier');
       }
     }
+    
+    this.logger.info('Publishing asset to web', { assetId: asset.id, publisherDid });
     
     if (typeof (asset as any).migrate !== 'function') {
       throw new Error('Not implemented');
     }
     if (asset.currentLayer !== 'did:peer') {
-      throw new Error('Not implemented');
+      throw new Error('Asset must be in did:peer layer to publish to web');
     }
+    
     const configuredAdapter: any = (this.config as any).storageAdapter;
     const storage = new MemoryStorageAdapter();
 
-    // Create a slug for this publication based on current peer id suffix
-    const slug = asset.id.split(':').pop() as string;
+    // Extract user path from publisher DID
+    // Format: did:webvh:domain:user or did:webvh:domain:path1:path2
+    // We want everything after the domain for the resource path
+    const didParts = publisherDid.split(':');
+    if (didParts.length < 4) {
+      throw new Error('Invalid did:webvh format: must include domain and user path');
+    }
+    
+    // Get the user path segments (everything after did:webvh:domain)
+    const userPathSegments = didParts.slice(3); // Skip 'did', 'webvh', 'domain'
+    const userPath = userPathSegments.join('/');
+    
+    // Extract domain for storage adapter (if needed)
+    const domain = decodeURIComponent(didParts[2]);
 
-    // Publish resources under content-addressed paths (for hosting outside DID log)
+    // Publish resources under DID-based paths (not .well-known)
+    // Format: /{userPath}/resources/{content-hash}
     for (const res of asset.resources) {
       const hashBytes = hexToBytes(res.hash);
       const multibase = encodeBase64UrlMultibase(hashBytes);
-      const relativePath = `.well-known/webvh/${slug}/resources/${multibase}`;
+      const relativePath = `${userPath}/resources/${multibase}`;
 
       let url: string;
       if (configuredAdapter && typeof configuredAdapter.put === 'function') {
@@ -303,7 +327,7 @@ export class LifecycleManager {
           contentType: res.contentType,
           hash: res.hash
         },
-        domain
+        publisherDid
       };
       
       // Emit from both LifecycleManager and asset emitters
@@ -320,17 +344,19 @@ export class LifecycleManager {
       }
     }
 
-    // New resource identifier for the web representation; the asset DID remains the same.
-    const webDid = `did:webvh:${domain}:${slug}`;
+    // Bind to publisher's did:webvh
+    const webDid = publisherDid;
     await asset.migrate('did:webvh');
     (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:webvh': webDid });
 
     // Issue a publication credential for the migration
+    // Use the provided signer if available, otherwise use keyStore
     try {
       const type: 'ResourceMigrated' | 'ResourceCreated' = 'ResourceMigrated';
-      const issuer = asset.id;
+      const issuer = publisherDid; // Publisher signs the credential
       const subject = {
-        id: webDid,
+        id: asset.id, // The asset being published
+        publishedAs: webDid,
         resourceId: asset.resources[0]?.id,
         fromLayer: 'did:peer',
         toLayer: 'did:webvh',
@@ -339,31 +365,38 @@ export class LifecycleManager {
 
       const unsigned = await this.credentialManager.createResourceCredential(type, subject, issuer);
 
-      // Resolve the DID and extract verification method
-      const didDoc = await this.didManager.resolveDID(issuer);
-      if (!didDoc || !didDoc.verificationMethod || didDoc.verificationMethod.length === 0) {
-        throw new Error('No verification method found in DID document');
-      }
+      let signed;
+      if (signer) {
+        // Use the provided signer
+        signed = await this.credentialManager.signCredentialWithExternalSigner(unsigned, signer);
+      } else {
+        // Use keyStore to retrieve private key
+        const didDoc = await this.didManager.resolveDID(issuer);
+        if (!didDoc || !didDoc.verificationMethod || didDoc.verificationMethod.length === 0) {
+          throw new Error('No verification method found in publisher DID document');
+        }
 
-      const vm = didDoc.verificationMethod[0];
-      let verificationMethod = vm.id;
+        const vm = didDoc.verificationMethod[0];
+        let verificationMethod = vm.id;
+        
+        // Ensure VM ID is absolute (not just a fragment like #key-0)
+        if (verificationMethod.startsWith('#')) {
+          verificationMethod = `${issuer}${verificationMethod}`;
+        }
+
+        // Retrieve private key from keyStore
+        if (!this.keyStore) {
+          throw new Error('Private key not available for signing. Provide keyStore or signer to publishToWeb.');
+        }
+
+        const privateKey = await this.keyStore.getPrivateKey(verificationMethod);
+        if (!privateKey) {
+          throw new Error('Private key not available for signing. Provide keyStore or signer to publishToWeb.');
+        }
+
+        signed = await this.credentialManager.signCredential(unsigned, privateKey, verificationMethod);
+      }
       
-      // Ensure VM ID is absolute (not just a fragment like #key-0)
-      if (verificationMethod.startsWith('#')) {
-        verificationMethod = `${issuer}${verificationMethod}`;
-      }
-
-      // Retrieve private key from keyStore
-      if (!this.keyStore) {
-        throw new Error('Private key not available for signing. Provide keyStore to LifecycleManager.');
-      }
-
-      const privateKey = await this.keyStore.getPrivateKey(verificationMethod);
-      if (!privateKey) {
-        throw new Error('Private key not available for signing. Provide keyStore to LifecycleManager.');
-      }
-
-      const signed = await this.credentialManager.signCredential(unsigned, privateKey, verificationMethod);
       (asset as any).credentials.push(signed);
 
       const credentialEvent = {
@@ -394,7 +427,7 @@ export class LifecycleManager {
     stopTimer();
     this.logger.info('Asset published to web successfully', { 
       assetId: asset.id, 
-      domain, 
+      publisherDid, 
       resourceCount: asset.resources.length 
     });
     this.metrics.recordMigration('did:peer', 'did:webvh');
@@ -402,7 +435,7 @@ export class LifecycleManager {
     return asset;
     } catch (error) {
       stopTimer();
-      this.logger.error('Publish to web failed', error as Error, { assetId: asset.id, domain });
+      this.logger.error('Publish to web failed', error as Error, { assetId: asset.id, publisherDid: typeof publisherDidOrSigner === 'string' ? publisherDidOrSigner : 'signer' });
       this.metrics.recordError('PUBLISH_FAILED', 'publishToWeb');
       throw error;
     }

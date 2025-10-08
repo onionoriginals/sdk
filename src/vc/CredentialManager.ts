@@ -3,7 +3,8 @@ import {
   VerifiablePresentation, 
   CredentialSubject, 
   OriginalsConfig,
-  Proof 
+  Proof,
+  ExternalSigner
 } from '../types';
 import { canonicalizeDocument } from '../utils/serialization';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding';
@@ -70,6 +71,47 @@ export class CredentialManager {
     const proofValue = await this.generateProofValue(credential, privateKeyMultibase, proofBase);
     const proof: Proof = { ...proofBase, proofValue };
     return { ...credential, proof };
+  }
+
+  /**
+   * Sign a credential using an external signer (e.g., hardware wallet, Privy)
+   * @param credential - The unsigned credential
+   * @param signer - External signer implementation
+   * @returns Signed verifiable credential
+   */
+  async signCredentialWithExternalSigner(
+    credential: VerifiableCredential,
+    signer: ExternalSigner
+  ): Promise<VerifiableCredential> {
+    const verificationMethodId = await signer.getVerificationMethodId();
+    
+    // Create proof structure
+    const proofBase = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-rdfc-2022', // Or derive from signer type
+      created: new Date().toISOString(),
+      verificationMethod: verificationMethodId,
+      proofPurpose: 'assertionMethod'
+    };
+
+    // Prepare unsigned credential
+    const unsignedCredential: any = { ...credential };
+    delete unsignedCredential.proof;
+
+    // Use external signer to sign
+    const { proofValue } = await signer.sign({
+      document: unsignedCredential,
+      proof: proofBase
+    });
+
+    // Return signed credential
+    return {
+      ...credential,
+      proof: {
+        ...proofBase,
+        proofValue
+      }
+    };
   }
 
   async verifyCredential(credential: VerifiableCredential): Promise<boolean> {
