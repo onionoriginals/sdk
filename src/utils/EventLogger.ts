@@ -168,7 +168,7 @@ export class EventLogger {
           assetId: event.asset.id,
           resourceId: event.resource.id,
           url: event.resource.url,
-          domain: event.domain
+          publisherDid: event.publisherDid
         };
         break;
         
