@@ -87,7 +87,9 @@ export default function CreateAsset() {
       const asset = await response.json();
       setCreatedAsset(asset);
       setShowSuccessModal(true);
-      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      queryClient.invalidateQueries({ predicate: (query) => 
+        query.queryKey[0] === "/api/assets" || query.queryKey[0]?.toString().startsWith("/api/assets?")
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       toast({
         title: "Asset Created",

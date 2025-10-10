@@ -2,7 +2,9 @@ import {
   OriginalsConfig,
   AssetResource,
   BitcoinTransaction,
-  KeyStore
+  KeyStore,
+  ExternalSigner,
+  VerifiableCredential
 } from '../types';
 import { BitcoinManager } from '../bitcoin/BitcoinManager';
 import { DIDManager } from '../did/DIDManager';
@@ -10,7 +12,6 @@ import { CredentialManager } from '../vc/CredentialManager';
 import { OriginalsAsset } from './OriginalsAsset';
 import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding';
-import { KeyManager } from '../did/KeyManager';
 import { validateBitcoinAddress } from '../utils/bitcoin-address';
 import { multikey } from '../crypto/Multikey';
 import { EventEmitter } from '../events/EventEmitter';
@@ -24,7 +25,6 @@ import {
   type BatchResult,
   type BatchOperationOptions,
   type BatchInscriptionOptions,
-  type BatchInscriptionResult
 } from './BatchOperations';
 
 export class LifecycleManager {
@@ -221,191 +221,204 @@ export class LifecycleManager {
 
   async publishToWeb(
     asset: OriginalsAsset,
-    domain: string
+    publisherDidOrSigner: string | ExternalSigner
   ): Promise<OriginalsAsset> {
     const stopTimer = this.logger.startTimer('publishToWeb');
-    this.logger.info('Publishing asset to web', { assetId: asset.id, domain });
     
     try {
-      // Input validation
-      if (!asset || typeof asset !== 'object') {
-        throw new Error('Invalid asset: must be a valid OriginalsAsset');
+      if (asset.currentLayer !== 'did:peer') {
+        throw new Error('Asset must be in did:peer layer to publish to web');
       }
-      if (!domain || typeof domain !== 'string') {
-        throw new Error('Invalid domain: must be a non-empty string');
-      }
-    
-    // Validate domain format - allow development domains with ports
-    const normalized = domain.trim().toLowerCase();
-    
-    // Split domain and port if present
-    const [domainPart, portPart] = normalized.split(':');
-    
-    // Validate port if present
-    if (portPart && (!/^\d+$/.test(portPart) || parseInt(portPart) < 1 || parseInt(portPart) > 65535)) {
-      throw new Error(`Invalid domain format: ${domain} - invalid port`);
-    }
-    
-    // Allow localhost and IP addresses for development
-    const isLocalhost = domainPart === 'localhost';
-    const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(domainPart);
-    
-    if (!isLocalhost && !isIP) {
-      // For non-localhost domains, require proper domain format
-      const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
-      const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
-      if (!domainRegex.test(domainPart)) {
-        throw new Error(`Invalid domain format: ${domain}`);
-      }
-    }
-    
-    if (typeof (asset as any).migrate !== 'function') {
-      throw new Error('Not implemented');
-    }
-    if (asset.currentLayer !== 'did:peer') {
-      throw new Error('Not implemented');
-    }
-    const configuredAdapter: any = (this.config as any).storageAdapter;
-    const storage = new MemoryStorageAdapter();
-
-    // Create a slug for this publication based on current peer id suffix
-    const slug = asset.id.split(':').pop() as string;
-
-    // Publish resources under content-addressed paths (for hosting outside DID log)
-    for (const res of asset.resources) {
-      const hashBytes = hexToBytes(res.hash);
-      const multibase = encodeBase64UrlMultibase(hashBytes);
-      const relativePath = `.well-known/webvh/${slug}/resources/${multibase}`;
-
-      let url: string;
-      if (configuredAdapter && typeof configuredAdapter.put === 'function') {
-        const objectKey = `${domain}/${relativePath}`;
-        const data = typeof res.content === 'string' ? Buffer.from(res.content) : Buffer.from(res.hash);
-        url = await configuredAdapter.put(objectKey, data, { contentType: res.contentType });
-      } else {
-        const data = res.content ? new (globalThis as any).TextEncoder().encode(res.content) : new (globalThis as any).TextEncoder().encode(res.hash);
-        url = await storage.putObject(domain, relativePath, data);
-      }
-
-      // Non-breaking: preserve id/hash/contentType, add url
-      (res as any).url = url;
       
-      // Emit resource published event
-      const resourceEvent = {
-        type: 'resource:published' as const,
-        timestamp: new Date().toISOString(),
-        asset: {
-          id: asset.id
-        },
-        resource: {
-          id: res.id,
-          url,
-          contentType: res.contentType,
-          hash: res.hash
-        },
-        domain
+      const { publisherDid, signer } = await this.extractPublisherInfo(publisherDidOrSigner);
+      const { domain, userPath } = this.parseWebVHDid(publisherDid);
+      
+      this.logger.info('Publishing asset to web', { assetId: asset.id, publisherDid });
+      
+      // Publish resources to storage
+      await this.publishResources(asset, publisherDid, domain, userPath);
+      
+      // Migrate asset to did:webvh layer
+      await asset.migrate('did:webvh');
+      asset.bindings = { ...(asset as any).bindings, 'did:webvh': publisherDid };
+      
+      // Issue publication credential (best-effort)
+      await this.issuePublicationCredential(asset, publisherDid, signer);
+      
+      stopTimer();
+      this.logger.info('Asset published to web successfully', { 
+        assetId: asset.id, 
+        publisherDid, 
+        resourceCount: asset.resources.length 
+      });
+      this.metrics.recordMigration('did:peer', 'did:webvh');
+      
+      return asset;
+    } catch (error) {
+      stopTimer();
+      this.logger.error('Publish to web failed', error as Error, { assetId: asset.id });
+      this.metrics.recordError('PUBLISH_FAILED', 'publishToWeb');
+      throw error;
+    }
+  }
+
+  private async extractPublisherInfo(publisherDidOrSigner: string | ExternalSigner): Promise<{
+    publisherDid: string;
+    signer?: ExternalSigner;
+  }> {
+    if (typeof publisherDidOrSigner === 'string') {
+      if (!publisherDidOrSigner.startsWith('did:webvh:')) {
+        throw new Error('Publisher DID must be a did:webvh identifier');
+      }
+      return { publisherDid: publisherDidOrSigner };
+    }
+    
+    const signer = publisherDidOrSigner;
+    const vmId = await signer.getVerificationMethodId();
+    const publisherDid = vmId.includes('#') ? vmId.split('#')[0] : vmId;
+    
+    if (!publisherDid.startsWith('did:webvh:')) {
+      throw new Error('Signer must be associated with a did:webvh identifier');
+    }
+    
+    return { publisherDid, signer };
+  }
+
+  private parseWebVHDid(did: string): { domain: string; userPath: string } {
+    const parts = did.split(':');
+    if (parts.length < 4) {
+      throw new Error('Invalid did:webvh format: must include domain and user path');
+    }
+    
+    const domain = decodeURIComponent(parts[2]);
+    const userPath = parts.slice(3).join('/');
+    
+    return { domain, userPath };
+  }
+
+  private async publishResources(
+    asset: OriginalsAsset,
+    publisherDid: string,
+    domain: string,
+    userPath: string
+  ): Promise<void> {
+    const storage = (this.config as any).storageAdapter || new MemoryStorageAdapter();
+    
+    for (const resource of asset.resources) {
+      const hashBytes = hexToBytes(resource.hash);
+      const multibase = encodeBase64UrlMultibase(hashBytes);
+      const resourceUrl = `${publisherDid}/resources/${multibase}`;
+      const relativePath = `${userPath}/resources/${multibase}`;
+      
+      // Store resource content
+      const data = resource.content 
+        ? Buffer.from(resource.content)
+        : Buffer.from(resource.hash);
+        
+      if (typeof storage.put === 'function') {
+        await storage.put(`${domain}/${relativePath}`, data, { contentType: resource.contentType });
+      } else {
+        const encoded = new TextEncoder().encode(resource.content || resource.hash);
+        await storage.putObject(domain, relativePath, encoded);
+      }
+      
+      (resource as any).url = resourceUrl;
+      
+      await this.emitResourcePublishedEvent(asset.id, resource, resourceUrl, publisherDid);
+    }
+  }
+
+  private async emitResourcePublishedEvent(
+    assetId: string,
+    resource: AssetResource,
+    resourceUrl: string,
+    publisherDid: string
+  ): Promise<void> {
+    const event = {
+      type: 'resource:published' as const,
+      timestamp: new Date().toISOString(),
+      asset: { id: assetId },
+      resource: {
+        id: resource.id,
+        url: resourceUrl,
+        contentType: resource.contentType,
+        hash: resource.hash
+      },
+      publisherDid
+    };
+    
+    try {
+      await this.eventEmitter.emit(event);
+    } catch (err) {
+      this.logger.error('Event handler error', err as Error, { event: event.type });
+    }
+  }
+
+  private async issuePublicationCredential(
+    asset: OriginalsAsset,
+    publisherDid: string,
+    signer?: ExternalSigner
+  ): Promise<void> {
+    try {
+      const subject = {
+        id: asset.id,
+        publishedAs: publisherDid,
+        resourceId: asset.resources[0]?.id,
+        fromLayer: 'did:peer' as const,
+        toLayer: 'did:webvh' as const,
+        migratedAt: new Date().toISOString()
       };
       
-      // Emit from both LifecycleManager and asset emitters
-      try {
-        await Promise.all([
-          this.eventEmitter.emit(resourceEvent),
-          asset._internalEmit(resourceEvent)
-        ]);
-      } catch (err) {
-        if (this.config.enableLogging) {
-          console.error('Event handler error during resource:published:', err);
-        }
-        // Continue execution despite handler errors
-      }
-    }
-
-    // New resource identifier for the web representation; the asset DID remains the same.
-    const webDid = `did:webvh:${domain}:${slug}`;
-    await asset.migrate('did:webvh');
-    (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:webvh': webDid });
-
-    // Issue a publication credential for the migration
-    try {
-      const type: 'ResourceMigrated' | 'ResourceCreated' = 'ResourceMigrated';
-      const issuer = asset.id;
-      const subject = {
-        id: webDid,
-        resourceId: asset.resources[0]?.id,
-        fromLayer: 'did:peer',
-        toLayer: 'did:webvh',
-        migratedAt: new Date().toISOString()
-      } as any;
-
-      const unsigned = await this.credentialManager.createResourceCredential(type, subject, issuer);
-
-      // Resolve the DID and extract verification method
-      const didDoc = await this.didManager.resolveDID(issuer);
-      if (!didDoc || !didDoc.verificationMethod || didDoc.verificationMethod.length === 0) {
-        throw new Error('No verification method found in DID document');
-      }
-
-      const vm = didDoc.verificationMethod[0];
-      let verificationMethod = vm.id;
+      const unsigned = await this.credentialManager.createResourceCredential(
+        'ResourceMigrated',
+        subject,
+        publisherDid
+      );
       
-      // Ensure VM ID is absolute (not just a fragment like #key-0)
-      if (verificationMethod.startsWith('#')) {
-        verificationMethod = `${issuer}${verificationMethod}`;
-      }
-
-      // Retrieve private key from keyStore
-      if (!this.keyStore) {
-        throw new Error('Private key not available for signing. Provide keyStore to LifecycleManager.');
-      }
-
-      const privateKey = await this.keyStore.getPrivateKey(verificationMethod);
-      if (!privateKey) {
-        throw new Error('Private key not available for signing. Provide keyStore to LifecycleManager.');
-      }
-
-      const signed = await this.credentialManager.signCredential(unsigned, privateKey, verificationMethod);
-      (asset as any).credentials.push(signed);
-
-      const credentialEvent = {
+      const signed = signer
+        ? await this.credentialManager.signCredentialWithExternalSigner(unsigned, signer)
+        : await this.signWithKeyStore(unsigned, publisherDid);
+      
+      asset.credentials.push(signed);
+      
+      await this.eventEmitter.emit({
         type: 'credential:issued' as const,
         timestamp: new Date().toISOString(),
-        asset: {
-          id: asset.id
-        },
+        asset: { id: asset.id },
         credential: {
           type: signed.type,
           issuer: typeof signed.issuer === 'string' ? signed.issuer : signed.issuer.id
         }
-      };
-
-      // Emit from both LifecycleManager and asset emitters
-      await Promise.all([
-        this.eventEmitter.emit(credentialEvent),
-        asset._internalEmit(credentialEvent)
-      ]);
+      });
     } catch (err) {
-      // Best-effort: if issuance fails, continue without blocking publish
-      // Log the error for debugging purposes
-      if (this.config.enableLogging) {
-        console.error('Failed to issue credential during publish:', err);
-      }
+      this.logger.error('Failed to issue credential during publish', err as Error);
+    }
+  }
+
+  private async signWithKeyStore(
+    credential: VerifiableCredential,
+    issuer: string
+  ): Promise<VerifiableCredential> {
+    if (!this.keyStore) {
+      throw new Error('KeyStore required for signing. Provide keyStore or external signer.');
     }
     
-    stopTimer();
-    this.logger.info('Asset published to web successfully', { 
-      assetId: asset.id, 
-      domain, 
-      resourceCount: asset.resources.length 
-    });
-    this.metrics.recordMigration('did:peer', 'did:webvh');
-    
-    return asset;
-    } catch (error) {
-      stopTimer();
-      this.logger.error('Publish to web failed', error as Error, { assetId: asset.id, domain });
-      this.metrics.recordError('PUBLISH_FAILED', 'publishToWeb');
-      throw error;
+    const didDoc = await this.didManager.resolveDID(issuer);
+    if (!didDoc?.verificationMethod?.[0]) {
+      throw new Error('No verification method found in publisher DID document');
     }
+    
+    let vmId = didDoc.verificationMethod[0].id;
+    if (vmId.startsWith('#')) {
+      vmId = `${issuer}${vmId}`;
+    }
+    
+    const privateKey = await this.keyStore.getPrivateKey(vmId);
+    if (!privateKey) {
+      throw new Error('Private key not found in keyStore');
+    }
+    
+    return this.credentialManager.signCredential(credential, privateKey, vmId);
   }
 
   async inscribeOnBitcoin(

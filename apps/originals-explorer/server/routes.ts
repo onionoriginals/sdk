@@ -101,11 +101,11 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
       user = await storage.createUserWithDid(verifiedClaims.user_id, didData.did, didData);
     }
     
-    // Add user info to request using did:webvh as primary ID
+    // Add user info to request with database ID as primary identifier
     (req as any).user = {
-      id: user.did, // Primary identifier is now did:webvh
+      id: user.id, // Primary identifier is the database UUID (for foreign keys)
       privyId: verifiedClaims.user_id, // Keep Privy ID for wallet operations
-      did: user.did,
+      did: user.did, // DID for display/lookup
       authToken: token, // Store JWT for Privy authorization context
     };
     
@@ -667,6 +667,103 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Generate random did:peer asset (for testing/demo)
+  app.post("/api/assets/generate-random", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      
+      // Random data generators
+      const adjectives = ['Quantum', 'Digital', 'Cosmic', 'Ethereal', 'Neon', 'Crystal', 'Cybernetic', 'Holographic', 'Prismatic', 'Luminous'];
+      const nouns = ['Artifact', 'Essence', 'Fragment', 'Relic', 'Token', 'Sigil', 'Catalyst', 'Nexus', 'Portal', 'Cipher'];
+      const categories = ['art', 'collectible', 'music', 'video', 'document'];
+      
+      const randomAdjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+      const randomNoun = nouns[Math.floor(Math.random() * nouns.length)];
+      const randomCategory = categories[Math.floor(Math.random() * categories.length)];
+      const randomNumber = Math.floor(Math.random() * 9999);
+      
+      const title = `${randomAdjective} ${randomNoun} #${randomNumber}`;
+      const description = `A randomly generated digital asset created at ${new Date().toISOString()}`;
+      
+      // Generate random content (JSON data)
+      const randomContent = JSON.stringify({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        attributes: {
+          rarity: ['common', 'uncommon', 'rare', 'epic', 'legendary'][Math.floor(Math.random() * 5)],
+          power: Math.floor(Math.random() * 100),
+          element: ['fire', 'water', 'earth', 'air', 'void'][Math.floor(Math.random() * 5)],
+        },
+        metadata: {
+          generator: 'Random Asset Generator v1.0',
+          network: process.env.NETWORK || 'regtest'
+        }
+      }, null, 2);
+      
+      // Hash the content
+      const contentHash = crypto.createHash('sha256').update(randomContent).digest('hex');
+      
+      // Create resources for the SDK
+      const resources = [
+        {
+          id: crypto.randomUUID(),
+          type: 'data',
+          contentType: 'application/json',
+          hash: contentHash,
+          content: randomContent,
+          size: Buffer.byteLength(randomContent)
+        }
+      ];
+      
+      // Create asset using SDK
+      const originalsAsset = await originalsSdk.lifecycle.createAsset(resources);
+      
+      // Store in database
+      const dbAsset = await storage.createAsset({
+        userId: user.id,
+        title,
+        description,
+        category: randomCategory,
+        tags: ['random', 'generated', 'demo'],
+        mediaUrl: null,
+        metadata: {
+          resources,
+          generatedAt: new Date().toISOString(),
+          generator: 'random'
+        },
+        currentLayer: 'did:peer',
+        didPeer: originalsAsset.id,
+        didWebvh: undefined,
+        didBtco: undefined,
+        didDocument: originalsAsset.did,
+        credentials: originalsAsset.credentials,
+        provenance: originalsAsset.getProvenance(),
+        status: 'completed',
+        assetType: 'original'
+      });
+      
+      console.log(`✅ Generated random asset: ${dbAsset.id} (${title})`);
+      
+      res.json({
+        success: true,
+        message: 'Random asset generated successfully',
+        asset: dbAsset,
+        originalsAsset: {
+          did: originalsAsset.id,
+          resources: originalsAsset.resources,
+          provenance: originalsAsset.getProvenance()
+        }
+      });
+      
+    } catch (error: any) {
+      console.error("Error generating random asset:", error);
+      res.status(500).json({ 
+        error: "Failed to generate random asset",
+        details: error.message 
+      });
+    }
+  });
+
   // Publish asset to web (did:peer -> did:webvh)
   app.post("/api/assets/:id/publish-to-web", authenticateUser, async (req, res) => {
     try {
@@ -699,8 +796,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Get domain from request body or environment
-      const domain = req.body.domain || process.env.WEBVH_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000';
+      // Verify user has a did:webvh
+      if (!user.did || !user.did.startsWith('did:webvh:')) {
+        return res.status(400).json({ 
+          error: 'User missing did:webvh identifier. Cannot publish.' 
+        });
+      }
       
       // Reconstruct OriginalsAsset from database
       const resources = (asset.metadata as any)?.resources;
@@ -717,14 +818,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (asset.credentials as any) || []
       );
       
-      // Publish to web using SDK
+      // Get user's Privy signer for signing credentials
+      let publisherSigner;
+      try {
+        const userData = await storage.getUserByDid(user.did);
+        if (!userData || !userData.updateWalletId) {
+          throw new Error('User missing update wallet for signing');
+        }
+        
+        // Import Privy signer creation
+        const { createPrivySigner } = await import('./privy-signer');
+        
+        // Create signer using user's update wallet
+        const verificationMethodId = `${user.did}#key-0`;
+        publisherSigner = await createPrivySigner(
+          user.privyId,
+          userData.updateWalletId,
+          privyClient,
+          verificationMethodId,
+          req.headers.authorization?.replace('Bearer ', '') || ''
+        );
+      } catch (signerError: any) {
+        console.error('Failed to create signer:', signerError);
+        return res.status(500).json({
+          error: 'Failed to create credential signer',
+          details: signerError.message
+        });
+      }
+      
+      // Publish to web using SDK with publisher's DID and signer
       let publishedAsset: OriginalsAsset;
       try {
         publishedAsset = await originalsSdk.lifecycle.publishToWeb(
           originalsAsset,
-          domain
+          publisherSigner // Use signer instead of domain
         );
-        console.log('Published to web:', publishedAsset.id);
+        console.log('Published to web:', publishedAsset.id, 'by', user.did);
       } catch (sdkError: any) {
         console.error('Publish error:', sdkError);
         return res.status(500).json({ 
@@ -733,14 +862,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Extract did:webvh from bindings
+      // Extract did:webvh from bindings (should be the user's DID)
       const bindings = (publishedAsset as any).bindings || {};
       const didWebvh = bindings['did:webvh'];
       
       if (!didWebvh) {
         return res.status(500).json({ 
-          error: 'Failed to generate did:webvh identifier' 
+          error: 'Failed to bind asset to did:webvh' 
         });
+      }
+      
+      // Verify it matches the user's DID
+      if (didWebvh !== user.did) {
+        console.warn(`Warning: Published asset bound to ${didWebvh} but user DID is ${user.did}`);
       }
       
       // Create a proper did:webvh document by updating the id field
@@ -794,17 +928,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }))
         };
         
-        const unsignedCredential = await originalsSdk.credential.createResourceCredential(
+        const unsignedCredential = await originalsSdk.credentials.createResourceCredential(
           'ResourceCreated',
           credentialSubject,
           user.did // Issued by the user
         );
         
-        // Import credential signing utilities
+        // Import Privy signer utilities
         const { createPrivySigner } = await import('./privy-signer');
-        const { base58 } = await import('@scure/base');
-        const { canonize, canonizeProof } = await import('@originals/sdk/dist/vc/utils/jsonld');
-        const { sha256Bytes } = await import('@originals/sdk/dist/utils/hash');
         
         // Get verification method ID for the user's assertion key
         const verificationMethodId = `${user.did}#assertion-key`;
@@ -818,104 +949,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           user.authToken
         );
         
-        // Create proof configuration
-        const proofConfig = {
-          '@context': 'https://w3id.org/security/data-integrity/v2',
-          type: 'DataIntegrityProof',
-          cryptosuite: 'eddsa-rdfc-2022',
-          created: new Date().toISOString(),
-          verificationMethod: verificationMethodId,
-          proofPurpose: 'assertionMethod'
-        };
-        
-        // Prepare credential for signing (without proof)
-        const credentialToSign = {
-          '@context': ['https://www.w3.org/ns/credentials/v2'],
-          ...unsignedCredential
-        };
-        delete (credentialToSign as any)['@context'];
-        credentialToSign['@context'] = ['https://www.w3.org/ns/credentials/v2'];
-        
-        // Canonicalize document and proof
-        const documentLoader = (iri: string) => {
-          // Basic document loader for standard contexts
-          if (iri === 'https://www.w3.org/ns/credentials/v2') {
-            return Promise.resolve({
-              document: {},
-              documentUrl: iri,
-              contextUrl: null
-            });
-          }
-          if (iri === 'https://w3id.org/security/data-integrity/v2') {
-            return Promise.resolve({
-              document: {},
-              documentUrl: iri,
-              contextUrl: null
-            });
-          }
-          return Promise.resolve({
-            document: {},
-            documentUrl: iri,
-            contextUrl: null
-          });
-        };
-        
-        const transformedData = await canonize(credentialToSign, { documentLoader });
-        const canonicalProofConfig = await canonizeProof(proofConfig, { documentLoader });
-        
-        // Hash the data
-        const proofConfigHash = await sha256Bytes(canonicalProofConfig);
-        const documentHash = await sha256Bytes(transformedData);
-        const hashData = new Uint8Array([...proofConfigHash, ...documentHash]);
-        
-        // Sign using Privy signer
-        // The signer expects document and proof, but we already have the hash
-        // We need to sign the hash directly using Privy's raw API
-        const { bytesToHex } = await import('./key-utils');
-        const dataHex = `0x${bytesToHex(hashData)}`;
-        
-        const { signature, encoding } = await privyClient.wallets().rawSign(userData.assertionWalletId, {
-          authorization_context: {
-            user_jwts: [user.authToken],
-          },
-          params: { hash: dataHex },
-        });
-        
-        // Convert signature to bytes
-        let signatureBytes: Buffer;
-        if (encoding === 'hex' || !encoding) {
-          const cleanSig = signature.startsWith('0x') ? signature.slice(2) : signature;
-          signatureBytes = Buffer.from(cleanSig, 'hex');
-        } else if (encoding === 'base64') {
-          signatureBytes = Buffer.from(signature, 'base64');
-        } else {
-          throw new Error(`Unsupported signature encoding: ${encoding}`);
-        }
-        
-        // Ed25519 signatures should be exactly 64 bytes
-        if (signatureBytes.length === 65) {
-          signatureBytes = signatureBytes.slice(0, 64);
-        } else if (signatureBytes.length !== 64) {
-          throw new Error(`Invalid Ed25519 signature length: ${signatureBytes.length}`);
-        }
-        
-        // Encode signature as base58 (used by eddsa-rdfc-2022)
-        const proofValue = base58.encode(signatureBytes);
-        
-        // Create the signed credential
-        const proof = {
-          type: 'DataIntegrityProof',
-          cryptosuite: 'eddsa-rdfc-2022',
-          created: proofConfig.created,
-          verificationMethod: verificationMethodId,
-          proofPurpose: 'assertionMethod',
-          proofValue
-        };
-        
-        ownershipCredential = {
-          ...credentialToSign,
-          proof
-        };
+        // Use SDK's external signer support to sign the credential
+        ownershipCredential = await originalsSdk.credentials.signCredentialWithExternalSigner(
+          unsignedCredential,
+          userSigner
+        );
         
         console.log(`✅ Ownership credential signed by user ${user.did} for asset ${didWebvh}`);
       } catch (credError: any) {
@@ -947,7 +985,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Extract slug for resolver URL with validation
+      // Extract domain and path from DID for HTTP URLs
+      // Format with SCID: did:webvh:SCID:domain:path1:path2...
+      // Format without SCID: did:webvh:domain:path1:path2...
+      // HTTP URL should be: http://domain/path1/path2/... (SCID stripped if present)
       const didParts = didWebvh.split(':');
       if (didParts.length < 4) {
         console.error('Invalid did:webvh format:', didWebvh);
@@ -955,21 +996,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
           error: 'Generated invalid did:webvh identifier' 
         });
       }
-      const slug = didParts[didParts.length - 1];
+      
+      // Detect if SCID is present (didwebvh-ts format)
+      // SCID is a multibase hash, typically starts with 'Q' or 'z' and is long
+      // Domain typically contains dots or is 'localhost'
+      let domainIndex: number;
+      let pathStartIndex: number;
+      
+      const part2 = didParts[2];
+      const part3 = didParts[3];
+      
+      // Check if part2 looks like an SCID (multibase hash) vs a domain
+      const isSCIDPresent = part2.length > 20 && /^[Qz]/.test(part2) && !part2.includes('.');
+      
+      if (isSCIDPresent && didParts.length >= 5) {
+        // Format: did:webvh:SCID:domain:path...
+        // didParts: ['did', 'webvh', 'SCID', 'domain', 'path1', 'path2', ...]
+        domainIndex = 3;
+        pathStartIndex = 4;
+      } else {
+        // Format: did:webvh:domain:path...
+        // didParts: ['did', 'webvh', 'domain', 'path1', 'path2', ...]
+        domainIndex = 2;
+        pathStartIndex = 3;
+      }
+      
+      const didDomainEncoded = didParts[domainIndex];
+      const didDomain = decodeURIComponent(didDomainEncoded);
+      
+      // Get all path segments after domain
+      const userPathSegments = didParts.slice(pathStartIndex);
+      const userPath = userPathSegments.join('/');
       
       // Use request protocol or environment variable
       const protocol = process.env.APP_PROTOCOL || req.protocol || 'http';
       
-      // Return response
+      // Return response with DID-based resource URLs
       res.json({
         asset: updatedAsset,
         originalsAsset: {
           did: publishedAsset.id,
           previousDid: asset.didPeer,
-          resources: publishedAsset.resources,
+          resources: publishedAsset.resources.map(r => {
+            // Extract multibase hash from DID-based URL
+            // Format: did:webvh:SCID:domain:path.../resources/multibase-hash
+            const didUrl = r.url || '';
+            const hashMatch = didUrl.match(/\/resources\/(.+)$/);
+            const multibaseHash = hashMatch ? hashMatch[1] : r.hash;
+            
+            return {
+              ...r,
+              // DID-based URL (primary) - includes SCID
+              url: r.url,
+              // HTTP URL (for browser access) - SCID stripped, domain decoded
+              httpUrl: `${protocol}://${didDomain}/${userPath}/resources/${multibaseHash}`
+            };
+          }),
           provenance: publishedAsset.getProvenance()
         },
-        resolverUrl: `${protocol}://${domain}/.well-known/did/${slug}`,
+        resolverUrl: `${protocol}://${didDomain}/${userPath}/did.jsonld`,
         ownershipCredential: ownershipCredential || null
       });
       
@@ -1573,6 +1658,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Serve resources at /:userSlug/resources/:hash
+  // This serves the actual resource files published to the web
+  app.get("/:userSlug/resources/:hash", async (req, res) => {
+    try {
+      const { userSlug, hash } = req.params;
+      
+      // Look up user to verify they exist
+      const user = await storage.getUserByDidSlug(userSlug);
+      if (!user || !user.did) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      // Look up all assets for this user to find the one with this resource
+      const assets = await storage.getAssetsByUserId(user.did);
+      
+      // Find asset with matching resource hash
+      let foundResource: any = null;
+      let foundAsset: any = null;
+      
+      for (const asset of assets) {
+        const resources = (asset.metadata as any)?.resources;
+        if (resources && Array.isArray(resources)) {
+          const resource = resources.find((r: any) => {
+            // Check if the hash matches (either the raw hash or multibase-encoded)
+            return r.hash === hash || r.url?.includes(hash);
+          });
+          
+          if (resource) {
+            foundResource = resource;
+            foundAsset = asset;
+            break;
+          }
+        }
+      }
+      
+      if (!foundResource) {
+        return res.status(404).json({ error: "Resource not found" });
+      }
+      
+      // Serve the resource content
+      const contentType = foundResource.contentType || 'application/octet-stream';
+      const content = foundResource.content;
+      
+      if (!content) {
+        return res.status(404).json({ error: "Resource content not available" });
+      }
+      
+      // Set appropriate headers
+      res.type(contentType);
+      
+      // Send the content
+      if (typeof content === 'string') {
+        res.send(content);
+      } else if (Buffer.isBuffer(content)) {
+        res.send(content);
+      } else {
+        res.json(content);
+      }
+      
+      console.log(`✅ Served resource ${hash} for user ${userSlug}`);
+    } catch (error) {
+      console.error("Error serving resource:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Publish asset to web (migrate from did:peer to did:webvh)
   app.post("/api/assets/:id/publish-to-web", authenticateUser, async (req, res) => {
     try {
@@ -1640,8 +1791,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...asset.didDocument,
         id: didWebvh,
         // Update any verification methods or other fields that reference the DID
-        ...(asset.didDocument.verificationMethod && {
-          verificationMethod: (asset.didDocument.verificationMethod as any[]).map((vm: any) => ({
+        ...((asset.didDocument as any).verificationMethod && {
+          verificationMethod: ((asset.didDocument as any).verificationMethod as any[]).map((vm: any) => ({
             ...vm,
             controller: didWebvh,
             id: vm.id ? vm.id.replace(asset.didPeer || '', didWebvh) : vm.id

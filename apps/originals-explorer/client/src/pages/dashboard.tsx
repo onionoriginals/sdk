@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Plus, ArrowRight, ArrowRightLeft, Check, ArrowRightLeft as Exchange, FileSpreadsheet, Globe, Loader2, CheckCircle, AlertCircle, ExternalLink } from "lucide-react";
+import { Plus, ArrowRight, ArrowRightLeft, Check, ArrowRightLeft as Exchange, FileSpreadsheet, Globe, Loader2, CheckCircle, AlertCircle, ExternalLink, Sparkles } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayerBadge } from "@/components/LayerBadge";
 import { LayerFilter } from "@/components/LayerFilter";
@@ -24,6 +24,19 @@ interface PublishResult {
   };
   resolverUrl: string;
   migration: any;
+  originalsAsset?: {
+    did: string;
+    previousDid: string;
+    resources: Array<{
+      id: string;
+      type: string;
+      contentType: string;
+      hash: string;
+      url?: string;
+      httpUrl?: string;
+    }>;
+    provenance: any;
+  };
 }
 
 export default function Dashboard() {
@@ -33,6 +46,7 @@ export default function Dashboard() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
+  const [isGeneratingRandom, setIsGeneratingRandom] = useState(false);
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -85,8 +99,10 @@ export default function Dashboard() {
       const result = await response.json();
       setPublishResult(result);
       
-      // Refresh assets list
-      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      // Refresh assets list (invalidate all /api/assets queries regardless of params)
+      queryClient.invalidateQueries({ predicate: (query) => 
+        query.queryKey[0] === "/api/assets" || query.queryKey[0]?.toString().startsWith("/api/assets?")
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       
       // Show success notification
@@ -115,6 +131,37 @@ export default function Dashboard() {
     setPublishResult(null);
   };
 
+  const handleGenerateRandom = async () => {
+    setIsGeneratingRandom(true);
+    
+    try {
+      const response = await apiRequest('POST', '/api/assets/generate-random', {});
+      const result = await response.json();
+      
+      // Refresh assets list (invalidate all /api/assets queries regardless of params)
+      queryClient.invalidateQueries({ predicate: (query) => 
+        query.queryKey[0] === "/api/assets" || query.queryKey[0]?.toString().startsWith("/api/assets?")
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      
+      // Show success notification
+      toast({
+        title: "Random asset generated!",
+        description: `Created "${result.asset.title}" in did:peer layer`,
+      });
+      
+    } catch (error: any) {
+      console.error('Generate random error:', error);
+      toast({
+        title: "Failed to generate asset",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingRandom(false);
+    }
+  };
+
   return (
     <main className="max-w-4xl mx-auto px-8 py-16">
       {/* Simple Header */}
@@ -127,13 +174,32 @@ export default function Dashboard() {
         </p>
         
         {/* Action Buttons */}
-        <div className="flex gap-4">
+        <div className="flex gap-4 flex-wrap">
           <Link href="/create">
             <Button className="minimal-button" data-testid="create-asset-button">
               <Plus className="w-4 h-4 mr-2" />
               Create Asset
             </Button>
           </Link>
+          <Button 
+            variant="outline" 
+            className="border-gray-200 hover:bg-gray-50" 
+            onClick={handleGenerateRandom}
+            disabled={isGeneratingRandom}
+            data-testid="generate-random-button"
+          >
+            {isGeneratingRandom ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4 mr-2" />
+                Generate Random
+              </>
+            )}
+          </Button>
           <Link href="/upload-assets">
             <Button variant="outline" className="border-gray-200 hover:bg-gray-50" data-testid="upload-spreadsheet-button">
               <FileSpreadsheet className="w-4 h-4 mr-2" />
@@ -270,63 +336,39 @@ export default function Dashboard() {
                   </div>
                 </>
               ) : (
-                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-sm">
-                  <div className="flex items-center gap-2 mb-3">
-                    <CheckCircle className="w-5 h-5 text-blue-600" />
-                    <h4 className="font-medium text-blue-900">Published to Web!</h4>
+                <div className="mt-4 p-6 bg-green-50 border border-green-200 rounded-sm">
+                  <div className="flex items-center gap-2 mb-4">
+                    <CheckCircle className="w-6 h-6 text-green-600" />
+                    <h4 className="text-lg font-medium text-green-900">Published to Web!</h4>
                   </div>
                   
-                  <div className="space-y-3">
-                    {/* New Layer */}
-                    <div>
-                      <div className="text-xs text-blue-700 mb-1">Current Layer</div>
-                      <LayerBadge layer="did:webvh" size="md" />
-                    </div>
-                    
-                    {/* Original DID */}
-                    {publishResult.asset.didPeer && (
+                  {/* Resource URL - DID-based identifier */}
+                  {publishResult.originalsAsset?.resources?.[0]?.url && (
+                    <div className="space-y-3">
                       <div>
-                        <div className="text-xs text-blue-700 mb-1">Original DID (did:peer)</div>
-                        <div className="font-mono text-xs text-blue-800 bg-white p-2 rounded-sm border border-blue-200 break-all">
-                          {publishResult.asset.didPeer}
+                        <div className="text-sm text-green-700 mb-2 font-medium">Resource URL</div>
+                        <div className="font-mono text-sm text-green-900 bg-white p-3 rounded-sm border border-green-300 break-all">
+                          {publishResult.originalsAsset.resources[0].url}
                         </div>
                       </div>
-                    )}
-                    
-                    {/* New DID */}
-                    <div>
-                      <div className="text-xs text-blue-700 mb-1">Web DID (did:webvh)</div>
-                      <div className="font-mono text-xs text-blue-900 bg-white p-2 rounded-sm border border-blue-200 break-all">
-                        {publishResult.asset.didWebvh}
-                      </div>
-                    </div>
-                    
-                    {/* Resolution URL */}
-                    {publishResult.resolverUrl && (
-                      <div>
-                        <div className="text-xs text-blue-700 mb-1">Resolver URL</div>
-                        <a 
-                          href={publishResult.resolverUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm text-blue-600 hover:text-blue-800 underline flex items-center gap-1"
-                        >
-                          {publishResult.resolverUrl}
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                    )}
-                    
-                    {/* Provenance Update */}
-                    {publishResult.migration?.timestamp && (
-                      <div>
-                        <div className="text-xs text-blue-700 mb-1">Provenance</div>
-                        <div className="text-xs text-blue-800 bg-white p-2 rounded-sm border border-blue-200">
-                          Migration event recorded: {new Date(publishResult.migration.timestamp).toLocaleString()}
+                      
+                      {/* HTTP URL for browser access */}
+                      {(publishResult.originalsAsset.resources[0] as any).httpUrl && (
+                        <div>
+                          <div className="text-xs text-green-600 mb-1">HTTP Access</div>
+                          <a 
+                            href={(publishResult.originalsAsset.resources[0] as any).httpUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-green-600 hover:text-green-800 underline flex items-center gap-2 break-all"
+                          >
+                            {(publishResult.originalsAsset.resources[0] as any).httpUrl}
+                            <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                          </a>
                         </div>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

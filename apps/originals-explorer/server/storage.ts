@@ -348,4 +348,24 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+// Use PostgreSQL if DATABASE_URL is set, otherwise MemStorage
+let storageInstance: IStorage;
+
+try {
+  const databaseUrl = process.env.DATABASE_URL;
+  
+  if (databaseUrl && databaseUrl.trim().length > 0) {
+    console.log("✅ DATABASE_URL detected - using PostgreSQL storage");
+    const { DatabaseStorage } = require("./db.js");
+    storageInstance = new DatabaseStorage(databaseUrl);
+  } else {
+    console.log("ℹ️  DATABASE_URL not set - using MemStorage (data will be lost on restart)");
+    storageInstance = new MemStorage();
+  }
+} catch (error) {
+  console.error("❌ Failed to initialize database storage:", error);
+  console.log("⚠️  Falling back to MemStorage");
+  storageInstance = new MemStorage();
+}
+
+export const storage = storageInstance;

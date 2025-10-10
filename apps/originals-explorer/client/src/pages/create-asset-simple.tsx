@@ -107,7 +107,9 @@ export default function CreateAssetSimple() {
     },
     onSuccess: (data) => {
       console.log("Asset created successfully:", data);
-      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      queryClient.invalidateQueries({ predicate: (query) => 
+        query.queryKey[0] === "/api/assets" || query.queryKey[0]?.toString().startsWith("/api/assets?")
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       setSuccessResult(data);
       setError(null);
