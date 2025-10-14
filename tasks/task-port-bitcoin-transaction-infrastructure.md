@@ -8,8 +8,8 @@
 ## 📊 Current Status
 
 **Last Updated:** October 14, 2025  
-**Completed:** 2/42 parent tasks (5% complete)  
-**Current Task:** Task 1.3: Port Fee Calculation  
+**Completed:** 3/42 parent tasks (7% complete)  
+**Current Task:** Task 1.4: Write UTXO Selection Tests  
 **Blocked:** No  
 
 **Quick Verification:**
@@ -93,15 +93,15 @@
     - [x] Fix any remaining compilation errors
     - [x] Export functions from `src/index.ts`
 
-- [ ] **Task 1.3: Port Fee Calculation**
-  - [ ] **1.3a: Copy and Clean**
-    - [ ] Copy `legacy/ordinalsplus/packages/ordinalsplus/src/transactions/fee-calculation.ts` to `src/bitcoin/fee-calculation.ts`
-    - [ ] Remove ordinalsplus imports
-    - [ ] Check if any new types are needed in `src/types/bitcoin.ts`
-  - [ ] **1.3b: Update and Verify**
-    - [ ] Update imports to use SDK types
-    - [ ] Run `bun run build` to check compilation
-    - [ ] Export from `src/bitcoin/index.ts`
+- [x] **Task 1.3: Port Fee Calculation**
+  - [x] **1.3a: Copy and Clean**
+    - [x] Copy `legacy/ordinalsplus/packages/ordinalsplus/src/transactions/fee-calculation.ts` to `src/bitcoin/fee-calculation.ts`
+    - [x] Remove ordinalsplus imports (none needed)
+    - [x] Check if any new types are needed in `src/types/bitcoin.ts` (none needed - pure logic)
+  - [x] **1.3b: Update and Verify**
+    - [x] Update imports to use SDK types (none needed - pure logic)
+    - [x] Run `bun run build` to check compilation
+    - [x] Export from `src/index.ts`
 
 - [ ] **Task 1.4: Write UTXO Selection Tests**
   - [ ] **1.4a: Test Setup**
