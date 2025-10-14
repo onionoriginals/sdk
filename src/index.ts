@@ -19,6 +19,14 @@ export { BitcoinManager } from './bitcoin/BitcoinManager.js';
 export { OrdinalsClient } from './bitcoin/OrdinalsClient.js';
 export { buildTransferTransaction } from './bitcoin/transfer.js';
 export { selectUtxos, UtxoSelectionError, estimateFeeSats } from './bitcoin/utxo.js';
+export { 
+  selectUtxos as selectUtxosSimple,
+  selectResourceUtxos,
+  selectUtxosForPayment,
+  tagResourceUtxos,
+  estimateTransactionSize
+} from './bitcoin/utxo-selection.js';
+export { calculateFee } from './bitcoin/fee-calculation.js';
 export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs.js';
 export { BbsSimple } from './vc/cryptosuites/bbsSimple.js';
 export * from './storage/index.js';
