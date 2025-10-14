@@ -8,8 +8,8 @@
 ## 📊 Current Status
 
 **Last Updated:** October 14, 2025  
-**Completed:** 4/42 parent tasks (10% complete)  
-**Current Task:** Task 1.5: Write Fee Calculation Tests  
+**Completed:** 5/42 parent tasks (12% complete)  
+**Current Task:** Task 1.6: Port Commit Transaction  
 **Blocked:** No  
 
 **Quick Verification:**
@@ -126,22 +126,24 @@
     - [x] Check coverage report for utxo-selection.ts (100% coverage, 98.70% branches)
     - [x] Coverage target achieved: utxo-selection.ts 100%, fee-calculation.ts 100%
 
-- [ ] **Task 1.5: Write Fee Calculation Tests**
-  - [ ] **1.5a: Test Setup**
-    - [ ] Create `tests/unit/bitcoin/fee-calculation.test.ts`
-    - [ ] Import fee calculation functions
-    - [ ] Set up test fixtures for various tx sizes
-  - [ ] **1.5b: Basic Fee Tests**
-    - [ ] Write test: "calculates fee for 1 input, 2 outputs"
-    - [ ] Write test: "calculates fee for 3 inputs, 1 output"
-    - [ ] Write test: "fee scales linearly with fee rate"
-  - [ ] **1.5c: Edge Cases**
-    - [ ] Write test: "handles zero fee rate (throws or returns 0)"
-    - [ ] Write test: "handles large input/output counts"
-    - [ ] Write test: "rounds up fractional satoshis"
-  - [ ] **1.5d: Coverage Check**
-    - [ ] Run `bun test tests/unit/bitcoin/fee-calculation.test.ts --coverage`
-    - [ ] Verify 90%+ coverage for fee-calculation.ts
+- [x] **Task 1.5: Write Fee Calculation Tests**
+  - [x] **1.5a: Test Setup**
+    - [x] Create `tests/unit/bitcoin/fee-calculation.test.ts`
+    - [x] Import fee calculation functions
+    - [x] Set up test fixtures for various tx sizes
+  - [x] **1.5b: Basic Fee Tests**
+    - [x] Write test: "calculates fee for 1 input, 2 outputs"
+    - [x] Write test: "calculates fee for 3 inputs, 1 output"
+    - [x] Write test: "fee scales linearly with fee rate"
+  - [x] **1.5c: Edge Cases**
+    - [x] Write test: "handles zero fee rate (returns 0)"
+    - [x] Write test: "handles large input/output counts"
+    - [x] Write test: "rounds up fractional satoshis"
+    - [x] Write test: "handles NaN and negative values"
+    - [x] Write test: "respects minimum relay fee"
+  - [x] **1.5d: Coverage Check**
+    - [x] Run `bun test tests/unit/bitcoin/fee-calculation.test.ts --coverage`
+    - [x] Verify 100% coverage for fee-calculation.ts (25 tests, all passing)
 
 ### Days 3-5: Commit Transaction
 - [ ] **Task 1.6: Port Commit Transaction**
