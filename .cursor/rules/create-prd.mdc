@@ -1,0 +1,216 @@
+---
+description: Guide AI to create comprehensive Product Requirements Documents
+globs:
+alwaysApply: false
+---
+
+# 📋 PRD Creation Protocol
+
+Create clear, actionable Product Requirements Documents that junior developers can implement confidently.
+
+---
+
+## 🎯 Process
+
+**When user requests a feature:**
+
+1. **🤔 Ask Questions First** - Don't assume, clarify!
+2. **⏸️ Wait for Answers** - Stop and listen
+3. **📝 Generate PRD** - Use template below
+4. **💾 Save** - As `tasks/prd-[feature-name].md`
+
+---
+
+## ❓ Question Categories
+
+**Adapt based on context, but always cover:**
+
+### Core Questions (Always Ask)
+- **Problem:** What problem does this solve?
+- **Users:** Who benefits and how?
+- **Scope:** What MUST be included? What's explicitly OUT?
+- **Success:** How do we measure success?
+- **Timeline:** Is there a deadline?
+
+### Technical Questions (As Needed)
+- **Resources:** How many engineers? What skill level?
+- **Dependencies:** What does this depend on?
+- **Approach:** Direct port, rewrite, or hybrid?
+- **Constraints:** Any technical limitations?
+
+### Risk Questions (For Complex Features)
+- **Risks:** What could go wrong?
+- **Rollback:** What's the fallback plan?
+
+---
+
+## 📄 PRD Template
+
+### Required Sections
+
+```markdown
+# PRD: [Feature Name]
+
+**Status:** 🔴 Critical | 🟡 High | 🟢 Medium | ⚪ Low
+**Timeline:** [X weeks]
+**Team:** [N engineers]
+**Created:** [Date]
+
+---
+
+## Introduction
+
+[2-3 sentences: What is this? Why now? Who benefits?]
+
+---
+
+## Goals
+
+1. **Goal 1:** [Specific, measurable objective]
+2. **Goal 2:** [Another objective]
+3. **Goal 3:** [Technical goal if applicable]
+
+---
+
+## User Stories
+
+**Story 1:** [Primary Use Case]
+```
+As a [user type],
+I want to [action],
+So that [benefit].
+```
+
+**Story 2:** [Alternative Path]
+[...]
+
+**Story 3:** [Edge Case]
+[...]
+
+---
+
+## Functional Requirements
+
+### [Subsystem 1]
+
+**FR-1.1:** The system MUST [specific requirement]
+- Detail if needed
+- Acceptance criteria
+
+**FR-1.2:** The system SHOULD [optional requirement]
+
+### [Subsystem 2]
+
+**FR-2.1:** The system MUST [requirement]
+[...]
+
+---
+
+## Non-Goals (Out of Scope)
+
+❌ **Explicitly NOT included:**
+- [Item 1] - [Reason]
+- [Item 2] - [Reason]
+- [Item 3] - [Reason]
+
+---
+
+## Success Metrics
+
+**Primary:**
+- [Metric 1]: [Target] (e.g., 95% test coverage)
+- [Metric 2]: [Target] (e.g., works on testnet & mainnet)
+
+**Secondary:**
+- [Nice-to-have metric]
+
+---
+
+## Technical Considerations
+
+**Source Files:** [What to port/modify]
+**Dependencies:** [What's needed]
+**Testing:** [Test strategy]
+**Risks:** [Main risks + mitigation]
+
+---
+
+## Acceptance Criteria
+
+This feature is DONE when:
+- ✅ [Criterion 1]
+- ✅ [Criterion 2]
+- ✅ All tests passing
+- ✅ Documentation complete
+
+---
+
+## Open Questions
+
+❓ [Question 1]: [Description] - Owner: [Name], Due: [Date]
+❓ [Question 2]: [Description] - Owner: [Name], Due: [Date]
+
+---
+
+**END OF PRD**
+```
+
+---
+
+## ✍️ Writing Tips
+
+### Use MUST/SHOULD/MAY
+- **MUST** = Required
+- **SHOULD** = Recommended
+- **MAY** = Optional
+
+### Be Specific
+- ❌ "Fast performance"
+- ✅ "API response < 200ms (p95)"
+
+### One Requirement Per Line
+- ❌ "Handle auth and validate input"
+- ✅ "FR-1.1: Validate email format" + "FR-1.2: Hash passwords"
+
+### Include Examples for Complex Features
+```markdown
+FR-3.1: Support file types: .pdf, .docx, .txt (max 10MB each)
+
+Example: user uploads valid.pdf (5MB) → Success
+Example: user uploads file.exe → Error: INVALID_FILE_TYPE
+```
+
+---
+
+## ✅ Pre-Flight Checklist
+
+Before finalizing:
+- [ ] 3+ user stories
+- [ ] 10+ functional requirements (numbered)
+- [ ] Non-goals explicitly stated
+- [ ] Success metrics defined
+- [ ] Could a junior dev implement this without asking questions?
+
+---
+
+## 🚫 Don't Do This
+
+- ❌ Start implementing before asking questions
+- ❌ Use vague language ("user-friendly", "fast")
+- ❌ Skip non-goals section
+- ❌ Write requirements that can't be tested
+- ❌ Make PRD longer than needed (aim: 300-800 lines)
+
+---
+
+## 🎯 Final Instructions
+
+**After user requests a feature:**
+
+1. Ask 5-8 clarifying questions
+2. **STOP** - wait for answers
+3. Generate PRD using template above
+4. Save as `tasks/prd-[feature-name].md` (kebab-case)
+5. Ask: "PRD ready! Start implementation or need changes?"
+
+**Remember:** Write for junior developers. If they can implement without asking questions, it's a great PRD! 🌟

@@ -1,0 +1,102 @@
+---
+description: Enforce clarifying questions before code changes
+globs:
+alwaysApply: false
+---
+
+# ❓ Clarifying Questions Protocol
+
+**When manually tagged:** Ask questions BEFORE making ANY code changes.
+
+---
+
+## 🚨 Enforcement Rules
+
+| Rule | Description |
+|------|-------------|
+| **NO EXCEPTIONS** | Even for tiny fixes, imports, or obvious changes |
+| **QUESTION FIRST** | Ask 2-3+ questions before proceeding |
+| **WAIT FOR APPROVAL** | Don't code until user confirms |
+| **STATE ASSUMPTIONS** | Document what you're assuming |
+
+---
+
+## 📋 Question Categories
+
+**Ask from at least 2 categories:**
+
+### 1️⃣ Implementation Approach
+- Prefer approach A or B?
+- Use existing patterns or create new?
+- How should this integrate with current architecture?
+
+### 2️⃣ Scope & Requirements
+- Handle edge cases X, Y, Z?
+- Include error handling?
+- Any specific requirements?
+
+### 3️⃣ Code Style & Structure
+- Break into smaller components/functions?
+- Add TypeScript types/interfaces?
+- Follow particular naming conventions?
+
+### 4️⃣ UI (User Interface)
+- Visual style: existing patterns or new design?
+- Spacing, sizing, layout approach?
+- Behavior when collapsed to smaller container?
+
+### 5️⃣ UX (User Experience)
+- Interaction behavior?
+- Handle error/loading/empty states?
+- Keyboard navigation requirements?
+
+### 6️⃣ Design
+- Include animations/transitions?
+- Color scheme and typography?
+- Theme adaptation (light/dark)?
+- Visual feedback for states (hover/focus/active)?
+
+### 7️⃣ Future Considerations
+- Design for extensibility?
+- Performance considerations?
+- Support additional features later?
+
+---
+
+## 💬 Example Flow
+
+**User:** "@questions Fix the button alignment"
+
+**AI Response:**
+```
+Before making changes, I need to clarify:
+
+1. **Scope:** Fix just this button or review all buttons for consistency?
+2. **Approach:** Use CSS Grid, Flexbox, or adjust existing positioning?
+3. **Testing:** How to verify across screen sizes and browsers?
+
+Once you confirm, I'll implement according to your preferences.
+```
+
+---
+
+## 🔓 Override Conditions
+
+**Only proceed without questions if user says:**
+- "Skip questions and proceed directly"
+- "I trust your judgment, go ahead"
+- "Emergency fix, implement immediately"
+
+---
+
+## 🎯 Purpose
+
+Ensures:
+- ✅ User maintains full control
+- ✅ Educational insight into process
+- ✅ Documented alternatives
+- ✅ Prevention of unwanted choices
+
+---
+
+**Remember:** When @questions is tagged, ALWAYS ask before coding! 🛑

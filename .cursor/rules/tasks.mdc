@@ -1,0 +1,109 @@
+---
+description: Task list management for tracking PRD implementation progress
+globs:
+alwaysApply: false
+---
+
+# ✅ Task List Management
+
+Track progress on PRD implementation using markdown task lists.
+
+---
+
+## 🔄 Completion Protocol
+
+### Sub-task Complete:
+```markdown
+- [x] Task 1.1: Setup directory structure  ← Mark as done
+  - [x] Create src/bitcoin/transactions/
+  - [x] Create index.ts
+  - [x] Update exports
+```
+
+### Parent Task Complete:
+```markdown
+- [x] Task 1.1: Setup directory structure  ← Mark parent when ALL subs done
+  - [x] Create src/bitcoin/transactions/
+  - [x] Create index.ts
+  - [x] Update exports
+```
+
+**Rule:** Parent gets `[x]` only when ALL children are `[x]`
+
+---
+
+## ⏸️ Pause Points
+
+**Stop after each major (parent) task** for user approval
+
+Example workflow:
+1. Complete Task 1.1 (parent + all subs)
+2. Update task list file
+3. ⏸️ **PAUSE** - wait for user approval
+4. User confirms → proceed to Task 1.2
+5. Repeat
+
+---
+
+## 📝 Maintenance Checklist
+
+**After completing any significant work:**
+
+- [ ] Mark finished sub-tasks `[x]`
+- [ ] Mark parent `[x]` if all children complete
+- [ ] Add newly discovered tasks
+- [ ] Update "Relevant Files" section
+- [ ] Add notes about challenges/decisions
+
+---
+
+## 📁 Relevant Files Section
+
+**Keep this section updated:**
+
+```markdown
+## Relevant Files
+
+### Created Files
+- `src/bitcoin/utxo-selection.ts` - UTXO selection with resource awareness
+- `tests/unit/bitcoin/utxo-selection.test.ts` - UTXO selection tests
+
+### Modified Files
+- `src/bitcoin/BitcoinManager.ts` - Added commit/reveal transaction flow
+- `src/types/bitcoin.ts` - Added CommitTransactionParams interface
+```
+
+---
+
+## 🤖 AI Workflow
+
+**Before starting work:**
+1. Check task list for next sub-task
+2. Verify parent task context
+
+**While working:**
+3. Complete the sub-task
+4. Update task list (`[ ]` → `[x]`)
+5. Update "Relevant Files"
+6. Add notes if needed
+
+**After completing parent task:**
+7. Mark parent `[x]` if all subs done
+8. ⏸️ **PAUSE** for user approval
+9. Don't start next parent until confirmed
+
+---
+
+## 🎯 Quick Reference
+
+| Scenario | Action |
+|----------|--------|
+| Finish sub-task | Mark `[x]`, check if parent done |
+| Finish parent | Mark parent `[x]`, PAUSE |
+| Find new work | Add to task list |
+| Create/modify file | Update "Relevant Files" |
+| Hit challenge | Add note to daily log |
+
+---
+
+**Golden Rule:** Update task list IMMEDIATELY after completing work, then pause! ⏸️
