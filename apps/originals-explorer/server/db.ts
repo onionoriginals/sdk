@@ -1,13 +1,55 @@
 // Simple PostgreSQL storage using Drizzle ORM
-const { drizzle } = require("drizzle-orm/node-postgres");
-const { eq, and } = require("drizzle-orm");
-const { Pool } = require("pg");
+import { drizzle, NodePgDatabase } from "drizzle-orm/node-postgres";
+import { eq, and } from "drizzle-orm";
+import { Pool } from "pg";
 
 // Import schema
-const { users, assets, walletConnections, assetTypes } = require("../shared/schema.ts");
+import { 
+  users, 
+  assets, 
+  walletConnections, 
+  assetTypes,
+  User,
+  Asset,
+  WalletConnection,
+  AssetType,
+  AssetLayer,
+  InsertAsset,
+  InsertUser,
+  InsertWalletConnection,
+  InsertAssetType
+} from "../shared/schema.ts";
 
-class DatabaseStorage {
-  constructor(connectionString) {
+interface GetAssetsByUserIdOptions {
+  layer?: AssetLayer | 'all';
+}
+
+interface DIDData {
+  didDocument: any;
+  didLog?: any;
+  didSlug?: string;
+  authWalletId: string;
+  assertionWalletId: string;
+  updateWalletId: string;
+  authKeyPublic: string;
+  assertionKeyPublic: string;
+  updateKeyPublic: string;
+  didCreatedAt: Date;
+}
+
+interface Stats {
+  totalAssets: number;
+  verifiedAssets: number;
+  migratedAssets: number;
+}
+
+export class DatabaseStorage {
+  private pool: Pool;
+  private db: NodePgDatabase;
+  private signingKeys: Map<string, any[]>;
+  private didDocuments: Map<string, any>;
+
+  constructor(connectionString: string) {
     this.pool = new Pool({ connectionString });
     this.db = drizzle(this.pool);
     this.signingKeys = new Map();
@@ -16,48 +58,48 @@ class DatabaseStorage {
   }
 
   // User methods
-  async getUser(id) {
+  async getUser(id: string): Promise<User | undefined> {
     const result = await this.db.select().from(users).where(eq(users.id, id)).limit(1);
     return result[0];
   }
 
-  async getUserByUsername(username) {
+  async getUserByUsername(username: string): Promise<User | undefined> {
     const result = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
     return result[0];
   }
 
-  async getUserByPrivyId(privyUserId) {
+  async getUserByPrivyId(privyUserId: string): Promise<User | undefined> {
     const byUsername = await this.getUserByUsername(privyUserId);
     return byUsername || undefined;
   }
 
-  async createUser(insertUser) {
-    const result = await this.db.insert(users).values(insertUser).returning();
+  async createUser(insertUser: InsertUser | (Omit<Partial<User>, 'id'> & { username: string; password: string })): Promise<User> {
+    const result = await this.db.insert(users).values(insertUser as any).returning();
     return result[0];
   }
 
-  async updateUser(userId, updates) {
+  async updateUser(userId: string, updates: Partial<User>): Promise<User> {
     const result = await this.db.update(users).set(updates).where(eq(users.id, userId)).returning();
     return result[0];
   }
 
-  async ensureUser(privyUserId) {
+  async ensureUser(privyUserId: string): Promise<User> {
     const existing = await this.getUserByPrivyId(privyUserId);
     if (existing) return existing;
     return this.createUser({ username: privyUserId, password: '' });
   }
 
-  async getUserByDidSlug(slug) {
+  async getUserByDidSlug(slug: string): Promise<User | undefined> {
     const result = await this.db.select().from(users).where(eq(users.didSlug, slug)).limit(1);
     return result[0];
   }
 
-  async getUserByDid(did) {
+  async getUserByDid(did: string): Promise<User | undefined> {
     const result = await this.db.select().from(users).where(eq(users.did, did)).limit(1);
     return result[0];
   }
 
-  async createUserWithDid(privyUserId, did, didData) {
+  async createUserWithDid(privyUserId: string, did: string, didData: DIDData): Promise<User> {
     // Check if user already exists by Privy ID
     const existing = await this.getUserByUsername(privyUserId);
     
@@ -103,12 +145,12 @@ class DatabaseStorage {
   }
 
   // Asset methods  
-  async getAsset(id) {
+  async getAsset(id: string): Promise<Asset | undefined> {
     const result = await this.db.select().from(assets).where(eq(assets.id, id)).limit(1);
     return result[0];
   }
 
-  async getAssetsByUserId(userId, options) {
+  async getAssetsByUserId(userId: string, options?: GetAssetsByUserIdOptions): Promise<Asset[]> {
     const result = await this.db.select().from(assets).where(eq(assets.userId, userId));
     if (options?.layer && options.layer !== 'all') {
       return result.filter(asset => asset.currentLayer === options.layer);
@@ -116,13 +158,13 @@ class DatabaseStorage {
     return result;
   }
 
-  async getAssetsByUserDid(userDid) {
+  async getAssetsByUserDid(userDid: string): Promise<Asset[]> {
     const user = await this.getUserByDid(userDid);
     if (!user) return [];
     return this.getAssetsByUserId(user.id);
   }
 
-  async createAsset(insertAsset) {
+  async createAsset(insertAsset: InsertAsset): Promise<Asset> {
     const result = await this.db.insert(assets).values({
       ...insertAsset,
       title: insertAsset.title || "Untitled Asset",
@@ -133,7 +175,7 @@ class DatabaseStorage {
     return result[0];
   }
 
-  async updateAsset(id, updates) {
+  async updateAsset(id: string, updates: Partial<Asset>): Promise<Asset> {
     const result = await this.db.update(assets)
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(assets.id, id))
@@ -142,14 +184,14 @@ class DatabaseStorage {
   }
 
   // Wallet methods
-  async getWalletConnection(userId) {
+  async getWalletConnection(userId: string): Promise<WalletConnection | undefined> {
     const result = await this.db.select().from(walletConnections)
       .where(and(eq(walletConnections.userId, userId), eq(walletConnections.isActive, "true")))
       .limit(1);
     return result[0];
   }
 
-  async createWalletConnection(insertConnection) {
+  async createWalletConnection(insertConnection: InsertWalletConnection): Promise<WalletConnection> {
     const result = await this.db.insert(walletConnections).values({
       ...insertConnection,
       isActive: insertConnection.isActive || "true",
@@ -157,7 +199,7 @@ class DatabaseStorage {
     return result[0];
   }
 
-  async updateWalletConnection(userId, updates) {
+  async updateWalletConnection(userId: string, updates: Partial<WalletConnection>): Promise<WalletConnection> {
     const result = await this.db.update(walletConnections)
       .set(updates)
       .where(eq(walletConnections.userId, userId))
@@ -166,27 +208,27 @@ class DatabaseStorage {
   }
 
   // Signing keys (in-memory for security)
-  async storeSigningKey(userId, key) {
+  async storeSigningKey(userId: string, key: any): Promise<void> {
     const keys = this.signingKeys.get(userId) || [];
     keys.push(key);
     this.signingKeys.set(userId, keys);
   }
 
-  async getSigningKeys(userId) {
+  async getSigningKeys(userId: string): Promise<any[]> {
     return this.signingKeys.get(userId) || [];
   }
 
   // Asset types
-  async getAssetType(id) {
+  async getAssetType(id: string): Promise<AssetType | undefined> {
     const result = await this.db.select().from(assetTypes).where(eq(assetTypes.id, id)).limit(1);
     return result[0];
   }
 
-  async getAssetTypesByUserId(userId) {
+  async getAssetTypesByUserId(userId: string): Promise<AssetType[]> {
     return this.db.select().from(assetTypes).where(eq(assetTypes.userId, userId));
   }
 
-  async createAssetType(insertAssetType) {
+  async createAssetType(insertAssetType: InsertAssetType): Promise<AssetType> {
     const result = await this.db.insert(assetTypes).values({
       ...insertAssetType,
       properties: insertAssetType.properties || [],
@@ -194,7 +236,7 @@ class DatabaseStorage {
     return result[0];
   }
 
-  async updateAssetType(id, updates) {
+  async updateAssetType(id: string, updates: Partial<AssetType>): Promise<AssetType> {
     const result = await this.db.update(assetTypes)
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(assetTypes.id, id))
@@ -203,16 +245,16 @@ class DatabaseStorage {
   }
 
   // DID documents (in-memory)
-  async storeDIDDocument(slug, data) {
+  async storeDIDDocument(slug: string, data: any): Promise<void> {
     this.didDocuments.set(slug, data);
   }
 
-  async getDIDDocument(slug) {
+  async getDIDDocument(slug: string): Promise<any | undefined> {
     return this.didDocuments.get(slug);
   }
 
   // Stats
-  async getStats() {
+  async getStats(): Promise<Stats> {
     const allAssets = await this.db.select().from(assets);
     return {
       totalAssets: allAssets.length,
@@ -221,11 +263,8 @@ class DatabaseStorage {
     };
   }
 
-  async close() {
+  async close(): Promise<void> {
     await this.pool.end();
   }
 }
-
-module.exports = { DatabaseStorage };
-
 

@@ -1,5 +1,6 @@
 import { type User, type InsertUser, type Asset, type InsertAsset, type WalletConnection, type InsertWalletConnection, type AssetType, type InsertAssetType, type AssetLayer } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { DatabaseStorage } from "./db.ts";
 
 export interface SigningKey {
   publicKey: string;
@@ -356,7 +357,6 @@ try {
   
   if (databaseUrl && databaseUrl.trim().length > 0) {
     console.log("✅ DATABASE_URL detected - using PostgreSQL storage");
-    const { DatabaseStorage } = require("./db.js");
     storageInstance = new DatabaseStorage(databaseUrl);
   } else {
     console.log("ℹ️  DATABASE_URL not set - using MemStorage (data will be lost on restart)");
