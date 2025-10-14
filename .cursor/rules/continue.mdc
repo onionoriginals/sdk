@@ -1,0 +1,388 @@
+---
+description: Onboard fresh AI agent to project in progress - pick up where previous agent left off
+globs:
+alwaysApply: false
+---
+
+# 🔄 Project Continuation Protocol
+
+**Purpose:** Seamlessly onboard a new AI agent to a project in progress.
+
+---
+
+## 🎯 When to Use This Rule
+
+Tag this rule when:
+- Starting fresh in a new context window
+- Switching to a new AI agent mid-project
+- Resuming work after a break
+- Need to assess project state
+
+---
+
+## 📋 Onboarding Process
+
+### Step 1: Locate Project Files (30 seconds)
+
+**Find the task list:**
+```bash
+# Look in tasks/ directory
+tasks/task-*.md
+```
+
+**Find the PRD:**
+```bash
+# Usually linked in task list header
+tasks/prd-*.md
+```
+
+**Read both files** to understand:
+- What the project is
+- What's been completed
+- What remains
+
+---
+
+### Step 2: Assess Current State (2 minutes)
+
+**Check task list progress:**
+
+```markdown
+Look for checkboxes:
+- [x] Completed task ✅
+- [ ] Not started ⏹️
+- 🟡 In progress (might be in notes)
+- ⚠️ Blocked
+- ❌ Failed
+
+Find the pattern:
+- Tasks 1.1-1.5: All [x] → Week 1 complete
+- Task 1.6: Some [x], some [ ] → Currently here!
+- Task 1.7+: All [ ] → Not started yet
+```
+
+**Key indicators:**
+- **Last completed parent task** = What's done
+- **First incomplete parent task** = Where to continue
+- **Partially complete parent task** = Resume here
+
+---
+
+### Step 3: Verify Actual State (1 minute)
+
+**Don't trust checkboxes blindly!** Verify what actually exists:
+
+```bash
+# Check if files mentioned in completed tasks exist
+ls -la src/bitcoin/utxo-selection.ts  # Task says complete?
+ls -la tests/unit/bitcoin/utxo-selection.test.ts  # Tests exist?
+
+# Run tests to verify they pass
+bun test tests/unit/bitcoin/utxo-selection.test.ts
+
+# Check compilation
+bun run build
+```
+
+**Reality check:**
+- ✅ File exists + tests pass = Actually complete
+- ⚠️ File exists + tests fail = Needs fixing
+- ❌ File missing = Checkbox is wrong, not complete
+
+---
+
+### Step 4: Review Recent Changes (1 minute)
+
+**Check git history:**
+```bash
+git log --oneline -20  # Last 20 commits
+git status  # Current changes
+git diff  # Uncommitted changes
+```
+
+**Check "Relevant Files" section** in task list:
+- What files were created?
+- What files were modified?
+- When were they last touched?
+
+**Check "Notes" section:**
+- Any blockers mentioned?
+- Any decisions made?
+- Any issues encountered?
+
+**Check "Daily Progress Log":**
+- What was accomplished recently?
+- Any patterns or insights?
+
+---
+
+### Step 5: Identify Next Task (30 seconds)
+
+**Decision tree:**
+
+```
+Is there a partially complete parent task?
+├─ YES → Resume that task
+│   └─ Find first unchecked [ ] sub-task
+│       └─ That's your starting point
+│
+└─ NO → Start next incomplete parent task
+    └─ First task that's fully [ ]
+        └─ Begin with first sub-task
+```
+
+**Example:**
+```markdown
+- [x] Task 1.1: Setup (all done)
+- [x] Task 1.2: Port UTXO (all done)
+- [ ] Task 1.3: Port Fee Calculation ← START HERE
+  - [ ] 1.3a: Copy and Clean ← Specifically, start here
+    - [ ] Copy file ← This is your first action
+```
+
+---
+
+### Step 6: Confirm Understanding (Required)
+
+**Before making ANY changes, tell the user:**
+
+```
+📍 **Project State Assessment:**
+
+**Project:** [Name from PRD]
+**Status:** [X% complete based on tasks]
+
+**Completed:**
+✅ Task 1.1: [Name]
+✅ Task 1.2: [Name]
+
+**Current Task:**
+🎯 Task 1.3: [Name]
+└─ Next action: [Specific sub-task]
+
+**Verified:**
+✅ [File X] exists and compiles
+✅ Tests passing for completed tasks
+⚠️ [Any issues found]
+
+**Ready to continue with Task 1.3.a: [Name]**
+
+Shall I proceed?
+```
+
+**Wait for user confirmation** before proceeding.
+
+---
+
+### Step 7: Continue Implementation
+
+**Follow task list protocol:**
+1. Complete the atomic action
+2. Mark `[x]` in task list
+3. Update "Relevant Files" if needed
+4. Add notes if challenges encountered
+5. When parent task complete → ⏸️ PAUSE for approval
+
+---
+
+## 🔍 Common Scenarios
+
+### Scenario A: Clean Handoff (Tasks 1-5 Done, Start Task 6)
+
+**What to do:**
+1. Verify Tasks 1-5 are actually complete (files exist, tests pass)
+2. Read Task 6 requirements
+3. Start with first sub-task (6a)
+4. Implement following normal protocol
+
+---
+
+### Scenario B: Mid-Task Handoff (Task 6 Partially Done)
+
+**What to do:**
+1. Check which sub-tasks of Task 6 are `[x]`
+2. Verify those sub-tasks are actually complete
+3. Find first `[ ]` sub-task
+4. Resume from there
+5. **Important:** Review the partial work before continuing
+
+---
+
+### Scenario C: Unclear State (Checkboxes Don't Match Reality)
+
+**What to do:**
+1. Report discrepancy to user
+2. Ask which is correct (checkbox or reality)
+3. Fix task list to match reality
+4. Then proceed from actual current state
+
+Example:
+```
+⚠️ **State Discrepancy Found:**
+
+Task 1.6 is marked [x] complete, but:
+- File src/bitcoin/transactions/commit.ts does NOT exist
+- Tests for commit don't exist
+
+**Options:**
+A) Task 1.6 was not actually completed (uncheck it)
+B) Files were created in different location (need to find them)
+C) Work was lost/reverted (need to redo)
+
+Which is correct?
+```
+
+---
+
+### Scenario D: Tests Failing (Marked Complete but Broken)
+
+**What to do:**
+1. Report test failures
+2. Ask if should fix or continue
+3. Update task list with status (e.g., ⚠️ Task 1.4: Tests failing)
+
+---
+
+### Scenario E: Git Shows Uncommitted Changes
+
+**What to do:**
+1. Review uncommitted changes
+2. Ask user:
+   - Should I commit these?
+   - Should I continue working on them?
+   - Should I discard them?
+
+---
+
+## 🛠️ Assessment Commands
+
+**Quick state check (run these):**
+
+```bash
+# 1. Check file structure
+ls -la src/bitcoin/
+ls -la tests/unit/bitcoin/
+
+# 2. Check compilation
+bun run build 2>&1 | tail -20
+
+# 3. Run tests
+bun test tests/unit --reporter=dot
+
+# 4. Check git state
+git status --short
+git log --oneline -5
+
+# 5. Check coverage (if tests pass)
+bun test --coverage 2>&1 | grep -A5 "Coverage"
+```
+
+---
+
+## ✅ Validation Checklist
+
+**Before claiming you understand the state:**
+
+- [ ] Found task list file
+- [ ] Found PRD file
+- [ ] Identified last completed parent task
+- [ ] Identified next incomplete task
+- [ ] Verified at least 2 completed tasks actually exist (files present)
+- [ ] Ran build and noted any errors
+- [ ] Checked git status
+- [ ] Read "Notes" section for context
+- [ ] Prepared summary for user
+
+---
+
+## 💬 Response Template
+
+**Use this format when @continue is tagged:**
+
+```markdown
+# 🔄 Project Continuation Assessment
+
+## 📂 Project Found
+- **PRD:** tasks/prd-[name].md
+- **Task List:** tasks/task-[name].md
+- **Target:** [High-level goal from PRD]
+
+## ✅ Progress Summary
+**Completed:** [N/M parent tasks] ([X]% complete)
+- ✅ Task 1.1: [Name]
+- ✅ Task 1.2: [Name]
+- ✅ Task 1.3: [Name]
+
+## 🎯 Current Position
+**Active:** Task [N]: [Name]
+- [x] Sub-task [N.a]: [Name]
+- [ ] Sub-task [N.b]: [Name] ← **RESUME HERE**
+- [ ] Sub-task [N.c]: [Name]
+
+## 🔍 State Verification
+- ✅ Files from completed tasks exist
+- ✅ Build status: [passing/failing]
+- ✅ Tests status: [X passing, Y failing]
+- ⚠️ Issues found: [List or "None"]
+
+## 📝 Recent Notes
+[Pull from "Notes" section or "None"]
+
+## 🚀 Next Action
+**Task [N.b]:** [Name]
+- First atomic action: [Specific step]
+- Estimated time: [X minutes]
+
+**Ready to continue?**
+```
+
+---
+
+## 🎓 Best Practices
+
+### DO:
+- ✅ Verify state before assuming
+- ✅ Read Notes section for context
+- ✅ Check git history for recent changes
+- ✅ Run tests before continuing
+- ✅ Ask if unclear about state
+
+### DON'T:
+- ❌ Trust checkboxes without verification
+- ❌ Skip verification steps
+- ❌ Start coding immediately
+- ❌ Ignore failing tests from "completed" tasks
+- ❌ Assume you know what's done
+
+---
+
+## 🔧 Troubleshooting
+
+**Problem:** Can't find task list
+- **Solution:** Look in `tasks/` directory, check for `.md` files
+
+**Problem:** Task list shows complete but files missing
+- **Solution:** Ask user what happened (git reset? moved files?)
+
+**Problem:** Tests failing for "completed" tasks
+- **Solution:** Report to user, ask if should fix or continue
+
+**Problem:** Unclear which task is "current"
+- **Solution:** Ask user directly where to resume
+
+---
+
+## 🎯 Success Criteria
+
+**You've successfully onboarded when:**
+1. ✅ You understand the project goal
+2. ✅ You know what's been completed
+3. ✅ You know where to resume
+4. ✅ You've verified the state matches task list
+5. ✅ User confirms your assessment is correct
+
+**Then:** Continue normal implementation following @tasks.mdc protocol
+
+---
+
+**Remember:** The goal is SEAMLESS continuation, not starting over! 🔄

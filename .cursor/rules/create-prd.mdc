@@ -211,6 +211,11 @@ Before finalizing:
 2. **STOP** - wait for answers
 3. Generate PRD using template above
 4. Save as `tasks/prd-[feature-name].md` (kebab-case)
-5. Ask: "PRD ready! Start implementation or need changes?"
+5. Optionally create task list: `tasks/task-[feature-name].md`
+6. Ask: "PRD ready! Start implementation or need changes?"
+
+**Related Rules:**
+- Use @tasks for creating task tracking lists
+- Use @continue for resuming work later
 
 **Remember:** Write for junior developers. If they can implement without asking questions, it's a great PRD! 🌟

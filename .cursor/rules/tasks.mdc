@@ -8,6 +8,8 @@ alwaysApply: false
 
 Track progress on PRD implementation using markdown task lists.
 
+**Related Rules:** Use with @continue for project handoffs
+
 ---
 
 ## 🔄 Completion Protocol
@@ -59,7 +61,7 @@ Example workflow:
 
 ## 📁 Relevant Files Section
 
-**Keep this section updated:**
+**Keep this section updated for @continue handoffs:**
 
 ```markdown
 ## Relevant Files
@@ -72,6 +74,28 @@ Example workflow:
 - `src/bitcoin/BitcoinManager.ts` - Added commit/reveal transaction flow
 - `src/types/bitcoin.ts` - Added CommitTransactionParams interface
 ```
+
+---
+
+## 📊 Project State Section
+
+**Add this at top of task list for easy handoffs:**
+
+```markdown
+## 📊 Current Status
+
+**Last Updated:** [Date]  
+**Completed:** [N/M parent tasks] ([X]% complete)  
+**Current Task:** Task [N.b]: [Name]  
+**Blocked:** [Yes/No - explain if yes]  
+
+**Quick Verification:**
+- Build status: ✅ Passing / ❌ Failing
+- Tests status: [N] passing, [M] failing
+- Coverage: [X]%
+```
+
+**Update this after each major task completion!**
 
 ---
 
@@ -103,6 +127,28 @@ Example workflow:
 | Find new work | Add to task list |
 | Create/modify file | Update "Relevant Files" |
 | Hit challenge | Add note to daily log |
+
+---
+
+---
+
+## 🔄 Handoff Support
+
+**For seamless continuation with @continue:**
+
+### Before Context Switch:
+1. Update task list with all `[x]` marks
+2. Update "Project State" section
+3. Add note about what's in progress
+4. Commit work if appropriate
+
+### After Agent Handoff:
+1. New agent uses @continue rule
+2. Reads PRD + task list
+3. Verifies actual state
+4. Continues from next `[ ]` task
+
+**Make handoffs smooth!**
 
 ---
 
