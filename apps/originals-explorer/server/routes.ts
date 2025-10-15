@@ -6,6 +6,7 @@ import { z } from "zod";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
+import { google } from "googleapis";
 import { PrivyClient } from "@privy-io/node";
 import { originalsSdk } from "./originals";
 import { createUserDIDWebVH, publishDIDDocument } from "./did-webvh-service";
@@ -1291,6 +1292,250 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error processing spreadsheet:", error);
       res.status(500).json({ error: error.message || "Failed to process spreadsheet" });
+    }
+  });
+
+  // Google Drive Integration Routes
+  
+  // List files in a Google Drive folder
+  app.post("/api/google-drive/list-folder", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { accessToken, folderId } = req.body;
+      
+      if (!accessToken) {
+        return res.status(400).json({ error: "Google access token is required" });
+      }
+      
+      // Create OAuth2 client with the user's access token
+      const oauth2Client = new OAuth2Client(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET
+      );
+      oauth2Client.setCredentials({ access_token: accessToken });
+      
+      // Create Drive API client
+      const drive = google.drive({ version: 'v3', auth: oauth2Client });
+      
+      // Build query - list all files in the folder (or root if no folderId)
+      const query = folderId 
+        ? `'${folderId}' in parents and trashed=false`
+        : `trashed=false`;
+      
+      // Fetch files from Google Drive
+      const response = await drive.files.list({
+        q: query,
+        fields: 'files(id, name, mimeType, size, createdTime, modifiedTime, webViewLink, thumbnailLink, iconLink)',
+        pageSize: 100, // Can be increased or paginated
+      });
+      
+      const files = response.data.files || [];
+      
+      res.json({
+        success: true,
+        folderId: folderId || 'root',
+        count: files.length,
+        files: files.map(file => ({
+          id: file.id,
+          name: file.name,
+          mimeType: file.mimeType,
+          size: file.size,
+          createdTime: file.createdTime,
+          modifiedTime: file.modifiedTime,
+          webViewLink: file.webViewLink,
+          thumbnailLink: file.thumbnailLink,
+          iconLink: file.iconLink,
+        }))
+      });
+      
+    } catch (error: any) {
+      console.error("Error listing Google Drive folder:", error);
+      res.status(500).json({ 
+        error: "Failed to list Google Drive folder",
+        details: error.message 
+      });
+    }
+  });
+
+  // Import all resources from a Google Drive folder and create did:peer assets
+  app.post("/api/google-drive/import-folder", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { accessToken, folderId, fileIds, category = 'document' } = req.body;
+      
+      if (!accessToken) {
+        return res.status(400).json({ error: "Google access token is required" });
+      }
+      
+      // Create OAuth2 client with the user's access token
+      const oauth2Client = new OAuth2Client(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET
+      );
+      oauth2Client.setCredentials({ access_token: accessToken });
+      
+      // Create Drive API client
+      const drive = google.drive({ version: 'v3', auth: oauth2Client });
+      
+      // Get list of files to import
+      let filesToImport: any[] = [];
+      
+      if (fileIds && Array.isArray(fileIds) && fileIds.length > 0) {
+        // Import specific files
+        for (const fileId of fileIds) {
+          try {
+            const file = await drive.files.get({
+              fileId,
+              fields: 'id, name, mimeType, size, webViewLink, thumbnailLink'
+            });
+            filesToImport.push(file.data);
+          } catch (fileError) {
+            console.error(`Failed to get file ${fileId}:`, fileError);
+          }
+        }
+      } else if (folderId) {
+        // Import all files from folder
+        const response = await drive.files.list({
+          q: `'${folderId}' in parents and trashed=false`,
+          fields: 'files(id, name, mimeType, size, webViewLink, thumbnailLink)',
+          pageSize: 100,
+        });
+        filesToImport = response.data.files || [];
+      } else {
+        return res.status(400).json({ error: "Either folderId or fileIds must be provided" });
+      }
+      
+      if (filesToImport.length === 0) {
+        return res.status(404).json({ error: "No files found to import" });
+      }
+      
+      // Import each file and create did:peer assets
+      const createdAssets = [];
+      const errors: Array<{ fileId: string; fileName: string; error: string }> = [];
+      
+      for (const file of filesToImport) {
+        try {
+          // Download file content (with size limit)
+          const fileSize = parseInt(file.size || '0');
+          const maxSize = 10 * 1024 * 1024; // 10MB limit
+          
+          let fileBuffer: Buffer;
+          let mediaUrl: string | null = null;
+          
+          // For large files or non-downloadable types, use webViewLink instead
+          const isGoogleDoc = file.mimeType?.startsWith('application/vnd.google-apps.');
+          
+          if (isGoogleDoc || fileSize > maxSize) {
+            // For Google Docs or large files, store reference URL instead of downloading
+            mediaUrl = file.webViewLink || null;
+            fileBuffer = Buffer.from(JSON.stringify({
+              googleDriveFileId: file.id,
+              name: file.name,
+              mimeType: file.mimeType,
+              webViewLink: file.webViewLink,
+              thumbnailLink: file.thumbnailLink,
+            }), 'utf-8');
+          } else {
+            // Download the file
+            const response = await drive.files.get(
+              { fileId: file.id, alt: 'media' },
+              { responseType: 'arraybuffer' }
+            );
+            fileBuffer = Buffer.from(response.data as ArrayBuffer);
+          }
+          
+          // Create asset metadata
+          const mediaFileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+          
+          const assetMetadata = {
+            title: file.name,
+            description: `Imported from Google Drive`,
+            category: category,
+            tags: ['google-drive', 'imported'],
+            mediaType: file.mimeType,
+            mediaFileHash: mediaFileHash,
+            googleDrive: {
+              fileId: file.id,
+              webViewLink: file.webViewLink,
+              thumbnailLink: file.thumbnailLink,
+            }
+          };
+          
+          const metadataString = JSON.stringify(assetMetadata);
+          const metadataHash = crypto.createHash('sha256').update(metadataString).digest('hex');
+          
+          // Create resource for SDK
+          const resources = [{
+            id: `resource-${Date.now()}-${file.id}`,
+            type: 'AssetMetadata',
+            contentType: 'application/json',
+            hash: metadataHash,
+            content: metadataString,
+            url: mediaUrl || undefined,
+          }];
+          
+          // Create asset with did:peer using SDK
+          const originalsAsset = await originalsSdk.lifecycle.createAsset(resources);
+          console.log(`✅ Created did:peer for "${file.name}": ${originalsAsset.id}`);
+          
+          // Store in database
+          const assetData = {
+            userId: user.id,
+            title: file.name,
+            description: `Imported from Google Drive`,
+            category: category,
+            tags: ['google-drive', 'imported'],
+            mediaUrl: mediaUrl,
+            metadata: {
+              mediaType: file.mimeType,
+              mediaFileHash: mediaFileHash,
+              metadataHash: metadataHash,
+              resourceId: resources[0].id,
+              resources: resources,
+              googleDrive: {
+                fileId: file.id,
+                webViewLink: file.webViewLink,
+                thumbnailLink: file.thumbnailLink,
+              }
+            },
+            currentLayer: 'did:peer' as const,
+            didPeer: originalsAsset.id,
+            didDocument: originalsAsset.did as any,
+            credentials: originalsAsset.credentials as any,
+            provenance: originalsAsset.getProvenance() as any,
+            status: 'completed',
+            assetType: 'original'
+          };
+          
+          const validatedAsset = insertAssetSchema.parse(assetData);
+          const asset = await storage.createAsset(validatedAsset);
+          createdAssets.push(asset);
+          
+        } catch (error: any) {
+          console.error(`Failed to import file ${file.name}:`, error);
+          errors.push({
+            fileId: file.id || 'unknown',
+            fileName: file.name || 'unknown',
+            error: error.message || "Failed to create asset"
+          });
+        }
+      }
+      
+      res.status(201).json({
+        success: true,
+        imported: createdAssets.length,
+        failed: errors.length,
+        total: filesToImport.length,
+        assets: createdAssets,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+      
+    } catch (error: any) {
+      console.error("Error importing Google Drive folder:", error);
+      res.status(500).json({ 
+        error: "Failed to import Google Drive folder",
+        details: error.message 
+      });
     }
   });
 

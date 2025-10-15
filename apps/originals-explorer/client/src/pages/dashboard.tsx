@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Plus, ArrowRight, ArrowRightLeft, Check, ArrowRightLeft as Exchange, FileSpreadsheet, Globe, Loader2, CheckCircle, AlertCircle, ExternalLink, Sparkles } from "lucide-react";
+import { Plus, ArrowRight, ArrowRightLeft, Check, ArrowRightLeft as Exchange, FileSpreadsheet, Globe, Loader2, CheckCircle, AlertCircle, ExternalLink, Sparkles, Cloud } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayerBadge } from "@/components/LayerBadge";
 import { LayerFilter } from "@/components/LayerFilter";
@@ -204,6 +204,12 @@ export default function Dashboard() {
             <Button variant="outline" className="border-gray-200 hover:bg-gray-50" data-testid="upload-spreadsheet-button">
               <FileSpreadsheet className="w-4 h-4 mr-2" />
               Upload Spreadsheet
+            </Button>
+          </Link>
+          <Link href="/import-google-drive">
+            <Button variant="outline" className="border-gray-200 hover:bg-gray-50" data-testid="import-drive-button">
+              <Cloud className="w-4 h-4 mr-2" />
+              Import from Drive
             </Button>
           </Link>
           <Link href="/migrate">

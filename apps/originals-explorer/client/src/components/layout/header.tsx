@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import { WalletConnector } from "@/components/wallet/wallet-connector";
 import { useAuth } from "@/hooks/useAuth";
-import { Menu, X, FolderTree, FileText, Upload, LogOut, User as UserIcon, MoreHorizontal, Hash, Copy, Settings } from "lucide-react";
+import { Menu, X, FolderTree, FileText, Upload, LogOut, User as UserIcon, MoreHorizontal, Hash, Copy, Settings, Cloud } from "lucide-react";
 import { sha256Hex } from "@/lib/hash";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
@@ -196,6 +196,15 @@ export default function Header() {
               </Link>
             )}
 
+            {/* Google Drive Import link */}
+            <Link href="/import-google-drive">
+              <button className="flex items-center text-gray-600 hover:text-gray-900 transition-colors" data-testid="button-import-drive">
+                <Cloud className="w-4 h-4 mr-2" />
+                <span className="hidden lg:inline">Import Drive</span>
+                <span className="lg:hidden">Drive</span>
+              </button>
+            </Link>
+
             {/* Setup link */}
             <Link href="/setup">
               <button className="flex items-center text-gray-600 hover:text-gray-900 transition-colors" data-testid="button-setup">
@@ -326,6 +335,18 @@ export default function Header() {
                   </Link>
                 )}
             
+            {/* Google Drive Import - Mobile */}
+            <Link href="/import-google-drive">
+              <button 
+                className="flex items-center text-gray-600 hover:text-gray-900 transition-colors w-full" 
+                data-testid="mobile-button-import-drive"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Cloud className="w-4 h-4 mr-3" />
+                Import Drive
+              </button>
+            </Link>
+
             {/* Setup - Mobile */}
             <Link href="/setup">
               <button 
