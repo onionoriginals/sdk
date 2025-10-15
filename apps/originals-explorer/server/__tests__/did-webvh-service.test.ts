@@ -12,43 +12,89 @@ mock.module("didwebvh-ts", () => ({
   resolveDID: mockResolveDID,
 }));
 
+// Mock wallet creation with storage
+const mockCreateWallet = mock();
+const mockRawSign = mock();
+const createdWallets: Map<string, any> = new Map();
+
 // Mock Privy client
 const mockPrivyClient = {
   walletApi: {
-    createWallet: mock(),
+    createWallet: mockCreateWallet,
   },
+  wallets: mock(() => ({
+    create: mockCreateWallet,
+    rawSign: mockRawSign,
+  })),
+  users: mock(() => ({
+    _get: mock((userId: string) => {
+      // Return user with all wallets created for this user
+      const userWallets = Array.from(createdWallets.values()).filter(w => 
+        w.owner?.user_id === userId || w.userId === userId
+      );
+      return Promise.resolve({
+        id: userId,
+        linked_accounts: userWallets.map(w => ({ ...w, type: 'wallet' })),
+      });
+    }),
+  })),
 } as any;
 
 // Mock key utilities
 mock.module("../key-utils", () => ({
-  extractPublicKeyFromWallet: mock(() => "a".repeat(64)),
+  extractPublicKeyFromWallet: mock((wallet: any) => {
+    return wallet.publicKey || wallet.public_key || "a".repeat(64);
+  }),
   convertToMultibase: mock((hex: string, type: string) => {
-    if (type === 'Secp256k1') return `z${hex.substring(0, 40)}`;
-    return `z${hex.substring(0, 40)}`;
+    // Return a proper Ed25519 multibase key with the correct header
+    // z6Mk... prefix indicates Ed25519 public key
+    if (type === 'Ed25519' || type === 'ed25519') {
+      return 'z6Mk' + hex.substring(0, 40);
+    }
+    // For Secp256k1
+    return 'zQ3s' + hex.substring(0, 40);
   }),
 }));
 
 describe("DID:WebVH Service", () => {
   beforeEach(() => {
-    mockPrivyClient.walletApi.createWallet.mockClear();
+    mockCreateWallet.mockClear();
     mockResolveDID.mockClear();
+    mockRawSign.mockClear();
+    createdWallets.clear();
     
     // Default mock implementations
-    mockPrivyClient.walletApi.createWallet.mockImplementation((params: any) => {
-      if (params.chainType === "bitcoin-segwit") {
-        return Promise.resolve({
-          id: "btc-wallet-1",
-          chainType: "bitcoin-segwit",
-          publicKey: "02" + "a".repeat(64),
-        });
-      } else if (params.chainType === "stellar") {
-        return Promise.resolve({
-          id: `stellar-wallet-${Date.now()}`,
-          chainType: "stellar",
-          publicKey: "a".repeat(64),
-        });
+    let walletCounter = 0;
+    mockCreateWallet.mockImplementation((params: any) => {
+      const chainType = params.chainType || params.chain_type;
+      const userId = params.owner?.user_id || params.userId;
+      walletCounter++;
+      const wallet: any = {
+        owner: { user_id: userId },
+        userId,
+      };
+      
+      if (chainType === "bitcoin-segwit") {
+        wallet.id = `btc-wallet-${walletCounter}`;
+        wallet.chainType = "bitcoin-segwit";
+        wallet.chain_type = "bitcoin-segwit";
+        wallet.publicKey = "02" + "a".repeat(64);
+      } else if (chainType === "stellar") {
+        wallet.id = `stellar-wallet-${walletCounter}`;
+        wallet.chainType = "stellar";
+        wallet.chain_type = "stellar";
+        wallet.publicKey = "a".repeat(64);
       }
+      
+      // Store the wallet so it can be retrieved later
+      createdWallets.set(wallet.id, wallet);
+      return Promise.resolve(wallet);
     });
+
+    mockRawSign.mockImplementation(() => Promise.resolve({
+      signature: "0x" + "a".repeat(128),
+      encoding: "hex",
+    }));
 
     // No need to mock createDID since we're not using it anymore
   });
@@ -56,7 +102,7 @@ describe("DID:WebVH Service", () => {
   describe("createUserDIDWebVH", () => {
     test("creates did:webvh with proper document structure", async () => {
       const userId = "did:privy:cltest123";
-      const result = await createUserDIDWebVH(userId, mockPrivyClient, "localhost:5000");
+      const result = await createUserDIDWebVH(userId, mockPrivyClient, "mock-auth-token", "localhost:5000");
 
       // Verify result structure
       expect(result.did).toBe("did:webvh:localhost%3A5000:cltest123");
@@ -76,35 +122,24 @@ describe("DID:WebVH Service", () => {
 
     test("creates three wallets (Bitcoin + 2 Stellar)", async () => {
       const userId = "did:privy:cltest123";
-      await createUserDIDWebVH(userId, mockPrivyClient, "localhost:5000");
+      await createUserDIDWebVH(userId, mockPrivyClient, "mock-auth-token", "localhost:5000");
 
-      expect(mockPrivyClient.walletApi.createWallet).toHaveBeenCalledTimes(3);
+      expect(mockCreateWallet).toHaveBeenCalledTimes(2); // 2 Stellar wallets (auth and update)
       
-      // Bitcoin wallet for authentication
-      expect(mockPrivyClient.walletApi.createWallet).toHaveBeenNthCalledWith(1, {
-        owner: { userId },
-        chainType: "bitcoin-segwit",
-        policyIds: [],
-      });
+      // Stellar wallet for authentication (first call)
+      expect(mockCreateWallet).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        chain_type: "stellar",
+      }));
 
-      // First Stellar wallet for assertion
-      expect(mockPrivyClient.walletApi.createWallet).toHaveBeenNthCalledWith(2, {
-        owner: { userId },
-        chainType: "stellar",
-        policyIds: [],
-      });
-
-      // Second Stellar wallet for updates
-      expect(mockPrivyClient.walletApi.createWallet).toHaveBeenNthCalledWith(3, {
-        owner: { userId },
-        chainType: "stellar",
-        policyIds: [],
-      });
+      // Stellar wallet for updates (second call)
+      expect(mockCreateWallet).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        chain_type: "stellar",
+      }));
     });
 
     test("handles special characters in user ID", async () => {
       const userId = "did:privy:cl_test@user#123";
-      const result = await createUserDIDWebVH(userId, mockPrivyClient);
+      const result = await createUserDIDWebVH(userId, mockPrivyClient, "mock-auth-token");
 
       expect(result.didSlug).toBe("cl-test-user-123");
       expect(result.did).toContain("cl-test-user-123");
@@ -112,7 +147,7 @@ describe("DID:WebVH Service", () => {
 
     test("strips did:privy prefix correctly", async () => {
       const userId = "did:privy:abc123";
-      const result = await createUserDIDWebVH(userId, mockPrivyClient);
+      const result = await createUserDIDWebVH(userId, mockPrivyClient, "mock-auth-token");
 
       expect(result.didSlug).toBe("abc123");
       expect(result.did).toContain("abc123");
@@ -120,17 +155,17 @@ describe("DID:WebVH Service", () => {
 
     test("handles user ID without did:privy prefix", async () => {
       const userId = "abc123";
-      const result = await createUserDIDWebVH(userId, mockPrivyClient);
+      const result = await createUserDIDWebVH(userId, mockPrivyClient, "mock-auth-token");
 
       expect(result.didSlug).toBe("abc123");
       expect(result.did).toContain("abc123");
     });
 
     test("throws error when wallet creation fails", async () => {
-      mockPrivyClient.walletApi.createWallet.mockRejectedValue(new Error("Wallet creation failed"));
+      mockCreateWallet.mockRejectedValue(new Error("Wallet creation failed"));
 
       await expect(
-        createUserDIDWebVH("did:privy:test", mockPrivyClient)
+        createUserDIDWebVH("did:privy:test", mockPrivyClient, "mock-auth-token")
       ).rejects.toThrow("Failed to create DID:WebVH");
     });
   });
@@ -186,7 +221,7 @@ describe("DID:WebVH Service", () => {
       const userId = "did:privy:testuser";
       const domain = "example.com";
       
-      const result = await createUserDIDWebVH(userId, mockPrivyClient, domain);
+      const result = await createUserDIDWebVH(userId, mockPrivyClient, "mock-auth-token", domain);
 
       expect(result.did).toBe("did:webvh:example.com:testuser");
     });
@@ -194,7 +229,7 @@ describe("DID:WebVH Service", () => {
     test("uses environment domain when not specified", async () => {
       process.env.DID_DOMAIN = "env.example.com";
       
-      const result = await createUserDIDWebVH("did:privy:test", mockPrivyClient);
+      const result = await createUserDIDWebVH("did:privy:test", mockPrivyClient, "mock-auth-token");
 
       expect(result.did).toBe("did:webvh:env.example.com:test");
 
@@ -202,7 +237,7 @@ describe("DID:WebVH Service", () => {
     });
 
     test("encodes domain with port correctly", async () => {
-      const result = await createUserDIDWebVH("did:privy:test", mockPrivyClient, "localhost:5000");
+      const result = await createUserDIDWebVH("did:privy:test", mockPrivyClient, "mock-auth-token", "localhost:5000");
 
       expect(result.did).toBe("did:webvh:localhost%3A5000:test");
     });

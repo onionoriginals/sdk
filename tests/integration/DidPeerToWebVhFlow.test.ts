@@ -2,6 +2,7 @@ import { describe, test, expect, beforeAll } from 'bun:test';
 import { OriginalsSDK } from '../../src';
 import { AssetResource } from '../../src/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';
+import { KeyManager } from '../../src/did/KeyManager';
 import * as fs from 'fs';
 import * as path from 'path';
 import { tmpdir } from 'os';
@@ -11,6 +12,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
   const sdk = OriginalsSDK.create({ 
     network: 'regtest', 
     keyStore,
+    defaultKeyType: 'Ed25519', // Use Ed25519 for did:webvh compatibility
     enableLogging: true 
   });
   const domain = 'localhost:5000';
@@ -19,6 +21,11 @@ describe('DID Peer to WebVH Publication Flow', () => {
   beforeAll(async () => {
     // Ensure temp directory exists
     await fs.promises.mkdir(tempDir, { recursive: true });
+    
+    // Set up publisher DID keys for tests
+    const keyManager = new KeyManager();
+    const publisherKey = await keyManager.generateKeyPair('Ed25519');
+    await keyStore.setPrivateKey('did:webvh:localhost%3A5000:user#key-0', publisherKey.privateKey);
   });
 
   test('complete flow: createDIDPeer -> publishToWeb -> resolve resource URL', async () => {
@@ -35,7 +42,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'resource-2',
         type: 'metadata',
         contentType: 'application/json',
-        hash: 'meta789hash',
+        hash: 'aea789ab',
         content: JSON.stringify({ title: 'Test Asset', version: '1.0' })
       }
     ];
@@ -92,7 +99,8 @@ describe('DID Peer to WebVH Publication Flow', () => {
     for (const resource of publishedAsset.resources) {
       expect(resource.url).toBeDefined();
       expect(typeof resource.url).toBe('string');
-      expect((resource.url as string).includes('.well-known/webvh/')).toBe(true);
+      expect((resource.url as string).includes('did:webvh:')).toBe(true);
+      expect((resource.url as string).includes('/resources/')).toBe(true);
       
       console.log(`✅ Resource ${resource.id}:`);
       console.log(`   URL: ${resource.url}`);
@@ -178,7 +186,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'res-format-test',
         type: 'data',
         contentType: 'application/octet-stream',
-        hash: 'testhash12345',
+        hash: 'e5a1234560',
         content: 'test data for URL format verification'
       }
     ];
@@ -191,21 +199,18 @@ describe('DID Peer to WebVH Publication Flow', () => {
     const url = resource.url as string;
     
     expect(url).toBeDefined();
-    expect(url).toMatch(/\.well-known\/webvh\//);
-    
-    // URL should contain the asset slug
-    const slug = asset.id.split(':').pop();
-    expect(url).toContain(slug);
-    
-    // URL should contain 'resources' path segment
+    expect(url).toContain('did:webvh:');
     expect(url).toContain('/resources/');
+    
+    // URL should be in format: did:webvh:domain:path/resources/hash
+    expect(url).toMatch(/^did:webvh:[^\/]+\/resources\//);
     
     // URL should end with a multibase-encoded hash
     expect(url.split('/').pop()).toMatch(/^[A-Za-z0-9_-]+$/);
     
     console.log(`\n✅ Resource URL format verified:`);
     console.log(`   Full URL: ${url}`);
-    console.log(`   Contains slug: ${slug}`);
+    console.log(`   Format: DID-based URL`);
     console.log(`   Contains resources path: true`);
     console.log(`   Hash encoded: ${url.split('/').pop()}`);
   });
@@ -216,7 +221,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'binding-test',
         type: 'data',
         contentType: 'text/plain',
-        hash: 'bindingtest123',
+        hash: 'b1d1234560',
         content: 'binding test content'
       }
     ];
@@ -249,28 +254,28 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'multi-1',
         type: 'data',
         contentType: 'text/plain',
-        hash: 'hash1',
+        hash: 'a51001',
         content: 'content 1'
       },
       {
         id: 'multi-2',
         type: 'data',
         contentType: 'application/json',
-        hash: 'hash2',
+        hash: 'a51002',
         content: '{"key": "value"}'
       },
       {
         id: 'multi-3',
         type: 'metadata',
         contentType: 'text/html',
-        hash: 'hash3',
+        hash: 'a51003',
         content: '<html><body>test</body></html>'
       },
       {
         id: 'multi-4',
         type: 'data',
         contentType: 'image/svg+xml',
-        hash: 'hash4',
+        hash: 'a51004',
         content: '<svg></svg>'
       }
     ];
@@ -286,7 +291,8 @@ describe('DID Peer to WebVH Publication Flow', () => {
       expect(resource.url).toBeDefined();
       expect(typeof resource.url).toBe('string');
       expect((resource.url as string).length).toBeGreaterThan(0);
-      expect((resource.url as string).includes('.well-known/webvh/')).toBe(true);
+      expect((resource.url as string).includes('did:webvh:')).toBe(true);
+      expect((resource.url as string).includes('/resources/')).toBe(true);
       
       console.log(`✅ Resource ${i + 1} (${resource.id}):`);
       console.log(`   URL: ${resource.url}`);
@@ -299,7 +305,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'preserve-test',
         type: 'data',
         contentType: 'text/markdown',
-        hash: 'preservehash',
+        hash: 'e5e1ea00',
         content: '# Test Document\nThis should be preserved.'
       }
     ];

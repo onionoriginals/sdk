@@ -15,6 +15,7 @@ import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { StorageAdapter as ConfigStorageAdapter } from '../../src/adapters/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import type { BatchResult } from '../../src/lifecycle/BatchOperations';
+import { KeyManager } from '../../src/did/KeyManager';
 
 function makeHash(prefix: string): string {
   const hexOnly = prefix.split('').map(c => {
@@ -59,7 +60,7 @@ describe('Batch Operations Integration', () => {
   let ordinalsProvider: OrdMockProvider;
   let keyStore: MockKeyStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     memoryStorage = new MemoryStorageAdapter();
     const storageAdapter = new StorageAdapterBridge(memoryStorage);
     feeOracle = new FeeOracleMock(7);
@@ -68,7 +69,7 @@ describe('Batch Operations Integration', () => {
 
     const config: OriginalsConfig = {
       network: 'regtest',
-      defaultKeyType: 'ES256K',
+      defaultKeyType: 'Ed25519', // Use Ed25519 for did:webvh compatibility
       enableLogging: false,
       storageAdapter,
       feeOracle,
@@ -76,6 +77,14 @@ describe('Batch Operations Integration', () => {
     };
 
     sdk = new OriginalsSDK(config, keyStore);
+    
+    // Set up publisher DID keys for batch operation tests
+    const keyManager = new KeyManager();
+    const domains = ['example.com', 'test.com', 'batch.test'];
+    for (const domain of domains) {
+      const publisherKey = await keyManager.generateKeyPair('Ed25519');
+      await keyStore.setPrivateKey(`did:webvh:${domain}:user#key-0`, publisherKey.privateKey);
+    }
   });
 
   describe('batchCreateAssets', () => {
@@ -187,7 +196,7 @@ describe('Batch Operations Integration', () => {
       for (const item of result.successful) {
         expect(item.result.currentLayer).toBe('did:webvh');
         expect(item.result.resources[0].url).toBeDefined();
-        expect(item.result.resources[0].url).toMatch(/^mem:\/\/example.com/);
+        expect(item.result.resources[0].url).toMatch(/^did:webvh:/);
       }
     });
 

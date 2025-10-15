@@ -29,8 +29,18 @@ mock.module('@privy-io/node', () => ({
       };
     }
     wallets() {
+      let walletCounter = 0;
       return {
-        create: async () => ({ id: 'test-wallet' }),
+        create: async (params: any) => {
+          walletCounter++;
+          const chainType = params.chain_type || 'stellar';
+          return {
+            id: `test-wallet-${walletCounter}`,
+            chain_type: chainType,
+            publicKey: chainType === 'bitcoin-segwit' ? '02' + 'a'.repeat(64) : 'a'.repeat(64),
+            public_key: chainType === 'bitcoin-segwit' ? '02' + 'a'.repeat(64) : 'a'.repeat(64),
+          };
+        },
         rawSign: async () => ({
           signature: '0x' + 'a'.repeat(128), // 64-byte signature as hex
           encoding: 'hex',

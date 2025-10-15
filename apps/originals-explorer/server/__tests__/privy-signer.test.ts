@@ -2,14 +2,24 @@ import { describe, test, expect, mock, beforeEach } from "bun:test";
 import { PrivyWebVHSigner, createPrivySigner, createVerificationMethodsFromPrivy } from "../privy-signer";
 
 // Mock dependencies
+const mockCreateWallet = mock();
+const mockRawSign = mock();
+
 const mockPrivyClient = {
   getUserById: mock(),
   walletApi: {
-    createWallet: mock(),
+    createWallet: mockCreateWallet,
   },
-  wallets: mock(() => ({
-    rawSign: mock(),
-  })),
+  wallets: () => ({
+    create: mockCreateWallet,
+    rawSign: mockRawSign,
+  }),
+  users: () => ({
+    _get: (userId: string) => Promise.resolve({
+      id: userId,
+      linked_accounts: [],
+    }),
+  }),
 } as any;
 
 const mockPrepareDataForSigning = mock();
@@ -43,18 +53,30 @@ mock.module("../key-utils", () => ({
   }),
 }));
 
+let walletCounter = 0;
+
 describe("PrivyWebVHSigner", () => {
   beforeEach(() => {
     mockPrivyClient.getUserById.mockClear();
-    mockPrivyClient.walletApi.createWallet.mockClear();
+    mockCreateWallet.mockClear();
+    mockRawSign.mockClear();
     mockPrepareDataForSigning.mockClear();
     mockEd25519Verify.mockClear();
     mockMultikeyEncode.mockClear();
     
-    // Reset the wallets mock
-    const mockRawSign = mock();
-    mockPrivyClient.wallets.mockReturnValue({
-      rawSign: mockRawSign,
+    // Reset wallet counter
+    walletCounter = 0;
+    
+    // Default implementation for wallet creation
+    mockCreateWallet.mockImplementation((params: any) => {
+      walletCounter++;
+      const chainType = params.chain_type || 'stellar';
+      return Promise.resolve({
+        id: `test-wallet-${walletCounter}`,
+        chain_type: chainType,
+        publicKey: chainType === 'bitcoin-segwit' ? '02' + 'a'.repeat(64) : 'a'.repeat(64),
+        public_key: chainType === 'bitcoin-segwit' ? '02' + 'a'.repeat(64) : 'a'.repeat(64),
+      });
     });
   });
 
@@ -449,7 +471,7 @@ describe("createPrivySigner", () => {
 describe("createVerificationMethodsFromPrivy", () => {
   beforeEach(() => {
     mockPrivyClient.getUserById.mockClear();
-    mockPrivyClient.walletApi.createWallet.mockClear();
+    // Already cleared in beforeEach via mockCreateWallet.mockClear()
     process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS = "";
   });
 
@@ -486,7 +508,7 @@ describe("createVerificationMethodsFromPrivy", () => {
     expect(result.updateKey).toContain("did:key:z");
     expect(result.authWalletId).toBe("stellar-wallet-1");
     expect(result.updateWalletId).toBe("stellar-wallet-2");
-    expect(mockPrivyClient.walletApi.createWallet).not.toHaveBeenCalled();
+    expect(mockCreateWallet).not.toHaveBeenCalled();
   });
 
   test("creates both wallets when none exist", async () => {
@@ -496,7 +518,7 @@ describe("createVerificationMethodsFromPrivy", () => {
     };
 
     mockPrivyClient.getUserById.mockResolvedValue(mockUser);
-    mockPrivyClient.walletApi.createWallet
+    mockCreateWallet
       .mockResolvedValueOnce({
         id: "new-stellar-1",
         chainType: "stellar",
@@ -515,7 +537,7 @@ describe("createVerificationMethodsFromPrivy", () => {
       "newuser"
     );
 
-    expect(mockPrivyClient.walletApi.createWallet).toHaveBeenCalledTimes(2);
+    expect(mockCreateWallet).toHaveBeenCalledTimes(2);
     expect(result.authWalletId).toBe("new-stellar-1");
     expect(result.updateWalletId).toBe("new-stellar-2");
   });
@@ -534,7 +556,7 @@ describe("createVerificationMethodsFromPrivy", () => {
     };
 
     mockPrivyClient.getUserById.mockResolvedValue(mockUser);
-    mockPrivyClient.walletApi.createWallet.mockResolvedValue({
+    mockCreateWallet.mockResolvedValue({
       id: "new-stellar-update",
       chainType: "stellar",
       publicKey: "f".repeat(64),
@@ -547,7 +569,7 @@ describe("createVerificationMethodsFromPrivy", () => {
       "partialuser"
     );
 
-    expect(mockPrivyClient.walletApi.createWallet).toHaveBeenCalledTimes(1);
+    expect(mockCreateWallet).toHaveBeenCalledTimes(1);
     expect(result.authWalletId).toBe("stellar-existing");
     expect(result.updateWalletId).toBe("new-stellar-update");
   });
@@ -561,7 +583,7 @@ describe("createVerificationMethodsFromPrivy", () => {
     };
 
     mockPrivyClient.getUserById.mockResolvedValue(mockUser);
-    mockPrivyClient.walletApi.createWallet.mockResolvedValue({
+    mockCreateWallet.mockResolvedValue({
       id: "wallet-with-policy",
       chainType: "stellar",
       publicKey: "g".repeat(64),
@@ -574,9 +596,9 @@ describe("createVerificationMethodsFromPrivy", () => {
       "policyuser"
     );
 
-    expect(mockPrivyClient.walletApi.createWallet).toHaveBeenCalledWith(
+    expect(mockCreateWallet).toHaveBeenCalledWith(
       expect.objectContaining({
-        policyIds: ["policy-1", "policy-2", "policy-3"],
+        policy_ids: ["policy-1", "policy-2", "policy-3"],
       })
     );
   });

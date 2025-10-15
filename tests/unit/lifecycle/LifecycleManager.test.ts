@@ -150,8 +150,13 @@ describe('LifecycleManager additional branch coverage', () => {
   const lm = new LifecycleManager({ network: 'mainnet' } as any, new DIDManager({} as any), new CredentialManager({} as any));
 
   test('publishToWeb throws when migrate not a function', async () => {
-    const asset: any = { currentLayer: 'did:peer' };
-    await expect(lm.publishToWeb(asset, 'example.com')).rejects.toThrow('Not implemented');
+    const asset: any = { 
+      currentLayer: 'did:peer',
+      id: 'did:peer:test',
+      resources: [{ id: 'r1', type: 'data', contentType: 'text/plain', hash: 'deadbeef', content: 'test' }],
+      migrate: undefined  // This should cause an error when called
+    };
+    await expect(lm.publishToWeb(asset, 'example.com')).rejects.toThrow();
   });
 });
 

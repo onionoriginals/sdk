@@ -134,6 +134,10 @@ export async function verifySignature(
     
     // return isValid;
   } catch (error) {
+    // Re-throw "not implemented" errors so tests can catch them
+    if (error instanceof Error && error.message.includes('not yet implemented')) {
+      throw error;
+    }
     console.error('Error verifying signature:', error);
     return false;
   }

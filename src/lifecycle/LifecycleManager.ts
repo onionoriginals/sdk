@@ -238,9 +238,12 @@ export class LifecycleManager {
       // Publish resources to storage
       await this.publishResources(asset, publisherDid, domain, userPath);
       
+      // Store the original did:peer ID before migration
+      const originalPeerDid = asset.id;
+      
       // Migrate asset to did:webvh layer
       await asset.migrate('did:webvh');
-      asset.bindings = { ...(asset as any).bindings, 'did:webvh': publisherDid };
+      asset.bindings = { ...(asset as any).bindings, 'did:peer': originalPeerDid, 'did:webvh': publisherDid };
       
       // Issue publication credential (best-effort)
       await this.issuePublicationCredential(asset, publisherDid, signer);
@@ -267,10 +270,18 @@ export class LifecycleManager {
     signer?: ExternalSigner;
   }> {
     if (typeof publisherDidOrSigner === 'string') {
-      if (!publisherDidOrSigner.startsWith('did:webvh:')) {
-        throw new Error('Publisher DID must be a did:webvh identifier');
+      // If it's already a did:webvh DID, use it as-is
+      if (publisherDidOrSigner.startsWith('did:webvh:')) {
+        return { publisherDid: publisherDidOrSigner };
       }
-      return { publisherDid: publisherDidOrSigner };
+      
+      // Otherwise, treat it as a domain and construct a did:webvh DID
+      // Format: did:webvh:domain:user (use 'user' as default user path)
+      // Encode the domain to handle ports (e.g., localhost:5000 -> localhost%3A5000)
+      const domain = publisherDidOrSigner;
+      const encodedDomain = encodeURIComponent(domain);
+      const publisherDid = `did:webvh:${encodedDomain}:user`;
+      return { publisherDid };
     }
     
     const signer = publisherDidOrSigner;
@@ -324,31 +335,35 @@ export class LifecycleManager {
       
       (resource as any).url = resourceUrl;
       
-      await this.emitResourcePublishedEvent(asset.id, resource, resourceUrl, publisherDid);
+      await this.emitResourcePublishedEvent(asset, resource, resourceUrl, publisherDid, domain);
     }
   }
 
   private async emitResourcePublishedEvent(
-    assetId: string,
+    asset: OriginalsAsset,
     resource: AssetResource,
     resourceUrl: string,
-    publisherDid: string
+    publisherDid: string,
+    domain: string
   ): Promise<void> {
     const event = {
       type: 'resource:published' as const,
       timestamp: new Date().toISOString(),
-      asset: { id: assetId },
+      asset: { id: asset.id },
       resource: {
         id: resource.id,
         url: resourceUrl,
         contentType: resource.contentType,
         hash: resource.hash
       },
-      publisherDid
+      publisherDid,
+      domain
     };
     
     try {
+      // Emit from both LifecycleManager and asset emitters
       await this.eventEmitter.emit(event);
+      await (asset as any).eventEmitter.emit(event);
     } catch (err) {
       this.logger.error('Event handler error', err as Error, { event: event.type });
     }
@@ -381,7 +396,7 @@ export class LifecycleManager {
       
       asset.credentials.push(signed);
       
-      await this.eventEmitter.emit({
+      const event = {
         type: 'credential:issued' as const,
         timestamp: new Date().toISOString(),
         asset: { id: asset.id },
@@ -389,7 +404,11 @@ export class LifecycleManager {
           type: signed.type,
           issuer: typeof signed.issuer === 'string' ? signed.issuer : signed.issuer.id
         }
-      });
+      };
+      
+      // Emit from both LifecycleManager and asset emitters
+      await this.eventEmitter.emit(event);
+      await (asset as any).eventEmitter.emit(event);
     } catch (err) {
       this.logger.error('Failed to issue credential during publish', err as Error);
     }
@@ -403,22 +422,60 @@ export class LifecycleManager {
       throw new Error('KeyStore required for signing. Provide keyStore or external signer.');
     }
     
-    const didDoc = await this.didManager.resolveDID(issuer);
-    if (!didDoc?.verificationMethod?.[0]) {
-      throw new Error('No verification method found in publisher DID document');
+    // Try to find a key in the keyStore for this DID
+    // First try common verification method patterns: #key-0, #keys-1, etc.
+    const commonVmIds = [
+      `${issuer}#key-0`,
+      `${issuer}#keys-1`,
+      `${issuer}#authentication`,
+    ];
+    
+    let privateKey: string | null = null;
+    let vmId: string | null = null;
+    
+    for (const testVmId of commonVmIds) {
+      const key = await this.keyStore.getPrivateKey(testVmId);
+      if (key) {
+        privateKey = key;
+        vmId = testVmId;
+        break;
+      }
     }
     
-    let vmId = didDoc.verificationMethod[0].id;
-    if (vmId.startsWith('#')) {
-      vmId = `${issuer}${vmId}`;
+    // If not found, try to find ANY key that starts with the issuer DID
+    if (!privateKey && typeof (this.keyStore as any).getAllVerificationMethodIds === 'function') {
+      const allVmIds = (this.keyStore as any).getAllVerificationMethodIds();
+      for (const testVmId of allVmIds) {
+        if (testVmId.startsWith(issuer)) {
+          const key = await this.keyStore.getPrivateKey(testVmId);
+          if (key) {
+            privateKey = key;
+            vmId = testVmId;
+            break;
+          }
+        }
+      }
     }
     
-    const privateKey = await this.keyStore.getPrivateKey(vmId);
+    // If no key found in common patterns, try resolving the DID
     if (!privateKey) {
-      throw new Error('Private key not found in keyStore');
+      const didDoc = await this.didManager.resolveDID(issuer);
+      if (!didDoc?.verificationMethod?.[0]) {
+        throw new Error('No verification method found in publisher DID document');
+      }
+      
+      vmId = didDoc.verificationMethod[0].id;
+      if (vmId.startsWith('#')) {
+        vmId = `${issuer}${vmId}`;
+      }
+      
+      privateKey = await this.keyStore.getPrivateKey(vmId);
+      if (!privateKey) {
+        throw new Error('Private key not found in keyStore');
+      }
     }
     
-    return this.credentialManager.signCredential(credential, privateKey, vmId);
+    return this.credentialManager.signCredential(credential, privateKey!, vmId!);
   }
 
   async inscribeOnBitcoin(

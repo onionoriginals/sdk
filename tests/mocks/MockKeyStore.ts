@@ -28,4 +28,11 @@ export class MockKeyStore implements KeyStore {
   getAllKeys(): Map<string, string> {
     return new Map(this.keys);
   }
+
+  /**
+   * Helper method: get all verification method IDs
+   */
+  getAllVerificationMethodIds(): string[] {
+    return Array.from(this.keys.keys());
+  }
 }

@@ -12,6 +12,7 @@ import type {
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
+import { KeyManager } from '../../src/did/KeyManager';
 
 // Helper to create a valid hash
 function makeHash(prefix: string): string {
@@ -53,19 +54,25 @@ describe('Integration: Event System', () => {
   let sdk: OriginalsSDK;
   let keyStore: MockKeyStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     keyStore = new MockKeyStore();
     const storageAdapter = new StorageAdapterBridge(new MemoryStorageAdapter());
 
     const config: OriginalsConfig = {
       network: 'regtest',
-      defaultKeyType: 'ES256K',
+      defaultKeyType: 'Ed25519', // Use Ed25519 for did:webvh compatibility
       enableLogging: false,
+      keyStore: keyStore,
       storageAdapter: storageAdapter as any,
       ordinalsProvider: new OrdMockProvider()
     };
 
     sdk = new OriginalsSDK(config, keyStore);
+    
+    // Set up publisher DID keys for credential signing
+    const keyManager = new KeyManager();
+    const publisherKey = await keyManager.generateKeyPair('Ed25519');
+    await keyStore.setPrivateKey('did:webvh:example.com:user#key-0', publisherKey.privateKey);
   });
 
   describe('asset:created event', () => {

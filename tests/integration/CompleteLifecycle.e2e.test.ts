@@ -27,6 +27,7 @@ import { FeeOracleMock } from '../../src/adapters/FeeOracleMock';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { StorageAdapter as ConfigStorageAdapter } from '../../src/adapters/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';
+import { KeyManager } from '../../src/did/KeyManager';
 
 /**
  * Helper to generate valid SHA-256 hashes (64 hex characters)
@@ -90,7 +91,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
   let ordinalsProvider: OrdMockProvider;
   let keyStore: MockKeyStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Setup real adapters (not mocks in the sense of jest.mock, but functional test doubles)
     memoryStorage = new MemoryStorageAdapter();
     storageAdapter = new StorageAdapterBridge(memoryStorage);
@@ -100,7 +101,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
     const config: OriginalsConfig = {
       network: 'regtest',
-      defaultKeyType: 'ES256K',
+      defaultKeyType: 'Ed25519', // Use Ed25519 for did:webvh compatibility
       enableLogging: false,
       storageAdapter,
       feeOracle,
@@ -108,6 +109,15 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
     };
 
     sdk = new OriginalsSDK(config, keyStore);
+    
+    // Set up publisher DID keys for various test domains
+    const keyManager = new KeyManager();
+    const domains = ['domain.test', 'integrity.test', 'multi-type.test', 'large.test', 'many.test', 
+                     'audit.test', 'time.test', 'binding.test', 'error.test', 'adapter-test.com', 'example.com'];
+    for (const domain of domains) {
+      const publisherKey = await keyManager.generateKeyPair('Ed25519');
+      await keyStore.setPrivateKey(`did:webvh:${domain}:user#key-0`, publisherKey.privateKey);
+    }
   });
 
   describe('Complete Lifecycle: peer → webvh → btco → transfer', () => {
@@ -163,15 +173,16 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify resources have URLs from storage adapter
       for (const resource of webAsset.resources) {
         expect(resource.url).toBeDefined();
-        expect(resource.url).toMatch(/^mem:\/\//); // MemoryStorageAdapter URL format
-        expect(resource.url).toContain(domain);
-        expect(resource.url).toContain('.well-known/webvh/');
+        expect(resource.url).toMatch(/^did:webvh:/); // DID-based URL format
+        expect(resource.url).toContain('/resources/');
       }
 
       // Verify storage adapter actually stored the resources
       for (const resource of webAsset.resources) {
         const url = resource.url as string;
-        const path = url.replace(`mem://${domain}/`, '');
+        // URL format is: did:webvh:domain:path/resources/hash
+        const urlParts = url.split(':');
+        const path = urlParts.slice(3).join(':');
         const stored = await memoryStorage.getObject(domain, path);
         expect(stored).not.toBeNull();
         expect(stored?.content).toBeDefined();
@@ -444,14 +455,16 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const domain = 'adapter-test.com';
       const webAsset = await sdk.lifecycle.publishToWeb(asset, domain);
 
-      // Verify resource URL uses storage adapter
+      // Verify resource URL uses DID-based format
       const resourceUrl = webAsset.resources[0].url;
       expect(resourceUrl).toBeDefined();
-      expect(resourceUrl).toMatch(/^mem:\/\//);
+      expect(resourceUrl).toMatch(/^did:webvh:/);
 
       // Verify content is retrievable through adapter
-      const urlPath = resourceUrl!.replace(`mem://${domain}/`, '');
-      const stored = await memoryStorage.getObject(domain, urlPath);
+      // URL format is: did:webvh:domain:path/resources/hash
+      const urlParts = (resourceUrl as string).split(':');
+      const pathPart = urlParts.slice(3).join(':');
+      const stored = await memoryStorage.getObject(domain, pathPart);
       expect(stored).not.toBeNull();
     });
 
@@ -538,13 +551,16 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(webAsset.resources).toHaveLength(4);
       for (const resource of webAsset.resources) {
         expect(resource.url).toBeDefined();
-        expect(resource.url).toMatch(/^mem:\/\//);
+        expect(resource.url).toMatch(/^did:webvh:/);
+        expect(resource.url).toContain('/resources/');
       }
 
       // Verify all are stored
       for (const resource of webAsset.resources) {
         const url = resource.url!;
-        const path = url.replace('mem://multi-type.test/', '');
+        // URL format is now: did:webvh:domain:path/resources/hash
+        const urlParts = url.split(':');
+        const path = urlParts.slice(3).join(':'); // Get everything after did:webvh:domain
         const stored = await memoryStorage.getObject('multi-type.test', path);
         expect(stored).not.toBeNull();
       }
@@ -594,7 +610,9 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       
       // Verify storage
       const url = webAsset.resources[0].url!;
-      const path = url.replace('mem://large.test/', '');
+      // URL format is now: did:webvh:domain:path/resources/hash
+      const urlParts = url.split(':');
+      const path = urlParts.slice(3).join(':'); // Get everything after did:webvh:domain
       const stored = await memoryStorage.getObject('large.test', path);
       expect(stored?.content.length).toBeGreaterThan(99000);
 
@@ -623,8 +641,11 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify all are stored
       for (const resource of webAsset.resources) {
         const url = resource.url!;
-        const path = url.replace('mem://many.test/', '');
-        const stored = await memoryStorage.getObject('many.test', path);
+        // URL format is now: did:webvh:domain:path/resources/hash
+        // Extract the path part after the domain
+        const urlParts = url.split(':');
+        const pathPart = urlParts.slice(3).join(':'); // Get everything after did:webvh:domain
+        const stored = await memoryStorage.getObject('many.test', pathPart);
         expect(stored).not.toBeNull();
       }
 
