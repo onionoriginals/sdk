@@ -5,5 +5,5 @@
  * including commit/reveal transactions for Ordinals inscriptions.
  */
 
-export {};
+export * from './commit';
 

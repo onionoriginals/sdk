@@ -95,4 +95,82 @@ export interface KeyPair {
 
 export type KeyType = 'ES256K' | 'Ed25519' | 'ES256';
 
+/**
+ * Data for an inscription to be committed
+ */
+export interface InscriptionData {
+  /** The content to inscribe (as Buffer) */
+  content: Buffer;
+  /** MIME type of the content (e.g., 'text/plain', 'image/png') */
+  contentType: string;
+  /** Optional metadata for the inscription */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * P2TR (Pay-to-Taproot) address information
+ */
+export interface P2TRAddressInfo {
+  /** The P2TR address string */
+  address: string;
+  /** The internal key (x-only pubkey) */
+  internalKey: Buffer;
+  /** The tweaked key used for the P2TR output */
+  tweakedKey: Buffer;
+  /** Optional taproot script tree */
+  scriptTree?: unknown;
+}
+
+/**
+ * Parameters for creating a commit transaction
+ */
+export interface CommitTransactionParams {
+  /** Available UTXOs to fund the transaction */
+  utxos: Utxo[];
+  /** Fee rate in satoshis per vbyte */
+  feeRate: number;
+  /** Inscription data to commit */
+  inscriptionData: InscriptionData;
+  /** Address to send change back to */
+  changeAddress: string;
+  /** Bitcoin network */
+  network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
+  /** Optional minimum amount for the commit output (defaults to dust limit) */
+  minimumCommitAmount?: number;
+  /** Optional: specific UTXO to use as first input */
+  selectedInscriptionUtxo?: Utxo;
+}
+
+/**
+ * Result of creating a commit transaction
+ */
+export interface CommitTransactionResult {
+  /** Base64-encoded PSBT for the commit transaction */
+  psbt: string;
+  /** P2TR address that will receive the commit output (for reveal transaction) */
+  revealAddress: string;
+  /** P2TR address information for the reveal */
+  revealAddressInfo: P2TRAddressInfo;
+  /** Total fee for the commit transaction in satoshis */
+  fee: number;
+  /** Change amount sent back (0 if below dust or no change) */
+  changeAmount: number;
+  /** Selected UTXOs used in the transaction */
+  selectedUtxos: Utxo[];
+  /** The amount committed to the reveal address */
+  commitAmount: number;
+}
+
+/**
+ * Detailed fee breakdown for commit transaction
+ */
+export interface CommitTransactionFee {
+  /** Commit transaction fee */
+  commit: number;
+  /** Estimated reveal transaction fee */
+  estimatedReveal?: number;
+  /** Total estimated cost */
+  total: number;
+}
+
 
