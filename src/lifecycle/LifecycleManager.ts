@@ -267,10 +267,16 @@ export class LifecycleManager {
     signer?: ExternalSigner;
   }> {
     if (typeof publisherDidOrSigner === 'string') {
-      if (!publisherDidOrSigner.startsWith('did:webvh:')) {
-        throw new Error('Publisher DID must be a did:webvh identifier');
+      // If it's already a did:webvh DID, use it as-is
+      if (publisherDidOrSigner.startsWith('did:webvh:')) {
+        return { publisherDid: publisherDidOrSigner };
       }
-      return { publisherDid: publisherDidOrSigner };
+      
+      // Otherwise, treat it as a domain and construct a did:webvh DID
+      // Format: did:webvh:domain:user (use 'user' as default user path)
+      const domain = publisherDidOrSigner;
+      const publisherDid = `did:webvh:${domain}:user`;
+      return { publisherDid };
     }
     
     const signer = publisherDidOrSigner;

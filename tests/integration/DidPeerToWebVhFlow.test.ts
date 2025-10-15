@@ -35,7 +35,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'resource-2',
         type: 'metadata',
         contentType: 'application/json',
-        hash: 'meta789hash',
+        hash: 'aea789ab',
         content: JSON.stringify({ title: 'Test Asset', version: '1.0' })
       }
     ];
@@ -178,7 +178,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'res-format-test',
         type: 'data',
         contentType: 'application/octet-stream',
-        hash: 'testhash12345',
+        hash: 'e5a12345',
         content: 'test data for URL format verification'
       }
     ];
@@ -216,7 +216,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'binding-test',
         type: 'data',
         contentType: 'text/plain',
-        hash: 'bindingtest123',
+        hash: 'b1d123456',
         content: 'binding test content'
       }
     ];
@@ -249,28 +249,28 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'multi-1',
         type: 'data',
         contentType: 'text/plain',
-        hash: 'hash1',
+        hash: 'a5101',
         content: 'content 1'
       },
       {
         id: 'multi-2',
         type: 'data',
         contentType: 'application/json',
-        hash: 'hash2',
+        hash: 'a5102',
         content: '{"key": "value"}'
       },
       {
         id: 'multi-3',
         type: 'metadata',
         contentType: 'text/html',
-        hash: 'hash3',
+        hash: 'a5103',
         content: '<html><body>test</body></html>'
       },
       {
         id: 'multi-4',
         type: 'data',
         contentType: 'image/svg+xml',
-        hash: 'hash4',
+        hash: 'a5104',
         content: '<svg></svg>'
       }
     ];
@@ -299,7 +299,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'preserve-test',
         type: 'data',
         contentType: 'text/markdown',
-        hash: 'preservehash',
+        hash: 'e5e1ea',
         content: '# Test Document\nThis should be preserved.'
       }
     ];
