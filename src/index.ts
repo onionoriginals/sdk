@@ -27,7 +27,15 @@ export {
   estimateTransactionSize
 } from './bitcoin/utxo-selection.js';
 export { calculateFee } from './bitcoin/fee-calculation.js';
-export { createCommitTransaction } from './bitcoin/transactions/index.js';
+export { 
+  createCommitTransaction, 
+  prepareInscription,
+  type CommitTransactionParams,
+  type CommitTransactionResult,
+  type PreparedInscription,
+  type InscriptionData as CommitInscriptionData,
+  type P2TRAddressInfo
+} from './bitcoin/transactions/index.js';
 export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs.js';
 export { BbsSimple } from './vc/cryptosuites/bbsSimple.js';
 export * from './storage/index.js';

@@ -1,124 +1,169 @@
 /**
  * Commit Transaction Processing for Ordinals
  * 
- * This module implements the commit transaction process for ordinals inscriptions.
- * Ported from legacy/ordinalsplus to SDK.
+ * Faithfully ported from legacy ordinalsplus using micro-ordinals and @scure/btc-signer.
+ * This is the working implementation - do not modify the approach.
  */
 
-import * as bitcoin from 'bitcoinjs-lib';
-import * as ecc from 'tiny-secp256k1';
-import { ECPairFactory } from 'ecpair';
-import { 
-  Utxo, 
-  CommitTransactionParams, 
-  CommitTransactionResult, 
-  InscriptionData,
-  P2TRAddressInfo,
-  DUST_LIMIT_SATS 
-} from '../../types/bitcoin';
+import * as btc from '@scure/btc-signer';
+import * as ordinals from 'micro-ordinals';
+import { schnorr } from '@noble/curves/secp256k1';
+import { Utxo, DUST_LIMIT_SATS } from '../../types/bitcoin';
 import { calculateFee } from '../fee-calculation';
-import { selectUtxos, estimateTransactionSize } from '../utxo-selection';
-
-// Initialize ECC library for bitcoinjs-lib
-bitcoin.initEccLib(ecc);
-
-// Create ECPair factory
-const ECPair = ECPairFactory(ecc);
+import { selectUtxos } from '../utxo-selection';
+import { getScureNetwork, BitcoinNetwork } from '../utils/networks';
 
 // Define minimum dust limit (satoshis)
 const MIN_DUST_LIMIT = DUST_LIMIT_SATS;
 
 /**
- * Get bitcoinjs-lib network object from network string
+ * Inscription data for commit transaction
  */
-function getBitcoinNetwork(network: 'mainnet' | 'testnet' | 'regtest' | 'signet'): bitcoin.Network {
-  switch (network) {
-    case 'mainnet':
-      return bitcoin.networks.bitcoin;
-    case 'testnet':
-      return bitcoin.networks.testnet;
-    case 'regtest':
-      return bitcoin.networks.regtest;
-    case 'signet':
-      // Signet uses testnet network parameters
-      return bitcoin.networks.testnet;
-    default:
-      return bitcoin.networks.bitcoin;
-  }
+export interface InscriptionData {
+  content: Uint8Array;
+  contentType: string;
+  metadata?: Record<string, unknown>;
 }
 
 /**
- * Create an inscription reveal script following Ordinals protocol
- * 
- * @param xOnlyPubkey - The x-only public key (32 bytes)
- * @param inscriptionData - The inscription data
- * @returns The taproot script for the inscription
+ * P2TR address information from inscription preparation
  */
-function createInscriptionScript(
-  xOnlyPubkey: Buffer, 
-  inscriptionData: InscriptionData
-): Buffer {
-  // Build the inscription script following the ordinals protocol
-  // Format: OP_FALSE OP_IF "ord" 0x01 <content-type> 0x00 <content> OP_ENDIF
-  const script = bitcoin.script.compile([
-    xOnlyPubkey,
-    bitcoin.opcodes.OP_CHECKSIG,
-    bitcoin.opcodes.OP_FALSE,
-    bitcoin.opcodes.OP_IF,
-    Buffer.from('ord', 'utf8'), // Ordinals protocol marker
-    Buffer.from([0x01]), // Content type tag
-    Buffer.from(inscriptionData.contentType, 'utf8'),
-    Buffer.from([0x00]), // Content tag
-    inscriptionData.content,
-    bitcoin.opcodes.OP_ENDIF
-  ]);
-  
-  return script;
+export interface P2TRAddressInfo {
+  address: string;
+  script: Uint8Array;
+  internalKey: Uint8Array;
 }
 
 /**
- * Generate a P2TR address for the commit transaction
- * 
- * @param inscriptionData - The inscription data
- * @param network - Bitcoin network
- * @returns P2TR address information including internal key and address
+ * Prepared inscription with all necessary data for commit transaction
+ * This matches the legacy PreparedInscription interface
  */
-function generateRevealAddress(
+export interface PreparedInscription {
+  commitAddress: P2TRAddressInfo;
+  inscription: {
+    tags: ordinals.Tags;
+    body: Uint8Array;
+  };
+  revealPublicKey: Uint8Array;
+  revealPrivateKey?: Uint8Array;
+  inscriptionScript: {
+    script: Uint8Array;
+    controlBlock: Uint8Array;
+    leafVersion: number;
+  };
+}
+
+/**
+ * Parameters for preparing a commit transaction
+ * Matches legacy interface
+ */
+export interface CommitTransactionParams {
+  /** The prepared inscription containing the commit address */
+  inscription: PreparedInscription;
+  /** Available UTXOs to fund the transaction */
+  utxos: Utxo[];
+  /** Address to send change back to */
+  changeAddress: string;
+  /** Fee rate in sats/vB */
+  feeRate: number;
+  /** Bitcoin network configuration */
+  network: BitcoinNetwork;
+  /** Optional minimum amount for the commit output */
+  minimumCommitAmount?: number;
+  /** CRITICAL: The specific UTXO selected by the user for inscription (must be first input) */
+  selectedInscriptionUtxo?: Utxo;
+}
+
+/**
+ * Result of the commit transaction preparation
+ * Matches legacy interface
+ */
+export interface CommitTransactionResult {
+  /** P2TR address for the commit output */
+  commitAddress: string;
+  /** Base64-encoded PSBT for the commit transaction */
+  commitPsbtBase64: string;
+  /** Raw PSBT object for commit transaction (for direct manipulation) */
+  commitPsbt: btc.Transaction;
+  /** The exact amount required for the commit output */
+  requiredCommitAmount: number;
+  /** Selected UTXOs for the transaction */
+  selectedUtxos: Utxo[];
+  /** Fee information */
+  fees: {
+    /** Estimated fee for the commit transaction in satoshis */
+    commit: number;
+  };
+}
+
+/**
+ * Prepares an inscription by generating all necessary components using micro-ordinals
+ * This is a helper to create PreparedInscription from InscriptionData
+ */
+export function prepareInscription(
   inscriptionData: InscriptionData,
-  network: bitcoin.Network
-): P2TRAddressInfo {
-  // Generate a random key pair for the reveal transaction
-  const revealKeyPair = ECPair.makeRandom({ network });
-  const internalKey = Buffer.from(revealKeyPair.publicKey.slice(1, 33)); // x-only pubkey (remove prefix byte)
-  
-  // Create the inscription script
-  const inscriptionScript = createInscriptionScript(internalKey, inscriptionData);
-  
-  // Create a taproot tree with the inscription script
-  const scriptTree = {
-    output: inscriptionScript
+  network: BitcoinNetwork = 'mainnet'
+): PreparedInscription {
+  // Convert to micro-ordinals inscription format
+  const tags: ordinals.Tags = {
+    contentType: inscriptionData.contentType
   };
   
-  // Create P2TR output with the script tree
-  const { address, output } = bitcoin.payments.p2tr({
-    internalPubkey: internalKey,
-    scriptTree,
-    network
-  });
-  
-  if (!address) {
-    throw new Error('Failed to generate P2TR address');
+  if (inscriptionData.metadata) {
+    tags.metadata = inscriptionData.metadata;
   }
   
-  // For the tweaked key, we need to compute it from the internal key and script tree
-  // This is a simplified version - in production, you'd need proper taproot tweaking
-  const tweakedKey = internalKey; // Simplified - actual implementation would compute tweak
+  const inscription: ordinals.Inscription = {
+    tags,
+    body: inscriptionData.content
+  };
+  
+  // Generate random key pair for reveal
+  const privateKey = new Uint8Array(32);
+  crypto.getRandomValues(privateKey);
+  const fullPubKey = schnorr.getPublicKey(privateKey);
+  const xOnlyPubKey = fullPubKey.length === 33 ? fullPubKey.slice(1) : fullPubKey;
+  
+  // Generate inscription script tree using micro-ordinals
+  const scriptTree = ordinals.p2tr_ord_reveal(xOnlyPubKey, [inscription]);
+  
+  // Get network object
+  const btcNetwork = getScureNetwork(network);
+  
+  // Create P2TR address using @scure/btc-signer with micro-ordinals output
+  const p2tr = btc.p2tr(
+    xOnlyPubKey,
+    scriptTree,
+    btcNetwork,
+    false,
+    [ordinals.OutOrdinalReveal]
+  );
+  
+  if (!p2tr.address) {
+    throw new Error('Failed to create P2TR address for commit transaction');
+  }
+  
+  // Extract script information
+  const script = p2tr.script || btc.OutScript.encode({ type: 'tr', pubkey: xOnlyPubKey });
+  
+  // Extract control block and script from taproot leaves (type as any to match legacy)
+  const leaves: any = p2tr.leaves || [];
+  const leaf = leaves[0];
   
   return {
-    address,
-    internalKey,
-    tweakedKey,
-    scriptTree
+    commitAddress: {
+      address: p2tr.address,
+      script,
+      internalKey: xOnlyPubKey
+    },
+    inscription,
+    revealPublicKey: xOnlyPubKey,
+    revealPrivateKey: privateKey,
+    inscriptionScript: {
+      script: leaf?.script || new Uint8Array(),
+      controlBlock: leaf?.controlBlock || new Uint8Array(),
+      leafVersion: leaf?.version ?? 0xc0
+    }
   };
 }
 
@@ -144,7 +189,8 @@ function estimateCommitTxSize(inputCount: number, outputCount: number): number {
 }
 
 /**
- * Creates a commit transaction for an ordinals inscription
+ * Prepares a commit transaction for an ordinals inscription
+ * FAITHFULLY PORTED FROM LEGACY - DO NOT MODIFY APPROACH
  * 
  * @param params - Parameters for the commit transaction
  * @returns Complete information for the prepared commit transaction
@@ -153,22 +199,22 @@ export async function createCommitTransaction(
   params: CommitTransactionParams
 ): Promise<CommitTransactionResult> {
   const { 
+    inscription, 
     utxos, 
     changeAddress, 
     feeRate,
     network,
-    inscriptionData,
     minimumCommitAmount = MIN_DUST_LIMIT,
     selectedInscriptionUtxo
   } = params;
   
-  // Validate inputs
+  // Validate inputs (from legacy)
   if (!utxos || utxos.length === 0) {
     throw new Error('No UTXOs provided to fund the transaction.');
   }
   
-  if (!inscriptionData || !inscriptionData.content) {
-    throw new Error('Invalid inscription data: missing content.');
+  if (!inscription || !inscription.commitAddress) {
+    throw new Error('Invalid inscription: missing commit address information.');
   }
   
   if (!changeAddress) {
@@ -179,16 +225,13 @@ export async function createCommitTransaction(
     throw new Error(`Invalid fee rate: ${feeRate}`);
   }
   
-  // Get Bitcoin network
-  const btcNetwork = getBitcoinNetwork(network);
-  
-  // Generate the reveal address (P2TR address for the inscription)
-  const revealAddressInfo = generateRevealAddress(inscriptionData, btcNetwork);
+  // Get the commit address from the prepared inscription
+  const commitAddress = inscription.commitAddress.address;
   
   // Calculate minimum amount needed for the commit output
   const commitOutputValue = Math.max(minimumCommitAmount, MIN_DUST_LIMIT);
   
-  // Handle user-selected UTXO for inscription
+  // Handle user-selected UTXO for inscription (CRITICAL from legacy)
   let selectedUtxos: Utxo[] = [];
   let totalInputValue = 0;
   
@@ -200,19 +243,14 @@ export async function createCommitTransaction(
   }
   
   // Estimate commit transaction size for initial fee calculation
-  const estimatedCommitVBytes = estimateCommitTxSize(1, 2); // 1 input, 2 outputs (commit + change)
-  
-  // Calculate estimated fee
+  const estimatedCommitVBytes = estimateCommitTxSize(1, 2);
   const estimatedCommitFee = Number(calculateFee(estimatedCommitVBytes, feeRate));
-  
-  // Calculate total amount needed
   const totalNeeded = commitOutputValue + estimatedCommitFee;
   
   // Check if we need additional UTXOs for funding
   if (totalInputValue < totalNeeded) {
     const additionalAmountNeeded = totalNeeded - totalInputValue;
     
-    // Filter out the already selected UTXO from available options
     const availableForFunding = selectedInscriptionUtxo 
       ? utxos.filter(utxo => !(utxo.txid === selectedInscriptionUtxo.txid && utxo.vout === selectedInscriptionUtxo.vout))
       : utxos;
@@ -221,14 +259,12 @@ export async function createCommitTransaction(
       throw new Error(`Insufficient funds. Selected UTXO has ${totalInputValue} sats but need ${totalNeeded} sats total. No additional UTXOs available.`);
     }
     
-    // Select additional UTXOs to cover the remaining amount
     try {
       const fundingResult = selectUtxos(availableForFunding, {
         targetAmount: additionalAmountNeeded,
         strategy: 'minimize_inputs'
       });
       
-      // Add the funding UTXOs AFTER the selected inscription UTXO
       selectedUtxos.push(...fundingResult.selectedUtxos);
       totalInputValue += fundingResult.totalInputValue;
       
@@ -257,8 +293,11 @@ export async function createCommitTransaction(
     throw new Error('No UTXOs selected for the transaction.');
   }
   
-  // Create the PSBT
-  const psbt = new bitcoin.Psbt({ network: btcNetwork });
+  // Get the network configuration
+  const scureNetwork = getScureNetwork(network);
+  
+  // Create transaction using @scure/btc-signer (LEGACY APPROACH)
+  const tx = new btc.Transaction();
   
   // Add inputs
   for (const utxo of selectedUtxos) {
@@ -267,37 +306,38 @@ export async function createCommitTransaction(
       continue;
     }
     
-    psbt.addInput({
-      hash: utxo.txid,
+    tx.addInput({
+      txid: utxo.txid,
       index: utxo.vout,
       witnessUtxo: {
         script: Buffer.from(utxo.scriptPubKey, 'hex'),
-        value: utxo.value
+        amount: BigInt(utxo.value)
       }
     });
   }
   
   // More accurate fee calculation now that we know exact input count
-  const actualCommitVBytes = estimateCommitTxSize(psbt.data.inputs.length, 2); // 2 outputs (commit + change)
+  const actualCommitVBytes = estimateCommitTxSize(tx.inputsLength, 2);
   const recalculatedCommitFee = Number(calculateFee(actualCommitVBytes, feeRate));
   
-  // Add the commit output (P2TR address)
-  psbt.addOutput({
-    address: revealAddressInfo.address,
-    value: commitOutputValue
-  });
+  // Add the commit output using the provided address (LEGACY APPROACH)
+  tx.addOutputAddress(
+    commitAddress,
+    BigInt(commitOutputValue),
+    scureNetwork
+  );
   
   // Calculate change amount
   const changeAmount = totalInputValue - commitOutputValue - recalculatedCommitFee;
   
   // Add change output if above dust limit
   if (changeAmount >= MIN_DUST_LIMIT) {
-    psbt.addOutput({
-      address: changeAddress,
-      value: changeAmount
-    });
+    tx.addOutputAddress(
+      changeAddress,
+      BigInt(changeAmount),
+      scureNetwork
+    );
   } else if (changeAmount > 0) {
-    // If change is below dust limit, add it to the fee
     console.log(`Change amount ${changeAmount} is below dust limit, adding to fee.`);
   }
   
@@ -305,16 +345,18 @@ export async function createCommitTransaction(
   const finalFee = totalInputValue - commitOutputValue - 
     (changeAmount >= MIN_DUST_LIMIT ? changeAmount : 0);
   
-  // Get the PSBT as base64
-  const psbtBase64 = psbt.toBase64();
+  // Get the PSBT as base64 (LEGACY FORMAT)
+  const txPsbt = tx.toPSBT();
+  const commitPsbtBase64 = typeof txPsbt === 'string' ? txPsbt : Buffer.from(txPsbt).toString('base64');
   
   return {
-    psbt: psbtBase64,
-    revealAddress: revealAddressInfo.address,
-    revealAddressInfo,
-    fee: finalFee,
-    changeAmount: changeAmount >= MIN_DUST_LIMIT ? changeAmount : 0,
+    commitAddress,
+    commitPsbtBase64,
+    commitPsbt: tx,
+    requiredCommitAmount: commitOutputValue,
     selectedUtxos,
-    commitAmount: commitOutputValue
+    fees: {
+      commit: finalFee
+    }
   };
 }

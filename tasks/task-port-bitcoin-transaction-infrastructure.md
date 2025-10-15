@@ -7,10 +7,11 @@
 
 ## 📊 Current Status
 
-**Last Updated:** October 15, 2025  
-**Completed:** 8/42 parent tasks (19% complete)  
-**Current Task:** Task 1.9: Manual Commit Test (No Broadcast)  
-**Blocked:** No (Note: bun runtime required for test execution)  
+**Last Updated:** October 15, 2025 (CORRECTED)  
+**Completed:** 7/42 parent tasks (17% complete) - Task 1.8 tests need rewrite  
+**Current Task:** Task 1.8: Update Commit Transaction Tests for micro-ordinals approach  
+**Blocked:** No  
+**Note:** ✅ Now using correct legacy approach (micro-ordinals + @scure/btc-signer)  
 
 **Quick Verification:**
 - Build status: ✅ Passing
