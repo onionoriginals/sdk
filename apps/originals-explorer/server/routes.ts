@@ -14,6 +14,7 @@ import multer from "multer";
 import { parse as csvParse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
 import { VerifiableCredential } from "@originals/sdk";
+import importRoutes from "./routes/import";
 
 // Temporary in-memory storage for OTP codes
 const otpStorage = new Map<string, { code: string; expires: number }>();
@@ -117,6 +118,9 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Mount Google Drive import routes
+  app.use("/api/import", importRoutes);
+
   // Healthcheck for Originals SDK integration
   app.get("/api/originals/health", async (_req, res) => {
     try {

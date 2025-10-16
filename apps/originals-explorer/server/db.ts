@@ -9,15 +9,18 @@ import {
   assets, 
   walletConnections, 
   assetTypes,
+  googleDriveImports,
   User,
   Asset,
   WalletConnection,
   AssetType,
+  GoogleDriveImport,
   AssetLayer,
   InsertAsset,
   InsertUser,
   InsertWalletConnection,
-  InsertAssetType
+  InsertAssetType,
+  InsertGoogleDriveImport
 } from "../shared/schema.ts";
 
 interface GetAssetsByUserIdOptions {
@@ -251,6 +254,55 @@ export class DatabaseStorage {
 
   async getDIDDocument(slug: string): Promise<any | undefined> {
     return this.didDocuments.get(slug);
+  }
+
+  // Google Drive import methods
+  async createGoogleDriveImport(importData: InsertGoogleDriveImport): Promise<GoogleDriveImport> {
+    const [result] = await this.db.insert(googleDriveImports).values(importData).returning();
+    return result;
+  }
+
+  async getGoogleDriveImport(importId: string): Promise<GoogleDriveImport | undefined> {
+    const [result] = await this.db.select().from(googleDriveImports).where(eq(googleDriveImports.id, importId));
+    return result;
+  }
+
+  async getGoogleDriveImportsByUserId(userId: string): Promise<GoogleDriveImport[]> {
+    return await this.db.select().from(googleDriveImports).where(eq(googleDriveImports.userId, userId));
+  }
+
+  async updateGoogleDriveImport(importId: string, updates: Partial<GoogleDriveImport>): Promise<GoogleDriveImport | undefined> {
+    const [result] = await this.db.update(googleDriveImports)
+      .set(updates)
+      .where(eq(googleDriveImports.id, importId))
+      .returning();
+    return result;
+  }
+
+  async createAssetFromGoogleDrive(data: {
+    userId: string;
+    importId: string;
+    title: string;
+    didPeer: string;
+    didDocument: any;
+    sourceMetadata: any;
+  }): Promise<string> {
+    const asset = await this.createAsset({
+      userId: data.userId,
+      title: data.title,
+      assetType: 'original',
+      status: 'completed',
+      source: 'google-drive-import',
+      sourceMetadata: {
+        ...data.sourceMetadata,
+        importId: data.importId,
+      },
+      currentLayer: 'did:peer',
+      didPeer: data.didPeer,
+      didDocument: data.didDocument,
+      mediaUrl: data.sourceMetadata.webViewLink || data.sourceMetadata.thumbnailLink,
+    });
+    return asset.id;
   }
 
   // Stats

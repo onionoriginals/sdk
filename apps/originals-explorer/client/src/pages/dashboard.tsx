@@ -9,6 +9,7 @@ import { LayerBadge } from "@/components/LayerBadge";
 import { LayerFilter } from "@/components/LayerFilter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { ImportManager } from "@/components/import/ImportManager";
 import type { AssetLayer } from "../../../shared/schema";
 
 interface PublishResult {
@@ -101,7 +102,7 @@ export default function Dashboard() {
       
       // Refresh assets list (invalidate all /api/assets queries regardless of params)
       queryClient.invalidateQueries({ predicate: (query) => 
-        query.queryKey[0] === "/api/assets" || query.queryKey[0]?.toString().startsWith("/api/assets?")
+        query.queryKey[0] === "/api/assets" || (query.queryKey[0]?.toString().startsWith("/api/assets?") ?? false)
       });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       
@@ -140,7 +141,7 @@ export default function Dashboard() {
       
       // Refresh assets list (invalidate all /api/assets queries regardless of params)
       queryClient.invalidateQueries({ predicate: (query) => 
-        query.queryKey[0] === "/api/assets" || query.queryKey[0]?.toString().startsWith("/api/assets?")
+        query.queryKey[0] === "/api/assets" || (query.queryKey[0]?.toString().startsWith("/api/assets?") ?? false)
       });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       
@@ -212,6 +213,13 @@ export default function Dashboard() {
               Migrate Ordinal
             </Button>
           </Link>
+          <ImportManager
+            userId={currentUser?.id || null}
+            onImportComplete={() => {
+              void queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+              void queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+            }}
+          />
         </div>
       </div>
 

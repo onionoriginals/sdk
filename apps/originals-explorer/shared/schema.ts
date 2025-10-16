@@ -34,6 +34,9 @@ export const assets = pgTable("assets", {
   status: varchar("status").notNull().default("draft"), // draft, pending, completed
   assetType: varchar("asset_type").notNull(), // original, migrated
   originalReference: text("original_reference"), // for migrated assets
+  // Source tracking for imports
+  source: varchar("source").default("manual"), // manual, google-drive-import, etc.
+  sourceMetadata: jsonb("source_metadata"), // Source-specific data (e.g., Google Drive file ID, links)
   // Layer tracking fields
   currentLayer: text("current_layer").default("did:peer"), // did:peer, did:webvh, or did:btco
   didPeer: text("did_peer"), // DID identifier for peer layer
@@ -64,6 +67,20 @@ export const assetTypes = pgTable("asset_types", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const googleDriveImports = pgTable("google_drive_imports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  folderId: text("folder_id").notNull(), // Google Drive folder ID
+  folderName: text("folder_name").notNull(), // User-friendly folder name
+  status: varchar("status").notNull().default("pending"), // pending, processing, completed, failed
+  totalFiles: varchar("total_files"), // Total number of files to process
+  processedFiles: varchar("processed_files").default("0"), // Number of files processed
+  failedFiles: varchar("failed_files").default("0"), // Number of failed files
+  errorDetails: jsonb("error_details"), // Array of error objects {fileId, fileName, error}
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -77,6 +94,9 @@ export const insertAssetSchema = createInsertSchema(assets).omit({
   title: z.string().optional(), // Title is now optional
   category: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  // Source tracking
+  source: z.enum(["manual", "google-drive-import"]).optional(),
+  sourceMetadata: z.any().optional(),
   // Layer tracking fields
   currentLayer: z.enum(["did:peer", "did:webvh", "did:btco"]).optional(),
   didPeer: z.string().optional(),
@@ -107,6 +127,21 @@ export const insertAssetTypeSchema = createInsertSchema(assetTypes).omit({
   })).optional(),
 });
 
+export const insertGoogleDriveImportSchema = createInsertSchema(googleDriveImports).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+}).extend({
+  folderId: z.string().min(1, "Folder ID is required"),
+  folderName: z.string().min(1, "Folder name is required"),
+  status: z.enum(["pending", "processing", "completed", "failed"]).optional(),
+  errorDetails: z.array(z.object({
+    fileId: z.string(),
+    fileName: z.string(),
+    error: z.string(),
+  })).optional(),
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertAsset = z.infer<typeof insertAssetSchema>;
@@ -115,6 +150,10 @@ export type InsertWalletConnection = z.infer<typeof insertWalletConnectionSchema
 export type WalletConnection = typeof walletConnections.$inferSelect;
 export type InsertAssetType = z.infer<typeof insertAssetTypeSchema>;
 export type AssetType = typeof assetTypes.$inferSelect;
+export type InsertGoogleDriveImport = z.infer<typeof insertGoogleDriveImportSchema>;
+export type GoogleDriveImport = typeof googleDriveImports.$inferSelect;
 
 // Layer type for type-safe layer filtering
 export type AssetLayer = "did:peer" | "did:webvh" | "did:btco";
+// Source type for asset origin tracking
+export type AssetSource = "manual" | "google-drive-import";
