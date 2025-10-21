@@ -16,6 +16,11 @@
     "test": "bun test tests/integration && bun test tests/unit",
     "test:coverage": "bun test tests/integration tests/unit --coverage",
     "test:ci": "bun run scripts/check-coverage.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report",
     "lint": "eslint src/**/*.ts",
     "prepare": "npm run build",
     "format": "prettier --write src/**/*.ts"
@@ -42,22 +47,24 @@
     "@noble/ed25519": "^2.0.0",
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^2.0.0",
+    "@scure/base": "^1.1.6",
     "@scure/bip32": "^2.0.0",
     "bitcoinjs-lib": "^6.1.0",
     "cbor-js": "^0.1.0",
     "didwebvh-ts": "^2.5.4",
     "jsonld": "^8.3.3",
-    "multiformats": "^12.0.0",
-    "@scure/base": "^1.1.6"
+    "multiformats": "^12.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.28.4",
     "@babel/preset-env": "^7.28.3",
+    "@playwright/test": "^1.56.1",
     "@types/bun": "^1.2.23",
     "@types/node": "^20.19.17",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.0.0",
+    "playwright": "^1.56.1",
     "prettier": "^3.0.0",
     "typescript": "^5.0.0"
   },
