@@ -15,7 +15,11 @@ export function useAuth() {
   }, []);
 
   // Always call useQuery to maintain hook order consistency
-  const { data: serverUser, isLoading: isServerUserLoading } = useQuery({
+  const { data: serverUser, isLoading: isServerUserLoading } = useQuery<{
+    id: string;
+    did: string;
+    turnkeyUserId: string;
+  }>({
     queryKey: ['/api/user'],
     enabled: ready && isAuthenticated,
     retry: false,

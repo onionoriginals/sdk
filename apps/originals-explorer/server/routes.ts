@@ -848,25 +848,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (asset.credentials as any) || []
       );
       
-      // Get user's Privy signer for signing credentials
+      // Get user's Turnkey signer for signing credentials
       let publisherSigner;
       try {
         const userData = await storage.getUserByDid(user.did);
-        if (!userData || !userData.updateWalletId) {
-          throw new Error('User missing update wallet for signing');
+        if (!userData || !userData.updateKeyId || !userData.turnkeyUserId) {
+          throw new Error('User missing update key for signing');
         }
-        
-        // Import Privy signer creation
-        const { createPrivySigner } = await import('./privy-signer');
-        
-        // Create signer using user's update wallet
+
+        // Import Turnkey signer creation
+        const { createTurnkeySigner } = await import('./turnkey-signer');
+
+        // Create signer using user's update key
         const verificationMethodId = `${user.did}#key-0`;
-        publisherSigner = await createPrivySigner(
-          user.privyId,
-          userData.updateWalletId,
-          privyClient,
-          verificationMethodId,
-          req.headers.authorization?.replace('Bearer ', '') || ''
+        publisherSigner = await createTurnkeySigner(
+          userData.turnkeyUserId,
+          userData.updateKeyId,
+          turnkeyClient,
+          verificationMethodId
         );
       } catch (signerError: any) {
         console.error('Failed to create signer:', signerError);
