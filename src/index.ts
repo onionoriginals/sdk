@@ -39,6 +39,10 @@ export type { MultikeyType } from './crypto/Multikey.js';
 // Event system exports
 export * from './events/index.js';
 
+// Migration system exports
+export { MigrationManager } from './migration/index.js';
+export * from './migration/types.js';
+
 // Batch operations exports
 export {
   BatchOperationExecutor,

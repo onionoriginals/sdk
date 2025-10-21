@@ -177,6 +177,72 @@ export interface BatchFailedEvent extends BaseEvent {
 }
 
 /**
+ * Emitted when a migration starts
+ */
+export interface MigrationStartedEvent extends BaseEvent {
+  type: 'migration:started';
+  migrationId: string;
+  sourceDid: string;
+  targetLayer: string;
+}
+
+/**
+ * Emitted when migration validation completes
+ */
+export interface MigrationValidatedEvent extends BaseEvent {
+  type: 'migration:validated';
+  migrationId: string;
+  valid: boolean;
+}
+
+/**
+ * Emitted when migration checkpoint is created
+ */
+export interface MigrationCheckpointedEvent extends BaseEvent {
+  type: 'migration:checkpointed';
+  migrationId: string;
+  checkpointId: string;
+}
+
+/**
+ * Emitted when migration completes successfully
+ */
+export interface MigrationCompletedEvent extends BaseEvent {
+  type: 'migration:completed';
+  migrationId: string;
+  sourceDid: string;
+  targetDid: string;
+}
+
+/**
+ * Emitted when migration fails
+ */
+export interface MigrationFailedEvent extends BaseEvent {
+  type: 'migration:failed';
+  migrationId: string;
+  error: any;
+}
+
+/**
+ * Emitted when migration is rolled back
+ */
+export interface MigrationRolledbackEvent extends BaseEvent {
+  type: 'migration:rolledback';
+  migrationId: string;
+  checkpointId: string;
+}
+
+/**
+ * Emitted when migration enters quarantine state
+ */
+export interface MigrationQuarantineEvent extends BaseEvent {
+  type: 'migration:quarantine';
+  migrationId: string;
+  checkpointId: string;
+  reason: string;
+}
+
+/**
  * Union type of all possible events
  */
 export type OriginalsEvent =
@@ -189,7 +255,14 @@ export type OriginalsEvent =
   | BatchStartedEvent
   | BatchCompletedEvent
   | BatchFailedEvent
-  | ResourceVersionCreatedEvent;
+  | ResourceVersionCreatedEvent
+  | MigrationStartedEvent
+  | MigrationValidatedEvent
+  | MigrationCheckpointedEvent
+  | MigrationCompletedEvent
+  | MigrationFailedEvent
+  | MigrationRolledbackEvent
+  | MigrationQuarantineEvent;
 
 /**
  * Event handler function type
@@ -210,4 +283,11 @@ export interface EventTypeMap {
   'batch:completed': BatchCompletedEvent;
   'batch:failed': BatchFailedEvent;
   'resource:version:created': ResourceVersionCreatedEvent;
+  'migration:started': MigrationStartedEvent;
+  'migration:validated': MigrationValidatedEvent;
+  'migration:checkpointed': MigrationCheckpointedEvent;
+  'migration:completed': MigrationCompletedEvent;
+  'migration:failed': MigrationFailedEvent;
+  'migration:rolledback': MigrationRolledbackEvent;
+  'migration:quarantine': MigrationQuarantineEvent;
 }
