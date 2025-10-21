@@ -102,7 +102,7 @@ export default function Dashboard() {
       
       // Refresh assets list (invalidate all /api/assets queries regardless of params)
       queryClient.invalidateQueries({ predicate: (query) => 
-        query.queryKey[0] === "/api/assets" || query.queryKey[0]?.toString().startsWith("/api/assets?")
+        query.queryKey[0] === "/api/assets" || query.queryKey[0]?.toString().startsWith("/api/assets?") || false
       });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       
@@ -141,7 +141,7 @@ export default function Dashboard() {
       
       // Refresh assets list (invalidate all /api/assets queries regardless of params)
       queryClient.invalidateQueries({ predicate: (query) => 
-        query.queryKey[0] === "/api/assets" || query.queryKey[0]?.toString().startsWith("/api/assets?")
+        query.queryKey[0] === "/api/assets" || query.queryKey[0]?.toString().startsWith("/api/assets?") || false
       });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       
