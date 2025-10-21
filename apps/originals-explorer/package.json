@@ -17,7 +17,6 @@
     "@jridgewell/trace-mapping": "^0.3.25",
     "@neondatabase/serverless": "^0.10.4",
     "@noble/hashes": "^2.0.1",
-    "@originals/sdk": "file:../..",
     "@turnkey/http": "^3.13.1",
     "@turnkey/api-key-stamper": "^0.5.0",
     "@turnkey/sdk-server": "^4.10.4",
