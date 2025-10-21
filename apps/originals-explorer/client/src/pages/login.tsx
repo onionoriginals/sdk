@@ -1,12 +1,14 @@
 import { useAuth } from "@/hooks/useAuth";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export default function Login() {
   const { user, isLoading, isUserLoading, isAuthenticated, login } = useAuth();
   const { toast } = useToast();
+  const [email, setEmail] = useState("");
 
   // Store return path and redirect after login
   useEffect(() => {
@@ -31,7 +33,15 @@ export default function Login() {
 
   const handleLogin = async () => {
     try {
-      await login();
+      if (!email) {
+        toast({
+          title: "Email Required",
+          description: "Please enter your email address",
+          variant: "destructive",
+        });
+        return;
+      }
+      await login(email);
     } catch (error) {
       toast({
         title: "Login Failed",
@@ -66,18 +76,34 @@ export default function Login() {
               </p>
             </div>
 
-            <Button
-              onClick={handleLogin}
-              disabled={isLoading}
-              className="w-full bg-gray-900 hover:bg-gray-800 text-white"
-              data-testid="privy-login-button"
-            >
-              {isLoading ? "Connecting..." : "Sign In"}
-            </Button>
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+                  Email Address
+                </label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full"
+                />
+              </div>
+
+              <Button
+                onClick={handleLogin}
+                disabled={isLoading || !email}
+                className="w-full bg-gray-900 hover:bg-gray-800 text-white"
+                data-testid="turnkey-login-button"
+              >
+                {isLoading ? "Connecting..." : "Sign In"}
+              </Button>
+            </div>
 
             <div className="text-center text-xs text-gray-500">
               <p>
-                Sign in with email, social accounts, or connect your wallet
+                Powered by Turnkey secure key management
               </p>
             </div>
           </div>

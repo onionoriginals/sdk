@@ -7,7 +7,6 @@ import QRCode from "qrcode";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import { Turnkey } from "@turnkey/sdk-server";
-import { ApiKeyStamper } from "@turnkey/api-key-stamper";
 import { originalsSdk } from "./originals";
 import { createUserDIDWebVH, publishDIDDocument } from "./did-webvh-service";
 import { OriginalsAsset } from "@originals/sdk";
@@ -75,14 +74,10 @@ const googleClient = new OAuth2Client(
 );
 
 // Initialize Turnkey client with API key authentication
-const stamper = new ApiKeyStamper({
-  apiPublicKey: process.env.TURNKEY_API_PUBLIC_KEY!,
-  apiPrivateKey: process.env.TURNKEY_API_PRIVATE_KEY!,
-});
-
 const turnkeyClient = new Turnkey({
   apiBaseUrl: "https://api.turnkey.com",
-  stamper,
+  apiPublicKey: process.env.TURNKEY_API_PUBLIC_KEY!,
+  apiPrivateKey: process.env.TURNKEY_API_PRIVATE_KEY!,
   defaultOrganizationId: process.env.TURNKEY_ORGANIZATION_ID!,
 });
 

@@ -1,4 +1,3 @@
-import { usePrivy, useCreateWallet } from "@privy-io/react-auth";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -10,34 +9,30 @@ import { Link } from "wouter";
 import { useState, useEffect } from "react";
 
 export default function Profile() {
-  const { user: privyUser, authenticated, ready, logout } = usePrivy();
-  const { createWallet } = useCreateWallet();
+  const { user, isLoading, isUserLoading, isAuthenticated, logout } = useAuth();
   const { toast } = useToast();
-  const { user, isUserLoading, isAuthenticated } = useAuth();
   const [did, setDid] = useState<string | null>(null);
   const [didDocument, setDidDocument] = useState<any>(null);
   const [didLoading, setDidLoading] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
-  
-  const isLoading = !ready || isUserLoading;
 
   // Clear DID state when user changes or logs out
   useEffect(() => {
-    if (!isAuthenticated || !privyUser) {
+    if (!isAuthenticated || !user) {
       setDid(null);
       setDidDocument(null);
       setQrCodeUrl(null);
       setShowKeys(false);
     }
-  }, [isAuthenticated, privyUser?.id]);
+  }, [isAuthenticated, user?.id]);
 
   // Auto-create DID when user is authenticated
   useEffect(() => {
-    if (isAuthenticated && privyUser && !did && !didLoading) {
+    if (isAuthenticated && user && !did && !didLoading) {
       ensureDid();
     }
-  }, [isAuthenticated, privyUser?.id]);
+  }, [isAuthenticated, user?.id]);
 
   const ensureDid = async () => {
     setDidLoading(true);

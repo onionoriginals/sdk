@@ -75,20 +75,14 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
 
       // Sign using Turnkey's API
       const signResponse = await this.turnkeyClient.apiClient().signRawPayload({
-        type: 'ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2',
-        organizationId: this.organizationId,
-        parameters: {
-          signWith: this.privateKeyId,
-          payload: dataHex,
-          encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
-          hashFunction: 'HASH_FUNCTION_NO_OP', // We're passing pre-hashed data
-        },
-        timestampMs: String(Date.now()),
+        signWith: this.privateKeyId,
+        payload: dataHex,
+        encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
+        hashFunction: 'HASH_FUNCTION_NO_OP', // We're passing pre-hashed data
       });
 
       // Extract signature from response
-      const signature = signResponse.activity.result.signRawPayloadResult?.r +
-                       signResponse.activity.result.signRawPayloadResult?.s;
+      const signature = (signResponse.r || '') + (signResponse.s || '');
 
       if (!signature) {
         throw new Error('No signature returned from Turnkey');
@@ -182,7 +176,6 @@ export async function createTurnkeySigner(
 ): Promise<TurnkeyWebVHSigner> {
   // Get private key details from Turnkey to extract public key
   const keyResponse = await turnkeyClient.apiClient().getPrivateKey({
-    organizationId,
     privateKeyId,
   });
 
@@ -236,9 +229,7 @@ export async function createVerificationMethodsFromTurnkey(
   updateKeyId: string;
 }> {
   // List existing private keys for the organization
-  const keysResponse = await turnkeyClient.apiClient().getPrivateKeys({
-    organizationId,
-  });
+  const keysResponse = await turnkeyClient.apiClient().getPrivateKeys({});
 
   const existingKeys = keysResponse.privateKeys || [];
 
@@ -252,54 +243,39 @@ export async function createVerificationMethodsFromTurnkey(
   if (ed25519Keys.length === 0) {
     // Create both keys
     const authKeyResponse = await turnkeyClient.apiClient().createPrivateKeys({
-      type: 'ACTIVITY_TYPE_CREATE_PRIVATE_KEYS_V2',
-      organizationId,
-      parameters: {
-        privateKeys: [{
-          privateKeyName: `auth-key-${userSlug}`,
-          curve: 'CURVE_ED25519',
-          addressFormats: ['ADDRESS_FORMAT_ED25519'],
-          privateKeyTags: ['auth', 'did:webvh'],
-        }],
-      },
-      timestampMs: String(Date.now()),
+      privateKeys: [{
+        privateKeyName: `auth-key-${userSlug}`,
+        curve: 'CURVE_ED25519',
+        addressFormats: ['ADDRESS_FORMAT_ED25519'],
+        privateKeyTags: ['auth', 'did:webvh'],
+      }],
     });
 
     const updateKeyResponse = await turnkeyClient.apiClient().createPrivateKeys({
-      type: 'ACTIVITY_TYPE_CREATE_PRIVATE_KEYS_V2',
-      organizationId,
-      parameters: {
-        privateKeys: [{
-          privateKeyName: `update-key-${userSlug}`,
-          curve: 'CURVE_ED25519',
-          addressFormats: ['ADDRESS_FORMAT_ED25519'],
-          privateKeyTags: ['update', 'did:webvh'],
-        }],
-      },
-      timestampMs: String(Date.now()),
+      privateKeys: [{
+        privateKeyName: `update-key-${userSlug}`,
+        curve: 'CURVE_ED25519',
+        addressFormats: ['ADDRESS_FORMAT_ED25519'],
+        privateKeyTags: ['update', 'did:webvh'],
+      }],
     });
 
-    authKey = authKeyResponse.activity.result.createPrivateKeysResultV2?.privateKeys[0];
-    updateKey = updateKeyResponse.activity.result.createPrivateKeysResultV2?.privateKeys[0];
+    authKey = authKeyResponse.privateKeys?.[0];
+    updateKey = updateKeyResponse.privateKeys?.[0];
   } else if (ed25519Keys.length === 1) {
     // Use existing key for auth, create one for updates
     authKey = ed25519Keys[0];
 
     const updateKeyResponse = await turnkeyClient.apiClient().createPrivateKeys({
-      type: 'ACTIVITY_TYPE_CREATE_PRIVATE_KEYS_V2',
-      organizationId,
-      parameters: {
-        privateKeys: [{
-          privateKeyName: `update-key-${userSlug}`,
-          curve: 'CURVE_ED25519',
-          addressFormats: ['ADDRESS_FORMAT_ED25519'],
-          privateKeyTags: ['update', 'did:webvh'],
-        }],
-      },
-      timestampMs: String(Date.now()),
+      privateKeys: [{
+        privateKeyName: `update-key-${userSlug}`,
+        curve: 'CURVE_ED25519',
+        addressFormats: ['ADDRESS_FORMAT_ED25519',],
+        privateKeyTags: ['update', 'did:webvh'],
+      }],
     });
 
-    updateKey = updateKeyResponse.activity.result.createPrivateKeysResultV2?.privateKeys[0];
+    updateKey = updateKeyResponse.privateKeys?.[0];
   } else {
     // Use existing keys
     authKey = ed25519Keys[0];
@@ -311,11 +287,18 @@ export async function createVerificationMethodsFromTurnkey(
   }
 
   // Get public keys and convert to multibase
-  const authPublicKeyHex = authKey.publicKey;
-  const updatePublicKeyHex = updateKey.publicKey;
+  const authPublicKeyHex = authKey?.publicKey || '';
+  const updatePublicKeyHex = updateKey?.publicKey || '';
 
   if (!authPublicKeyHex || !updatePublicKeyHex) {
     throw new Error('Public keys not available from Turnkey');
+  }
+
+  const authKeyId = authKey?.privateKeyId || '';
+  const updateKeyId = updateKey?.privateKeyId || '';
+
+  if (!authKeyId || !updateKeyId) {
+    throw new Error('Private key IDs not available from Turnkey');
   }
 
   const authPublicKeyBytes = Buffer.from(authPublicKeyHex, 'hex');
@@ -340,7 +323,7 @@ export async function createVerificationMethodsFromTurnkey(
       }
     ],
     updateKey: `did:key:${updateKeyMultibase}`,
-    authKeyId: authKey.privateKeyId,
-    updateKeyId: updateKey.privateKeyId,
+    authKeyId,
+    updateKeyId,
   };
 }

@@ -64,20 +64,15 @@ export async function signWithUserKey(
 
     // Use Turnkey's signRawPayload API to sign the data
     const signResponse = await turnkeyClient.apiClient().signRawPayload({
-      type: 'ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2',
-      organizationId: user.turnkeyUserId,
-      parameters: {
-        signWith: keyId,
-        payload: dataHex,
-        encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
-        hashFunction: 'HASH_FUNCTION_NO_OP', // Data is already hashed if needed
-      },
-      timestampMs: String(Date.now()),
+      signWith: keyId,
+      payload: dataHex,
+      encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
+      hashFunction: 'HASH_FUNCTION_NO_OP', // Data is already hashed if needed
     });
 
     // Extract and combine signature components
-    const r = signResponse.activity.result.signRawPayloadResult?.r;
-    const s = signResponse.activity.result.signRawPayloadResult?.s;
+    const r = signResponse.r;
+    const s = signResponse.s;
 
     if (!r || !s) {
       throw new Error('Invalid signature response from Turnkey');
