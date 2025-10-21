@@ -933,11 +933,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         // Get full user data to access their wallets
         const userData = await storage.getUserByDid(user.did);
-        
-        if (!userData || !userData.assertionWalletId || !userData.assertionKeyPublic) {
+
+        if (!userData || !userData.assertionKeyId || !userData.assertionKeyPublic) {
           throw new Error('User missing assertion key for signing');
         }
-        
+
         // Create ownership credential
         const credentialSubject = {
           id: didWebvh, // The asset's DID
@@ -951,26 +951,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
             contentType: r.contentType
           }))
         };
-        
+
         const unsignedCredential = await originalsSdk.credentials.createResourceCredential(
           'ResourceCreated',
           credentialSubject,
           user.did // Issued by the user
         );
-        
-        // Import Privy signer utilities
-        const { createPrivySigner } = await import('./privy-signer');
-        
+
+        // Import Turnkey signer utilities
+        const { createTurnkeySigner } = await import('./turnkey-signer');
+
         // Get verification method ID for the user's assertion key
         const verificationMethodId = `${user.did}#assertion-key`;
-        
-        // Create a signer for the user's assertion wallet
-        const userSigner = await createPrivySigner(
-          user.privyId,
-          userData.assertionWalletId,
-          privyClient,
-          verificationMethodId,
-          user.authToken
+
+        // Create a signer for the user's assertion key using Turnkey
+        const userSigner = await createTurnkeySigner(
+          user.turnkeyUserId,
+          userData.assertionKeyId,
+          turnkeyClient,
+          verificationMethodId
         );
         
         // Use SDK's external signer support to sign the credential
@@ -1333,153 +1332,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create both Bitcoin and Stellar wallets automatically in one call
+  // REMOVED: Old Privy wallet creation endpoints
+  // These endpoints are deprecated after migrating to Turnkey
+  // Turnkey manages keys differently - via sub-organizations and private keys
+  // Wallet creation is now handled automatically during DID creation
+  /*
   app.post("/api/wallets/create-both", authenticateUser, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      if (!user?.id) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-
-      // Read policy IDs from environment (may be required by Privy)
-      const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
-      const policyIds = rawPolicyIds
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      
-      // Use Privy to create both Bitcoin and Stellar wallets using individual calls
-      // Privy manages all keys - we never see or store private keys
-      // The API will automatically handle HD wallet indexing
-      let btcWallet = await privyClient.wallets().create({
-        owner: {
-          user_id: user.privyId, // Use Privy ID for wallet operations
-        },
-        chain_type: "bitcoin-segwit",
-        policy_ids: policyIds.length > 0 ? policyIds : [],
-      });
-      console.log("Bitcoin wallet created:", btcWallet);
-      
-      let stellarWallet = await privyClient.wallets().create({
-        owner: {
-          user_id: user.privyId, // Use Privy ID for wallet operations
-        },
-        chain_type: "stellar",
-        policy_ids: policyIds.length > 0 ? policyIds : [],
-      });
-      console.log("Stellar wallet created:", stellarWallet);
-
-      // Fetch updated user to get all wallets (since there could be multiple)
-      const updatedUser = await privyClient.users()._get(user.privyId);
-      const allWallets = updatedUser.linked_accounts?.filter((a: any) => a.type === 'wallet') || [];
-
-      console.log("Bitcoin and Stellar wallets created. User now has", allWallets.length, "wallets");
-
-      // Privy returns the wallet info with public keys
-      // Private keys are managed entirely by Privy's infrastructure
-      return res.status(201).json({
-        success: true,
-        message: "Bitcoin and Stellar wallets created and managed by Privy",
-        userId: user.privyId, // Use Privy ID for wallet operations
-        wallets: allWallets,
-        btcWallet,
-        stellarWallet,
-      });
-    } catch (error: any) {
-      console.error("Error creating Bitcoin and Stellar wallets:", error);
-      return res.status(500).json({ error: error.message || "Failed to create wallets" });
-    }
+    return res.status(501).json({ error: "Wallet creation migrated to Turnkey - keys are auto-created with DID" });
   });
 
-  // Create a Privy Bitcoin wallet for the authenticated user
-  // Create Stellar wallet (uses ED25519 for signing)
-  // Automatically handles being first wallet or additional wallet
   app.post("/api/wallets/stellar", authenticateUser, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      if (!user?.id) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-
-      // Get user to check existing wallets
-      const privyUser = await privyClient.users()._get(user.privyId);
-      
-      // Read policy IDs from environment (may be required by Privy)
-      const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
-      const policyIds = rawPolicyIds
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      
-      // Use Privy to create a Stellar wallet (ED25519-based)
-      // Privy manages all keys - we never see or store private keys
-      // The API will automatically handle HD wallet indexing
-      const result = await privyClient.wallets().create({
-        owner: {
-          user_id: user.privyId, // Use Privy ID for wallet operations
-        },
-        chain_type: "stellar",
-        policy_ids: policyIds.length > 0 ? policyIds : [],
-      });
-
-      // Privy returns the wallet info with public key
-      // Private key is managed entirely by Privy's infrastructure
-      return res.status(201).json({
-        success: true,
-        message: "Stellar wallet created with ED25519 keys managed by Privy",
-        userId: user.privyId, // Use Privy ID for wallet operations
-        wallet: result,
-      });
-    } catch (error: any) {
-      console.error("Error creating Stellar wallet:", error);
-      return res.status(500).json({ error: error.message || "Failed to create Stellar wallet" });
-    }
+    return res.status(501).json({ error: "Wallet creation migrated to Turnkey - keys are auto-created with DID" });
   });
 
-  // Create Bitcoin wallet
-  // Automatically handles being first wallet or additional wallet
   app.post("/api/wallets/bitcoin", authenticateUser, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      if (!user?.id) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-
-      // Get user to check existing wallets
-      const privyUser = await privyClient.users()._get(user.privyId);
-
-      // Read policy IDs from environment; these must be configured in Privy Console
-      const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
-      const policyIds = rawPolicyIds
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      
-      // Privy's createWallets API automatically handles HD wallet indexing
-      // The first wallet will be at index 0, subsequent wallets at higher indices
-      const result = await privyClient.wallets().create({
-        owner: {
-          user_id: user.privyId, // Use Privy ID for wallet operations
-        },
-        chain_type: "bitcoin-segwit",
-        policy_ids: policyIds.length > 0 ? policyIds : [],
-        });
-
-      console.log("Bitcoin wallet created. User now has", result.id, " a new wallet");
-
-      // result contains the updated user and wallets
-      return res.status(201).json({
-        success: true,
-        message: "Bitcoin wallet created and managed by Privy",
-        userId: user.privyId, // Use Privy ID for wallet operations
-        wallet: result,
-      });
-    } catch (error: any) {
-      console.error("Error creating Privy BTC wallet:", error);
-      const message = error?.message || "Failed to create BTC wallet";
-      return res.status(500).json({ error: message });
-    }
+    return res.status(501).json({ error: "Wallet creation migrated to Turnkey - keys are auto-created with DID" });
   });
+  */
 
   app.get("/api/wallet/:userId", async (req, res) => {
     try {

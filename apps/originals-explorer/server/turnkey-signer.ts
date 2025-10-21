@@ -237,7 +237,7 @@ export async function createVerificationMethodsFromTurnkey(
 
   // Check if we have existing keys
   const ed25519Keys = existingKeys.filter(
-    (k: any) => k.curve === 'CURVE_ED25519' && k.addressFormats?.includes('ADDRESS_FORMAT_ED25519')
+    (k: any) => k.curve === 'CURVE_ED25519' && k.addressFormats?.includes('ADDRESS_FORMAT_XLM')
   );
 
   if (ed25519Keys.length === 0) {
@@ -246,7 +246,7 @@ export async function createVerificationMethodsFromTurnkey(
       privateKeys: [{
         privateKeyName: `auth-key-${userSlug}`,
         curve: 'CURVE_ED25519',
-        addressFormats: ['ADDRESS_FORMAT_ED25519'],
+        addressFormats: ['ADDRESS_FORMAT_XLM'],
         privateKeyTags: ['auth', 'did:webvh'],
       }],
     });
@@ -255,7 +255,7 @@ export async function createVerificationMethodsFromTurnkey(
       privateKeys: [{
         privateKeyName: `update-key-${userSlug}`,
         curve: 'CURVE_ED25519',
-        addressFormats: ['ADDRESS_FORMAT_ED25519'],
+        addressFormats: ['ADDRESS_FORMAT_XLM'],
         privateKeyTags: ['update', 'did:webvh'],
       }],
     });
@@ -270,7 +270,7 @@ export async function createVerificationMethodsFromTurnkey(
       privateKeys: [{
         privateKeyName: `update-key-${userSlug}`,
         curve: 'CURVE_ED25519',
-        addressFormats: ['ADDRESS_FORMAT_ED25519',],
+        addressFormats: ['ADDRESS_FORMAT_XLM'],
         privateKeyTags: ['update', 'did:webvh'],
       }],
     });
@@ -286,19 +286,26 @@ export async function createVerificationMethodsFromTurnkey(
     throw new Error('Failed to create or retrieve keys from Turnkey');
   }
 
-  // Get public keys and convert to multibase
-  const authPublicKeyHex = authKey?.publicKey || '';
-  const updatePublicKeyHex = updateKey?.publicKey || '';
-
-  if (!authPublicKeyHex || !updatePublicKeyHex) {
-    throw new Error('Public keys not available from Turnkey');
-  }
-
   const authKeyId = authKey?.privateKeyId || '';
   const updateKeyId = updateKey?.privateKeyId || '';
 
   if (!authKeyId || !updateKeyId) {
     throw new Error('Private key IDs not available from Turnkey');
+  }
+
+  // Fetch full key details to get public keys
+  const authKeyDetails = await turnkeyClient.apiClient().getPrivateKey({
+    privateKeyId: authKeyId,
+  });
+  const updateKeyDetails = await turnkeyClient.apiClient().getPrivateKey({
+    privateKeyId: updateKeyId,
+  });
+
+  const authPublicKeyHex = authKeyDetails.privateKey?.publicKey || '';
+  const updatePublicKeyHex = updateKeyDetails.privateKey?.publicKey || '';
+
+  if (!authPublicKeyHex || !updatePublicKeyHex) {
+    throw new Error('Public keys not available from Turnkey');
   }
 
   const authPublicKeyBytes = Buffer.from(authPublicKeyHex, 'hex');

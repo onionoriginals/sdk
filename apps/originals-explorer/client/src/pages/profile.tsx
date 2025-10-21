@@ -47,7 +47,7 @@ export default function Profile() {
         if (data.created) {
           toast({
             title: "DID Created",
-            description: "Your decentralized identifier has been created and secured by Privy.",
+            description: "Your decentralized identifier has been created and secured by Turnkey.",
           });
         }
 
@@ -110,7 +110,7 @@ export default function Profile() {
     );
   }
 
-  if (!isAuthenticated || !privyUser) {
+  if (!isAuthenticated || !user) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Card className="w-full max-w-md">
@@ -132,8 +132,9 @@ export default function Profile() {
     );
   }
 
-  const initials = privyUser?.email?.address 
-    ? privyUser.email.address.split('@')[0].slice(0, 2).toUpperCase()
+  const email = localStorage.getItem('turnkey_email') || 'No email address';
+  const initials = email !== 'No email address'
+    ? email.split('@')[0].slice(0, 2).toUpperCase()
     : 'U';
 
   return (
@@ -158,7 +159,7 @@ export default function Profile() {
             <div className="flex items-center gap-3 mb-4 p-3 hover:bg-gray-50 rounded-lg transition-colors">
               <Mail className="w-4 h-4 text-gray-500" />
               <span className="text-sm text-gray-900" data-testid="profile-email-display">
-                {privyUser?.email?.address || 'No email address'}
+                {email}
               </span>
             </div>
 
@@ -179,7 +180,7 @@ export default function Profile() {
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs font-semibold text-blue-900">Decentralized ID</span>
                         <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-                          Secured by Privy
+                          Secured by Turnkey
                         </span>
                       </div>
                       <div className="font-mono text-xs text-gray-700 break-all mb-2" data-testid="profile-did">
@@ -266,7 +267,7 @@ export default function Profile() {
                       </div>
 
                       <div className="text-xs text-gray-500 italic mt-2">
-                        🔒 All private keys are securely managed by Privy
+                        🔒 All private keys are securely managed by Turnkey
                       </div>
                       <div className="text-xs text-gray-500 italic">
                         ℹ️ Update key is managed separately in did.jsonl
@@ -295,70 +296,37 @@ export default function Profile() {
 
             <Separator className="mb-6" />
 
-            {/* Wallet Section */}
+            {/* Wallet Section - Removed (Privy-specific functionality) */}
+            {/*
             <div className="mb-6">
               <div className="text-xs text-gray-500 mb-3">Your wallets</div>
-              {privyUser?.linkedAccounts?.some((account: any) => account.type === 'wallet') ? (
-                <div className="space-y-2">
-                  {privyUser.linkedAccounts
-                    .filter((account: any) => account.type === 'wallet')
-                    .map((wallet: any, index: number) => (
-                      <div key={wallet.address || index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div className="flex items-center gap-2">
-                          <Wallet className="w-4 h-4 text-gray-500" />
-                          <div className="flex flex-col">
-                            <span className="text-sm font-mono text-gray-900" data-testid={`profile-wallet-address-${index}`}>
-                              {wallet.address.slice(0, 6)}...{wallet.address.slice(-4)}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                             {wallet.walletClientType || wallet.chainType || 'wallet'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              ) : privyUser?.wallet?.address ? (
-                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <Wallet className="w-4 h-4 text-gray-500" />
-                    <span className="text-sm font-mono text-gray-900" data-testid="profile-wallet-address">
-                      {privyUser.wallet.address.slice(0, 6)}...{privyUser.wallet.address.slice(-4)}
-                    </span>
-                  </div>
-                  <div className="text-xs text-gray-500">0.063 ETH</div>
-                </div>
-              ) : (
-                <div className="text-sm text-gray-500 text-center py-4">
-                  No wallets connected
-                </div>
-              )}
+              <div className="text-sm text-gray-500 text-center py-4">
+                Wallet management has been migrated to Turnkey
+              </div>
             </div>
 
-            {/* Add Funds Button */}
-            <Button 
-              className="w-full bg-gray-900 hover:bg-gray-800 text-white rounded-lg mb-6" 
+            <Button
+              className="w-full bg-gray-900 hover:bg-gray-800 text-white rounded-lg mb-6"
               data-testid="profile-add-funds-button"
             >
               Add funds
             </Button>
+            */}
 
-            {/* Create Both Wallets Button */}
+            {/* Wallet Creation Buttons - Removed (Privy-specific functionality) */}
+            {/*
             <Button
               className="w-full bg-purple-600 hover:bg-purple-700 text-white rounded-lg mb-3"
               onClick={async () => {
                 try {
                   const res = await apiRequest("POST", "/api/wallets/create-both");
                   const data = await res.json();
-                  console.log("Bitcoin and Stellar wallets created:", data);
                   toast({
                     title: "Wallets Created",
                     description: `Created ${data.wallets?.length || 2} wallets! Refreshing...`,
                   });
-                  // Reload the page to fetch updated user data with new wallets
                   setTimeout(() => window.location.reload(), 1500);
                 } catch (e: any) {
-                  console.error("Failed to create wallets:", e);
                   toast({
                     title: "Failed to create wallets",
                     description: e?.message || "Please try again.",
@@ -366,69 +334,11 @@ export default function Profile() {
                   });
                 }
               }}
-              data-testid="profile-create-both-wallets"
             >
               <Wallet className="w-4 h-4 mr-2" />
               Create Bitcoin & Stellar Wallets
             </Button>
-
-            {/* Create Bitcoin Wallet Button */}
-            <Button
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white rounded-lg mb-3"
-              onClick={async () => {
-                try {
-                  // Bitcoin requires server-side API (chainType not supported client-side)
-                  const res = await apiRequest("POST", "/api/wallets/bitcoin");
-                  const data = await res.json();
-                  console.log("Bitcoin wallet created:", data);
-                  toast({
-                    title: "Bitcoin Wallet Created",
-                    description: "Your BTC wallet is managed by Privy. Refreshing...",
-                  });
-                  setTimeout(() => window.location.reload(), 1500);
-                } catch (e: any) {
-                  console.error("Failed to create Bitcoin wallet:", e);
-                  toast({
-                    title: "Failed to create wallet",
-                    description: e?.message || "Please try again.",
-                    variant: "destructive",
-                  });
-                }
-              }}
-              data-testid="profile-create-btc-wallet"
-            >
-              <Wallet className="w-4 h-4 mr-2" />
-              Create Bitcoin Wallet
-            </Button>
-
-            {/* Create Stellar Wallet (ED25519) Button */}
-            <Button
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg mb-6"
-              onClick={async () => {
-                try {
-                  // Stellar requires server-side API (chainType not supported client-side)
-                  const res = await apiRequest("POST", "/api/wallets/stellar");
-                  const data = await res.json();
-                  console.log("Stellar wallet created:", data);
-                  toast({
-                    title: "Stellar Wallet Created",
-                    description: "Your ED25519 signing wallet is managed by Privy. Refreshing...",
-                  });
-                  setTimeout(() => window.location.reload(), 1500);
-                } catch (e: any) {
-                  console.error("Failed to create Stellar wallet:", e);
-                  toast({
-                    title: "Failed to create wallet",
-                    description: e?.message || "Please try again.",
-                    variant: "destructive",
-                  });
-                }
-              }}
-              data-testid="profile-create-stellar-wallet"
-            >
-              <Key className="w-4 h-4 mr-2" />
-              Create Stellar Wallet (ED25519)
-            </Button>
+            */}
 
             {/* Quick Actions */}
             <div className="space-y-2 mb-6">
@@ -451,11 +361,11 @@ export default function Profile() {
               </Link>
             </div>
 
-            {/* Protected by Privy */}
+            {/* Protected by Turnkey */}
             <div className="text-center">
               <div className="text-xs text-gray-400 flex items-center justify-center gap-1">
-                Protected by 
-                <span className="font-semibold text-gray-600">●&nbsp;privy</span>
+                Protected by
+                <span className="font-semibold text-gray-600">●&nbsp;Turnkey</span>
               </div>
             </div>
           </CardContent>
