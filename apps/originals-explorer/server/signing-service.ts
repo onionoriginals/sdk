@@ -1,28 +1,28 @@
-import { PrivyClient } from "@privy-io/node";
+import { Turnkey } from "@turnkey/sdk-server";
 import { storage } from "./storage";
 
 export type KeyPurpose = 'authentication' | 'assertion' | 'update';
 
 /**
- * Sign data using a user's Privy-managed key
- * This function keeps all private keys secure within Privy's infrastructure
- * 
- * @param userId - The Privy user ID
+ * Sign data using a user's Turnkey-managed key
+ * This function keeps all private keys secure within Turnkey's infrastructure
+ *
+ * @param userId - The Turnkey user/sub-org ID
  * @param keyPurpose - Which key to use ('authentication', 'assertion', or 'update')
  * @param data - The data to sign (as a string or Buffer)
- * @param privyClient - Initialized Privy client
- * @returns The signature as a string
+ * @param turnkeyClient - Initialized Turnkey client
+ * @returns The signature as a hex string
  */
 export async function signWithUserKey(
   userId: string,
   keyPurpose: KeyPurpose,
   data: string | Buffer,
-  privyClient: PrivyClient
+  turnkeyClient: Turnkey
 ): Promise<string> {
   try {
     // Get the user's DID metadata from storage
     const user = await storage.getUser(userId);
-    
+
     if (!user) {
       throw new Error(`User not found: ${userId}`);
     }
@@ -31,49 +31,60 @@ export async function signWithUserKey(
       throw new Error(`User ${userId} does not have a DID. Please create one first.`);
     }
 
-    // Get the appropriate Privy wallet ID based on key purpose
-    let walletId: string | null;
+    if (!user.turnkeyUserId) {
+      throw new Error(`User ${userId} does not have a Turnkey account`);
+    }
+
+    // Get the appropriate Turnkey key ID based on key purpose
+    let keyId: string | null;
     switch (keyPurpose) {
       case 'authentication':
-        walletId = user.authWalletId;
+        keyId = user.authKeyId;
         break;
       case 'assertion':
-        walletId = user.assertionWalletId;
+        keyId = user.assertionKeyId;
         break;
       case 'update':
-        walletId = user.updateWalletId;
+        keyId = user.updateKeyId;
         break;
       default:
         throw new Error(`Invalid key purpose: ${keyPurpose}`);
     }
 
-    if (!walletId) {
-      throw new Error(`No ${keyPurpose} wallet found for user ${userId}`);
+    if (!keyId) {
+      throw new Error(`No ${keyPurpose} key found for user ${userId}`);
     }
 
-    // Convert data to appropriate format
-    const dataToSign = typeof data === 'string' ? data : data.toString('hex');
+    // Convert data to hex format for Turnkey
+    const dataHex = typeof data === 'string'
+      ? Buffer.from(data).toString('hex')
+      : data.toString('hex');
 
-    // Use Privy's signing API to sign the data
-    // Note: The exact API method may vary - check Privy's documentation
-    // This is a placeholder for the actual Privy signing method
-    console.log(`Signing data with ${keyPurpose} key (wallet ${walletId})...`);
-    
-    // TODO: Replace with actual Privy signing API call
-    // Example (check Privy docs for exact method):
-    // const signature = await privyClient.walletApi.signMessage({
-    //   walletId,
-    //   message: dataToSign,
-    // });
-    
-    // For now, throw an error indicating this needs implementation
-    throw new Error(
-      'Privy signing API integration not yet implemented. ' +
-      'Please refer to Privy documentation for the correct signing method. ' +
-      `Wallet ID: ${walletId}, Key purpose: ${keyPurpose}`
-    );
+    console.log(`Signing data with ${keyPurpose} key (${keyId})...`);
 
-    // return signature;
+    // Use Turnkey's signRawPayload API to sign the data
+    const signResponse = await turnkeyClient.apiClient().signRawPayload({
+      type: 'ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2',
+      organizationId: user.turnkeyUserId,
+      parameters: {
+        signWith: keyId,
+        payload: dataHex,
+        encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
+        hashFunction: 'HASH_FUNCTION_NO_OP', // Data is already hashed if needed
+      },
+      timestampMs: String(Date.now()),
+    });
+
+    // Extract and combine signature components
+    const r = signResponse.activity.result.signRawPayloadResult?.r;
+    const s = signResponse.activity.result.signRawPayloadResult?.s;
+
+    if (!r || !s) {
+      throw new Error('Invalid signature response from Turnkey');
+    }
+
+    const signature = r + s;
+    return signature;
   } catch (error) {
     console.error('Error signing with user key:', error);
     throw new Error(
@@ -84,8 +95,8 @@ export async function signWithUserKey(
 
 /**
  * Verify a signature against a user's public key
- * 
- * @param userId - The Privy user ID
+ *
+ * @param userId - The Turnkey user/sub-org ID
  * @param keyPurpose - Which key was used ('authentication', 'assertion', or 'update')
  * @param data - The original data that was signed
  * @param signature - The signature to verify
@@ -145,8 +156,8 @@ export async function verifySignature(
 
 /**
  * Get the verification method ID for a user's key
- * 
- * @param userId - The Privy user ID
+ *
+ * @param userId - The Turnkey user/sub-org ID
  * @param keyPurpose - Which key ('authentication', 'assertion', or 'update')
  * @returns The verification method ID (e.g., "did:webvh:example.com:user#auth-key")
  */

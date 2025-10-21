@@ -1,7 +1,7 @@
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient, setGlobalGetAccessToken } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
+import { TurnkeyProvider } from "@turnkey/sdk-react";
 import { useEffect, useRef } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -21,17 +21,16 @@ import UploadAssets from "@/pages/upload-assets";
 import GoogleCallback from "@/pages/google-callback";
 
 function AuthSetup() {
-  const { getAccessToken } = usePrivy();
-  
+  // For Turnkey, we'll set up the access token retrieval differently
+  // This will be implemented in the useAuth hook
   useEffect(() => {
-    // Wrap getAccessToken to ensure it returns a string (never null for auth)
-    const wrappedGetAccessToken = async () => {
-      const token = await getAccessToken();
-      return token || '';
+    // Get token from localStorage or session storage
+    const getAccessToken = async () => {
+      return localStorage.getItem('turnkey_token') || '';
     };
-    setGlobalGetAccessToken(wrappedGetAccessToken);
-  }, [getAccessToken]);
-  
+    setGlobalGetAccessToken(getAccessToken);
+  }, []);
+
   return null;
 }
 
@@ -56,18 +55,15 @@ function Router() {
 }
 
 function App() {
+  const turnkeyConfig = {
+    apiBaseUrl: "https://api.turnkey.com",
+    defaultOrganizationId: import.meta.env.VITE_TURNKEY_ORGANIZATION_ID,
+    // rpId and serverSignUrl would be configured for production
+    // For now, we'll handle auth manually in the login page
+  };
+
   return (
-    <PrivyProvider 
-      appId={import.meta.env.VITE_PRIVY_APP_ID}
-      config={{
-        appearance: {
-          theme: 'light',
-          accentColor: '#1f2937',
-          logo: undefined,
-        },
-        loginMethods: ['email', 'wallet', 'google'],
-      }}
-    >
+    <TurnkeyProvider config={turnkeyConfig}>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <AuthSetup />
@@ -78,7 +74,7 @@ function App() {
           </div>
         </TooltipProvider>
       </QueryClientProvider>
-    </PrivyProvider>
+    </TurnkeyProvider>
   );
 }
 

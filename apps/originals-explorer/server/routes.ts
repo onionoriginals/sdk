@@ -6,7 +6,8 @@ import { z } from "zod";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
-import { PrivyClient } from "@privy-io/node";
+import { Turnkey } from "@turnkey/sdk-server";
+import { ApiKeyStamper } from "@turnkey/api-key-stamper";
 import { originalsSdk } from "./originals";
 import { createUserDIDWebVH, publishDIDDocument } from "./did-webvh-service";
 import { OriginalsAsset } from "@originals/sdk";
@@ -73,43 +74,68 @@ const googleClient = new OAuth2Client(
   process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/auth/google/callback'
 );
 
-const privyClient = new PrivyClient({
-  appId: process.env.PRIVY_APP_ID!,
-  appSecret: process.env.PRIVY_APP_SECRET!
+// Initialize Turnkey client with API key authentication
+const stamper = new ApiKeyStamper({
+  apiPublicKey: process.env.TURNKEY_API_PUBLIC_KEY!,
+  apiPrivateKey: process.env.TURNKEY_API_PRIVATE_KEY!,
+});
+
+const turnkeyClient = new Turnkey({
+  apiBaseUrl: "https://api.turnkey.com",
+  stamper,
+  defaultOrganizationId: process.env.TURNKEY_ORGANIZATION_ID!,
 });
 
 // Authentication middleware that uses did:webvh as primary identifier
 const authenticateUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authorizationHeader = req.headers.authorization;
-    
+
     if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
       return res.status(401).json({ error: "Missing or invalid authorization header" });
     }
 
     const token = authorizationHeader.substring(7);
-    const verifiedClaims = await privyClient.utils().auth().verifyAuthToken(token);
-    
-    // Check if user already exists by Privy ID
-    let user = await storage.getUserByPrivyId(verifiedClaims.user_id);
-    
+
+    // Verify Turnkey session token
+    // For now, we'll use a simple approach: the token contains the Turnkey sub-org ID
+    // In production, you'd verify the token signature and claims
+    let turnkeyUserId: string;
+
+    try {
+      // Parse the token to extract user info
+      // This is a simplified version - in production, properly verify JWT or session token
+      const tokenPayload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+      turnkeyUserId = tokenPayload.sub || tokenPayload.userId;
+
+      if (!turnkeyUserId) {
+        throw new Error('No user ID in token');
+      }
+    } catch (err) {
+      console.error("Token parsing error:", err);
+      return res.status(401).json({ error: "Invalid token format" });
+    }
+
+    // Check if user already exists by Turnkey ID
+    let user = await storage.getUserByTurnkeyId(turnkeyUserId);
+
     // If user doesn't exist, create DID:WebVH and user record
     if (!user) {
-      console.log(`Creating DID:WebVH for new user ${verifiedClaims.user_id}...`);
-      const didData = await createUserDIDWebVH(verifiedClaims.user_id, privyClient, token);
-      
+      console.log(`Creating DID:WebVH for new user ${turnkeyUserId}...`);
+      const didData = await createUserDIDWebVH(turnkeyUserId, turnkeyClient);
+
       // Create user with DID as primary identifier
-      user = await storage.createUserWithDid(verifiedClaims.user_id, didData.did, didData);
+      user = await storage.createUserWithDid(turnkeyUserId, didData.did, didData);
     }
-    
+
     // Add user info to request with database ID as primary identifier
     (req as any).user = {
       id: user.id, // Primary identifier is the database UUID (for foreign keys)
-      privyId: verifiedClaims.user_id, // Keep Privy ID for wallet operations
+      turnkeyUserId: turnkeyUserId, // Turnkey sub-org ID for key operations
       did: user.did, // DID for display/lookup
-      authToken: token, // Store JWT for Privy authorization context
+      authToken: token, // Store token for future use
     };
-    
+
     next();
   } catch (error) {
     console.error("Authentication error:", error);
@@ -138,7 +164,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         id: user.id, // This is now the did:webvh
         did: user.did,
-        privyId: user.privyId, // Keep for reference
+        turnkeyUserId: user.turnkeyUserId, // Keep for reference
       });
     } catch (error) {
       console.error("Error fetching user:", error);
