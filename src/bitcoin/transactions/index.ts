@@ -1,9 +1,13 @@
 /**
- * Bitcoin transaction creation and management
- * 
- * This module provides transaction infrastructure for Bitcoin operations,
- * including commit/reveal transactions for Ordinals inscriptions.
+ * Bitcoin Transactions
+ *
+ * This directory contains modules for creating and managing Bitcoin transactions,
+ * particularly for Ordinals inscriptions.
  */
 
-export {};
-
+// Export commit transaction functionality
+export {
+  createCommitTransaction,
+  type CommitTransactionParams,
+  type CommitTransactionResult
+} from './commit.js';

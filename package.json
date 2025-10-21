@@ -42,13 +42,15 @@
     "@noble/ed25519": "^2.0.0",
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^2.0.0",
+    "@scure/base": "^1.1.6",
     "@scure/bip32": "^2.0.0",
+    "@scure/btc-signer": "^1.8.0",
     "bitcoinjs-lib": "^6.1.0",
     "cbor-js": "^0.1.0",
     "didwebvh-ts": "^2.5.4",
     "jsonld": "^8.3.3",
-    "multiformats": "^12.0.0",
-    "@scure/base": "^1.1.6"
+    "micro-ordinals": "^0.2.2",
+    "multiformats": "^12.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.28.4",
