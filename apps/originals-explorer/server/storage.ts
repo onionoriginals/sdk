@@ -28,6 +28,15 @@ export interface IStorage {
   getAssetsByUserDid(userDid: string): Promise<Asset[]>;
   createAsset(asset: InsertAsset): Promise<Asset>;
   updateAsset(id: string, updates: Partial<Asset>): Promise<Asset | undefined>;
+  createAssetFromGoogleDrive(data: {
+    userId: string;
+    importId: string;
+    title: string;
+    didPeer: string;
+    didDocument: any;
+    resources: any[];
+    sourceMetadata: any;
+  }): Promise<Asset>;
   
   // Wallet connection methods
   getWalletConnection(userId: string): Promise<WalletConnection | undefined>;
@@ -54,6 +63,19 @@ export interface IStorage {
     verifiedAssets: number;
     migratedAssets: number;
   }>;
+  
+  // Google Drive import methods
+  createGoogleDriveImport(data: {
+    userId: string;
+    folderId: string;
+    folderName: string;
+    status: string;
+    totalFiles: string;
+    processedFiles: string;
+    failedFiles: string;
+  }): Promise<{ id: string }>;
+  getGoogleDriveImport(importId: string): Promise<any>;
+  updateGoogleDriveImport(importId: string, updates: Partial<any>): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -64,10 +86,12 @@ export class MemStorage implements IStorage {
   private signingKeys: Map<string, SigningKey[]>;
   private assetTypes: Map<string, AssetType>;
   private didDocuments: Map<string, { didDocument: any; didLog?: any; publishedAt: string }>;
+  private googleDriveImports: Map<string, any>;
 
   constructor() {
     this.users = new Map();
     this.privyToDidMapping = new Map();
+    this.googleDriveImports = new Map();
     this.assets = new Map();
     this.walletConnections = new Map();
     this.signingKeys = new Map();
@@ -257,6 +281,51 @@ export class MemStorage implements IStorage {
     return updatedAsset;
   }
 
+  async createAssetFromGoogleDrive(data: {
+    userId: string;
+    importId: string;
+    title: string;
+    didPeer: string;
+    didDocument: any;
+    resources: any[];
+    sourceMetadata: any;
+  }): Promise<Asset> {
+    const asset: Asset = {
+      id: randomUUID(),
+      userId: data.userId,
+      title: data.title,
+      assetType: 'image',
+      status: 'draft',
+      currentLayer: 'did:peer',
+      didPeer: data.didPeer,
+      didWebvh: null,
+      didBtco: null,
+      description: null,
+      category: null,
+      tags: null,
+      mediaUrl: null,
+      originalReference: 'google-drive-import',
+      metadata: {
+        ...data.sourceMetadata,
+        resourceCount: data.resources.length,
+        resources: data.resources, // Only metadata (no content)
+      },
+      credentials: null,
+      provenance: {
+        didDocument: data.didDocument,
+        importId: data.importId,
+        resourceCount: data.resources.length,
+        resources: data.resources, // Only metadata (no content)
+      },
+      didDocument: data.didDocument,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.assets.set(asset.id, asset);
+    console.log(`[Storage] Created asset ${asset.id} with ${data.resources.length} resources`);
+    return asset;
+  }
+
   async getWalletConnection(userId: string): Promise<WalletConnection | undefined> {
     return Array.from(this.walletConnections.values()).find(
       (connection) => connection.userId === userId && connection.isActive === "true",
@@ -346,6 +415,38 @@ export class MemStorage implements IStorage {
       verifiedAssets: allAssets.filter(asset => asset.credentials && Object.keys(asset.credentials as any).length > 0).length,
       migratedAssets: allAssets.filter(asset => asset.assetType === "migrated").length,
     };
+  }
+
+  async createGoogleDriveImport(data: {
+    userId: string;
+    folderId: string;
+    folderName: string;
+    status: string;
+    totalFiles: string;
+    processedFiles: string;
+    failedFiles: string;
+  }) {
+    const id = randomUUID();
+    const importRecord = {
+      id,
+      ...data,
+      createdAt: new Date(),
+      completedAt: null,
+      errorDetails: [],
+    };
+    this.googleDriveImports.set(id, importRecord);
+    return { id };
+  }
+
+  async getGoogleDriveImport(importId: string) {
+    return this.googleDriveImports.get(importId);
+  }
+
+  async updateGoogleDriveImport(importId: string, updates: Partial<any>) {
+    const existing = this.googleDriveImports.get(importId);
+    if (existing) {
+      this.googleDriveImports.set(importId, { ...existing, ...updates });
+    }
   }
 }
 

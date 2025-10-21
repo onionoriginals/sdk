@@ -253,6 +253,42 @@ export class DatabaseStorage {
     return this.didDocuments.get(slug);
   }
 
+  async createAssetFromGoogleDrive(data: {
+    userId: string;
+    importId: string;
+    title: string;
+    didPeer: string;
+    didDocument: any;
+    resources: any[];
+    sourceMetadata: any;
+  }): Promise<Asset> {
+    const assetValues = {
+      userId: data.userId,
+      title: data.title,
+      assetType: 'image' as const,
+      status: 'draft',
+      currentLayer: 'did:peer' as const,
+      didPeer: data.didPeer,
+      originalReference: 'google-drive-import',
+      metadata: {
+        ...data.sourceMetadata,
+        resourceCount: data.resources.length,
+        resources: data.resources, // Only metadata (no content)
+      },
+      provenance: {
+        didDocument: data.didDocument,
+        importId: data.importId,
+        resourceCount: data.resources.length,
+        resources: data.resources, // Only metadata (no content)
+      },
+      didDocument: data.didDocument,
+    };
+    
+    const [created] = await this.db.insert(assets).values(assetValues).returning();
+    console.log(`[DatabaseStorage] Created asset ${created.id} with ${data.resources.length} resources`);
+    return created;
+  }
+
   // Stats
   async getStats(): Promise<Stats> {
     const allAssets = await this.db.select().from(assets);
@@ -261,6 +297,41 @@ export class DatabaseStorage {
       verifiedAssets: allAssets.filter(a => a.credentials && Object.keys(a.credentials).length > 0).length,
       migratedAssets: allAssets.filter(a => a.assetType === "migrated").length,
     };
+  }
+
+  // Google Drive import methods (using in-memory for now, can be migrated to DB later)
+  private googleDriveImports: Map<string, any> = new Map();
+
+  async createGoogleDriveImport(data: {
+    userId: string;
+    folderId: string;
+    folderName: string;
+    status: string;
+    totalFiles: string;
+    processedFiles: string;
+    failedFiles: string;
+  }) {
+    const id = crypto.randomUUID();
+    const importRecord = {
+      id,
+      ...data,
+      createdAt: new Date(),
+      completedAt: null,
+      errorDetails: [],
+    };
+    this.googleDriveImports.set(id, importRecord);
+    return { id };
+  }
+
+  async getGoogleDriveImport(importId: string) {
+    return this.googleDriveImports.get(importId);
+  }
+
+  async updateGoogleDriveImport(importId: string, updates: Partial<any>) {
+    const existing = this.googleDriveImports.get(importId);
+    if (existing) {
+      this.googleDriveImports.set(importId, { ...existing, ...updates });
+    }
   }
 
   async close(): Promise<void> {
