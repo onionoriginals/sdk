@@ -18,6 +18,7 @@ import NotFound from "@/pages/not-found";
 import AssetsSpreadsheet from "@/pages/assets-spreadsheet";
 import Setup from "@/pages/setup";
 import UploadAssets from "@/pages/upload-assets";
+import GoogleCallback from "@/pages/google-callback";
 
 function AuthSetup() {
   const { getAccessToken } = usePrivy();
@@ -48,6 +49,7 @@ function Router() {
       <Route path="/create" component={CreateAsset} />
       <Route path="/migrate" component={MigrateAsset} />
       <Route path="/upload-assets" component={UploadAssets} />
+      <Route path="/auth/google/callback" component={GoogleCallback} />
       <Route component={NotFound} />
     </Switch>
   );
