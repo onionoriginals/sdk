@@ -1,4 +1,5 @@
 import { google, drive_v3 } from 'googleapis';
+import { withRetry, RateLimiter } from './retryHelper';
 
 /**
  * Google Drive file metadata for image imports
@@ -28,11 +29,16 @@ export interface ListFilesResult {
  */
 export class GoogleDriveClient {
   private drive: drive_v3.Drive;
+  private rateLimiter: RateLimiter;
 
   constructor(accessToken: string) {
     const auth = new google.auth.OAuth2();
     auth.setCredentials({ access_token: accessToken });
     this.drive = google.drive({ version: 'v3', auth });
+
+    // Rate limiter: max 10 concurrent requests, 100ms between requests
+    // Google Drive API has a limit of 1000 requests per 100 seconds per user
+    this.rateLimiter = new RateLimiter(10, 100);
   }
 
   /**
@@ -74,13 +80,24 @@ export class GoogleDriveClient {
       const subfoldersToProcess: string[] = [];
 
       do {
-        response = await this.drive.files.list({
-          q: `'${folderId}' in parents and trashed = false`,
-          fields: 'nextPageToken, files(id, name, mimeType, size, webViewLink, webContentLink, thumbnailLink, parents, capabilities/canDownload)',
-          pageSize: 1000, // Increased from 100 to reduce API calls
-          pageToken,
-          supportsAllDrives: true,
-          includeItemsFromAllDrives: true,
+        // Use rate limiter and retry logic for API calls
+        response = await this.rateLimiter.execute(async () => {
+          return withRetry(
+            async () => {
+              return this.drive.files.list({
+                q: `'${folderId}' in parents and trashed = false`,
+                fields: 'nextPageToken, files(id, name, mimeType, size, webViewLink, webContentLink, thumbnailLink, parents, capabilities/canDownload)',
+                pageSize: 1000, // Increased from 100 to reduce API calls
+                pageToken,
+                supportsAllDrives: true,
+                includeItemsFromAllDrives: true,
+              });
+            },
+            {
+              maxRetries: 3,
+              initialDelayMs: 1000,
+            }
+          );
         });
 
         const fileList = response.data.files || [];
@@ -216,23 +233,40 @@ export class GoogleDriveClient {
   }
 
   /**
-   * Download file content as Buffer
+   * Download file content as Buffer with retry logic
    */
   async downloadFile(fileId: string): Promise<Buffer> {
-    try {
-      const response = await this.drive.files.get(
-        {
-          fileId,
-          alt: 'media',
-          supportsAllDrives: true,
-        },
-        { responseType: 'arraybuffer' }
-      );
+    return this.rateLimiter.execute(async () => {
+      return withRetry(
+        async () => {
+          try {
+            const response = await this.drive.files.get(
+              {
+                fileId,
+                alt: 'media',
+                supportsAllDrives: true,
+              },
+              { responseType: 'arraybuffer' }
+            );
 
-      return Buffer.from(response.data as ArrayBuffer);
-    } catch (error: any) {
-      throw new Error(`Failed to download file ${fileId}: ${error.message}`);
-    }
+            return Buffer.from(response.data as ArrayBuffer);
+          } catch (error: any) {
+            // Handle specific Google Drive errors
+            if (error.code === 403) {
+              throw new Error(`Permission denied for file ${fileId}: ${error.message}`);
+            }
+            if (error.code === 404) {
+              throw new Error(`File ${fileId} not found: ${error.message}`);
+            }
+            throw error;
+          }
+        },
+        {
+          maxRetries: 3,
+          initialDelayMs: 1000,
+        }
+      );
+    });
   }
 
   /**
