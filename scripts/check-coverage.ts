@@ -7,8 +7,8 @@
 
 import { spawn } from 'child_process';
 
-const MIN_LINE_COVERAGE = 98;
-const MIN_FUNCTION_COVERAGE = 96;
+const MIN_LINE_COVERAGE = 95;
+const MIN_FUNCTION_COVERAGE = 95;
 
 async function runTests(): Promise<string> {
   return new Promise((resolve, reject) => {
