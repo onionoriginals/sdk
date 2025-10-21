@@ -342,7 +342,31 @@ describe('createCommitTransaction', () => {
       await expect(createCommitTransaction(params)).rejects.toThrow(/Invalid fee rate/);
     });
 
-    test('handles UTXO without scriptPubKey gracefully', async () => {
+    test('throws when all UTXOs are missing scriptPubKey', async () => {
+      const invalidUtxo1: Utxo = {
+        txid: 'a'.repeat(64),
+        vout: 0,
+        value: 10000
+        // Missing scriptPubKey
+      };
+
+      const invalidUtxo2: Utxo = {
+        txid: 'b'.repeat(64),
+        vout: 1,
+        value: 10000
+        // Missing scriptPubKey
+      };
+
+      const params = createCommitParams({
+        utxos: [invalidUtxo1, invalidUtxo2]
+      });
+
+      // Should throw error because no valid UTXOs remain after filtering
+      await expect(createCommitTransaction(params)).rejects.toThrow(/No valid spendable UTXOs available/);
+      await expect(createCommitTransaction(params)).rejects.toThrow(/missing scriptPubKey/);
+    });
+
+    test('filters out invalid UTXOs and uses only valid ones', async () => {
       const invalidUtxo: Utxo = {
         txid: 'a'.repeat(64),
         vout: 0,
@@ -351,12 +375,14 @@ describe('createCommitTransaction', () => {
       };
 
       const params = createCommitParams({
-        utxos: [invalidUtxo, createUtxo(10000, 1)]
+        utxos: [invalidUtxo, createUtxo(50000, 1), createUtxo(50000, 2)]
       });
 
-      // Should skip the invalid UTXO and use the valid one
+      // Should filter out the invalid UTXO and use only the valid ones
       const result = await createCommitTransaction(params);
       expect(result).toBeDefined();
+      // Should only use valid UTXOs
+      expect(result.selectedUtxos.every(u => u.scriptPubKey)).toBe(true);
     });
   });
 
@@ -430,6 +456,170 @@ describe('createCommitTransaction', () => {
       }
 
       expect(totalInput).toBe(totalOutput + changeAmount + fee);
+    });
+
+    test('inputs always cover outputs (no negative change)', async () => {
+      // Test with various fee rates to ensure iterative selection works
+      const feeRates = [1, 5, 10, 20, 50];
+
+      for (const feeRate of feeRates) {
+        const params = createCommitParams({
+          utxos: [createUtxo(10000, 0), createUtxo(20000, 1), createUtxo(30000, 2)],
+          feeRate
+        });
+
+        const result = await createCommitTransaction(params);
+
+        const totalInput = result.selectedUtxos.reduce((sum, utxo) => sum + utxo.value, 0);
+        const totalOutput = result.commitAmount + result.fees.commit;
+
+        // Critical check: inputs must always be >= outputs
+        expect(totalInput).toBeGreaterThanOrEqual(totalOutput);
+
+        // Calculate actual change
+        const actualChange = totalInput - totalOutput;
+        expect(actualChange).toBeGreaterThanOrEqual(0);
+      }
+    });
+  });
+
+  describe('Iterative UTXO Selection', () => {
+    test('reselects UTXOs when fee increases after accurate calculation', async () => {
+      // Create scenario where 1 UTXO isn't enough after fee recalculation
+      const params = createCommitParams({
+        utxos: [
+          createUtxo(1500, 0),  // Not enough alone
+          createUtxo(2000, 1),  // Will need this one too
+          createUtxo(5000, 2)   // May need this as well
+        ],
+        minimumCommitAmount: 546,
+        feeRate: 10
+      });
+
+      const result = await createCommitTransaction(params);
+
+      // Should have selected enough UTXOs to cover commit + fees
+      const totalInput = result.selectedUtxos.reduce((sum, utxo) => sum + utxo.value, 0);
+      expect(totalInput).toBeGreaterThanOrEqual(result.commitAmount + result.fees.commit);
+    });
+
+    test('stops iteration when sufficient funds are found', async () => {
+      // Create scenario with plenty of UTXOs
+      const params = createCommitParams({
+        utxos: [
+          createUtxo(100000, 0), // This should be enough
+          createUtxo(100000, 1),
+          createUtxo(100000, 2)
+        ],
+        feeRate: 10
+      });
+
+      const result = await createCommitTransaction(params);
+
+      // Should not need all UTXOs since first one is sufficient
+      expect(result.selectedUtxos.length).toBeLessThan(3);
+    });
+
+    test('throws error if max iterations reached without sufficient funds', async () => {
+      // Create scenario where UTXOs are just barely insufficient
+      // This would require many iterations if the algorithm isn't working
+      const params = createCommitParams({
+        utxos: [
+          createUtxo(500, 0),
+          createUtxo(500, 1)
+        ],
+        minimumCommitAmount: 546,
+        feeRate: 50 // High fee rate makes it impossible
+      });
+
+      // Should throw after max iterations
+      await expect(createCommitTransaction(params)).rejects.toThrow(/Insufficient funds/);
+    });
+  });
+
+  describe('UTXO Validation', () => {
+    test('validates UTXO has txid', async () => {
+      const invalidUtxo: Utxo = {
+        txid: '', // Empty txid
+        vout: 0,
+        value: 10000,
+        scriptPubKey: '0014' + 'a'.repeat(40)
+      };
+
+      const params = createCommitParams({
+        utxos: [invalidUtxo]
+      });
+
+      await expect(createCommitTransaction(params)).rejects.toThrow(/No valid spendable UTXOs/);
+    });
+
+    test('validates UTXO has valid vout', async () => {
+      const invalidUtxo: any = {
+        txid: 'a'.repeat(64),
+        vout: 'invalid', // Invalid vout type
+        value: 10000,
+        scriptPubKey: '0014' + 'a'.repeat(40)
+      };
+
+      const params = createCommitParams({
+        utxos: [invalidUtxo]
+      });
+
+      await expect(createCommitTransaction(params)).rejects.toThrow(/No valid spendable UTXOs/);
+    });
+
+    test('validates UTXO has positive value', async () => {
+      const invalidUtxo: Utxo = {
+        txid: 'a'.repeat(64),
+        vout: 0,
+        value: 0, // Zero value
+        scriptPubKey: '0014' + 'a'.repeat(40)
+      };
+
+      const params = createCommitParams({
+        utxos: [invalidUtxo]
+      });
+
+      await expect(createCommitTransaction(params)).rejects.toThrow(/No valid spendable UTXOs/);
+    });
+
+    test('provides detailed error message for invalid UTXOs', async () => {
+      const invalidUtxos: Utxo[] = [
+        {
+          txid: 'a'.repeat(64),
+          vout: 0,
+          value: 10000
+          // Missing scriptPubKey
+        },
+        {
+          txid: '', // Missing txid
+          vout: 1,
+          value: 10000,
+          scriptPubKey: '0014' + 'a'.repeat(40)
+        },
+        {
+          txid: 'c'.repeat(64),
+          vout: 2,
+          value: 0, // Invalid value
+          scriptPubKey: '0014' + 'a'.repeat(40)
+        }
+      ];
+
+      const params = createCommitParams({
+        utxos: invalidUtxos
+      });
+
+      try {
+        await createCommitTransaction(params);
+        throw new Error('Should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        if (error instanceof Error) {
+          // Should contain detailed information about what's wrong
+          expect(error.message).toMatch(/No valid spendable UTXOs available/);
+          expect(error.message).toMatch(/3 UTXO.*provided but all are invalid/);
+        }
+      }
     });
   });
 });
