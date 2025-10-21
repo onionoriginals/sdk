@@ -14,13 +14,13 @@ export interface IStorage {
   // User methods
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
-  getUserByPrivyId(privyUserId: string): Promise<User | undefined>;
+  getUserByTurnkeyId(turnkeyUserId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(userId: string, updates: Partial<User>): Promise<User | undefined>;
   ensureUser(userId: string): Promise<User>;
   getUserByDidSlug(slug: string): Promise<User | undefined>;
   getUserByDid(did: string): Promise<User | undefined>;
-  createUserWithDid(privyUserId: string, did: string, didData: any): Promise<User>;
+  createUserWithDid(turnkeyUserId: string, did: string, didData: any): Promise<User>;
   
   // Asset methods
   getAsset(id: string): Promise<Asset | undefined>;
@@ -80,7 +80,7 @@ export interface IStorage {
 
 export class MemStorage implements IStorage {
   private users: Map<string, User>; // Key: did:webvh, Value: User
-  private privyToDidMapping: Map<string, string>; // Key: Privy user ID, Value: did:webvh
+  private turnkeyToDidMapping: Map<string, string>; // Key: Turnkey user ID, Value: did:webvh
   private assets: Map<string, Asset>;
   private walletConnections: Map<string, WalletConnection>;
   private signingKeys: Map<string, SigningKey[]>;
@@ -90,7 +90,7 @@ export class MemStorage implements IStorage {
 
   constructor() {
     this.users = new Map();
-    this.privyToDidMapping = new Map();
+    this.turnkeyToDidMapping = new Map();
     this.googleDriveImports = new Map();
     this.assets = new Map();
     this.walletConnections = new Map();
@@ -109,24 +109,25 @@ export class MemStorage implements IStorage {
     );
   }
 
-  async getUserByPrivyId(privyUserId: string): Promise<User | undefined> {
-    const did = this.privyToDidMapping.get(privyUserId);
+  async getUserByTurnkeyId(turnkeyUserId: string): Promise<User | undefined> {
+    const did = this.turnkeyToDidMapping.get(turnkeyUserId);
     if (!did) return undefined;
     return this.users.get(did);
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
-    const user: User = { 
-      ...insertUser, 
+    const user: User = {
+      ...insertUser,
       id,
+      turnkeyUserId: null,
       did: null,
       didDocument: null,
       didLog: null,
       didSlug: null,
-      authWalletId: null,
-      assertionWalletId: null,
-      updateWalletId: null,
+      authKeyId: null,
+      assertionKeyId: null,
+      updateKeyId: null,
       authKeyPublic: null,
       assertionKeyPublic: null,
       updateKeyPublic: null,
@@ -145,62 +146,64 @@ export class MemStorage implements IStorage {
     return updatedUser;
   }
 
-  async ensureUser(privyUserId: string): Promise<User> {
-    // Check if user already exists by Privy ID
-    const existing = await this.getUserByPrivyId(privyUserId);
+  async ensureUser(turnkeyUserId: string): Promise<User> {
+    // Check if user already exists by Turnkey ID
+    const existing = await this.getUserByTurnkeyId(turnkeyUserId);
     if (existing) {
       return existing;
     }
 
-    // Create a temporary user record with Privy ID - DID will be added later
+    // Create a temporary user record with Turnkey ID - DID will be added later
     const user: User = {
-      id: privyUserId, // Temporary - will be updated to DID
-      username: privyUserId,
-      password: '', // Not used for Privy users
+      id: turnkeyUserId, // Temporary - will be updated to DID
+      username: turnkeyUserId,
+      password: '', // Not used for Turnkey users
+      turnkeyUserId: turnkeyUserId,
       did: null,
       didDocument: null,
       didLog: null,
       didSlug: null,
-      authWalletId: null,
-      assertionWalletId: null,
-      updateWalletId: null,
+      authKeyId: null,
+      assertionKeyId: null,
+      updateKeyId: null,
       authKeyPublic: null,
       assertionKeyPublic: null,
       updateKeyPublic: null,
       didCreatedAt: null,
     };
-    this.users.set(privyUserId, user);
+    this.users.set(turnkeyUserId, user);
     return user;
   }
 
-  async createUserWithDid(privyUserId: string, did: string, didData: any): Promise<User> {
+  async createUserWithDid(turnkeyUserId: string, did: string, didData: any): Promise<User> {
     // Create user with DID as the primary key
     const user: User = {
       id: did, // Use DID as primary identifier
       username: did,
-      password: '', // Not used for Privy users
+      password: '', // Not used for Turnkey users
+      turnkeyUserId: turnkeyUserId,
       did: did,
       didDocument: didData.didDocument,
       didLog: didData.didLog || null,
       didSlug: didData.didSlug || null,
-      authWalletId: didData.authWalletId,
-      assertionWalletId: didData.assertionWalletId,
-      updateWalletId: didData.updateWalletId,
+      authKeyId: didData.authKeyId,
+      assertionKeyId: didData.assertionKeyId,
+      updateKeyId: didData.updateKeyId,
       authKeyPublic: didData.authKeyPublic,
       assertionKeyPublic: didData.assertionKeyPublic,
       updateKeyPublic: didData.updateKeyPublic,
       didCreatedAt: didData.didCreatedAt,
     };
-    
+
     // Store user with DID as key
     this.users.set(did, user);
-    
-    // Create mapping from Privy ID to DID
-    this.privyToDidMapping.set(privyUserId, did);
-    
+
+    // Create mapping from Turnkey ID to DID
+    this.turnkeyToDidMapping.set(turnkeyUserId, did);
+
     // Remove temporary user record if it exists
-    this.users.delete(privyUserId);
-    
+    this.users.delete(turnkeyUserId);
+
     return user;
   }
 

@@ -7,15 +7,16 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
-  // DID-related fields (Privy-managed keys)
+  // DID-related fields (Turnkey-managed keys)
+  turnkeyUserId: text("turnkey_user_id").unique(), // Turnkey sub-organization ID
   did: text("did"), // did:webvh identifier
   didDocument: jsonb("did_document"), // Complete DID document
   didLog: jsonb("did_log"), // DID log (did.jsonl content)
   didSlug: text("did_slug"), // User slug extracted from DID
-  authWalletId: text("auth_wallet_id"), // Privy wallet ID for authentication (Bitcoin)
-  assertionWalletId: text("assertion_wallet_id"), // Privy wallet ID for assertions (Stellar/ED25519)
-  updateWalletId: text("update_wallet_id"), // Privy wallet ID for DID updates (Stellar/ED25519)
-  authKeyPublic: text("auth_key_public"), // Bitcoin public key in multibase format
+  authKeyId: text("auth_key_id"), // Turnkey private key ID for authentication
+  assertionKeyId: text("assertion_key_id"), // Turnkey private key ID for assertions
+  updateKeyId: text("update_key_id"), // Turnkey private key ID for DID updates
+  authKeyPublic: text("auth_key_public"), // ED25519 public key in multibase format
   assertionKeyPublic: text("assertion_key_public"), // ED25519 public key in multibase format
   updateKeyPublic: text("update_key_public"), // ED25519 public key in multibase format
   didCreatedAt: timestamp("did_created_at"), // When the DID was created
