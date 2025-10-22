@@ -170,21 +170,68 @@ export function ImportProgress({ importId, isOpen, onComplete }: ImportProgressP
           {/* Error Details */}
           {status.errors && status.errors.length > 0 && (
             <div className="space-y-2">
-              <div className="text-sm font-medium text-muted-foreground">
-                Issues encountered:
-              </div>
-              <div className="max-h-32 overflow-y-auto space-y-1">
-                {status.errors.slice(0, 5).map((err, idx) => (
-                  <div key={idx} className="text-xs text-red-600 bg-red-50 rounded p-2">
-                    <span className="font-medium">{err.file}:</span> {err.error}
-                  </div>
-                ))}
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium text-muted-foreground">
+                  Issues encountered ({status.errors.length}):
+                </div>
                 {status.errors.length > 5 && (
-                  <div className="text-xs text-muted-foreground italic">
-                    ...and {status.errors.length - 5} more
+                  <div className="text-xs text-muted-foreground">
+                    Showing first 5
                   </div>
                 )}
               </div>
+              <div className="max-h-40 overflow-y-auto space-y-1.5 rounded-md border p-3 bg-muted/20">
+                {status.errors.slice(0, 5).map((err, idx) => {
+                  const isPermissionError = err.error.toLowerCase().includes('permission');
+                  const isNetworkError = err.error.toLowerCase().includes('network') ||
+                                        err.error.toLowerCase().includes('timeout');
+                  const isNotFoundError = err.error.toLowerCase().includes('not found');
+
+                  return (
+                    <div key={idx} className="text-xs rounded p-2 bg-background border">
+                      <div className="font-medium truncate text-foreground mb-0.5">
+                        {err.file}
+                      </div>
+                      <div className={`
+                        ${isPermissionError ? 'text-orange-600' : ''}
+                        ${isNetworkError ? 'text-blue-600' : ''}
+                        ${isNotFoundError ? 'text-yellow-600' : ''}
+                        ${!isPermissionError && !isNetworkError && !isNotFoundError ? 'text-red-600' : ''}
+                      `}>
+                        {isPermissionError && '🔒 '}
+                        {isNetworkError && '🌐 '}
+                        {isNotFoundError && '❓ '}
+                        {err.error}
+                      </div>
+                    </div>
+                  );
+                })}
+                {status.errors.length > 5 && (
+                  <div className="text-xs text-center text-muted-foreground italic pt-1">
+                    + {status.errors.length - 5} more errors
+                  </div>
+                )}
+              </div>
+
+              {/* Error category hints */}
+              {status.errors.some(e => e.error.toLowerCase().includes('permission')) && (
+                <Alert className="border-orange-200 bg-orange-50">
+                  <AlertCircle className="h-4 w-4 text-orange-600" />
+                  <AlertDescription className="text-orange-900 text-xs">
+                    <strong>Tip:</strong> Permission errors occur when files are not shared with you or have restricted access.
+                    Check file sharing settings in Google Drive.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {status.errors.some(e => e.error.toLowerCase().includes('network') || e.error.toLowerCase().includes('timeout')) && (
+                <Alert className="border-blue-200 bg-blue-50">
+                  <AlertCircle className="h-4 w-4 text-blue-600" />
+                  <AlertDescription className="text-blue-900 text-xs">
+                    <strong>Tip:</strong> Network errors are usually temporary. Try importing these files again.
+                  </AlertDescription>
+                </Alert>
+              )}
             </div>
           )}
 
