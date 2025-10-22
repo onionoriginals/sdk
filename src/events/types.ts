@@ -177,6 +177,104 @@ export interface BatchFailedEvent extends BaseEvent {
 }
 
 /**
+ * Emitted when a migration starts
+ */
+export interface MigrationStartedEvent extends BaseEvent {
+  type: 'migration:started';
+  migrationId: string;
+  sourceDid: string;
+  targetLayer: string;
+}
+
+/**
+ * Emitted when migration validation completes
+ */
+export interface MigrationValidatedEvent extends BaseEvent {
+  type: 'migration:validated';
+  migrationId: string;
+  valid: boolean;
+}
+
+/**
+ * Emitted when migration checkpoint is created
+ */
+export interface MigrationCheckpointedEvent extends BaseEvent {
+  type: 'migration:checkpointed';
+  migrationId: string;
+  checkpointId: string;
+}
+
+/**
+ * Emitted when migration enters in-progress state
+ */
+export interface MigrationInProgressEvent extends BaseEvent {
+  type: 'migration:in_progress';
+  migrationId: string;
+  currentOperation: string;
+  progress: number;
+}
+
+/**
+ * Emitted when migration enters anchoring state (Bitcoin)
+ */
+export interface MigrationAnchoringEvent extends BaseEvent {
+  type: 'migration:anchoring';
+  migrationId: string;
+  transactionId?: string;
+}
+
+/**
+ * Emitted when migration completes successfully
+ */
+export interface MigrationCompletedEvent extends BaseEvent {
+  type: 'migration:completed';
+  migrationId: string;
+  sourceDid: string;
+  targetDid: string;
+}
+
+/**
+ * Emitted when migration fails
+ */
+export interface MigrationFailedEvent extends BaseEvent {
+  type: 'migration:failed';
+  migrationId: string;
+  error: any;
+}
+
+/**
+ * Emitted when migration is rolled back
+ */
+export interface MigrationRolledbackEvent extends BaseEvent {
+  type: 'migration:rolledback';
+  migrationId: string;
+  checkpointId: string;
+}
+
+/**
+ * Emitted when migration enters quarantine state
+ */
+export interface MigrationQuarantineEvent extends BaseEvent {
+  type: 'migration:quarantine';
+  migrationId: string;
+  checkpointId: string;
+  reason: string;
+}
+
+/**
+ * Emitted during batch operations to report progress
+ */
+export interface BatchProgressEvent extends BaseEvent {
+  type: 'batch:progress';
+  batchId: string;
+  operation: string;
+  progress: number;
+  completed: number;
+  failed: number;
+  total: number;
+}
+
+/**
  * Union type of all possible events
  */
 export type OriginalsEvent =
@@ -189,7 +287,17 @@ export type OriginalsEvent =
   | BatchStartedEvent
   | BatchCompletedEvent
   | BatchFailedEvent
-  | ResourceVersionCreatedEvent;
+  | BatchProgressEvent
+  | ResourceVersionCreatedEvent
+  | MigrationStartedEvent
+  | MigrationValidatedEvent
+  | MigrationCheckpointedEvent
+  | MigrationInProgressEvent
+  | MigrationAnchoringEvent
+  | MigrationCompletedEvent
+  | MigrationFailedEvent
+  | MigrationRolledbackEvent
+  | MigrationQuarantineEvent;
 
 /**
  * Event handler function type
@@ -209,5 +317,15 @@ export interface EventTypeMap {
   'batch:started': BatchStartedEvent;
   'batch:completed': BatchCompletedEvent;
   'batch:failed': BatchFailedEvent;
+  'batch:progress': BatchProgressEvent;
   'resource:version:created': ResourceVersionCreatedEvent;
+  'migration:started': MigrationStartedEvent;
+  'migration:validated': MigrationValidatedEvent;
+  'migration:checkpointed': MigrationCheckpointedEvent;
+  'migration:in_progress': MigrationInProgressEvent;
+  'migration:anchoring': MigrationAnchoringEvent;
+  'migration:completed': MigrationCompletedEvent;
+  'migration:failed': MigrationFailedEvent;
+  'migration:rolledback': MigrationRolledbackEvent;
+  'migration:quarantine': MigrationQuarantineEvent;
 }
