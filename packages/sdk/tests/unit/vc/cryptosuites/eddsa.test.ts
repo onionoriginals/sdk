@@ -373,6 +373,12 @@ describe('EdDSA createProof with multikey string', () => {
 
 /** Inlined from eddsa.success.part.ts */
 import * as ed25519 from '@noble/ed25519';
+import { sha512 } from '@noble/hashes/sha512';
+import { concatBytes } from '@noble/hashes/utils.js';
+
+// Initialize ed25519 with required hash function
+(ed25519 as any).utils = (ed25519 as any).utils || {};
+(ed25519 as any).utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
 
 describe('EdDSA verifyProof success path', () => {
   test('createProof then verifyProof returns verified=true', async () => {
