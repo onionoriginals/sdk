@@ -27,6 +27,16 @@ export interface EventLoggingConfig {
   'batch:started'?: LogLevel | false;
   'batch:completed'?: LogLevel | false;
   'batch:failed'?: LogLevel | false;
+  'migration:started'?: LogLevel | false;
+  'migration:validated'?: LogLevel | false;
+  'migration:checkpointed'?: LogLevel | false;
+  'migration:in_progress'?: LogLevel | false;
+  'migration:anchoring'?: LogLevel | false;
+  'migration:completed'?: LogLevel | false;
+  'migration:failed'?: LogLevel | false;
+  'migration:rolledback'?: LogLevel | false;
+  'migration:quarantine'?: LogLevel | false;
+  'batch:progress'?: LogLevel | false;
 }
 
 /**
@@ -42,7 +52,17 @@ const DEFAULT_EVENT_CONFIG: EventLoggingConfig = {
   'verification:completed': 'info',
   'batch:started': 'info',
   'batch:completed': 'info',
-  'batch:failed': 'warn'
+  'batch:failed': 'warn',
+  'migration:started': 'info',
+  'migration:validated': 'info',
+  'migration:checkpointed': 'info',
+  'migration:in_progress': 'info',
+  'migration:anchoring': 'info',
+  'migration:completed': 'info',
+  'migration:failed': 'warn',
+  'migration:rolledback': 'warn',
+  'migration:quarantine': 'error',
+  'batch:progress': 'debug'
 };
 
 /**

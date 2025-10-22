@@ -8,7 +8,7 @@ import {
 } from '../types';
 import { canonicalizeDocument } from '../utils/serialization';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding';
-import { sha256 } from '@noble/hashes/sha2.js';
+import { sha256 } from '@noble/hashes/sha256';
 import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer';
 import { DIDManager } from '../did/DIDManager';
 import { Issuer, VerificationMethodLike } from './Issuer';

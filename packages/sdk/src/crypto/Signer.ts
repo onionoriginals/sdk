@@ -5,7 +5,8 @@ export abstract class Signer {
 
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
 import { p256 } from '@noble/curves/p256';
-import { sha256, sha512 } from '@noble/hashes/sha2.js';
+import { sha256 } from '@noble/hashes/sha256';
+import { sha512 } from '@noble/hashes/sha512';
 import { hmac } from '@noble/hashes/hmac.js';
 import { concatBytes } from '@noble/hashes/utils.js';
 import * as secp256k1 from '@noble/secp256k1';

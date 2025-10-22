@@ -15,7 +15,7 @@ const createUtxo = (value: number, index: number = 0): Utxo => ({
   vout: index,
   value,
   scriptPubKey: '0014' + 'b'.repeat(40), // Mock P2WPKH scriptPubKey
-  address: 'bc1q' + 'test'.repeat(10)
+  address: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4' // Valid mainnet address
 });
 
 // Helper to create basic commit params
@@ -23,7 +23,7 @@ const createCommitParams = (overrides: Partial<CommitTransactionParams> = {}): C
   content: Buffer.from('Hello Ordinals'),
   contentType: 'text/plain',
   utxos: [createUtxo(10000, 0)],
-  changeAddress: 'bc1qtest' + 'addr'.repeat(10),
+  changeAddress: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4', // Valid mainnet address
   feeRate: 10,
   network: 'mainnet',
   ...overrides

@@ -413,7 +413,7 @@ export class MigrationManager {
       targetLayer: options.targetLayer,
       state: rollbackSuccess ? MigrationStateEnum.ROLLED_BACK : MigrationStateEnum.FAILED,
       duration,
-      cost: { storageCost: 0, networkFees: 0, totalCost: 0, estimatedDuration: duration, currency: 'sats' },
+      cost: { storageCost: 0, networkFees: 0, totalCost: 0, currency: 'sats' },
       auditRecord,
       error: migrationError
     };

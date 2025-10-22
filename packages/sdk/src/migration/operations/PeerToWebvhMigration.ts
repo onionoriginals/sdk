@@ -56,7 +56,6 @@ export class PeerToWebvhMigration extends BaseMigration {
       storageCost: 0,
       networkFees: 0,
       totalCost: 0,
-      estimatedDuration: 1000, // ~1 second
       currency: 'sats'
     };
   }

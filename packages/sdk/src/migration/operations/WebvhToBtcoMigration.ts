@@ -99,7 +99,6 @@ export class WebvhToBtcoMigration extends BaseMigration {
       storageCost: 0,
       networkFees,
       totalCost: networkFees,
-      estimatedDuration: 600000, // ~10 minutes
       currency: 'sats'
     };
   }

@@ -16,6 +16,9 @@ export class CheckpointStorage {
    * Save a checkpoint
    */
   async save(checkpoint: MigrationCheckpoint): Promise<void> {
+    if (!checkpoint.checkpointId) {
+      throw new Error('Checkpoint must have an ID');
+    }
     this.checkpoints.set(checkpoint.checkpointId, checkpoint);
 
     // Optionally persist to configured storage adapter
