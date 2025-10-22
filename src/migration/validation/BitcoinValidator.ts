@@ -4,7 +4,7 @@
 
 import {
   MigrationOptions,
-  ValidationResult,
+  MigrationValidationResult,
   ValidationError,
   ValidationWarning,
   IValidator
@@ -18,7 +18,7 @@ export class BitcoinValidator implements IValidator {
     private bitcoinManager: BitcoinManager
   ) {}
 
-  async validate(options: MigrationOptions): Promise<ValidationResult> {
+  async validate(options: MigrationOptions): Promise<MigrationValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
 
@@ -63,7 +63,7 @@ export class BitcoinValidator implements IValidator {
           message: 'Could not estimate Bitcoin network fees',
           details: { error: error instanceof Error ? error.message : String(error) }
         });
-        networkFees = 10240; // Default fallback: ~10KB at 10 sat/vB
+        networkFees = 10240; // Default fallback: ~1KB at 10 sat/vB
       }
 
       // Validate network (should be signet for testnet)
@@ -91,7 +91,7 @@ export class BitcoinValidator implements IValidator {
     warnings: ValidationWarning[],
     networkFees: number,
     duration: number
-  ): ValidationResult {
+  ): MigrationValidationResult {
     return {
       valid,
       errors,

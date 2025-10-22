@@ -4,7 +4,7 @@
 
 import {
   MigrationOptions,
-  ValidationResult,
+  MigrationValidationResult,
   ValidationError,
   ValidationWarning,
   IValidator
@@ -18,7 +18,7 @@ export class DIDCompatibilityValidator implements IValidator {
     private didManager: DIDManager
   ) {}
 
-  async validate(options: MigrationOptions): Promise<ValidationResult> {
+  async validate(options: MigrationOptions): Promise<MigrationValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
 
@@ -134,7 +134,7 @@ export class DIDCompatibilityValidator implements IValidator {
     return supportedTypes.includes(vm.type);
   }
 
-  private createResult(valid: boolean, errors: ValidationError[], warnings: ValidationWarning[]): ValidationResult {
+  private createResult(valid: boolean, errors: ValidationError[], warnings: ValidationWarning[]): MigrationValidationResult {
     return {
       valid,
       errors,
@@ -143,7 +143,6 @@ export class DIDCompatibilityValidator implements IValidator {
         storageCost: 0,
         networkFees: 0,
         totalCost: 0,
-        estimatedDuration: 0,
         currency: 'sats'
       },
       estimatedDuration: 100 // DID validation typically takes ~100ms

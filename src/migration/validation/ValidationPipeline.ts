@@ -4,7 +4,7 @@
 
 import {
   MigrationOptions,
-  ValidationResult,
+  MigrationValidationResult,
   ValidationError,
   ValidationWarning,
   CostEstimate,
@@ -46,14 +46,13 @@ export class ValidationPipeline {
   /**
    * Run all validation checks for a migration
    */
-  async validate(options: MigrationOptions): Promise<ValidationResult> {
+  async validate(options: MigrationOptions): Promise<MigrationValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
     let estimatedCost: CostEstimate = {
       storageCost: 0,
       networkFees: 0,
       totalCost: 0,
-      estimatedDuration: 0,
       currency: 'sats'
     };
     let estimatedDuration = 0;
@@ -115,7 +114,6 @@ export class ValidationPipeline {
 
       // Calculate total cost
       estimatedCost.totalCost = estimatedCost.storageCost + estimatedCost.networkFees;
-      estimatedCost.estimatedDuration = estimatedDuration;
 
       return {
         valid: errors.length === 0,

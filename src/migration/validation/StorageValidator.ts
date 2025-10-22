@@ -4,7 +4,7 @@
 
 import {
   MigrationOptions,
-  ValidationResult,
+  MigrationValidationResult,
   ValidationError,
   ValidationWarning,
   IValidator
@@ -14,7 +14,7 @@ import { OriginalsConfig } from '../../types';
 export class StorageValidator implements IValidator {
   constructor(private config: OriginalsConfig) {}
 
-  async validate(options: MigrationOptions): Promise<ValidationResult> {
+  async validate(options: MigrationOptions): Promise<MigrationValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
 
@@ -51,7 +51,6 @@ export class StorageValidator implements IValidator {
           storageCost,
           networkFees: 0,
           totalCost: storageCost,
-          estimatedDuration: 0,
           currency: 'sats'
         },
         estimatedDuration: 50
@@ -71,7 +70,6 @@ export class StorageValidator implements IValidator {
           storageCost: 0,
           networkFees: 0,
           totalCost: 0,
-          estimatedDuration: 0,
           currency: 'sats'
         },
         estimatedDuration: 0

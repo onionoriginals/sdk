@@ -73,7 +73,6 @@ export interface CostEstimate {
   storageCost: number;                  // Storage cost in currency units
   networkFees: number;                  // Bitcoin network fees (btco only)
   totalCost: number;                    // Total cost
-  estimatedDuration: number;            // Estimated time in milliseconds
   currency: string;                     // Currency unit (e.g., 'sats', 'USD')
 }
 
@@ -97,9 +96,9 @@ export interface ValidationWarning {
 }
 
 /**
- * Validation result
+ * Migration validation result
  */
-export interface ValidationResult {
+export interface MigrationValidationResult {
   valid: boolean;
   errors: ValidationError[];            // Blocking errors
   warnings: ValidationWarning[];        // Non-blocking issues
@@ -111,7 +110,7 @@ export interface ValidationResult {
  * Migration checkpoint data
  */
 export interface MigrationCheckpoint {
-  checkpointId: string;
+  checkpointId?: string;
   migrationId: string;
   timestamp: number;
   sourceDid: string;
@@ -130,7 +129,7 @@ export interface MigrationCheckpoint {
 export interface RollbackResult {
   success: boolean;
   migrationId: string;
-  checkpointId: string;
+  checkpointId?: string;
   restoredState: MigrationStateEnum;
   duration: number;                     // milliseconds
   errors?: MigrationError[];
@@ -182,10 +181,10 @@ export interface MigrationAuditRecord {
   targetDid: string | null;             // null if failed before creation
   targetLayer: DIDLayer;
   finalState: MigrationStateEnum;
-  validationResults: ValidationResult;
+  validationResults: MigrationValidationResult;
   costActual: CostEstimate;             // Actual costs incurred
   duration: number;                     // milliseconds
-  checkpointId: string;                 // For rollback reference
+  checkpointId?: string;                 // For rollback reference
   errors: MigrationError[];             // Any errors encountered
   metadata: Record<string, any>;        // Custom metadata
   signature?: string;                   // Cryptographic signature
@@ -306,7 +305,7 @@ export interface LifecycleMigrationContext {
  * Validator interface
  */
 export interface IValidator {
-  validate(options: MigrationOptions): Promise<ValidationResult>;
+  validate(options: MigrationOptions): Promise<MigrationValidationResult>;
 }
 
 /**

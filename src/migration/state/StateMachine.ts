@@ -75,9 +75,11 @@ export class StateMachine {
 
   /**
    * Get all valid transitions from a given state
+   * Returns a copy to prevent external mutation of the transition table
    */
   getValidTransitions(fromState: MigrationStateEnum): MigrationStateEnum[] {
-    return this.transitions.get(fromState) || [];
+    const transitions = this.transitions.get(fromState);
+    return transitions ? [...transitions] : [];
   }
 
   /**

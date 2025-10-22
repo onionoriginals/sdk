@@ -205,6 +205,25 @@ export interface MigrationCheckpointedEvent extends BaseEvent {
 }
 
 /**
+ * Emitted when migration enters in-progress state
+ */
+export interface MigrationInProgressEvent extends BaseEvent {
+  type: 'migration:in_progress';
+  migrationId: string;
+  currentOperation: string;
+  progress: number;
+}
+
+/**
+ * Emitted when migration enters anchoring state (Bitcoin)
+ */
+export interface MigrationAnchoringEvent extends BaseEvent {
+  type: 'migration:anchoring';
+  migrationId: string;
+  transactionId?: string;
+}
+
+/**
  * Emitted when migration completes successfully
  */
 export interface MigrationCompletedEvent extends BaseEvent {
@@ -243,6 +262,19 @@ export interface MigrationQuarantineEvent extends BaseEvent {
 }
 
 /**
+ * Emitted during batch operations to report progress
+ */
+export interface BatchProgressEvent extends BaseEvent {
+  type: 'batch:progress';
+  batchId: string;
+  operation: string;
+  progress: number;
+  completed: number;
+  failed: number;
+  total: number;
+}
+
+/**
  * Union type of all possible events
  */
 export type OriginalsEvent =
@@ -255,10 +287,13 @@ export type OriginalsEvent =
   | BatchStartedEvent
   | BatchCompletedEvent
   | BatchFailedEvent
+  | BatchProgressEvent
   | ResourceVersionCreatedEvent
   | MigrationStartedEvent
   | MigrationValidatedEvent
   | MigrationCheckpointedEvent
+  | MigrationInProgressEvent
+  | MigrationAnchoringEvent
   | MigrationCompletedEvent
   | MigrationFailedEvent
   | MigrationRolledbackEvent
@@ -282,10 +317,13 @@ export interface EventTypeMap {
   'batch:started': BatchStartedEvent;
   'batch:completed': BatchCompletedEvent;
   'batch:failed': BatchFailedEvent;
+  'batch:progress': BatchProgressEvent;
   'resource:version:created': ResourceVersionCreatedEvent;
   'migration:started': MigrationStartedEvent;
   'migration:validated': MigrationValidatedEvent;
   'migration:checkpointed': MigrationCheckpointedEvent;
+  'migration:in_progress': MigrationInProgressEvent;
+  'migration:anchoring': MigrationAnchoringEvent;
   'migration:completed': MigrationCompletedEvent;
   'migration:failed': MigrationFailedEvent;
   'migration:rolledback': MigrationRolledbackEvent;

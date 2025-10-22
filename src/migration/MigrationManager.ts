@@ -144,6 +144,11 @@ export class MigrationManager {
 
       checkpoint = await this.checkpointManager.createCheckpoint(migrationId, options);
 
+      // Persist checkpointId immediately so rollback can locate it
+      await this.stateTracker.updateState(migrationId, {
+        checkpointId: checkpoint.checkpointId
+      });
+
       await this.emitEvent('migration:checkpointed', { migrationId, checkpointId: checkpoint.checkpointId });
 
       // Step 4: Execute migration

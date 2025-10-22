@@ -4,7 +4,7 @@
 
 import {
   MigrationOptions,
-  ValidationResult,
+  MigrationValidationResult,
   ValidationError,
   ValidationWarning,
   IValidator
@@ -18,7 +18,7 @@ export class CredentialValidator implements IValidator {
     private credentialManager: CredentialManager
   ) {}
 
-  async validate(options: MigrationOptions): Promise<ValidationResult> {
+  async validate(options: MigrationOptions): Promise<MigrationValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
 
@@ -45,7 +45,7 @@ export class CredentialValidator implements IValidator {
     }
   }
 
-  private createResult(valid: boolean, errors: ValidationError[], warnings: ValidationWarning[]): ValidationResult {
+  private createResult(valid: boolean, errors: ValidationError[], warnings: ValidationWarning[]): MigrationValidationResult {
     return {
       valid,
       errors,
@@ -54,7 +54,6 @@ export class CredentialValidator implements IValidator {
         storageCost: 0,
         networkFees: 0,
         totalCost: 0,
-        estimatedDuration: 0,
         currency: 'sats'
       },
       estimatedDuration: 50 // Credential validation typically takes ~50ms
