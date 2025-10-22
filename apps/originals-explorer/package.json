@@ -1,5 +1,5 @@
 {
-  "name": "rest-express",
+  "name": "originals-explorer",
   "version": "1.0.0",
   "type": "module",
   "license": "MIT",
@@ -17,7 +17,7 @@
     "@jridgewell/trace-mapping": "^0.3.25",
     "@neondatabase/serverless": "^0.10.4",
     "@noble/hashes": "^2.0.1",
-    "@originals/sdk": "file:../..",
+    "@originals/sdk": "workspace:*",
     "@privy-io/node": "^0.2.0",
     "@privy-io/react-auth": "^2.24.0",
     "@radix-ui/react-accordion": "^1.2.4",
