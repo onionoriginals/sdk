@@ -1,0 +1,71 @@
+{
+  "name": "@originals/sdk",
+  "version": "1.0.0",
+  "description": "TypeScript SDK for the Originals Protocol - creating, discovering, and transferring digital assets with cryptographically verifiable provenance",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test tests/integration && bun test tests/unit && bun test tests/security && bun test tests/stress",
+    "test:coverage": "bun test tests/integration tests/unit --coverage",
+    "test:ci": "bun run ../../scripts/check-coverage.ts",
+    "test:security": "bun test tests/security",
+    "test:stress": "bun test tests/stress",
+    "lint": "eslint src/**/*.ts",
+    "prepare": "npm run build",
+    "format": "prettier --write src/**/*.ts"
+  },
+  "keywords": [
+    "originals",
+    "did",
+    "verifiable-credentials",
+    "bitcoin",
+    "ordinals",
+    "digital-assets",
+    "provenance",
+    "decentralized-identity"
+  ],
+  "author": "Aviary Tech",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aviarytech/originals-sdk"
+  },
+  "dependencies": {
+    "@aviarytech/did-peer": "^1.1.2",
+    "@noble/curves": "^1.6.0",
+    "@noble/ed25519": "^2.0.0",
+    "@noble/hashes": "^2.0.1",
+    "@noble/secp256k1": "^2.0.0",
+    "@scure/base": "^1.1.6",
+    "@scure/bip32": "^2.0.0",
+    "@scure/btc-signer": "^1.8.0",
+    "bitcoinjs-lib": "^6.1.0",
+    "cbor-js": "^0.1.0",
+    "didwebvh-ts": "^2.5.4",
+    "jsonld": "^8.3.3",
+    "micro-ordinals": "^0.2.2",
+    "multiformats": "^12.0.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.4",
+    "@babel/preset-env": "^7.28.3",
+    "@types/bun": "^1.2.23",
+    "@types/node": "^20.19.17",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

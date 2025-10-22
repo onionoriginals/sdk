@@ -12,7 +12,7 @@ const MIN_FUNCTION_COVERAGE = 95;
 
 async function runTests(): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('bun', ['test', 'tests/integration', 'tests/unit', '--coverage'], {
+    const proc = spawn('bun', ['test', 'packages/sdk/tests/integration', 'packages/sdk/tests/unit', '--coverage'], {
       stdio: ['inherit', 'pipe', 'pipe'],
       cwd: process.cwd()
     });
