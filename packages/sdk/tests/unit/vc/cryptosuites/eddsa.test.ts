@@ -373,7 +373,7 @@ describe('EdDSA createProof with multikey string', () => {
 
 /** Inlined from eddsa.success.part.ts */
 import * as ed25519 from '@noble/ed25519';
-import { sha512 } from '@noble/hashes/sha512';
+import { sha512 } from '@noble/hashes/sha2.js';
 import { concatBytes } from '@noble/hashes/utils.js';
 
 // Initialize ed25519 with required hash function
