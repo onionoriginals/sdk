@@ -572,9 +572,9 @@ console.log('Format:', /^[a-f0-9]{64}i\d+$/.test(inscriptionId) ? 'Valid' : 'Inv
 
 // Check if it's actually a satoshi number
 if (/^\d+$/.test(inscriptionId)) {
-  console.log('This looks like a satoshi number, not an inscription ID');
-  const inscriptions = await sdk.bitcoin.getInscriptionsBySatoshi(inscriptionId);
-  console.log('Inscriptions on satoshi:', inscriptions);
+  console.log('ERROR: This looks like a satoshi number, not an inscription ID');
+  console.log('Inscription IDs have format: {txid}i{index}');
+  console.log('Use an Ordinals explorer to find inscriptions on this satoshi');
 }
 
 // Check provider endpoint
@@ -634,19 +634,13 @@ console.log(isSafe); // false
 **Diagnosis:**
 
 ```typescript
-const inscriptions = await sdk.bitcoin.getInscriptionsBySatoshi(satoshi);
+// The preventFrontRunning method detected multiple inscriptions
+console.log(`Front-running detected on satoshi ${satoshi}`);
+console.log('Multiple inscriptions exist on this satoshi');
 
-console.log(`Found ${inscriptions.length} inscriptions on satoshi ${satoshi}:`);
-for (const ins of inscriptions) {
-  console.log('- ID:', ins.inscriptionId);
-  console.log('  Type:', ins.contentType);
-  console.log('  Block:', ins.blockHeight);
-}
-
-// Identify the front-runner
-inscriptions.sort((a, b) => a.blockHeight! - b.blockHeight!);
-console.log('First inscription (original):', inscriptions[0].inscriptionId);
-console.log('Front-runner:', inscriptions[1]?.inscriptionId);
+// To inspect all inscriptions, use an Ordinals explorer:
+// - https://ordinals.com/sat/{satoshi}
+// - Or access the provider directly if you have it configured
 ```
 
 **Solutions:**
@@ -662,16 +656,13 @@ console.log('Front-runner:', inscriptions[1]?.inscriptionId);
    }
    ```
 
-2. **Verify inscription is legitimate**
+2. **Accept the front-running**
    ```typescript
-   // Check if additional inscriptions are actually relevant
-   const originalInscription = inscriptions[0];
-   const content = originalInscription.content.toString('utf-8');
-
-   console.log('Original content:', content);
-
-   // Determine if front-runner invalidates your inscription
-   // This depends on your protocol rules
+   // Front-running may not always be malicious
+   // If your inscription was successfully created, you can proceed
+   // Use Ordinals explorers to verify which inscription is first
+   console.log('Inscription created, but satoshi has multiple inscriptions');
+   console.log('Verify your inscription at: https://ordinals.com');
    ```
 
 ---

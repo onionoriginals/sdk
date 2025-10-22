@@ -311,14 +311,9 @@ if (inscription) {
   const content = inscription.content.toString('utf-8');
   console.log('Content:', content);
 }
-
-// Get all inscriptions on a satoshi
-const satoshiInscriptions = await sdk.bitcoin.getInscriptionsBySatoshi(
-  '2099994106992659'
-);
-
-console.log(`Found ${satoshiInscriptions.length} inscriptions`);
 ```
+
+**Note:** To query all inscriptions on a specific satoshi, you would need to access the Ordinals provider directly. The SDK's `preventFrontRunning()` method uses this functionality internally to check for multiple inscriptions.
 
 ### Front-Running Protection
 
@@ -330,10 +325,7 @@ const isSafe = await sdk.bitcoin.preventFrontRunning(satoshi);
 if (!isSafe) {
   console.warn('WARNING: Multiple inscriptions detected!');
   console.warn('This satoshi may have been front-run');
-
-  // Get all inscriptions to inspect
-  const all = await sdk.bitcoin.getInscriptionsBySatoshi(satoshi);
-  console.log('Inscriptions:', all);
+  console.warn('Use external Ordinals explorer to inspect all inscriptions');
 }
 ```
 
@@ -348,8 +340,7 @@ const inscription = await sdk.bitcoin.trackInscription(inscriptionId);
 // Transfer to new owner
 const transferTx = await sdk.bitcoin.transferInscription(
   inscription,
-  'bc1qnewowner...',
-  { feeRate: 15 } // Optional: specify fee rate
+  'bc1qnewowner...'
 );
 
 console.log('Transfer TX:', transferTx.txid);

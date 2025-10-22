@@ -18,26 +18,56 @@ The `BitcoinManager` class is the main interface for Bitcoin operations.
 
 ### Constructor
 
+**Note:** `BitcoinManager` is created internally by `OriginalsSDK`. You typically don't instantiate it directly.
+
 ```typescript
-constructor(
-  provider: OrdinalsProvider,
-  network: BitcoinNetwork,
-  feeOracle?: FeeOracleAdapter
-)
+constructor(config: OriginalsConfig)
 ```
 
 **Parameters:**
-- `provider` (OrdinalsProvider): Provider for Ordinals operations
-- `network` (BitcoinNetwork): Bitcoin network ('mainnet' | 'testnet' | 'signet' | 'regtest')
-- `feeOracle` (FeeOracleAdapter, optional): Fee estimation service
+- `config` (OriginalsConfig): SDK configuration object containing:
+  - `network` (BitcoinNetwork): Bitcoin network ('mainnet' | 'testnet' | 'signet' | 'regtest')
+  - `ordinalsProvider` (OrdinalsProvider, optional): Provider for Ordinals operations
+  - `feeOracle` (FeeOracleAdapter, optional): Fee estimation service
+  - `enableLogging` (boolean, optional): Enable logging
+  - Other SDK configuration options
 
-**Example:**
+**Example (via OriginalsSDK):**
 ```typescript
-const bitcoinManager = new BitcoinManager(
-  ordinalsProvider,
-  'mainnet',
-  feeOracle
-);
+import { OriginalsSDK, OrdinalsClient } from '@originals/sdk';
+
+const sdk = OriginalsSDK.create({
+  network: 'mainnet',
+  ordinalsProvider: new OrdinalsClient({
+    network: 'mainnet',
+    apiUrl: process.env.ORD_API_URL,
+    walletPrivateKey: process.env.BITCOIN_PRIVATE_KEY
+  }),
+  feeOracle: {
+    estimateFeeRate: async (targetBlocks) => {
+      const response = await fetch('https://mempool.space/api/v1/fees/recommended');
+      const fees = await response.json();
+      return targetBlocks <= 1 ? fees.fastestFee : fees.halfHourFee;
+    }
+  }
+});
+
+// Access BitcoinManager through sdk.bitcoin
+const inscription = await sdk.bitcoin.inscribeData(data, contentType);
+```
+
+**Advanced (Direct Instantiation):**
+```typescript
+import { BitcoinManager } from '@originals/sdk';
+
+const config = {
+  network: 'mainnet',
+  defaultKeyType: 'ES256K',
+  ordinalsProvider: ordinalsClient,
+  feeOracle: feeOracle
+};
+
+const bitcoinManager = new BitcoinManager(config);
 ```
 
 ### inscribeData()
@@ -102,16 +132,13 @@ Transfers an Ordinals inscription to a new Bitcoin address.
 ```typescript
 async transferInscription(
   inscription: OrdinalsInscription,
-  toAddress: string,
-  options?: { feeRate?: number }
+  toAddress: string
 ): Promise<BitcoinTransaction>
 ```
 
 **Parameters:**
 - `inscription` (OrdinalsInscription): Inscription to transfer
 - `toAddress` (string): Recipient Bitcoin address
-- `options` (object, optional):
-  - `feeRate` (number, optional): Fee rate in sat/vB
 
 **Returns:**
 - `Promise<BitcoinTransaction>`: Transfer transaction details
@@ -122,20 +149,21 @@ async transferInscription(
   - `'INSCRIPTION_NOT_FOUND'`: Inscription doesn't exist
   - `'INSUFFICIENT_FUNDS'`: Can't pay transfer fee
 
+**Note:** Fee rate is automatically determined using the configured fee oracle or provider. The fee rate cannot be manually specified via this method. To control fees, configure a `feeOracle` when creating the SDK.
+
 **Example:**
 ```typescript
 const inscription = await sdk.bitcoin.trackInscription(inscriptionId);
 
 const transferTx = await sdk.bitcoin.transferInscription(
   inscription,
-  'bc1qxyz...', // Mainnet address
-  { feeRate: 12 }
+  'bc1qxyz...' // Recipient address
 );
 
 console.log('Transfer TX:', transferTx.txid);
 ```
 
-**Location:** `src/bitcoin/BitcoinManager.ts:89`
+**Location:** `src/bitcoin/BitcoinManager.ts:180`
 
 ---
 
@@ -170,39 +198,7 @@ if (inscription) {
 }
 ```
 
-**Location:** `src/bitcoin/BitcoinManager.ts:112`
-
----
-
-### getInscriptionsBySatoshi()
-
-Gets all inscriptions on a specific satoshi.
-
-```typescript
-async getInscriptionsBySatoshi(
-  satoshi: string
-): Promise<OrdinalsInscription[]>
-```
-
-**Parameters:**
-- `satoshi` (string): Satoshi identifier (e.g., '1234567890')
-
-**Returns:**
-- `Promise<OrdinalsInscription[]>`: Array of inscriptions on this satoshi
-
-**Example:**
-```typescript
-const inscriptions = await sdk.bitcoin.getInscriptionsBySatoshi(
-  '2099994106992659'
-);
-
-console.log(`Found ${inscriptions.length} inscriptions`);
-for (const ins of inscriptions) {
-  console.log('- ', ins.inscriptionId, ins.contentType);
-}
-```
-
-**Location:** `src/bitcoin/BitcoinManager.ts:134`
+**Location:** `src/bitcoin/BitcoinManager.ts:163`
 
 ---
 
@@ -222,6 +218,8 @@ async preventFrontRunning(
 **Returns:**
 - `Promise<boolean>`: `true` if safe (0-1 inscriptions), `false` if front-run (2+ inscriptions)
 
+**Note:** This method uses the configured Ordinals provider's `getInscriptionsBySatoshi()` method internally. To query inscriptions on a satoshi directly, use `provider.getInscriptionsBySatoshi()` instead (see [OrdinalsProvider Interface](#ordinalsProvider-interface)).
+
 **Example:**
 ```typescript
 const isSafe = await sdk.bitcoin.preventFrontRunning(
@@ -234,7 +232,7 @@ if (!isSafe) {
 }
 ```
 
-**Location:** `src/bitcoin/BitcoinManager.ts:156`
+**Location:** `src/bitcoin/BitcoinManager.ts:249`
 
 ---
 
