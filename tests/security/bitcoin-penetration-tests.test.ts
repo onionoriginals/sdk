@@ -115,13 +115,13 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
     it('should reject extremely high fee rates', async () => {
       const extremelyHighFeeRate = 1_000_000_000; // 1 billion sat/vB
 
-      await expect(async () => {
-        await bitcoinManager.inscribeData(
+      await expect(
+        bitcoinManager.inscribeData(
           { test: 'data' },
           'application/json',
           extremelyHighFeeRate
-        );
-      }).toThrow();
+        )
+      ).rejects.toThrow();
 
       console.log('[SECURITY] Extremely high fee rate rejected (or should be with fix)');
     });
@@ -129,13 +129,13 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
     it('should reject negative fee rates', async () => {
       const negativeFeeRate = -10;
 
-      await expect(async () => {
-        await bitcoinManager.inscribeData(
+      await expect(
+        bitcoinManager.inscribeData(
           { test: 'data' },
           'application/json',
           negativeFeeRate
-        );
-      }).toThrow(/must be a positive number/);
+        )
+      ).rejects.toThrow(/must be a positive number/);
 
       console.log('[SECURITY] Negative fee rate correctly rejected');
     });
@@ -143,13 +143,13 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
     it('should reject NaN fee rates', async () => {
       const nanFeeRate = NaN;
 
-      await expect(async () => {
-        await bitcoinManager.inscribeData(
+      await expect(
+        bitcoinManager.inscribeData(
           { test: 'data' },
           'application/json',
           nanFeeRate
-        );
-      }).toThrow(/must be a positive number/);
+        )
+      ).rejects.toThrow(/must be a positive number/);
 
       console.log('[SECURITY] NaN fee rate correctly rejected');
     });
@@ -157,13 +157,13 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
     it('should reject Infinity fee rates', async () => {
       const infinityFeeRate = Infinity;
 
-      await expect(async () => {
-        await bitcoinManager.inscribeData(
+      await expect(
+        bitcoinManager.inscribeData(
           { test: 'data' },
           'application/json',
           infinityFeeRate
-        );
-      }).toThrow(/must be a positive number/);
+        )
+      ).rejects.toThrow(/must be a positive number/);
 
       console.log('[SECURITY] Infinity fee rate correctly rejected');
     });
@@ -171,13 +171,13 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
     it('should handle zero fee rate gracefully', async () => {
       const zeroFeeRate = 0;
 
-      await expect(async () => {
-        await bitcoinManager.inscribeData(
+      await expect(
+        bitcoinManager.inscribeData(
           { test: 'data' },
           'application/json',
           zeroFeeRate
-        );
-      }).toThrow(/must be a positive number/);
+        )
+      ).rejects.toThrow(/must be a positive number/);
 
       console.log('[SECURITY] Zero fee rate correctly rejected');
     });
@@ -298,13 +298,13 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
 
     maliciousMimeTypes.forEach((mimeType) => {
       it(`should reject malicious MIME type: ${mimeType.substring(0, 30)}...`, async () => {
-        await expect(async () => {
-          await bitcoinManager.inscribeData(
+        await expect(
+          bitcoinManager.inscribeData(
             { test: 'data' },
             mimeType,
             10
-          );
-        }).toThrow();
+          )
+        ).rejects.toThrow();
 
         console.log(`[SECURITY] Malicious MIME type rejected: ${mimeType.substring(0, 40)}`);
       });
