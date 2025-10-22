@@ -16,9 +16,11 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "bun test tests/integration && bun test tests/unit",
+    "test": "bun test tests/integration && bun test tests/unit && bun test tests/security && bun test tests/stress",
     "test:coverage": "bun test tests/integration tests/unit --coverage",
     "test:ci": "bun run scripts/check-coverage.ts",
+    "test:security": "bun test tests/security",
+    "test:stress": "bun test tests/stress",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
