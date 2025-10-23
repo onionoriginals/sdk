@@ -28,9 +28,9 @@ interface DIDData {
   didDocument: any;
   didLog?: any;
   didSlug?: string;
-  authWalletId: string;
-  assertionWalletId: string;
-  updateWalletId: string;
+  authKeyId: string;
+  assertionKeyId: string;
+  updateKeyId: string;
   authKeyPublic: string;
   assertionKeyPublic: string;
   updateKeyPublic: string;
@@ -68,9 +68,11 @@ export class DatabaseStorage {
     return result[0];
   }
 
-  async getUserByPrivyId(privyUserId: string): Promise<User | undefined> {
-    const byUsername = await this.getUserByUsername(privyUserId);
-    return byUsername || undefined;
+  async getUserByTurnkeyId(turnkeySubOrgId: string): Promise<User | undefined> {
+    const result = await this.db.select().from(users)
+      .where(eq(users.turnkeySubOrgId, turnkeySubOrgId))
+      .limit(1);
+    return result[0];
   }
 
   async createUser(insertUser: InsertUser | (Omit<Partial<User>, 'id'> & { username: string; password: string })): Promise<User> {
@@ -83,10 +85,10 @@ export class DatabaseStorage {
     return result[0];
   }
 
-  async ensureUser(privyUserId: string): Promise<User> {
-    const existing = await this.getUserByPrivyId(privyUserId);
+  async ensureUser(turnkeySubOrgId: string, email: string): Promise<User> {
+    const existing = await this.getUserByTurnkeyId(turnkeySubOrgId);
     if (existing) return existing;
-    return this.createUser({ username: privyUserId, password: '' });
+    return this.createUser({ username: email, password: '', turnkeySubOrgId, email });
   }
 
   async getUserByDidSlug(slug: string): Promise<User | undefined> {
@@ -99,20 +101,21 @@ export class DatabaseStorage {
     return result[0];
   }
 
-  async createUserWithDid(privyUserId: string, did: string, didData: DIDData): Promise<User> {
-    // Check if user already exists by Privy ID
-    const existing = await this.getUserByUsername(privyUserId);
-    
+  async createUserWithDid(email: string, turnkeySubOrgId: string, did: string, didData: DIDData): Promise<User> {
+    // CRITICAL PR FEEDBACK: Maintain stable user.id!
+    // Check if user already exists by Turnkey sub-org ID
+    const existing = await this.getUserByTurnkeyId(turnkeySubOrgId);
+
     if (existing) {
-      // Update existing user with DID data (keep the same database ID)
+      // UPDATE existing user with DID data in-place (keep the same database ID!)
       return await this.updateUser(existing.id, {
         did,
         didDocument: didData.didDocument,
         didLog: didData.didLog || null,
         didSlug: didData.didSlug || null,
-        authWalletId: didData.authWalletId,
-        assertionWalletId: didData.assertionWalletId,
-        updateWalletId: didData.updateWalletId,
+        authKeyId: didData.authKeyId,
+        assertionKeyId: didData.assertionKeyId,
+        updateKeyId: didData.updateKeyId,
         authKeyPublic: didData.authKeyPublic,
         assertionKeyPublic: didData.assertionKeyPublic,
         updateKeyPublic: didData.updateKeyPublic,
@@ -128,15 +131,17 @@ export class DatabaseStorage {
 
     // Create new user (database will generate UUID as ID)
     return this.createUser({
-      username: privyUserId,  // Keep Privy ID as username for lookup
+      username: email,
       password: '',
+      turnkeySubOrgId,
+      email,
       did,
       didDocument: didData.didDocument,
       didLog: didData.didLog || null,
       didSlug: didData.didSlug || null,
-      authWalletId: didData.authWalletId,
-      assertionWalletId: didData.assertionWalletId,
-      updateWalletId: didData.updateWalletId,
+      authKeyId: didData.authKeyId,
+      assertionKeyId: didData.assertionKeyId,
+      updateKeyId: didData.updateKeyId,
       authKeyPublic: didData.authKeyPublic,
       assertionKeyPublic: didData.assertionKeyPublic,
       updateKeyPublic: didData.updateKeyPublic,
