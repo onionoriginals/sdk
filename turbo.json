@@ -1,0 +1,73 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**", "build/**"]
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "test:coverage": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "test:ci": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "outputs": ["coverage/**", "badges/**"]
+    },
+    "test:security": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "test:stress": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "test:e2e": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "test:e2e:ui": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "test:e2e:headed": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "test:e2e:debug": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "lint": {
+      "cache": false
+    },
+    "format": {
+      "cache": false
+    },
+    "check": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true
+    },
+    "start": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "persistent": true
+    },
+    "db:push": {
+      "cache": false
+    },
+    "db:wipe": {
+      "cache": false
+    }
+  }
+}

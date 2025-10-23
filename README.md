@@ -246,19 +246,45 @@ For detailed information about the DID:WebVH integration, including Privy setup 
 
 ## Development
 
+This is a monorepo managed with [Turborepo](https://turbo.build/repo) for efficient task orchestration.
+
 ```bash
 # Install dependencies
 bun install
 
-# Build
+# Build all packages (SDK + Apps)
 bun run build
 
-# Test  
+# Test all packages
 bun test
 
-# Lint
+# Lint all packages
 bun run lint
+
+# Start development servers
+bun run dev
+
+# Type check all packages
+bun run check
 ```
+
+### Monorepo Structure
+
+```
+sdk/
+├── packages/
+│   └── sdk/                # Main SDK package
+└── apps/
+    └── originals-explorer/ # Explorer application
+```
+
+### Turborepo Benefits
+
+- **Intelligent caching**: Never rebuild the same code twice
+- **Parallel execution**: Run tasks across packages simultaneously
+- **Task dependencies**: Automatically build dependencies before dependents
+
+For detailed information about using Turborepo, see [docs/TURBOREPO.md](./docs/TURBOREPO.md).
 
 ## License
 
