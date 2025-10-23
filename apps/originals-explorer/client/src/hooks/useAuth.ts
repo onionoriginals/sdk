@@ -1,8 +1,9 @@
 import { usePrivy } from '@privy-io/react-auth';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 export function useAuth() {
-  const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
+  const { ready, authenticated, user, login, logout: privyLogout, getAccessToken } = usePrivy();
+  const queryClient = useQueryClient();
 
   // Always call useQuery to maintain hook order consistency
   const { data: serverUser, isLoading: isServerUserLoading } = useQuery({
@@ -13,7 +14,14 @@ export function useAuth() {
 
   // Return consistent structure regardless of auth state
   const isAuthenticated = ready && authenticated;
-  
+
+  // Wrap logout to clear query cache
+  const handleLogout = async () => {
+    await privyLogout();
+    // Clear all queries to prevent data leakage
+    queryClient.clear();
+  };
+
   return {
     user: isAuthenticated && user && serverUser ? {
       id: serverUser.id,
@@ -25,7 +33,7 @@ export function useAuth() {
     isUserLoading: isAuthenticated && isServerUserLoading,
     isAuthenticated,
     login,
-    logout,
+    logout: handleLogout,
     getAccessToken,
   };
 }

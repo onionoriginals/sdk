@@ -52,10 +52,10 @@ export function OriginalsSidebar() {
     enabled: isAuthenticated,
   });
 
-  // Filter API assets by layer
-  const ideasDocs = apiAssets?.filter(a => a.currentLayer === 'did:peer') || [];
-  const resourcesDocs = apiAssets?.filter(a => a.currentLayer === 'did:webvh') || [];
-  const assetsDocs = apiAssets?.filter(a => a.currentLayer === 'did:btco') || [];
+  // Filter API assets by layer - only show if authenticated
+  const ideasDocs = isAuthenticated && apiAssets ? apiAssets.filter(a => a.currentLayer === 'did:peer') : [];
+  const resourcesDocs = isAuthenticated && apiAssets ? apiAssets.filter(a => a.currentLayer === 'did:webvh') : [];
+  const assetsDocs = isAuthenticated && apiAssets ? apiAssets.filter(a => a.currentLayer === 'did:btco') : [];
 
   const createNewAsset = () => {
     navigate('/create');
