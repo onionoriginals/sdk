@@ -40,6 +40,8 @@ export interface ResourceProviderLike {
 
 export interface BtcoDidResolutionOptions {
   provider?: ResourceProviderLike;
+  fetchFn?: (url: string) => Promise<Response>;
+  timeout?: number;
 }
 
 export class BtcoDidResolver {
@@ -119,11 +121,25 @@ export class BtcoDidResolver {
         inscriptionData.contentType = inscription.content_type;
 
         try {
-          const response = await fetch(inscription.content_url);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          // Use configurable fetch function or default to global fetch
+          const fetchFn = options.fetchFn || this.options.fetchFn || fetch;
+          const timeout = options.timeout || this.options.timeout || 10000; // 10 second default
+
+          // Create abort controller for timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+          try {
+            const response = await fetchFn(inscription.content_url);
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            inscriptionData.content = await response.text();
+          } finally {
+            clearTimeout(timeoutId);
           }
-          inscriptionData.content = await response.text();
         } catch (err: any) {
           inscriptionData.error = `Failed to fetch content: ${err?.message || String(err)}`;
           inscriptionDataList.push(inscriptionData);
