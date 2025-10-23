@@ -7,18 +7,30 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
-  // DID-related fields (Privy-managed keys)
+
+  // Turnkey-related fields
+  turnkeySubOrgId: text("turnkey_sub_org_id").unique(), // Turnkey sub-organization ID (NOT email!)
+  email: text("email"), // Email metadata only, never used as Turnkey ID
+
+  // DID-related fields (Turnkey-managed keys)
   did: text("did"), // did:webvh identifier
   didDocument: jsonb("did_document"), // Complete DID document
   didLog: jsonb("did_log"), // DID log (did.jsonl content)
   didSlug: text("did_slug"), // User slug extracted from DID
-  authWalletId: text("auth_wallet_id"), // Privy wallet ID for authentication (Bitcoin)
-  assertionWalletId: text("assertion_wallet_id"), // Privy wallet ID for assertions (Stellar/ED25519)
-  updateWalletId: text("update_wallet_id"), // Privy wallet ID for DID updates (Stellar/ED25519)
-  authKeyPublic: text("auth_key_public"), // Bitcoin public key in multibase format
-  assertionKeyPublic: text("assertion_key_public"), // ED25519 public key in multibase format
-  updateKeyPublic: text("update_key_public"), // ED25519 public key in multibase format
+
+  // Turnkey private key IDs (tagged with user slug for isolation)
+  authKeyId: text("auth_key_id"), // Turnkey private key ID for authentication (Ed25519)
+  assertionKeyId: text("assertion_key_id"), // Turnkey private key ID for signing credentials (Ed25519)
+  updateKeyId: text("update_key_id"), // Turnkey private key ID for DID updates (Ed25519)
+
+  // Public keys in multibase format
+  authKeyPublic: text("auth_key_public"), // Ed25519 public key for authentication
+  assertionKeyPublic: text("assertion_key_public"), // Ed25519 public key for assertions
+  updateKeyPublic: text("update_key_public"), // Ed25519 public key for updates
+
   didCreatedAt: timestamp("did_created_at"), // When the DID was created
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const assets = pgTable("assets", {
