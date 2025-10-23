@@ -1,17 +1,28 @@
-import { PrivyClient } from "@privy-io/node";
-import { convertToMultibase, extractPublicKeyFromWallet } from "./key-utils";
-import { originalsSdk } from "./originals";
-import { 
-  createVerificationMethodsFromPrivy, 
-  createPrivySigner 
-} from "./privy-signer";
+/**
+ * DID:WebVH Service - Turnkey Integration
+ * Creates and manages DID:WebVH identifiers using Turnkey for key management
+ *
+ * Critical PR #102 Feedback Addressed:
+ * - Uses Turnkey sub-organization ID (NOT email!)
+ * - Returns Turnkey private key IDs (NOT wallet IDs)
+ * - No user auth tokens needed (server-side Turnkey API)
+ * - Key tagging for user isolation
+ */
+
+import { Turnkey } from '@turnkey/sdk-server';
+import { originalsSdk } from './originals';
+import {
+  createVerificationMethodsFromTurnkey,
+  createTurnkeySigner,
+  generateUserSlug
+} from './turnkey-signer';
 
 export interface DIDWebVHCreationResult {
   did: string;
   didDocument: any;
-  authWalletId: string;
-  assertionWalletId: string;
-  updateWalletId: string;
+  authKeyId: string;
+  assertionKeyId: string;
+  updateKeyId: string;
   authKeyPublic: string;
   assertionKeyPublic: string;
   updateKeyPublic: string;
@@ -22,67 +33,57 @@ export interface DIDWebVHCreationResult {
 }
 
 /**
- * Generate a sanitized user slug from Privy user ID
- * @param privyUserId - The Privy user ID (e.g., "did:privy:cltest123456" or "cltest123456")
- * @returns Sanitized slug for use in did:webvh
- */
-function generateUserSlug(privyUserId: string): string {
-  // Strip "did:privy:" prefix if present
-  let slug = privyUserId.replace(/^did:privy:/, '');
-  
-  // Sanitize: lowercase and replace any non-alphanumeric with hyphens
-  const sanitized = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-  
-  // Remove consecutive hyphens and trim
-  return sanitized.replace(/-+/g, '-').replace(/^-|-$/g, '');
-}
-
-/**
- * Create a DID:WebVH for a user using Privy-managed wallets
- * Uses the Originals SDK with custom Privy signer integration
- * @param privyUserId - The Privy user ID
- * @param privyClient - Initialized Privy client
- * @param userAuthToken - The user's JWT token for authorization
+ * Create a DID:WebVH for a user using Turnkey-managed keys
+ * Uses the Originals SDK with Turnkey signer integration
+ *
+ * CRITICAL: Uses Turnkey sub-organization ID (NOT email!)
+ *
+ * @param turnkeySubOrgId - The Turnkey sub-organization ID (stable identifier)
+ * @param turnkeyClient - Initialized Turnkey client
  * @param domain - Domain to use in the DID (default: from env)
  * @returns DID creation result with all metadata
  */
 export async function createUserDIDWebVH(
-  privyUserId: string,
-  privyClient: PrivyClient,
-  userAuthToken: string,
+  turnkeySubOrgId: string,
+  turnkeyClient: Turnkey,
   domain: string = process.env.DID_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000'
 ): Promise<DIDWebVHCreationResult> {
   try {
-    // Generate user slug
-    const userSlug = generateUserSlug(privyUserId);
+    // Generate user slug from sub-org ID
+    const userSlug = generateUserSlug(turnkeySubOrgId);
 
-    // Create verification methods and wallets using Privy
+    // Create verification methods and keys using Turnkey
+    // CRITICAL: All keys are tagged with user slug for isolation
     const {
       verificationMethods,
       updateKey,
-      authWalletId,
-      updateWalletId,
-    } = await createVerificationMethodsFromPrivy(
-      privyUserId,
-      privyClient,
+      authKeyId,
+      assertionKeyId,
+      updateKeyId,
+      authKeyPublic,
+      assertionKeyPublic,
+      updateKeyPublic,
+    } = await createVerificationMethodsFromTurnkey(
+      turnkeySubOrgId,
+      turnkeyClient,
       domain,
       userSlug
     );
 
-    // Create the signer using the update wallet (will be used to sign the DID creation)
+    // Create the signer using the update key (will be used to sign the DID creation)
     const encodedDomain = encodeURIComponent(domain);
     const did = `did:webvh:${encodedDomain}:${userSlug}`;
-    const verificationMethodId = updateKey; // Use the update key as verification method
+    const verificationMethodId = `${did}#update-key`;
 
-    const signer = await createPrivySigner(
-      privyUserId,
-      updateWalletId,
-      privyClient,
+    const signer = await createTurnkeySigner(
+      turnkeySubOrgId,
+      updateKeyId,
+      turnkeyClient,
       verificationMethodId,
-      userAuthToken
+      updateKeyPublic
     );
 
-    // Create the DID using the Originals SDK DIDManager with Privy signer
+    // Create the DID using the Originals SDK DIDManager with Turnkey signer
     // No outputDir - we don't need files on disk, everything is served from the database
     const result = await originalsSdk.did.createDIDWebVH({
       domain,
@@ -97,19 +98,19 @@ export async function createUserDIDWebVH(
     return {
       did: result.did,
       didDocument: result.didDocument as any,
-      authWalletId,
-      assertionWalletId: authWalletId, // Same as auth for now
-      updateWalletId,
-      authKeyPublic: verificationMethods[0].publicKeyMultibase,
-      assertionKeyPublic: verificationMethods[0].publicKeyMultibase,
-      updateKeyPublic: updateKey.replace('did:key:', ''),
+      authKeyId,
+      assertionKeyId,
+      updateKeyId,
+      authKeyPublic,
+      assertionKeyPublic,
+      updateKeyPublic,
       didCreatedAt: new Date(),
       didSlug: userSlug,
       didLog: result.log,
       logPath: result.logPath,
     };
   } catch (error) {
-    console.error('Error creating DID:WebVH:', error);
+    console.error('Error creating DID:WebVH with Turnkey:', error);
     throw new Error(`Failed to create DID:WebVH: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -152,33 +153,33 @@ export async function publishDIDDocument(params: {
   didLog?: any;
 }): Promise<void> {
   const { did, didDocument, didLog } = params;
-  
+
   // Validate DID format
   if (!did.startsWith('did:webvh:')) {
     throw new Error('Invalid DID format: must be a did:webvh identifier');
   }
-  
+
   // Extract slug from did:webvh:domain.com:slug
   const parts = did.split(':');
   if (parts.length < 4) {
     throw new Error('Invalid DID format: missing slug component');
   }
   const slug = parts[parts.length - 1];
-  
+
   if (!slug) {
     throw new Error('Invalid DID format: could not extract slug');
   }
-  
+
   // Import storage dynamically to avoid circular dependency
   const { storage } = await import('./storage');
-  
+
   // Store in database for public access
   await storage.storeDIDDocument(slug, {
     didDocument,
     didLog: didLog || { entries: [] },
     publishedAt: new Date().toISOString()
   });
-  
+
   console.log(`DID document published: ${did}`);
 }
 
@@ -192,25 +193,25 @@ export async function resolveDIDDocument(did: string): Promise<any> {
   if (!did.startsWith('did:webvh:')) {
     throw new Error('Invalid DID format: must be a did:webvh identifier');
   }
-  
+
   const parts = did.split(':');
   if (parts.length < 4) {
     throw new Error('Invalid DID format: missing slug component');
   }
   const slug = parts[parts.length - 1];
-  
+
   if (!slug) {
     throw new Error('Invalid DID format: could not extract slug');
   }
-  
+
   // Import storage dynamically to avoid circular dependency
   const { storage } = await import('./storage');
-  
+
   const doc = await storage.getDIDDocument(slug);
-  
+
   if (!doc) {
     throw new Error('DID document not found');
   }
-  
+
   return doc.didDocument;
 }
