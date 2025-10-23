@@ -1,5 +1,5 @@
 [test]
-preload = ["./tests/setup.bun.ts"]
+preload = ["./packages/sdk/tests/setup.bun.ts"]
 coveragePathIgnorePatterns = [
   "tests/mocks/**",
   "tests/setup.bun.ts",
