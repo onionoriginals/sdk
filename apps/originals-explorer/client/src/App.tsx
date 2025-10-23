@@ -5,6 +5,7 @@ import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { useEffect, useRef } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { OriginalsLayout } from "@/components/layout/originals-layout";
 import Header from "@/components/layout/header";
 import Homepage from "@/pages/homepage";
 import Directory from "@/pages/directory";
@@ -19,6 +20,7 @@ import AssetsSpreadsheet from "@/pages/assets-spreadsheet";
 import Setup from "@/pages/setup";
 import UploadAssets from "@/pages/upload-assets";
 import GoogleCallback from "@/pages/google-callback";
+import AssetDetail from "@/pages/asset-detail";
 
 function AuthSetup() {
   const { getAccessToken } = usePrivy();
@@ -38,7 +40,16 @@ function AuthSetup() {
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={Homepage} />
+      <Route path="/">
+        <OriginalsLayout>
+          <Homepage />
+        </OriginalsLayout>
+      </Route>
+      <Route path="/asset/:id">
+        <OriginalsLayout>
+          <AssetDetail />
+        </OriginalsLayout>
+      </Route>
       <Route path="/dir" component={Directory} />
       <Route path="/assets" component={AssetsSpreadsheet} />
       <Route path="/setup" component={Setup} />
@@ -55,9 +66,26 @@ function Router() {
   );
 }
 
+function AppContent() {
+  const [location] = useLocation();
+  // Don't show header on routes that use OriginalsLayout (has sidebar)
+  const routesWithSidebar = ['/', '/asset'];
+  const showHeader = !routesWithSidebar.some(route =>
+    location === route || location.startsWith(route + '/')
+  );
+
+  return (
+    <div className="min-h-screen bg-background">
+      {showHeader && <Header />}
+      <Toaster />
+      <Router />
+    </div>
+  );
+}
+
 function App() {
   return (
-    <PrivyProvider 
+    <PrivyProvider
       appId={import.meta.env.VITE_PRIVY_APP_ID}
       config={{
         appearance: {
@@ -71,11 +99,7 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <AuthSetup />
-          <div className="min-h-screen bg-background">
-            <Header />
-            <Toaster />
-            <Router />
-          </div>
+          <AppContent />
         </TooltipProvider>
       </QueryClientProvider>
     </PrivyProvider>
