@@ -14,13 +14,13 @@ export interface IStorage {
   // User methods
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
-  getUserByPrivyId(privyUserId: string): Promise<User | undefined>;
+  getUserByTurnkeyId(turnkeySubOrgId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(userId: string, updates: Partial<User>): Promise<User | undefined>;
-  ensureUser(userId: string): Promise<User>;
+  ensureUser(turnkeySubOrgId: string, email: string): Promise<User>;
   getUserByDidSlug(slug: string): Promise<User | undefined>;
   getUserByDid(did: string): Promise<User | undefined>;
-  createUserWithDid(privyUserId: string, did: string, didData: any): Promise<User>;
+  createUserWithDid(email: string, turnkeySubOrgId: string, did: string, didData: any): Promise<User>;
   
   // Asset methods
   getAsset(id: string): Promise<Asset | undefined>;
@@ -79,8 +79,8 @@ export interface IStorage {
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>; // Key: did:webvh, Value: User
-  private privyToDidMapping: Map<string, string>; // Key: Privy user ID, Value: did:webvh
+  private users: Map<string, User>; // Key: user.id (UUID), Value: User
+  private turnkeyToUserIdMapping: Map<string, string>; // Key: Turnkey sub-org ID, Value: user.id
   private assets: Map<string, Asset>;
   private walletConnections: Map<string, WalletConnection>;
   private signingKeys: Map<string, SigningKey[]>;
@@ -90,7 +90,7 @@ export class MemStorage implements IStorage {
 
   constructor() {
     this.users = new Map();
-    this.privyToDidMapping = new Map();
+    this.turnkeyToUserIdMapping = new Map();
     this.googleDriveImports = new Map();
     this.assets = new Map();
     this.walletConnections = new Map();
@@ -109,28 +109,32 @@ export class MemStorage implements IStorage {
     );
   }
 
-  async getUserByPrivyId(privyUserId: string): Promise<User | undefined> {
-    const did = this.privyToDidMapping.get(privyUserId);
-    if (!did) return undefined;
-    return this.users.get(did);
+  async getUserByTurnkeyId(turnkeySubOrgId: string): Promise<User | undefined> {
+    const userId = this.turnkeyToUserIdMapping.get(turnkeySubOrgId);
+    if (!userId) return undefined;
+    return this.users.get(userId);
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
-    const user: User = { 
-      ...insertUser, 
+    const user: User = {
+      ...insertUser,
       id,
+      turnkeySubOrgId: null,
+      email: null,
       did: null,
       didDocument: null,
       didLog: null,
       didSlug: null,
-      authWalletId: null,
-      assertionWalletId: null,
-      updateWalletId: null,
+      authKeyId: null,
+      assertionKeyId: null,
+      updateKeyId: null,
       authKeyPublic: null,
       assertionKeyPublic: null,
       updateKeyPublic: null,
       didCreatedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     };
     this.users.set(id, user);
     return user;
@@ -145,62 +149,98 @@ export class MemStorage implements IStorage {
     return updatedUser;
   }
 
-  async ensureUser(privyUserId: string): Promise<User> {
-    // Check if user already exists by Privy ID
-    const existing = await this.getUserByPrivyId(privyUserId);
+  async ensureUser(turnkeySubOrgId: string, email: string): Promise<User> {
+    // Check if user already exists by Turnkey sub-org ID
+    const existing = await this.getUserByTurnkeyId(turnkeySubOrgId);
     if (existing) {
       return existing;
     }
 
-    // Create a temporary user record with Privy ID - DID will be added later
+    // Create a temporary user record - DID will be added later
+    // CRITICAL: Use stable UUID as id, NOT turnkeySubOrgId!
+    const id = randomUUID();
     const user: User = {
-      id: privyUserId, // Temporary - will be updated to DID
-      username: privyUserId,
-      password: '', // Not used for Privy users
+      id, // Stable UUID - NEVER changes!
+      username: email,
+      password: '', // Not used for Turnkey users
+      turnkeySubOrgId,
+      email,
       did: null,
       didDocument: null,
       didLog: null,
       didSlug: null,
-      authWalletId: null,
-      assertionWalletId: null,
-      updateWalletId: null,
+      authKeyId: null,
+      assertionKeyId: null,
+      updateKeyId: null,
       authKeyPublic: null,
       assertionKeyPublic: null,
       updateKeyPublic: null,
       didCreatedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     };
-    this.users.set(privyUserId, user);
+    this.users.set(id, user);
+    this.turnkeyToUserIdMapping.set(turnkeySubOrgId, id);
     return user;
   }
 
-  async createUserWithDid(privyUserId: string, did: string, didData: any): Promise<User> {
-    // Create user with DID as the primary key
+  async createUserWithDid(email: string, turnkeySubOrgId: string, did: string, didData: any): Promise<User> {
+    // CRITICAL PR FEEDBACK: Maintain stable user.id!
+    // Check for existing user to update in-place (not swap!)
+    const existing = await this.getUserByTurnkeyId(turnkeySubOrgId);
+
+    if (existing) {
+      // UPDATE existing record in-place - keep user.id stable!
+      const updatedUser: User = {
+        ...existing,
+        turnkeySubOrgId,
+        email,
+        did,
+        didDocument: didData.didDocument,
+        didLog: didData.didLog || null,
+        didSlug: didData.didSlug || null,
+        authKeyId: didData.authKeyId,
+        assertionKeyId: didData.assertionKeyId,
+        updateKeyId: didData.updateKeyId,
+        authKeyPublic: didData.authKeyPublic,
+        assertionKeyPublic: didData.assertionKeyPublic,
+        updateKeyPublic: didData.updateKeyPublic,
+        didCreatedAt: new Date(),
+        updatedAt: new Date(),
+      };
+      this.users.set(existing.id, updatedUser);
+      return updatedUser;
+    }
+
+    // Create new user with stable UUID
+    const id = randomUUID();
     const user: User = {
-      id: did, // Use DID as primary identifier
-      username: did,
-      password: '', // Not used for Privy users
-      did: did,
+      id, // Stable UUID - primary identifier
+      username: email,
+      password: '',
+      turnkeySubOrgId,
+      email,
+      did,
       didDocument: didData.didDocument,
       didLog: didData.didLog || null,
       didSlug: didData.didSlug || null,
-      authWalletId: didData.authWalletId,
-      assertionWalletId: didData.assertionWalletId,
-      updateWalletId: didData.updateWalletId,
+      authKeyId: didData.authKeyId,
+      assertionKeyId: didData.assertionKeyId,
+      updateKeyId: didData.updateKeyId,
       authKeyPublic: didData.authKeyPublic,
       assertionKeyPublic: didData.assertionKeyPublic,
       updateKeyPublic: didData.updateKeyPublic,
-      didCreatedAt: didData.didCreatedAt,
+      didCreatedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
     };
-    
-    // Store user with DID as key
-    this.users.set(did, user);
-    
-    // Create mapping from Privy ID to DID
-    this.privyToDidMapping.set(privyUserId, did);
-    
-    // Remove temporary user record if it exists
-    this.users.delete(privyUserId);
-    
+
+    // Store with stable UUID as key
+    this.users.set(id, user);
+
+    // Create mapping from Turnkey sub-org ID to user.id
+    this.turnkeyToUserIdMapping.set(turnkeySubOrgId, id);
+
     return user;
   }
 
