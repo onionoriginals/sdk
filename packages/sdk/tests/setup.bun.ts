@@ -5,8 +5,25 @@ import * as secp256k1 from '@noble/secp256k1';
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { concatBytes } from '@noble/hashes/utils.js';
-import { afterEach } from 'bun:test';
+import { afterEach, beforeEach } from 'bun:test';
 import { verificationMethodRegistry } from '../src/vc/documentLoader';
+
+// Suppress console logs during tests to reduce noise
+// Only show errors unless explicitly configured otherwise
+const originalConsole = {
+  log: console.log,
+  info: console.info,
+  debug: console.debug,
+  warn: console.warn,
+};
+
+beforeEach(() => {
+  // Suppress non-error console output during tests
+  console.log = () => {};
+  console.info = () => {};
+  console.debug = () => {};
+  console.warn = () => {};
+});
 
 // Ensure globalThis.crypto is available for noble libraries
 if (typeof globalThis.crypto === 'undefined') {
@@ -30,8 +47,15 @@ const secp256k1Any = secp256k1 as any;
 if (!secp256k1Any.utils) secp256k1Any.utils = {};
 secp256k1Any.utils.hmacSha256Sync = hmacSha256Impl;
 
-// Global cleanup: Clear verification method registry after each test to prevent pollution
+// Global cleanup after each test
 afterEach(() => {
+  // Restore console methods
+  console.log = originalConsole.log;
+  console.info = originalConsole.info;
+  console.debug = originalConsole.debug;
+  console.warn = originalConsole.warn;
+  
+  // Clear verification method registry to prevent pollution
   verificationMethodRegistry.clear();
 });
 
