@@ -60,8 +60,7 @@ export class BitcoinValidator implements IValidator {
       } catch (error) {
         warnings.push({
           code: 'FEE_ESTIMATION_FAILED',
-          message: 'Could not estimate Bitcoin network fees',
-          details: { error: error instanceof Error ? error.message : String(error) }
+          message: `Could not estimate Bitcoin network fees: ${error instanceof Error ? error.message : String(error)}`
         });
         networkFees = 10240; // Default fallback: ~1KB at 10 sat/vB
       }
@@ -100,7 +99,6 @@ export class BitcoinValidator implements IValidator {
         storageCost: 0,
         networkFees,
         totalCost: networkFees,
-        estimatedDuration: duration,
         currency: 'sats'
       },
       estimatedDuration: duration

@@ -9,18 +9,18 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "bun run --filter @originals/sdk build",
-    "test": "bun run --filter @originals/sdk test",
-    "test:coverage": "bun run --filter @originals/sdk test:coverage",
+    "build": "cd packages/sdk && bun run build",
+    "test": "cd packages/sdk && bun run test",
+    "test:coverage": "cd packages/sdk && bun run test:coverage",
     "test:ci": "bun run scripts/check-coverage.ts",
-    "test:security": "bun run --filter @originals/sdk test:security",
-    "test:stress": "bun run --filter @originals/sdk test:stress",
+    "test:security": "cd packages/sdk && bun run test:security",
+    "test:stress": "cd packages/sdk && bun run test:stress",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
     "test:e2e:report": "playwright show-report",
-    "lint": "bun run --filter @originals/sdk lint"
+    "lint": "cd packages/sdk && bun run lint"
   },
   "author": "Aviary Tech",
   "license": "MIT",

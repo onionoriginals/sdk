@@ -4,7 +4,7 @@
 
 import { MigrationAuditRecord, IAuditLogger } from '../types';
 import { OriginalsConfig } from '../../types';
-import { sha256 } from '@noble/hashes/sha2';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { encodeBase64UrlMultibase } from '../../utils/encoding';
 
 export class AuditLogger implements IAuditLogger {
