@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { FileText, Globe, Lightbulb, Plus, Bitcoin, User, Settings, LogOut } from "lucide-react";
 import {
@@ -15,18 +15,13 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { AssetLayer } from "../../../../../shared/schema";
-
-interface Document {
-  id: string;
-  title: string;
-  content: string;
-  updatedAt: string;
-  layer: 'private' | 'public' | 'property';
-}
 
 interface ApiAsset {
   id: string;
@@ -45,8 +40,11 @@ type TabType = 'ideas' | 'resources' | 'assets';
 export function OriginalsSidebar() {
   const [location, navigate] = useLocation();
   const [activeTab, setActiveTab] = useState<TabType>('ideas');
-  const [documents, setDocuments] = useState<Document[]>([]);
+  const [quickTitle, setQuickTitle] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
   const { isAuthenticated, user, logout } = useAuth();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   // Fetch assets from API
   const { data: apiAssets } = useQuery<ApiAsset[]>({
@@ -54,71 +52,54 @@ export function OriginalsSidebar() {
     enabled: isAuthenticated,
   });
 
-  useEffect(() => {
-    const loadDocuments = () => {
-      const saved = localStorage.getItem("originals-documents");
-      const docs: Document[] = saved ? JSON.parse(saved) : [];
-      setDocuments(docs);
-    };
+  // Filter API assets by layer
+  const ideasDocs = apiAssets?.filter(a => a.currentLayer === 'did:peer') || [];
+  const resourcesDocs = apiAssets?.filter(a => a.currentLayer === 'did:webvh') || [];
+  const assetsDocs = apiAssets?.filter(a => a.currentLayer === 'did:btco') || [];
 
-    loadDocuments();
-    window.addEventListener('originals-documents-updated', loadDocuments);
+  const createNewAsset = () => {
+    navigate('/create');
+  };
 
-    return () => {
-      window.removeEventListener('originals-documents-updated', loadDocuments);
-    };
-  }, []);
+  const handleQuickCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickTitle.trim() || isCreating) return;
 
-  // Combine localStorage documents with API assets
-  const ideasDocs = [
-    ...documents.filter(d => (d.layer || 'private') === 'private').map(d => ({ ...d, isApiAsset: false })),
-    ...(apiAssets?.filter(a => a.currentLayer === 'private').map(a => ({
-      id: a.id,
-      title: a.title,
-      content: '',
-      updatedAt: a.createdAt,
-      layer: 'private' as const,
-      isApiAsset: true,
-    })) || [])
-  ];
+    setIsCreating(true);
+    try {
+      const response = await apiRequest('POST', '/api/assets', {
+        title: quickTitle.trim(),
+        assetType: 'original',
+        content: '',
+        metadata: {},
+      });
 
-  const resourcesDocs = [
-    ...documents.filter(d => (d.layer || 'private') === 'public').map(d => ({ ...d, isApiAsset: false })),
-    ...(apiAssets?.filter(a => a.currentLayer === 'public').map(a => ({
-      id: a.id,
-      title: a.title,
-      content: '',
-      updatedAt: a.createdAt,
-      layer: 'public' as const,
-      isApiAsset: true,
-    })) || [])
-  ];
+      const result = await response.json();
 
-  const assetsDocs = [
-    ...documents.filter(d => (d.layer || 'private') === 'property').map(d => ({ ...d, isApiAsset: false })),
-    ...(apiAssets?.filter(a => a.currentLayer === 'property').map(a => ({
-      id: a.id,
-      title: a.title,
-      content: '',
-      updatedAt: a.createdAt,
-      layer: 'property' as const,
-      isApiAsset: true,
-    })) || [])
-  ];
+      // Refresh assets list
+      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
 
-  const createNewDocument = () => {
-    const newDoc: Document = {
-      id: Math.random().toString(36).substring(2, 11),
-      title: 'Untitled',
-      content: '',
-      updatedAt: new Date().toISOString(),
-      layer: 'private',
-    };
+      // Clear input
+      setQuickTitle('');
 
-    const allDocs = [...documents, newDoc];
-    localStorage.setItem("originals-documents", JSON.stringify(allDocs));
-    window.dispatchEvent(new Event('originals-documents-updated'));
-    navigate(`/?doc=${newDoc.id}`);
+      // Navigate to the new asset
+      navigate(`/asset/${result.id}`);
+
+      toast({
+        title: "Asset created!",
+        description: `"${quickTitle}" has been created in did:peer layer`,
+      });
+    } catch (error: any) {
+      console.error('Quick create error:', error);
+      toast({
+        title: "Failed to create asset",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const tabs = [
@@ -143,7 +124,7 @@ export function OriginalsSidebar() {
       label: 'Assets',
       icon: Bitcoin,
       count: assetsDocs.length,
-      description: 'On-chain property',
+      description: 'Property on-chain',
       color: 'text-orange-600',
     },
   ];
@@ -162,13 +143,11 @@ export function OriginalsSidebar() {
   };
 
   const currentDocs = getCurrentDocs();
-  const urlParams = new URLSearchParams(window.location.search);
-  const activeDocId = urlParams.get('doc');
 
   return (
-    <Sidebar side="left" variant="sidebar" collapsible="none">
-      <SidebarHeader className="border-b border-gray-200 bg-white p-3">
-        <div className="flex items-center justify-between">
+    <Sidebar side="left" variant="sidebar" collapsible="none" className="flex flex-col h-screen">
+      <SidebarHeader className="border-b border-gray-200 bg-white p-3 flex-shrink-0">
+        <div className="flex items-center justify-between mb-3">
           <button
             onClick={() => navigate("/")}
             className="text-gray-900 font-light text-lg tracking-tight hover:text-gray-700 transition-colors"
@@ -179,17 +158,27 @@ export function OriginalsSidebar() {
             size="sm"
             variant="ghost"
             className="h-7 w-7 p-0"
-            onClick={createNewDocument}
-            title="Create new document"
+            onClick={createNewAsset}
+            title="Create new asset"
           >
             <Plus className="h-4 w-4" />
           </Button>
         </div>
+        <form onSubmit={handleQuickCreate} className="flex gap-2">
+          <Input
+            type="text"
+            placeholder="Type title and press enter..."
+            value={quickTitle}
+            onChange={(e) => setQuickTitle(e.target.value)}
+            disabled={isCreating}
+            className="flex-1 text-sm"
+          />
+        </form>
       </SidebarHeader>
 
-      <SidebarContent className="bg-gray-50">
-        {/* Tab Navigation */}
-        <div className="border-b border-gray-200 bg-white px-3 py-2">
+      <SidebarContent className="bg-gray-50 flex-1 flex flex-col overflow-hidden">
+        {/* Tab Navigation - Fixed at top */}
+        <div className="border-b border-gray-200 bg-white px-3 py-2 flex-shrink-0">
           <div className="flex flex-col gap-1">
             {tabs.map((tab) => {
               const Icon = tab.icon;
@@ -224,52 +213,56 @@ export function OriginalsSidebar() {
           </div>
         </div>
 
-        {/* Document List */}
-        <SidebarGroup className="flex-1 overflow-hidden">
-          <SidebarGroupLabel className="px-4 py-2 text-gray-500">
-            {tabs.find(t => t.id === activeTab)?.description}
-          </SidebarGroupLabel>
-          <SidebarGroupContent className="overflow-y-auto">
-            <SidebarMenu className="px-2">
-              {currentDocs.length === 0 ? (
-                <div className="px-4 py-6 text-center text-sm text-gray-500">
-                  No {activeTab} yet
-                </div>
-              ) : (
-                currentDocs.map((doc) => {
-                  const href = (doc as any).isApiAsset ? `/dashboard` : `/?doc=${doc.id}`;
-                  return (
-                    <SidebarMenuItem key={doc.id}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={activeDocId === doc.id}
-                        className="px-3 py-2"
-                      >
-                        <a href={href} onClick={(e) => {
-                          e.preventDefault();
-                          navigate(href);
-                        }}>
-                          <FileText className="h-4 w-4 text-gray-400" />
-                          <div className="flex-1 min-w-0">
-                            <div className="truncate text-sm font-medium text-gray-900">
-                              {doc.title || 'Untitled'}
+        {/* Document List - Scrollable */}
+        <div className="flex-1 overflow-y-auto">
+          <SidebarGroup>
+            <SidebarGroupLabel className="px-4 py-2 text-gray-500">
+              {tabs.find(t => t.id === activeTab)?.description}
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="px-2">
+                {currentDocs.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-gray-500">
+                    No {activeTab} yet
+                  </div>
+                ) : (
+                  currentDocs.map((asset) => {
+                    const href = `/asset/${asset.id}`;
+                    const isActive = location === `/asset/${asset.id}`;
+
+                    return (
+                      <SidebarMenuItem key={asset.id}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={isActive}
+                          className="px-3 py-2"
+                        >
+                          <a href={href} onClick={(e) => {
+                            e.preventDefault();
+                            navigate(href);
+                          }}>
+                            <FileText className="h-4 w-4 text-gray-400" />
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate text-sm font-medium text-gray-900">
+                                {asset.title || 'Untitled'}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {new Date(asset.createdAt).toLocaleDateString()}
+                              </div>
                             </div>
-                            <div className="text-xs text-gray-500">
-                              {new Date(doc.updatedAt).toLocaleDateString()}
-                            </div>
-                          </div>
-                        </a>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })
-              )}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+                          </a>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })
+                )}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </div>
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-gray-200 bg-white">
+      <SidebarFooter className="border-t border-gray-200 bg-white flex-shrink-0">
         {isAuthenticated ? (
           <div className="p-2 space-y-1">
             <SidebarMenu>

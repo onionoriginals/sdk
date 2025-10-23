@@ -20,6 +20,7 @@ import AssetsSpreadsheet from "@/pages/assets-spreadsheet";
 import Setup from "@/pages/setup";
 import UploadAssets from "@/pages/upload-assets";
 import GoogleCallback from "@/pages/google-callback";
+import AssetDetail from "@/pages/asset-detail";
 
 function AuthSetup() {
   const { getAccessToken } = usePrivy();
@@ -44,6 +45,11 @@ function Router() {
           <Homepage />
         </OriginalsLayout>
       </Route>
+      <Route path="/asset/:id">
+        <OriginalsLayout>
+          <AssetDetail />
+        </OriginalsLayout>
+      </Route>
       <Route path="/dir" component={Directory} />
       <Route path="/assets" component={AssetsSpreadsheet} />
       <Route path="/setup" component={Setup} />
@@ -62,7 +68,11 @@ function Router() {
 
 function AppContent() {
   const [location] = useLocation();
-  const showHeader = location !== '/';
+  // Don't show header on routes that use OriginalsLayout (has sidebar)
+  const routesWithSidebar = ['/', '/asset'];
+  const showHeader = !routesWithSidebar.some(route =>
+    location === route || location.startsWith(route + '/')
+  );
 
   return (
     <div className="min-h-screen bg-background">
