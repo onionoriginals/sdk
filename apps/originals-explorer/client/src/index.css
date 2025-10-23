@@ -39,6 +39,16 @@
   --gray-700: hsl(215, 25%, 27%);
   --gray-800: hsl(217, 33%, 17%);
   --gray-900: hsl(222, 84%, 5%);
+
+  /* Sidebar colors - Claude Code inspired */
+  --sidebar-background: hsl(0, 0%, 100%);
+  --sidebar-foreground: hsl(215, 25%, 27%);
+  --sidebar-primary: hsl(220, 13%, 13%);
+  --sidebar-primary-foreground: hsl(0, 0%, 100%);
+  --sidebar-accent: hsl(210, 20%, 98%);
+  --sidebar-accent-foreground: hsl(215, 25%, 27%);
+  --sidebar-border: hsl(220, 13%, 91%);
+  --sidebar-ring: hsl(220, 13%, 13%);
 }
 
 .dark {
@@ -67,6 +77,16 @@
   --neutral-500: hsl(215, 16%, 65%);
   --neutral-600: hsl(210, 40%, 80%);
   --neutral-900: hsl(210, 40%, 96%);
+
+  /* Sidebar colors - Dark mode */
+  --sidebar-background: hsl(220, 13%, 18%);
+  --sidebar-foreground: hsl(210, 40%, 96%);
+  --sidebar-primary: hsl(217, 91%, 60%);
+  --sidebar-primary-foreground: hsl(0, 0%, 100%);
+  --sidebar-accent: hsl(220, 13%, 22%);
+  --sidebar-accent-foreground: hsl(210, 40%, 96%);
+  --sidebar-border: hsl(220, 13%, 26%);
+  --sidebar-ring: hsl(217, 91%, 60%);
 }
 
 @layer base {
