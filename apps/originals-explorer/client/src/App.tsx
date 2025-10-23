@@ -1,8 +1,6 @@
-import { Switch, Route, useLocation } from "wouter";
-import { queryClient, setGlobalGetAccessToken } from "./lib/queryClient";
+import { Switch, Route } from "wouter";
+import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
-import { useEffect, useRef } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Header from "@/components/layout/header";
@@ -20,21 +18,10 @@ import Setup from "@/pages/setup";
 import UploadAssets from "@/pages/upload-assets";
 import GoogleCallback from "@/pages/google-callback";
 
-function AuthSetup() {
-  const { getAccessToken } = usePrivy();
-  
-  useEffect(() => {
-    // Wrap getAccessToken to ensure it returns a string (never null for auth)
-    const wrappedGetAccessToken = async () => {
-      const token = await getAccessToken();
-      return token || '';
-    };
-    setGlobalGetAccessToken(wrappedGetAccessToken);
-  }, [getAccessToken]);
-  
-  return null;
-}
-
+/**
+ * Main Router Component
+ * Handles all application routes
+ */
 function Router() {
   return (
     <Switch>
@@ -55,30 +42,22 @@ function Router() {
   );
 }
 
+/**
+ * Main App Component
+ * Authentication via HTTP-only cookies (no client-side token management)
+ * Turnkey integration on server-side for key management
+ */
 function App() {
   return (
-    <PrivyProvider 
-      appId={import.meta.env.VITE_PRIVY_APP_ID}
-      config={{
-        appearance: {
-          theme: 'light',
-          accentColor: '#1f2937',
-          logo: undefined,
-        },
-        loginMethods: ['email', 'wallet', 'google'],
-      }}
-    >
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <AuthSetup />
-          <div className="min-h-screen bg-background">
-            <Header />
-            <Toaster />
-            <Router />
-          </div>
-        </TooltipProvider>
-      </QueryClientProvider>
-    </PrivyProvider>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <div className="min-h-screen bg-background">
+          <Header />
+          <Toaster />
+          <Router />
+        </div>
+      </TooltipProvider>
+    </QueryClientProvider>
   );
 }
 

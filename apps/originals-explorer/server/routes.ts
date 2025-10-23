@@ -6,7 +6,9 @@ import { z } from "zod";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
-import { PrivyClient } from "@privy-io/node";
+import { Turnkey } from "@turnkey/sdk-server";
+import cookieParser from "cookie-parser";
+import { signToken, verifyToken, getAuthCookieConfig, getClearAuthCookieConfig } from "./auth/jwt";
 import { originalsSdk } from "./originals";
 import { createUserDIDWebVH, publishDIDDocument } from "./did-webvh-service";
 import { OriginalsAsset } from "@originals/sdk";
@@ -73,43 +75,96 @@ const googleClient = new OAuth2Client(
   process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/auth/google/callback'
 );
 
-const privyClient = new PrivyClient({
-  appId: process.env.PRIVY_APP_ID!,
-  appSecret: process.env.PRIVY_APP_SECRET!
+// Turnkey client for key management
+const turnkeyClient = new Turnkey({
+  apiBaseUrl: "https://api.turnkey.com",
+  apiPublicKey: process.env.TURNKEY_API_PUBLIC_KEY!,
+  apiPrivateKey: process.env.TURNKEY_API_PRIVATE_KEY!,
+  defaultOrganizationId: process.env.TURNKEY_ORGANIZATION_ID!,
 });
 
-// Authentication middleware that uses did:webvh as primary identifier
-const authenticateUser = async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Create or retrieve a Turnkey sub-organization for a user
+ * Each user gets their own sub-org for key isolation
+ */
+async function ensureTurnkeySubOrg(email: string): Promise<string> {
   try {
-    const authorizationHeader = req.headers.authorization;
-    
-    if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: "Missing or invalid authorization header" });
+    // Generate a unique name for the sub-org
+    const subOrgName = `user-${email.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
+
+    // Check if sub-org already exists
+    const subOrgs = await turnkeyClient.apiClient().getSubOrganizations({
+      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
+    });
+
+    const existing = subOrgs.subOrganizations?.find(
+      org => org.subOrganizationName === subOrgName
+    );
+
+    if (existing && existing.subOrganizationId) {
+      return existing.subOrganizationId;
     }
 
-    const token = authorizationHeader.substring(7);
-    const verifiedClaims = await privyClient.utils().auth().verifyAuthToken(token);
-    
-    // Check if user already exists by Privy ID
-    let user = await storage.getUserByPrivyId(verifiedClaims.user_id);
-    
+    // Create new sub-organization
+    const result = await turnkeyClient.apiClient().createSubOrganization({
+      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
+      subOrganizationName: subOrgName,
+      rootUsers: [{
+        userName: email,
+        userEmail: email,
+      }],
+      rootQuorumThreshold: 1,
+    });
+
+    if (!result.subOrganizationId) {
+      throw new Error('Failed to create sub-organization');
+    }
+
+    return result.subOrganizationId;
+  } catch (error) {
+    console.error('Error creating Turnkey sub-organization:', error);
+    throw new Error(`Failed to create Turnkey sub-organization: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Authentication middleware using JWT from HTTP-only cookies
+ * CRITICAL PR #102: Uses cookies (not localStorage) for security
+ */
+const authenticateUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Get JWT token from HTTP-only cookie
+    const token = req.cookies?.auth_token;
+
+    if (!token) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    // Verify JWT token
+    const payload = verifyToken(token);
+    const turnkeySubOrgId = payload.sub; // Turnkey sub-org ID (stable identifier)
+    const email = payload.email; // Email metadata
+
+    // Check if user already exists by Turnkey sub-org ID
+    let user = await storage.getUserByTurnkeyId(turnkeySubOrgId);
+
     // If user doesn't exist, create DID:WebVH and user record
     if (!user) {
-      console.log(`Creating DID:WebVH for new user ${verifiedClaims.user_id}...`);
-      const didData = await createUserDIDWebVH(verifiedClaims.user_id, privyClient, token);
-      
+      console.log(`Creating DID:WebVH for new user ${email}...`);
+      const didData = await createUserDIDWebVH(turnkeySubOrgId, turnkeyClient);
+
       // Create user with DID as primary identifier
-      user = await storage.createUserWithDid(verifiedClaims.user_id, didData.did, didData);
+      user = await storage.createUserWithDid(email, turnkeySubOrgId, didData.did, didData);
     }
-    
+
     // Add user info to request with database ID as primary identifier
     (req as any).user = {
       id: user.id, // Primary identifier is the database UUID (for foreign keys)
-      privyId: verifiedClaims.user_id, // Keep Privy ID for wallet operations
+      turnkeySubOrgId, // Turnkey sub-org ID for key operations
+      email, // Email metadata
       did: user.did, // DID for display/lookup
-      authToken: token, // Store JWT for Privy authorization context
     };
-    
+
     next();
   } catch (error) {
     console.error("Authentication error:", error);
@@ -118,6 +173,51 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Add cookie parser middleware for HTTP-only cookies
+  app.use(cookieParser());
+
+  // Login endpoint - creates sub-org and issues JWT in HTTP-only cookie
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { email } = req.body;
+
+      if (!email || typeof email !== 'string') {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ error: "Invalid email format" });
+      }
+
+      // Create or get Turnkey sub-organization for this user
+      const turnkeySubOrgId = await ensureTurnkeySubOrg(email);
+
+      // Sign JWT token with sub-org ID
+      const token = signToken(turnkeySubOrgId, email);
+
+      // Set HTTP-only cookie
+      const cookieConfig = getAuthCookieConfig(token);
+      res.cookie(cookieConfig.name, cookieConfig.value, cookieConfig.options);
+
+      res.json({
+        success: true,
+        message: "Authentication successful",
+      });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ error: "Login failed" });
+    }
+  });
+
+  // Logout endpoint - clears HTTP-only cookie
+  app.post("/api/auth/logout", (_req, res) => {
+    const clearConfig = getClearAuthCookieConfig();
+    res.cookie(clearConfig.name, clearConfig.value, clearConfig.options);
+    res.json({ success: true, message: "Logged out successfully" });
+  });
+
   // Mount Google Drive import routes
   app.use("/api/import", importRoutes);
 
@@ -136,9 +236,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = (req as any).user;
       res.json({
-        id: user.id, // This is now the did:webvh
+        id: user.id, // Database UUID
         did: user.did,
-        privyId: user.privyId, // Keep for reference
+        email: user.email,
+        turnkeySubOrgId: user.turnkeySubOrgId,
       });
     } catch (error) {
       console.error("Error fetching user:", error);
