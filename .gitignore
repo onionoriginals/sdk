@@ -102,3 +102,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 test-results/
 playwright-report/
 playwright/.cache/
+
+# Turborepo
+.turbo/
