@@ -1,6 +1,5 @@
 import { PrivyClient } from "@privy-io/node";
 import { convertToMultibase, extractPublicKeyFromWallet } from "./key-utils";
-import { resolveDID } from "didwebvh-ts";
 import { originalsSdk } from "./originals";
 import { 
   createVerificationMethodsFromPrivy, 
@@ -116,14 +115,14 @@ export async function createUserDIDWebVH(
 }
 
 /**
- * Resolve a DID:WebVH using the didwebvh-ts library
+ * Resolve a DID:WebVH using the Originals SDK
  * @param did - The DID to resolve
  * @returns The resolved DID document or null if not found
  */
 export async function resolveDIDWebVH(did: string): Promise<any | null> {
   try {
-    const result = await resolveDID(did);
-    return result.doc;
+    const result = await originalsSdk.did.resolveDID(did);
+    return result;
   } catch (error) {
     console.error('Error resolving DID:WebVH:', error);
     return null;
