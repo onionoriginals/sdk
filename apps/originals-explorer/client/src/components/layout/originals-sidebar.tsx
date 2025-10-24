@@ -21,7 +21,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { AssetLayer } from "../../../../../shared/schema";
+import type { AssetLayer } from "../../../../shared/schema";
 
 interface ApiAsset {
   id: string;

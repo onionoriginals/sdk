@@ -10,7 +10,7 @@
 
 import { Turnkey } from '@turnkey/sdk-server';
 import type { ExternalSigner } from '@originals/sdk';
-import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { prepareDataForSigning } from '@originals/sdk';
 
 /**

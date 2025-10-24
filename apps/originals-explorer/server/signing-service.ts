@@ -10,7 +10,7 @@
 
 import { Turnkey } from '@turnkey/sdk-server';
 import { storage } from "./storage";
-import { hexToBytes, bytesToHex } from '@noble/hashes/utils';
+import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js';
 
 export type KeyPurpose = 'authentication' | 'assertion' | 'update';
 
@@ -83,7 +83,8 @@ export async function signWithUserKey(
     });
 
     // CRITICAL: Ed25519 returns single hex blob, NOT r/s fields!
-    const signature = signResponse.signature;
+    // Cast to any because Turnkey SDK types don't properly expose signature field
+    const signature = (signResponse as any).signature as string;
     if (!signature) {
       throw new Error('No signature returned from Turnkey');
     }
