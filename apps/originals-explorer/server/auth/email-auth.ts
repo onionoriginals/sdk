@@ -42,38 +42,56 @@ function generateSessionId(): string {
 }
 
 /**
- * Create a Turnkey sub-organization for a user
+ * Get or create a Turnkey sub-organization for a user
  * Uses the proper Turnkey SDK to create sub-orgs with email-only root users
  */
-async function createTurnkeySubOrg(
+async function getOrCreateTurnkeySubOrg(
   email: string,
   turnkeyClient: Turnkey
 ): Promise<string> {
   try {
-    // Generate a unique name for the sub-org
-    const subOrgName = `user-${email.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${Date.now()}`;
+    // First, check if a sub-org already exists for this email
+    // Generate a consistent name based on email (without timestamp for lookup)
+    const baseSubOrgName = `user-${email.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
 
-    console.log(`📧 Creating Turnkey sub-organization for ${email}...`);
+    console.log(`🔍 Checking for existing sub-organization for ${email}...`);
+
+    try {
+      // Try to get existing sub-organizations
+      const subOrgs = await turnkeyClient.apiClient().getSubOrganizations();
+
+      // Look for existing sub-org with matching name pattern
+      const existing = subOrgs.subOrganizations?.find(
+        (org) => org.subOrganizationName?.startsWith(baseSubOrgName)
+      );
+
+      if (existing && existing.subOrganizationId) {
+        console.log(`✅ Found existing sub-organization: ${existing.subOrganizationId}`);
+        return existing.subOrganizationId;
+      }
+    } catch (lookupError) {
+      console.log(`📝 No existing sub-org found, will create new one`);
+    }
+
+    // Generate a unique name for the new sub-org (with timestamp)
+    const subOrgName = `${baseSubOrgName}-${Date.now()}`;
+
+    console.log(`📧 Creating new Turnkey sub-organization for ${email}...`);
 
     // Create sub-organization using the Turnkey SDK
-    // This creates a sub-org with email-only authentication (no passkeys required)
+    // Using the correct parameter structure for Turnkey API
     const result = await turnkeyClient.apiClient().createSubOrganization({
-      type: 'ACTIVITY_TYPE_CREATE_SUB_ORGANIZATION',
-      timestampMs: String(Date.now()),
-      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
-      parameters: {
-        subOrganizationName: subOrgName,
-        rootUsers: [
-          {
-            userName: email,
-            userEmail: email,
-            apiKeys: [],
-            authenticators: [],
-            oauthProviders: [],
-          },
-        ],
-        rootQuorumThreshold: 1,
-      },
+      subOrganizationName: subOrgName,
+      rootUsers: [
+        {
+          userName: email,
+          userEmail: email,
+          apiKeys: [],
+          authenticators: [],
+          oauthProviders: [],
+        },
+      ],
+      rootQuorumThreshold: 1,
     });
 
     const subOrgId = result.activity?.result?.createSubOrganizationResultV7?.subOrganizationId;
@@ -110,9 +128,9 @@ export async function initiateEmailAuth(
 
   console.log(`\n🚀 Initiating email auth for: ${email}`);
 
-  // Step 1: Create or get Turnkey sub-organization
+  // Step 1: Get or create Turnkey sub-organization
   // We need to create this first so we have a valid sub-org ID
-  const subOrgId = await createTurnkeySubOrg(email, turnkeyClient);
+  const subOrgId = await getOrCreateTurnkeySubOrg(email, turnkeyClient);
 
   // Step 2: Send OTP via Turnkey
   console.log(`📨 Sending OTP to ${email} via Turnkey...`);
