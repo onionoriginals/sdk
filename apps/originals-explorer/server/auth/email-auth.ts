@@ -3,7 +3,7 @@
  * Implements proper email-based authentication using Turnkey's OTP flow
  */
 
-import { Turnkey } from '@turnkey/sdk-server';
+import { Turnkey, server } from '@turnkey/sdk-server';
 
 interface EmailAuthSession {
   email: string;
@@ -132,18 +132,23 @@ export async function initiateEmailAuth(
   // We need to create this first so we have a valid sub-org ID
   const subOrgId = await getOrCreateTurnkeySubOrg(email, turnkeyClient);
 
-  // Step 2: Send OTP via Turnkey
+  // Step 2: Send OTP via Turnkey using the server.sendOtp method
   console.log(`📨 Sending OTP to ${email} via Turnkey...`);
 
-  const otpResult = await turnkeyClient.sendOtp({
-    organizationId: subOrgId,
-    otpType: 'OTP_TYPE_EMAIL',
+  // Generate a unique user identifier for rate limiting
+  const crypto = await import('crypto');
+  const userIdentifier = crypto.createHash('sha256').update(email).digest('hex');
+
+  const otpResult = await server.sendOtp({
+    suborgID: subOrgId,
+    otpType: 'EMAIL',
     contact: email,
+    userIdentifier: userIdentifier,
     emailCustomization: {
       appName: 'Originals Explorer',
     },
-    userIdentifier: email, // For rate limiting
-    expirationSeconds: '900', // 15 minutes
+    otpLength: 6,
+    alphanumeric: false, // Use numeric only for easier entry
   });
 
   const otpId = otpResult.otpId;
@@ -219,18 +224,18 @@ export async function verifyEmailAuth(
   console.log(`\n🔐 Verifying OTP for session ${sessionId}...`);
 
   try {
-    // Verify the OTP code with Turnkey
-    const verifyResult = await turnkeyClient.verifyOtp({
-      organizationId: session.subOrgId,
+    // Verify the OTP code with Turnkey using server.verifyOtp
+    const verifyResult = await server.verifyOtp({
       otpId: session.otpId,
       otpCode: code,
+      sessionLengthSeconds: 900, // 15 minutes
     });
 
     if (!verifyResult.verificationToken) {
       throw new Error('OTP verification failed - no verification token returned');
     }
 
-    console.log(`✅ OTP verified successfully!`);
+    console.log(`✅ OTP verified successfully! Token: ${verifyResult.verificationToken.substring(0, 20)}...`);
 
     // Mark session as verified
     session.verified = true;
