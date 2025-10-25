@@ -218,8 +218,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Verification code is required" });
       }
 
-      // Verify the code
-      const verification = await verifyEmailAuth(sessionId, code);
+      // Verify the code with Turnkey
+      const verification = await verifyEmailAuth(sessionId, code, turnkeyClient);
 
       if (!verification.verified) {
         return res.status(401).json({ error: "Invalid verification code" });

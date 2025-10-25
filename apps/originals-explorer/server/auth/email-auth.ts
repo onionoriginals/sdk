@@ -1,6 +1,6 @@
 /**
  * Turnkey Email Authentication Service
- * Implements proper email-based authentication using Turnkey's Email Auth flow
+ * Implements proper email-based authentication using Turnkey's OTP flow
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
@@ -8,6 +8,7 @@ import { Turnkey } from '@turnkey/sdk-server';
 interface EmailAuthSession {
   email: string;
   subOrgId?: string;
+  otpId?: string;
   timestamp: number;
   verified: boolean;
 }
@@ -15,8 +16,8 @@ interface EmailAuthSession {
 // In-memory session storage (use Redis in production)
 const authSessions = new Map<string, EmailAuthSession>();
 
-// Session timeout (5 minutes)
-const SESSION_TIMEOUT = 5 * 60 * 1000;
+// Session timeout (15 minutes to match Turnkey OTP)
+const SESSION_TIMEOUT = 15 * 60 * 1000;
 
 /**
  * Clean up expired sessions
@@ -41,79 +42,61 @@ function generateSessionId(): string {
 }
 
 /**
- * Create or retrieve a Turnkey sub-organization for a user
- * In development mode, generates a mock sub-org ID
+ * Create a Turnkey sub-organization for a user
+ * Uses the proper Turnkey SDK to create sub-orgs with email-only root users
  */
-async function ensureTurnkeySubOrg(
+async function createTurnkeySubOrg(
   email: string,
   turnkeyClient: Turnkey
 ): Promise<string> {
-  // Development mode: Use mock sub-org IDs
-  if (process.env.NODE_ENV === 'development' || !process.env.TURNKEY_ORGANIZATION_ID) {
-    console.log('🔧 Development mode: Using mock Turnkey sub-org ID');
-    // Generate a consistent mock ID based on email
-    const crypto = await import('crypto');
-    const hash = crypto.createHash('sha256').update(email).digest('hex');
-    return `mock-suborg-${hash.substring(0, 16)}`;
-  }
-
   try {
-    // Production mode: Use actual Turnkey API
     // Generate a unique name for the sub-org
-    const subOrgName = `user-${email.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
+    const subOrgName = `user-${email.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${Date.now()}`;
 
-    // For now, just generate a stable ID based on email
-    // TODO: Implement actual Turnkey sub-org creation when API is available
-    const crypto = await import('crypto');
-    const hash = crypto.createHash('sha256').update(email).digest('hex');
-    const subOrgId = `suborg-${hash.substring(0, 16)}`;
+    console.log(`📧 Creating Turnkey sub-organization for ${email}...`);
 
-    console.log(`✅ Generated sub-org ID for ${email}: ${subOrgId}`);
+    // Create sub-organization using the Turnkey SDK
+    // This creates a sub-org with email-only authentication (no passkeys required)
+    const result = await turnkeyClient.apiClient().createSubOrganization({
+      type: 'ACTIVITY_TYPE_CREATE_SUB_ORGANIZATION',
+      timestampMs: String(Date.now()),
+      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
+      parameters: {
+        subOrganizationName: subOrgName,
+        rootUsers: [
+          {
+            userName: email,
+            userEmail: email,
+            apiKeys: [],
+            authenticators: [],
+            oauthProviders: [],
+          },
+        ],
+        rootQuorumThreshold: 1,
+      },
+    });
+
+    const subOrgId = result.activity?.result?.createSubOrganizationResultV7?.subOrganizationId;
+
+    if (!subOrgId) {
+      throw new Error('No sub-organization ID returned from Turnkey');
+    }
+
+    console.log(`✅ Created sub-organization: ${subOrgId}`);
     return subOrgId;
-
-    // Commented out until Turnkey SDK API is confirmed:
-    // const subOrgs = await turnkeyClient.apiClient().getSubOrganizations({
-    //   organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
-    // });
-    //
-    // const existing = subOrgs.subOrganizations?.find(
-    //   (org) => org.subOrganizationName === subOrgName
-    // );
-    //
-    // if (existing && existing.subOrganizationId) {
-    //   return existing.subOrganizationId;
-    // }
-    //
-    // const result = await turnkeyClient.apiClient().createSubOrganization({
-    //   organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
-    //   subOrganizationName: subOrgName,
-    //   rootUsers: [
-    //     {
-    //       userName: email,
-    //       userEmail: email,
-    //     },
-    //   ],
-    //   rootQuorumThreshold: 1,
-    // });
-    //
-    // if (!result.subOrganizationId) {
-    //   throw new Error('Failed to create sub-organization');
-    // }
-    //
-    // return result.subOrganizationId;
   } catch (error) {
-    console.error('Error creating Turnkey sub-organization:', error);
-    // Fallback to mock ID on error
-    const crypto = await import('crypto');
-    const hash = crypto.createHash('sha256').update(email).digest('hex');
-    return `fallback-suborg-${hash.substring(0, 16)}`;
+    console.error('❌ Error creating Turnkey sub-organization:', error);
+    throw new Error(
+      `Failed to create Turnkey sub-organization: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 }
 
 /**
- * Initiate email authentication
- * This would normally trigger Turnkey's email auth flow
- * For now, we'll simulate with a simple OTP
+ * Initiate email authentication using Turnkey OTP
+ * Sends a 6-digit OTP code to the user's email
  */
 export async function initiateEmailAuth(
   email: string,
@@ -125,42 +108,54 @@ export async function initiateEmailAuth(
     throw new Error('Invalid email format');
   }
 
-  // Create or get Turnkey sub-organization
-  const subOrgId = await ensureTurnkeySubOrg(email, turnkeyClient);
+  console.log(`\n🚀 Initiating email auth for: ${email}`);
+
+  // Step 1: Create or get Turnkey sub-organization
+  // We need to create this first so we have a valid sub-org ID
+  const subOrgId = await createTurnkeySubOrg(email, turnkeyClient);
+
+  // Step 2: Send OTP via Turnkey
+  console.log(`📨 Sending OTP to ${email} via Turnkey...`);
+
+  const otpResult = await turnkeyClient.sendOtp({
+    organizationId: subOrgId,
+    otpType: 'OTP_TYPE_EMAIL',
+    contact: email,
+    emailCustomization: {
+      appName: 'Originals Explorer',
+    },
+    userIdentifier: email, // For rate limiting
+    expirationSeconds: '900', // 15 minutes
+  });
+
+  const otpId = otpResult.otpId;
+
+  if (!otpId) {
+    throw new Error('Failed to initiate OTP - no OTP ID returned');
+  }
+
+  console.log(`✅ OTP sent! OTP ID: ${otpId}`);
 
   // Create auth session
   const sessionId = generateSessionId();
   authSessions.set(sessionId, {
     email,
     subOrgId,
+    otpId,
     timestamp: Date.now(),
     verified: false,
   });
 
-  // In production with real Turnkey Email Auth:
-  // await turnkeyClient.apiClient().emailAuth({
-  //   email,
-  //   targetPublicKey: clientPublicKey,
-  //   organizationId: subOrgId,
-  // });
-
-  // For development, we'll generate a simple OTP
-  const otp = generateDevelopmentOTP();
-
-  // Log OTP to console (in production, Turnkey sends email)
-  console.log('\n' + '='.repeat(60));
-  console.log(`🔐 EMAIL AUTH CODE for ${email}`);
-  console.log(`   Session: ${sessionId}`);
-  console.log(`   Code: ${otp}`);
-  console.log(`   Valid for: 5 minutes`);
+  console.log('='.repeat(60));
+  console.log(`📧 Check ${email} for the verification code!`);
+  console.log(`   Session ID: ${sessionId}`);
+  console.log(`   OTP ID: ${otpId}`);
+  console.log(`   Valid for: 15 minutes`);
   console.log('='.repeat(60) + '\n');
-
-  // Store OTP with session (in production, Turnkey handles this)
-  (authSessions.get(sessionId) as any).otp = otp;
 
   return {
     sessionId,
-    message: 'Verification code sent to email (check console in development)',
+    message: 'Verification code sent to your email. Check your inbox!',
   };
 }
 
@@ -172,11 +167,12 @@ function generateDevelopmentOTP(): string {
 }
 
 /**
- * Verify email authentication code
+ * Verify email authentication code using Turnkey OTP
  */
 export async function verifyEmailAuth(
   sessionId: string,
-  code: string
+  code: string,
+  turnkeyClient: Turnkey
 ): Promise<{
   verified: boolean;
   email: string;
@@ -194,30 +190,44 @@ export async function verifyEmailAuth(
     throw new Error('Session expired. Please request a new code.');
   }
 
-  // In production with real Turnkey:
-  // const result = await turnkeyClient.apiClient().verifyEmailAuth({
-  //   sessionId,
-  //   code,
-  // });
-
-  // For development, check the OTP we generated
-  const storedOtp = (session as any).otp;
-  if (code !== storedOtp) {
-    throw new Error('Invalid verification code');
+  if (!session.otpId) {
+    throw new Error('OTP ID not found in session');
   }
-
-  // Mark session as verified
-  session.verified = true;
 
   if (!session.subOrgId) {
     throw new Error('Sub-organization ID not found');
   }
 
-  return {
-    verified: true,
-    email: session.email,
-    subOrgId: session.subOrgId,
-  };
+  console.log(`\n🔐 Verifying OTP for session ${sessionId}...`);
+
+  try {
+    // Verify the OTP code with Turnkey
+    const verifyResult = await turnkeyClient.verifyOtp({
+      organizationId: session.subOrgId,
+      otpId: session.otpId,
+      otpCode: code,
+    });
+
+    if (!verifyResult.verificationToken) {
+      throw new Error('OTP verification failed - no verification token returned');
+    }
+
+    console.log(`✅ OTP verified successfully!`);
+
+    // Mark session as verified
+    session.verified = true;
+
+    return {
+      verified: true,
+      email: session.email,
+      subOrgId: session.subOrgId,
+    };
+  } catch (error) {
+    console.error('❌ OTP verification failed:', error);
+    throw new Error(
+      `Invalid verification code: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 /**
