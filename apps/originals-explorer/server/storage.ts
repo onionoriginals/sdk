@@ -15,12 +15,13 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByPrivyId(privyUserId: string): Promise<User | undefined>;
+  getUserByTurnkeyId(turnkeySubOrgId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(userId: string, updates: Partial<User>): Promise<User | undefined>;
   ensureUser(userId: string): Promise<User>;
   getUserByDidSlug(slug: string): Promise<User | undefined>;
   getUserByDid(did: string): Promise<User | undefined>;
-  createUserWithDid(privyUserId: string, did: string, didData: any): Promise<User>;
+  createUserWithDid(identifierId: string, email: string, did: string, didData: any): Promise<User>;
   
   // Asset methods
   getAsset(id: string): Promise<Asset | undefined>;
@@ -81,6 +82,7 @@ export interface IStorage {
 export class MemStorage implements IStorage {
   private users: Map<string, User>; // Key: did:webvh, Value: User
   private privyToDidMapping: Map<string, string>; // Key: Privy user ID, Value: did:webvh
+  private turnkeyToDidMapping: Map<string, string>; // Key: Turnkey sub-org ID, Value: did:webvh
   private assets: Map<string, Asset>;
   private walletConnections: Map<string, WalletConnection>;
   private signingKeys: Map<string, SigningKey[]>;
@@ -91,6 +93,7 @@ export class MemStorage implements IStorage {
   constructor() {
     this.users = new Map();
     this.privyToDidMapping = new Map();
+    this.turnkeyToDidMapping = new Map();
     this.googleDriveImports = new Map();
     this.assets = new Map();
     this.walletConnections = new Map();
@@ -115,11 +118,26 @@ export class MemStorage implements IStorage {
     return this.users.get(did);
   }
 
+  async getUserByTurnkeyId(turnkeySubOrgId: string): Promise<User | undefined> {
+    // First check the mapping
+    const did = this.turnkeyToDidMapping.get(turnkeySubOrgId);
+    if (did) {
+      return this.users.get(did);
+    }
+    
+    // Fallback: search all users for matching turnkeySubOrgId
+    return Array.from(this.users.values()).find(
+      (user) => (user as any).turnkeySubOrgId === turnkeySubOrgId
+    );
+  }
+
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
     const user: User = { 
       ...insertUser, 
       id,
+      email: null,
+      turnkeySubOrgId: null,
       did: null,
       didDocument: null,
       didLog: null,
@@ -157,6 +175,8 @@ export class MemStorage implements IStorage {
       id: privyUserId, // Temporary - will be updated to DID
       username: privyUserId,
       password: '', // Not used for Privy users
+      email: null,
+      turnkeySubOrgId: null,
       did: null,
       didDocument: null,
       didLog: null,
@@ -173,12 +193,15 @@ export class MemStorage implements IStorage {
     return user;
   }
 
-  async createUserWithDid(privyUserId: string, did: string, didData: any): Promise<User> {
+  async createUserWithDid(identifierId: string, email: string, did: string, didData: any): Promise<User> {
     // Create user with DID as the primary key
+    // identifierId can be either Privy user ID or Turnkey sub-org ID
     const user: User = {
       id: did, // Use DID as primary identifier
-      username: did,
-      password: '', // Not used for Privy users
+      username: email, // Use full email as username to ensure uniqueness
+      password: '', // Not used for OAuth/Turnkey users
+      email,
+      turnkeySubOrgId: identifierId as any, // Turnkey sub-org ID
       did: did,
       didDocument: didData.didDocument,
       didLog: didData.didLog || null,
@@ -195,11 +218,13 @@ export class MemStorage implements IStorage {
     // Store user with DID as key
     this.users.set(did, user);
     
-    // Create mapping from Privy ID to DID
-    this.privyToDidMapping.set(privyUserId, did);
+    // Create mapping from Turnkey ID to DID
+    this.turnkeyToDidMapping.set(identifierId, did);
     
     // Remove temporary user record if it exists
-    this.users.delete(privyUserId);
+    this.users.delete(identifierId);
+    
+    console.log(`✅ Created user with DID: ${did} (Turnkey ID: ${identifierId}, Email: ${email})`);
     
     return user;
   }

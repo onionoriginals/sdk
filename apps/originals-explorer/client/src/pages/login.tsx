@@ -10,7 +10,7 @@ import { apiRequest } from "@/lib/queryClient";
 type AuthStep = 'email' | 'code';
 
 export default function Login() {
-  const { user, isLoading, isUserLoading, isAuthenticated } = useAuth();
+  const { user, isLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
 
   const [step, setStep] = useState<AuthStep>('email');
@@ -146,7 +146,7 @@ export default function Login() {
     setSessionId('');
   };
 
-  if (isLoading || isUserLoading) {
+  if (isLoading) {
     return (
       <main className="min-h-screen bg-white flex items-center justify-center px-4">
         <div className="text-center">

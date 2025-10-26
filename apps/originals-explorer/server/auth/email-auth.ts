@@ -3,7 +3,7 @@
  * Implements proper email-based authentication using Turnkey's OTP flow
  */
 
-import { Turnkey, server } from '@turnkey/sdk-server';
+import { Turnkey } from '@turnkey/sdk-server';
 
 interface EmailAuthSession {
   email: string;
@@ -132,16 +132,15 @@ export async function initiateEmailAuth(
   // We need to create this first so we have a valid sub-org ID
   const subOrgId = await getOrCreateTurnkeySubOrg(email, turnkeyClient);
 
-  // Step 2: Send OTP via Turnkey using the server.sendOtp method
+  // Step 2: Send OTP via Turnkey using the turnkeyClient API
   console.log(`📨 Sending OTP to ${email} via Turnkey...`);
 
   // Generate a unique user identifier for rate limiting
   const crypto = await import('crypto');
   const userIdentifier = crypto.createHash('sha256').update(email).digest('hex');
 
-  const otpResult = await server.sendOtp({
-    suborgID: subOrgId,
-    otpType: 'EMAIL',
+  const otpResult = await turnkeyClient.apiClient().initOtp({
+    otpType: 'OTP_TYPE_EMAIL',
     contact: email,
     userIdentifier: userIdentifier,
     emailCustomization: {
@@ -224,11 +223,11 @@ export async function verifyEmailAuth(
   console.log(`\n🔐 Verifying OTP for session ${sessionId}...`);
 
   try {
-    // Verify the OTP code with Turnkey using server.verifyOtp
-    const verifyResult = await server.verifyOtp({
+    // Verify the OTP code with Turnkey using the turnkeyClient API
+    const verifyResult = await turnkeyClient.apiClient().verifyOtp({
       otpId: session.otpId,
       otpCode: code,
-      sessionLengthSeconds: 900, // 15 minutes
+      expirationSeconds: '900', // 15 minutes
     });
 
     if (!verifyResult.verificationToken) {

@@ -1,39 +1,61 @@
-import { usePrivy } from '@privy-io/react-auth';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+
+interface User {
+  id: string;
+  did: string;
+  email: string;
+  turnkeySubOrgId: string;
+}
 
 export function useAuth() {
-  const { ready, authenticated, user, login, logout: privyLogout, getAccessToken } = usePrivy();
   const queryClient = useQueryClient();
 
-  // Always call useQuery to maintain hook order consistency
-  const { data: serverUser, isLoading: isServerUserLoading } = useQuery({
+  // Check authentication by trying to fetch user data
+  // The JWT cookie is automatically sent with the request
+  const { data: serverUser, isLoading, error } = useQuery<User>({
     queryKey: ['/api/user'],
-    enabled: ready && authenticated,
+    queryFn: async () => {
+      const response = await fetch('/api/user', {
+        credentials: 'include', // Include cookies
+      });
+      if (!response.ok) {
+        throw new Error('Not authenticated');
+      }
+      return response.json();
+    },
     retry: false,
+    staleTime: 5 * 60 * 1000, // Consider data fresh for 5 minutes
   });
 
-  // Return consistent structure regardless of auth state
-  const isAuthenticated = ready && authenticated;
+  // Logout mutation
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error('Logout failed');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      // Clear all queries to prevent data leakage
+      queryClient.clear();
+    },
+  });
 
-  // Wrap logout to clear query cache
-  const handleLogout = async () => {
-    await privyLogout();
-    // Clear all queries to prevent data leakage
-    queryClient.clear();
-  };
+  const isAuthenticated = !!serverUser && !error;
 
   return {
-    user: isAuthenticated && user && serverUser ? {
+    user: serverUser ? {
       id: serverUser.id,
-      email: user.email?.address,
-      wallet: user.wallet?.address,
-      privyId: user.id,
+      email: serverUser.email,
+      did: serverUser.did,
+      turnkeySubOrgId: serverUser.turnkeySubOrgId,
     } : null,
-    isLoading: !ready,
-    isUserLoading: isAuthenticated && isServerUserLoading,
+    isLoading,
     isAuthenticated,
-    login,
-    logout: handleLogout,
-    getAccessToken,
+    logout: () => logoutMutation.mutate(),
   };
 }

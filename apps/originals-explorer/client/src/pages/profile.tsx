@@ -1,4 +1,3 @@
-import { usePrivy, useCreateWallet } from "@privy-io/react-auth";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -10,34 +9,30 @@ import { Link } from "wouter";
 import { useState, useEffect } from "react";
 
 export default function Profile() {
-  const { user: privyUser, authenticated, ready, logout } = usePrivy();
-  const { createWallet } = useCreateWallet();
+  const { user, isLoading, isAuthenticated, logout } = useAuth();
   const { toast } = useToast();
-  const { user, isUserLoading, isAuthenticated } = useAuth();
   const [did, setDid] = useState<string | null>(null);
   const [didDocument, setDidDocument] = useState<any>(null);
   const [didLoading, setDidLoading] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
-  
-  const isLoading = !ready || isUserLoading;
 
   // Clear DID state when user changes or logs out
   useEffect(() => {
-    if (!isAuthenticated || !privyUser) {
+    if (!isAuthenticated || !user) {
       setDid(null);
       setDidDocument(null);
       setQrCodeUrl(null);
       setShowKeys(false);
     }
-  }, [isAuthenticated, privyUser?.id]);
+  }, [isAuthenticated, user?.id]);
 
   // Auto-create DID when user is authenticated
   useEffect(() => {
-    if (isAuthenticated && privyUser && !did && !didLoading) {
+    if (isAuthenticated && user && !did && !didLoading) {
       ensureDid();
     }
-  }, [isAuthenticated, privyUser?.id]);
+  }, [isAuthenticated, user?.id]);
 
   const ensureDid = async () => {
     setDidLoading(true);
@@ -115,7 +110,7 @@ export default function Profile() {
     );
   }
 
-  if (!isAuthenticated || !privyUser) {
+  if (!isAuthenticated || !user) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Card className="w-full max-w-md">
@@ -137,8 +132,8 @@ export default function Profile() {
     );
   }
 
-  const initials = privyUser?.email?.address 
-    ? privyUser.email.address.split('@')[0].slice(0, 2).toUpperCase()
+  const initials = user?.email 
+    ? user.email.split('@')[0].slice(0, 2).toUpperCase()
     : 'U';
 
   return (
@@ -163,7 +158,7 @@ export default function Profile() {
             <div className="flex items-center gap-3 mb-4 p-3 hover:bg-gray-50 rounded-lg transition-colors">
               <Mail className="w-4 h-4 text-gray-500" />
               <span className="text-sm text-gray-900" data-testid="profile-email-display">
-                {privyUser?.email?.address || 'No email address'}
+                {user?.email || 'No email address'}
               </span>
             </div>
 
@@ -303,41 +298,10 @@ export default function Profile() {
             {/* Wallet Section */}
             <div className="mb-6">
               <div className="text-xs text-gray-500 mb-3">Your wallets</div>
-              {privyUser?.linkedAccounts?.some((account: any) => account.type === 'wallet') ? (
-                <div className="space-y-2">
-                  {privyUser.linkedAccounts
-                    .filter((account: any) => account.type === 'wallet')
-                    .map((wallet: any, index: number) => (
-                      <div key={wallet.address || index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div className="flex items-center gap-2">
-                          <Wallet className="w-4 h-4 text-gray-500" />
-                          <div className="flex flex-col">
-                            <span className="text-sm font-mono text-gray-900" data-testid={`profile-wallet-address-${index}`}>
-                              {wallet.address.slice(0, 6)}...{wallet.address.slice(-4)}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                             {wallet.walletClientType || wallet.chainType || 'wallet'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              ) : privyUser?.wallet?.address ? (
-                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <Wallet className="w-4 h-4 text-gray-500" />
-                    <span className="text-sm font-mono text-gray-900" data-testid="profile-wallet-address">
-                      {privyUser.wallet.address.slice(0, 6)}...{privyUser.wallet.address.slice(-4)}
-                    </span>
-                  </div>
-                  <div className="text-xs text-gray-500">0.063 ETH</div>
-                </div>
-              ) : (
-                <div className="text-sm text-gray-500 text-center py-4">
-                  No wallets connected
-                </div>
-              )}
+              {/* Wallet functionality removed - Turnkey email auth doesn't include wallet management */}
+              <div className="text-sm text-gray-500 text-center py-4">
+                Wallet management coming soon
+              </div>
             </div>
 
             {/* Add Funds Button */}

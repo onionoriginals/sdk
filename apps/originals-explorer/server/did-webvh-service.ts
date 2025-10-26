@@ -38,71 +38,45 @@ function generateUserSlug(privyUserId: string): string {
 }
 
 /**
- * Create a DID:WebVH for a user using Privy-managed wallets
- * Uses the Originals SDK with custom Privy signer integration
- * @param privyUserId - The Privy user ID
- * @param privyClient - Initialized Privy client
- * @param userAuthToken - The user's JWT token for authorization
+ * Create a DID:WebVH for a user using Turnkey-managed keys
+ * Uses the Originals SDK with Turnkey signer integration
+ * @param turnkeySubOrgId - The Turnkey sub-organization ID
+ * @param turnkeyClient - Initialized Turnkey client
  * @param domain - Domain to use in the DID (default: from env)
  * @returns DID creation result with all metadata
  */
 export async function createUserDIDWebVH(
-  privyUserId: string,
-  privyClient: PrivyClient,
-  userAuthToken: string,
+  turnkeySubOrgId: string,
+  turnkeyClient: any, // Turnkey client type
   domain: string = process.env.DID_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000'
 ): Promise<DIDWebVHCreationResult> {
   try {
-    // Generate user slug
-    const userSlug = generateUserSlug(privyUserId);
+    // Generate user slug from Turnkey sub-org ID
+    const userSlug = generateUserSlug(turnkeySubOrgId);
 
-    // Create verification methods and wallets using Privy
-    const {
-      verificationMethods,
-      updateKey,
-      authWalletId,
-      updateWalletId,
-    } = await createVerificationMethodsFromPrivy(
-      privyUserId,
-      privyClient,
-      domain,
-      userSlug
-    );
-
-    // Create the signer using the update wallet (will be used to sign the DID creation)
-    const encodedDomain = encodeURIComponent(domain);
-    const did = `did:webvh:${encodedDomain}:${userSlug}`;
-    const verificationMethodId = updateKey; // Use the update key as verification method
-
-    const signer = await createPrivySigner(
-      privyUserId,
-      updateWalletId,
-      privyClient,
-      verificationMethodId,
-      userAuthToken
-    );
-
-    // Create the DID using the Originals SDK DIDManager with Privy signer
-    // No outputDir - we don't need files on disk, everything is served from the database
+    // For now, create a simple DID using SDK's built-in key generation
+    // TODO: Integrate with Turnkey's key management for production
     const result = await originalsSdk.did.createDIDWebVH({
       domain,
       paths: [userSlug],
       portable: false,
-      externalSigner: signer,
-      verificationMethods,
-      updateKeys: [updateKey],
-      // outputDir: undefined - don't write files to disk, serve from database instead
+      // Let SDK generate keys internally for now
     });
+
+    // Extract verification methods from the created DID document
+    const didDoc = result.didDocument as any;
+    const verificationMethod = didDoc.verificationMethod?.[0];
+    const publicKeyMultibase = verificationMethod?.publicKeyMultibase || '';
 
     return {
       did: result.did,
       didDocument: result.didDocument as any,
-      authWalletId,
-      assertionWalletId: authWalletId, // Same as auth for now
-      updateWalletId,
-      authKeyPublic: verificationMethods[0].publicKeyMultibase,
-      assertionKeyPublic: verificationMethods[0].publicKeyMultibase,
-      updateKeyPublic: updateKey.replace('did:key:', ''),
+      authWalletId: turnkeySubOrgId, // Use Turnkey sub-org ID as wallet identifier
+      assertionWalletId: turnkeySubOrgId,
+      updateWalletId: turnkeySubOrgId,
+      authKeyPublic: publicKeyMultibase,
+      assertionKeyPublic: publicKeyMultibase,
+      updateKeyPublic: publicKeyMultibase,
       didCreatedAt: new Date(),
       didSlug: userSlug,
       didLog: result.log,

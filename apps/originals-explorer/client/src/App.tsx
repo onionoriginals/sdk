@@ -1,8 +1,7 @@
 import { Switch, Route, useLocation } from "wouter";
-import { queryClient, setGlobalGetAccessToken } from "./lib/queryClient";
+import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { OriginalsLayout } from "@/components/layout/originals-layout";
@@ -21,21 +20,6 @@ import Setup from "@/pages/setup";
 import UploadAssets from "@/pages/upload-assets";
 import GoogleCallback from "@/pages/google-callback";
 import AssetDetail from "@/pages/asset-detail";
-
-function AuthSetup() {
-  const { getAccessToken } = usePrivy();
-  
-  useEffect(() => {
-    // Wrap getAccessToken to ensure it returns a string (never null for auth)
-    const wrappedGetAccessToken = async () => {
-      const token = await getAccessToken();
-      return token || '';
-    };
-    setGlobalGetAccessToken(wrappedGetAccessToken);
-  }, [getAccessToken]);
-  
-  return null;
-}
 
 function Router() {
   return (
@@ -85,24 +69,11 @@ function AppContent() {
 
 function App() {
   return (
-    <PrivyProvider
-      appId={import.meta.env.VITE_PRIVY_APP_ID}
-      config={{
-        appearance: {
-          theme: 'light',
-          accentColor: '#1f2937',
-          logo: undefined,
-        },
-        loginMethods: ['email', 'wallet', 'google'],
-      }}
-    >
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <AuthSetup />
-          <AppContent />
-        </TooltipProvider>
-      </QueryClientProvider>
-    </PrivyProvider>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <AppContent />
+      </TooltipProvider>
+    </QueryClientProvider>
   );
 }
 

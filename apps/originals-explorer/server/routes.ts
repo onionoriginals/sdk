@@ -99,7 +99,7 @@ async function ensureTurnkeySubOrg(email: string): Promise<string> {
     });
 
     const existing = subOrgs.subOrganizations?.find(
-      org => org.subOrganizationName === subOrgName
+      (org: any) => org.subOrganizationName === subOrgName
     );
 
     if (existing && existing.subOrganizationId) {
@@ -113,6 +113,9 @@ async function ensureTurnkeySubOrg(email: string): Promise<string> {
       rootUsers: [{
         userName: email,
         userEmail: email,
+        apiKeys: [],
+        authenticators: [],
+        oauthProviders: [],
       }],
       rootQuorumThreshold: 1,
     });
@@ -155,7 +158,7 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
       const didData = await createUserDIDWebVH(turnkeySubOrgId, turnkeyClient);
 
       // Create user with DID as primary identifier
-      user = await storage.createUserWithDid(email, turnkeySubOrgId, didData.did, didData);
+      user = await storage.createUserWithDid(turnkeySubOrgId, email, didData.did, didData);
     }
 
     // Add user info to request with database ID as primary identifier
