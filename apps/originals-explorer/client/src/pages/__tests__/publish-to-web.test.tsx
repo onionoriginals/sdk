@@ -54,7 +54,7 @@ describe('Publish to Web UI (Dashboard)', () => {
           json: async () => ({
             id: 'did:webvh:localhost%3A5000:testuser',
             did: 'did:webvh:localhost%3A5000:testuser',
-            privyId: 'privy-test-user',
+            turnkeySubOrgId: 'turnkey-test-user',
           }),
         };
       }
@@ -133,7 +133,7 @@ describe('Publish to Web UI (Dashboard)', () => {
           json: async () => ({
             id: 'did:webvh:localhost%3A5000:testuser',
             did: 'did:webvh:localhost%3A5000:testuser',
-            privyId: 'privy-test-user',
+            turnkeySubOrgId: 'turnkey-test-user',
           }),
         };
       }

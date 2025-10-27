@@ -152,13 +152,30 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
     // Check if user already exists by Turnkey sub-org ID
     let user = await storage.getUserByTurnkeyId(turnkeySubOrgId);
 
-    // If user doesn't exist, create DID:WebVH and user record
+    // If user doesn't exist, create user record
+    // Note: DID creation is skipped for now because it requires client-side signing
+    // with the user's Turnkey credentials (parent org cannot sign with sub-org keys)
     if (!user) {
-      console.log(`Creating DID:WebVH for new user ${email}...`);
-      const didData = await createUserDIDWebVH(turnkeySubOrgId, turnkeyClient);
+      console.log(`Creating user record for ${email}...`);
 
-      // Create user with DID as primary identifier
-      user = await storage.createUserWithDid(turnkeySubOrgId, email, didData.did, didData);
+      // Create user without DID for now
+      // TODO: Implement client-side DID creation flow
+      const placeholderDid = `temp:${turnkeySubOrgId}`;
+      user = await storage.createUserWithDid(turnkeySubOrgId, email, placeholderDid, {
+        did: placeholderDid,
+        didDocument: null,
+        authKeyId: null,
+        assertionKeyId: null,
+        updateKeyId: null,
+        authKeyPublic: null,
+        assertionKeyPublic: null,
+        updateKeyPublic: null,
+        didCreatedAt: new Date(),
+        didSlug: null,
+        didLog: null,
+      });
+
+      console.log(`✅ User created with Turnkey sub-org: ${turnkeySubOrgId}`);
     }
 
     // Add user info to request with database ID as primary identifier

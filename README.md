@@ -71,7 +71,7 @@ await originals.lifecycle.inscribeOnBitcoin(asset);
 - ✅ Cryptographic provenance verification
 - ✅ Front-running protection via unique satoshi assignment
 - ✅ **DID:WebVH integration with didwebvh-ts** - Full support for creating and managing did:webvh identifiers
-- ✅ **External signer support** - Integrate with Privy, AWS KMS, HSMs, and other key management systems
+- ✅ **External signer support** - Integrate with Turnkey, AWS KMS, HSMs, and other key management systems
 
 ## Use Cases
 
@@ -208,13 +208,13 @@ console.log('DID:', result.did);
 // Store result.keyPair.privateKey securely!
 ```
 
-### Create DID with External Key Management (e.g., Privy)
+### Create DID with External Key Management (e.g., Turnkey)
 
 ```typescript
-import { createPrivySigner } from './privy-signer';
+import { createTurnkeySigner } from './turnkey-signer';
 
 // Create external signer
-const signer = await createPrivySigner(userId, walletId, privyClient, verificationMethodId);
+const signer = await createTurnkeySigner(subOrgId, keyId, turnkeyClient, verificationMethodId, publicKeyMultibase);
 
 // Create DID
 const result = await sdk.did.createDIDWebVH({
@@ -242,7 +242,7 @@ const result = await sdk.did.updateDIDWebVH({
 });
 ```
 
-For detailed information about the DID:WebVH integration, including Privy setup and external signer implementation, see [DIDWEBVH_INTEGRATION.md](./DIDWEBVH_INTEGRATION.md).
+For detailed information about the DID:WebVH integration, including Turnkey setup and external signer implementation, see [DIDWEBVH_INTEGRATION.md](./DIDWEBVH_INTEGRATION.md).
 
 ## Development
 

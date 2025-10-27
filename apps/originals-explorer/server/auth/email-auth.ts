@@ -57,17 +57,45 @@ async function getOrCreateTurnkeySubOrg(
     console.log(`🔍 Checking for existing sub-organization for ${email}...`);
 
     try {
-      // Try to get existing sub-organizations
-      const subOrgs = await turnkeyClient.apiClient().getSubOrganizations();
+      // Try to get existing sub-organizations by email filter
+      const subOrgs = await turnkeyClient.apiClient().getSubOrgIds({
+        organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
+        filterType: 'EMAIL',
+        filterValue: email,
+      });
 
-      // Look for existing sub-org with matching name pattern
-      const existing = subOrgs.subOrganizations?.find(
-        (org) => org.subOrganizationName?.startsWith(baseSubOrgName)
-      );
+      const subOrgIds = subOrgs.organizationIds || [];
+      const existingSubOrgId = subOrgIds.length > 0 ? subOrgIds[0] : null;
 
-      if (existing && existing.subOrganizationId) {
-        console.log(`✅ Found existing sub-organization: ${existing.subOrganizationId}`);
-        return existing.subOrganizationId;
+      if (existingSubOrgId) {
+        console.log(`✅ Found existing sub-organization: ${existingSubOrgId}`);
+
+        // Check if this sub-org has a wallet - if not, it was created before wallet implementation
+        console.log(`🔍 Checking if sub-org has wallet...`);
+        try {
+          const walletsCheck = await turnkeyClient.apiClient().getWallets({
+            organizationId: existingSubOrgId,
+          });
+          const walletCount = walletsCheck.wallets?.length || 0;
+          console.log(`Found ${walletCount} wallet(s) in existing sub-org`);
+
+          if (walletCount === 0) {
+            console.log(`⚠️ Sub-org has no wallet. This sub-org was created before wallet creation was implemented.`);
+            console.log(`📝 Parent org cannot delete sub-orgs due to Turnkey security model.`);
+            console.log(`📝 Creating new sub-org with wallet instead...`);
+            // Continue below to create a new sub-org with a timestamp to avoid collision
+          } else {
+            // Sub-org has wallet, use it
+            return existingSubOrgId;
+          }
+        } catch (walletCheckErr) {
+          console.error('Could not check wallet in sub-org:', walletCheckErr);
+          // If we can't check wallets, assume sub-org is fine and return it
+          return existingSubOrgId;
+        }
+
+        // If we reach here and the sub-org wasn't returned above, it means we deleted it
+        // Continue below to create a new one
       }
     } catch (lookupError) {
       console.log(`📝 No existing sub-org found, will create new one`);
@@ -78,8 +106,9 @@ async function getOrCreateTurnkeySubOrg(
 
     console.log(`📧 Creating new Turnkey sub-organization for ${email}...`);
 
-    // Create sub-organization using the Turnkey SDK
-    // Using the correct parameter structure for Turnkey API
+    // Create sub-organization with a wallet containing the keys we need
+    // Turnkey allows parent orgs to create wallets DURING sub-org creation
+    // The wallet accounts will be owned by the sub-org (non-custodial)
     const result = await turnkeyClient.apiClient().createSubOrganization({
       subOrganizationName: subOrgName,
       rootUsers: [
@@ -92,6 +121,29 @@ async function getOrCreateTurnkeySubOrg(
         },
       ],
       rootQuorumThreshold: 1,
+      wallet: {
+        walletName: 'default-wallet',
+        accounts: [
+          {
+            curve: 'CURVE_SECP256K1',
+            pathFormat: 'PATH_FORMAT_BIP32',
+            path: "m/44'/0'/0'/0/0", // Standard Bitcoin path for auth-key
+            addressFormat: 'ADDRESS_FORMAT_ETHEREUM', // Secp256k1 - use Ethereum format
+          },
+          {
+            curve: 'CURVE_ED25519',
+            pathFormat: 'PATH_FORMAT_BIP32',
+            path: "m/44'/501'/0'/0'", // Standard Solana path (Ed25519) for assertion-key
+            addressFormat: 'ADDRESS_FORMAT_SOLANA', // Ed25519 - use Solana format
+          },
+          {
+            curve: 'CURVE_ED25519',
+            pathFormat: 'PATH_FORMAT_BIP32',
+            path: "m/44'/501'/1'/0'", // Different path for update-key
+            addressFormat: 'ADDRESS_FORMAT_SOLANA', // Ed25519 - use Solana format
+          },
+        ],
+      },
     });
 
     const subOrgId = result.activity?.result?.createSubOrganizationResultV7?.subOrganizationId;
@@ -101,6 +153,8 @@ async function getOrCreateTurnkeySubOrg(
     }
 
     console.log(`✅ Created sub-organization: ${subOrgId}`);
+    console.log(`📝 Keys will be created after OTP verification`);
+
     return subOrgId;
   } catch (error) {
     console.error('❌ Error creating Turnkey sub-organization:', error);

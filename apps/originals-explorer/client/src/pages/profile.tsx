@@ -47,7 +47,7 @@ export default function Profile() {
         if (data.created) {
           toast({
             title: "DID Created",
-            description: "Your decentralized identifier has been created and secured by Privy.",
+            description: "Your decentralized identifier has been created and secured by Turnkey.",
           });
         }
 
@@ -179,7 +179,7 @@ export default function Profile() {
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs font-semibold text-blue-900">Decentralized ID</span>
                         <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-                          Secured by Privy
+                          Secured by Turnkey
                         </span>
                       </div>
                       <div className="font-mono text-xs text-gray-700 break-all mb-2" data-testid="profile-did">
@@ -266,7 +266,7 @@ export default function Profile() {
                       </div>
 
                       <div className="text-xs text-gray-500 italic mt-2">
-                        🔒 All private keys are securely managed by Privy
+                        🔒 All private keys are securely managed by Turnkey
                       </div>
                       <div className="text-xs text-gray-500 italic">
                         ℹ️ Update key is managed separately in did.jsonl
@@ -352,7 +352,7 @@ export default function Profile() {
                   console.log("Bitcoin wallet created:", data);
                   toast({
                     title: "Bitcoin Wallet Created",
-                    description: "Your BTC wallet is managed by Privy. Refreshing...",
+                    description: "Your BTC wallet is managed by Turnkey. Refreshing...",
                   });
                   setTimeout(() => window.location.reload(), 1500);
                 } catch (e: any) {
@@ -381,7 +381,7 @@ export default function Profile() {
                   console.log("Stellar wallet created:", data);
                   toast({
                     title: "Stellar Wallet Created",
-                    description: "Your ED25519 signing wallet is managed by Privy. Refreshing...",
+                    description: "Your ED25519 signing wallet is managed by Turnkey. Refreshing...",
                   });
                   setTimeout(() => window.location.reload(), 1500);
                 } catch (e: any) {
@@ -420,11 +420,11 @@ export default function Profile() {
               </Link>
             </div>
 
-            {/* Protected by Privy */}
+            {/* Protected by Turnkey */}
             <div className="text-center">
               <div className="text-xs text-gray-400 flex items-center justify-center gap-1">
-                Protected by 
-                <span className="font-semibold text-gray-600">●&nbsp;privy</span>
+                Protected by
+                <span className="font-semibold text-gray-600">●&nbsp;turnkey</span>
               </div>
             </div>
           </CardContent>

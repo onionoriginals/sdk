@@ -75,7 +75,7 @@ The DID system supports three DID methods with unified interfaces:
 
 **WebVHManager (WebVHManager.ts)** - did:webvh-specific operations
 - Integrates with didwebvh-ts library for version history DIDs
-- Supports external signers (Privy, AWS KMS, HSMs) via ExternalSigner interface
+- Supports external signers (Turnkey, AWS KMS, HSMs) via ExternalSigner interface
 - Creates/updates DID logs as JSONL files for .well-known hosting
 - Key methods: `createDIDWebVH()`, `updateDIDWebVH()`, `loadDIDLog()`
 
@@ -101,7 +101,7 @@ interface ExternalSigner {
 ```
 
 This enables integration with:
-- Privy for user wallet management
+- Turnkey for user key management
 - AWS KMS for enterprise key custody
 - Hardware Security Modules (HSMs)
 - Other secure key management systems

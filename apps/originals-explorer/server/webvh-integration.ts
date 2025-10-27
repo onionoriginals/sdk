@@ -148,12 +148,9 @@ export class WebVHIntegrationService {
    * @returns Sanitized slug safe for DIDs
    */
   private sanitizeSlug(slug: string): string {
-    // Remove 'did:privy:' prefix if present
-    let sanitized = slug.replace(/^did:privy:/, '');
-    
     // Convert to lowercase and replace non-alphanumeric with hyphens
-    sanitized = sanitized.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    
+    const sanitized = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+
     // Remove consecutive hyphens and trim
     return sanitized.replace(/-+/g, '-').replace(/^-|-$/g, '');
   }
