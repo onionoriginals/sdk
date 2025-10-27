@@ -1,17 +1,14 @@
-import { PrivyClient } from "@privy-io/node";
-import { convertToMultibase, extractPublicKeyFromWallet } from "./key-utils";
+import { Turnkey } from "@turnkey/sdk-server";
+import { convertToMultibase } from "./key-utils";
 import { originalsSdk } from "./originals";
-import { 
-  createVerificationMethodsFromPrivy, 
-  createPrivySigner 
-} from "./privy-signer";
+import { createTurnkeySigner } from "./turnkey-signer";
 
 export interface DIDWebVHCreationResult {
   did: string;
   didDocument: any;
-  authWalletId: string;
-  assertionWalletId: string;
-  updateWalletId: string;
+  authKeyId: string;
+  assertionKeyId: string;
+  updateKeyId: string;
   authKeyPublic: string;
   assertionKeyPublic: string;
   updateKeyPublic: string;
@@ -22,87 +19,120 @@ export interface DIDWebVHCreationResult {
 }
 
 /**
- * Generate a sanitized user slug from Privy user ID
- * @param privyUserId - The Privy user ID (e.g., "did:privy:cltest123456" or "cltest123456")
+ * Generate a sanitized user slug from Turnkey sub-org ID
+ * @param turnkeySubOrgId - The Turnkey sub-organization ID
  * @returns Sanitized slug for use in did:webvh
  */
-function generateUserSlug(privyUserId: string): string {
-  // Strip "did:privy:" prefix if present
-  let slug = privyUserId.replace(/^did:privy:/, '');
-  
+function generateUserSlug(turnkeySubOrgId: string): string {
   // Sanitize: lowercase and replace any non-alphanumeric with hyphens
-  const sanitized = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-  
+  const sanitized = turnkeySubOrgId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+
   // Remove consecutive hyphens and trim
   return sanitized.replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
 /**
- * Create a DID:WebVH for a user using Privy-managed wallets
- * Uses the Originals SDK with custom Privy signer integration
- * @param privyUserId - The Privy user ID
- * @param privyClient - Initialized Privy client
- * @param userAuthToken - The user's JWT token for authorization
+ * Create a DID:WebVH for a user using Turnkey-managed keys
+ * Uses the Originals SDK with Turnkey signer integration
+ * @param turnkeySubOrgId - The Turnkey sub-organization ID
+ * @param turnkeyClient - Initialized Turnkey client
  * @param domain - Domain to use in the DID (default: from env)
  * @returns DID creation result with all metadata
  */
 export async function createUserDIDWebVH(
-  privyUserId: string,
-  privyClient: PrivyClient,
-  userAuthToken: string,
+  turnkeySubOrgId: string,
+  turnkeyClient: Turnkey,
   domain: string = process.env.DID_DOMAIN || process.env.VITE_APP_DOMAIN || 'localhost:5000'
 ): Promise<DIDWebVHCreationResult> {
   try {
-    // Generate user slug
-    const userSlug = generateUserSlug(privyUserId);
+    // Generate user slug from Turnkey sub-org ID
+    const userSlug = generateUserSlug(turnkeySubOrgId);
 
-    // Create verification methods and wallets using Privy
-    const {
-      verificationMethods,
-      updateKey,
-      authWalletId,
-      updateWalletId,
-    } = await createVerificationMethodsFromPrivy(
-      privyUserId,
-      privyClient,
-      domain,
-      userSlug
-    );
+    // Wallet accounts are created during sub-org creation (see email-auth.ts)
+    // They are stored IN the sub-org for proper isolation
 
-    // Create the signer using the update wallet (will be used to sign the DID creation)
+    // List wallets in the sub-org
+    const walletsResult = await turnkeyClient.apiClient().getWallets({
+      organizationId: turnkeySubOrgId,
+    });
+
+    const wallets = walletsResult.wallets || [];
+    if (wallets.length === 0) {
+      throw new Error(
+        `No wallets found in sub-org ${turnkeySubOrgId}. ` +
+        `This sub-org may have been created before wallet creation was implemented. ` +
+        `Please delete it and log in again with a fresh email.`
+      );
+    }
+
+    // Get the default wallet (first one)
+    const wallet = wallets[0];
+    console.log(`Using wallet: ${wallet.walletName} (${wallet.walletId})`);
+
+    // Get wallet accounts
+    const accountsResult = await turnkeyClient.apiClient().getWalletAccounts({
+      organizationId: turnkeySubOrgId,
+      walletId: wallet.walletId!,
+    });
+
+    const accounts = accountsResult.accounts || [];
+    if (accounts.length < 3) {
+      throw new Error(
+        `Expected 3 wallet accounts but found ${accounts.length} in wallet ${wallet.walletId}`
+      );
+    }
+
+    // Accounts are created in order: Secp256k1, Ed25519, Ed25519
+    const authAccount = accounts[0]; // CURVE_SECP256K1
+    const assertionAccount = accounts[1]; // CURVE_ED25519
+    const updateAccount = accounts[2]; // CURVE_ED25519
+
+    // Convert Turnkey public keys to multibase format
+    const authKeyMultibase = convertToMultibase(authAccount.publicKey || '', 'Secp256k1');
+    const assertionKeyMultibase = convertToMultibase(assertionAccount.publicKey || '', 'Ed25519');
+    const updateKeyMultibase = convertToMultibase(updateAccount.publicKey || '', 'Ed25519');
+
+    // Create the update signer for DID creation (SDK uses this to sign the initial DID document)
     const encodedDomain = encodeURIComponent(domain);
     const did = `did:webvh:${encodedDomain}:${userSlug}`;
-    const verificationMethodId = updateKey; // Use the update key as verification method
+    const updateVerificationMethodId = `${did}#update-key`;
 
-    const signer = await createPrivySigner(
-      privyUserId,
-      updateWalletId,
-      privyClient,
-      verificationMethodId,
-      userAuthToken
+    const updateSigner = await createTurnkeySigner(
+      turnkeySubOrgId,
+      updateAccount.address!, // Use account address as the signing key identifier
+      turnkeyClient,
+      updateVerificationMethodId,
+      updateKeyMultibase
     );
 
-    // Create the DID using the Originals SDK DIDManager with Privy signer
-    // No outputDir - we don't need files on disk, everything is served from the database
+    // Use the Originals SDK to create the DID:WebVH with Turnkey-managed keys
     const result = await originalsSdk.did.createDIDWebVH({
       domain,
       paths: [userSlug],
       portable: false,
-      externalSigner: signer,
-      verificationMethods,
-      updateKeys: [updateKey],
-      // outputDir: undefined - don't write files to disk, serve from database instead
+      externalSigner: updateSigner,
+      verificationMethods: [
+        {
+          type: 'Multikey',
+          publicKeyMultibase: authKeyMultibase,
+        },
+        {
+          type: 'Multikey',
+          publicKeyMultibase: assertionKeyMultibase,
+        }
+      ],
+      updateKeys: [updateVerificationMethodId], // Required when using externalSigner
     });
 
     return {
       did: result.did,
       didDocument: result.didDocument as any,
-      authWalletId,
-      assertionWalletId: authWalletId, // Same as auth for now
-      updateWalletId,
-      authKeyPublic: verificationMethods[0].publicKeyMultibase,
-      assertionKeyPublic: verificationMethods[0].publicKeyMultibase,
-      updateKeyPublic: updateKey.replace('did:key:', ''),
+      authKeyId: authAccount.address!,
+      assertionKeyId: assertionAccount.address!,
+      updateKeyId: updateAccount.address!,
+      authKeyPublic: authKeyMultibase,
+      assertionKeyPublic: assertionKeyMultibase,
+      updateKeyPublic: updateKeyMultibase,
       didCreatedAt: new Date(),
       didSlug: userSlug,
       didLog: result.log,

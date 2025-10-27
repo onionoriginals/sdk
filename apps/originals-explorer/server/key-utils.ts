@@ -1,8 +1,8 @@
 import { multikey } from '@originals/sdk';
 
 /**
- * Convert Privy's public key format to multibase Multikey format
- * @param publicKeyHex - The public key in hex format from Privy
+ * Convert Turnkey's public key format to multibase Multikey format
+ * @param publicKeyHex - The public key in hex format from Turnkey
  * @param keyType - The type of key ('Secp256k1' for Bitcoin, 'Ed25519' for Stellar)
  * @returns The public key encoded in multibase format (z-base58btc with multicodec header)
  */
@@ -18,7 +18,7 @@ export function convertToMultibase(
   // Convert hex string to Uint8Array
   let publicKeyBytes = hexToBytes(cleanHex);
   
-  // Stellar public keys from Privy include a version byte prefix
+  // Some Ed25519 public keys include a version byte prefix
   // Ed25519 keys must be exactly 32 bytes, so remove the prefix if present
   if (keyType === 'Ed25519' && publicKeyBytes.length === 33) {
     publicKeyBytes = publicKeyBytes.slice(1);
@@ -53,28 +53,26 @@ export function bytesToHex(bytes: Uint8Array): string {
 }
 
 /**
- * Extract public key from Privy wallet object
- * @param wallet - Privy wallet object
+ * Extract public key from key object
+ * @param key - Key object with publicKey field
  * @returns Public key in hex format
  * @throws Error if no public key is available
  */
-export function extractPublicKeyFromWallet(wallet: any): string {
-  // Privy wallet structure varies by chain type
+export function extractPublicKeyFromWallet(key: any): string {
   // Try common fields for public key
-  if (wallet.publicKey) {
-    return wallet.publicKey;
+  if (key.publicKey) {
+    return key.publicKey;
   }
-  if (wallet.public_key) {
-    return wallet.public_key;
+  if (key.public_key) {
+    return key.public_key;
   }
-  
+
   // If no public key is available, throw an error
-  // DO NOT fall back to wallet.address as it's not in hex format
+  // DO NOT fall back to address fields as they're not in hex format
   // (Bitcoin addresses are bech32/base58, Stellar addresses are base32)
   throw new Error(
-    `No public key available in wallet object. ` +
-    `Wallet ID: ${wallet.id || 'unknown'}, ` +
-    `Chain type: ${wallet.chainType || 'unknown'}. ` +
-    `The wallet object must contain a 'publicKey' or 'public_key' field.`
+    `No public key available in key object. ` +
+    `Key ID: ${key.id || 'unknown'}. ` +
+    `The key object must contain a 'publicKey' or 'public_key' field.`
   );
 }

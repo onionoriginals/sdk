@@ -73,6 +73,11 @@ export class DatabaseStorage {
     return byUsername || undefined;
   }
 
+  async getUserByTurnkeyId(turnkeySubOrgId: string): Promise<User | undefined> {
+    const result = await this.db.select().from(users).where(eq(users.turnkeySubOrgId, turnkeySubOrgId)).limit(1);
+    return result[0];
+  }
+
   async createUser(insertUser: InsertUser | (Omit<Partial<User>, 'id'> & { username: string; password: string })): Promise<User> {
     const result = await this.db.insert(users).values(insertUser as any).returning();
     return result[0];
@@ -99,13 +104,14 @@ export class DatabaseStorage {
     return result[0];
   }
 
-  async createUserWithDid(privyUserId: string, did: string, didData: DIDData): Promise<User> {
-    // Check if user already exists by Privy ID
-    const existing = await this.getUserByUsername(privyUserId);
+  async createUserWithDid(identifierId: string, email: string, did: string, didData: DIDData): Promise<User> {
+    // Check if user already exists by Turnkey ID
+    const existing = await this.getUserByTurnkeyId(identifierId);
     
     if (existing) {
       // Update existing user with DID data (keep the same database ID)
       return await this.updateUser(existing.id, {
+        email,
         did,
         didDocument: didData.didDocument,
         didLog: didData.didLog || null,
@@ -126,10 +132,33 @@ export class DatabaseStorage {
       return existingByDid;
     }
 
+    // Check if user already exists by email/username
+    const existingByUsername = await this.getUserByUsername(email);
+    if (existingByUsername) {
+      // Update existing user with Turnkey and DID data
+      return await this.updateUser(existingByUsername.id, {
+        email,
+        turnkeySubOrgId: identifierId,
+        did,
+        didDocument: didData.didDocument,
+        didLog: didData.didLog || null,
+        didSlug: didData.didSlug || null,
+        authWalletId: didData.authWalletId,
+        assertionWalletId: didData.assertionWalletId,
+        updateWalletId: didData.updateWalletId,
+        authKeyPublic: didData.authKeyPublic,
+        assertionKeyPublic: didData.assertionKeyPublic,
+        updateKeyPublic: didData.updateKeyPublic,
+        didCreatedAt: didData.didCreatedAt,
+      });
+    }
+
     // Create new user (database will generate UUID as ID)
     return this.createUser({
-      username: privyUserId,  // Keep Privy ID as username for lookup
+      username: email,  // Use full email as username to ensure uniqueness
       password: '',
+      email,
+      turnkeySubOrgId: identifierId,
       did,
       didDocument: didData.didDocument,
       didLog: didData.didLog || null,

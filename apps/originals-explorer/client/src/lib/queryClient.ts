@@ -7,41 +7,21 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-// Global variable to store getAccessToken function
-let globalGetAccessToken: (() => Promise<string>) | null = null;
-
-export function setGlobalGetAccessToken(fn: () => Promise<string>) {
-  globalGetAccessToken = fn;
-}
-
-// Get auth token from Privy
-async function getAuthToken(): Promise<string | null> {
-  if (!globalGetAccessToken) {
-    return null;
-  }
-  
-  try {
-    return await globalGetAccessToken();
-  } catch (error) {
-    console.warn('Failed to get access token:', error);
-    return null;
-  }
-}
-
+/**
+ * Make an API request with cookie-based authentication
+ * The JWT token is automatically sent via HTTP-only cookies
+ */
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  const token = await getAuthToken();
-  
   // Check if data is FormData to handle file uploads
   const isFormData = data instanceof FormData;
   
   const headers: Record<string, string> = {
     // Don't set Content-Type for FormData (browser will set it with boundary)
     ...(data && !isFormData ? { "Content-Type": "application/json" } : {}),
-    ...(token ? { "Authorization": `Bearer ${token}` } : {}),
   };
 
   const res = await fetch(url, {
@@ -49,7 +29,7 @@ export async function apiRequest(
     headers,
     // Don't JSON.stringify FormData
     body: data ? (isFormData ? data as FormData : JSON.stringify(data)) : undefined,
-    credentials: "include",
+    credentials: "include", // Send cookies with request
   });
 
   await throwIfResNotOk(res);
@@ -62,14 +42,8 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const token = await getAuthToken();
-    const headers: Record<string, string> = {
-      ...(token ? { "Authorization": `Bearer ${token}` } : {}),
-    };
-
     const res = await fetch(queryKey.join("/") as string, {
-      headers,
-      credentials: "include",
+      credentials: "include", // Send cookies with request
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

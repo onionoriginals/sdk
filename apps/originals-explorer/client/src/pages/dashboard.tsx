@@ -75,7 +75,7 @@ export default function Dashboard() {
   });
 
   // Get current user
-  const { data: currentUser } = useQuery<{ id: string; did: string; privyId: string }>({
+  const { data: currentUser } = useQuery<{ id: string; did: string; turnkeySubOrgId: string }>({
     queryKey: ["/api/user"],
   });
 

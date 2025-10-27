@@ -7,14 +7,17 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
-  // DID-related fields (Privy-managed keys)
+  // Turnkey authentication fields
+  email: text("email"), // User's email address
+  turnkeySubOrgId: text("turnkey_sub_org_id").unique(), // Turnkey sub-organization ID
+  // DID-related fields (Turnkey-managed keys)
   did: text("did"), // did:webvh identifier
   didDocument: jsonb("did_document"), // Complete DID document
   didLog: jsonb("did_log"), // DID log (did.jsonl content)
   didSlug: text("did_slug"), // User slug extracted from DID
-  authWalletId: text("auth_wallet_id"), // Privy wallet ID for authentication (Bitcoin)
-  assertionWalletId: text("assertion_wallet_id"), // Privy wallet ID for assertions (Stellar/ED25519)
-  updateWalletId: text("update_wallet_id"), // Privy wallet ID for DID updates (Stellar/ED25519)
+  authWalletId: text("auth_wallet_id"), // Wallet ID for authentication (Bitcoin)
+  assertionWalletId: text("assertion_wallet_id"), // Wallet ID for assertions (Stellar/ED25519)
+  updateWalletId: text("update_wallet_id"), // Wallet ID for DID updates (Stellar/ED25519)
   authKeyPublic: text("auth_key_public"), // Bitcoin public key in multibase format
   assertionKeyPublic: text("assertion_key_public"), // ED25519 public key in multibase format
   updateKeyPublic: text("update_key_public"), // ED25519 public key in multibase format

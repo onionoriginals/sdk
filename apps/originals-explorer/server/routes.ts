@@ -6,7 +6,10 @@ import { z } from "zod";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
-import { PrivyClient } from "@privy-io/node";
+import { Turnkey } from "@turnkey/sdk-server";
+import cookieParser from "cookie-parser";
+import { signToken, verifyToken, getAuthCookieConfig, getClearAuthCookieConfig } from "./auth/jwt";
+import { initiateEmailAuth, verifyEmailAuth, cleanupSession } from "./auth/email-auth";
 import { originalsSdk } from "./originals";
 import { createUserDIDWebVH, publishDIDDocument } from "./did-webvh-service";
 import { OriginalsAsset } from "@originals/sdk";
@@ -73,43 +76,116 @@ const googleClient = new OAuth2Client(
   process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/auth/google/callback'
 );
 
-const privyClient = new PrivyClient({
-  appId: process.env.PRIVY_APP_ID!,
-  appSecret: process.env.PRIVY_APP_SECRET!
+// Turnkey client for key management
+const turnkeyClient = new Turnkey({
+  apiBaseUrl: "https://api.turnkey.com",
+  apiPublicKey: process.env.TURNKEY_API_PUBLIC_KEY!,
+  apiPrivateKey: process.env.TURNKEY_API_PRIVATE_KEY!,
+  defaultOrganizationId: process.env.TURNKEY_ORGANIZATION_ID!,
 });
 
-// Authentication middleware that uses did:webvh as primary identifier
-const authenticateUser = async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Create or retrieve a Turnkey sub-organization for a user
+ * Each user gets their own sub-org for key isolation
+ */
+async function ensureTurnkeySubOrg(email: string): Promise<string> {
   try {
-    const authorizationHeader = req.headers.authorization;
-    
-    if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: "Missing or invalid authorization header" });
+    // Generate a unique name for the sub-org
+    const subOrgName = `user-${email.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
+
+    // Check if sub-org already exists
+    const subOrgs = await turnkeyClient.apiClient().getSubOrganizations({
+      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
+    });
+
+    const existing = subOrgs.subOrganizations?.find(
+      (org: any) => org.subOrganizationName === subOrgName
+    );
+
+    if (existing && existing.subOrganizationId) {
+      return existing.subOrganizationId;
     }
 
-    const token = authorizationHeader.substring(7);
-    const verifiedClaims = await privyClient.utils().auth().verifyAuthToken(token);
-    
-    // Check if user already exists by Privy ID
-    let user = await storage.getUserByPrivyId(verifiedClaims.user_id);
-    
-    // If user doesn't exist, create DID:WebVH and user record
-    if (!user) {
-      console.log(`Creating DID:WebVH for new user ${verifiedClaims.user_id}...`);
-      const didData = await createUserDIDWebVH(verifiedClaims.user_id, privyClient, token);
-      
-      // Create user with DID as primary identifier
-      user = await storage.createUserWithDid(verifiedClaims.user_id, didData.did, didData);
+    // Create new sub-organization
+    const result = await turnkeyClient.apiClient().createSubOrganization({
+      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
+      subOrganizationName: subOrgName,
+      rootUsers: [{
+        userName: email,
+        userEmail: email,
+        apiKeys: [],
+        authenticators: [],
+        oauthProviders: [],
+      }],
+      rootQuorumThreshold: 1,
+    });
+
+    if (!result.subOrganizationId) {
+      throw new Error('Failed to create sub-organization');
     }
-    
+
+    return result.subOrganizationId;
+  } catch (error) {
+    console.error('Error creating Turnkey sub-organization:', error);
+    throw new Error(`Failed to create Turnkey sub-organization: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Authentication middleware using JWT from HTTP-only cookies
+ * CRITICAL PR #102: Uses cookies (not localStorage) for security
+ */
+const authenticateUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Get JWT token from HTTP-only cookie
+    const token = req.cookies?.auth_token;
+
+    if (!token) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    // Verify JWT token
+    const payload = verifyToken(token);
+    const turnkeySubOrgId = payload.sub; // Turnkey sub-org ID (stable identifier)
+    const email = payload.email; // Email metadata
+
+    // Check if user already exists by Turnkey sub-org ID
+    let user = await storage.getUserByTurnkeyId(turnkeySubOrgId);
+
+    // If user doesn't exist, create user record
+    // Note: DID creation is skipped for now because it requires client-side signing
+    // with the user's Turnkey credentials (parent org cannot sign with sub-org keys)
+    if (!user) {
+      console.log(`Creating user record for ${email}...`);
+
+      // Create user without DID for now
+      // TODO: Implement client-side DID creation flow
+      const placeholderDid = `temp:${turnkeySubOrgId}`;
+      user = await storage.createUserWithDid(turnkeySubOrgId, email, placeholderDid, {
+        did: placeholderDid,
+        didDocument: null,
+        authKeyId: null,
+        assertionKeyId: null,
+        updateKeyId: null,
+        authKeyPublic: null,
+        assertionKeyPublic: null,
+        updateKeyPublic: null,
+        didCreatedAt: new Date(),
+        didSlug: null,
+        didLog: null,
+      });
+
+      console.log(`✅ User created with Turnkey sub-org: ${turnkeySubOrgId}`);
+    }
+
     // Add user info to request with database ID as primary identifier
     (req as any).user = {
       id: user.id, // Primary identifier is the database UUID (for foreign keys)
-      privyId: verifiedClaims.user_id, // Keep Privy ID for wallet operations
+      turnkeySubOrgId, // Turnkey sub-org ID for key operations
+      email, // Email metadata
       did: user.did, // DID for display/lookup
-      authToken: token, // Store JWT for Privy authorization context
     };
-    
+
     next();
   } catch (error) {
     console.error("Authentication error:", error);
@@ -118,6 +194,87 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Add cookie parser middleware for HTTP-only cookies
+  app.use(cookieParser());
+
+  // Step 1: Initiate email authentication
+  // Sends verification code to user's email (via Turnkey in production, console in dev)
+  app.post("/api/auth/initiate", async (req, res) => {
+    try {
+      const { email } = req.body;
+
+      if (!email || typeof email !== 'string') {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      // Initiate email auth flow
+      const result = await initiateEmailAuth(email, turnkeyClient);
+
+      res.json({
+        success: true,
+        sessionId: result.sessionId,
+        message: result.message,
+      });
+    } catch (error) {
+      console.error("Email auth initiation error:", error);
+      res.status(500).json({
+        error: "Failed to initiate authentication",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Step 2: Verify email code and complete login
+  // User submits the code they received, server verifies and issues JWT
+  app.post("/api/auth/verify", async (req, res) => {
+    try {
+      const { sessionId, code } = req.body;
+
+      if (!sessionId || typeof sessionId !== 'string') {
+        return res.status(400).json({ error: "Session ID is required" });
+      }
+
+      if (!code || typeof code !== 'string') {
+        return res.status(400).json({ error: "Verification code is required" });
+      }
+
+      // Verify the code with Turnkey
+      const verification = await verifyEmailAuth(sessionId, code, turnkeyClient);
+
+      if (!verification.verified) {
+        return res.status(401).json({ error: "Invalid verification code" });
+      }
+
+      // Sign JWT token with sub-org ID
+      const token = signToken(verification.subOrgId, verification.email);
+
+      // Set HTTP-only cookie
+      const cookieConfig = getAuthCookieConfig(token);
+      res.cookie(cookieConfig.name, cookieConfig.value, cookieConfig.options);
+
+      // Clean up the session
+      cleanupSession(sessionId);
+
+      res.json({
+        success: true,
+        message: "Authentication successful",
+      });
+    } catch (error) {
+      console.error("Email verification error:", error);
+      res.status(401).json({
+        error: "Verification failed",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Logout endpoint - clears HTTP-only cookie
+  app.post("/api/auth/logout", (_req, res) => {
+    const clearConfig = getClearAuthCookieConfig();
+    res.cookie(clearConfig.name, clearConfig.value, clearConfig.options);
+    res.json({ success: true, message: "Logged out successfully" });
+  });
+
   // Mount Google Drive import routes
   app.use("/api/import", importRoutes);
 
@@ -136,9 +293,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = (req as any).user;
       res.json({
-        id: user.id, // This is now the did:webvh
+        id: user.id, // Database UUID
         did: user.did,
-        privyId: user.privyId, // Keep for reference
+        email: user.email,
+        turnkeySubOrgId: user.turnkeySubOrgId,
       });
     } catch (error) {
       console.error("Error fetching user:", error);
@@ -233,57 +391,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error resolving DID:", error);
       res.status(500).json({ error: "Failed to resolve DID" });
-    }
-  });
-
-  // Advanced: Create DID with SDK-managed keys (alternative to Privy)
-  // This endpoint is for advanced users who want full control over key management
-  app.post("/api/did/create-with-sdk", authenticateUser, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      
-      // Check if user already has a DID
-      const existingUser = await storage.getUserByDid(user.did);
-      if (existingUser?.did) {
-        return res.status(400).json({ 
-          error: "User already has a DID",
-          did: existingUser.did 
-        });
-      }
-
-      // Import the WebVH integration service
-      const { webvhService } = await import('./webvh-integration');
-      
-      // Create DID using SDK
-      const result = await webvhService.createDIDWithSDK(user.privyId);
-      
-      // Update user with SDK-created DID
-      await storage.updateUser(user.privyId, {
-        did: result.did,
-        didDocument: result.didDocument as any,
-        didLog: result.log as any,
-        didSlug: user.privyId.replace(/^did:privy:/, ''),
-        didCreatedAt: new Date(),
-      });
-      
-      res.status(201).json({
-        success: true,
-        did: result.did,
-        didDocument: result.didDocument,
-        logPath: result.logPath,
-        message: "DID created with SDK-managed keys. Keep your private key secure!",
-        keyPair: {
-          publicKey: result.keyPair.publicKey,
-          // Never expose private key in response for production
-          // privateKey: result.keyPair.privateKey,
-        },
-      });
-    } catch (error) {
-      console.error("Error creating DID with SDK:", error);
-      res.status(500).json({ 
-        error: "Failed to create DID",
-        message: error instanceof Error ? error.message : String(error)
-      });
     }
   });
 
@@ -822,25 +929,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (asset.credentials as any) || []
       );
       
-      // Get user's Privy signer for signing credentials
+      // Get user's Turnkey signer for signing credentials
       let publisherSigner;
       try {
         const userData = await storage.getUserByDid(user.did);
-        if (!userData || !userData.updateWalletId) {
-          throw new Error('User missing update wallet for signing');
+        if (!userData || !userData.updateKeyId) {
+          throw new Error('User missing update key for signing');
         }
-        
-        // Import Privy signer creation
-        const { createPrivySigner } = await import('./privy-signer');
-        
-        // Create signer using user's update wallet
-        const verificationMethodId = `${user.did}#key-0`;
-        publisherSigner = await createPrivySigner(
-          user.privyId,
-          userData.updateWalletId,
-          privyClient,
+
+        // Import Turnkey signer creation
+        const { createTurnkeySigner } = await import('./turnkey-signer');
+
+        // Create signer using user's update key
+        const verificationMethodId = `${user.did}#update-key`;
+        publisherSigner = await createTurnkeySigner(
+          user.turnkeySubOrgId,
+          userData.updateKeyId,
+          turnkeyClient,
           verificationMethodId,
-          req.headers.authorization?.replace('Bearer ', '') || ''
+          userData.updateKeyPublic
         );
       } catch (signerError: any) {
         console.error('Failed to create signer:', signerError);
@@ -938,19 +1045,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           user.did // Issued by the user
         );
         
-        // Import Privy signer utilities
-        const { createPrivySigner } = await import('./privy-signer');
-        
+        // Import Turnkey signer utilities
+        const { createTurnkeySigner } = await import('./turnkey-signer');
+
         // Get verification method ID for the user's assertion key
         const verificationMethodId = `${user.did}#assertion-key`;
-        
-        // Create a signer for the user's assertion wallet
-        const userSigner = await createPrivySigner(
-          user.privyId,
-          userData.assertionWalletId,
-          privyClient,
+
+        // Create a signer for the user's assertion key
+        const userSigner = await createTurnkeySigner(
+          user.turnkeySubOrgId,
+          userData.assertionKeyId,
+          turnkeyClient,
           verificationMethodId,
-          user.authToken
+          userData.assertionKeyPublic
         );
         
         // Use SDK's external signer support to sign the credential
@@ -1310,154 +1417,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error("Error connecting wallet:", error);
       res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // Create both Bitcoin and Stellar wallets automatically in one call
-  app.post("/api/wallets/create-both", authenticateUser, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      if (!user?.id) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-
-      // Read policy IDs from environment (may be required by Privy)
-      const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
-      const policyIds = rawPolicyIds
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      
-      // Use Privy to create both Bitcoin and Stellar wallets using individual calls
-      // Privy manages all keys - we never see or store private keys
-      // The API will automatically handle HD wallet indexing
-      let btcWallet = await privyClient.wallets().create({
-        owner: {
-          user_id: user.privyId, // Use Privy ID for wallet operations
-        },
-        chain_type: "bitcoin-segwit",
-        policy_ids: policyIds.length > 0 ? policyIds : [],
-      });
-      console.log("Bitcoin wallet created:", btcWallet);
-      
-      let stellarWallet = await privyClient.wallets().create({
-        owner: {
-          user_id: user.privyId, // Use Privy ID for wallet operations
-        },
-        chain_type: "stellar",
-        policy_ids: policyIds.length > 0 ? policyIds : [],
-      });
-      console.log("Stellar wallet created:", stellarWallet);
-
-      // Fetch updated user to get all wallets (since there could be multiple)
-      const updatedUser = await privyClient.users()._get(user.privyId);
-      const allWallets = updatedUser.linked_accounts?.filter((a: any) => a.type === 'wallet') || [];
-
-      console.log("Bitcoin and Stellar wallets created. User now has", allWallets.length, "wallets");
-
-      // Privy returns the wallet info with public keys
-      // Private keys are managed entirely by Privy's infrastructure
-      return res.status(201).json({
-        success: true,
-        message: "Bitcoin and Stellar wallets created and managed by Privy",
-        userId: user.privyId, // Use Privy ID for wallet operations
-        wallets: allWallets,
-        btcWallet,
-        stellarWallet,
-      });
-    } catch (error: any) {
-      console.error("Error creating Bitcoin and Stellar wallets:", error);
-      return res.status(500).json({ error: error.message || "Failed to create wallets" });
-    }
-  });
-
-  // Create a Privy Bitcoin wallet for the authenticated user
-  // Create Stellar wallet (uses ED25519 for signing)
-  // Automatically handles being first wallet or additional wallet
-  app.post("/api/wallets/stellar", authenticateUser, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      if (!user?.id) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-
-      // Get user to check existing wallets
-      const privyUser = await privyClient.users()._get(user.privyId);
-      
-      // Read policy IDs from environment (may be required by Privy)
-      const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
-      const policyIds = rawPolicyIds
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      
-      // Use Privy to create a Stellar wallet (ED25519-based)
-      // Privy manages all keys - we never see or store private keys
-      // The API will automatically handle HD wallet indexing
-      const result = await privyClient.wallets().create({
-        owner: {
-          user_id: user.privyId, // Use Privy ID for wallet operations
-        },
-        chain_type: "stellar",
-        policy_ids: policyIds.length > 0 ? policyIds : [],
-      });
-
-      // Privy returns the wallet info with public key
-      // Private key is managed entirely by Privy's infrastructure
-      return res.status(201).json({
-        success: true,
-        message: "Stellar wallet created with ED25519 keys managed by Privy",
-        userId: user.privyId, // Use Privy ID for wallet operations
-        wallet: result,
-      });
-    } catch (error: any) {
-      console.error("Error creating Stellar wallet:", error);
-      return res.status(500).json({ error: error.message || "Failed to create Stellar wallet" });
-    }
-  });
-
-  // Create Bitcoin wallet
-  // Automatically handles being first wallet or additional wallet
-  app.post("/api/wallets/bitcoin", authenticateUser, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      if (!user?.id) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-
-      // Get user to check existing wallets
-      const privyUser = await privyClient.users()._get(user.privyId);
-
-      // Read policy IDs from environment; these must be configured in Privy Console
-      const rawPolicyIds = process.env.PRIVY_EMBEDDED_WALLET_POLICY_IDS || "";
-      const policyIds = rawPolicyIds
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      
-      // Privy's createWallets API automatically handles HD wallet indexing
-      // The first wallet will be at index 0, subsequent wallets at higher indices
-      const result = await privyClient.wallets().create({
-        owner: {
-          user_id: user.privyId, // Use Privy ID for wallet operations
-        },
-        chain_type: "bitcoin-segwit",
-        policy_ids: policyIds.length > 0 ? policyIds : [],
-        });
-
-      console.log("Bitcoin wallet created. User now has", result.id, " a new wallet");
-
-      // result contains the updated user and wallets
-      return res.status(201).json({
-        success: true,
-        message: "Bitcoin wallet created and managed by Privy",
-        userId: user.privyId, // Use Privy ID for wallet operations
-        wallet: result,
-      });
-    } catch (error: any) {
-      console.error("Error creating Privy BTC wallet:", error);
-      const message = error?.message || "Failed to create BTC wallet";
-      return res.status(500).json({ error: message });
     }
   });
 
