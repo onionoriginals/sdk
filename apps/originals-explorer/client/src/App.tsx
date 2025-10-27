@@ -34,10 +34,14 @@ function Router() {
           <AssetDetail />
         </OriginalsLayout>
       </Route>
+      <Route path="/profile">
+        <OriginalsLayout>
+          <Profile />
+        </OriginalsLayout>
+      </Route>
       <Route path="/dir" component={Directory} />
       <Route path="/assets" component={AssetsSpreadsheet} />
       <Route path="/setup" component={Setup} />
-      <Route path="/profile" component={Profile} />
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
       <Route path="/dashboard" component={Dashboard} />
@@ -53,7 +57,7 @@ function Router() {
 function AppContent() {
   const [location] = useLocation();
   // Don't show header on routes that use OriginalsLayout (has sidebar)
-  const routesWithSidebar = ['/', '/asset'];
+  const routesWithSidebar = ['/', '/asset', '/profile'];
   const showHeader = !routesWithSidebar.some(route =>
     location === route || location.startsWith(route + '/')
   );

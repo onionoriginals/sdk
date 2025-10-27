@@ -2,9 +2,9 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { User, Mail, Wallet, Settings, LogOut, X, Plus, Key, Shield, Copy, QrCode, ChevronDown, ChevronUp, Download } from "lucide-react";
+import { Mail, Settings, LogOut, Plus, Key, Shield, Copy, ChevronDown, ChevronUp, Download } from "lucide-react";
 import { Link } from "wouter";
 import { useState, useEffect } from "react";
 
@@ -101,57 +101,47 @@ export default function Profile() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-2 text-gray-600">Loading profile...</p>
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        <div className="bg-white min-h-96 p-4 sm:p-6 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-2 text-gray-600">Loading profile...</p>
+          </div>
         </div>
-      </div>
+      </main>
     );
   }
 
   if (!isAuthenticated || !user) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <CardTitle>Authentication Required</CardTitle>
-            <CardDescription>
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        <div className="bg-white min-h-96 p-4 sm:p-6 flex items-center justify-center">
+          <div className="text-center max-w-md mx-auto">
+            <h2 className="text-2xl font-semibold text-gray-900 mb-2">Authentication Required</h2>
+            <p className="text-gray-600 mb-6">
               Please sign in to view your profile
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-center">
+            </p>
             <Link href="/login">
               <Button data-testid="profile-login-button">
                 Sign In
               </Button>
             </Link>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </div>
+      </main>
     );
   }
 
-  const initials = user?.email 
-    ? user.email.split('@')[0].slice(0, 2).toUpperCase()
-    : 'U';
-
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        {/* Account Modal */}
-        <Card className="bg-white shadow-lg border-0 rounded-2xl">
-          <CardContent className="p-6">
+    <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <div className="bg-white min-h-96 p-4 sm:p-6">
+        <div className="max-w-2xl mx-auto">
+          <CardContent className="p-0">
             {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold text-gray-900" data-testid="profile-title">
+            <div className="mb-6">
+              <h2 className="text-3xl font-light text-gray-900" data-testid="profile-title">
                 Account
               </h2>
-              <Link href="/">
-                <button className="text-gray-400 hover:text-gray-600" data-testid="profile-close-button">
-                  <X className="w-5 h-5" />
-                </button>
-              </Link>
             </div>
 
             {/* User Email */}
@@ -295,110 +285,6 @@ export default function Profile() {
 
             <Separator className="mb-6" />
 
-            {/* Wallet Section */}
-            <div className="mb-6">
-              <div className="text-xs text-gray-500 mb-3">Your wallets</div>
-              {/* Wallet functionality removed - Turnkey email auth doesn't include wallet management */}
-              <div className="text-sm text-gray-500 text-center py-4">
-                Wallet management coming soon
-              </div>
-            </div>
-
-            {/* Add Funds Button */}
-            <Button 
-              className="w-full bg-gray-900 hover:bg-gray-800 text-white rounded-lg mb-6" 
-              data-testid="profile-add-funds-button"
-            >
-              Add funds
-            </Button>
-
-            {/* Create Both Wallets Button */}
-            <Button
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white rounded-lg mb-3"
-              onClick={async () => {
-                try {
-                  const res = await apiRequest("POST", "/api/wallets/create-both");
-                  const data = await res.json();
-                  console.log("Bitcoin and Stellar wallets created:", data);
-                  toast({
-                    title: "Wallets Created",
-                    description: `Created ${data.wallets?.length || 2} wallets! Refreshing...`,
-                  });
-                  // Reload the page to fetch updated user data with new wallets
-                  setTimeout(() => window.location.reload(), 1500);
-                } catch (e: any) {
-                  console.error("Failed to create wallets:", e);
-                  toast({
-                    title: "Failed to create wallets",
-                    description: e?.message || "Please try again.",
-                    variant: "destructive",
-                  });
-                }
-              }}
-              data-testid="profile-create-both-wallets"
-            >
-              <Wallet className="w-4 h-4 mr-2" />
-              Create Bitcoin & Stellar Wallets
-            </Button>
-
-            {/* Create Bitcoin Wallet Button */}
-            <Button
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white rounded-lg mb-3"
-              onClick={async () => {
-                try {
-                  // Bitcoin requires server-side API (chainType not supported client-side)
-                  const res = await apiRequest("POST", "/api/wallets/bitcoin");
-                  const data = await res.json();
-                  console.log("Bitcoin wallet created:", data);
-                  toast({
-                    title: "Bitcoin Wallet Created",
-                    description: "Your BTC wallet is managed by Turnkey. Refreshing...",
-                  });
-                  setTimeout(() => window.location.reload(), 1500);
-                } catch (e: any) {
-                  console.error("Failed to create Bitcoin wallet:", e);
-                  toast({
-                    title: "Failed to create wallet",
-                    description: e?.message || "Please try again.",
-                    variant: "destructive",
-                  });
-                }
-              }}
-              data-testid="profile-create-btc-wallet"
-            >
-              <Wallet className="w-4 h-4 mr-2" />
-              Create Bitcoin Wallet
-            </Button>
-
-            {/* Create Stellar Wallet (ED25519) Button */}
-            <Button
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg mb-6"
-              onClick={async () => {
-                try {
-                  // Stellar requires server-side API (chainType not supported client-side)
-                  const res = await apiRequest("POST", "/api/wallets/stellar");
-                  const data = await res.json();
-                  console.log("Stellar wallet created:", data);
-                  toast({
-                    title: "Stellar Wallet Created",
-                    description: "Your ED25519 signing wallet is managed by Turnkey. Refreshing...",
-                  });
-                  setTimeout(() => window.location.reload(), 1500);
-                } catch (e: any) {
-                  console.error("Failed to create Stellar wallet:", e);
-                  toast({
-                    title: "Failed to create wallet",
-                    description: e?.message || "Please try again.",
-                    variant: "destructive",
-                  });
-                }
-              }}
-              data-testid="profile-create-stellar-wallet"
-            >
-              <Key className="w-4 h-4 mr-2" />
-              Create Stellar Wallet (ED25519)
-            </Button>
-
             {/* Quick Actions */}
             <div className="space-y-2 mb-6">
               <Link href="/dir">
@@ -428,8 +314,8 @@ export default function Profile() {
               </div>
             </div>
           </CardContent>
-        </Card>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }
