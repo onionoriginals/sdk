@@ -419,6 +419,234 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Prepare DID document for frontend signing
+  app.post("/api/did/prepare-document", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { publicKeys } = req.body;
+
+      if (!publicKeys || !publicKeys.auth || !publicKeys.assertion || !publicKeys.update) {
+        return res.status(400).json({
+          error: "Missing required public keys. Need auth, assertion, and update keys."
+        });
+      }
+
+      // Generate DID document structure without signing
+      const email = user.email;
+      const domain = process.env.DOMAIN || 'localhost:5001';
+      const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+      const baseUrl = `${protocol}://${domain}`;
+
+      // Create DID identifier
+      const did = `did:webvh:${domain}:${encodeURIComponent(email)}`;
+
+      // Create DID document structure
+      const didDocument = {
+        "@context": [
+          "https://www.w3.org/ns/did/v1",
+          "https://w3id.org/security/multikey/v1"
+        ],
+        id: did,
+        controller: did,
+        verificationMethod: [
+          {
+            id: `${did}#auth-key`,
+            type: "Multikey",
+            controller: did,
+            publicKeyMultibase: publicKeys.auth
+          },
+          {
+            id: `${did}#assertion-key`,
+            type: "Multikey",
+            controller: did,
+            publicKeyMultibase: publicKeys.assertion
+          }
+        ],
+        authentication: [`${did}#auth-key`],
+        assertionMethod: [`${did}#assertion-key`],
+        service: [
+          {
+            id: `${did}#originals`,
+            type: "OriginalsService",
+            serviceEndpoint: `${baseUrl}/api/did/${encodeURIComponent(did)}`
+          }
+        ]
+      };
+
+      res.json({
+        didDocument,
+        did,
+        updateKeyId: `${did}#update-key`,
+      });
+    } catch (error) {
+      console.error("Error preparing DID document:", error);
+      res.status(500).json({
+        error: "Failed to prepare DID document",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Accept signed DID document from frontend
+  app.post("/api/did/accept-signed", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { didDocument, signature, publicKey } = req.body;
+
+      if (!didDocument || !signature || !publicKey) {
+        return res.status(400).json({
+          error: "Missing required fields: didDocument, signature, publicKey"
+        });
+      }
+
+      // Import verification utilities
+      const { verifyDIDSignature, extractPublicKeyFromDID } = await import('./signature-verification');
+
+      // Extract the update key from the DID document (should be provided separately in the did.jsonl)
+      // For now, verify the signature against the provided public key
+      const isValid = verifyDIDSignature(didDocument, signature, publicKey);
+
+      if (!isValid) {
+        return res.status(400).json({
+          error: "Invalid signature. DID document verification failed."
+        });
+      }
+
+      // Create DID log entry (did.jsonl format)
+      const logEntry = {
+        versionId: "1-" + Date.now(),
+        versionTime: new Date().toISOString(),
+        parameters: {
+          method: "did:webvh:0.3",
+          scid: didDocument.id,
+        },
+        state: didDocument,
+        proof: [{
+          type: "DataIntegrityProof",
+          cryptosuite: "eddsa-jcs-2022",
+          verificationMethod: `${didDocument.id}#update-key`,
+          proofPurpose: "authentication",
+          proofValue: signature,
+          created: new Date().toISOString()
+        }]
+      };
+
+      const didLog = JSON.stringify(logEntry);
+
+      // Store DID document and log
+      await storage.updateUser(user.id, {
+        did: didDocument.id,
+        didDocument: didDocument,
+        didLog: didLog,
+        didCreatedAt: new Date(),
+      });
+
+      // Publish to storage (GCS or local)
+      try {
+        await publishDIDDocument(didDocument.id, didLog);
+      } catch (publishError) {
+        console.error("Error publishing DID document:", publishError);
+        // Continue even if publishing fails - DID is still stored in DB
+      }
+
+      res.json({
+        success: true,
+        did: didDocument.id,
+        message: "DID document successfully verified and stored"
+      });
+    } catch (error) {
+      console.error("Error accepting signed DID:", error);
+      res.status(500).json({
+        error: "Failed to process signed DID document",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Prepare credential for frontend signing
+  app.post("/api/credentials/prepare", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { assetId, issuerDID, subjectDID } = req.body;
+
+      if (!assetId) {
+        return res.status(400).json({
+          error: "Missing required field: assetId"
+        });
+      }
+
+      // Get asset from database
+      const asset = await storage.getAsset(assetId);
+
+      if (!asset) {
+        return res.status(404).json({ error: 'Asset not found' });
+      }
+
+      // Check ownership
+      if (asset.userId !== user.id) {
+        return res.status(403).json({ error: 'Not authorized to issue credentials for this asset' });
+      }
+
+      // Use user's DID as issuer if not provided
+      const issuer = issuerDID || user.did;
+
+      if (!issuer) {
+        return res.status(400).json({
+          error: 'Issuer DID not found. User must have a DID.'
+        });
+      }
+
+      // Use asset's current DID as subject
+      const subject = subjectDID || asset.didWebvh || asset.didPeer;
+
+      if (!subject) {
+        return res.status(400).json({
+          error: 'Subject DID not found. Asset must have a DID.'
+        });
+      }
+
+      // Create credential structure (W3C Verifiable Credential format)
+      const credential = {
+        "@context": [
+          "https://www.w3.org/2018/credentials/v1",
+          "https://w3id.org/security/suites/jws-2020/v1"
+        ],
+        type: ["VerifiableCredential", "OwnershipCredential"],
+        issuer: issuer,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: {
+          id: subject,
+          type: "DigitalAsset",
+          name: asset.name,
+          assetId: asset.id,
+          owner: issuer,
+          ownershipClaimed: new Date().toISOString()
+        }
+      };
+
+      // Create proof template (without proofValue which will be added after signing)
+      const proof = {
+        type: "DataIntegrityProof",
+        cryptosuite: "eddsa-jcs-2022",
+        verificationMethod: `${issuer}#assertion-key`,
+        proofPurpose: "assertionMethod",
+        created: new Date().toISOString()
+      };
+
+      res.json({
+        credential,
+        proof,
+        message: "Credential prepared for signing. Sign with assertion key."
+      });
+    } catch (error) {
+      console.error("Error preparing credential:", error);
+      res.status(500).json({
+        error: "Failed to prepare credential",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Assets routes
   app.get("/api/assets", authenticateUser, async (req, res) => {
     try {
@@ -905,7 +1133,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = (req as any).user;
       const assetId = req.params.id;
-      
+      const { signedCredential, signature, publicKey } = req.body; // Accept pre-signed credential from frontend
+
       // Get asset from database
       const asset = await storage.getAsset(assetId);
       
@@ -1042,60 +1271,99 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Issue ownership credential from user's DID to asset's DID
       let ownershipCredential;
-      try {
-        // Get full user data to access their wallets
-        const userData = await storage.getUserByDid(user.did);
-        
-        if (!userData || !userData.assertionWalletId || !userData.assertionKeyPublic) {
-          throw new Error('User missing assertion key for signing');
+
+      // Check if credential was pre-signed by frontend
+      if (signedCredential && signature && publicKey) {
+        try {
+          console.log('🔐 Verifying frontend-signed credential...');
+
+          // Import verification utilities
+          const { verifyCredentialSignature } = await import('./signature-verification');
+
+          // Extract the proof from the signed credential
+          const proof = signedCredential.proof;
+
+          // Verify the signature
+          const isValid = verifyCredentialSignature(
+            { ...signedCredential, proof: undefined },
+            { ...proof, proofValue: undefined },
+            signature,
+            publicKey
+          );
+
+          if (!isValid) {
+            throw new Error('Invalid credential signature');
+          }
+
+          // Use the pre-signed credential
+          ownershipCredential = signedCredential;
+          console.log(`✅ Frontend-signed credential verified for asset ${didWebvh}`);
+        } catch (credError: any) {
+          console.error('Failed to verify frontend-signed credential:', credError);
+          return res.status(400).json({
+            error: 'Invalid credential signature',
+            details: credError.message
+          });
         }
-        
-        // Create ownership credential
-        const credentialSubject = {
-          id: didWebvh, // The asset's DID
-          owner: user.did, // The user's DID
-          assetType: 'OriginalsAsset',
-          title: asset.title,
-          publishedAt: new Date().toISOString(),
-          resources: publishedAsset.resources.map(r => ({
-            id: r.id,
-            hash: r.hash,
-            contentType: r.contentType
-          }))
-        };
-        
-        const unsignedCredential = await originalsSdk.credentials.createResourceCredential(
-          'ResourceCreated',
-          credentialSubject,
-          user.did // Issued by the user
-        );
-        
-        // Import Turnkey signer utilities
-        const { createTurnkeySigner } = await import('./turnkey-signer');
+      } else {
+        // Fallback to server-side signing (for backward compatibility)
+        try {
+          console.log('⚠️ Using server-side signing (deprecated). Please use frontend signing.');
 
-        // Get verification method ID for the user's assertion key
-        const verificationMethodId = `${user.did}#assertion-key`;
+          // Get full user data to access their wallets
+          const userData = await storage.getUserByDid(user.did);
 
-        // Create a signer for the user's assertion key
-        const userSigner = await createTurnkeySigner(
-          user.turnkeySubOrgId,
-          userData.assertionKeyId,
-          turnkeyClient,
-          verificationMethodId,
-          userData.assertionKeyPublic
-        );
-        
-        // Use SDK's external signer support to sign the credential
-        ownershipCredential = await originalsSdk.credentials.signCredentialWithExternalSigner(
-          unsignedCredential,
-          userSigner
-        );
-        
-        console.log(`✅ Ownership credential signed by user ${user.did} for asset ${didWebvh}`);
-      } catch (credError: any) {
-        console.error('Failed to issue ownership credential:', credError);
-        // Don't fail the whole operation, but log the error
-        console.warn('Asset published but ownership credential not issued');
+          if (!userData || !userData.assertionWalletId || !userData.assertionKeyPublic) {
+            throw new Error('User missing assertion key for signing');
+          }
+
+          // Create ownership credential
+          const credentialSubject = {
+            id: didWebvh, // The asset's DID
+            owner: user.did, // The user's DID
+            assetType: 'OriginalsAsset',
+            title: asset.title,
+            publishedAt: new Date().toISOString(),
+            resources: publishedAsset.resources.map(r => ({
+              id: r.id,
+              hash: r.hash,
+              contentType: r.contentType
+            }))
+          };
+
+          const unsignedCredential = await originalsSdk.credentials.createResourceCredential(
+            'ResourceCreated',
+            credentialSubject,
+            user.did // Issued by the user
+          );
+
+          // Import Turnkey signer utilities
+          const { createTurnkeySigner } = await import('./turnkey-signer');
+
+          // Get verification method ID for the user's assertion key
+          const verificationMethodId = `${user.did}#assertion-key`;
+
+          // Create a signer for the user's assertion key
+          const userSigner = await createTurnkeySigner(
+            user.turnkeySubOrgId,
+            userData.assertionKeyId,
+            turnkeyClient,
+            verificationMethodId,
+            userData.assertionKeyPublic
+          );
+
+          // Use SDK's external signer support to sign the credential
+          ownershipCredential = await originalsSdk.credentials.signCredentialWithExternalSigner(
+            unsignedCredential,
+            userSigner
+          );
+
+          console.log(`✅ Ownership credential signed by server for user ${user.did} for asset ${didWebvh}`);
+        } catch (credError: any) {
+          console.error('Failed to issue ownership credential:', credError);
+          // Don't fail the whole operation, but log the error
+          console.warn('Asset published but ownership credential not issued');
+        }
       }
       
       // Publish DID document to make it publicly accessible
