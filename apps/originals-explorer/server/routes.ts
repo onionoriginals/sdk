@@ -152,30 +152,55 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
     // Check if user already exists by Turnkey sub-org ID
     let user = await storage.getUserByTurnkeyId(turnkeySubOrgId);
 
-    // If user doesn't exist, create user record
-    // Note: DID creation is skipped for now because it requires client-side signing
-    // with the user's Turnkey credentials (parent org cannot sign with sub-org keys)
+    // If user doesn't exist, create user record with DID:WebVH
     if (!user) {
       console.log(`Creating user record for ${email}...`);
 
-      // Create user without DID for now
-      // TODO: Implement client-side DID creation flow
-      const placeholderDid = `temp:${turnkeySubOrgId}`;
-      user = await storage.createUserWithDid(turnkeySubOrgId, email, placeholderDid, {
-        did: placeholderDid,
-        didDocument: null,
-        authKeyId: null,
-        assertionKeyId: null,
-        updateKeyId: null,
-        authKeyPublic: null,
-        assertionKeyPublic: null,
-        updateKeyPublic: null,
-        didCreatedAt: new Date(),
-        didSlug: null,
-        didLog: null,
-      });
+      try {
+        // Create DID:WebVH using Turnkey-managed keys
+        const didResult = await createUserDIDWebVH(turnkeySubOrgId, turnkeyClient);
 
-      console.log(`✅ User created with Turnkey sub-org: ${turnkeySubOrgId}`);
+        // Create user with full DID information
+        // Map field names from didResult to storage schema
+        user = await storage.createUserWithDid(turnkeySubOrgId, email, didResult.did, {
+          did: didResult.did,
+          didDocument: didResult.didDocument,
+          authWalletId: didResult.authKeyId, // Account address for auth key
+          assertionWalletId: didResult.assertionKeyId, // Account address for assertion key
+          updateWalletId: didResult.updateKeyId, // Account address for update key
+          authKeyPublic: didResult.authKeyPublic,
+          assertionKeyPublic: didResult.assertionKeyPublic,
+          updateKeyPublic: didResult.updateKeyPublic,
+          didCreatedAt: didResult.didCreatedAt,
+          didSlug: didResult.didSlug,
+          didLog: didResult.didLog,
+        });
+
+        console.log(`✅ User created with DID:WebVH: ${didResult.did}`);
+        console.log(`   Turnkey sub-org: ${turnkeySubOrgId}`);
+        console.log(`   Auth key: ${didResult.authKeyId}`);
+        console.log(`   Assertion key: ${didResult.assertionKeyId}`);
+        console.log(`   Update key: ${didResult.updateKeyId}`);
+      } catch (didError) {
+        console.error('Failed to create DID:WebVH:', didError);
+        // Fall back to placeholder DID if DID creation fails
+        const placeholderDid = `temp:${turnkeySubOrgId}`;
+        user = await storage.createUserWithDid(turnkeySubOrgId, email, placeholderDid, {
+          did: placeholderDid,
+          didDocument: null,
+          authKeyId: null,
+          assertionKeyId: null,
+          updateKeyId: null,
+          authKeyPublic: null,
+          assertionKeyPublic: null,
+          updateKeyPublic: null,
+          didCreatedAt: new Date(),
+          didSlug: null,
+          didLog: null,
+        });
+        console.log(`⚠️ User created with placeholder DID due to error: ${placeholderDid}`);
+        console.error('DID creation error details:', didError);
+      }
     }
 
     // Add user info to request with database ID as primary identifier
