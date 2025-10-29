@@ -11,7 +11,7 @@ import cookieParser from "cookie-parser";
 import { signToken, verifyToken, getAuthCookieConfig, getClearAuthCookieConfig } from "./auth/jwt";
 import { initiateEmailAuth, verifyEmailAuth, cleanupSession } from "./auth/email-auth";
 import { originalsSdk } from "./originals";
-import { createUserDIDWebVH, publishDIDDocument } from "./did-webvh-service";
+import { publishDIDDocument } from "./did-webvh-service";
 import { OriginalsAsset } from "@originals/sdk";
 import multer from "multer";
 import { parse as csvParse } from "csv-parse/sync";
@@ -152,55 +152,29 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
     // Check if user already exists by Turnkey sub-org ID
     let user = await storage.getUserByTurnkeyId(turnkeySubOrgId);
 
-    // If user doesn't exist, create user record with DID:WebVH
+    // If user doesn't exist, create user record without DID
+    // User will create their DID via frontend signing flow
     if (!user) {
       console.log(`Creating user record for ${email}...`);
 
-      try {
-        // Create DID:WebVH using Turnkey-managed keys
-        const didResult = await createUserDIDWebVH(turnkeySubOrgId, turnkeyClient);
+      // Create user without DID - they'll create it via frontend signing
+      user = await storage.createUserWithDid(turnkeySubOrgId, email, null, {
+        did: null,
+        didDocument: null,
+        authKeyId: null,
+        assertionKeyId: null,
+        updateKeyId: null,
+        authKeyPublic: null,
+        assertionKeyPublic: null,
+        updateKeyPublic: null,
+        didCreatedAt: null,
+        didSlug: null,
+        didLog: null,
+      });
 
-        // Create user with full DID information
-        // Map field names from didResult to storage schema
-        user = await storage.createUserWithDid(turnkeySubOrgId, email, didResult.did, {
-          did: didResult.did,
-          didDocument: didResult.didDocument,
-          authWalletId: didResult.authKeyId, // Account address for auth key
-          assertionWalletId: didResult.assertionKeyId, // Account address for assertion key
-          updateWalletId: didResult.updateKeyId, // Account address for update key
-          authKeyPublic: didResult.authKeyPublic,
-          assertionKeyPublic: didResult.assertionKeyPublic,
-          updateKeyPublic: didResult.updateKeyPublic,
-          didCreatedAt: didResult.didCreatedAt,
-          didSlug: didResult.didSlug,
-          didLog: didResult.didLog,
-        });
-
-        console.log(`✅ User created with DID:WebVH: ${didResult.did}`);
-        console.log(`   Turnkey sub-org: ${turnkeySubOrgId}`);
-        console.log(`   Auth key: ${didResult.authKeyId}`);
-        console.log(`   Assertion key: ${didResult.assertionKeyId}`);
-        console.log(`   Update key: ${didResult.updateKeyId}`);
-      } catch (didError) {
-        console.error('Failed to create DID:WebVH:', didError);
-        // Fall back to placeholder DID if DID creation fails
-        const placeholderDid = `temp:${turnkeySubOrgId}`;
-        user = await storage.createUserWithDid(turnkeySubOrgId, email, placeholderDid, {
-          did: placeholderDid,
-          didDocument: null,
-          authKeyId: null,
-          assertionKeyId: null,
-          updateKeyId: null,
-          authKeyPublic: null,
-          assertionKeyPublic: null,
-          updateKeyPublic: null,
-          didCreatedAt: new Date(),
-          didSlug: null,
-          didLog: null,
-        });
-        console.log(`⚠️ User created with placeholder DID due to error: ${placeholderDid}`);
-        console.error('DID creation error details:', didError);
-      }
+      console.log(`✅ User created: ${email}`);
+      console.log(`   Turnkey sub-org: ${turnkeySubOrgId}`);
+      console.log(`   DID will be created via frontend signing flow`);
     }
 
     // Add user info to request with database ID as primary identifier
@@ -326,25 +300,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // Get user's DID:WebVH (automatically created during authentication)
-  app.post("/api/user/ensure-did", authenticateUser, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      
-      // DID is automatically created during authentication, so just return it
-      return res.json({ 
-        did: user.did,
-        created: false // Always false since it's created during auth
-      });
-    } catch (error) {
-      console.error("Error getting user DID:", error);
-      return res.status(500).json({ 
-        error: "Failed to get DID",
-        message: error instanceof Error ? error.message : String(error)
-      });
     }
   });
 
@@ -1269,101 +1224,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Issue ownership credential from user's DID to asset's DID
+      // Require frontend-signed credential
+      if (!signedCredential || !signature || !publicKey) {
+        return res.status(400).json({
+          error: 'Frontend-signed credential required',
+          message: 'This endpoint requires a pre-signed credential from the frontend. Please use Turnkey to sign credentials in the browser.'
+        });
+      }
+
+      // Verify frontend-signed credential
       let ownershipCredential;
+      try {
+        console.log('🔐 Verifying frontend-signed credential...');
 
-      // Check if credential was pre-signed by frontend
-      if (signedCredential && signature && publicKey) {
-        try {
-          console.log('🔐 Verifying frontend-signed credential...');
+        // Import verification utilities
+        const { verifyCredentialSignature } = await import('./signature-verification');
 
-          // Import verification utilities
-          const { verifyCredentialSignature } = await import('./signature-verification');
+        // Extract the proof from the signed credential
+        const proof = signedCredential.proof;
 
-          // Extract the proof from the signed credential
-          const proof = signedCredential.proof;
+        // Verify the signature
+        const isValid = verifyCredentialSignature(
+          { ...signedCredential, proof: undefined },
+          { ...proof, proofValue: undefined },
+          signature,
+          publicKey
+        );
 
-          // Verify the signature
-          const isValid = verifyCredentialSignature(
-            { ...signedCredential, proof: undefined },
-            { ...proof, proofValue: undefined },
-            signature,
-            publicKey
-          );
-
-          if (!isValid) {
-            throw new Error('Invalid credential signature');
-          }
-
-          // Use the pre-signed credential
-          ownershipCredential = signedCredential;
-          console.log(`✅ Frontend-signed credential verified for asset ${didWebvh}`);
-        } catch (credError: any) {
-          console.error('Failed to verify frontend-signed credential:', credError);
-          return res.status(400).json({
-            error: 'Invalid credential signature',
-            details: credError.message
-          });
+        if (!isValid) {
+          throw new Error('Invalid credential signature');
         }
-      } else {
-        // Fallback to server-side signing (for backward compatibility)
-        try {
-          console.log('⚠️ Using server-side signing (deprecated). Please use frontend signing.');
 
-          // Get full user data to access their wallets
-          const userData = await storage.getUserByDid(user.did);
-
-          if (!userData || !userData.assertionWalletId || !userData.assertionKeyPublic) {
-            throw new Error('User missing assertion key for signing');
-          }
-
-          // Create ownership credential
-          const credentialSubject = {
-            id: didWebvh, // The asset's DID
-            owner: user.did, // The user's DID
-            assetType: 'OriginalsAsset',
-            title: asset.title,
-            publishedAt: new Date().toISOString(),
-            resources: publishedAsset.resources.map(r => ({
-              id: r.id,
-              hash: r.hash,
-              contentType: r.contentType
-            }))
-          };
-
-          const unsignedCredential = await originalsSdk.credentials.createResourceCredential(
-            'ResourceCreated',
-            credentialSubject,
-            user.did // Issued by the user
-          );
-
-          // Import Turnkey signer utilities
-          const { createTurnkeySigner } = await import('./turnkey-signer');
-
-          // Get verification method ID for the user's assertion key
-          const verificationMethodId = `${user.did}#assertion-key`;
-
-          // Create a signer for the user's assertion key
-          const userSigner = await createTurnkeySigner(
-            user.turnkeySubOrgId,
-            userData.assertionKeyId,
-            turnkeyClient,
-            verificationMethodId,
-            userData.assertionKeyPublic
-          );
-
-          // Use SDK's external signer support to sign the credential
-          ownershipCredential = await originalsSdk.credentials.signCredentialWithExternalSigner(
-            unsignedCredential,
-            userSigner
-          );
-
-          console.log(`✅ Ownership credential signed by server for user ${user.did} for asset ${didWebvh}`);
-        } catch (credError: any) {
-          console.error('Failed to issue ownership credential:', credError);
-          // Don't fail the whole operation, but log the error
-          console.warn('Asset published but ownership credential not issued');
-        }
+        // Use the pre-signed credential
+        ownershipCredential = signedCredential;
+        console.log(`✅ Frontend-signed credential verified for asset ${didWebvh}`);
+      } catch (credError: any) {
+        console.error('Failed to verify frontend-signed credential:', credError);
+        return res.status(400).json({
+          error: 'Invalid credential signature',
+          details: credError.message
+        });
       }
       
       // Publish DID document to make it publicly accessible
