@@ -1,12 +1,15 @@
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useTurnkeyAuth } from "@/hooks/useTurnkeyAuth";
 import { apiRequest } from "@/lib/queryClient";
 import { CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Mail, Settings, LogOut, Plus, Key, Shield, Copy, ChevronDown, ChevronUp, Download } from "lucide-react";
+import { Mail, Settings, LogOut, Plus, Key, Shield, Copy, ChevronDown, ChevronUp, Download, Loader2 } from "lucide-react";
 import { Link } from "wouter";
 import { useState, useEffect } from "react";
+import { signDIDDocument } from "@/lib/turnkey-signing";
 
 export default function Profile() {
   const { user, isLoading, isAuthenticated, logout } = useAuth();
@@ -17,6 +20,12 @@ export default function Profile() {
   const [showKeys, setShowKeys] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
 
+  // Turnkey authentication state
+  const turnkeyAuth = useTurnkeyAuth();
+  const [otpCode, setOtpCode] = useState("");
+  const [showTurnkeyAuth, setShowTurnkeyAuth] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+
   // Clear DID state when user changes or logs out
   useEffect(() => {
     if (!isAuthenticated || !user) {
@@ -24,45 +33,181 @@ export default function Profile() {
       setDidDocument(null);
       setQrCodeUrl(null);
       setShowKeys(false);
+      setShowTurnkeyAuth(false);
+      setOtpSent(false);
     }
   }, [isAuthenticated, user?.id]);
 
-  // Auto-create DID when user is authenticated
+  // Check if user has DID when authenticated
   useEffect(() => {
     if (isAuthenticated && user && !did && !didLoading) {
-      ensureDid();
+      checkUserDid();
     }
   }, [isAuthenticated, user?.id]);
 
-  const ensureDid = async () => {
+  const checkUserDid = async () => {
     setDidLoading(true);
     try {
-      const res = await apiRequest("POST", "/api/user/ensure-did");
-      const data = await res.json();
-      
-      if (data.did) {
-        setDid(data.did);
-        setDidDocument(data.didDocument);
-        
-        if (data.created) {
-          toast({
-            title: "DID Created",
-            description: "Your decentralized identifier has been created and secured by Turnkey.",
-          });
-        }
+      // Check if user already has a DID
+      if (user?.did) {
+        setDid(user.did);
 
-        // Generate QR code for the DID
-        const qrRes = await apiRequest("POST", "/api/qr-code", {
-          data: data.did,
-        });
-        const qrData = await qrRes.json();
-        setQrCodeUrl(qrData.qrCode);
+        // Try to fetch DID document
+        try {
+          const res = await apiRequest("GET", "/api/did/me");
+          const data = await res.json();
+          if (data.didDocument) {
+            setDidDocument(data.didDocument);
+
+            // Generate QR code
+            const qrRes = await apiRequest("POST", "/api/qr-code", {
+              data: user.did,
+            });
+            const qrData = await qrRes.json();
+            setQrCodeUrl(qrData.qrCode);
+          }
+        } catch (error) {
+          console.error("Error fetching DID document:", error);
+        }
+      } else {
+        // User doesn't have DID - show Turnkey auth UI
+        setShowTurnkeyAuth(true);
       }
-    } catch (e: any) {
-      console.error("Failed to ensure DID:", e);
+    } catch (error) {
+      console.error("Error checking user DID:", error);
+    } finally {
+      setDidLoading(false);
+    }
+  };
+
+  const handleRequestOtp = async () => {
+    if (!user?.email) {
+      toast({
+        title: "Error",
+        description: "User email not found",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const result = await turnkeyAuth.requestOtp(user.email);
+
+    if (result.success) {
+      setOtpSent(true);
+      toast({
+        title: "OTP Sent",
+        description: `Verification code sent to ${user.email}`,
+      });
+    } else {
+      toast({
+        title: "Failed to send OTP",
+        description: result.error || "Please try again",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCreateDid = async () => {
+    if (!otpCode || otpCode.length !== 6) {
+      toast({
+        title: "Invalid OTP",
+        description: "Please enter the 6-digit code from your email",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setDidLoading(true);
+    try {
+      // Step 1: Verify OTP and login
+      const loginResult = await turnkeyAuth.verifyAndLogin(otpCode);
+
+      if (!loginResult.success) {
+        throw new Error(loginResult.error || "Failed to verify OTP");
+      }
+
+      toast({
+        title: "Authenticated",
+        description: "Creating your DID...",
+      });
+
+      // Step 2: Get keys from Turnkey
+      const authKey = turnkeyAuth.getAuthKey();
+      const assertionKey = turnkeyAuth.getAssertionKey();
+      const updateKey = turnkeyAuth.getUpdateKey();
+
+      if (!authKey || !assertionKey || !updateKey) {
+        throw new Error("Failed to discover keys from Turnkey wallet");
+      }
+
+      console.log("Discovered keys:", {
+        auth: authKey.address,
+        assertion: assertionKey.address,
+        update: updateKey.address,
+      });
+
+      // Step 3: Prepare DID document (get unsigned structure from backend)
+      const prepareRes = await apiRequest("POST", "/api/did/prepare-document", {
+        publicKeys: {
+          auth: authKey.address, // Using addresses as public key identifiers
+          assertion: assertionKey.address,
+          update: updateKey.address,
+        },
+      });
+
+      const prepareData = await prepareRes.json();
+      const unsignedDidDocument = prepareData.didDocument;
+
+      console.log("Prepared DID document:", unsignedDidDocument);
+
+      // Step 4: Sign DID document with update key in browser
+      if (!turnkeyAuth.turnkeyClient) {
+        throw new Error("Turnkey client not initialized");
+      }
+
+      const { signature, proofValue } = await signDIDDocument(
+        turnkeyAuth.turnkeyClient,
+        unsignedDidDocument,
+        updateKey
+      );
+
+      console.log("Signed DID document with signature:", signature);
+
+      // Step 5: Send signed DID to backend for verification and storage
+      const acceptRes = await apiRequest("POST", "/api/did/accept-signed", {
+        didDocument: unsignedDidDocument,
+        signature: proofValue,
+        publicKey: updateKey.address,
+      });
+
+      const acceptData = await acceptRes.json();
+
+      if (!acceptData.success) {
+        throw new Error(acceptData.error || "Failed to accept signed DID");
+      }
+
+      // Success!
+      setDid(acceptData.did);
+      setDidDocument(unsignedDidDocument);
+      setShowTurnkeyAuth(false);
+
+      toast({
+        title: "DID Created",
+        description: "Your decentralized identifier has been created and secured by Turnkey.",
+      });
+
+      // Generate QR code
+      const qrRes = await apiRequest("POST", "/api/qr-code", {
+        data: acceptData.did,
+      });
+      const qrData = await qrRes.json();
+      setQrCodeUrl(qrData.qrCode);
+
+    } catch (error: any) {
+      console.error("Failed to create DID:", error);
       toast({
         title: "Failed to create DID",
-        description: e?.message || "Please try again.",
+        description: error?.message || "Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -91,7 +236,7 @@ export default function Profile() {
       a.download = "did-document.json";
       a.click();
       URL.revokeObjectURL(url);
-      
+
       toast({
         title: "Downloaded",
         description: "DID document saved to your device",
@@ -156,7 +301,7 @@ export default function Profile() {
             {didLoading ? (
               <div className="mb-4 p-3 bg-blue-50 rounded-lg">
                 <div className="flex items-center gap-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
                   <span className="text-sm text-blue-900">Creating your DID...</span>
                 </div>
               </div>
@@ -215,9 +360,9 @@ export default function Profile() {
                   {qrCodeUrl && (
                     <div className="mt-3 pt-3 border-t border-blue-200">
                       <div className="text-xs text-gray-600 mb-2">Scan to share your DID</div>
-                      <img 
-                        src={qrCodeUrl} 
-                        alt="DID QR Code" 
+                      <img
+                        src={qrCodeUrl}
+                        alt="DID QR Code"
                         className="w-32 h-32 mx-auto bg-white p-2 rounded"
                         data-testid="profile-did-qr"
                       />
@@ -228,7 +373,7 @@ export default function Profile() {
                   {showKeys && didDocument && (
                     <div className="mt-3 pt-3 border-t border-blue-200 space-y-2">
                       <div className="text-xs font-semibold text-gray-700 mb-2">Verification Methods</div>
-                      
+
                       <div className="bg-white p-2 rounded border border-gray-200">
                         <div className="flex items-center gap-2 mb-1">
                           <Key className="w-3 h-3 text-orange-600" />
@@ -265,6 +410,93 @@ export default function Profile() {
                   )}
                 </div>
               </div>
+            ) : showTurnkeyAuth ? (
+              <div className="mb-4">
+                <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                  <div className="flex items-start gap-3 mb-3">
+                    <Shield className="w-5 h-5 text-yellow-600 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-yellow-900 mb-1">
+                        Create Your Decentralized ID
+                      </div>
+                      <div className="text-xs text-yellow-800 mb-3">
+                        Authenticate with Turnkey to create a secure DID with your own keys
+                      </div>
+
+                      {!otpSent ? (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-xs text-gray-700 mb-1 block">Email</label>
+                            <Input
+                              type="email"
+                              value={user.email}
+                              disabled
+                              className="text-sm h-9"
+                            />
+                          </div>
+                          <Button
+                            onClick={handleRequestOtp}
+                            disabled={turnkeyAuth.isLoading}
+                            className="w-full"
+                            size="sm"
+                          >
+                            {turnkeyAuth.isLoading ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Sending...
+                              </>
+                            ) : (
+                              "Send Verification Code"
+                            )}
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-xs text-gray-700 mb-1 block">
+                              Verification Code (check your email)
+                            </label>
+                            <Input
+                              type="text"
+                              placeholder="000000"
+                              value={otpCode}
+                              onChange={(e) => setOtpCode(e.target.value)}
+                              maxLength={6}
+                              className="text-sm h-9 font-mono"
+                            />
+                          </div>
+                          <Button
+                            onClick={handleCreateDid}
+                            disabled={turnkeyAuth.isLoading || otpCode.length !== 6}
+                            className="w-full"
+                            size="sm"
+                          >
+                            {turnkeyAuth.isLoading ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Creating DID...
+                              </>
+                            ) : (
+                              "Create DID"
+                            )}
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              setOtpSent(false);
+                              setOtpCode("");
+                            }}
+                            variant="ghost"
+                            size="sm"
+                            className="w-full"
+                          >
+                            Resend Code
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             ) : null}
 
             {/* Settings */}
@@ -274,7 +506,7 @@ export default function Profile() {
             </div>
 
             {/* Log out */}
-            <div 
+            <div
               className="flex items-center gap-3 mb-6 p-3 hover:bg-gray-50 rounded-lg transition-colors cursor-pointer"
               onClick={logout}
               data-testid="profile-logout-button"
@@ -295,7 +527,7 @@ export default function Profile() {
                   </span>
                 </div>
               </Link>
-              
+
               <Link href="/create">
                 <div className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg transition-colors cursor-pointer">
                   <Plus className="w-4 h-4 text-gray-500" />
