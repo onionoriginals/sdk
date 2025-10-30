@@ -229,14 +229,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // This enables browser-side Turnkey authentication while maintaining server-side auth
   app.post("/api/auth/exchange-session", async (req, res) => {
     try {
-      const { email, userId, organizationId, sessionToken } = req.body;
+      const { email, userId, sessionToken } = req.body;
 
       if (!email || typeof email !== 'string') {
         return res.status(400).json({ error: "Email is required" });
       }
 
-      if (!organizationId || typeof organizationId !== 'string') {
-        return res.status(400).json({ error: "Organization ID is required" });
+      if (!userId || typeof userId !== 'string') {
+        return res.status(400).json({ error: "User ID is required" });
       }
 
       if (!sessionToken || typeof sessionToken !== 'string') {
@@ -245,7 +245,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Sign JWT token with Turnkey organization ID as the subject (stable identifier)
       // organizationId is the user's Turnkey sub-org ID
-      const token = signToken(organizationId, email);
+      const token = signToken(userId, email);
 
       // Set HTTP-only cookie
       const cookieConfig = getAuthCookieConfig(token);
