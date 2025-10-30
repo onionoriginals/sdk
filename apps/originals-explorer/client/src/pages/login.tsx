@@ -126,7 +126,6 @@ export default function Login() {
       setSession({
         client: turnkeyAuth.turnkeyClient,
         email: turnkeyAuth.email,
-        subOrgId: loginResult.subOrgId,
         sessionToken: loginResult.sessionToken,
         wallets: loginResult.wallets || [],
       });
@@ -135,7 +134,6 @@ export default function Login() {
       const response = await apiRequest('POST', '/api/auth/exchange-session', {
         email: turnkeyAuth.email,
         sessionToken: loginResult.sessionToken,
-        subOrgId: loginResult.subOrgId,
       });
 
       if (response.ok) {

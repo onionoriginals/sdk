@@ -22,7 +22,6 @@ interface TurnkeyAuthState {
   error: string | null;
   turnkeyClient: TurnkeyClient | null;
   email: string | null;
-  subOrgId: string | null;
   sessionToken: string | null;
   wallets: TurnkeyWallet[];
   otpId: string | null;
@@ -36,7 +35,6 @@ export function useTurnkeyAuth() {
     error: null,
     turnkeyClient: null,
     email: null,
-    subOrgId: null,
     sessionToken: null,
     wallets: [],
     otpId: null,
@@ -90,8 +88,8 @@ export function useTurnkeyAuth() {
       // Verify OTP
       const verificationToken = await verifyOtp(state.turnkeyClient, state.otpId, otpCode, state.email);
 
-      // Login with verification token and get sub-org ID
-      const { sessionToken, subOrgId } = await loginWithOtp(state.turnkeyClient, state.email, verificationToken);
+      // Login with verification token
+      const { sessionToken } = await loginWithOtp(state.turnkeyClient, state.email, verificationToken);
 
       // Fetch wallets and keys
       const wallets = await fetchWallets(state.turnkeyClient);
@@ -101,11 +99,10 @@ export function useTurnkeyAuth() {
         isLoading: false,
         isAuthenticated: true,
         sessionToken,
-        subOrgId,
         wallets,
       }));
 
-      return { success: true, sessionToken, subOrgId, wallets };
+      return { success: true, sessionToken, wallets };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to verify OTP';
       setState(prev => ({
