@@ -1,8 +1,6 @@
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { useTurnkeyAuth } from "@/hooks/useTurnkeyAuth";
 import { useTurnkeySession } from "@/contexts/TurnkeySessionContext";
 import { apiRequest } from "@/lib/queryClient";
 import { CardContent } from "@/components/ui/card";
@@ -25,12 +23,6 @@ export default function Profile() {
   // Turnkey session from login
   const turnkeySession = useTurnkeySession();
 
-  // Fallback Turnkey auth for cases where session doesn't exist
-  const turnkeyAuth = useTurnkeyAuth();
-  const [otpCode, setOtpCode] = useState("");
-  const [showTurnkeyAuth, setShowTurnkeyAuth] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
-
   // Enhanced logout that also clears Turnkey session
   const handleLogout = () => {
     turnkeySession.clearSession();
@@ -44,8 +36,6 @@ export default function Profile() {
       setDidDocument(null);
       setQrCodeUrl(null);
       setShowKeys(false);
-      setShowTurnkeyAuth(false);
-      setOtpSent(false);
     }
   }, [isAuthenticated, user?.id]);
 
@@ -82,20 +72,8 @@ export default function Profile() {
         } catch (error) {
           console.error("Error fetching DID document:", error);
         }
-      } else {
-        // User doesn't have real DID - check if we have a Turnkey session from login
-        if (turnkeySession.isAuthenticated && turnkeySession.client && turnkeySession.wallets.length > 0) {
-          // Session exists from login - don't show OTP UI, user can directly create DID
-          console.log("Existing Turnkey session found - ready to create DID");
-          setShowTurnkeyAuth(false); // Don't show OTP UI
-          setOtpSent(true); // Mark as "authenticated" for UI state
-        } else {
-          // No session - need to show OTP UI
-          console.log("No Turnkey session - need OTP authentication");
-          setShowTurnkeyAuth(true);
-          setOtpSent(false);
-        }
       }
+      // User doesn't have DID yet - they can create one using their existing login session
     } catch (error) {
       console.error("Error checking user DID:", error);
     } finally {
@@ -103,41 +81,12 @@ export default function Profile() {
     }
   };
 
-  const handleRequestOtp = async () => {
-    if (!user?.email) {
-      toast({
-        title: "Error",
-        description: "User email not found",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const result = await turnkeyAuth.requestOtp(user.email);
-
-    if (result.success) {
-      setOtpSent(true);
-      toast({
-        title: "OTP Sent",
-        description: `Verification code sent to ${user.email}`,
-      });
-    } else {
-      toast({
-        title: "Failed to send OTP",
-        description: result.error || "Please try again",
-        variant: "destructive",
-      });
-    }
-  };
-
   const handleCreateDid = async () => {
-    // If we have a session from login, use it; otherwise require OTP
-    const hasExistingSession = turnkeySession.isAuthenticated && turnkeySession.client && turnkeySession.wallets.length > 0;
-
-    if (!hasExistingSession && (!otpCode || otpCode.length !== 6)) {
+    // Must have a Turnkey session from login
+    if (!turnkeySession.isAuthenticated || !turnkeySession.client || !turnkeySession.wallets?.length) {
       toast({
-        title: "Invalid OTP",
-        description: "Please enter the 6-digit code from your email",
+        title: "Not Authenticated",
+        description: "Please log in first to create a DID",
         variant: "destructive",
       });
       return;
@@ -145,34 +94,13 @@ export default function Profile() {
 
     setDidLoading(true);
     try {
-      let turnkeyClient, wallets;
+      const turnkeyClient = turnkeySession.client;
+      const wallets = turnkeySession.wallets;
 
-      if (hasExistingSession) {
-        // Use existing session from login
-        console.log("Using existing Turnkey session");
-        turnkeyClient = turnkeySession.client;
-        wallets = turnkeySession.wallets;
-
-        toast({
-          title: "Using Existing Session",
-          description: "Creating your DID...",
-        });
-      } else {
-        // Step 1: Verify OTP and login (fallback)
-        const loginResult = await turnkeyAuth.verifyAndLogin(otpCode);
-
-        if (!loginResult.success) {
-          throw new Error(loginResult.error || "Failed to verify OTP");
-        }
-
-        toast({
-          title: "Authenticated",
-          description: "Creating your DID...",
-        });
-
-        turnkeyClient = turnkeyAuth.turnkeyClient;
-        wallets = turnkeyAuth.wallets;
-      }
+      toast({
+        title: "Creating DID",
+        description: "Using your Turnkey session...",
+      });
 
       // Step 2: Get keys from Turnkey
       const authKey = getKeyByCurve(wallets, 'CURVE_SECP256K1');
@@ -237,7 +165,6 @@ export default function Profile() {
       // Success!
       setDid(acceptData.did);
       setDidDocument(unsignedDidDocument);
-      setShowTurnkeyAuth(false);
 
       toast({
         title: "DID Created",
@@ -458,94 +385,7 @@ export default function Profile() {
                   )}
                 </div>
               </div>
-            ) : showTurnkeyAuth ? (
-              <div className="mb-4">
-                <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                  <div className="flex items-start gap-3 mb-3">
-                    <Shield className="w-5 h-5 text-yellow-600 mt-0.5" />
-                    <div className="flex-1">
-                      <div className="text-sm font-semibold text-yellow-900 mb-1">
-                        Create Your Decentralized ID
-                      </div>
-                      <div className="text-xs text-yellow-800 mb-3">
-                        Authenticate with Turnkey to create a secure DID with your own keys
-                      </div>
-
-                      {!otpSent ? (
-                        <div className="space-y-3">
-                          <div>
-                            <label className="text-xs text-gray-700 mb-1 block">Email</label>
-                            <Input
-                              type="email"
-                              value={user.email}
-                              disabled
-                              className="text-sm h-9"
-                            />
-                          </div>
-                          <Button
-                            onClick={handleRequestOtp}
-                            disabled={turnkeyAuth.isLoading}
-                            className="w-full"
-                            size="sm"
-                          >
-                            {turnkeyAuth.isLoading ? (
-                              <>
-                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                Sending...
-                              </>
-                            ) : (
-                              "Send Verification Code"
-                            )}
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          <div>
-                            <label className="text-xs text-gray-700 mb-1 block">
-                              Verification Code (check your email)
-                            </label>
-                            <Input
-                              type="text"
-                              placeholder="000000"
-                              value={otpCode}
-                              onChange={(e) => setOtpCode(e.target.value)}
-                              maxLength={6}
-                              className="text-sm h-9 font-mono"
-                            />
-                          </div>
-                          <Button
-                            onClick={handleCreateDid}
-                            disabled={turnkeyAuth.isLoading || otpCode.length !== 6}
-                            className="w-full"
-                            size="sm"
-                          >
-                            {turnkeyAuth.isLoading ? (
-                              <>
-                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                Creating DID...
-                              </>
-                            ) : (
-                              "Create DID"
-                            )}
-                          </Button>
-                          <Button
-                            onClick={() => {
-                              setOtpSent(false);
-                              setOtpCode("");
-                            }}
-                            variant="ghost"
-                            size="sm"
-                            className="w-full"
-                          >
-                            Resend Code
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
+            ) : turnkeySession.isAuthenticated ? (
               // User has existing Turnkey session from login - show simple "Create DID" button
               <div className="mb-4">
                 <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
@@ -577,6 +417,32 @@ export default function Profile() {
                           </>
                         )}
                       </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              // User is not authenticated with Turnkey - ask them to log in
+              <div className="mb-4">
+                <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                  <div className="flex items-start gap-3">
+                    <Shield className="w-5 h-5 text-yellow-600 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-yellow-900 mb-1">
+                        Turnkey Session Required
+                      </div>
+                      <div className="text-xs text-yellow-800 mb-3">
+                        Please log in again to create your DID. Your session may have expired.
+                      </div>
+                      <Link href="/login?returnTo=/profile">
+                        <Button
+                          className="w-full"
+                          size="sm"
+                          variant="default"
+                        >
+                          Log In
+                        </Button>
+                      </Link>
                     </div>
                   </div>
                 </div>

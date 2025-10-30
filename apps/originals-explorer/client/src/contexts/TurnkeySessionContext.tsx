@@ -6,6 +6,7 @@
 
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { TurnkeyClient } from '@turnkey/core';
+import { initializeTurnkeyClient } from '@/lib/turnkey-client';
 import type { TurnkeyWallet } from '@/lib/turnkey-client';
 
 interface TurnkeySessionState {
@@ -36,13 +37,20 @@ export function TurnkeySessionProvider({ children }: { children: ReactNode }) {
         const stored = sessionStorage.getItem(SESSION_STORAGE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
-          // We can't serialize the TurnkeyClient instance, so we'll need to reinitialize it
+          // Reinitialize the TurnkeyClient with stored session
+          let client: TurnkeyClient | null = null;
+          if (parsed.sessionToken) {
+            client = initializeTurnkeyClient();
+            // The client will use the session token automatically after init
+            client.init().catch(err => console.error('Failed to init Turnkey client:', err));
+          }
+
           return {
-            client: null, // Will be reinitialized
+            client,
             email: parsed.email || null,
             sessionToken: parsed.sessionToken || null,
             wallets: parsed.wallets || [],
-            isAuthenticated: !!parsed.sessionToken,
+            isAuthenticated: !!parsed.sessionToken && !!(parsed.wallets?.length),
           };
         }
       } catch (error) {
@@ -77,7 +85,8 @@ export function TurnkeySessionProvider({ children }: { children: ReactNode }) {
     setSessionState(prev => ({
       ...prev,
       ...newSession,
-      isAuthenticated: !!(newSession.sessionToken ?? prev.sessionToken),
+      isAuthenticated: !!(newSession.sessionToken ?? prev.sessionToken) &&
+                      !!((newSession.wallets ?? prev.wallets)?.length),
     }));
   }, []);
 
