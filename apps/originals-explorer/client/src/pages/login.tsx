@@ -247,7 +247,7 @@ export default function Login() {
                   type="text"
                   placeholder="000000"
                   value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onChange={(e) => setCode(e.target.value.slice(0, 6))}
                   disabled={isSubmitting}
                   className="w-full text-center text-2xl tracking-widest font-mono"
                   autoComplete="one-time-code"
