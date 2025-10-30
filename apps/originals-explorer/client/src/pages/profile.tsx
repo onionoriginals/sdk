@@ -48,8 +48,10 @@ export default function Profile() {
   const checkUserDid = async () => {
     setDidLoading(true);
     try {
-      // Check if user already has a DID
-      if (user?.did) {
+      // Check if user has a real DID (not a temporary placeholder)
+      const hasRealDid = user?.did && !user.did.startsWith('temp:');
+
+      if (hasRealDid) {
         setDid(user.did);
 
         // Try to fetch DID document
@@ -70,7 +72,7 @@ export default function Profile() {
           console.error("Error fetching DID document:", error);
         }
       } else {
-        // User doesn't have DID - show Turnkey auth UI
+        // User doesn't have real DID (either null or temporary) - show Turnkey auth UI
         setShowTurnkeyAuth(true);
       }
     } catch (error) {

@@ -152,14 +152,18 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
     // Check if user already exists by Turnkey sub-org ID
     let user = await storage.getUserByTurnkeyId(turnkeySubOrgId);
 
-    // If user doesn't exist, create user record without DID
-    // User will create their DID via frontend signing flow
+    // If user doesn't exist, create user record with temporary DID
+    // User will create their actual DID via frontend signing flow
     if (!user) {
       console.log(`Creating user record for ${email}...`);
 
-      // Create user without DID - they'll create it via frontend signing
-      user = await storage.createUserWithDid(turnkeySubOrgId, email, null, {
-        did: null,
+      // Use temporary DID as placeholder until user creates real DID via frontend
+      // This ensures each user has a unique identifier in storage
+      const temporaryDid = `temp:turnkey:${turnkeySubOrgId}`;
+
+      // Create user with temporary DID - they'll replace it via frontend signing
+      user = await storage.createUserWithDid(turnkeySubOrgId, email, temporaryDid, {
+        did: temporaryDid,
         didDocument: null,
         authKeyId: null,
         assertionKeyId: null,
@@ -174,7 +178,8 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
 
       console.log(`✅ User created: ${email}`);
       console.log(`   Turnkey sub-org: ${turnkeySubOrgId}`);
-      console.log(`   DID will be created via frontend signing flow`);
+      console.log(`   Temporary DID: ${temporaryDid}`);
+      console.log(`   Real DID will be created via frontend signing flow`);
     }
 
     // Add user info to request with database ID as primary identifier
@@ -488,13 +493,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const didLog = JSON.stringify(logEntry);
 
-      // Store DID document and log
-      await storage.updateUser(user.id, {
-        did: didDocument.id,
-        didDocument: didDocument,
-        didLog: didLog,
-        didCreatedAt: new Date(),
-      });
+      // Get the current user to check if they have a temporary DID
+      const currentUser = await storage.getUserByTurnkeyId(user.turnkeySubOrgId);
+
+      if (!currentUser) {
+        return res.status(404).json({
+          error: "User not found"
+        });
+      }
+
+      // Check if user has a temporary DID that needs to be replaced
+      const hasTemporaryDid = currentUser.did && currentUser.did.startsWith('temp:');
+
+      if (hasTemporaryDid) {
+        // User has temporary DID - need to create new user entry with real DID
+        // and delete the old temporary entry
+        console.log(`Migrating user from temporary DID ${currentUser.did} to real DID ${didDocument.id}`);
+
+        // Create new user entry with real DID using the same pattern as createUserWithDid
+        await storage.createUserWithDid(user.turnkeySubOrgId, currentUser.email!, didDocument.id, {
+          did: didDocument.id,
+          didDocument: didDocument,
+          didLog: didLog,
+          didSlug: null, // Will be set if needed
+          authKeyId: currentUser.authWalletId,
+          assertionKeyId: currentUser.assertionWalletId,
+          updateKeyId: currentUser.updateWalletId,
+          authKeyPublic: currentUser.authKeyPublic,
+          assertionKeyPublic: currentUser.assertionKeyPublic,
+          updateKeyPublic: currentUser.updateKeyPublic,
+          didCreatedAt: new Date(),
+        });
+
+        console.log(`✅ Successfully migrated user to real DID: ${didDocument.id}`);
+      } else {
+        // User already has a real DID, just update it
+        await storage.updateUser(currentUser.id, {
+          did: didDocument.id,
+          didDocument: didDocument,
+          didLog: didLog,
+          didCreatedAt: new Date(),
+        });
+      }
 
       // Publish to storage (GCS or local)
       try {
