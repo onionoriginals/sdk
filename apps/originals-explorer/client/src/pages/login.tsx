@@ -133,6 +133,8 @@ export default function Login() {
       // Step 3: Exchange Turnkey session for JWT cookie
       const response = await apiRequest('POST', '/api/auth/exchange-session', {
         email: turnkeyAuth.email,
+        userId: loginResult.userId,
+        organizationId: loginResult.organizationId,
         sessionToken: loginResult.sessionToken,
       });
 

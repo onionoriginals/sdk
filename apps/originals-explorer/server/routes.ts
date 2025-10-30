@@ -99,10 +99,11 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
 
     // Verify JWT token
     const payload = verifyToken(token);
-    const email = payload.sub; // Email is now the stable identifier (JWT subject)
+    const turnkeySubOrgId = payload.sub; // Turnkey organization ID (sub-org ID) - stable identifier
+    const email = payload.email; // Email metadata
 
-    // Check if user already exists by email (using Turnkey ID lookup which now stores email)
-    let user = await storage.getUserByTurnkeyId(email);
+    // Check if user already exists by Turnkey sub-org ID
+    let user = await storage.getUserByTurnkeyId(turnkeySubOrgId);
 
     // If user doesn't exist, create user record with temporary DID
     // User will create their actual DID via frontend signing flow
@@ -111,11 +112,10 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
 
       // Use temporary DID as placeholder until user creates real DID via frontend
       // This ensures each user has a unique identifier in storage
-      const temporaryDid = `temp:${email}`;
+      const temporaryDid = `temp:turnkey:${turnkeySubOrgId}`;
 
       // Create user with temporary DID - they'll replace it via frontend signing
-      // Note: identifierId parameter now receives email instead of Turnkey sub-org ID
-      user = await storage.createUserWithDid(email, email, temporaryDid, {
+      user = await storage.createUserWithDid(turnkeySubOrgId, email, temporaryDid, {
         did: temporaryDid,
         didDocument: null,
         authKeyId: null,
@@ -130,7 +130,7 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
       });
 
       console.log(`✅ User created: ${email}`);
-      console.log(`   Identifier: ${email}`);
+      console.log(`   Turnkey sub-org ID: ${turnkeySubOrgId}`);
       console.log(`   Temporary DID: ${temporaryDid}`);
       console.log(`   Real DID will be created via frontend signing flow`);
     }
@@ -138,8 +138,8 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
     // Add user info to request with database ID as primary identifier
     (req as any).user = {
       id: user.id, // Primary identifier is the database UUID (for foreign keys)
-      turnkeySubOrgId: email, // Email used as identifier (field name is legacy)
-      email, // Email
+      turnkeySubOrgId, // Turnkey sub-org ID for key operations
+      email, // Email metadata
       did: user.did, // DID for display/lookup
     };
 
@@ -229,19 +229,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // This enables browser-side Turnkey authentication while maintaining server-side auth
   app.post("/api/auth/exchange-session", async (req, res) => {
     try {
-      const { email, sessionToken } = req.body;
+      const { email, userId, organizationId, sessionToken } = req.body;
 
       if (!email || typeof email !== 'string') {
         return res.status(400).json({ error: "Email is required" });
+      }
+
+      if (!organizationId || typeof organizationId !== 'string') {
+        return res.status(400).json({ error: "Organization ID is required" });
       }
 
       if (!sessionToken || typeof sessionToken !== 'string') {
         return res.status(400).json({ error: "Session token is required" });
       }
 
-      // Sign JWT token with email as the subject (stable identifier)
-      // Note: subject and email are the same for simplicity
-      const token = signToken(email, email);
+      // Sign JWT token with Turnkey organization ID as the subject (stable identifier)
+      // organizationId is the user's Turnkey sub-org ID
+      const token = signToken(organizationId, email);
 
       // Set HTTP-only cookie
       const cookieConfig = getAuthCookieConfig(token);
