@@ -102,7 +102,7 @@ export async function loginWithOtp(
   turnkeyClient: TurnkeyClient,
   email: string,
   verificationToken: string
-): Promise<{ sessionToken: string; subOrgId: string }> {
+): Promise<{ sessionToken: string; userId: string; organizationId: string }> {
   try {
     // Login with the verification token
     const loginResponse = await turnkeyClient.loginWithOtp({
@@ -113,8 +113,10 @@ export async function loginWithOtp(
       throw new Error('No session token returned from login');
     }
 
-    // Fetch user info to get sub-org ID
+    // Fetch user info to get stable identifiers
     const userInfo = await turnkeyClient.fetchUser();
+
+    console.log('Turnkey user info:', userInfo);
 
     if (!userInfo?.organizationId) {
       throw new Error('No organization ID returned from Turnkey');
@@ -122,7 +124,8 @@ export async function loginWithOtp(
 
     return {
       sessionToken: loginResponse.sessionToken,
-      subOrgId: userInfo.organizationId,
+      userId: userInfo.userId || userInfo.organizationId, // Fallback to orgId if userId not present
+      organizationId: userInfo.organizationId,
     };
   } catch (error) {
     console.error('Error logging in with OTP:', error);

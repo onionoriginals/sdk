@@ -99,7 +99,7 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
 
     // Verify JWT token
     const payload = verifyToken(token);
-    const turnkeySubOrgId = payload.sub; // Turnkey sub-org ID (stable identifier)
+    const turnkeySubOrgId = payload.sub; // Turnkey organization ID (sub-org ID) - stable identifier
     const email = payload.email; // Email metadata
 
     // Check if user already exists by Turnkey sub-org ID
@@ -130,7 +130,7 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
       });
 
       console.log(`✅ User created: ${email}`);
-      console.log(`   Turnkey sub-org: ${turnkeySubOrgId}`);
+      console.log(`   Turnkey sub-org ID: ${turnkeySubOrgId}`);
       console.log(`   Temporary DID: ${temporaryDid}`);
       console.log(`   Real DID will be created via frontend signing flow`);
     }
@@ -229,22 +229,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // This enables browser-side Turnkey authentication while maintaining server-side auth
   app.post("/api/auth/exchange-session", async (req, res) => {
     try {
-      const { email, sessionToken, subOrgId } = req.body;
+      const { email, userId, organizationId, sessionToken } = req.body;
 
       if (!email || typeof email !== 'string') {
         return res.status(400).json({ error: "Email is required" });
+      }
+
+      if (!organizationId || typeof organizationId !== 'string') {
+        return res.status(400).json({ error: "Organization ID is required" });
       }
 
       if (!sessionToken || typeof sessionToken !== 'string') {
         return res.status(400).json({ error: "Session token is required" });
       }
 
-      if (!subOrgId || typeof subOrgId !== 'string') {
-        return res.status(400).json({ error: "Sub-organization ID is required" });
-      }
-
-      // Sign JWT token with sub-org ID from Turnkey
-      const token = signToken(subOrgId, email);
+      // Sign JWT token with Turnkey organization ID as the subject (stable identifier)
+      // organizationId is the user's Turnkey sub-org ID
+      const token = signToken(organizationId, email);
 
       // Set HTTP-only cookie
       const cookieConfig = getAuthCookieConfig(token);
