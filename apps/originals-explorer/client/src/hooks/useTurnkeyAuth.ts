@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { Turnkey } from '@turnkey/sdk-browser';
+import { Turnkey } from '@turnkey/core';
 import {
   initializeTurnkeyClient,
   initOtp,

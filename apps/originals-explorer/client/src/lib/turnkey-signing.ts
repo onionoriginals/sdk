@@ -3,7 +3,7 @@
  * Handles signing operations for DID documents and credentials
  */
 
-import { Turnkey } from '@turnkey/sdk-browser';
+import { Turnkey } from '@turnkey/core';
 import type { TurnkeyWalletAccount } from './turnkey-client';
 
 /**

@@ -3,7 +3,7 @@
  * Handles Turnkey client initialization and authentication flow
  */
 
-import { Turnkey } from '@turnkey/sdk-browser';
+import { Turnkey } from '@turnkey/core';
 
 export interface TurnkeyWalletAccount {
   accountId: string;
