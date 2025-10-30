@@ -85,53 +85,6 @@ const turnkeyClient = new Turnkey({
 });
 
 /**
- * Create or retrieve a Turnkey sub-organization for a user
- * Each user gets their own sub-org for key isolation
- */
-async function ensureTurnkeySubOrg(email: string): Promise<string> {
-  try {
-    // Generate a unique name for the sub-org
-    const subOrgName = `user-${email.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
-
-    // Check if sub-org already exists
-    const subOrgs = await turnkeyClient.apiClient().getSubOrganizations({
-      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
-    });
-
-    const existing = subOrgs.subOrganizations?.find(
-      (org: any) => org.subOrganizationName === subOrgName
-    );
-
-    if (existing && existing.subOrganizationId) {
-      return existing.subOrganizationId;
-    }
-
-    // Create new sub-organization
-    const result = await turnkeyClient.apiClient().createSubOrganization({
-      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
-      subOrganizationName: subOrgName,
-      rootUsers: [{
-        userName: email,
-        userEmail: email,
-        apiKeys: [],
-        authenticators: [],
-        oauthProviders: [],
-      }],
-      rootQuorumThreshold: 1,
-    });
-
-    if (!result.subOrganizationId) {
-      throw new Error('Failed to create sub-organization');
-    }
-
-    return result.subOrganizationId;
-  } catch (error) {
-    console.error('Error creating Turnkey sub-organization:', error);
-    throw new Error(`Failed to create Turnkey sub-organization: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-/**
  * Authentication middleware using JWT from HTTP-only cookies
  * CRITICAL PR #102: Uses cookies (not localStorage) for security
  */
@@ -276,7 +229,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // This enables browser-side Turnkey authentication while maintaining server-side auth
   app.post("/api/auth/exchange-session", async (req, res) => {
     try {
-      const { email, sessionToken } = req.body;
+      const { email, sessionToken, subOrgId } = req.body;
 
       if (!email || typeof email !== 'string') {
         return res.status(400).json({ error: "Email is required" });
@@ -286,10 +239,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Session token is required" });
       }
 
-      // Get or create Turnkey sub-organization for this user
-      const subOrgId = await ensureTurnkeySubOrg(email);
+      if (!subOrgId || typeof subOrgId !== 'string') {
+        return res.status(400).json({ error: "Sub-organization ID is required" });
+      }
 
-      // Sign JWT token with sub-org ID
+      // Sign JWT token with sub-org ID from Turnkey
       const token = signToken(subOrgId, email);
 
       // Set HTTP-only cookie
