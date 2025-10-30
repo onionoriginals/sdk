@@ -29,7 +29,7 @@ export async function signWithTurnkey(
       walletAccount: walletAccount as WalletAccount,
       message: hexPayload,
       encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
-      hashFunction: 'HASH_FUNCTION_NO_OP', // Payload is already hashed by SDK
+      hashFunction: 'HASH_FUNCTION_NOT_APPLICABLE', // Payload is already hashed by SDK
     });
 
     if (!response.r || !response.s) {
