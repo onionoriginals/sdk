@@ -11,6 +11,7 @@ import type { TurnkeyWallet } from '@/lib/turnkey-client';
 interface TurnkeySessionState {
   client: TurnkeyClient | null;
   email: string | null;
+  subOrgId: string | null;
   sessionToken: string | null;
   wallets: TurnkeyWallet[];
   isAuthenticated: boolean;
@@ -40,6 +41,7 @@ export function TurnkeySessionProvider({ children }: { children: ReactNode }) {
           return {
             client: null, // Will be reinitialized
             email: parsed.email || null,
+            subOrgId: parsed.subOrgId || null,
             sessionToken: parsed.sessionToken || null,
             wallets: parsed.wallets || [],
             isAuthenticated: !!parsed.sessionToken,
@@ -52,6 +54,7 @@ export function TurnkeySessionProvider({ children }: { children: ReactNode }) {
     return {
       client: null,
       email: null,
+      subOrgId: null,
       sessionToken: null,
       wallets: [],
       isAuthenticated: false,
@@ -64,6 +67,7 @@ export function TurnkeySessionProvider({ children }: { children: ReactNode }) {
       if (session.sessionToken) {
         sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
           email: session.email,
+          subOrgId: session.subOrgId,
           sessionToken: session.sessionToken,
           wallets: session.wallets,
         }));
@@ -71,7 +75,7 @@ export function TurnkeySessionProvider({ children }: { children: ReactNode }) {
         sessionStorage.removeItem(SESSION_STORAGE_KEY);
       }
     }
-  }, [session.email, session.sessionToken, session.wallets]);
+  }, [session.email, session.subOrgId, session.sessionToken, session.wallets]);
 
   const setSession = useCallback((newSession: Partial<TurnkeySessionState>) => {
     setSessionState(prev => ({
@@ -85,6 +89,7 @@ export function TurnkeySessionProvider({ children }: { children: ReactNode }) {
     setSessionState({
       client: null,
       email: null,
+      subOrgId: null,
       sessionToken: null,
       wallets: [],
       isAuthenticated: false,
