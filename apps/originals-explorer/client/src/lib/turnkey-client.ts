@@ -3,7 +3,7 @@
  * Handles Turnkey client initialization and authentication flow
  */
 
-import { Turnkey } from '@turnkey/core';
+import { OtpType, TurnkeyClient, WalletAccount } from '@turnkey/core';
 
 export interface TurnkeyWalletAccount {
   accountId: string;
@@ -22,23 +22,24 @@ export interface TurnkeyWallet {
 export interface TurnkeyAuthState {
   email: string;
   subOrgId: string;
-  client: Turnkey;
+  client: TurnkeyClient;
   wallets: TurnkeyWallet[];
 }
 
 /**
  * Initialize Turnkey client with auth proxy configuration
  */
-export function initializeTurnkeyClient(): Turnkey {
+export function initializeTurnkeyClient(): TurnkeyClient {
   const authProxyConfigId = import.meta.env.VITE_TURNKEY_AUTH_PROXY_CONFIG_ID;
+  const organizationId = import.meta.env.VITE_TURNKEY_ORGANIZATION_ID;
 
   if (!authProxyConfigId) {
     throw new Error('VITE_TURNKEY_AUTH_PROXY_CONFIG_ID environment variable not set');
   }
 
-  return new Turnkey({
+  return new TurnkeyClient({
     authProxyConfigId,
-    defaultOrganizationId: '', // Will be set after login
+    organizationId,
   });
 }
 
@@ -46,25 +47,20 @@ export function initializeTurnkeyClient(): Turnkey {
  * Send OTP code to email
  */
 export async function initOtp(
-  turnkeyClient: Turnkey,
+  turnkeyClient: TurnkeyClient,
   email: string
 ): Promise<string> {
   try {
-    const response = await turnkeyClient.passkeyClient().initOtp({
-      otpType: 'OTP_TYPE_EMAIL',
-      contact: email,
-      emailCustomization: {
-        appName: 'Originals Explorer',
-      },
-      otpLength: 6,
-      alphanumeric: false,
+    const response = await turnkeyClient.initOtp({
+      otpType: OtpType.Email,
+      contact: email
     });
 
-    if (!response.otpId) {
+    if (!response || typeof response !== 'string') {
       throw new Error('No OTP ID returned from Turnkey');
     }
 
-    return response.otpId;
+    return response;
   } catch (error) {
     console.error('Error initializing OTP:', error);
     throw new Error(`Failed to send OTP: ${error instanceof Error ? error.message : String(error)}`);
@@ -75,15 +71,17 @@ export async function initOtp(
  * Verify OTP code
  */
 export async function verifyOtp(
-  turnkeyClient: Turnkey,
+  turnkeyClient: TurnkeyClient,
   otpId: string,
-  otpCode: string
+  otpCode: string,
+  email: string
 ): Promise<string> {
   try {
-    const response = await turnkeyClient.passkeyClient().verifyOtp({
+    const response = await turnkeyClient.verifyOtp({
       otpId,
       otpCode,
-      expirationSeconds: '900', // 15 minutes
+      contact: email,
+      otpType: OtpType.Email,
     });
 
     if (!response.verificationToken) {
@@ -101,25 +99,22 @@ export async function verifyOtp(
  * Complete login with verified OTP
  */
 export async function loginWithOtp(
-  turnkeyClient: Turnkey,
+  turnkeyClient: TurnkeyClient,
   email: string,
   verificationToken: string
-): Promise<{ subOrgId: string }> {
+): Promise<{ sessionToken: string }> {
   try {
     // Login with the verification token
-    const loginResponse = await turnkeyClient.passkeyClient().loginWithVerificationToken({
+    const loginResponse = await turnkeyClient.loginWithOtp({
       verificationToken,
     });
 
-    if (!loginResponse.organizationId) {
-      throw new Error('No organization ID returned from login');
+    if (!loginResponse.sessionToken) {
+      throw new Error('No session token returned from login');
     }
 
-    // Set the default organization ID for future requests
-    turnkeyClient.config.defaultOrganizationId = loginResponse.organizationId;
-
     return {
-      subOrgId: loginResponse.organizationId,
+      sessionToken: loginResponse.sessionToken,
     };
   } catch (error) {
     console.error('Error logging in with OTP:', error);
@@ -131,12 +126,10 @@ export async function loginWithOtp(
  * Fetch user information
  */
 export async function fetchUser(
-  turnkeyClient: Turnkey
+  turnkeyClient: TurnkeyClient
 ): Promise<any> {
   try {
-    const response = await turnkeyClient.apiClient().getWhoami({
-      organizationId: turnkeyClient.config.defaultOrganizationId!,
-    });
+    const response = await turnkeyClient.fetchUser();
 
     return response;
   } catch (error) {
@@ -149,33 +142,28 @@ export async function fetchUser(
  * Fetch user's wallets
  */
 export async function fetchWallets(
-  turnkeyClient: Turnkey
+  turnkeyClient: TurnkeyClient
 ): Promise<TurnkeyWallet[]> {
   try {
-    const response = await turnkeyClient.apiClient().getWallets({
-      organizationId: turnkeyClient.config.defaultOrganizationId!,
-    });
+    const response = await turnkeyClient.fetchWallets();
 
     const wallets: TurnkeyWallet[] = [];
 
-    for (const wallet of response.wallets || []) {
-      const accountsResponse = await turnkeyClient.apiClient().getWalletAccounts({
-        organizationId: turnkeyClient.config.defaultOrganizationId!,
-        walletId: wallet.walletId,
+    for (const wallet of response || []) {
+      const accountsResponse = await turnkeyClient.fetchWalletAccounts({
+        wallet: wallet,
       });
-
-      const accounts: TurnkeyWalletAccount[] = (accountsResponse.accounts || []).map(account => ({
-        accountId: account.accountId,
-        address: account.address,
-        curve: account.curve,
-        path: account.path,
-        addressFormat: account.addressFormat,
-      }));
 
       wallets.push({
         walletId: wallet.walletId,
         walletName: wallet.walletName,
-        accounts,
+        accounts: accountsResponse.map((account: WalletAccount) => ({
+          accountId: account.walletAccountId,
+          address: account.address,
+          curve: account.curve,
+          path: account.path,
+          addressFormat: account.addressFormat,
+        })),
       });
     }
 

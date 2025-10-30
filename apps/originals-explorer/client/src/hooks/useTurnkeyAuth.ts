@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { Turnkey } from '@turnkey/core';
+import { TurnkeyClient } from '@turnkey/core';
 import {
   initializeTurnkeyClient,
   initOtp,
@@ -20,7 +20,7 @@ interface TurnkeyAuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
-  turnkeyClient: Turnkey | null;
+  turnkeyClient: TurnkeyClient | null;
   email: string | null;
   subOrgId: string | null;
   wallets: TurnkeyWallet[];
@@ -49,6 +49,7 @@ export function useTurnkeyAuth() {
 
     try {
       const client = initializeTurnkeyClient();
+      await client.init();
       const otpId = await initOtp(client, email);
 
       setState(prev => ({
@@ -85,10 +86,10 @@ export function useTurnkeyAuth() {
 
     try {
       // Verify OTP
-      const verificationToken = await verifyOtp(state.turnkeyClient, state.otpId, otpCode);
+      const verificationToken = await verifyOtp(state.turnkeyClient, state.otpId, otpCode, state.email);
 
       // Login with verification token
-      const { subOrgId } = await loginWithOtp(state.turnkeyClient, state.email, verificationToken);
+      const { sessionToken } = await loginWithOtp(state.turnkeyClient, state.email, verificationToken);
 
       // Fetch wallets and keys
       const wallets = await fetchWallets(state.turnkeyClient);
@@ -97,12 +98,11 @@ export function useTurnkeyAuth() {
         ...prev,
         isLoading: false,
         isAuthenticated: true,
-        subOrgId,
+        sessionToken,
         wallets,
-        verificationToken,
       }));
 
-      return { success: true, subOrgId, wallets };
+      return { success: true, sessionToken, wallets };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to verify OTP';
       setState(prev => ({
