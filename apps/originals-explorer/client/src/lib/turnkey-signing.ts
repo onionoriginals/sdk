@@ -34,9 +34,9 @@ export async function signWithTurnkey(
       throw new Error('Invalid signature response from Turnkey');
     }
 
-    // Combine r and s into a single signature
-    // For ECDSA signatures, we typically need both r and s components
-    const signature = response.r + response.s.slice(2); // Remove '0x' from s before concatenating
+    // Combine r and s into a single signature using proper formatting
+    // formatSignature handles '0x' prefix normalization consistently
+    const signature = formatSignature(response.r, response.s, response.v);
 
     return signature;
   } catch (error) {
