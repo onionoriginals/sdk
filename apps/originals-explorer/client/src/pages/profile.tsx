@@ -85,13 +85,15 @@ export default function Profile() {
       } else {
         // User doesn't have real DID - check if we have a Turnkey session from login
         if (turnkeySession.isAuthenticated && turnkeySession.client && turnkeySession.wallets.length > 0) {
-          // Session exists from login - can proceed directly to DID creation
-          console.log("Using existing Turnkey session from login");
-          setShowTurnkeyAuth(true);
-          setOtpSent(true); // Skip OTP step since we have session
+          // Session exists from login - don't show OTP UI, user can directly create DID
+          console.log("Existing Turnkey session found - ready to create DID");
+          setShowTurnkeyAuth(false); // Don't show OTP UI
+          setOtpSent(true); // Mark as "authenticated" for UI state
         } else {
-          // No session - need to request OTP
+          // No session - need to show OTP UI
+          console.log("No Turnkey session - need OTP authentication");
           setShowTurnkeyAuth(true);
+          setOtpSent(false);
         }
       }
     } catch (error) {
@@ -543,7 +545,43 @@ export default function Profile() {
                   </div>
                 </div>
               </div>
-            ) : null}
+            ) : (
+              // User has existing Turnkey session from login - show simple "Create DID" button
+              <div className="mb-4">
+                <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-start gap-3 mb-3">
+                    <Shield className="w-5 h-5 text-blue-600 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-blue-900 mb-1">
+                        Ready to Create Your Decentralized ID
+                      </div>
+                      <div className="text-xs text-blue-800 mb-3">
+                        Your Turnkey session is active. Click below to create your DID with your own keys.
+                      </div>
+                      <Button
+                        onClick={handleCreateDid}
+                        disabled={didLoading}
+                        className="w-full"
+                        size="sm"
+                        data-testid="profile-create-did-button"
+                      >
+                        {didLoading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Creating DID...
+                          </>
+                        ) : (
+                          <>
+                            <Shield className="w-4 h-4 mr-2" />
+                            Create My DID
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Settings */}
             <div className="flex items-center gap-3 mb-4 p-3 hover:bg-gray-50 rounded-lg transition-colors cursor-pointer">
