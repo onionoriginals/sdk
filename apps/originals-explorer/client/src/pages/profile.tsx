@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useTurnkeyAuth } from "@/hooks/useTurnkeyAuth";
+import { useTurnkeySession } from "@/contexts/TurnkeySessionContext";
 import { apiRequest } from "@/lib/queryClient";
 import { CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -10,6 +11,7 @@ import { Mail, Settings, LogOut, Plus, Key, Shield, Copy, ChevronDown, ChevronUp
 import { Link } from "wouter";
 import { useState, useEffect } from "react";
 import { signDIDDocument } from "@/lib/turnkey-signing";
+import { getKeyByCurve } from "@/lib/turnkey-client";
 
 export default function Profile() {
   const { user, isLoading, isAuthenticated, logout } = useAuth();
@@ -20,11 +22,20 @@ export default function Profile() {
   const [showKeys, setShowKeys] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
 
-  // Turnkey authentication state
+  // Turnkey session from login
+  const turnkeySession = useTurnkeySession();
+
+  // Fallback Turnkey auth for cases where session doesn't exist
   const turnkeyAuth = useTurnkeyAuth();
   const [otpCode, setOtpCode] = useState("");
   const [showTurnkeyAuth, setShowTurnkeyAuth] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
+
+  // Enhanced logout that also clears Turnkey session
+  const handleLogout = () => {
+    turnkeySession.clearSession();
+    logout();
+  };
 
   // Clear DID state when user changes or logs out
   useEffect(() => {
@@ -72,8 +83,16 @@ export default function Profile() {
           console.error("Error fetching DID document:", error);
         }
       } else {
-        // User doesn't have real DID (either null or temporary) - show Turnkey auth UI
-        setShowTurnkeyAuth(true);
+        // User doesn't have real DID - check if we have a Turnkey session from login
+        if (turnkeySession.isAuthenticated && turnkeySession.client && turnkeySession.wallets.length > 0) {
+          // Session exists from login - can proceed directly to DID creation
+          console.log("Using existing Turnkey session from login");
+          setShowTurnkeyAuth(true);
+          setOtpSent(true); // Skip OTP step since we have session
+        } else {
+          // No session - need to request OTP
+          setShowTurnkeyAuth(true);
+        }
       }
     } catch (error) {
       console.error("Error checking user DID:", error);
@@ -110,7 +129,10 @@ export default function Profile() {
   };
 
   const handleCreateDid = async () => {
-    if (!otpCode || otpCode.length !== 6) {
+    // If we have a session from login, use it; otherwise require OTP
+    const hasExistingSession = turnkeySession.isAuthenticated && turnkeySession.client && turnkeySession.wallets.length > 0;
+
+    if (!hasExistingSession && (!otpCode || otpCode.length !== 6)) {
       toast({
         title: "Invalid OTP",
         description: "Please enter the 6-digit code from your email",
@@ -121,22 +143,44 @@ export default function Profile() {
 
     setDidLoading(true);
     try {
-      // Step 1: Verify OTP and login
-      const loginResult = await turnkeyAuth.verifyAndLogin(otpCode);
+      let turnkeyClient, wallets;
 
-      if (!loginResult.success) {
-        throw new Error(loginResult.error || "Failed to verify OTP");
+      if (hasExistingSession) {
+        // Use existing session from login
+        console.log("Using existing Turnkey session");
+        turnkeyClient = turnkeySession.client;
+        wallets = turnkeySession.wallets;
+
+        toast({
+          title: "Using Existing Session",
+          description: "Creating your DID...",
+        });
+      } else {
+        // Step 1: Verify OTP and login (fallback)
+        const loginResult = await turnkeyAuth.verifyAndLogin(otpCode);
+
+        if (!loginResult.success) {
+          throw new Error(loginResult.error || "Failed to verify OTP");
+        }
+
+        toast({
+          title: "Authenticated",
+          description: "Creating your DID...",
+        });
+
+        turnkeyClient = turnkeyAuth.turnkeyClient;
+        wallets = turnkeyAuth.wallets;
       }
 
-      toast({
-        title: "Authenticated",
-        description: "Creating your DID...",
-      });
-
       // Step 2: Get keys from Turnkey
-      const authKey = turnkeyAuth.getAuthKey();
-      const assertionKey = turnkeyAuth.getAssertionKey();
-      const updateKey = turnkeyAuth.getUpdateKey();
+      const authKey = getKeyByCurve(wallets, 'CURVE_SECP256K1');
+      const assertionKey = getKeyByCurve(wallets, 'CURVE_ED25519');
+
+      // Get second ED25519 key for update key
+      const ed25519Keys = wallets.flatMap(wallet =>
+        wallet.accounts.filter(account => account.curve === 'CURVE_ED25519')
+      );
+      const updateKey = ed25519Keys.length > 1 ? ed25519Keys[1] : null;
 
       if (!authKey || !assertionKey || !updateKey) {
         throw new Error("Failed to discover keys from Turnkey wallet");
@@ -163,12 +207,12 @@ export default function Profile() {
       console.log("Prepared DID document:", unsignedDidDocument);
 
       // Step 4: Sign DID document with update key in browser
-      if (!turnkeyAuth.turnkeyClient) {
+      if (!turnkeyClient) {
         throw new Error("Turnkey client not initialized");
       }
 
       const { signature, proofValue } = await signDIDDocument(
-        turnkeyAuth.turnkeyClient,
+        turnkeyClient,
         unsignedDidDocument,
         updateKey
       );
@@ -510,7 +554,7 @@ export default function Profile() {
             {/* Log out */}
             <div
               className="flex items-center gap-3 mb-6 p-3 hover:bg-gray-50 rounded-lg transition-colors cursor-pointer"
-              onClick={logout}
+              onClick={handleLogout}
               data-testid="profile-logout-button"
             >
               <LogOut className="w-4 h-4 text-gray-500" />

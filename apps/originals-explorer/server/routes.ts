@@ -272,6 +272,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Exchange Turnkey session token for JWT cookie
+  // This enables browser-side Turnkey authentication while maintaining server-side auth
+  app.post("/api/auth/exchange-session", async (req, res) => {
+    try {
+      const { email, sessionToken } = req.body;
+
+      if (!email || typeof email !== 'string') {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      if (!sessionToken || typeof sessionToken !== 'string') {
+        return res.status(400).json({ error: "Session token is required" });
+      }
+
+      // Get or create Turnkey sub-organization for this user
+      const subOrgId = await ensureTurnkeySubOrg(email);
+
+      // Sign JWT token with sub-org ID
+      const token = signToken(subOrgId, email);
+
+      // Set HTTP-only cookie
+      const cookieConfig = getAuthCookieConfig(token);
+      res.cookie(cookieConfig.name, cookieConfig.value, cookieConfig.options);
+
+      res.json({
+        success: true,
+        message: "Authentication successful",
+      });
+    } catch (error) {
+      console.error("Session exchange error:", error);
+      res.status(500).json({
+        error: "Failed to exchange session",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Logout endpoint - clears HTTP-only cookie
   app.post("/api/auth/logout", (_req, res) => {
     const clearConfig = getClearAuthCookieConfig();

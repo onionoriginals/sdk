@@ -6,17 +6,20 @@ import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/queryClient";
+import { useTurnkeyAuth } from "@/hooks/useTurnkeyAuth";
+import { useTurnkeySession } from "@/contexts/TurnkeySessionContext";
 
 type AuthStep = 'email' | 'code';
 
 export default function Login() {
   const { user, isLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
+  const turnkeyAuth = useTurnkeyAuth();
+  const { setSession } = useTurnkeySession();
 
   const [step, setStep] = useState<AuthStep>('email');
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [sessionId, setSessionId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Store return path and redirect after login
@@ -64,28 +67,26 @@ export default function Login() {
 
     setIsSubmitting(true);
     try {
-      const response = await apiRequest('POST', '/api/auth/initiate', { email });
+      // Use browser-side Turnkey OTP
+      const result = await turnkeyAuth.requestOtp(email);
 
-      if (response.ok) {
-        const data = await response.json();
-        setSessionId(data.sessionId);
+      if (result.success) {
         setStep('code');
         toast({
           title: "Verification Code Sent",
-          description: "Check your email for the verification code (or console in development).",
+          description: "Check your email for the verification code.",
         });
       } else {
-        const error = await response.json();
         toast({
           title: "Failed to Send Code",
-          description: error.details || "Please try again.",
+          description: result.error || "Please try again.",
           variant: "destructive",
         });
       }
     } catch (error) {
       toast({
         title: "Connection Error",
-        description: "Failed to connect to server.",
+        description: "Failed to initiate authentication.",
         variant: "destructive",
       });
     } finally {
@@ -108,24 +109,46 @@ export default function Login() {
 
     setIsSubmitting(true);
     try {
-      const response = await apiRequest('POST', '/api/auth/verify', {
-        sessionId,
-        code: code.trim(),
+      // Step 1: Verify OTP with browser-side Turnkey
+      const loginResult = await turnkeyAuth.verifyAndLogin(code.trim());
+
+      if (!loginResult.success) {
+        toast({
+          title: "Verification Failed",
+          description: loginResult.error || "Invalid code. Please try again.",
+          variant: "destructive",
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Step 2: Store Turnkey session in context for signing operations
+      setSession({
+        client: turnkeyAuth.turnkeyClient,
+        email: turnkeyAuth.email,
+        sessionToken: loginResult.sessionToken,
+        wallets: loginResult.wallets || [],
+      });
+
+      // Step 3: Exchange Turnkey session for JWT cookie
+      const response = await apiRequest('POST', '/api/auth/exchange-session', {
+        email: turnkeyAuth.email,
+        sessionToken: loginResult.sessionToken,
       });
 
       if (response.ok) {
-        // Success - auth hook will detect the cookie and redirect
+        // Success - JWT cookie is set, Turnkey session is stored
         toast({
-          title: "Verification Successful",
-          description: "Logging you in...",
+          title: "Login Successful",
+          description: "Welcome back!",
         });
         // Force a page reload to pick up the new auth state
         setTimeout(() => window.location.reload(), 500);
       } else {
         const error = await response.json();
         toast({
-          title: "Verification Failed",
-          description: error.details || "Invalid code. Please try again.",
+          title: "Login Failed",
+          description: error.details || "Failed to complete login. Please try again.",
           variant: "destructive",
         });
       }
@@ -143,7 +166,6 @@ export default function Login() {
   const handleBack = () => {
     setStep('email');
     setCode('');
-    setSessionId('');
   };
 
   if (isLoading) {
