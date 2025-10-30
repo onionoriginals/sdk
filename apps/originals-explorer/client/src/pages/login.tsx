@@ -26,8 +26,20 @@ export default function Login() {
   useEffect(() => {
     // Store where user should return to after login
     if (!isAuthenticated) {
-      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/';
+      const params = new URLSearchParams(window.location.search);
+      const returnTo = params.get('returnTo') || '/';
+      const reason = params.get('reason');
+
       sessionStorage.setItem('loginReturnTo', returnTo);
+
+      // Show message if user was redirected due to session expiration
+      if (reason === 'session_expired') {
+        toast({
+          title: "Session Expired",
+          description: "Your session has expired. Please log in again.",
+          variant: "destructive",
+        });
+      }
     }
 
     // Redirect to return path after successful login

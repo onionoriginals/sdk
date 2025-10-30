@@ -4,6 +4,7 @@
  */
 
 import { TurnkeyClient, WalletAccount } from '@turnkey/core';
+import { withTokenExpiration } from './turnkey-error-handler';
 
 /**
  * Sign a payload with Turnkey
@@ -12,39 +13,43 @@ import { TurnkeyClient, WalletAccount } from '@turnkey/core';
  * @param turnkeyClient - Initialized Turnkey client
  * @param payload - Pre-hashed/formatted payload ready to sign (as hex string)
  * @param walletAccount - Turnkey wallet account to sign with
+ * @param onExpired - Optional callback for handling expired sessions
  * @returns Formatted signature (0x-prefixed hex string)
  */
 export async function signWithTurnkey(
   turnkeyClient: TurnkeyClient,
   payload: string,
-  walletAccount: WalletAccount
+  walletAccount: WalletAccount,
+  onExpired?: () => void
 ): Promise<string> {
-  try {
-    // Payload should already be properly formatted by Originals SDK
-    // Just ensure it's in hex format for Turnkey
-    const hexPayload = payload.startsWith('0x') ? payload.slice(2) : payload;
+  return withTokenExpiration(async () => {
+    try {
+      // Payload should already be properly formatted by Originals SDK
+      // Just ensure it's in hex format for Turnkey
+      const hexPayload = payload.startsWith('0x') ? payload.slice(2) : payload;
 
-    const response = await turnkeyClient.signMessage({
-      organizationId: walletAccount.organizationId,
-      walletAccount: walletAccount as WalletAccount,
-      message: hexPayload,
-      encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
-      hashFunction: 'HASH_FUNCTION_NO_OP', // Payload is already hashed by SDK
-    });
+      const response = await turnkeyClient.signMessage({
+        organizationId: walletAccount.organizationId,
+        walletAccount: walletAccount as WalletAccount,
+        message: hexPayload,
+        encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
+        hashFunction: 'HASH_FUNCTION_NO_OP', // Payload is already hashed by SDK
+      });
 
-    if (!response.r || !response.s) {
-      throw new Error('Invalid signature response from Turnkey');
+      if (!response.r || !response.s) {
+        throw new Error('Invalid signature response from Turnkey');
+      }
+
+      // Combine r and s into a single signature using proper formatting
+      // formatSignature handles '0x' prefix normalization consistently
+      const signature = formatSignature(response.r, response.s, response.v);
+
+      return signature;
+    } catch (error) {
+      console.error('Error signing with Turnkey:', error);
+      throw new Error(`Failed to sign: ${error instanceof Error ? error.message : String(error)}`);
     }
-
-    // Combine r and s into a single signature using proper formatting
-    // formatSignature handles '0x' prefix normalization consistently
-    const signature = formatSignature(response.r, response.s, response.v);
-
-    return signature;
-  } catch (error) {
-    console.error('Error signing with Turnkey:', error);
-    throw new Error(`Failed to sign: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  }, onExpired);
 }
 
 /**
@@ -53,7 +58,8 @@ export async function signWithTurnkey(
 export async function signDIDDocument(
   turnkeyClient: TurnkeyClient,
   didDocument: any,
-  walletAccount: WalletAccount
+  walletAccount: WalletAccount,
+  onExpired?: () => void
 ): Promise<{ signature: string; proofValue: string }> {
   try {
     // Create the data to sign (canonical form of DID document)
@@ -68,7 +74,7 @@ export async function signDIDDocument(
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
     // Sign the hash with Turnkey
-    const signature = await signWithTurnkey(turnkeyClient, hashHex, walletAccount);
+    const signature = await signWithTurnkey(turnkeyClient, hashHex, walletAccount, onExpired);
 
     // Format as proof value (multibase encoded)
     const proofValue = `z${signature}`;
@@ -90,7 +96,8 @@ export async function signCredential(
   turnkeyClient: TurnkeyClient,
   credential: any,
   proof: any,
-  walletAccount: WalletAccount
+  walletAccount: WalletAccount,
+  onExpired?: () => void
 ): Promise<{ signature: string; proofValue: string }> {
   try {
     // Create the data to sign (canonical form)
@@ -111,7 +118,7 @@ export async function signCredential(
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
     // Sign the hash with Turnkey
-    const signature = await signWithTurnkey(turnkeyClient, hashHex, walletAccount);
+    const signature = await signWithTurnkey(turnkeyClient, hashHex, walletAccount, onExpired);
 
     // Format as proof value
     const proofValue = `z${signature}`;

@@ -10,6 +10,7 @@ import { Link } from "wouter";
 import { useState, useEffect } from "react";
 import { signDIDDocument } from "@/lib/turnkey-signing";
 import { getKeyByCurve } from "@/lib/turnkey-client";
+import { TurnkeySessionExpiredError } from "@/lib/turnkey-error-handler";
 
 export default function Profile() {
   const { user, isLoading, isAuthenticated, logout } = useAuth();
@@ -144,7 +145,8 @@ export default function Profile() {
       const { signature, proofValue } = await signDIDDocument(
         turnkeyClient,
         unsignedDidDocument,
-        updateKey
+        updateKey,
+        turnkeySession.handleTokenExpired // Handle token expiration
       );
 
       console.log("Signed DID document with signature:", signature);
@@ -180,6 +182,18 @@ export default function Profile() {
 
     } catch (error: any) {
       console.error("Failed to create DID:", error);
+
+      // Handle session expiration specifically
+      if (error instanceof TurnkeySessionExpiredError) {
+        toast({
+          title: "Session Expired",
+          description: "Your Turnkey session has expired. Redirecting to login...",
+          variant: "destructive",
+        });
+        // The handleTokenExpired callback will handle the redirect
+        return;
+      }
+
       toast({
         title: "Failed to create DID",
         description: error?.message || "Please try again.",
