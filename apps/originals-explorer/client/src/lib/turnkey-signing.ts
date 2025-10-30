@@ -3,8 +3,7 @@
  * Handles signing operations for DID documents and credentials
  */
 
-import { Turnkey } from '@turnkey/core';
-import type { TurnkeyWalletAccount } from './turnkey-client';
+import { TurnkeyClient, WalletAccount } from '@turnkey/core';
 
 /**
  * Sign a payload with Turnkey
@@ -16,19 +15,19 @@ import type { TurnkeyWalletAccount } from './turnkey-client';
  * @returns Formatted signature (0x-prefixed hex string)
  */
 export async function signWithTurnkey(
-  turnkeyClient: Turnkey,
+  turnkeyClient: TurnkeyClient,
   payload: string,
-  walletAccount: TurnkeyWalletAccount
+  walletAccount: WalletAccount
 ): Promise<string> {
   try {
     // Payload should already be properly formatted by Originals SDK
     // Just ensure it's in hex format for Turnkey
     const hexPayload = payload.startsWith('0x') ? payload.slice(2) : payload;
 
-    const response = await turnkeyClient.apiClient().signRawPayload({
-      organizationId: turnkeyClient.config.defaultOrganizationId!,
-      signWith: walletAccount.address,
-      payload: hexPayload,
+    const response = await turnkeyClient.signMessage({
+      organizationId: walletAccount.organizationId,
+      walletAccount: walletAccount as WalletAccount,
+      message: hexPayload,
       encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
       hashFunction: 'HASH_FUNCTION_NO_OP', // Payload is already hashed by SDK
     });
@@ -52,9 +51,9 @@ export async function signWithTurnkey(
  * Sign a DID document with Turnkey
  */
 export async function signDIDDocument(
-  turnkeyClient: Turnkey,
+  turnkeyClient: TurnkeyClient,
   didDocument: any,
-  walletAccount: TurnkeyWalletAccount
+  walletAccount: WalletAccount
 ): Promise<{ signature: string; proofValue: string }> {
   try {
     // Create the data to sign (canonical form of DID document)
@@ -88,10 +87,10 @@ export async function signDIDDocument(
  * Sign a credential with Turnkey
  */
 export async function signCredential(
-  turnkeyClient: Turnkey,
+  turnkeyClient: TurnkeyClient,
   credential: any,
   proof: any,
-  walletAccount: TurnkeyWalletAccount
+  walletAccount: WalletAccount
 ): Promise<{ signature: string; proofValue: string }> {
   try {
     // Create the data to sign (canonical form)

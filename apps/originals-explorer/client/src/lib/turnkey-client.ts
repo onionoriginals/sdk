@@ -5,18 +5,10 @@
 
 import { OtpType, TurnkeyClient, WalletAccount } from '@turnkey/core';
 
-export interface TurnkeyWalletAccount {
-  accountId: string;
-  address: string;
-  curve: string;
-  path: string;
-  addressFormat: string;
-}
-
 export interface TurnkeyWallet {
   walletId: string;
   walletName: string;
-  accounts: TurnkeyWalletAccount[];
+  accounts: WalletAccount[];
 }
 
 export interface TurnkeyAuthState {
@@ -164,13 +156,7 @@ export async function fetchWallets(
       wallets.push({
         walletId: wallet.walletId,
         walletName: wallet.walletName,
-        accounts: accountsResponse.map((account: WalletAccount) => ({
-          accountId: account.walletAccountId,
-          address: account.address,
-          curve: account.curve,
-          path: account.path,
-          addressFormat: account.addressFormat,
-        })),
+        accounts: accountsResponse,
       });
     }
 
@@ -187,7 +173,7 @@ export async function fetchWallets(
 export function getKeyByCurve(
   wallets: TurnkeyWallet[],
   curve: 'CURVE_SECP256K1' | 'CURVE_ED25519'
-): TurnkeyWalletAccount | null {
+): WalletAccount | null {
   for (const wallet of wallets) {
     for (const account of wallet.accounts) {
       if (account.curve === curve) {
