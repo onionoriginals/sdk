@@ -7,27 +7,30 @@ import { Turnkey } from '@turnkey/sdk-browser';
 import type { TurnkeyWalletAccount } from './turnkey-client';
 
 /**
- * Sign a raw message with Turnkey
+ * Sign a payload with Turnkey
+ * Assumes the payload is already properly formatted/hashed by the Originals SDK
+ *
+ * @param turnkeyClient - Initialized Turnkey client
+ * @param payload - Pre-hashed/formatted payload ready to sign (as hex string)
+ * @param walletAccount - Turnkey wallet account to sign with
+ * @returns Formatted signature (0x-prefixed hex string)
  */
 export async function signWithTurnkey(
   turnkeyClient: Turnkey,
-  message: string,
+  payload: string,
   walletAccount: TurnkeyWalletAccount
 ): Promise<string> {
   try {
-    // Hash the message (Turnkey expects a hash for signing)
-    const encoder = new TextEncoder();
-    const data = encoder.encode(message);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    // Payload should already be properly formatted by Originals SDK
+    // Just ensure it's in hex format for Turnkey
+    const hexPayload = payload.startsWith('0x') ? payload.slice(2) : payload;
 
     const response = await turnkeyClient.apiClient().signRawPayload({
       organizationId: turnkeyClient.config.defaultOrganizationId!,
       signWith: walletAccount.address,
-      payload: hashHex,
+      payload: hexPayload,
       encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
-      hashFunction: 'HASH_FUNCTION_NO_OP', // We already hashed it
+      hashFunction: 'HASH_FUNCTION_NO_OP', // Payload is already hashed by SDK
     });
 
     if (!response.r || !response.s) {
@@ -55,10 +58,18 @@ export async function signDIDDocument(
 ): Promise<{ signature: string; proofValue: string }> {
   try {
     // Create the data to sign (canonical form of DID document)
+    // In production, this should come from Originals SDK's canonicalization
     const canonicalDoc = JSON.stringify(didDocument, Object.keys(didDocument).sort());
 
-    // Sign with Turnkey
-    const signature = await signWithTurnkey(turnkeyClient, canonicalDoc, walletAccount);
+    // Hash the canonical document
+    const encoder = new TextEncoder();
+    const data = encoder.encode(canonicalDoc);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+    // Sign the hash with Turnkey
+    const signature = await signWithTurnkey(turnkeyClient, hashHex, walletAccount);
 
     // Format as proof value (multibase encoded)
     const proofValue = `z${signature}`;
@@ -83,8 +94,8 @@ export async function signCredential(
   walletAccount: TurnkeyWalletAccount
 ): Promise<{ signature: string; proofValue: string }> {
   try {
-    // Create the data to sign
-    // This should match the canonical form expected by the verifier
+    // Create the data to sign (canonical form)
+    // In production, this should come from Originals SDK's canonicalization
     const dataToSign = JSON.stringify({
       credential,
       proof: {
@@ -93,8 +104,15 @@ export async function signCredential(
       },
     }, Object.keys({ credential, proof }).sort());
 
-    // Sign with Turnkey
-    const signature = await signWithTurnkey(turnkeyClient, dataToSign, walletAccount);
+    // Hash the canonical data
+    const encoder = new TextEncoder();
+    const data = encoder.encode(dataToSign);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+    // Sign the hash with Turnkey
+    const signature = await signWithTurnkey(turnkeyClient, hashHex, walletAccount);
 
     // Format as proof value
     const proofValue = `z${signature}`;
