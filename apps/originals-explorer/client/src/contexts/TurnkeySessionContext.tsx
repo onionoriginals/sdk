@@ -20,6 +20,7 @@ interface TurnkeySessionState {
 interface TurnkeySessionContextValue extends TurnkeySessionState {
   setSession: (session: Partial<TurnkeySessionState>) => void;
   clearSession: () => void;
+  handleTokenExpired: () => void;
 }
 
 const TurnkeySessionContext = createContext<TurnkeySessionContextValue | null>(null);
@@ -103,8 +104,24 @@ export function TurnkeySessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const handleTokenExpired = useCallback(() => {
+    console.warn('Turnkey session expired, clearing session and redirecting to login');
+
+    // Clear the expired session
+    clearSession();
+
+    // Store current path for return after re-authentication
+    if (typeof window !== 'undefined') {
+      const currentPath = window.location.pathname + window.location.search;
+      sessionStorage.setItem('loginReturnTo', currentPath);
+
+      // Redirect to login page
+      window.location.href = `/login?returnTo=${encodeURIComponent(currentPath)}&reason=session_expired`;
+    }
+  }, [clearSession]);
+
   return (
-    <TurnkeySessionContext.Provider value={{ ...session, setSession, clearSession }}>
+    <TurnkeySessionContext.Provider value={{ ...session, setSession, clearSession, handleTokenExpired }}>
       {children}
     </TurnkeySessionContext.Provider>
   );

@@ -4,6 +4,7 @@
  */
 
 import { OtpType, TurnkeyClient, WalletAccount } from '@turnkey/core';
+import { withTokenExpiration } from './turnkey-error-handler';
 
 export interface TurnkeyWallet {
   walletId: string;
@@ -125,46 +126,51 @@ export async function loginWithOtp(
  * Fetch user information
  */
 export async function fetchUser(
-  turnkeyClient: TurnkeyClient
+  turnkeyClient: TurnkeyClient,
+  onExpired?: () => void
 ): Promise<any> {
-  try {
-    const response = await turnkeyClient.fetchUser();
-
-    return response;
-  } catch (error) {
-    console.error('Error fetching user:', error);
-    throw new Error(`Failed to fetch user: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  return withTokenExpiration(async () => {
+    try {
+      const response = await turnkeyClient.fetchUser();
+      return response;
+    } catch (error) {
+      console.error('Error fetching user:', error);
+      throw new Error(`Failed to fetch user: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, onExpired);
 }
 
 /**
  * Fetch user's wallets
  */
 export async function fetchWallets(
-  turnkeyClient: TurnkeyClient
+  turnkeyClient: TurnkeyClient,
+  onExpired?: () => void
 ): Promise<TurnkeyWallet[]> {
-  try {
-    const response = await turnkeyClient.fetchWallets();
+  return withTokenExpiration(async () => {
+    try {
+      const response = await turnkeyClient.fetchWallets();
 
-    const wallets: TurnkeyWallet[] = [];
+      const wallets: TurnkeyWallet[] = [];
 
-    for (const wallet of response || []) {
-      const accountsResponse = await turnkeyClient.fetchWalletAccounts({
-        wallet: wallet,
-      });
+      for (const wallet of response || []) {
+        const accountsResponse = await turnkeyClient.fetchWalletAccounts({
+          wallet: wallet,
+        });
 
-      wallets.push({
-        walletId: wallet.walletId,
-        walletName: wallet.walletName,
-        accounts: accountsResponse,
-      });
+        wallets.push({
+          walletId: wallet.walletId,
+          walletName: wallet.walletName,
+          accounts: accountsResponse,
+        });
+      }
+
+      return wallets;
+    } catch (error) {
+      console.error('Error fetching wallets:', error);
+      throw new Error(`Failed to fetch wallets: ${error instanceof Error ? error.message : String(error)}`);
     }
-
-    return wallets;
-  } catch (error) {
-    console.error('Error fetching wallets:', error);
-    throw new Error(`Failed to fetch wallets: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  }, onExpired);
 }
 
 /**
