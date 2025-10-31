@@ -18,6 +18,7 @@ import { parse as csvParse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
 import { VerifiableCredential } from "@originals/sdk";
 import importRoutes from "./routes/import";
+import { mountDIDRoutes } from "./routes-did";
 
 // Temporary in-memory storage for OTP codes
 const otpStorage = new Map<string, { code: string; expires: number }>();
@@ -273,6 +274,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Mount Google Drive import routes
   app.use("/api/import", importRoutes);
+
+  // Mount simplified DID routes (uses didwebvh-ts verification)
+  mountDIDRoutes(app, authenticateUser);
 
   // Healthcheck for Originals SDK integration
   app.get("/api/originals/health", async (_req, res) => {
