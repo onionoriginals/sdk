@@ -15,7 +15,7 @@ export default function Login() {
   const { user, isLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const turnkeyAuth = useTurnkeyAuth();
-  const { setSession } = useTurnkeySession();
+  const { setSession, isAuthenticated: turnkeySessionIsAuthenticated } = useTurnkeySession();
 
   const [step, setStep] = useState<AuthStep>('email');
   const [email, setEmail] = useState("");
@@ -24,36 +24,52 @@ export default function Login() {
 
   // Store return path and redirect after login
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const returnTo = params.get('returnTo') || '/';
+    const reason = params.get('reason');
+
     // Store where user should return to after login
     if (!isAuthenticated) {
-      const params = new URLSearchParams(window.location.search);
-      const returnTo = params.get('returnTo') || '/';
-      const reason = params.get('reason');
-
       sessionStorage.setItem('loginReturnTo', returnTo);
 
       // Show message if user was redirected due to session expiration
       if (reason === 'session_expired') {
         toast({
           title: "Session Expired",
-          description: "Your session has expired. Please log in again.",
+          description: "Your Turnkey session has expired. Please log in again to refresh it.",
           variant: "destructive",
         });
       }
     }
 
     // Redirect to return path after successful login
+    // BUT: If user came from session expiration OR Turnkey session is missing, allow them to login even if JWT is still valid
+    // This refreshes their Turnkey session while keeping their JWT session
     if (isAuthenticated && user) {
-      toast({
-        title: "Login Successful",
-        description: "Welcome back!",
-      });
+      // Check if Turnkey session is missing/expired (even if JWT is valid)
+      const needsTurnkeyRefresh = !turnkeySessionIsAuthenticated || reason === 'session_expired';
+      
+      // Only auto-redirect if user has BOTH JWT AND Turnkey session valid
+      // If Turnkey session is missing/expired, let user complete the login flow to refresh it
+      if (!needsTurnkeyRefresh) {
+        toast({
+          title: "Login Successful",
+          description: "Welcome back!",
+        });
 
-      const returnTo = sessionStorage.getItem('loginReturnTo') || '/';
-      sessionStorage.removeItem('loginReturnTo');
-      window.location.href = returnTo;
+        const returnTo = sessionStorage.getItem('loginReturnTo') || '/';
+        sessionStorage.removeItem('loginReturnTo');
+        window.location.href = returnTo;
+      } else if (!reason) {
+        // Show message if Turnkey session is missing but user wasn't explicitly redirected
+        toast({
+          title: "Session Refresh Needed",
+          description: "Your Turnkey session has expired. Please log in again to refresh it.",
+          variant: "destructive",
+        });
+      }
     }
-  }, [isAuthenticated, user, toast]);
+  }, [isAuthenticated, user, toast, turnkeySessionIsAuthenticated]);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,8 +172,18 @@ export default function Login() {
           title: "Login Successful",
           description: "Welcome back!",
         });
-        // Force a page reload to pick up the new auth state
-        setTimeout(() => window.location.reload(), 500);
+        
+        // Check if we have a return path stored (from session refresh or normal login)
+        const returnTo = sessionStorage.getItem('loginReturnTo');
+        
+        if (returnTo) {
+          // Redirect to stored return path (handles both session refresh and normal login)
+          sessionStorage.removeItem('loginReturnTo');
+          window.location.href = returnTo;
+        } else {
+          // No return path - reload to pick up new auth state
+          setTimeout(() => window.location.reload(), 500);
+        }
       } else {
         const error = await response.json();
         toast({
