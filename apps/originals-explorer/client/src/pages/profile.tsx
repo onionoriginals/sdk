@@ -8,7 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { Mail, Settings, LogOut, Plus, Key, Shield, Copy, ChevronDown, ChevronUp, Download, Loader2 } from "lucide-react";
 import { Link } from "wouter";
 import { useState, useEffect } from "react";
-import { signDIDDocument } from "@/lib/turnkey-signing";
+import { createDIDWithTurnkey } from "@/lib/turnkey-did-signer";
 import { getKeyByCurve } from "@/lib/turnkey-client";
 import { TurnkeySessionExpiredError } from "@/lib/turnkey-error-handler";
 
@@ -103,79 +103,66 @@ export default function Profile() {
         description: "Using your Turnkey session...",
       });
 
-      // Step 2: Get keys from Turnkey
-      const authKey = getKeyByCurve(wallets, 'CURVE_SECP256K1');
-      const assertionKey = getKeyByCurve(wallets, 'CURVE_ED25519');
+      // Step 1: Get multibase-encoded public keys from backend
+      const keysRes = await apiRequest("GET", "/api/did/keys");
+      const keysData = await keysRes.json();
 
-      // Get second ED25519 key for update key
+      if (!keysData.authKey || !keysData.assertionKey || !keysData.updateKey) {
+        throw new Error("Failed to get public keys from backend");
+      }
+
+      console.log("Got multibase keys from backend");
+
+      // Step 2: Get update key account from Turnkey wallets
       const ed25519Keys = wallets.flatMap(wallet =>
         wallet.accounts.filter(account => account.curve === 'CURVE_ED25519')
       );
-      const updateKey = ed25519Keys.length > 1 ? ed25519Keys[1] : null;
+      const updateKeyAccount = ed25519Keys.length > 1 ? ed25519Keys[1] : null;
 
-      if (!authKey || !assertionKey || !updateKey) {
-        throw new Error("Failed to discover keys from Turnkey wallet");
+      if (!updateKeyAccount) {
+        throw new Error("Failed to find update key in Turnkey wallet");
       }
 
-      console.log("Discovered keys:", {
-        auth: authKey.address,
-        assertion: assertionKey.address,
-        update: updateKey.address,
-      });
-
-      // Step 3: Prepare DID document (get unsigned structure from backend)
-      const prepareRes = await apiRequest("POST", "/api/did/prepare-document", {
-        publicKeys: {
-          auth: authKey.address, // Using addresses as public key identifiers
-          assertion: assertionKey.address,
-          update: updateKey.address,
-        },
-      });
-
-      const prepareData = await prepareRes.json();
-      const unsignedDidDocument = prepareData.didDocument;
-
-      console.log("Prepared DID document:", unsignedDidDocument);
-
-      // Step 4: Sign DID document with update key in browser
-      if (!turnkeyClient) {
-        throw new Error("Turnkey client not initialized");
-      }
-
-      const { signature, proofValue } = await signDIDDocument(
+      // Step 3: Create DID log using didwebvh-ts with Turnkey signing
+      const domain = window.location.host;
+      const { did, didDocument, didLog } = await createDIDWithTurnkey({
         turnkeyClient,
-        unsignedDidDocument,
-        updateKey,
-        turnkeySession.handleTokenExpired // Handle token expiration
-      );
-
-      console.log("Signed DID document with signature:", signature);
-
-      // Step 5: Send signed DID to backend for verification and storage
-      const acceptRes = await apiRequest("POST", "/api/did/accept-signed", {
-        didDocument: unsignedDidDocument,
-        signature: proofValue,
-        publicKey: updateKey.address,
+        updateKeyAccount,
+        authKeyPublic: keysData.authKey,
+        assertionKeyPublic: keysData.assertionKey,
+        updateKeyPublic: keysData.updateKey,
+        domain,
+        slug: keysData.userSlug,
+        onExpired: turnkeySession.handleTokenExpired,
       });
 
-      const acceptData = await acceptRes.json();
+      console.log("Created DID log:", { did });
 
-      if (!acceptData.success) {
-        throw new Error(acceptData.error || "Failed to accept signed DID");
+      // Step 4: Submit DID log to backend for verification and storage
+      const submitRes = await apiRequest("POST", "/api/did/submit-log", {
+        did,
+        didDocument,
+        didLog,
+      });
+
+      const submitData = await submitRes.json();
+
+      if (!submitData.success) {
+        throw new Error(submitData.error || "Failed to submit DID log");
       }
 
       // Success!
-      setDid(acceptData.did);
-      setDidDocument(unsignedDidDocument);
+      setDid(did);
+      setDidDocument(didDocument);
 
       toast({
         title: "DID Created",
-        description: "Your decentralized identifier has been created and secured by Turnkey.",
+        description: "Your decentralized identifier has been created and verified!",
       });
 
       // Generate QR code
       const qrRes = await apiRequest("POST", "/api/qr-code", {
-        data: acceptData.did,
+        data: did,
       });
       const qrData = await qrRes.json();
       setQrCodeUrl(qrData.qrCode);
