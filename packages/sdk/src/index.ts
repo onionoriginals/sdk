@@ -3,7 +3,14 @@ import { OriginalsSDK } from './core/OriginalsSDK.js';
 
 // Main exports
 export { OriginalsSDK } from './core/OriginalsSDK.js';
-export type { OriginalsSDKOptions } from './core/OriginalsSDK.js';
+export type { 
+  OriginalsSDKOptions,
+  OriginalResult,
+  CreateOriginalOptions,
+  UpdateOriginalOptions,
+  CreateDIDOriginalOptions,
+  UpdateDIDOriginalOptions
+} from './core/OriginalsSDK.js';
 export { OriginalsAsset } from './lifecycle/OriginalsAsset.js';
 export type { ProvenanceChain } from './lifecycle/OriginalsAsset.js';
 

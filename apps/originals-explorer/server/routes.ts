@@ -11,13 +11,14 @@ import cookieParser from "cookie-parser";
 import { signToken, verifyToken, getAuthCookieConfig, getClearAuthCookieConfig } from "./auth/jwt";
 import { initiateEmailAuth, verifyEmailAuth, cleanupSession } from "./auth/email-auth";
 import { originalsSdk } from "./originals";
-import { createUserDIDWebVH, publishDIDDocument } from "./did-webvh-service";
+import { publishDIDDocument } from "./did-webvh-service";
 import { OriginalsAsset } from "@originals/sdk";
 import multer from "multer";
 import { parse as csvParse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
 import { VerifiableCredential } from "@originals/sdk";
 import importRoutes from "./routes/import";
+import { mountDIDRoutes } from "./routes-did";
 
 // Temporary in-memory storage for OTP codes
 const otpStorage = new Map<string, { code: string; expires: number }>();
@@ -85,53 +86,6 @@ const turnkeyClient = new Turnkey({
 });
 
 /**
- * Create or retrieve a Turnkey sub-organization for a user
- * Each user gets their own sub-org for key isolation
- */
-async function ensureTurnkeySubOrg(email: string): Promise<string> {
-  try {
-    // Generate a unique name for the sub-org
-    const subOrgName = `user-${email.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
-
-    // Check if sub-org already exists
-    const subOrgs = await turnkeyClient.apiClient().getSubOrganizations({
-      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
-    });
-
-    const existing = subOrgs.subOrganizations?.find(
-      (org: any) => org.subOrganizationName === subOrgName
-    );
-
-    if (existing && existing.subOrganizationId) {
-      return existing.subOrganizationId;
-    }
-
-    // Create new sub-organization
-    const result = await turnkeyClient.apiClient().createSubOrganization({
-      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
-      subOrganizationName: subOrgName,
-      rootUsers: [{
-        userName: email,
-        userEmail: email,
-        apiKeys: [],
-        authenticators: [],
-        oauthProviders: [],
-      }],
-      rootQuorumThreshold: 1,
-    });
-
-    if (!result.subOrganizationId) {
-      throw new Error('Failed to create sub-organization');
-    }
-
-    return result.subOrganizationId;
-  } catch (error) {
-    console.error('Error creating Turnkey sub-organization:', error);
-    throw new Error(`Failed to create Turnkey sub-organization: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-/**
  * Authentication middleware using JWT from HTTP-only cookies
  * CRITICAL PR #102: Uses cookies (not localStorage) for security
  */
@@ -146,61 +100,40 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
 
     // Verify JWT token
     const payload = verifyToken(token);
-    const turnkeySubOrgId = payload.sub; // Turnkey sub-org ID (stable identifier)
+    const turnkeySubOrgId = payload.sub; // Turnkey organization ID (sub-org ID) - stable identifier
     const email = payload.email; // Email metadata
 
     // Check if user already exists by Turnkey sub-org ID
     let user = await storage.getUserByTurnkeyId(turnkeySubOrgId);
 
-    // If user doesn't exist, create user record with DID:WebVH
+    // If user doesn't exist, create user record with temporary DID
+    // User will create their actual DID via frontend signing flow
     if (!user) {
       console.log(`Creating user record for ${email}...`);
 
-      try {
-        // Create DID:WebVH using Turnkey-managed keys
-        const didResult = await createUserDIDWebVH(turnkeySubOrgId, turnkeyClient);
+      // Use temporary DID as placeholder until user creates real DID via frontend
+      // This ensures each user has a unique identifier in storage
+      const temporaryDid = `temp:turnkey:${turnkeySubOrgId}`;
 
-        // Create user with full DID information
-        // Map field names from didResult to storage schema
-        user = await storage.createUserWithDid(turnkeySubOrgId, email, didResult.did, {
-          did: didResult.did,
-          didDocument: didResult.didDocument,
-          authWalletId: didResult.authKeyId, // Account address for auth key
-          assertionWalletId: didResult.assertionKeyId, // Account address for assertion key
-          updateWalletId: didResult.updateKeyId, // Account address for update key
-          authKeyPublic: didResult.authKeyPublic,
-          assertionKeyPublic: didResult.assertionKeyPublic,
-          updateKeyPublic: didResult.updateKeyPublic,
-          didCreatedAt: didResult.didCreatedAt,
-          didSlug: didResult.didSlug,
-          didLog: didResult.didLog,
-        });
+      // Create user with temporary DID - they'll replace it via frontend signing
+      user = await storage.createUserWithDid(turnkeySubOrgId, email, temporaryDid, {
+        did: temporaryDid,
+        didDocument: null,
+        authKeyId: null,
+        assertionKeyId: null,
+        updateKeyId: null,
+        authKeyPublic: null,
+        assertionKeyPublic: null,
+        updateKeyPublic: null,
+        didCreatedAt: null,
+        didSlug: null,
+        didLog: null,
+      });
 
-        console.log(`✅ User created with DID:WebVH: ${didResult.did}`);
-        console.log(`   Turnkey sub-org: ${turnkeySubOrgId}`);
-        console.log(`   Auth key: ${didResult.authKeyId}`);
-        console.log(`   Assertion key: ${didResult.assertionKeyId}`);
-        console.log(`   Update key: ${didResult.updateKeyId}`);
-      } catch (didError) {
-        console.error('Failed to create DID:WebVH:', didError);
-        // Fall back to placeholder DID if DID creation fails
-        const placeholderDid = `temp:${turnkeySubOrgId}`;
-        user = await storage.createUserWithDid(turnkeySubOrgId, email, placeholderDid, {
-          did: placeholderDid,
-          didDocument: null,
-          authKeyId: null,
-          assertionKeyId: null,
-          updateKeyId: null,
-          authKeyPublic: null,
-          assertionKeyPublic: null,
-          updateKeyPublic: null,
-          didCreatedAt: new Date(),
-          didSlug: null,
-          didLog: null,
-        });
-        console.log(`⚠️ User created with placeholder DID due to error: ${placeholderDid}`);
-        console.error('DID creation error details:', didError);
-      }
+      console.log(`✅ User created: ${email}`);
+      console.log(`   Turnkey sub-org ID: ${turnkeySubOrgId}`);
+      console.log(`   Temporary DID: ${temporaryDid}`);
+      console.log(`   Real DID will be created via frontend signing flow`);
     }
 
     // Add user info to request with database ID as primary identifier
@@ -209,6 +142,7 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
       turnkeySubOrgId, // Turnkey sub-org ID for key operations
       email, // Email metadata
       did: user.did, // DID for display/lookup
+      sessionToken: payload.sessionToken, // User's Turnkey session token for API calls
     };
 
     next();
@@ -293,6 +227,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Exchange Turnkey session token for JWT cookie
+  // This enables browser-side Turnkey authentication while maintaining server-side auth
+  app.post("/api/auth/exchange-session", async (req, res) => {
+    try {
+      const { email, userId, sessionToken } = req.body;
+
+      if (!email || typeof email !== 'string') {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      if (!userId || typeof userId !== 'string') {
+        return res.status(400).json({ error: "User ID is required" });
+      }
+
+      if (!sessionToken || typeof sessionToken !== 'string') {
+        return res.status(400).json({ error: "Session token is required" });
+      }
+
+      // Sign JWT token with Turnkey organization ID as the subject (stable identifier)
+      // organizationId is the user's Turnkey sub-org ID
+      // Include session token so we can use user's credentials for Turnkey API calls
+      const token = signToken(userId, email, sessionToken);
+
+      // Set HTTP-only cookie
+      const cookieConfig = getAuthCookieConfig(token);
+      res.cookie(cookieConfig.name, cookieConfig.value, cookieConfig.options);
+
+      res.json({
+        success: true,
+        message: "Authentication successful",
+      });
+    } catch (error) {
+      console.error("Session exchange error:", error);
+      res.status(500).json({
+        error: "Failed to exchange session",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Logout endpoint - clears HTTP-only cookie
   app.post("/api/auth/logout", (_req, res) => {
     const clearConfig = getClearAuthCookieConfig();
@@ -302,6 +276,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Mount Google Drive import routes
   app.use("/api/import", importRoutes);
+
+  // Mount simplified DID routes (uses didwebvh-ts verification)
+  mountDIDRoutes(app, authenticateUser, turnkeyClient);
 
   // Healthcheck for Originals SDK integration
   app.get("/api/originals/health", async (_req, res) => {
@@ -326,25 +303,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // Get user's DID:WebVH (automatically created during authentication)
-  app.post("/api/user/ensure-did", authenticateUser, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      
-      // DID is automatically created during authentication, so just return it
-      return res.json({ 
-        did: user.did,
-        created: false // Always false since it's created during auth
-      });
-    } catch (error) {
-      console.error("Error getting user DID:", error);
-      return res.status(500).json({ 
-        error: "Failed to get DID",
-        message: error instanceof Error ? error.message : String(error)
-      });
     }
   });
 
@@ -416,6 +374,269 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error resolving DID:", error);
       res.status(500).json({ error: "Failed to resolve DID" });
+    }
+  });
+
+  // Prepare DID document for frontend signing
+  app.post("/api/did/prepare-document", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { publicKeys } = req.body;
+
+      if (!publicKeys || !publicKeys.auth || !publicKeys.assertion || !publicKeys.update) {
+        return res.status(400).json({
+          error: "Missing required public keys. Need auth, assertion, and update keys."
+        });
+      }
+
+      // Generate DID document structure without signing
+      const email = user.email;
+      const domain = process.env.DOMAIN || 'localhost:5001';
+      const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+      const baseUrl = `${protocol}://${domain}`;
+
+      // Create DID identifier
+      const did = `did:webvh:${domain}:${encodeURIComponent(email)}`;
+
+      // Create DID document structure
+      const didDocument = {
+        "@context": [
+          "https://www.w3.org/ns/did/v1",
+          "https://w3id.org/security/multikey/v1"
+        ],
+        id: did,
+        controller: did,
+        verificationMethod: [
+          {
+            id: `${did}#auth-key`,
+            type: "Multikey",
+            controller: did,
+            publicKeyMultibase: publicKeys.auth
+          },
+          {
+            id: `${did}#assertion-key`,
+            type: "Multikey",
+            controller: did,
+            publicKeyMultibase: publicKeys.assertion
+          }
+        ],
+        authentication: [`${did}#auth-key`],
+        assertionMethod: [`${did}#assertion-key`],
+        service: [
+          {
+            id: `${did}#originals`,
+            type: "OriginalsService",
+            serviceEndpoint: `${baseUrl}/api/did/${encodeURIComponent(did)}`
+          }
+        ]
+      };
+
+      res.json({
+        didDocument,
+        did,
+        updateKeyId: `${did}#update-key`,
+      });
+    } catch (error) {
+      console.error("Error preparing DID document:", error);
+      res.status(500).json({
+        error: "Failed to prepare DID document",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Accept signed DID document from frontend
+  app.post("/api/did/accept-signed", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { didDocument, signature, publicKey } = req.body;
+
+      if (!didDocument || !signature || !publicKey) {
+        return res.status(400).json({
+          error: "Missing required fields: didDocument, signature, publicKey"
+        });
+      }
+
+      // Import verification utilities
+      const { verifyDIDSignature, extractPublicKeyFromDID } = await import('./signature-verification');
+
+      // Extract the update key from the DID document (should be provided separately in the did.jsonl)
+      // For now, verify the signature against the provided public key
+      const isValid = verifyDIDSignature(didDocument, signature, publicKey);
+
+      if (!isValid) {
+        return res.status(400).json({
+          error: "Invalid signature. DID document verification failed."
+        });
+      }
+
+      // Create DID log entry (did.jsonl format)
+      const logEntry = {
+        versionId: "1-" + Date.now(),
+        versionTime: new Date().toISOString(),
+        parameters: {
+          method: "did:webvh:0.3",
+          scid: didDocument.id,
+        },
+        state: didDocument,
+        proof: [{
+          type: "DataIntegrityProof",
+          cryptosuite: "eddsa-jcs-2022",
+          verificationMethod: `${didDocument.id}#update-key`,
+          proofPurpose: "authentication",
+          proofValue: signature,
+          created: new Date().toISOString()
+        }]
+      };
+
+      const didLog = JSON.stringify(logEntry);
+
+      // Get the current user to check if they have a temporary DID
+      const currentUser = await storage.getUserByTurnkeyId(user.turnkeySubOrgId);
+
+      if (!currentUser) {
+        return res.status(404).json({
+          error: "User not found"
+        });
+      }
+
+      // Check if user has a temporary DID that needs to be replaced
+      const hasTemporaryDid = currentUser.did && currentUser.did.startsWith('temp:');
+
+      if (hasTemporaryDid) {
+        // User has temporary DID - need to create new user entry with real DID
+        // and delete the old temporary entry
+        console.log(`Migrating user from temporary DID ${currentUser.did} to real DID ${didDocument.id}`);
+
+        // Create new user entry with real DID using the same pattern as createUserWithDid
+        await storage.createUserWithDid(user.turnkeySubOrgId, currentUser.email!, didDocument.id, {
+          did: didDocument.id,
+          didDocument: didDocument,
+          didLog: didLog,
+          didSlug: null, // Will be set if needed
+          authKeyId: currentUser.authWalletId,
+          assertionKeyId: currentUser.assertionWalletId,
+          updateKeyId: currentUser.updateWalletId,
+          authKeyPublic: currentUser.authKeyPublic,
+          assertionKeyPublic: currentUser.assertionKeyPublic,
+          updateKeyPublic: currentUser.updateKeyPublic,
+          didCreatedAt: new Date(),
+        });
+
+        console.log(`✅ Successfully migrated user to real DID: ${didDocument.id}`);
+      } else {
+        // User already has a real DID, just update it
+        await storage.updateUser(currentUser.id, {
+          did: didDocument.id,
+          didDocument: didDocument,
+          didLog: didLog,
+          didCreatedAt: new Date(),
+        });
+      }
+
+      // Publish to storage (GCS or local)
+      try {
+        await publishDIDDocument(didDocument.id, didLog);
+      } catch (publishError) {
+        console.error("Error publishing DID document:", publishError);
+        // Continue even if publishing fails - DID is still stored in DB
+      }
+
+      res.json({
+        success: true,
+        did: didDocument.id,
+        message: "DID document successfully verified and stored"
+      });
+    } catch (error) {
+      console.error("Error accepting signed DID:", error);
+      res.status(500).json({
+        error: "Failed to process signed DID document",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Prepare credential for frontend signing
+  app.post("/api/credentials/prepare", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { assetId, issuerDID, subjectDID } = req.body;
+
+      if (!assetId) {
+        return res.status(400).json({
+          error: "Missing required field: assetId"
+        });
+      }
+
+      // Get asset from database
+      const asset = await storage.getAsset(assetId);
+
+      if (!asset) {
+        return res.status(404).json({ error: 'Asset not found' });
+      }
+
+      // Check ownership
+      if (asset.userId !== user.id) {
+        return res.status(403).json({ error: 'Not authorized to issue credentials for this asset' });
+      }
+
+      // Use user's DID as issuer if not provided
+      const issuer = issuerDID || user.did;
+
+      if (!issuer) {
+        return res.status(400).json({
+          error: 'Issuer DID not found. User must have a DID.'
+        });
+      }
+
+      // Use asset's current DID as subject
+      const subject = subjectDID || asset.didWebvh || asset.didPeer;
+
+      if (!subject) {
+        return res.status(400).json({
+          error: 'Subject DID not found. Asset must have a DID.'
+        });
+      }
+
+      // Create credential structure (W3C Verifiable Credential format)
+      const credential = {
+        "@context": [
+          "https://www.w3.org/2018/credentials/v1",
+          "https://w3id.org/security/suites/jws-2020/v1"
+        ],
+        type: ["VerifiableCredential", "OwnershipCredential"],
+        issuer: issuer,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: {
+          id: subject,
+          type: "DigitalAsset",
+          name: asset.name,
+          assetId: asset.id,
+          owner: issuer,
+          ownershipClaimed: new Date().toISOString()
+        }
+      };
+
+      // Create proof template (without proofValue which will be added after signing)
+      const proof = {
+        type: "DataIntegrityProof",
+        cryptosuite: "eddsa-jcs-2022",
+        verificationMethod: `${issuer}#assertion-key`,
+        proofPurpose: "assertionMethod",
+        created: new Date().toISOString()
+      };
+
+      res.json({
+        credential,
+        proof,
+        message: "Credential prepared for signing. Sign with assertion key."
+      });
+    } catch (error) {
+      console.error("Error preparing credential:", error);
+      res.status(500).json({
+        error: "Failed to prepare credential",
+        message: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 
@@ -905,7 +1126,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = (req as any).user;
       const assetId = req.params.id;
-      
+      const { signedCredential, signature, publicKey } = req.body; // Accept pre-signed credential from frontend
+
       // Get asset from database
       const asset = await storage.getAsset(assetId);
       
@@ -1040,62 +1262,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Issue ownership credential from user's DID to asset's DID
+      // Require frontend-signed credential
+      if (!signedCredential || !signature || !publicKey) {
+        return res.status(400).json({
+          error: 'Frontend-signed credential required',
+          message: 'This endpoint requires a pre-signed credential from the frontend. Please use Turnkey to sign credentials in the browser.'
+        });
+      }
+
+      // Verify frontend-signed credential
       let ownershipCredential;
       try {
-        // Get full user data to access their wallets
-        const userData = await storage.getUserByDid(user.did);
-        
-        if (!userData || !userData.assertionWalletId || !userData.assertionKeyPublic) {
-          throw new Error('User missing assertion key for signing');
+        console.log('🔐 Verifying frontend-signed credential...');
+
+        // Import verification utilities
+        const { verifyCredentialSignature } = await import('./signature-verification');
+
+        // Extract the proof from the signed credential
+        const proof = signedCredential.proof;
+
+        // Verify the signature
+        const isValid = verifyCredentialSignature(
+          { ...signedCredential, proof: undefined },
+          { ...proof, proofValue: undefined },
+          signature,
+          publicKey
+        );
+
+        if (!isValid) {
+          throw new Error('Invalid credential signature');
         }
-        
-        // Create ownership credential
-        const credentialSubject = {
-          id: didWebvh, // The asset's DID
-          owner: user.did, // The user's DID
-          assetType: 'OriginalsAsset',
-          title: asset.title,
-          publishedAt: new Date().toISOString(),
-          resources: publishedAsset.resources.map(r => ({
-            id: r.id,
-            hash: r.hash,
-            contentType: r.contentType
-          }))
-        };
-        
-        const unsignedCredential = await originalsSdk.credentials.createResourceCredential(
-          'ResourceCreated',
-          credentialSubject,
-          user.did // Issued by the user
-        );
-        
-        // Import Turnkey signer utilities
-        const { createTurnkeySigner } = await import('./turnkey-signer');
 
-        // Get verification method ID for the user's assertion key
-        const verificationMethodId = `${user.did}#assertion-key`;
-
-        // Create a signer for the user's assertion key
-        const userSigner = await createTurnkeySigner(
-          user.turnkeySubOrgId,
-          userData.assertionKeyId,
-          turnkeyClient,
-          verificationMethodId,
-          userData.assertionKeyPublic
-        );
-        
-        // Use SDK's external signer support to sign the credential
-        ownershipCredential = await originalsSdk.credentials.signCredentialWithExternalSigner(
-          unsignedCredential,
-          userSigner
-        );
-        
-        console.log(`✅ Ownership credential signed by user ${user.did} for asset ${didWebvh}`);
+        // Use the pre-signed credential
+        ownershipCredential = signedCredential;
+        console.log(`✅ Frontend-signed credential verified for asset ${didWebvh}`);
       } catch (credError: any) {
-        console.error('Failed to issue ownership credential:', credError);
-        // Don't fail the whole operation, but log the error
-        console.warn('Asset published but ownership credential not issued');
+        console.error('Failed to verify frontend-signed credential:', credError);
+        return res.status(400).json({
+          error: 'Invalid credential signature',
+          details: credError.message
+        });
       }
       
       // Publish DID document to make it publicly accessible

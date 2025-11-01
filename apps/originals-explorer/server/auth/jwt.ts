@@ -13,6 +13,7 @@ import jwt from 'jsonwebtoken';
 export interface TokenPayload {
   sub: string; // Turnkey sub-organization ID (NOT email!)
   email: string; // User email (metadata only)
+  sessionToken?: string; // Optional Turnkey session token for user authentication
   iat: number; // Issued at
   exp: number; // Expiration time
 }
@@ -27,18 +28,26 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
  * Sign a JWT token for a user
  * @param subOrgId - Turnkey sub-organization ID (stable identifier)
  * @param email - User email (metadata)
+ * @param sessionToken - Optional Turnkey session token for user authentication
  * @returns Signed JWT token string
  */
-export function signToken(subOrgId: string, email: string): string {
+export function signToken(subOrgId: string, email: string, sessionToken?: string): string {
   if (!subOrgId) {
     throw new Error('Sub-organization ID is required for token signing');
   }
 
+  const payload: any = {
+    sub: subOrgId, // Primary identifier
+    email, // Metadata
+  };
+
+  // Include session token if provided
+  if (sessionToken) {
+    payload.sessionToken = sessionToken;
+  }
+
   return jwt.sign(
-    {
-      sub: subOrgId, // Primary identifier
-      email, // Metadata
-    },
+    payload,
     JWT_SECRET,
     {
       expiresIn: JWT_EXPIRES_IN,
