@@ -45,16 +45,23 @@ export class TurnkeyDIDSigner {
   async sign(input: SigningInput): Promise<SigningOutput> {
     return withTokenExpiration(async () => {
       try {
+        console.log('[TurnkeyDIDSigner] Starting sign operation...');
+        console.log('[TurnkeyDIDSigner] Document keys:', Object.keys(input.document));
+        console.log('[TurnkeyDIDSigner] Proof keys:', Object.keys(input.proof));
+
         // Use SDK's prepareDIDDataForSigning (which wraps didwebvh-ts's prepareDataForSigning)
         // This ensures didwebvh-ts is only imported within the SDK
         const dataToSign = await OriginalsSDK.prepareDIDDataForSigning(input.document, input.proof);
+        console.log('[TurnkeyDIDSigner] Data to sign length:', dataToSign.length, 'bytes');
 
         // Convert to hex for Turnkey
         const hexData = Array.from(new Uint8Array(dataToSign))
           .map(b => b.toString(16).padStart(2, '0'))
           .join('');
+        console.log('[TurnkeyDIDSigner] Hex data length:', hexData.length, 'chars');
 
         // Sign with Turnkey
+        console.log('[TurnkeyDIDSigner] Calling Turnkey signMessage...');
         const response = await this.turnkeyClient.signMessage({
           organizationId: this.walletAccount.organizationId,
           walletAccount: this.walletAccount,
@@ -62,6 +69,7 @@ export class TurnkeyDIDSigner {
           encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
           hashFunction: 'HASH_FUNCTION_NOT_APPLICABLE',
         });
+        console.log('[TurnkeyDIDSigner] Turnkey response received');
 
         if (!response.r || !response.s) {
           throw new Error('Invalid signature response from Turnkey');
@@ -71,9 +79,11 @@ export class TurnkeyDIDSigner {
         const cleanR = response.r.startsWith('0x') ? response.r.slice(2) : response.r;
         const cleanS = response.s.startsWith('0x') ? response.s.slice(2) : response.s;
         const combinedHex = cleanR + cleanS;
+        console.log('[TurnkeyDIDSigner] Combined signature hex length:', combinedHex.length, 'chars');
 
         // Convert hex to bytes
         const signatureBytes = Buffer.from(combinedHex, 'hex');
+        console.log('[TurnkeyDIDSigner] Signature bytes length:', signatureBytes.length);
 
         // Validate Ed25519 signature length (should be 64 bytes)
         if (signatureBytes.length !== 64) {
@@ -82,14 +92,16 @@ export class TurnkeyDIDSigner {
 
         // Encode signature as multibase using SDK method
         const proofValue = multikey.encodeMultibase(signatureBytes);
+        console.log('[TurnkeyDIDSigner] Proof value (multibase):', proofValue.substring(0, 20) + '...');
+        console.log('[TurnkeyDIDSigner] ✅ Signature created successfully');
 
         return { proofValue };
       } catch (error) {
-        console.error('Error signing with Turnkey:', error);
-        
+        console.error('[TurnkeyDIDSigner] Error signing with Turnkey:', error);
+
         // Check error here too before re-throwing (backup in case withTokenExpiration doesn't catch it)
         const errorStr = JSON.stringify(error);
-        if (errorStr.toLowerCase().includes('api_key_expired') || 
+        if (errorStr.toLowerCase().includes('api_key_expired') ||
             errorStr.toLowerCase().includes('expired api key') ||
             errorStr.toLowerCase().includes('"code":16')) {
           console.warn('Detected expired API key in sign method, calling onExpired');
@@ -98,7 +110,7 @@ export class TurnkeyDIDSigner {
           }
           throw new TurnkeySessionExpiredError('Your Turnkey session has expired. Please log in again.');
         }
-        
+
         throw error;
       }
     }, this.onExpired);
@@ -213,6 +225,14 @@ export async function createDIDWithTurnkey(params: {
   // Create Turnkey signer for the update key
   const signer = new TurnkeyDIDSigner(turnkeyClient, updateKeyAccount, updateKeyPublic, onExpired);
 
+  console.log('[createDIDWithTurnkey] Creating DID...');
+  console.log('[createDIDWithTurnkey] Domain:', domain);
+  console.log('[createDIDWithTurnkey] Slug:', slug);
+  console.log('[createDIDWithTurnkey] Auth key:', authKeyPublic.substring(0, 20) + '...');
+  console.log('[createDIDWithTurnkey] Assertion key:', assertionKeyPublic.substring(0, 20) + '...');
+  console.log('[createDIDWithTurnkey] Update key:', updateKeyPublic.substring(0, 20) + '...');
+  console.log('[createDIDWithTurnkey] Verification method ID:', signer.getVerificationMethodId());
+
   // Use SDK's createDIDOriginal which wraps didwebvh-ts's createDID
   // Pass signer as both signer and verifier since TurnkeyDIDSigner implements both interfaces
   const result = await OriginalsSDK.createDIDOriginal({
@@ -240,6 +260,10 @@ export async function createDIDWithTurnkey(params: {
     authentication: ['#key-0'],
     assertionMethod: ['#key-1'],
   });
+
+  console.log('[createDIDWithTurnkey] ✅ DID created:', result.did);
+  console.log('[createDIDWithTurnkey] Log entries:', result.log.length);
+  console.log('[createDIDWithTurnkey] First log entry proof:', result.log[0]?.proof);
 
   return {
     did: result.did,

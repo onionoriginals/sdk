@@ -248,21 +248,38 @@ export function mountDIDRoutes(app: Express, authenticateUser: any, turnkeyClien
 
       // Verify the DID log using didwebvh-ts
       try {
+        console.log('[/api/did/submit-log] Verifying DID log...');
+        console.log('[/api/did/submit-log] DID:', did);
+        console.log('[/api/did/submit-log] DID Log type:', typeof didLog);
+        console.log('[/api/did/submit-log] DID Log is array?', Array.isArray(didLog));
+        console.log('[/api/did/submit-log] DID Log length:', Array.isArray(didLog) ? didLog.length : 'N/A');
+        console.log('[/api/did/submit-log] DID Log first entry:', JSON.stringify(Array.isArray(didLog) ? didLog[0] : didLog, null, 2));
+
         const { verifyLog } = await import('didwebvh-ts');
 
+        console.log('[/api/did/submit-log] verifyLog function imported:', typeof verifyLog);
+
         // Verify the log is valid
+        console.log('[/api/did/submit-log] Calling verifyLog...');
         const isValid = await verifyLog(didLog);
+        console.log('[/api/did/submit-log] verifyLog result:', isValid);
 
         if (!isValid) {
+          console.error('[/api/did/submit-log] Verification failed - log is invalid');
           return res.status(400).json({
-            error: "Invalid DID log: verification failed"
+            error: "Invalid DID log: verification failed",
+            details: "The DID log signature verification failed. This may indicate the log was tampered with or signed incorrectly."
           });
         }
+
+        console.log('[/api/did/submit-log] ✅ DID log verified successfully');
       } catch (verifyError) {
-        console.error("DID log verification error:", verifyError);
+        console.error("[/api/did/submit-log] DID log verification error:", verifyError);
+        console.error("[/api/did/submit-log] Error stack:", verifyError instanceof Error ? verifyError.stack : 'N/A');
         return res.status(400).json({
           error: "Failed to verify DID log",
-          message: verifyError instanceof Error ? verifyError.message : String(verifyError)
+          message: verifyError instanceof Error ? verifyError.message : String(verifyError),
+          stack: verifyError instanceof Error ? verifyError.stack : undefined
         });
       }
 
