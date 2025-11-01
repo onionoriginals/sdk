@@ -4,7 +4,8 @@
  */
 
 import { TurnkeyClient, WalletAccount } from '@turnkey/core';
-import { withTokenExpiration } from './turnkey-error-handler';
+import { withTokenExpiration, TurnkeySessionExpiredError } from './turnkey-error-handler';
+import { OriginalsSDK, multikey } from '@originals/sdk';
 
 interface SigningInput {
   document: Record<string, unknown>;
@@ -44,15 +45,12 @@ export class TurnkeyDIDSigner {
   async sign(input: SigningInput): Promise<SigningOutput> {
     return withTokenExpiration(async () => {
       try {
-        // Import the prepareDataForSigning function from didwebvh-ts
-        // This ensures we sign the data in the exact format didwebvh-ts expects
-        const { prepareDataForSigning } = await import('didwebvh-ts');
-
-        // Prepare the canonical data for signing
-        const dataToSign = await prepareDataForSigning(input.document, input.proof);
+        // Use SDK's prepareDIDDataForSigning (which wraps didwebvh-ts's prepareDataForSigning)
+        // This ensures didwebvh-ts is only imported within the SDK
+        const dataToSign = await OriginalsSDK.prepareDIDDataForSigning(input.document, input.proof);
 
         // Convert to hex for Turnkey
-        const hexData = Array.from(dataToSign)
+        const hexData = Array.from(new Uint8Array(dataToSign))
           .map(b => b.toString(16).padStart(2, '0'))
           .join('');
 
@@ -69,13 +67,38 @@ export class TurnkeyDIDSigner {
           throw new Error('Invalid signature response from Turnkey');
         }
 
-        // Combine r and s into the format expected by didwebvh-ts
-        // didwebvh-ts expects multibase-encoded signature
-        const signature = this.formatSignatureForMultibase(response.r, response.s, response.v);
+        // For Ed25519, combine r+s only (64 bytes total), ignore v component
+        const cleanR = response.r.startsWith('0x') ? response.r.slice(2) : response.r;
+        const cleanS = response.s.startsWith('0x') ? response.s.slice(2) : response.s;
+        const combinedHex = cleanR + cleanS;
 
-        return { proofValue: signature };
+        // Convert hex to bytes
+        const signatureBytes = Buffer.from(combinedHex, 'hex');
+
+        // Validate Ed25519 signature length (should be 64 bytes)
+        if (signatureBytes.length !== 64) {
+          throw new Error(`Invalid Ed25519 signature length: ${signatureBytes.length} (expected 64 bytes)`);
+        }
+
+        // Encode signature as multibase using SDK method
+        const proofValue = multikey.encodeMultibase(signatureBytes);
+
+        return { proofValue };
       } catch (error) {
         console.error('Error signing with Turnkey:', error);
+        
+        // Check error here too before re-throwing (backup in case withTokenExpiration doesn't catch it)
+        const errorStr = JSON.stringify(error);
+        if (errorStr.toLowerCase().includes('api_key_expired') || 
+            errorStr.toLowerCase().includes('expired api key') ||
+            errorStr.toLowerCase().includes('"code":16')) {
+          console.warn('Detected expired API key in sign method, calling onExpired');
+          if (this.onExpired) {
+            this.onExpired();
+          }
+          throw new TurnkeySessionExpiredError('Your Turnkey session has expired. Please log in again.');
+        }
+        
         throw error;
       }
     }, this.onExpired);
@@ -87,6 +110,24 @@ export class TurnkeyDIDSigner {
    */
   getVerificationMethodId(): string {
     return `did:key:${this.publicKeyMultibase}`;
+  }
+
+  /**
+   * Verify a signature (required by didwebvh-ts Verifier interface)
+   * Uses OriginalsSDK's verifyDIDSignature helper for browser-compatible verification
+   * @param signature - The signature bytes
+   * @param message - The message bytes that were signed
+   * @param publicKey - The public key bytes
+   * @returns True if the signature is valid
+   */
+  async verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): Promise<boolean> {
+    try {
+      // Use SDK's static helper method for verification
+      return await OriginalsSDK.verifyDIDSignature(signature, message, publicKey);
+    } catch (error) {
+      console.error('Error verifying signature:', error);
+      return false;
+    }
   }
 
   /**
@@ -151,7 +192,7 @@ export class TurnkeyDIDSigner {
 }
 
 /**
- * Create a DID:WebVH using didwebvh-ts with Turnkey signing
+ * Create a DID:WebVH using OriginalsSDK.createDIDOriginal() with Turnkey signing
  */
 export async function createDIDWithTurnkey(params: {
   turnkeyClient: TurnkeyClient;
@@ -172,31 +213,27 @@ export async function createDIDWithTurnkey(params: {
   // Create Turnkey signer for the update key
   const signer = new TurnkeyDIDSigner(turnkeyClient, updateKeyAccount, updateKeyPublic, onExpired);
 
-  // Import didwebvh-ts
-  const { createDID } = await import('didwebvh-ts');
-
-  // Create verification methods for auth and assertion keys
-  const verificationMethods = [
-    {
-      type: 'Multikey',
-      publicKeyMultibase: authKeyPublic,
-    },
-    {
-      type: 'Multikey',
-      publicKeyMultibase: assertionKeyPublic,
-    }
-  ];
-
-  // Create the DID using didwebvh-ts
-  const result = await createDID({
+  // Use SDK's createDIDOriginal which wraps didwebvh-ts's createDID
+  // Pass signer as both signer and verifier since TurnkeyDIDSigner implements both interfaces
+  const result = await OriginalsSDK.createDIDOriginal({
+    type: 'did',
     domain,
     signer,
-    verifier: signer, // Use same signer as verifier
+    verifier: signer, // Explicitly pass signer as verifier since it implements verify()
     updateKeys: [signer.getVerificationMethodId()],
-    verificationMethods,
-    context: [
-      'https://www.w3.org/ns/did/v1',
-      'https://w3id.org/security/multikey/v1'
+    verificationMethods: [
+      {
+        id: '#key-0',
+        type: 'Multikey',
+        controller: '', // Will be set by createDID
+        publicKeyMultibase: authKeyPublic,
+      },
+      {
+        id: '#key-1',
+        type: 'Multikey',
+        controller: '', // Will be set by createDID
+        publicKeyMultibase: assertionKeyPublic,
+      }
     ],
     paths: [slug],
     portable: false,

@@ -11,6 +11,7 @@ import { useState, useEffect } from "react";
 import { createDIDWithTurnkey } from "@/lib/turnkey-did-signer";
 import { getKeyByCurve } from "@/lib/turnkey-client";
 import { TurnkeySessionExpiredError } from "@/lib/turnkey-error-handler";
+import { extractKeysFromWallets } from "@/lib/key-utils";
 
 export default function Profile() {
   const { user, isLoading, isAuthenticated, logout } = useAuth();
@@ -103,15 +104,15 @@ export default function Profile() {
         description: "Using your Turnkey session...",
       });
 
-      // Step 1: Get multibase-encoded public keys from backend
-      const keysRes = await apiRequest("GET", "/api/did/keys");
-      const keysData = await keysRes.json();
+      // Step 1: Extract multibase-encoded public keys from wallets (client-side)
+      // This avoids server-side API calls and uses the keys we already have
+      const keys = extractKeysFromWallets(wallets);
 
-      if (!keysData.authKey || !keysData.assertionKey || !keysData.updateKey) {
-        throw new Error("Failed to get public keys from backend");
+      if (!keys) {
+        throw new Error("Failed to extract public keys from wallets. Make sure you have at least 3 wallet accounts (1 Secp256k1 and 2 Ed25519).");
       }
 
-      console.log("Got multibase keys from backend");
+      console.log("Extracted multibase keys from wallets:", keys);
 
       // Step 2: Get update key account from Turnkey wallets
       const ed25519Keys = wallets.flatMap(wallet =>
@@ -125,14 +126,17 @@ export default function Profile() {
 
       // Step 3: Create DID log using didwebvh-ts with Turnkey signing
       const domain = window.location.host;
+      const userEmail = user?.email || turnkeySession.email || 'user';
+      const userSlug = userEmail.split('@')[0]; // Use email prefix as slug
+      
       const { did, didDocument, didLog } = await createDIDWithTurnkey({
         turnkeyClient,
         updateKeyAccount,
-        authKeyPublic: keysData.authKey,
-        assertionKeyPublic: keysData.assertionKey,
-        updateKeyPublic: keysData.updateKey,
+        authKeyPublic: keys.authKey,
+        assertionKeyPublic: keys.assertionKey,
+        updateKeyPublic: keys.updateKey,
         domain,
-        slug: keysData.userSlug,
+        slug: userSlug,
         onExpired: turnkeySession.handleTokenExpired,
       });
 

@@ -5,6 +5,8 @@
 
 import { TurnkeyClient, WalletAccount } from '@turnkey/core';
 import { withTokenExpiration } from './turnkey-error-handler';
+import { OriginalsSDK } from '@originals/sdk';
+import { TurnkeyDIDSigner } from './turnkey-did-signer';
 
 /**
  * Sign a payload with Turnkey
@@ -54,39 +56,34 @@ export async function signWithTurnkey(
 
 /**
  * Sign a DID document with Turnkey
+ * @deprecated Use createDIDWithTurnkey() or OriginalsSDK.createDIDOriginal() directly
+ * This function is kept for backward compatibility but may not work with the new API
  */
 export async function signDIDDocument(
   turnkeyClient: TurnkeyClient,
   didDocument: any,
+  publicKeyMultibase: string,
   walletAccount: WalletAccount,
   onExpired?: () => void
-): Promise<{ signature: string; proofValue: string }> {
-  try {
-    // Create the data to sign (canonical form of DID document)
-    // In production, this should come from Originals SDK's canonicalization
-    const canonicalDoc = JSON.stringify(didDocument, Object.keys(didDocument).sort());
+): Promise<{ signature: string; proofValue: string; didDocument: any; log: any }> {
+  return withTokenExpiration(async () => {
+    try {
+      // Create Turnkey signer adapter
+      const signer = new TurnkeyDIDSigner(
+        turnkeyClient,
+        walletAccount,
+        publicKeyMultibase,
+        onExpired
+      );
 
-    // Hash the canonical document
-    const encoder = new TextEncoder();
-    const data = encoder.encode(canonicalDoc);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-    // Sign the hash with Turnkey
-    const signature = await signWithTurnkey(turnkeyClient, hashHex, walletAccount, onExpired);
-
-    // Format as proof value (multibase encoded)
-    const proofValue = `z${signature}`;
-
-    return {
-      signature,
-      proofValue,
-    };
-  } catch (error) {
-    console.error('Error signing DID document:', error);
-    throw new Error(`Failed to sign DID document: ${error instanceof Error ? error.message : String(error)}`);
-  }
+      // NOTE: This function uses the old API. Consider using createDIDWithTurnkey() instead
+      // or OriginalsSDK.createDIDOriginal() directly with proper options
+      throw new Error('signDIDDocument is deprecated. Use createDIDWithTurnkey() or OriginalsSDK.createDIDOriginal() instead.');
+    } catch (error) {
+      console.error('Error signing DID document:', error);
+      throw new Error(`Failed to sign DID document: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, onExpired);
 }
 
 /**

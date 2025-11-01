@@ -142,6 +142,7 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
       turnkeySubOrgId, // Turnkey sub-org ID for key operations
       email, // Email metadata
       did: user.did, // DID for display/lookup
+      sessionToken: payload.sessionToken, // User's Turnkey session token for API calls
     };
 
     next();
@@ -246,7 +247,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Sign JWT token with Turnkey organization ID as the subject (stable identifier)
       // organizationId is the user's Turnkey sub-org ID
-      const token = signToken(userId, email);
+      // Include session token so we can use user's credentials for Turnkey API calls
+      const token = signToken(userId, email, sessionToken);
 
       // Set HTTP-only cookie
       const cookieConfig = getAuthCookieConfig(token);
@@ -276,7 +278,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/import", importRoutes);
 
   // Mount simplified DID routes (uses didwebvh-ts verification)
-  mountDIDRoutes(app, authenticateUser);
+  mountDIDRoutes(app, authenticateUser, turnkeyClient);
 
   // Healthcheck for Originals SDK integration
   app.get("/api/originals/health", async (_req, res) => {

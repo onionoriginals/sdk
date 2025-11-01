@@ -10,9 +10,6 @@
  * - Async-safe operations
  */
 
-
-import { appendFile } from 'node:fs/promises';
-
 import type { OriginalsConfig } from '../types';
 
 /**
@@ -114,7 +111,6 @@ export class FileLogOutput implements LogOutput {
         // Create new file
         await Bun.write(this.filePath, lines);
       }
-      await appendFile(this.filePath, lines);
     } catch (err) {
       // Fallback to console on file write error
       console.error('Failed to write log file:', err);

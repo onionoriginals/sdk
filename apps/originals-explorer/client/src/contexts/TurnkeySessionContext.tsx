@@ -115,8 +115,11 @@ export function TurnkeySessionProvider({ children }: { children: ReactNode }) {
       const currentPath = window.location.pathname + window.location.search;
       sessionStorage.setItem('loginReturnTo', currentPath);
 
-      // Redirect to login page
-      window.location.href = `/login?returnTo=${encodeURIComponent(currentPath)}&reason=session_expired`;
+      // Use setTimeout to ensure redirect happens even if there are pending operations
+      setTimeout(() => {
+        // Redirect to login page
+        window.location.href = `/login?returnTo=${encodeURIComponent(currentPath)}&reason=session_expired`;
+      }, 100);
     }
   }, [clearSession]);
 
