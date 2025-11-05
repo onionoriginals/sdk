@@ -5,7 +5,7 @@
 
 import { TurnkeyClient, WalletAccount } from '@turnkey/core';
 import { withTokenExpiration, TurnkeySessionExpiredError } from './turnkey-error-handler';
-import { OriginalsSDK, multikey } from '@originals/sdk';
+import { OriginalsSDK, encoding } from '@originals/sdk';
 
 interface SigningInput {
   document: Record<string, unknown>;
@@ -45,31 +45,16 @@ export class TurnkeyDIDSigner {
   async sign(input: SigningInput): Promise<SigningOutput> {
     return withTokenExpiration(async () => {
       try {
-        console.log('[TurnkeyDIDSigner] Starting sign operation...');
-        console.log('[TurnkeyDIDSigner] Document keys:', Object.keys(input.document));
-        console.log('[TurnkeyDIDSigner] Proof keys:', Object.keys(input.proof));
-
         // Use SDK's prepareDIDDataForSigning (which wraps didwebvh-ts's prepareDataForSigning)
-        // This ensures didwebvh-ts is only imported within the SDK
         const dataToSign = await OriginalsSDK.prepareDIDDataForSigning(input.document, input.proof);
-        console.log('[TurnkeyDIDSigner] Data to sign length:', dataToSign.length, 'bytes');
-
-        // Convert to hex for Turnkey
-        const hexData = Array.from(new Uint8Array(dataToSign))
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join('');
-        console.log('[TurnkeyDIDSigner] Hex data length:', hexData.length, 'chars');
-
+        
         // Sign with Turnkey
-        console.log('[TurnkeyDIDSigner] Calling Turnkey signMessage...');
-        const response = await this.turnkeyClient.signMessage({
-          organizationId: this.walletAccount.organizationId,
-          walletAccount: this.walletAccount,
-          message: hexData,
+        const response = await this.turnkeyClient.httpClient.signRawPayload({
+          signWith: this.walletAccount.address,
+          payload: Buffer.from(dataToSign).toString('hex'),
           encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
           hashFunction: 'HASH_FUNCTION_NOT_APPLICABLE',
         });
-        console.log('[TurnkeyDIDSigner] Turnkey response received');
 
         if (!response.r || !response.s) {
           throw new Error('Invalid signature response from Turnkey');
@@ -79,11 +64,9 @@ export class TurnkeyDIDSigner {
         const cleanR = response.r.startsWith('0x') ? response.r.slice(2) : response.r;
         const cleanS = response.s.startsWith('0x') ? response.s.slice(2) : response.s;
         const combinedHex = cleanR + cleanS;
-        console.log('[TurnkeyDIDSigner] Combined signature hex length:', combinedHex.length, 'chars');
 
-        // Convert hex to bytes
+        // Convert hex to bytes (use cleaned hex to avoid 0x prefix issues)
         const signatureBytes = Buffer.from(combinedHex, 'hex');
-        console.log('[TurnkeyDIDSigner] Signature bytes length:', signatureBytes.length);
 
         // Validate Ed25519 signature length (should be 64 bytes)
         if (signatureBytes.length !== 64) {
@@ -91,9 +74,7 @@ export class TurnkeyDIDSigner {
         }
 
         // Encode signature as multibase using SDK method
-        const proofValue = multikey.encodeMultibase(signatureBytes);
-        console.log('[TurnkeyDIDSigner] Proof value (multibase):', proofValue.substring(0, 20) + '...');
-        console.log('[TurnkeyDIDSigner] ✅ Signature created successfully');
+        const proofValue = encoding.multibase.encode(signatureBytes, 'base58btc');
 
         return { proofValue };
       } catch (error) {
@@ -137,69 +118,9 @@ export class TurnkeyDIDSigner {
       // Use SDK's static helper method for verification
       return await OriginalsSDK.verifyDIDSignature(signature, message, publicKey);
     } catch (error) {
-      console.error('Error verifying signature:', error);
+      console.error('[TurnkeyDIDSigner] Error verifying signature:', error);
       return false;
     }
-  }
-
-  /**
-   * Format Turnkey signature (r, s, v) into multibase format expected by didwebvh-ts
-   */
-  private formatSignatureForMultibase(r: string, s: string, v?: string): string {
-    // Remove '0x' prefix if present
-    const cleanR = r.startsWith('0x') ? r.slice(2) : r;
-    const cleanS = s.startsWith('0x') ? s.slice(2) : s;
-
-    // Combine r and s
-    let combined = cleanR + cleanS;
-
-    // Add v if present
-    if (v) {
-      const cleanV = v.startsWith('0x') ? v.slice(2) : v;
-      combined += cleanV;
-    }
-
-    // Convert hex to bytes
-    const bytes = new Uint8Array(combined.length / 2);
-    for (let i = 0; i < combined.length; i += 2) {
-      bytes[i / 2] = parseInt(combined.substring(i, i + 2), 16);
-    }
-
-    // Encode as multibase (base58btc with 'z' prefix)
-    return 'z' + this.base58Encode(bytes);
-  }
-
-  /**
-   * Encode bytes as base58 (Bitcoin alphabet)
-   */
-  private base58Encode(bytes: Uint8Array): string {
-    const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-    const BASE = 58n;
-
-    // Convert bytes to big number
-    let num = 0n;
-    for (const byte of bytes) {
-      num = num * 256n + BigInt(byte);
-    }
-
-    // Convert to base58
-    const result: string[] = [];
-    while (num > 0n) {
-      const remainder = Number(num % BASE);
-      result.unshift(ALPHABET[remainder]);
-      num = num / BASE;
-    }
-
-    // Add leading '1's for leading zero bytes
-    for (const byte of bytes) {
-      if (byte === 0) {
-        result.unshift('1');
-      } else {
-        break;
-      }
-    }
-
-    return result.join('');
   }
 }
 
@@ -224,14 +145,6 @@ export async function createDIDWithTurnkey(params: {
 
   // Create Turnkey signer for the update key
   const signer = new TurnkeyDIDSigner(turnkeyClient, updateKeyAccount, updateKeyPublic, onExpired);
-
-  console.log('[createDIDWithTurnkey] Creating DID...');
-  console.log('[createDIDWithTurnkey] Domain:', domain);
-  console.log('[createDIDWithTurnkey] Slug:', slug);
-  console.log('[createDIDWithTurnkey] Auth key:', authKeyPublic.substring(0, 20) + '...');
-  console.log('[createDIDWithTurnkey] Assertion key:', assertionKeyPublic.substring(0, 20) + '...');
-  console.log('[createDIDWithTurnkey] Update key:', updateKeyPublic.substring(0, 20) + '...');
-  console.log('[createDIDWithTurnkey] Verification method ID:', signer.getVerificationMethodId());
 
   // Use SDK's createDIDOriginal which wraps didwebvh-ts's createDID
   // Pass signer as both signer and verifier since TurnkeyDIDSigner implements both interfaces
@@ -260,10 +173,6 @@ export async function createDIDWithTurnkey(params: {
     authentication: ['#key-0'],
     assertionMethod: ['#key-1'],
   });
-
-  console.log('[createDIDWithTurnkey] ✅ DID created:', result.did);
-  console.log('[createDIDWithTurnkey] Log entries:', result.log.length);
-  console.log('[createDIDWithTurnkey] First log entry proof:', result.log[0]?.proof);
 
   return {
     did: result.did,

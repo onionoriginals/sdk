@@ -46,6 +46,8 @@
     "@scure/base": "^1.1.6",
     "@scure/bip32": "^2.0.0",
     "@scure/btc-signer": "^1.8.0",
+    "@stablelib/ed25519": "^2.0.2",
+    "b58": "^4.0.3",
     "bitcoinjs-lib": "^6.1.0",
     "cbor-js": "^0.1.0",
     "didwebvh-ts": "^2.5.5",

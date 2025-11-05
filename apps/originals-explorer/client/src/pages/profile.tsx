@@ -112,8 +112,6 @@ export default function Profile() {
         throw new Error("Failed to extract public keys from wallets. Make sure you have at least 3 wallet accounts (1 Secp256k1 and 2 Ed25519).");
       }
 
-      console.log("Extracted multibase keys from wallets:", keys);
-
       // Step 2: Get update key account from Turnkey wallets
       const ed25519Keys = wallets.flatMap(wallet =>
         wallet.accounts.filter(account => account.curve === 'CURVE_ED25519')
@@ -139,8 +137,6 @@ export default function Profile() {
         slug: userSlug,
         onExpired: turnkeySession.handleTokenExpired,
       });
-
-      console.log("Created DID log:", { did });
 
       // Step 4: Submit DID log to backend for verification and storage
       const submitRes = await apiRequest("POST", "/api/did/submit-log", {

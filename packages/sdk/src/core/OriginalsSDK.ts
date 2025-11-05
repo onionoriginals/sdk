@@ -8,6 +8,7 @@ import { emitTelemetry, StructuredError } from '../utils/telemetry';
 import { Logger } from '../utils/Logger';
 import { MetricsCollector } from '../utils/MetricsCollector';
 import { EventLogger } from '../utils/EventLogger';
+import { createDID } from 'didwebvh-ts';
 
 // Type for DID log (from didwebvh-ts)
 interface DIDLogEntry {
@@ -282,16 +283,16 @@ export class OriginalsSDK {
    */
   static async createDIDOriginal(options: CreateDIDOriginalOptions): Promise<OriginalResult> {
     // Dynamically import didwebvh-ts to avoid module resolution issues
-    const mod = await import('didwebvh-ts') as unknown as {
-      createDID: (options: Record<string, unknown>) => Promise<{
-        did: string;
-        doc: Record<string, unknown>;
-        log: DIDLog;
-        meta: DIDResolutionMeta;
-      }>;
-    };
+    // const mod = await import('didwebvh-ts') as unknown as {
+    //   createDID: (options: Record<string, unknown>) => Promise<{
+    //     did: string;
+    //     doc: Record<string, unknown>;
+    //     log: DIDLog;
+    //     meta: DIDResolutionMeta;
+    //   }>;
+    // };
 
-    const { createDID } = mod;
+    // const { createDID } = mod;
 
     // Runtime validation
     if (typeof createDID !== 'function') {
@@ -299,36 +300,46 @@ export class OriginalsSDK {
     }
 
     // Prepare options for createDID
-    const createOptions: Record<string, unknown> = {
+    // const createOptions: Record<string, unknown> = {
+    //   domain: options.domain,
+    //   signer: options.signer,
+    //   verifier: options.verifier || options.signer, // Use signer as verifier if not provided
+    //   updateKeys: options.updateKeys,
+    //   verificationMethods: options.verificationMethods,
+    //   context: options.context || [
+    //     'https://www.w3.org/ns/did/v1',
+    //     'https://w3id.org/security/multikey/v1'
+    //   ],
+    // };
+
+    // // Add optional parameters
+    // if (options.paths !== undefined) createOptions.paths = options.paths;
+    // if (options.controller !== undefined) createOptions.controller = options.controller;
+    // if (options.alsoKnownAs !== undefined) createOptions.alsoKnownAs = options.alsoKnownAs;
+    // if (options.portable !== undefined) createOptions.portable = options.portable;
+    // if (options.nextKeyHashes !== undefined) createOptions.nextKeyHashes = options.nextKeyHashes;
+    // if (options.authentication !== undefined) createOptions.authentication = options.authentication;
+    // if (options.assertionMethod !== undefined) createOptions.assertionMethod = options.assertionMethod;
+    // if (options.keyAgreement !== undefined) createOptions.keyAgreement = options.keyAgreement;
+    // if (options.services !== undefined) createOptions.services = options.services;
+
+    // Create the DID using didwebvh-ts
+    const result = await createDID({
       domain: options.domain,
       signer: options.signer,
-      verifier: options.verifier || options.signer, // Use signer as verifier if not provided
+      verifier: options.verifier,
       updateKeys: options.updateKeys,
       verificationMethods: options.verificationMethods,
       context: options.context || [
         'https://www.w3.org/ns/did/v1',
         'https://w3id.org/security/multikey/v1'
       ],
-    };
-
-    // Add optional parameters
-    if (options.paths !== undefined) createOptions.paths = options.paths;
-    if (options.controller !== undefined) createOptions.controller = options.controller;
-    if (options.alsoKnownAs !== undefined) createOptions.alsoKnownAs = options.alsoKnownAs;
-    if (options.portable !== undefined) createOptions.portable = options.portable;
-    if (options.nextKeyHashes !== undefined) createOptions.nextKeyHashes = options.nextKeyHashes;
-    if (options.authentication !== undefined) createOptions.authentication = options.authentication;
-    if (options.assertionMethod !== undefined) createOptions.assertionMethod = options.assertionMethod;
-    if (options.keyAgreement !== undefined) createOptions.keyAgreement = options.keyAgreement;
-    if (options.services !== undefined) createOptions.services = options.services;
-
-    // Create the DID using didwebvh-ts
-    const result = await createDID(createOptions);
+    });
 
     return {
       did: result.did,
-      doc: result.doc as unknown as DIDDocument,
-      log: result.log,
+      doc: result.doc,
+      log: result.log as unknown as DIDLog,
       meta: result.meta
     };
   }

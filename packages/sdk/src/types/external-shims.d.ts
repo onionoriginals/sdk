@@ -16,34 +16,7 @@ declare module 'multiformats/bases/base64' {
 }
 
 declare module 'jsonld';
-
-declare module 'didwebvh-ts' {
-  export interface DIDDocument {
-    '@context'?: string | string[];
-    id: string;
-    controller?: string | string[];
-    verificationMethod?: Array<{
-      id: string;
-      type: string;
-      controller: string;
-      publicKeyMultibase?: string;
-      publicKeyJwk?: Record<string, unknown>;
-    }>;
-    authentication?: Array<string | Record<string, unknown>>;
-    assertionMethod?: Array<string | Record<string, unknown>>;
-    keyAgreement?: Array<string | Record<string, unknown>>;
-    capabilityInvocation?: Array<string | Record<string, unknown>>;
-    capabilityDelegation?: Array<string | Record<string, unknown>>;
-    service?: Array<{
-      id: string;
-      type: string;
-      serviceEndpoint: string | Record<string, unknown>;
-    }>;
-    [key: string]: unknown;
-  }
-  export function resolveDID(did: string): Promise<{ doc?: DIDDocument } | null>;
-}
-
+declare module 'b58';
 declare module '@aviarytech/did-peer' {
   export interface ServiceEndpoint {
     id: string;

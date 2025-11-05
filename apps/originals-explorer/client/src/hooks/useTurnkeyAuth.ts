@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { TurnkeyClient } from '@turnkey/core';
+import { TurnkeyClient, WalletAccount } from '@turnkey/core';
 import {
   initializeTurnkeyClient,
   initOtp,
@@ -13,7 +13,6 @@ import {
   fetchWallets,
   getKeyByCurve,
   type TurnkeyWallet,
-  type TurnkeyWalletAccount,
 } from '@/lib/turnkey-client';
 
 interface TurnkeyAuthState {
@@ -22,9 +21,6 @@ interface TurnkeyAuthState {
   error: string | null;
   turnkeyClient: TurnkeyClient | null;
   email: string | null;
-  userId: string | null;
-  organizationId: string | null;
-  sessionToken: string | null;
   wallets: TurnkeyWallet[];
   otpId: string | null;
   verificationToken: string | null;
@@ -37,9 +33,6 @@ export function useTurnkeyAuth() {
     error: null,
     turnkeyClient: null,
     email: null,
-    userId: null,
-    organizationId: null,
-    sessionToken: null,
     wallets: [],
     otpId: null,
     verificationToken: null,
@@ -93,7 +86,7 @@ export function useTurnkeyAuth() {
       const verificationToken = await verifyOtp(state.turnkeyClient, state.otpId, otpCode, state.email);
 
       // Login with verification token and fetch user info
-      const { sessionToken, userId, organizationId } = await loginWithOtp(state.turnkeyClient, state.email, verificationToken);
+      const { sessionToken, userId } = await loginWithOtp(state.turnkeyClient, state.email, verificationToken);
 
       // Fetch wallets and keys
       const wallets = await fetchWallets(state.turnkeyClient);
@@ -103,12 +96,11 @@ export function useTurnkeyAuth() {
         isLoading: false,
         isAuthenticated: true,
         userId,
-        organizationId,
         sessionToken,
         wallets,
       }));
 
-      return { success: true, sessionToken, userId, organizationId, wallets };
+      return { success: true, sessionToken, userId, wallets };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to verify OTP';
       setState(prev => ({
@@ -144,7 +136,6 @@ export function useTurnkeyAuth() {
       error: null,
       turnkeyClient: null,
       email: null,
-      subOrgId: null,
       wallets: [],
       otpId: null,
       verificationToken: null,
@@ -154,28 +145,28 @@ export function useTurnkeyAuth() {
   /**
    * Get key by curve type
    */
-  const getKeyByCurveType = useCallback((curve: 'CURVE_SECP256K1' | 'CURVE_ED25519'): TurnkeyWalletAccount | null => {
+  const getKeyByCurveType = useCallback((curve: 'CURVE_SECP256K1' | 'CURVE_ED25519'): WalletAccount | null => {
     return getKeyByCurve(state.wallets, curve);
   }, [state.wallets]);
 
   /**
    * Get authentication key (SECP256K1)
    */
-  const getAuthKey = useCallback((): TurnkeyWalletAccount | null => {
+  const getAuthKey = useCallback((): WalletAccount | null => {
     return getKeyByCurveType('CURVE_SECP256K1');
   }, [getKeyByCurveType]);
 
   /**
    * Get assertion key (ED25519)
    */
-  const getAssertionKey = useCallback((): TurnkeyWalletAccount | null => {
+  const getAssertionKey = useCallback((): WalletAccount | null => {
     return getKeyByCurveType('CURVE_ED25519');
   }, [getKeyByCurveType]);
 
   /**
    * Get update key (ED25519, second one)
    */
-  const getUpdateKey = useCallback((): TurnkeyWalletAccount | null => {
+  const getUpdateKey = useCallback((): WalletAccount | null => {
     // Get all ED25519 keys
     const ed25519Keys = state.wallets.flatMap(wallet =>
       wallet.accounts.filter(account => account.curve === 'CURVE_ED25519')
@@ -192,7 +183,6 @@ export function useTurnkeyAuth() {
     error: state.error,
     turnkeyClient: state.turnkeyClient,
     email: state.email,
-    subOrgId: state.subOrgId,
     wallets: state.wallets,
 
     // Methods
