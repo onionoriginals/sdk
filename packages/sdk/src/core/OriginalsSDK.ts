@@ -299,35 +299,12 @@ export class OriginalsSDK {
       throw new Error('Failed to load didwebvh-ts: createDID is not a function');
     }
 
-    // Prepare options for createDID
-    // const createOptions: Record<string, unknown> = {
-    //   domain: options.domain,
-    //   signer: options.signer,
-    //   verifier: options.verifier || options.signer, // Use signer as verifier if not provided
-    //   updateKeys: options.updateKeys,
-    //   verificationMethods: options.verificationMethods,
-    //   context: options.context || [
-    //     'https://www.w3.org/ns/did/v1',
-    //     'https://w3id.org/security/multikey/v1'
-    //   ],
-    // };
-
-    // // Add optional parameters
-    // if (options.paths !== undefined) createOptions.paths = options.paths;
-    // if (options.controller !== undefined) createOptions.controller = options.controller;
-    // if (options.alsoKnownAs !== undefined) createOptions.alsoKnownAs = options.alsoKnownAs;
-    // if (options.portable !== undefined) createOptions.portable = options.portable;
-    // if (options.nextKeyHashes !== undefined) createOptions.nextKeyHashes = options.nextKeyHashes;
-    // if (options.authentication !== undefined) createOptions.authentication = options.authentication;
-    // if (options.assertionMethod !== undefined) createOptions.assertionMethod = options.assertionMethod;
-    // if (options.keyAgreement !== undefined) createOptions.keyAgreement = options.keyAgreement;
-    // if (options.services !== undefined) createOptions.services = options.services;
-
     // Create the DID using didwebvh-ts
     const result = await createDID({
       domain: options.domain,
       signer: options.signer,
       verifier: options.verifier,
+      paths: options.paths,
       updateKeys: options.updateKeys,
       verificationMethods: options.verificationMethods,
       context: options.context || [

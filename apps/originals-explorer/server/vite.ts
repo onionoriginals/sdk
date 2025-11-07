@@ -40,6 +40,17 @@ export async function setupVite(app: Express, server: Server) {
   });
 
   app.use(vite.middlewares);
+  
+  // Serve static files from public directory in development too
+  // This allows files like /<userId>/did.jsonl to be served from public/<userId>/did.jsonl
+  // Use same path resolution as webvh-integration.ts (process.cwd())
+  const publicPath = path.join(process.cwd(), "public");
+  if (fs.existsSync(publicPath)) {
+    app.use(express.static(publicPath, {
+      index: false, // Don't serve index.html for all routes
+    }));
+  }
+  
   app.use("*", async (req, res, next) => {
     const url = req.originalUrl;
 
@@ -67,17 +78,22 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(import.meta.dirname, "public");
+  // Use same path resolution as webvh-integration.ts (process.cwd())
+  const distPath = path.join(process.cwd(), "public");
 
   if (!fs.existsSync(distPath)) {
-    throw new Error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`,
-    );
+    // Create public directory if it doesn't exist (for DID logs)
+    fs.mkdirSync(distPath, { recursive: true });
   }
 
-  app.use(express.static(distPath));
+  // Serve static files from public directory
+  // This allows files like /<userId>/did.jsonl to be served from public/<userId>/did.jsonl
+  app.use(express.static(distPath, {
+    // Don't serve index.html for all routes - only for SPA fallback
+    index: false,
+  }));
 
-  // fall through to index.html if the file doesn't exist
+  // fall through to index.html if the file doesn't exist (SPA fallback)
   app.use("*", (_req, res) => {
     res.sendFile(path.resolve(distPath, "index.html"));
   });

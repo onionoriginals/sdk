@@ -8,6 +8,7 @@ import { storage } from './storage';
 import { convertToMultibase } from './key-utils';
 import OriginalsSDK, { Ed25519Verifier } from '@originals/sdk';
 import { resolveDIDFromLog } from 'didwebvh-ts';
+import { getWebVHService } from './webvh-integration';
 
 /**
  * Create a Turnkey API client using user's session token
@@ -316,6 +317,16 @@ export function mountDIDRoutes(app: Express, authenticateUser: any, turnkeyClien
         console.log(`✅ Updated DID for user: ${did}`);
       }
 
+      // Save DID log to filesystem as did.jsonl
+      try {
+        const webvhService = getWebVHService();
+        const logPath = await webvhService.saveDIDLog(did, logEntries);
+        console.log(`✅ Saved DID log to filesystem: ${logPath}`);
+      } catch (saveError) {
+        // Log error but don't fail the request - database storage succeeded
+        console.error("Warning: Failed to save DID log to filesystem:", saveError);
+      }
+
       res.json({
         success: true,
         did: did,
@@ -330,4 +341,5 @@ export function mountDIDRoutes(app: Express, authenticateUser: any, turnkeyClien
       });
     }
   });
+
 }

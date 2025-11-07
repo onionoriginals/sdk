@@ -100,16 +100,70 @@ export class WebVHIntegrationService {
 
   /**
    * Save a DID log to the appropriate location
+   * For path-based DIDs: saves to public/:path/did.jsonl (NO .well-known)
+   * For domain-only DIDs: saves to public/.well-known/did.jsonl
    * @param did - The DID identifier
    * @param log - The DID log entries
    */
   async saveDIDLog(did: string, log: any[]): Promise<string> {
     try {
-      const logPath = await originalsSdk.did.saveDIDLog(
-        did,
-        log,
-        path.join(this.config.publicDir, '.well-known')
-      );
+      // Parse DID to extract path components
+      // Format: did:webvh:domain[:port]:path1:path2...
+      const didParts = did.split(':');
+      if (didParts.length < 3 || didParts[0] !== 'did' || didParts[1] !== 'webvh') {
+        throw new Error('Invalid did:webvh format');
+      }
+      console.log('didParts', didParts);
+      const pathParts = didParts.slice(4); // Everything after domain
+      
+      // Validate all path segments to prevent directory traversal
+      for (const segment of pathParts) {
+        if (!segment || segment === '.' || segment === '..' || 
+            segment.includes('/') || segment.includes('\\') || segment.includes('\0')) {
+          throw new Error(`Invalid path segment in DID: "${segment}"`);
+        }
+      }
+      
+      let logPath: string;
+      
+      if (pathParts.length > 0) {
+        // Path-based DID: save to public/:path/did.jsonl (NO .well-known)
+        // For did:webvh:example.com:alice -> public/alice/did.jsonl
+        const sanitizedPath = pathParts.map(part => {
+          // Decode and sanitize each path segment
+          const decoded = decodeURIComponent(part);
+          // Sanitize: lowercase and replace unsafe characters
+          return decoded
+            .toLowerCase()
+            .replace(/[^a-z0-9._-]/g, '_');
+        });
+        
+        logPath = path.join(this.config.publicDir, ...sanitizedPath, 'did.jsonl');
+        
+        // Verify the resolved path is still within publicDir (defense in depth)
+        const resolvedPublicDir = path.resolve(this.config.publicDir);
+        const resolvedPath = path.resolve(logPath);
+        const relativePath = path.relative(resolvedPublicDir, resolvedPath);
+        if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+          throw new Error('Invalid DID path: resolved path is outside public directory');
+        }
+      } else {
+        // Domain-only DID: save to public/.well-known/did.jsonl
+        logPath = path.join(this.config.publicDir, '.well-known', 'did.jsonl');
+      }
+
+      // Create directories if they don't exist
+      const dirPath = path.dirname(logPath);
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+
+      // Convert log to JSONL format (one JSON object per line)
+      const jsonlContent = log.map(entry => JSON.stringify(entry)).join('\n');
+
+      // Write the log file
+      fs.writeFileSync(logPath, jsonlContent, 'utf8');
+
       console.log(`Saved DID log to: ${logPath}`);
       return logPath;
     } catch (error) {

@@ -12,6 +12,7 @@ import { createDIDWithTurnkey } from "@/lib/turnkey-did-signer";
 import { getKeyByCurve } from "@/lib/turnkey-client";
 import { TurnkeySessionExpiredError } from "@/lib/turnkey-error-handler";
 import { extractKeysFromWallets } from "@/lib/key-utils";
+import { ensureWalletWithAccounts } from "@/lib/turnkey-client";
 
 export default function Profile() {
   const { user, isLoading, isAuthenticated, logout } = useAuth();
@@ -100,36 +101,31 @@ export default function Profile() {
       return;
     }
 
-    // For new users, wallets might be empty - fetch them if needed
-    let wallets = turnkeySession.wallets;
-    if (!wallets || wallets.length === 0) {
-      try {
-        const { fetchWallets } = await import('@/lib/turnkey-client');
-        wallets = await fetchWallets(turnkeySession.client!);
-        // Update session with fetched wallets
-        turnkeySession.setSession({ wallets });
-      } catch (error) {
-        console.error('Failed to fetch wallets:', error);
-        toast({
-          title: "Failed to Fetch Wallets",
-          description: "Could not retrieve your wallets. Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
-    }
-
     setDidLoading(true);
     try {
       const turnkeyClient = turnkeySession.client;
-      // Use wallets we fetched above (or from session)
 
       toast({
-        title: "Creating DID",
-        description: "Using your Turnkey session...",
+        title: "Creating Keys",
+        description: "Setting up your cryptographic keys...",
       });
 
-      // Step 1: Extract multibase-encoded public keys from wallets (client-side)
+      // Step 1: Ensure user has a wallet with the required accounts
+      // This will create the wallet and accounts if they don't exist
+      const wallets = await ensureWalletWithAccounts(
+        turnkeyClient,
+        turnkeySession.handleTokenExpired
+      );
+
+      // Update session with wallets (may be newly created)
+      turnkeySession.setSession({ wallets });
+
+      toast({
+        title: "Keys Ready",
+        description: "Creating your DID...",
+      });
+
+      // Step 2: Extract multibase-encoded public keys from wallets (client-side)
       // This avoids server-side API calls and uses the keys we already have
       const keys = extractKeysFromWallets(wallets);
 
@@ -137,7 +133,7 @@ export default function Profile() {
         throw new Error("Failed to extract public keys from wallets. Make sure you have at least 3 wallet accounts (1 Secp256k1 and 2 Ed25519).");
       }
 
-      // Step 2: Get update key account from Turnkey wallets
+      // Step 3: Get update key account from Turnkey wallets
       const ed25519Keys = wallets.flatMap(wallet =>
         wallet.accounts.filter(account => account.curve === 'CURVE_ED25519')
       );
@@ -147,11 +143,14 @@ export default function Profile() {
         throw new Error("Failed to find update key in Turnkey wallet");
       }
 
-      // Step 3: Create DID log using didwebvh-ts with Turnkey signing
+      // Step 4: Create DID log using didwebvh-ts with Turnkey signing
       const domain = window.location.host;
-      const userEmail = user?.email || turnkeySession.email || 'user';
-      const userSlug = userEmail.split('@')[0]; // Use email prefix as slug
-      
+      // Use user ID (UUID) or Turnkey sub-org ID as unique identifier - never use email to avoid PII leakage
+      if (!user?.id && !user?.turnkeySubOrgId) {
+        throw new Error("User identifier not available. Please refresh the page and try again.");
+      }
+      const userSlug = user?.id || user?.turnkeySubOrgId!;
+      console.log('creating DID with slug', userSlug);
       const { did, didDocument, didLog } = await createDIDWithTurnkey({
         turnkeyClient,
         updateKeyAccount,
@@ -163,7 +162,7 @@ export default function Profile() {
         onExpired: turnkeySession.handleTokenExpired,
       });
 
-      // Step 4: Submit DID log to backend for verification and storage
+      // Step 5: Submit DID log to backend for verification, storage, and filesystem save
       const submitRes = await apiRequest("POST", "/api/did/submit-log", {
         did,
         didDocument,

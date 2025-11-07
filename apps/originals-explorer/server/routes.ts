@@ -5,6 +5,8 @@ import { insertAssetSchema, insertAssetTypeSchema, insertWalletConnectionSchema 
 import { z } from "zod";
 import QRCode from "qrcode";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 import { OAuth2Client } from "google-auth-library";
 import { Turnkey } from "@turnkey/sdk-server";
 import cookieParser from "cookie-parser";
@@ -1833,7 +1835,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { userSlug } = req.params;
       
-      // Look up user by DID slug
+      // First, check if file exists in public directory (preferred)
+      // Use same path resolution as webvh-integration.ts (process.cwd())
+      const publicDir = path.join(process.cwd(), 'public');
+      const filePath = path.join(publicDir, userSlug, "did.jsonl");
+      console.log('filePath', filePath);
+      if (fs.existsSync(filePath)) {
+        // Serve the file directly from filesystem
+        res.type("text/jsonl");
+        return res.sendFile(filePath);
+      }
+      
+      // Fallback: Look up user by DID slug in database
       const user = await storage.getUserByDidSlug(userSlug);
       
       if (!user?.didLog) {
