@@ -61,64 +61,41 @@ export async function initOtp(
 }
 
 /**
- * Verify OTP code
+ * Complete OTP authentication flow (verifies OTP and logs in/signs up)
+ * This combines verification and login/signup into a single call
+ * @see https://docs.turnkey.com/generated-docs/formatted/core/turnkey-client-complete-otp#completeotp
  */
-export async function verifyOtp(
+export async function completeOtp(
   turnkeyClient: TurnkeyClient,
   otpId: string,
   otpCode: string,
   email: string
-): Promise<string> {
+): Promise<{ sessionToken: string; userId: string; action: 'login' | 'signup' }> {
   try {
-    const response = await turnkeyClient.verifyOtp({
+    // Complete OTP flow - verifies code and handles login/signup automatically
+    const response = await turnkeyClient.completeOtp({
       otpId,
       otpCode,
       contact: email,
       otpType: OtpType.Email,
     });
 
-    if (!response.verificationToken) {
-      throw new Error('No verification token returned from Turnkey');
-    }
-
-    return response.verificationToken;
-  } catch (error) {
-    console.error('Error verifying OTP:', error);
-    throw new Error(`Failed to verify OTP: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-/**
- * Complete login with verified OTP and fetch user info
- */
-export async function loginWithOtp(
-  turnkeyClient: TurnkeyClient,
-  email: string,
-  verificationToken: string
-): Promise<{ sessionToken: string; userId: string }> {
-  try {
-    // Login with the verification token
-    const loginResponse = await turnkeyClient.loginWithOtp({
-      verificationToken,
-    });
-
-    if (!loginResponse.sessionToken) {
-      throw new Error('No session token returned from login');
+    console.log('response', response);
+    if (!response.sessionToken) {
+      throw new Error('No session token returned from completeOtp');
     }
 
     // Fetch user info to get stable identifiers
     const userInfo = await turnkeyClient.fetchUser();
 
-    console.log('Turnkey user info:', userInfo);
-
-
     return {
-      sessionToken: loginResponse.sessionToken,
-      userId: userInfo.userId
+      sessionToken: response.sessionToken,
+      userId: userInfo.userId,
+      action: response.action === 'LOGIN' ? 'login' : 'signup',
     };
   } catch (error) {
-    console.error('Error logging in with OTP:', error);
-    throw new Error(`Failed to login: ${error instanceof Error ? error.message : String(error)}`);
+    console.error('Error completing OTP:', error);
+    throw new Error(`Failed to complete OTP: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -201,9 +178,8 @@ export async function authenticateWithEmail(
   // This is a simplified version - in practice, you'll need to:
   // 1. Call initOtp to send the code
   // 2. Let user enter the code
-  // 3. Call verifyOtp
-  // 4. Call loginWithOtp
-  // 5. Fetch wallets
+  // 3. Call completeOtp to verify and login/signup
+  // 4. Fetch wallets
 
-  throw new Error('Use initOtp, verifyOtp, and loginWithOtp separately for proper flow');
+  throw new Error('Use initOtp and completeOtp separately for proper flow');
 }

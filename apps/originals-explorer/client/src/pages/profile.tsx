@@ -26,9 +26,15 @@ export default function Profile() {
   const turnkeySession = useTurnkeySession();
 
   // Enhanced logout that also clears Turnkey session
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Clear Turnkey session first
     turnkeySession.clearSession();
+    // Then logout (which will invalidate auth queries)
     logout();
+    // Redirect to home after logout
+    setTimeout(() => {
+      window.location.href = '/';
+    }, 100);
   };
 
   // Clear DID state when user changes or logs out
@@ -85,19 +91,38 @@ export default function Profile() {
 
   const handleCreateDid = async () => {
     // Must have a Turnkey session from login
-    if (!turnkeySession.isAuthenticated || !turnkeySession.client || !turnkeySession.wallets?.length) {
+    if (!turnkeySession.isAuthenticated || !turnkeySession.client || !turnkeySession.sessionToken) {
       toast({
-        title: "Not Authenticated",
-        description: "Please log in first to create a DID",
+        title: "Turnkey Session Required",
+        description: "Please log in again to create your DID. Your session may have expired.",
         variant: "destructive",
       });
       return;
     }
 
+    // For new users, wallets might be empty - fetch them if needed
+    let wallets = turnkeySession.wallets;
+    if (!wallets || wallets.length === 0) {
+      try {
+        const { fetchWallets } = await import('@/lib/turnkey-client');
+        wallets = await fetchWallets(turnkeySession.client!);
+        // Update session with fetched wallets
+        turnkeySession.setSession({ wallets });
+      } catch (error) {
+        console.error('Failed to fetch wallets:', error);
+        toast({
+          title: "Failed to Fetch Wallets",
+          description: "Could not retrieve your wallets. Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     setDidLoading(true);
     try {
       const turnkeyClient = turnkeySession.client;
-      const wallets = turnkeySession.wallets;
+      // Use wallets we fetched above (or from session)
 
       toast({
         title: "Creating DID",

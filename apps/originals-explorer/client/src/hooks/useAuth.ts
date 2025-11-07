@@ -40,7 +40,12 @@ export function useAuth() {
       return response.json();
     },
     onSuccess: () => {
-      // Clear all queries to prevent data leakage
+      // Immediately set user data to null so UI updates right away
+      queryClient.setQueryData(['/api/user'], null);
+      // Invalidate and reset the user query to force refetch
+      queryClient.invalidateQueries({ queryKey: ['/api/user'] });
+      queryClient.resetQueries({ queryKey: ['/api/user'] });
+      // Clear all other queries to prevent data leakage
       queryClient.clear();
     },
   });

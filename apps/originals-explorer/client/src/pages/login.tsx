@@ -278,9 +278,6 @@ export default function Login() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="code" className="text-sm font-medium text-gray-700">
-                  Verification Code
-                </Label>
                 <Input
                   id="code"
                   type="text"
@@ -295,9 +292,6 @@ export default function Login() {
                   autoFocus
                   data-testid="code-input"
                 />
-                <p className="text-xs text-gray-500 text-center">
-                  In development, check the server console for the code
-                </p>
               </div>
 
               <Button

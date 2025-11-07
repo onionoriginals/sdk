@@ -8,8 +8,7 @@ import { TurnkeyClient, WalletAccount } from '@turnkey/core';
 import {
   initializeTurnkeyClient,
   initOtp,
-  verifyOtp,
-  loginWithOtp,
+  completeOtp,
   fetchWallets,
   getKeyByCurve,
   type TurnkeyWallet,
@@ -70,7 +69,7 @@ export function useTurnkeyAuth() {
   }, []);
 
   /**
-   * Step 2: Verify OTP code and complete login
+   * Step 2: Complete OTP authentication (verifies code and logs in/signs up)
    */
   const verifyAndLogin = useCallback(async (otpCode: string) => {
     if (!state.turnkeyClient || !state.otpId || !state.email) {
@@ -82,11 +81,13 @@ export function useTurnkeyAuth() {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      // Verify OTP
-      const verificationToken = await verifyOtp(state.turnkeyClient, state.otpId, otpCode, state.email);
-
-      // Login with verification token and fetch user info
-      const { sessionToken, userId } = await loginWithOtp(state.turnkeyClient, state.email, verificationToken);
+      // Complete OTP flow - verifies code and handles login/signup automatically
+      const { sessionToken, userId, action } = await completeOtp(
+        state.turnkeyClient,
+        state.otpId,
+        otpCode,
+        state.email
+      );
 
       // Fetch wallets and keys
       const wallets = await fetchWallets(state.turnkeyClient);
@@ -100,9 +101,9 @@ export function useTurnkeyAuth() {
         wallets,
       }));
 
-      return { success: true, sessionToken, userId, wallets };
+      return { success: true, sessionToken, userId, wallets, action };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to verify OTP';
+      const errorMessage = error instanceof Error ? error.message : 'Failed to complete OTP';
       setState(prev => ({
         ...prev,
         isLoading: false,

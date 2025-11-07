@@ -51,7 +51,8 @@ export function TurnkeySessionProvider({ children }: { children: ReactNode }) {
             email: parsed.email || null,
             sessionToken: parsed.sessionToken || null,
             wallets: parsed.wallets || [],
-            isAuthenticated: !!parsed.sessionToken && !!(parsed.wallets?.length),
+            // isAuthenticated only requires sessionToken - wallets may be empty for new users
+            isAuthenticated: !!parsed.sessionToken,
           };
         }
       } catch (error) {
@@ -86,8 +87,8 @@ export function TurnkeySessionProvider({ children }: { children: ReactNode }) {
     setSessionState(prev => ({
       ...prev,
       ...newSession,
-      isAuthenticated: !!(newSession.sessionToken ?? prev.sessionToken) &&
-                      !!((newSession.wallets ?? prev.wallets)?.length),
+      // isAuthenticated only requires sessionToken - wallets may be empty for new users
+      isAuthenticated: !!(newSession.sessionToken ?? prev.sessionToken),
     }));
   }, []);
 
