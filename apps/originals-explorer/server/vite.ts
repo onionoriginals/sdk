@@ -78,23 +78,43 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
-  // Use same path resolution as webvh-integration.ts (process.cwd())
-  const distPath = path.join(process.cwd(), "public");
+  // Determine the app directory - check if we're running from root or app directory
+  const cwd = process.cwd();
+  const appDir = cwd.endsWith('apps/originals-explorer') 
+    ? cwd 
+    : path.join(cwd, 'apps', 'originals-explorer');
+  
+  // Vite builds to dist/public, so serve from there
+  const distPublicPath = path.join(appDir, "dist", "public");
+  
+  // Also need public directory for DID logs (separate from built assets)
+  const publicPath = path.join(appDir, "public");
 
-  if (!fs.existsSync(distPath)) {
-    // Create public directory if it doesn't exist (for DID logs)
-    fs.mkdirSync(distPath, { recursive: true });
+  // Create public directory if it doesn't exist (for DID logs)
+  if (!fs.existsSync(publicPath)) {
+    fs.mkdirSync(publicPath, { recursive: true });
   }
 
-  // Serve static files from public directory
-  // This allows files like /<userId>/did.jsonl to be served from public/<userId>/did.jsonl
-  app.use(express.static(distPath, {
-    // Don't serve index.html for all routes - only for SPA fallback
-    index: false,
+  // Serve static files from dist/public (built Vite assets)
+  if (fs.existsSync(distPublicPath)) {
+    app.use(express.static(distPublicPath, {
+      // Don't serve index.html for all routes - only for SPA fallback
+      index: false,
+    }));
+  }
+
+  // Also serve from public directory for DID logs (e.g., /<userId>/did.jsonl)
+  app.use(express.static(publicPath, {
+    index: false, // Don't serve index.html for all routes
   }));
 
   // fall through to index.html if the file doesn't exist (SPA fallback)
   app.use("*", (_req, res) => {
-    res.sendFile(path.resolve(distPath, "index.html"));
+    const indexPath = path.join(distPublicPath, "index.html");
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(path.resolve(indexPath));
+    } else {
+      res.status(404).send("Not found: index.html not found in dist/public");
+    }
   });
 }
