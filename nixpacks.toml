@@ -9,9 +9,10 @@ cmds = ["bun install --frozen-lockfile"]
 [phases.build]
 # Build SDK first (dependency), then the explorer app
 # This ensures @originals/sdk is built before the explorer tries to use it
+# Each command runs independently from the root directory
 cmds = [
   "cd packages/sdk && bun run build",
-  "cd ../../apps/originals-explorer && bun run build",
+  "cd apps/originals-explorer && bun run build",
   "# Verify SDK is accessible",
   "test -f packages/sdk/dist/index.js && echo 'SDK built successfully' || exit 1",
   "test -d apps/originals-explorer/node_modules/@originals/sdk && echo 'SDK workspace link exists' || echo 'Warning: SDK workspace link not found'"
