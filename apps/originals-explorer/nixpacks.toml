@@ -2,18 +2,15 @@
 nixPkgs = ["bun"]
 
 [phases.install]
-# IMPORTANT: Railway runs from apps/originals-explorer, but we need to install from root
-# to resolve workspace dependencies like @originals/sdk.
-# The root lockfile (../../bun.lock) contains all workspace dependency resolutions.
-# Ensure Railway's "Root Directory" is set to "apps/originals-explorer" in project settings.
-cmds = [
-  "cd ../.. && bun install --frozen-lockfile"
-]
+# Install from root to resolve workspace dependencies like @originals/sdk
+# Railway root directory should be set to "." (monorepo root)
+cmds = ["bun install --frozen-lockfile"]
 
 [phases.build]
-# Build from the app directory (Railway's working directory)
-cmds = ["bun run build"]
+# Build the explorer app from root directory
+cmds = ["cd apps/originals-explorer && bun run build"]
 
 [start]
-cmd = "bun run start"
+# Start the explorer app from root directory
+cmd = "cd apps/originals-explorer && bun run start"
 
