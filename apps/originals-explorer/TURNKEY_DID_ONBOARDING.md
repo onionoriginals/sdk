@@ -297,9 +297,54 @@ async function withTokenExpiration<T>(
    - Cause: Keys not extracted from DID document
    - Fix: Extract from `verificationMethod` array and DID log proof
 
-## Testing Checklist
+## Testing
 
-### DID Creation Flow
+### Running Tests
+
+The project uses Bun's built-in test runner. To run tests:
+
+```bash
+# Run all client-side tests
+cd apps/originals-explorer
+bun test client/src/lib/__tests__/
+
+# Run all server-side tests
+bun test server/__tests__/
+
+# Run specific test file
+bun test client/src/lib/__tests__/key-utils.test.ts
+
+# Run with watch mode
+bun test --watch
+```
+
+### Test Coverage
+
+**Client-side (`client/src/lib/__tests__/`):**
+- `key-utils.test.ts` - Key extraction and multibase encoding (197 lines, 12 tests)
+  - `convertToMultibase()` - Hex to multibase conversion
+  - `extractKeysFromWallets()` - Wallet account key extraction
+  - Edge cases: missing keys, empty wallets, multiple wallets
+
+- `turnkey-error-handler.test.ts` - Session expiration handling (248 lines, 30 tests)
+  - `TurnkeySessionExpiredError` - Custom error class
+  - `isTokenExpiredError()` - Error pattern detection
+  - `withTokenExpiration()` - Wrapper for automatic retry
+  - Edge cases: various error formats, async callbacks, context preservation
+
+**Server-side (`server/__tests__/`):**
+- `did-routes.test.ts` - DID endpoint validation (305 lines, 60+ tests)
+  - Input validation for `/api/did/submit-log`
+  - Key extraction from DID documents
+  - DID format validation (did:webvh with/without SCID)
+  - JSONL formatting
+  - Temporary DID detection
+  - Multibase encoding validation
+  - Edge cases: null values, empty strings, malformed data
+
+### Integration Testing Checklist
+
+#### DID Creation Flow
 
 - [ ] New user can log in with OTP
 - [ ] Temporary DID created on first login
@@ -312,7 +357,7 @@ async function withTokenExpiration<T>(
 - [ ] DID log saved to `.well-known/did.jsonl`
 - [ ] User can view DID on profile page
 
-### Error Scenarios
+#### Error Scenarios
 
 - [ ] Expired session detected and redirected to login
 - [ ] Missing wallets auto-created on DID creation attempt
@@ -320,12 +365,50 @@ async function withTokenExpiration<T>(
 - [ ] Tampered DID log rejected
 - [ ] Network failures handled gracefully
 
-### Verification
+#### Verification
 
 - [ ] DID resolves via HTTP at `https://{domain}/{slug}/did.jsonl`
 - [ ] Signature verification succeeds with extracted keys
 - [ ] Keys match between database and DID document
 - [ ] No null keys in database for completed onboarding
+
+### Writing New Tests
+
+When adding new functionality, follow these patterns:
+
+**Unit Test Example (Client):**
+```typescript
+import { describe, test, expect, mock } from "bun:test";
+
+describe("my-utility", () => {
+  test("handles normal case", () => {
+    const result = myFunction("input");
+    expect(result).toBe("expected");
+  });
+
+  test("handles edge case", () => {
+    expect(() => myFunction(null)).toThrow();
+  });
+});
+```
+
+**Validation Test Example (Server):**
+```typescript
+test("rejects invalid input", () => {
+  const invalidInput = { /* malformed data */ };
+  const isValid = validateInput(invalidInput);
+  expect(isValid).toBe(false);
+});
+```
+
+**Mock Example:**
+```typescript
+mock.module("@originals/sdk", () => ({
+  multikey: {
+    encodePublicKey: mock((bytes, type) => `z${type}_mock`),
+  },
+}));
+```
 
 ## Security Considerations
 
