@@ -354,17 +354,20 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
 
     it('should handle dust limit correctly', () => {
       const utxos: ResourceUtxo[] = [
-        { txid: 'tx1', vout: 0, value: 100000, scriptPubKey: 'script', address: 'tb1q', inscriptions: [], hasResource: false },
+        { txid: 'tx1', vout: 0, value: 101000, scriptPubKey: 'script', address: 'tb1q', inscriptions: [], hasResource: false },
       ];
 
-      // Request amount that would leave dust change
+      // Request amount that would leave dust change (< 546 dust limit)
+      // With 1 input, 2 outputs: ~140 vbytes, fee ~1400 sats
+      // Change = 101000 - 99500 - 1400 = 100 (< 546 dust limit)
       const result = selectResourceUtxos(utxos, {
-        requiredAmount: 99500, // Would leave 500 sat change (< 546 dust limit)
+        requiredAmount: 99500, // Would leave ~100 sat change (< 546 dust limit)
         feeRate: 10
       });
 
-      // Change should be added to fee to avoid dust
+      // Change should be added to fee to avoid dust, so changeAmount should be 0
       expect(result.changeAmount).toBeLessThan(546);
+      expect(result.changeAmount).toBe(0);
 
       console.log('[SECURITY] Dust limit handling verified');
     });
@@ -424,9 +427,10 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
     });
 
     it('should detect overflow in fee calculations', () => {
-      // Create a scenario that could overflow
-      const veryLargeTxSize = Number.MAX_SAFE_INTEGER / 100;
-      const highFeeRate = 100;
+      // Create a scenario that would actually overflow
+      // Use values that exceed Number.MAX_SAFE_INTEGER when multiplied
+      const veryLargeTxSize = Number.MAX_SAFE_INTEGER;
+      const highFeeRate = 2; // Multiplying by 2 will exceed MAX_SAFE_INTEGER
 
       // This would overflow if not properly handled
       const potentialOverflow = veryLargeTxSize * highFeeRate;

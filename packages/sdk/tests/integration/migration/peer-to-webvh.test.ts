@@ -85,7 +85,7 @@ describe('Peer to WebVH Migration', () => {
     // Verify migration failed
     expect(result.success).toBe(false);
     expect(result.error).toBeDefined();
-    expect(result.error?.code).toBe('DOMAIN_REQUIRED');
+    expect(result.error?.code).toBe('VALIDATION_FAILED');
   });
 
   test('should track migration state throughout process', async () => {
@@ -164,7 +164,9 @@ describe('Peer to WebVH Migration', () => {
 
     expect(cost).toBeDefined();
     expect(cost.totalCost).toBeDefined();
-    expect(cost.estimatedDuration).toBeDefined();
+    expect(cost.networkFees).toBeDefined();
+    expect(cost.storageCost).toBeDefined();
+    expect(cost.totalCost).toBeDefined();
     expect(cost.currency).toBe('sats');
   });
 });

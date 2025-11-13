@@ -87,6 +87,11 @@ export class BitcoinManager {
     if (feeRate !== undefined && (typeof feeRate !== 'number' || feeRate <= 0 || !Number.isFinite(feeRate))) {
       throw new StructuredError('INVALID_INPUT', 'Fee rate must be a positive number');
     }
+    // Security: Reject extremely high fee rates to prevent accidental fund drainage
+    const MAX_REASONABLE_FEE_RATE = 10_000; // sat/vB
+    if (feeRate !== undefined && feeRate > MAX_REASONABLE_FEE_RATE) {
+      throw new StructuredError('INVALID_INPUT', `Fee rate ${feeRate} exceeds maximum reasonable fee rate of ${MAX_REASONABLE_FEE_RATE} sat/vB`);
+    }
     
     const effectiveFeeRate = await this.resolveFeeRate(1, feeRate);
 

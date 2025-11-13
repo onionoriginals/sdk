@@ -1,10 +1,10 @@
+// Initialize noble crypto libraries first (idempotent - safe to import multiple times)
+import '../crypto/noble-init.js';
+
 import { DIDDocument, KeyPair, KeyType, KeyRecoveryCredential } from '../types';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 import { p256 } from '@noble/curves/p256';
-import { sha256, sha512 } from '@noble/hashes/sha2.js';
-import { hmac } from '@noble/hashes/hmac.js';
-import { concatBytes } from '@noble/hashes/utils.js';
 import { multikey, MultikeyType } from '../crypto/Multikey';
 
 function toMultikeyType(type: KeyType): MultikeyType {
@@ -23,47 +23,8 @@ function fromMultikeyType(type: MultikeyType): KeyType {
 
 export class KeyManager {
 	constructor() {
-		const sAny: any = secp256k1 as any;
-		const eAny: any = ed25519 as any;
-		
-		// Handle Bun's readonly utils property by checking if it's writable
-		try {
-			sAny.utils = sAny.utils || {};
-			sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
-				hmac(sha256, key, concatBytes(...msgs));
-		} catch (e) {
-			// In Bun, utils might be readonly, so we try to set the property directly
-			if (sAny.utils && !sAny.utils.hmacSha256Sync) {
-				try {
-					Object.defineProperty(sAny.utils, 'hmacSha256Sync', {
-						value: (key: Uint8Array, ...msgs: Uint8Array[]) =>
-							hmac(sha256, key, concatBytes(...msgs)),
-						writable: true,
-						configurable: true
-					});
-				} catch (e2) {
-					// If we still can't set it, it's okay - the library might already have it set
-				}
-			}
-		}
-		
-		try {
-			eAny.utils = eAny.utils || {};
-			eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
-		} catch (e) {
-			// In Bun, utils might be readonly, so we try to set the property directly
-			if (eAny.utils && !eAny.utils.sha512Sync) {
-				try {
-					Object.defineProperty(eAny.utils, 'sha512Sync', {
-						value: (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs)),
-						writable: true,
-						configurable: true
-					});
-				} catch (e2) {
-					// If we still can't set it, it's okay - the library might already have it set
-				}
-			}
-		}
+		// Noble crypto libraries are initialized via noble-init.ts (imported at SDK entry point)
+		// No initialization needed here
 	}
 	async generateKeyPair(type: KeyType): Promise<KeyPair> {
                 if (type === 'ES256K') {

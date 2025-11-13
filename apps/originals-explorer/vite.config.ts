@@ -11,7 +11,20 @@ const __dirname = path.dirname(__filename);
 export default defineConfig({
   plugins: [
     react(),
-    nodePolyfills(),
+    nodePolyfills({
+      // Include Buffer and other Node.js globals
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true,
+      },
+      // Include specific polyfills
+      include: ['buffer'],
+      // Override Buffer polyfill to use the installed buffer package
+      overrides: {
+        buffer: 'buffer',
+      },
+    }),
     runtimeErrorOverlay(),
     ...(process.env.NODE_ENV !== "production" &&
     process.env.REPL_ID !== undefined
@@ -35,11 +48,29 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
+    commonjsOptions: {
+      transformMixedEsModules: true,
+    },
+    rollupOptions: {
+      // Externalize the SDK package to avoid polyfill transformation issues
+      // The SDK uses Buffer as a global which conflicts with vite-plugin-node-polyfills
+      // The SDK will need to be loaded separately at runtime or bundled differently
+      external: ['@originals/sdk'],
+    },
   },
   server: {
     fs: {
       strict: true,
       deny: ["**/.*"],
+    },
+  },
+  optimizeDeps: {
+    // Include Buffer in optimized dependencies
+    include: ['buffer'],
+    esbuildOptions: {
+      define: {
+        global: 'globalThis',
+      },
     },
   },
 });

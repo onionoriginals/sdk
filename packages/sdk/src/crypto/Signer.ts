@@ -1,3 +1,6 @@
+// Initialize noble crypto libraries first (idempotent - safe to import multiple times)
+import './noble-init.js';
+
 export abstract class Signer {
   abstract sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer>;
   abstract verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean>;
@@ -5,26 +8,10 @@ export abstract class Signer {
 
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
 import { p256 } from '@noble/curves/p256';
-import { sha256, sha512 } from '@noble/hashes/sha2.js';
-import { hmac } from '@noble/hashes/hmac.js';
-import { concatBytes } from '@noble/hashes/utils.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 import { multikey } from './Multikey';
-
-// Ensure noble crypto libraries have required utilities
-// Use same implementation as setup.bun.ts for consistency
-const sAny: any = secp256k1 as any;
-const eAny: any = ed25519 as any;
-
-if (sAny && sAny.utils && typeof sAny.utils.hmacSha256Sync !== 'function') {
-  sAny.utils.hmacSha256Sync = (key: Uint8Array, ...msgs: Uint8Array[]) =>
-    hmac(sha256, key, concatBytes(...msgs));
-}
-
-if (eAny && eAny.utils && typeof eAny.utils.sha512Sync !== 'function') {
-  eAny.utils.sha512Sync = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
-}
 
 export class ES256KSigner extends Signer {
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
@@ -49,7 +36,7 @@ export class ES256KSigner extends Signer {
     
     const privateKey = decoded.key;
     const hash = sha256(data);
-    const sigAny: any = await (secp256k1 as any).signAsync(hash as Uint8Array, privateKey as Uint8Array);
+    const sigAny: any = await (secp256k1 as any).signAsync(hash, privateKey);
     const sigBytes: Uint8Array = sigAny instanceof Uint8Array
       ? sigAny
       : typeof sigAny?.toCompactRawBytes === 'function'
@@ -168,7 +155,7 @@ export class ES256Signer extends Signer {
     
     const privateKey = decoded.key;
     const hash = sha256(data);
-    const sigAny: any = p256.sign(hash as Uint8Array, privateKey as Uint8Array);
+    const sigAny: any = p256.sign(hash, privateKey);
     const sigBytes: Uint8Array = sigAny instanceof Uint8Array
       ? sigAny
       : typeof sigAny?.toCompactRawBytes === 'function'

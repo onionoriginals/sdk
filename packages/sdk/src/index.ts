@@ -1,4 +1,7 @@
 /* istanbul ignore file */
+// Initialize noble crypto libraries first (must run before any crypto operations)
+import './crypto/noble-init.js';
+
 import { OriginalsSDK } from './core/OriginalsSDK.js';
 
 // Main exports

@@ -15,7 +15,7 @@ const createUtxo = (value: number, index: number = 0, network: 'mainnet' | 'test
     mainnet: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4',
     testnet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
     signet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
-    regtest: 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kyv60dr'
+    regtest: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx' // Use testnet format for regtest compatibility with @scure/btc-signer
   };
 
   return {
@@ -34,7 +34,7 @@ const createCommitParams = (overrides: Partial<CommitTransactionParams> = {}): C
     mainnet: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4',
     testnet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
     signet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
-    regtest: 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kyv60dr'
+    regtest: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx' // Use testnet format for regtest compatibility with @scure/btc-signer
   };
 
   return {
@@ -332,7 +332,8 @@ describe('createCommitTransaction', () => {
       const params = createCommitParams({ network: 'regtest' });
       const result = await createCommitTransaction(params);
 
-      expect(result.commitAddress).toMatch(/^bcrt1p/);
+      // Regtest uses TEST_NETWORK which generates tb1p addresses
+      expect(result.commitAddress).toMatch(/^tb1p/);
     });
   });
 

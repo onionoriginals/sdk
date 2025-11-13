@@ -11,7 +11,6 @@ import { ProvenanceQuery, Migration, Transfer } from './ProvenanceQuery';
 import { EventEmitter } from '../events/EventEmitter';
 import type { EventHandler, EventTypeMap } from '../events/types';
 import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning';
-import type { ResourceVersion } from './ResourceVersioning';
 
 export interface ProvenanceChain {
   createdAt: string;

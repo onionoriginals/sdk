@@ -32,7 +32,10 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.example.com/inscription/insc123',
-      { headers: { Accept: 'application/json' } }
+      expect.objectContaining({
+        headers: { Accept: 'application/json' },
+        signal: expect.any(AbortSignal)
+      })
     );
   });
 
@@ -62,7 +65,10 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       'https://ord.example/inscription/insc123',
-      { headers: { Accept: 'application/json' } }
+      expect.objectContaining({
+        headers: { Accept: 'application/json' },
+        signal: expect.any(AbortSignal)
+      })
     );
   });
 
@@ -90,7 +96,10 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.example.com/inscription/insc123',
-      { headers: { Accept: 'application/json' } }
+      expect.objectContaining({
+        headers: { Accept: 'application/json' },
+        signal: expect.any(AbortSignal)
+      })
     );
   });
 
@@ -115,7 +124,10 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.example.com/inscription/insc123',
-      { headers: { Accept: 'application/json' } }
+      expect.objectContaining({
+        headers: { Accept: 'application/json' },
+        signal: expect.any(AbortSignal)
+      })
     );
   });
 
