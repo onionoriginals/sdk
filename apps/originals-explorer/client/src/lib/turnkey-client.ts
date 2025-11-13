@@ -242,7 +242,7 @@ export async function createWalletAccounts(
     curve: 'CURVE_SECP256K1' | 'CURVE_ED25519';
     pathFormat: 'PATH_FORMAT_BIP32';
     path: string;
-    addressFormat: 'ADDRESS_FORMAT_ETHEREUM' | 'ADDRESS_FORMAT_SOLANA';
+    addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR' | 'ADDRESS_FORMAT_SOLANA';
   }>,
   onExpired?: () => void
 ): Promise<void> {
@@ -291,7 +291,7 @@ export async function ensureWalletWithAccounts(
         curve: 'CURVE_SECP256K1' | 'CURVE_ED25519';
         pathFormat: 'PATH_FORMAT_BIP32';
         path: string;
-        addressFormat: 'ADDRESS_FORMAT_ETHEREUM' | 'ADDRESS_FORMAT_SOLANA';
+        addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR' | 'ADDRESS_FORMAT_SOLANA';
       }> = [];
 
       // Add missing Secp256k1 account if needed
@@ -300,7 +300,7 @@ export async function ensureWalletWithAccounts(
           curve: 'CURVE_SECP256K1',
           pathFormat: 'PATH_FORMAT_BIP32',
           path: "m/44'/0'/0'/0/0",
-          addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+          addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
         });
       }
 
