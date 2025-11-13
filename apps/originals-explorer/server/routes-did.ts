@@ -275,6 +275,24 @@ export function mountDIDRoutes(app: Express, authenticateUser: any, turnkeyClien
       const logEntries = Array.isArray(didLog) ? didLog : [didLog];
       const didLogJsonl = logEntries.map(entry => JSON.stringify(entry)).join('\n');
 
+      // Extract public keys from DID document to store in database
+      const verificationMethods = didDocument.verificationMethod || [];
+      const authKey = verificationMethods.find((vm: any) => vm.id === '#key-0')?.publicKeyMultibase || null;
+      const assertionKey = verificationMethods.find((vm: any) => vm.id === '#key-1')?.publicKeyMultibase || null;
+
+      // Extract update key from the first log entry's proof
+      let updateKey = null;
+      if (logEntries.length > 0 && logEntries[0].proof && Array.isArray(logEntries[0].proof)) {
+        const updateKeyProof = logEntries[0].proof[0];
+        if (updateKeyProof && updateKeyProof.verificationMethod) {
+          // Extract the did:key value from verificationMethod (format: "did:key:z...")
+          const didKeyMatch = updateKeyProof.verificationMethod.match(/did:key:(z[a-zA-Z0-9]+)/);
+          if (didKeyMatch) {
+            updateKey = didKeyMatch[1]; // Extract just the multibase key part (z...)
+          }
+        }
+      }
+
       // Check if user has temporary DID
       const hasTemporaryDid = user.did && user.did.startsWith('temp:');
 
@@ -286,17 +304,20 @@ export function mountDIDRoutes(app: Express, authenticateUser: any, turnkeyClien
           did: did,
           didDocument: didDocument,
           didLog: didLogJsonl,
-          didSlug: null,
-          authKeyId: user.authWalletId,
-          assertionKeyId: user.assertionWalletId,
-          updateKeyId: user.updateWalletId,
-          authKeyPublic: user.authKeyPublic,
-          assertionKeyPublic: user.assertionKeyPublic,
-          updateKeyPublic: user.updateKeyPublic,
+          didSlug: null, // Slug is embedded in the DID itself
+          authKeyId: null, // Wallet IDs not tracked - keys managed by Turnkey
+          assertionKeyId: null,
+          updateKeyId: null,
+          authKeyPublic: authKey,
+          assertionKeyPublic: assertionKey,
+          updateKeyPublic: updateKey,
           didCreatedAt: new Date(),
         });
 
         console.log(`✅ Successfully migrated user to real DID: ${did}`);
+        console.log(`   Auth key: ${authKey?.slice(0, 20)}...`);
+        console.log(`   Assertion key: ${assertionKey?.slice(0, 20)}...`);
+        console.log(`   Update key: ${updateKey?.slice(0, 20)}...`);
       } else {
         // Update existing DID
         // First get the user to find their ID
@@ -307,11 +328,14 @@ export function mountDIDRoutes(app: Express, authenticateUser: any, turnkeyClien
             message: `No user found for Turnkey sub-org ${user.turnkeySubOrgId}`
           });
         }
-        
+
         await storage.updateUser(existingUser.id, {
           did: did,
           didDocument: didDocument,
           didLog: didLogJsonl,
+          authKeyPublic: authKey,
+          assertionKeyPublic: assertionKey,
+          updateKeyPublic: updateKey,
         });
 
         console.log(`✅ Updated DID for user: ${did}`);
