@@ -1,0 +1,42 @@
+# Exclude legacy projects
+legacy/
+
+# Exclude test files and test dependencies
+**/__tests__/
+**/tests/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+playwright.config.ts
+**/playwright.config.ts
+
+# Exclude development files
+**/.replit
+**/replit.md
+**/*.md
+docs/
+tasks/
+
+# Exclude coverage and build artifacts
+coverage/
+**/coverage/
+**/dist/
+**/.next/
+**/node_modules/
+
+# Exclude local databases
+**/*.db
+**/local.db
+
+# Exclude sample/test data
+**/sample-assets.csv
+**/attached_assets/
+
+# Exclude scripts that aren't needed for production
+scripts/benchmark-*.ts
+scripts/cleanup-*.ts
+scripts/delete-*.ts
+scripts/wipe-*.ts
+scripts/verify-*.ts
+

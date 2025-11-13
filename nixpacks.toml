@@ -3,13 +3,22 @@ nixPkgs = ["bun"]
 
 [phases.install]
 # Install from root to resolve workspace dependencies like @originals/sdk
+# Use --frozen-lockfile for reproducible builds
 cmds = ["bun install --frozen-lockfile"]
 
 [phases.build]
-# Build the explorer app from root directory
-cmds = ["cd apps/originals-explorer && bun run build"]
+# Build SDK first (dependency), then the explorer app
+# This ensures @originals/sdk is built before the explorer tries to use it
+cmds = [
+  "cd packages/sdk && bun run build",
+  "cd ../../apps/originals-explorer && bun run build",
+  "# Verify SDK is accessible",
+  "test -f packages/sdk/dist/index.js && echo 'SDK built successfully' || exit 1",
+  "test -d apps/originals-explorer/node_modules/@originals/sdk && echo 'SDK workspace link exists' || echo 'Warning: SDK workspace link not found'"
+]
 
 [start]
 # Start the explorer app from root directory
-cmd = "cd apps/originals-explorer && bun run start"
+# Node.js will resolve @originals/sdk from node_modules/@originals/sdk (workspace symlink)
+cmd = "NODE_ENV=production node apps/originals-explorer/dist/index.js"
 

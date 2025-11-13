@@ -1,0 +1,59 @@
+# Exclude legacy projects (not needed for explorer deployment)
+legacy/
+
+# Exclude test files
+**/__tests__/
+**/tests/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+playwright.config.ts
+**/playwright.config.ts
+
+# Exclude development documentation
+**/*.md
+!README.md
+docs/
+tasks/
+
+# Exclude development configs
+**/.replit
+**/replit.md
+**/bunfig.test.toml
+
+# Exclude coverage and build artifacts (will be rebuilt)
+coverage/
+**/coverage/
+**/.next/
+
+# Exclude local databases
+**/*.db
+**/local.db
+
+# Exclude sample/test data
+**/sample-assets.csv
+**/attached_assets/
+
+# Exclude development scripts
+scripts/benchmark-*.ts
+scripts/cleanup-*.ts
+scripts/delete-*.ts
+scripts/wipe-*.ts
+scripts/verify-*.ts
+
+# Exclude git files
+.git/
+.gitignore
+
+# Exclude IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Exclude other configs not needed for build
+.eslintrc*
+.prettierrc*
+.editorconfig
+
