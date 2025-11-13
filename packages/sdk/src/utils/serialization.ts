@@ -30,14 +30,13 @@ const PRELOADED_CONTEXTS: Record<string, any> = {
   'https://originals.build/context': originalsContext
 };
 
-const nodeDocumentLoader = jsonld.documentLoaders.node();
 
 const defaultDocumentLoader: DocumentLoader = async (url: string) => {
   const preloaded = PRELOADED_CONTEXTS[url];
   if (preloaded) {
     return { documentUrl: url, document: preloaded, contextUrl: null };
   }
-  return nodeDocumentLoader(url);
+  throw new Error(`Document not found in PRELOADED_CONTEXTS: ${url}`);
 };
 
 export function serializeDIDDocument(didDoc: DIDDocument): string {

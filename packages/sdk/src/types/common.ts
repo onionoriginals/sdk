@@ -69,7 +69,7 @@ export interface ExternalSigner {
    * Get the verification method ID for this signer
    * @returns The verification method ID (e.g., "did:key:z6Mk...")
    */
-  getVerificationMethodId(): Promise<string> | string;
+  getVerificationMethodId(): string;
 }
 
 /**

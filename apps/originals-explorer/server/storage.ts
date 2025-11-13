@@ -14,6 +14,7 @@ export interface IStorage {
   // User methods
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
   getUserByPrivyId(privyUserId: string): Promise<User | undefined>;
   getUserByTurnkeyId(turnkeySubOrgId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
@@ -82,7 +83,8 @@ export interface IStorage {
 export class MemStorage implements IStorage {
   private users: Map<string, User>; // Key: did:webvh, Value: User
   private privyToDidMapping: Map<string, string>; // Key: Privy user ID, Value: did:webvh
-  private turnkeyToDidMapping: Map<string, string>; // Key: Turnkey sub-org ID, Value: did:webvh
+  private turnkeyToDidMapping: Map<string, string>; // Key: Turnkey sub-org ID, Value: did:webvh (legacy)
+  private emailToDidMapping: Map<string, string>; // Key: Email, Value: did:webvh
   private assets: Map<string, Asset>;
   private walletConnections: Map<string, WalletConnection>;
   private signingKeys: Map<string, SigningKey[]>;
@@ -94,6 +96,7 @@ export class MemStorage implements IStorage {
     this.users = new Map();
     this.privyToDidMapping = new Map();
     this.turnkeyToDidMapping = new Map();
+    this.emailToDidMapping = new Map();
     this.googleDriveImports = new Map();
     this.assets = new Map();
     this.walletConnections = new Map();

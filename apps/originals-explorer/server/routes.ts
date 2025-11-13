@@ -5,19 +5,22 @@ import { insertAssetSchema, insertAssetTypeSchema, insertWalletConnectionSchema 
 import { z } from "zod";
 import QRCode from "qrcode";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 import { OAuth2Client } from "google-auth-library";
 import { Turnkey } from "@turnkey/sdk-server";
 import cookieParser from "cookie-parser";
 import { signToken, verifyToken, getAuthCookieConfig, getClearAuthCookieConfig } from "./auth/jwt";
 import { initiateEmailAuth, verifyEmailAuth, cleanupSession } from "./auth/email-auth";
 import { originalsSdk } from "./originals";
-import { createUserDIDWebVH, publishDIDDocument } from "./did-webvh-service";
+import { publishDIDDocument } from "./did-webvh-service";
 import { OriginalsAsset } from "@originals/sdk";
 import multer from "multer";
 import { parse as csvParse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
 import { VerifiableCredential } from "@originals/sdk";
 import importRoutes from "./routes/import";
+import { mountDIDRoutes } from "./routes-did";
 
 // Temporary in-memory storage for OTP codes
 const otpStorage = new Map<string, { code: string; expires: number }>();
@@ -85,53 +88,6 @@ const turnkeyClient = new Turnkey({
 });
 
 /**
- * Create or retrieve a Turnkey sub-organization for a user
- * Each user gets their own sub-org for key isolation
- */
-async function ensureTurnkeySubOrg(email: string): Promise<string> {
-  try {
-    // Generate a unique name for the sub-org
-    const subOrgName = `user-${email.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
-
-    // Check if sub-org already exists
-    const subOrgs = await turnkeyClient.apiClient().getSubOrganizations({
-      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
-    });
-
-    const existing = subOrgs.subOrganizations?.find(
-      (org: any) => org.subOrganizationName === subOrgName
-    );
-
-    if (existing && existing.subOrganizationId) {
-      return existing.subOrganizationId;
-    }
-
-    // Create new sub-organization
-    const result = await turnkeyClient.apiClient().createSubOrganization({
-      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
-      subOrganizationName: subOrgName,
-      rootUsers: [{
-        userName: email,
-        userEmail: email,
-        apiKeys: [],
-        authenticators: [],
-        oauthProviders: [],
-      }],
-      rootQuorumThreshold: 1,
-    });
-
-    if (!result.subOrganizationId) {
-      throw new Error('Failed to create sub-organization');
-    }
-
-    return result.subOrganizationId;
-  } catch (error) {
-    console.error('Error creating Turnkey sub-organization:', error);
-    throw new Error(`Failed to create Turnkey sub-organization: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-/**
  * Authentication middleware using JWT from HTTP-only cookies
  * CRITICAL PR #102: Uses cookies (not localStorage) for security
  */
@@ -146,61 +102,40 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
 
     // Verify JWT token
     const payload = verifyToken(token);
-    const turnkeySubOrgId = payload.sub; // Turnkey sub-org ID (stable identifier)
+    const turnkeySubOrgId = payload.sub; // Turnkey organization ID (sub-org ID) - stable identifier
     const email = payload.email; // Email metadata
 
     // Check if user already exists by Turnkey sub-org ID
     let user = await storage.getUserByTurnkeyId(turnkeySubOrgId);
 
-    // If user doesn't exist, create user record with DID:WebVH
+    // If user doesn't exist, create user record with temporary DID
+    // User will create their actual DID via frontend signing flow
     if (!user) {
       console.log(`Creating user record for ${email}...`);
 
-      try {
-        // Create DID:WebVH using Turnkey-managed keys
-        const didResult = await createUserDIDWebVH(turnkeySubOrgId, turnkeyClient);
+      // Use temporary DID as placeholder until user creates real DID via frontend
+      // This ensures each user has a unique identifier in storage
+      const temporaryDid = `temp:turnkey:${turnkeySubOrgId}`;
 
-        // Create user with full DID information
-        // Map field names from didResult to storage schema
-        user = await storage.createUserWithDid(turnkeySubOrgId, email, didResult.did, {
-          did: didResult.did,
-          didDocument: didResult.didDocument,
-          authWalletId: didResult.authKeyId, // Account address for auth key
-          assertionWalletId: didResult.assertionKeyId, // Account address for assertion key
-          updateWalletId: didResult.updateKeyId, // Account address for update key
-          authKeyPublic: didResult.authKeyPublic,
-          assertionKeyPublic: didResult.assertionKeyPublic,
-          updateKeyPublic: didResult.updateKeyPublic,
-          didCreatedAt: didResult.didCreatedAt,
-          didSlug: didResult.didSlug,
-          didLog: didResult.didLog,
-        });
+      // Create user with temporary DID - they'll replace it via frontend signing
+      user = await storage.createUserWithDid(turnkeySubOrgId, email, temporaryDid, {
+        did: temporaryDid,
+        didDocument: null,
+        authKeyId: null,
+        assertionKeyId: null,
+        updateKeyId: null,
+        authKeyPublic: null,
+        assertionKeyPublic: null,
+        updateKeyPublic: null,
+        didCreatedAt: null,
+        didSlug: null,
+        didLog: null,
+      });
 
-        console.log(`✅ User created with DID:WebVH: ${didResult.did}`);
-        console.log(`   Turnkey sub-org: ${turnkeySubOrgId}`);
-        console.log(`   Auth key: ${didResult.authKeyId}`);
-        console.log(`   Assertion key: ${didResult.assertionKeyId}`);
-        console.log(`   Update key: ${didResult.updateKeyId}`);
-      } catch (didError) {
-        console.error('Failed to create DID:WebVH:', didError);
-        // Fall back to placeholder DID if DID creation fails
-        const placeholderDid = `temp:${turnkeySubOrgId}`;
-        user = await storage.createUserWithDid(turnkeySubOrgId, email, placeholderDid, {
-          did: placeholderDid,
-          didDocument: null,
-          authKeyId: null,
-          assertionKeyId: null,
-          updateKeyId: null,
-          authKeyPublic: null,
-          assertionKeyPublic: null,
-          updateKeyPublic: null,
-          didCreatedAt: new Date(),
-          didSlug: null,
-          didLog: null,
-        });
-        console.log(`⚠️ User created with placeholder DID due to error: ${placeholderDid}`);
-        console.error('DID creation error details:', didError);
-      }
+      console.log(`✅ User created: ${email}`);
+      console.log(`   Turnkey sub-org ID: ${turnkeySubOrgId}`);
+      console.log(`   Temporary DID: ${temporaryDid}`);
+      console.log(`   Real DID will be created via frontend signing flow`);
     }
 
     // Add user info to request with database ID as primary identifier
@@ -209,6 +144,7 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
       turnkeySubOrgId, // Turnkey sub-org ID for key operations
       email, // Email metadata
       did: user.did, // DID for display/lookup
+      sessionToken: payload.sessionToken, // User's Turnkey session token for API calls
     };
 
     next();
@@ -293,6 +229,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Exchange Turnkey session token for JWT cookie
+  // This enables browser-side Turnkey authentication while maintaining server-side auth
+  app.post("/api/auth/exchange-session", async (req, res) => {
+    try {
+      const { email, userId, sessionToken } = req.body;
+
+      if (!email || typeof email !== 'string') {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      if (!userId || typeof userId !== 'string') {
+        return res.status(400).json({ error: "User ID is required" });
+      }
+
+      if (!sessionToken || typeof sessionToken !== 'string') {
+        return res.status(400).json({ error: "Session token is required" });
+      }
+
+      // Sign JWT token with Turnkey organization ID as the subject (stable identifier)
+      // organizationId is the user's Turnkey sub-org ID
+      // Include session token so we can use user's credentials for Turnkey API calls
+      const token = signToken(userId, email, sessionToken);
+
+      // Set HTTP-only cookie
+      const cookieConfig = getAuthCookieConfig(token);
+      res.cookie(cookieConfig.name, cookieConfig.value, cookieConfig.options);
+
+      res.json({
+        success: true,
+        message: "Authentication successful",
+      });
+    } catch (error) {
+      console.error("Session exchange error:", error);
+      res.status(500).json({
+        error: "Failed to exchange session",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Logout endpoint - clears HTTP-only cookie
   app.post("/api/auth/logout", (_req, res) => {
     const clearConfig = getClearAuthCookieConfig();
@@ -302,6 +278,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Mount Google Drive import routes
   app.use("/api/import", importRoutes);
+
+  // Mount simplified DID routes (uses didwebvh-ts verification)
+  mountDIDRoutes(app, authenticateUser, turnkeyClient);
 
   // Healthcheck for Originals SDK integration
   app.get("/api/originals/health", async (_req, res) => {
@@ -326,25 +305,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // Get user's DID:WebVH (automatically created during authentication)
-  app.post("/api/user/ensure-did", authenticateUser, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      
-      // DID is automatically created during authentication, so just return it
-      return res.json({ 
-        did: user.did,
-        created: false // Always false since it's created during auth
-      });
-    } catch (error) {
-      console.error("Error getting user DID:", error);
-      return res.status(500).json({ 
-        error: "Failed to get DID",
-        message: error instanceof Error ? error.message : String(error)
-      });
     }
   });
 
@@ -416,6 +376,158 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error resolving DID:", error);
       res.status(500).json({ error: "Failed to resolve DID" });
+    }
+  });
+
+  // Prepare DID document for frontend signing
+  app.post("/api/did/prepare-document", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { publicKeys } = req.body;
+
+      if (!publicKeys || !publicKeys.auth || !publicKeys.assertion || !publicKeys.update) {
+        return res.status(400).json({
+          error: "Missing required public keys. Need auth, assertion, and update keys."
+        });
+      }
+
+      // Generate DID document structure without signing
+      const email = user.email;
+      const domain = process.env.DOMAIN || 'localhost:5001';
+      const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+      const baseUrl = `${protocol}://${domain}`;
+
+      // Create DID identifier
+      const did = `did:webvh:${domain}:${encodeURIComponent(email)}`;
+
+      // Create DID document structure
+      const didDocument = {
+        "@context": [
+          "https://www.w3.org/ns/did/v1",
+          "https://w3id.org/security/multikey/v1"
+        ],
+        id: did,
+        controller: did,
+        verificationMethod: [
+          {
+            id: `${did}#auth-key`,
+            type: "Multikey",
+            controller: did,
+            publicKeyMultibase: publicKeys.auth
+          },
+          {
+            id: `${did}#assertion-key`,
+            type: "Multikey",
+            controller: did,
+            publicKeyMultibase: publicKeys.assertion
+          }
+        ],
+        authentication: [`${did}#auth-key`],
+        assertionMethod: [`${did}#assertion-key`],
+        service: [
+          {
+            id: `${did}#originals`,
+            type: "OriginalsService",
+            serviceEndpoint: `${baseUrl}/api/did/${encodeURIComponent(did)}`
+          }
+        ]
+      };
+
+      res.json({
+        didDocument,
+        did,
+        updateKeyId: `${did}#update-key`,
+      });
+    } catch (error) {
+      console.error("Error preparing DID document:", error);
+      res.status(500).json({
+        error: "Failed to prepare DID document",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Prepare credential for frontend signing
+  app.post("/api/credentials/prepare", authenticateUser, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { assetId, issuerDID, subjectDID } = req.body;
+
+      if (!assetId) {
+        return res.status(400).json({
+          error: "Missing required field: assetId"
+        });
+      }
+
+      // Get asset from database
+      const asset = await storage.getAsset(assetId);
+
+      if (!asset) {
+        return res.status(404).json({ error: 'Asset not found' });
+      }
+
+      // Check ownership
+      if (asset.userId !== user.id) {
+        return res.status(403).json({ error: 'Not authorized to issue credentials for this asset' });
+      }
+
+      // Use user's DID as issuer if not provided
+      const issuer = issuerDID || user.did;
+
+      if (!issuer) {
+        return res.status(400).json({
+          error: 'Issuer DID not found. User must have a DID.'
+        });
+      }
+
+      // Use asset's current DID as subject
+      const subject = subjectDID || asset.didWebvh || asset.didPeer;
+
+      if (!subject) {
+        return res.status(400).json({
+          error: 'Subject DID not found. Asset must have a DID.'
+        });
+      }
+
+      // Create credential structure (W3C Verifiable Credential format)
+      const credential = {
+        "@context": [
+          "https://www.w3.org/2018/credentials/v1",
+          "https://w3id.org/security/suites/jws-2020/v1"
+        ],
+        type: ["VerifiableCredential", "OwnershipCredential"],
+        issuer: issuer,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: {
+          id: subject,
+          type: "DigitalAsset",
+          name: asset.name,
+          assetId: asset.id,
+          owner: issuer,
+          ownershipClaimed: new Date().toISOString()
+        }
+      };
+
+      // Create proof template (without proofValue which will be added after signing)
+      const proof = {
+        type: "DataIntegrityProof",
+        cryptosuite: "eddsa-jcs-2022",
+        verificationMethod: `${issuer}#assertion-key`,
+        proofPurpose: "assertionMethod",
+        created: new Date().toISOString()
+      };
+
+      res.json({
+        credential,
+        proof,
+        message: "Credential prepared for signing. Sign with assertion key."
+      });
+    } catch (error) {
+      console.error("Error preparing credential:", error);
+      res.status(500).json({
+        error: "Failed to prepare credential",
+        message: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 
@@ -901,314 +1013,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Publish asset to web (did:peer -> did:webvh)
-  app.post("/api/assets/:id/publish-to-web", authenticateUser, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      const assetId = req.params.id;
-      
-      // Get asset from database
-      const asset = await storage.getAsset(assetId);
-      
-      if (!asset) {
-        return res.status(404).json({ error: 'Asset not found' });
-      }
-      
-      // Check ownership
-      if (asset.userId !== user.id) {
-        return res.status(403).json({ error: 'Not authorized' });
-      }
-      
-      // Check current layer
-      if (asset.currentLayer !== 'did:peer') {
-        return res.status(400).json({ 
-          error: `Asset is already in ${asset.currentLayer} layer. Can only publish from did:peer.`
-        });
-      }
-      
-      // Verify asset has did:peer identifier
-      if (!asset.didPeer) {
-        return res.status(400).json({ 
-          error: 'Asset missing did:peer identifier. Cannot publish.' 
-        });
-      }
-      
-      // Verify user has a did:webvh
-      if (!user.did || !user.did.startsWith('did:webvh:')) {
-        return res.status(400).json({ 
-          error: 'User missing did:webvh identifier. Cannot publish.' 
-        });
-      }
-      
-      // Reconstruct OriginalsAsset from database
-      const resources = (asset.metadata as any)?.resources;
-      
-      if (!resources || !Array.isArray(resources) || resources.length === 0) {
-        return res.status(400).json({ 
-          error: 'Asset missing resources data. Cannot reconstruct for publishing.' 
-        });
-      }
-      
-      const originalsAsset = new OriginalsAsset(
-        resources,
-        asset.didDocument as any,
-        (asset.credentials as any) || []
-      );
-      
-      // Get user's Turnkey signer for signing credentials
-      let publisherSigner;
-      try {
-        const userData = await storage.getUserByDid(user.did);
-        if (!userData || !userData.updateKeyId) {
-          throw new Error('User missing update key for signing');
-        }
-
-        // Import Turnkey signer creation
-        const { createTurnkeySigner } = await import('./turnkey-signer');
-
-        // Create signer using user's update key
-        const verificationMethodId = `${user.did}#update-key`;
-        publisherSigner = await createTurnkeySigner(
-          user.turnkeySubOrgId,
-          userData.updateKeyId,
-          turnkeyClient,
-          verificationMethodId,
-          userData.updateKeyPublic
-        );
-      } catch (signerError: any) {
-        console.error('Failed to create signer:', signerError);
-        return res.status(500).json({
-          error: 'Failed to create credential signer',
-          details: signerError.message
-        });
-      }
-      
-      // Publish to web using SDK with publisher's DID and signer
-      let publishedAsset: OriginalsAsset;
-      try {
-        publishedAsset = await originalsSdk.lifecycle.publishToWeb(
-          originalsAsset,
-          publisherSigner // Use signer instead of domain
-        );
-        console.log('Published to web:', publishedAsset.id, 'by', user.did);
-      } catch (sdkError: any) {
-        console.error('Publish error:', sdkError);
-        return res.status(500).json({ 
-          error: 'Failed to publish to web',
-          details: sdkError.message 
-        });
-      }
-      
-      // Extract did:webvh from bindings (should be the user's DID)
-      const bindings = (publishedAsset as any).bindings || {};
-      const didWebvh = bindings['did:webvh'];
-      
-      if (!didWebvh) {
-        return res.status(500).json({ 
-          error: 'Failed to bind asset to did:webvh' 
-        });
-      }
-      
-      // Verify it matches the user's DID
-      if (didWebvh !== user.did) {
-        console.warn(`Warning: Published asset bound to ${didWebvh} but user DID is ${user.did}`);
-      }
-      
-      // Create a proper did:webvh document by updating the id field
-      const didWebvhDocument = {
-        ...publishedAsset.did,
-        id: didWebvh
-      };
-      
-      // Store original values for potential rollback
-      const originalDidDocument = asset.didDocument;
-      const originalCredentials = asset.credentials;
-      const originalProvenance = asset.provenance;
-      
-      // Update database with new layer and did:webvh
-      const updatedAsset = await storage.updateAsset(assetId, {
-        currentLayer: 'did:webvh',
-        didWebvh: didWebvh,
-        didDocument: didWebvhDocument as any,
-        credentials: publishedAsset.credentials as any,
-        provenance: publishedAsset.getProvenance() as any,
-        updatedAt: new Date()
-      });
-      
-      if (!updatedAsset) {
-        return res.status(500).json({ 
-          error: 'Failed to update asset in database' 
-        });
-      }
-      
-      // Issue ownership credential from user's DID to asset's DID
-      let ownershipCredential;
-      try {
-        // Get full user data to access their wallets
-        const userData = await storage.getUserByDid(user.did);
-        
-        if (!userData || !userData.assertionWalletId || !userData.assertionKeyPublic) {
-          throw new Error('User missing assertion key for signing');
-        }
-        
-        // Create ownership credential
-        const credentialSubject = {
-          id: didWebvh, // The asset's DID
-          owner: user.did, // The user's DID
-          assetType: 'OriginalsAsset',
-          title: asset.title,
-          publishedAt: new Date().toISOString(),
-          resources: publishedAsset.resources.map(r => ({
-            id: r.id,
-            hash: r.hash,
-            contentType: r.contentType
-          }))
-        };
-        
-        const unsignedCredential = await originalsSdk.credentials.createResourceCredential(
-          'ResourceCreated',
-          credentialSubject,
-          user.did // Issued by the user
-        );
-        
-        // Import Turnkey signer utilities
-        const { createTurnkeySigner } = await import('./turnkey-signer');
-
-        // Get verification method ID for the user's assertion key
-        const verificationMethodId = `${user.did}#assertion-key`;
-
-        // Create a signer for the user's assertion key
-        const userSigner = await createTurnkeySigner(
-          user.turnkeySubOrgId,
-          userData.assertionKeyId,
-          turnkeyClient,
-          verificationMethodId,
-          userData.assertionKeyPublic
-        );
-        
-        // Use SDK's external signer support to sign the credential
-        ownershipCredential = await originalsSdk.credentials.signCredentialWithExternalSigner(
-          unsignedCredential,
-          userSigner
-        );
-        
-        console.log(`✅ Ownership credential signed by user ${user.did} for asset ${didWebvh}`);
-      } catch (credError: any) {
-        console.error('Failed to issue ownership credential:', credError);
-        // Don't fail the whole operation, but log the error
-        console.warn('Asset published but ownership credential not issued');
-      }
-      
-      // Publish DID document to make it publicly accessible
-      try {
-        await publishDIDDocument({
-          did: didWebvh,
-          didDocument: didWebvhDocument,
-          didLog: publishedAsset.getProvenance()
-        });
-      } catch (publishError: any) {
-        console.error('Failed to publish DID document:', publishError);
-        // Rollback database changes - restore all original values
-        await storage.updateAsset(assetId, {
-          currentLayer: 'did:peer',
-          didWebvh: null,
-          didDocument: originalDidDocument,
-          credentials: originalCredentials,
-          provenance: originalProvenance,
-        });
-        return res.status(500).json({ 
-          error: 'Failed to publish DID document',
-          details: publishError.message 
-        });
-      }
-      
-      // Extract domain and path from DID for HTTP URLs
-      // Format with SCID: did:webvh:SCID:domain:path1:path2...
-      // Format without SCID: did:webvh:domain:path1:path2...
-      // HTTP URL should be: http://domain/path1/path2/... (SCID stripped if present)
-      const didParts = didWebvh.split(':');
-      if (didParts.length < 4) {
-        console.error('Invalid did:webvh format:', didWebvh);
-        return res.status(500).json({ 
-          error: 'Generated invalid did:webvh identifier' 
-        });
-      }
-      
-      // Detect if SCID is present (didwebvh-ts format)
-      // SCID is a multibase hash, typically starts with 'Q' or 'z' and is long
-      // Domain typically contains dots or is 'localhost'
-      let domainIndex: number;
-      let pathStartIndex: number;
-      
-      const part2 = didParts[2];
-      const part3 = didParts[3];
-      
-      // Check if part2 looks like an SCID (multibase hash) vs a domain
-      const isSCIDPresent = part2.length > 20 && /^[Qz]/.test(part2) && !part2.includes('.');
-      
-      if (isSCIDPresent && didParts.length >= 5) {
-        // Format: did:webvh:SCID:domain:path...
-        // didParts: ['did', 'webvh', 'SCID', 'domain', 'path1', 'path2', ...]
-        domainIndex = 3;
-        pathStartIndex = 4;
-      } else {
-        // Format: did:webvh:domain:path...
-        // didParts: ['did', 'webvh', 'domain', 'path1', 'path2', ...]
-        domainIndex = 2;
-        pathStartIndex = 3;
-      }
-      
-      const didDomainEncoded = didParts[domainIndex];
-      const didDomain = decodeURIComponent(didDomainEncoded);
-      
-      // Get all path segments after domain
-      const userPathSegments = didParts.slice(pathStartIndex);
-      const userPath = userPathSegments.join('/');
-      
-      // Use request protocol or environment variable
-      const protocol = process.env.APP_PROTOCOL || req.protocol || 'http';
-      
-      // Return response with DID-based resource URLs
-      res.json({
-        asset: updatedAsset,
-        originalsAsset: {
-          did: publishedAsset.id,
-          previousDid: asset.didPeer,
-          resources: publishedAsset.resources.map(r => {
-            // Extract multibase hash from DID-based URL
-            // Format: did:webvh:SCID:domain:path.../resources/multibase-hash
-            const didUrl = r.url || '';
-            const hashMatch = didUrl.match(/\/resources\/(.+)$/);
-            const multibaseHash = hashMatch ? hashMatch[1] : r.hash;
-            
-            return {
-              ...r,
-              // DID-based URL (primary) - includes SCID
-              url: r.url,
-              // HTTP URL (for browser access) - SCID stripped, domain decoded
-              httpUrl: `${protocol}://${didDomain}/${userPath}/resources/${multibaseHash}`
-            };
-          }),
-          provenance: publishedAsset.getProvenance()
-        },
-        resolverUrl: `${protocol}://${didDomain}/${userPath}/did.jsonld`,
-        ownershipCredential: ownershipCredential || null
-      });
-      
-    } catch (error: any) {
-      console.error("Error publishing asset to web:", error);
-      
-      if (error.message && error.message.includes('Invalid migration')) {
-        return res.status(400).json({ 
-          error: error.message 
-        });
-      }
-      
-      res.status(500).json({ 
-        error: "Internal server error",
-        details: error.message 
-      });
-    }
-  });
 
   // Asset Types routes
   app.get("/api/asset-types", authenticateUser, async (req, res) => {
@@ -1627,7 +1431,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { userSlug } = req.params;
       
-      // Look up user by DID slug
+      // First, check if file exists in public directory (preferred)
+      // Use same path resolution as webvh-integration.ts (process.cwd())
+      const publicDir = path.join(process.cwd(), 'public');
+      const filePath = path.join(publicDir, userSlug, "did.jsonl");
+      console.log('filePath', filePath);
+      if (fs.existsSync(filePath)) {
+        // Serve the file directly from filesystem
+        res.type("text/jsonl");
+        return res.sendFile(filePath);
+      }
+      
+      // Fallback: Look up user by DID slug in database
       const user = await storage.getUserByDidSlug(userSlug);
       
       if (!user?.didLog) {

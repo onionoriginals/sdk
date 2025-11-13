@@ -1,12 +1,18 @@
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useTurnkeySession } from "@/contexts/TurnkeySessionContext";
 import { apiRequest } from "@/lib/queryClient";
 import { CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Mail, Settings, LogOut, Plus, Key, Shield, Copy, ChevronDown, ChevronUp, Download } from "lucide-react";
+import { Mail, Settings, LogOut, Plus, Key, Shield, Copy, ChevronDown, ChevronUp, Download, Loader2 } from "lucide-react";
 import { Link } from "wouter";
 import { useState, useEffect } from "react";
+import { createDIDWithTurnkey } from "@/lib/turnkey-did-signer";
+import { getKeyByCurve } from "@/lib/turnkey-client";
+import { TurnkeySessionExpiredError } from "@/lib/turnkey-error-handler";
+import { extractKeysFromWallets } from "@/lib/key-utils";
+import { ensureWalletWithAccounts } from "@/lib/turnkey-client";
 
 export default function Profile() {
   const { user, isLoading, isAuthenticated, logout } = useAuth();
@@ -16,6 +22,21 @@ export default function Profile() {
   const [didLoading, setDidLoading] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
+
+  // Turnkey session from login
+  const turnkeySession = useTurnkeySession();
+
+  // Enhanced logout that also clears Turnkey session
+  const handleLogout = async () => {
+    // Clear Turnkey session first
+    turnkeySession.clearSession();
+    // Then logout (which will invalidate auth queries)
+    logout();
+    // Redirect to home after logout
+    setTimeout(() => {
+      window.location.href = '/';
+    }, 100);
+  };
 
   // Clear DID state when user changes or logs out
   useEffect(() => {
@@ -27,42 +48,166 @@ export default function Profile() {
     }
   }, [isAuthenticated, user?.id]);
 
-  // Auto-create DID when user is authenticated
+  // Check if user has DID when authenticated
   useEffect(() => {
     if (isAuthenticated && user && !did && !didLoading) {
-      ensureDid();
+      checkUserDid();
     }
   }, [isAuthenticated, user?.id]);
 
-  const ensureDid = async () => {
+  const checkUserDid = async () => {
     setDidLoading(true);
     try {
-      const res = await apiRequest("POST", "/api/user/ensure-did");
-      const data = await res.json();
-      
-      if (data.did) {
-        setDid(data.did);
-        setDidDocument(data.didDocument);
-        
-        if (data.created) {
-          toast({
-            title: "DID Created",
-            description: "Your decentralized identifier has been created and secured by Turnkey.",
-          });
-        }
+      // Check if user has a real DID (not a temporary placeholder)
+      const hasRealDid = user?.did && !user.did.startsWith('temp:');
 
-        // Generate QR code for the DID
-        const qrRes = await apiRequest("POST", "/api/qr-code", {
-          data: data.did,
-        });
-        const qrData = await qrRes.json();
-        setQrCodeUrl(qrData.qrCode);
+      if (hasRealDid) {
+        setDid(user.did);
+
+        // Try to fetch DID document
+        try {
+          const res = await apiRequest("GET", "/api/did/me");
+          const data = await res.json();
+          if (data.didDocument) {
+            setDidDocument(data.didDocument);
+
+            // Generate QR code
+            const qrRes = await apiRequest("POST", "/api/qr-code", {
+              data: user.did,
+            });
+            const qrData = await qrRes.json();
+            setQrCodeUrl(qrData.qrCode);
+          }
+        } catch (error) {
+          console.error("Error fetching DID document:", error);
+        }
       }
-    } catch (e: any) {
-      console.error("Failed to ensure DID:", e);
+      // User doesn't have DID yet - they can create one using their existing login session
+    } catch (error) {
+      console.error("Error checking user DID:", error);
+    } finally {
+      setDidLoading(false);
+    }
+  };
+
+  const handleCreateDid = async () => {
+    // Must have a Turnkey session from login
+    if (!turnkeySession.isAuthenticated || !turnkeySession.client || !turnkeySession.sessionToken) {
+      toast({
+        title: "Turnkey Session Required",
+        description: "Please log in again to create your DID. Your session may have expired.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setDidLoading(true);
+    try {
+      const turnkeyClient = turnkeySession.client;
+
+      toast({
+        title: "Creating Keys",
+        description: "Setting up your cryptographic keys...",
+      });
+
+      // Step 1: Ensure user has a wallet with the required accounts
+      // This will create the wallet and accounts if they don't exist
+      const wallets = await ensureWalletWithAccounts(
+        turnkeyClient,
+        turnkeySession.handleTokenExpired
+      );
+
+      // Update session with wallets (may be newly created)
+      turnkeySession.setSession({ wallets });
+
+      toast({
+        title: "Keys Ready",
+        description: "Creating your DID...",
+      });
+
+      // Step 2: Extract multibase-encoded public keys from wallets (client-side)
+      // This avoids server-side API calls and uses the keys we already have
+      const keys = extractKeysFromWallets(wallets);
+
+      if (!keys) {
+        throw new Error("Failed to extract public keys from wallets. Make sure you have at least 3 wallet accounts (1 Secp256k1 and 2 Ed25519).");
+      }
+
+      // Step 3: Get update key account from Turnkey wallets
+      const ed25519Keys = wallets.flatMap(wallet =>
+        wallet.accounts.filter(account => account.curve === 'CURVE_ED25519')
+      );
+      const updateKeyAccount = ed25519Keys.length > 1 ? ed25519Keys[1] : null;
+
+      if (!updateKeyAccount) {
+        throw new Error("Failed to find update key in Turnkey wallet");
+      }
+
+      // Step 4: Create DID log using didwebvh-ts with Turnkey signing
+      const domain = window.location.host;
+      // Use user ID (UUID) or Turnkey sub-org ID as unique identifier - never use email to avoid PII leakage
+      if (!user?.id && !user?.turnkeySubOrgId) {
+        throw new Error("User identifier not available. Please refresh the page and try again.");
+      }
+      const userSlug = user?.id || user?.turnkeySubOrgId!;
+      console.log('creating DID with slug', userSlug);
+      const { did, didDocument, didLog } = await createDIDWithTurnkey({
+        turnkeyClient,
+        updateKeyAccount,
+        authKeyPublic: keys.authKey,
+        assertionKeyPublic: keys.assertionKey,
+        updateKeyPublic: keys.updateKey,
+        domain,
+        slug: userSlug,
+        onExpired: turnkeySession.handleTokenExpired,
+      });
+
+      // Step 5: Submit DID log to backend for verification, storage, and filesystem save
+      const submitRes = await apiRequest("POST", "/api/did/submit-log", {
+        did,
+        didDocument,
+        didLog,
+      });
+
+      const submitData = await submitRes.json();
+
+      if (!submitData.success) {
+        throw new Error(submitData.error || "Failed to submit DID log");
+      }
+
+      // Success!
+      setDid(did);
+      setDidDocument(didDocument);
+
+      toast({
+        title: "DID Created",
+        description: "Your decentralized identifier has been created and verified!",
+      });
+
+      // Generate QR code
+      const qrRes = await apiRequest("POST", "/api/qr-code", {
+        data: did,
+      });
+      const qrData = await qrRes.json();
+      setQrCodeUrl(qrData.qrCode);
+
+    } catch (error: any) {
+      console.error("Failed to create DID:", error);
+
+      // Handle session expiration specifically
+      if (error instanceof TurnkeySessionExpiredError) {
+        toast({
+          title: "Session Expired",
+          description: "Your Turnkey session has expired. Redirecting to login...",
+          variant: "destructive",
+        });
+        // The handleTokenExpired callback will handle the redirect
+        return;
+      }
+
       toast({
         title: "Failed to create DID",
-        description: e?.message || "Please try again.",
+        description: error?.message || "Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -91,7 +236,7 @@ export default function Profile() {
       a.download = "did-document.json";
       a.click();
       URL.revokeObjectURL(url);
-      
+
       toast({
         title: "Downloaded",
         description: "DID document saved to your device",
@@ -156,7 +301,7 @@ export default function Profile() {
             {didLoading ? (
               <div className="mb-4 p-3 bg-blue-50 rounded-lg">
                 <div className="flex items-center gap-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
                   <span className="text-sm text-blue-900">Creating your DID...</span>
                 </div>
               </div>
@@ -215,9 +360,9 @@ export default function Profile() {
                   {qrCodeUrl && (
                     <div className="mt-3 pt-3 border-t border-blue-200">
                       <div className="text-xs text-gray-600 mb-2">Scan to share your DID</div>
-                      <img 
-                        src={qrCodeUrl} 
-                        alt="DID QR Code" 
+                      <img
+                        src={qrCodeUrl}
+                        alt="DID QR Code"
                         className="w-32 h-32 mx-auto bg-white p-2 rounded"
                         data-testid="profile-did-qr"
                       />
@@ -228,7 +373,7 @@ export default function Profile() {
                   {showKeys && didDocument && (
                     <div className="mt-3 pt-3 border-t border-blue-200 space-y-2">
                       <div className="text-xs font-semibold text-gray-700 mb-2">Verification Methods</div>
-                      
+
                       <div className="bg-white p-2 rounded border border-gray-200">
                         <div className="flex items-center gap-2 mb-1">
                           <Key className="w-3 h-3 text-orange-600" />
@@ -265,7 +410,69 @@ export default function Profile() {
                   )}
                 </div>
               </div>
-            ) : null}
+            ) : turnkeySession.isAuthenticated ? (
+              // User has existing Turnkey session from login - show simple "Create DID" button
+              <div className="mb-4">
+                <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-start gap-3 mb-3">
+                    <Shield className="w-5 h-5 text-blue-600 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-blue-900 mb-1">
+                        Ready to Create Your Decentralized ID
+                      </div>
+                      <div className="text-xs text-blue-800 mb-3">
+                        Your Turnkey session is active. Click below to create your DID with your own keys.
+                      </div>
+                      <Button
+                        onClick={handleCreateDid}
+                        disabled={didLoading}
+                        className="w-full"
+                        size="sm"
+                        data-testid="profile-create-did-button"
+                      >
+                        {didLoading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Creating DID...
+                          </>
+                        ) : (
+                          <>
+                            <Shield className="w-4 h-4 mr-2" />
+                            Create My DID
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              // User is not authenticated with Turnkey - ask them to log in
+              <div className="mb-4">
+                <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                  <div className="flex items-start gap-3">
+                    <Shield className="w-5 h-5 text-yellow-600 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-yellow-900 mb-1">
+                        Turnkey Session Required
+                      </div>
+                      <div className="text-xs text-yellow-800 mb-3">
+                        Please log in again to create your DID. Your session may have expired.
+                      </div>
+                      <Link href="/login?returnTo=/profile">
+                        <Button
+                          className="w-full"
+                          size="sm"
+                          variant="default"
+                        >
+                          Log In
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Settings */}
             <div className="flex items-center gap-3 mb-4 p-3 hover:bg-gray-50 rounded-lg transition-colors cursor-pointer">
@@ -274,9 +481,9 @@ export default function Profile() {
             </div>
 
             {/* Log out */}
-            <div 
+            <div
               className="flex items-center gap-3 mb-6 p-3 hover:bg-gray-50 rounded-lg transition-colors cursor-pointer"
-              onClick={logout}
+              onClick={handleLogout}
               data-testid="profile-logout-button"
             >
               <LogOut className="w-4 h-4 text-gray-500" />
@@ -295,7 +502,7 @@ export default function Profile() {
                   </span>
                 </div>
               </Link>
-              
+
               <Link href="/create">
                 <div className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg transition-colors cursor-pointer">
                   <Plus className="w-4 h-4 text-gray-500" />

@@ -6,39 +6,70 @@ import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/queryClient";
+import { useTurnkeyAuth } from "@/hooks/useTurnkeyAuth";
+import { useTurnkeySession } from "@/contexts/TurnkeySessionContext";
 
 type AuthStep = 'email' | 'code';
 
 export default function Login() {
   const { user, isLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
+  const turnkeyAuth = useTurnkeyAuth();
+  const { setSession, isAuthenticated: turnkeySessionIsAuthenticated } = useTurnkeySession();
 
   const [step, setStep] = useState<AuthStep>('email');
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [sessionId, setSessionId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Store return path and redirect after login
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const returnTo = params.get('returnTo') || '/';
+    const reason = params.get('reason');
+
     // Store where user should return to after login
     if (!isAuthenticated) {
-      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/';
       sessionStorage.setItem('loginReturnTo', returnTo);
+
+      // Show message if user was redirected due to session expiration
+      if (reason === 'session_expired') {
+        toast({
+          title: "Session Expired",
+          description: "Your Turnkey session has expired. Please log in again to refresh it.",
+          variant: "destructive",
+        });
+      }
     }
 
     // Redirect to return path after successful login
+    // BUT: If user came from session expiration OR Turnkey session is missing, allow them to login even if JWT is still valid
+    // This refreshes their Turnkey session while keeping their JWT session
     if (isAuthenticated && user) {
-      toast({
-        title: "Login Successful",
-        description: "Welcome back!",
-      });
+      // Check if Turnkey session is missing/expired (even if JWT is valid)
+      const needsTurnkeyRefresh = !turnkeySessionIsAuthenticated || reason === 'session_expired';
+      
+      // Only auto-redirect if user has BOTH JWT AND Turnkey session valid
+      // If Turnkey session is missing/expired, let user complete the login flow to refresh it
+      if (!needsTurnkeyRefresh) {
+        toast({
+          title: "Login Successful",
+          description: "Welcome back!",
+        });
 
-      const returnTo = sessionStorage.getItem('loginReturnTo') || '/';
-      sessionStorage.removeItem('loginReturnTo');
-      window.location.href = returnTo;
+        const returnTo = sessionStorage.getItem('loginReturnTo') || '/';
+        sessionStorage.removeItem('loginReturnTo');
+        window.location.href = returnTo;
+      } else if (!reason) {
+        // Show message if Turnkey session is missing but user wasn't explicitly redirected
+        toast({
+          title: "Session Refresh Needed",
+          description: "Your Turnkey session has expired. Please log in again to refresh it.",
+          variant: "destructive",
+        });
+      }
     }
-  }, [isAuthenticated, user, toast]);
+  }, [isAuthenticated, user, toast, turnkeySessionIsAuthenticated]);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,28 +95,26 @@ export default function Login() {
 
     setIsSubmitting(true);
     try {
-      const response = await apiRequest('POST', '/api/auth/initiate', { email });
+      // Use browser-side Turnkey OTP
+      const result = await turnkeyAuth.requestOtp(email);
 
-      if (response.ok) {
-        const data = await response.json();
-        setSessionId(data.sessionId);
+      if (result.success) {
         setStep('code');
         toast({
           title: "Verification Code Sent",
-          description: "Check your email for the verification code (or console in development).",
+          description: "Check your email for the verification code.",
         });
       } else {
-        const error = await response.json();
         toast({
           title: "Failed to Send Code",
-          description: error.details || "Please try again.",
+          description: result.error || "Please try again.",
           variant: "destructive",
         });
       }
     } catch (error) {
       toast({
         title: "Connection Error",
-        description: "Failed to connect to server.",
+        description: "Failed to initiate authentication.",
         variant: "destructive",
       });
     } finally {
@@ -108,24 +137,57 @@ export default function Login() {
 
     setIsSubmitting(true);
     try {
-      const response = await apiRequest('POST', '/api/auth/verify', {
-        sessionId,
-        code: code.trim(),
+      // Step 1: Verify OTP with browser-side Turnkey
+      const loginResult = await turnkeyAuth.verifyAndLogin(code.trim());
+
+      if (!loginResult.success) {
+        toast({
+          title: "Verification Failed",
+          description: loginResult.error || "Invalid code. Please try again.",
+          variant: "destructive",
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Step 2: Store Turnkey session in context for signing operations
+      setSession({
+        client: turnkeyAuth.turnkeyClient,
+        email: turnkeyAuth.email,
+        sessionToken: loginResult.sessionToken,
+        wallets: loginResult.wallets || [],
+      });
+
+      // Step 3: Exchange Turnkey session for JWT cookie
+      const response = await apiRequest('POST', '/api/auth/exchange-session', {
+        email: turnkeyAuth.email,
+        userId: loginResult.userId,
+        sessionToken: loginResult.sessionToken,
       });
 
       if (response.ok) {
-        // Success - auth hook will detect the cookie and redirect
+        // Success - JWT cookie is set, Turnkey session is stored
         toast({
-          title: "Verification Successful",
-          description: "Logging you in...",
+          title: "Login Successful",
+          description: "Welcome back!",
         });
-        // Force a page reload to pick up the new auth state
-        setTimeout(() => window.location.reload(), 500);
+        
+        // Check if we have a return path stored (from session refresh or normal login)
+        const returnTo = sessionStorage.getItem('loginReturnTo');
+        
+        if (returnTo) {
+          // Redirect to stored return path (handles both session refresh and normal login)
+          sessionStorage.removeItem('loginReturnTo');
+          window.location.href = returnTo;
+        } else {
+          // No return path - reload to pick up new auth state
+          setTimeout(() => window.location.reload(), 500);
+        }
       } else {
         const error = await response.json();
         toast({
-          title: "Verification Failed",
-          description: error.details || "Invalid code. Please try again.",
+          title: "Login Failed",
+          description: error.details || "Failed to complete login. Please try again.",
           variant: "destructive",
         });
       }
@@ -143,7 +205,6 @@ export default function Login() {
   const handleBack = () => {
     setStep('email');
     setCode('');
-    setSessionId('');
   };
 
   if (isLoading) {
@@ -217,15 +278,12 @@ export default function Login() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="code" className="text-sm font-medium text-gray-700">
-                  Verification Code
-                </Label>
                 <Input
                   id="code"
                   type="text"
                   placeholder="000000"
                   value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onChange={(e) => setCode(e.target.value.slice(0, 6))}
                   disabled={isSubmitting}
                   className="w-full text-center text-2xl tracking-widest font-mono"
                   autoComplete="one-time-code"
@@ -234,9 +292,6 @@ export default function Login() {
                   autoFocus
                   data-testid="code-input"
                 />
-                <p className="text-xs text-gray-500 text-center">
-                  In development, check the server console for the code
-                </p>
               </div>
 
               <Button

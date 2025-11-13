@@ -3,7 +3,14 @@ import { OriginalsSDK } from './core/OriginalsSDK.js';
 
 // Main exports
 export { OriginalsSDK } from './core/OriginalsSDK.js';
-export type { OriginalsSDKOptions } from './core/OriginalsSDK.js';
+export type { 
+  OriginalsSDKOptions,
+  OriginalResult,
+  CreateOriginalOptions,
+  UpdateOriginalOptions,
+  CreateDIDOriginalOptions,
+  UpdateDIDOriginalOptions
+} from './core/OriginalsSDK.js';
 export { OriginalsAsset } from './lifecycle/OriginalsAsset.js';
 export type { ProvenanceChain } from './lifecycle/OriginalsAsset.js';
 
@@ -13,6 +20,8 @@ export * from './types/index.js';
 // Manager exports
 export { DIDManager, type CreateWebVHOptions, type CreateWebVHResult } from './did/DIDManager.js';
 export { KeyManager } from './did/KeyManager.js';
+export { Ed25519Verifier } from './did/Ed25519Verifier.js';
+export * as encoding from './utils/encoding.js';
 export { CredentialManager } from './vc/CredentialManager.js';
 export { LifecycleManager } from './lifecycle/LifecycleManager.js';
 export { BitcoinManager } from './bitcoin/BitcoinManager.js';
