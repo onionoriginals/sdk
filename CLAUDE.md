@@ -230,13 +230,83 @@ throw new StructuredError('ERROR_CODE', 'User-friendly message');
 - Complex flows need end-to-end tests in `tests/integration/`
 - Security-sensitive code requires tests in `tests/security/`
 
+## WebVH Network Deployments
+
+The SDK supports three WebVH network deployments with different stability levels:
+
+### Network Tiers
+
+- **`pichu.originals.build`** (Production)
+  - **Stability**: Major releases only (X.0.0)
+  - **Use case**: Production applications requiring maximum stability
+  - **Default**: This is the default network
+
+- **`cleffa.originals.build`** (Staging)
+  - **Stability**: Minor releases (X.Y.0)
+  - **Use case**: Pre-production testing and staging environments
+
+- **`magby.originals.build`** (Development)
+  - **Stability**: All patch versions (X.Y.Z)
+  - **Use case**: Development and experimentation with latest features
+
+### Version Validation
+
+Each network enforces semantic versioning constraints:
+- **pichu**: Only accepts major releases (e.g., 1.0.0, 2.0.0)
+- **cleffa**: Accepts major and minor releases (e.g., 1.1.0, 2.5.0)
+- **magby**: Accepts all versions including patches (e.g., 1.2.3)
+
+### Network Selection
+
+You can select a network when configuring the SDK:
+
+```typescript
+// Use production network (default)
+const sdk = OriginalsSDK.create({
+  webvhNetwork: 'pichu', // or omit for default
+});
+
+// Use staging network
+const sdk = OriginalsSDK.create({
+  webvhNetwork: 'cleffa',
+});
+
+// Use development network
+const sdk = OriginalsSDK.create({
+  webvhNetwork: 'magby',
+});
+```
+
+When creating or migrating to did:webvh, the SDK will automatically use the configured network's domain. You can also explicitly provide a domain to override:
+
+```typescript
+// Uses configured network domain (e.g., pichu.originals.build)
+await sdk.did.createDIDWebVH({ paths: ['user', 'alice'] });
+
+// Explicitly override domain
+await sdk.did.createDIDWebVH({
+  domain: 'custom.example.com',
+  paths: ['user', 'alice']
+});
+```
+
+### Context URLs
+
+Each network has its own context URL:
+- `https://pichu.originals.build/context`
+- `https://cleffa.originals.build/context`
+- `https://magby.originals.build/context`
+
+All three networks use the same context document content, but are served from their respective domains.
+
 ## Configuration
 
 The SDK is configured via `OriginalsConfig`:
 
 ```typescript
 const sdk = OriginalsSDK.create({
-  network: 'mainnet' | 'testnet' | 'regtest' | 'signet',
+  network: 'mainnet' | 'testnet' | 'regtest' | 'signet', // Bitcoin network
+  webvhNetwork: 'pichu' | 'cleffa' | 'magby', // WebVH network (default: 'pichu')
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256',
   ordinalsProvider: new OrdMockProvider(), // Required for Bitcoin ops
   feeOracle?: customFeeOracle, // Optional dynamic fees

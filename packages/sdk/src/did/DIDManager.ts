@@ -1,4 +1,5 @@
 import { DIDDocument, OriginalsConfig, AssetResource, VerificationMethod, KeyPair, ExternalSigner, ExternalVerifier } from '../types';
+import { getNetworkDomain, DEFAULT_WEBVH_NETWORK } from '../types/network';
 import { BtcoDidResolver } from './BtcoDidResolver';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
 import { createBtcoDidDocument } from './createBtcoDidDocument';
@@ -61,9 +62,13 @@ export class DIDManager {
     return resolved as DIDDocument;
   }
 
-  async migrateToDIDWebVH(didDoc: DIDDocument, domain: string): Promise<DIDDocument> {
+  async migrateToDIDWebVH(didDoc: DIDDocument, domain?: string): Promise<DIDDocument> {
+    // Use provided domain or get default from configured network
+    const network = this.config.webvhNetwork || DEFAULT_WEBVH_NETWORK;
+    const targetDomain = domain || getNetworkDomain(network);
+
     // Flexible domain validation - allow development domains with ports
-    const normalized = String(domain || '').trim().toLowerCase();
+    const normalized = String(targetDomain || '').trim().toLowerCase();
     
     // Split domain and port if present
     const [domainPart, portPart] = normalized.split(':');
@@ -236,17 +241,21 @@ export class DIDManager {
    * @returns The created DID, document, log, and key pair (if generated)
    */
   async createDIDWebVH(options: CreateWebVHOptions): Promise<CreateWebVHResult> {
-    const { 
-      domain, 
-      keyPair: providedKeyPair, 
-      paths = [], 
-      portable = false, 
+    const {
+      domain: providedDomain,
+      keyPair: providedKeyPair,
+      paths = [],
+      portable = false,
       outputDir,
       externalSigner,
       externalVerifier,
       verificationMethods: providedVerificationMethods,
       updateKeys: providedUpdateKeys
     } = options;
+
+    // Use provided domain or get default from configured network
+    const network = this.config.webvhNetwork || DEFAULT_WEBVH_NETWORK;
+    const domain = providedDomain || getNetworkDomain(network);
 
     // Dynamically import didwebvh-ts to avoid module resolution issues
     const mod = await import('didwebvh-ts') as unknown as {
@@ -590,7 +599,7 @@ interface DIDLogEntry {
 type DIDLog = DIDLogEntry[];
 
 export interface CreateWebVHOptions {
-  domain: string;
+  domain?: string; // Optional - defaults to configured webvhNetwork domain
   keyPair?: KeyPair;
   paths?: string[];
   portable?: boolean;

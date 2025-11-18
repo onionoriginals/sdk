@@ -24,10 +24,15 @@ const PRELOADED_CONTEXTS: Record<string, any> = {
   'https://w3id.org/security/data-integrity/v2': dataIntegrityV2Context,
   'https://www.w3.org/ns/did/v1': didsContext,
   'https://w3id.org/security/suites/ed25519-2020/v1': ed255192020Context,
-  
+
   // Custom contexts
   'https://ordinals.plus/vocab/v1': ordinalsContext,
-  'https://originals.build/context': originalsContext
+
+  // Originals network contexts (all three networks use the same context document)
+  'https://originals.build/context': originalsContext, // Legacy
+  'https://pichu.originals.build/context': originalsContext, // Production
+  'https://cleffa.originals.build/context': originalsContext, // Staging
+  'https://magby.originals.build/context': originalsContext, // Development
 };
 
 
