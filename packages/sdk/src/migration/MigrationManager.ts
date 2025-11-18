@@ -40,6 +40,10 @@ export class MigrationManager {
   // private auditLogger: AuditLogger;
   private eventEmitter: EventEmitter;
 
+  // Temporary in-memory audit storage for v1.0 (unsigned records)
+  // Will be replaced by proper AuditLogger with signatures in v1.1
+  private inMemoryAuditRecords: Map<string, any[]>;
+
   // Migration operation handlers
   private peerToWebvh: PeerToWebvhMigration;
   private webvhToBtco: WebvhToBtcoMigration;
@@ -64,6 +68,9 @@ export class MigrationManager {
     // TODO: AuditLogger temporarily disabled for v1.0 release
     // this.auditLogger = new AuditLogger(config);
     this.eventEmitter = new EventEmitter();
+
+    // Initialize in-memory audit storage for v1.0
+    this.inMemoryAuditRecords = new Map();
 
     // Initialize migration operations
     this.peerToWebvh = new PeerToWebvhMigration(config, didManager, credentialManager, this.stateTracker);
@@ -189,7 +196,8 @@ export class MigrationManager {
       };
 
       // TODO: AuditLogger temporarily disabled for v1.0 release
-      // await this.auditLogger.logMigration(auditRecord);
+      // Store in-memory for v1.0 (unsigned, will be replaced with signed records in v1.1)
+      this.storeAuditRecordInMemory(auditRecord);
 
       // Clean up checkpoint after successful migration
       setTimeout(() => {
@@ -261,10 +269,10 @@ export class MigrationManager {
   /**
    * Get migration history for a DID
    * TODO: AuditLogger temporarily disabled for v1.0 release
+   * Returns in-memory audit records (unsigned) - will use proper AuditLogger in v1.1
    */
   async getMigrationHistory(did: string): Promise<any[]> {
-    // return await this.auditLogger.getMigrationHistory(did);
-    return [];
+    return this.inMemoryAuditRecords.get(did) || [];
   }
 
   /**
@@ -411,7 +419,8 @@ export class MigrationManager {
     };
 
     // TODO: AuditLogger temporarily disabled for v1.0 release
-    // await this.auditLogger.logMigration(auditRecord);
+    // Store in-memory for v1.0 (unsigned, will be replaced with signed records in v1.1)
+    this.storeAuditRecordInMemory(auditRecord);
 
     return {
       migrationId,
@@ -452,6 +461,25 @@ export class MigrationManager {
     }
 
     throw new Error(`Unsupported migration path: ${sourceLayer} → ${options.targetLayer}`);
+  }
+
+  /**
+   * Store audit record in memory for v1.0
+   * Stores by both source and target DID for easy lookup
+   * TODO: Remove in v1.1 when AuditLogger is re-enabled with signatures
+   */
+  private storeAuditRecordInMemory(record: any): void {
+    // Store by source DID
+    const sourceRecords = this.inMemoryAuditRecords.get(record.sourceDid) || [];
+    sourceRecords.push(record);
+    this.inMemoryAuditRecords.set(record.sourceDid, sourceRecords);
+
+    // Also store by target DID if available
+    if (record.targetDid) {
+      const targetRecords = this.inMemoryAuditRecords.get(record.targetDid) || [];
+      targetRecords.push(record);
+      this.inMemoryAuditRecords.set(record.targetDid, targetRecords);
+    }
   }
 
   /**
