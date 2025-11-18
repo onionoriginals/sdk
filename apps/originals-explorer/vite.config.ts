@@ -51,12 +51,6 @@ export default defineConfig({
     commonjsOptions: {
       transformMixedEsModules: true,
     },
-    rollupOptions: {
-      // Externalize the SDK package to avoid polyfill transformation issues
-      // The SDK uses Buffer as a global which conflicts with vite-plugin-node-polyfills
-      // The SDK will need to be loaded separately at runtime or bundled differently
-      external: ['@originals/sdk'],
-    },
   },
   server: {
     fs: {
