@@ -21,7 +21,9 @@ import { ValidationPipeline } from './validation/ValidationPipeline';
 import { CheckpointManager } from './checkpoint/CheckpointManager';
 import { RollbackManager } from './rollback/RollbackManager';
 import { StateTracker } from './state/StateTracker';
-import { AuditLogger } from './audit/AuditLogger';
+// TODO: AuditLogger temporarily disabled for v1.0 release
+// Will be re-enabled in v1.1 with proper Ed25519 digital signatures
+// import { AuditLogger } from './audit/AuditLogger';
 import { PeerToWebvhMigration } from './operations/PeerToWebvhMigration';
 import { WebvhToBtcoMigration } from './operations/WebvhToBtcoMigration';
 import { PeerToBtcoMigration } from './operations/PeerToBtcoMigration';
@@ -34,7 +36,8 @@ export class MigrationManager {
   private checkpointManager: CheckpointManager;
   private rollbackManager: RollbackManager;
   private stateTracker: StateTracker;
-  private auditLogger: AuditLogger;
+  // TODO: AuditLogger temporarily disabled for v1.0 release
+  // private auditLogger: AuditLogger;
   private eventEmitter: EventEmitter;
 
   // Migration operation handlers
@@ -58,7 +61,8 @@ export class MigrationManager {
     this.checkpointManager = new CheckpointManager(config, didManager, credentialManager);
     this.stateTracker = new StateTracker(config);
     this.rollbackManager = new RollbackManager(config, this.checkpointManager, didManager);
-    this.auditLogger = new AuditLogger(config);
+    // TODO: AuditLogger temporarily disabled for v1.0 release
+    // this.auditLogger = new AuditLogger(config);
     this.eventEmitter = new EventEmitter();
 
     // Initialize migration operations
@@ -184,7 +188,8 @@ export class MigrationManager {
         metadata: options.metadata || {}
       };
 
-      await this.auditLogger.logMigration(auditRecord);
+      // TODO: AuditLogger temporarily disabled for v1.0 release
+      // await this.auditLogger.logMigration(auditRecord);
 
       // Clean up checkpoint after successful migration
       setTimeout(() => {
@@ -255,9 +260,11 @@ export class MigrationManager {
 
   /**
    * Get migration history for a DID
+   * TODO: AuditLogger temporarily disabled for v1.0 release
    */
   async getMigrationHistory(did: string): Promise<any[]> {
-    return await this.auditLogger.getMigrationHistory(did);
+    // return await this.auditLogger.getMigrationHistory(did);
+    return [];
   }
 
   /**
@@ -403,7 +410,8 @@ export class MigrationManager {
       metadata: options.metadata || {}
     };
 
-    await this.auditLogger.logMigration(auditRecord);
+    // TODO: AuditLogger temporarily disabled for v1.0 release
+    // await this.auditLogger.logMigration(auditRecord);
 
     return {
       migrationId,
