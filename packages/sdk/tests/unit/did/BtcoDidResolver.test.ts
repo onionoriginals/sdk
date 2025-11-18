@@ -274,10 +274,10 @@ describe('BtcoDidResolver', () => {
 
   test('network prefixes mapping via private getDidPrefix', () => {
     const resolver = new BtcoDidResolver({ provider });
-    const prefixTestnet = (resolver as any).getDidPrefix('testnet');
+    const prefixRegtest = (resolver as any).getDidPrefix('regtest');
     const prefixSignet = (resolver as any).getDidPrefix('signet');
     const prefixMain = (resolver as any).getDidPrefix('mainnet');
-    expect(prefixTestnet).toBe('did:btco:test');
+    expect(prefixRegtest).toBe('did:btco:reg');
     expect(prefixSignet).toBe('did:btco:sig');
     expect(prefixMain).toBe('did:btco');
   });
@@ -353,15 +353,15 @@ describe('BtcoDidResolver branches', () => {
   });
 
   test('valid did doc selected as latest and network prefixes', async () => {
-    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:test:2' }));
+    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:reg:2' }));
     const provider = makeProvider({
       getSatInfo: async () => ({ inscription_ids: ['ins-a', 'ins-b'] }),
-      getMetadata: async (id: string) => ({ '@context': ['https://www.w3.org/ns/did/v1'], id: id === 'ins-b' ? 'did:btco:test:2' : 'did:btco:test:999' })
+      getMetadata: async (id: string) => ({ '@context': ['https://www.w3.org/ns/did/v1'], id: id === 'ins-b' ? 'did:btco:reg:2' : 'did:btco:reg:999' })
     });
     const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:test:2');
-    expect(res.didDocument?.id).toBe('did:btco:test:2');
-    expect(res.resolutionMetadata.network).toBe('test');
+    const res = await r.resolve('did:btco:reg:2');
+    expect(res.didDocument?.id).toBe('did:btco:reg:2');
+    expect(res.resolutionMetadata.network).toBe('reg');
   });
 
   test('deactivated content with flame emoji', async () => {

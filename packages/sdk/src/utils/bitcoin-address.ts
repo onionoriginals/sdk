@@ -3,7 +3,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 /**
  * Bitcoin network types supported by the validation
  */
-export type BitcoinNetwork = 'mainnet' | 'testnet' | 'regtest' | 'signet';
+export type BitcoinNetwork = 'mainnet' | 'regtest' | 'signet';
 
 /**
  * Maps our network names to bitcoinjs-lib network configurations
@@ -12,8 +12,6 @@ const getNetwork = (network: BitcoinNetwork): bitcoin.Network => {
   switch (network) {
     case 'mainnet':
       return bitcoin.networks.bitcoin;
-    case 'testnet':
-      return bitcoin.networks.testnet;
     case 'regtest':
       // Regtest uses testnet parameters but with bcrt prefix
       // However, since many regtest addresses in tests use testnet format,
@@ -36,7 +34,7 @@ const getNetwork = (network: BitcoinNetwork): bitcoin.Network => {
  * - Network prefix validation
  * 
  * @param address - The Bitcoin address to validate
- * @param network - The network to validate against ('mainnet', 'testnet', 'regtest', 'signet')
+ * @param network - The network to validate against ('mainnet', 'regtest', 'signet')
  * @returns true if the address is valid for the network
  * @throws Error with descriptive message if validation fails
  * 

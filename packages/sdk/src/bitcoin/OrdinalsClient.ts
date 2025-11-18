@@ -6,7 +6,7 @@ import { hexToBytes } from '../utils/encoding';
 export class OrdinalsClient {
   constructor(
     private rpcUrl: string,
-    private network: 'mainnet' | 'testnet' | 'regtest' | 'signet'
+    private network: 'mainnet' | 'regtest' | 'signet'
   ) {}
 
   async getInscriptionById(id: string): Promise<OrdinalsInscription | null> {

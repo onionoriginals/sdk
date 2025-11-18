@@ -1,4 +1,5 @@
 import { DIDDocument, OriginalsConfig, AssetResource, VerificationMethod, KeyPair, ExternalSigner, ExternalVerifier } from '../types';
+import { getNetworkDomain, DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH } from '../types/network';
 import { BtcoDidResolver } from './BtcoDidResolver';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
 import { createBtcoDidDocument } from './createBtcoDidDocument';
@@ -61,9 +62,13 @@ export class DIDManager {
     return resolved as DIDDocument;
   }
 
-  async migrateToDIDWebVH(didDoc: DIDDocument, domain: string): Promise<DIDDocument> {
+  async migrateToDIDWebVH(didDoc: DIDDocument, domain?: string): Promise<DIDDocument> {
+    // Use provided domain or get default from configured network
+    const network = this.config.webvhNetwork || DEFAULT_WEBVH_NETWORK;
+    const targetDomain = domain || getNetworkDomain(network);
+
     // Flexible domain validation - allow development domains with ports
-    const normalized = String(domain || '').trim().toLowerCase();
+    const normalized = String(targetDomain || '').trim().toLowerCase();
     
     // Split domain and port if present
     const [domainPart, portPart] = normalized.split(':');
@@ -119,8 +124,15 @@ export class DIDManager {
       throw new Error(`Satoshi identifier must be within Bitcoin's total supply (0 to ${MAX_SATOSHI_SUPPLY.toLocaleString()})`);
     }
 
-    const net = this.config.network || 'mainnet';
-    const network = (net === 'regtest' ? 'signet' : net) as any;
+    // Determine Bitcoin network from WebVH network configuration if available
+    // This ensures consistent environment mapping: magby→regtest, cleffa→signet, pichu→mainnet
+    let network: 'mainnet' | 'regtest' | 'signet';
+    if (this.config.webvhNetwork) {
+      network = getBitcoinNetworkForWebVH(this.config.webvhNetwork);
+    } else {
+      // Fall back to explicit network config
+      network = this.config.network || 'mainnet';
+    }
 
     // Try to carry over the first multikey VM if present
     const firstVm = (didDoc.verificationMethod && didDoc.verificationMethod[0]) as VerificationMethod | undefined;
@@ -144,7 +156,7 @@ export class DIDManager {
     if (publicKey && keyType) {
       btcoDoc = createBtcoDidDocument(satoshi, network as any, { publicKey, keyType });
     } else {
-      const prefix = network === 'mainnet' ? 'did:btco:' : network === 'testnet' ? 'did:btco:test:' : 'did:btco:sig:';
+      const prefix = network === 'mainnet' ? 'did:btco:' : network === 'regtest' ? 'did:btco:reg:' : 'did:btco:sig:';
       btcoDoc = {
         '@context': ['https://www.w3.org/ns/did/v1'],
         id: prefix + String(satoshi)
@@ -220,7 +232,7 @@ export class DIDManager {
 
   createBtcoDidDocument(
     satNumber: number | string,
-    network: 'mainnet' | 'testnet' | 'signet',
+    network: 'mainnet' | 'regtest' | 'signet',
     options: Parameters<typeof createBtcoDidDocument>[2]
   ): DIDDocument {
     return createBtcoDidDocument(satNumber, network, options as any);
@@ -236,17 +248,21 @@ export class DIDManager {
    * @returns The created DID, document, log, and key pair (if generated)
    */
   async createDIDWebVH(options: CreateWebVHOptions): Promise<CreateWebVHResult> {
-    const { 
-      domain, 
-      keyPair: providedKeyPair, 
-      paths = [], 
-      portable = false, 
+    const {
+      domain: providedDomain,
+      keyPair: providedKeyPair,
+      paths = [],
+      portable = false,
       outputDir,
       externalSigner,
       externalVerifier,
       verificationMethods: providedVerificationMethods,
       updateKeys: providedUpdateKeys
     } = options;
+
+    // Use provided domain or get default from configured network
+    const network = this.config.webvhNetwork || DEFAULT_WEBVH_NETWORK;
+    const domain = providedDomain || getNetworkDomain(network);
 
     // Dynamically import didwebvh-ts to avoid module resolution issues
     const mod = await import('didwebvh-ts') as unknown as {
@@ -590,7 +606,7 @@ interface DIDLogEntry {
 type DIDLog = DIDLogEntry[];
 
 export interface CreateWebVHOptions {
-  domain: string;
+  domain?: string; // Optional - defaults to configured webvhNetwork domain
   keyPair?: KeyPair;
   paths?: string[];
   portable?: boolean;
