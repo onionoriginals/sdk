@@ -17,7 +17,7 @@ describe('Telemetry Integration', () => {
     };
     
     config = {
-      network: 'testnet',
+      network: 'regtest',
       defaultKeyType: 'ES256K',
       logging: {
         level: 'debug',
@@ -52,7 +52,7 @@ describe('Telemetry Integration', () => {
   describe('lifecycle operations with logging', () => {
     test('should log asset creation', async () => {
       const sdk = OriginalsSDK.create({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
           level: 'info',
@@ -88,7 +88,7 @@ describe('Telemetry Integration', () => {
     
     test('should log with performance timing', async () => {
       const sdk = OriginalsSDK.create({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
           level: 'debug',
@@ -126,7 +126,7 @@ describe('Telemetry Integration', () => {
   describe('event logging integration', () => {
     test('should automatically log events', async () => {
       const sdk = OriginalsSDK.create({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
           level: 'info',
@@ -163,7 +163,7 @@ describe('Telemetry Integration', () => {
   describe('metrics collection', () => {
     test('should collect metrics from lifecycle operations', async () => {
       const sdk = OriginalsSDK.create({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K',
         metrics: {
           enabled: true
@@ -191,7 +191,7 @@ describe('Telemetry Integration', () => {
     
     test('should export metrics in JSON format', async () => {
       const sdk = OriginalsSDK.create({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K'
       });
       
@@ -218,7 +218,7 @@ describe('Telemetry Integration', () => {
     
     test('should export metrics in Prometheus format', async () => {
       const sdk = OriginalsSDK.create({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K'
       });
       
@@ -244,7 +244,7 @@ describe('Telemetry Integration', () => {
   describe('error logging', () => {
     test('should log errors during operations', async () => {
       const sdk = OriginalsSDK.create({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
           level: 'error',
@@ -268,7 +268,7 @@ describe('Telemetry Integration', () => {
     
     test('should record error metrics', async () => {
       const sdk = OriginalsSDK.create({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K'
       });
       
@@ -289,7 +289,7 @@ describe('Telemetry Integration', () => {
   describe('child loggers', () => {
     test('should use hierarchical context in logs', async () => {
       const sdk = OriginalsSDK.create({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
           level: 'info',
@@ -310,7 +310,7 @@ describe('Telemetry Integration', () => {
   describe('configuration options', () => {
     test('should respect log level configuration', () => {
       const sdk = new OriginalsSDK({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
           level: 'warn',
@@ -331,7 +331,7 @@ describe('Telemetry Integration', () => {
     
     test('should support custom event logging configuration', async () => {
       const sdk = OriginalsSDK.create({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
           level: 'info',
@@ -368,7 +368,7 @@ describe('Telemetry Integration', () => {
   describe('data sanitization', () => {
     test('should sanitize sensitive data in logs', () => {
       const sdk = new OriginalsSDK({
-        network: 'testnet',
+        network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
           level: 'info',
