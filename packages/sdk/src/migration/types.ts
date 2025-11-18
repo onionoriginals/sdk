@@ -203,7 +203,7 @@ export interface MigrationResult {
   state: MigrationStateEnum;
   duration: number;
   cost: CostEstimate;
-  auditRecord: MigrationAuditRecord;
+  auditRecord?: MigrationAuditRecord;  // Optional - undefined when AuditLogger disabled (v1.0)
   error?: MigrationError;
 }
 
