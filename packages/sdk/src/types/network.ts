@@ -2,12 +2,14 @@
  * WebVH Network Configuration
  *
  * Defines the three deployment networks for the Originals Protocol:
- * - magby: Development network (patch versions)
- * - cleffa: Staging network (minor versions)
- * - pichu: Production network (major versions)
+ * - magby: Development network (patch versions) → Bitcoin regtest
+ * - cleffa: Staging network (minor versions) → Bitcoin signet
+ * - pichu: Production network (major versions) → Bitcoin mainnet
  */
 
 export type WebVHNetworkName = 'magby' | 'cleffa' | 'pichu';
+
+export type BitcoinNetworkName = 'mainnet' | 'testnet' | 'regtest' | 'signet';
 
 export type VersionStability = 'patch' | 'minor' | 'major';
 
@@ -17,6 +19,7 @@ export interface WebVHNetworkConfig {
   stability: VersionStability;
   description: string;
   contextUrl: string;
+  bitcoinNetwork: BitcoinNetworkName; // Corresponding Bitcoin network for did:btco migrations
 }
 
 /**
@@ -29,6 +32,7 @@ export const WEBVH_NETWORKS: Record<WebVHNetworkName, WebVHNetworkConfig> = {
     stability: 'patch',
     description: 'Development network - accepts all patch versions (most unstable)',
     contextUrl: 'https://magby.originals.build/context',
+    bitcoinNetwork: 'regtest', // Development → regtest
   },
   cleffa: {
     name: 'cleffa',
@@ -36,6 +40,7 @@ export const WEBVH_NETWORKS: Record<WebVHNetworkName, WebVHNetworkConfig> = {
     stability: 'minor',
     description: 'Staging network - accepts minor releases',
     contextUrl: 'https://cleffa.originals.build/context',
+    bitcoinNetwork: 'signet', // Staging → signet
   },
   pichu: {
     name: 'pichu',
@@ -43,6 +48,7 @@ export const WEBVH_NETWORKS: Record<WebVHNetworkName, WebVHNetworkConfig> = {
     stability: 'major',
     description: 'Production network - accepts major releases only (most stable)',
     contextUrl: 'https://pichu.originals.build/context',
+    bitcoinNetwork: 'mainnet', // Production → mainnet
   },
 };
 
@@ -132,4 +138,41 @@ export function getRecommendedNetworkForVersion(version: string): WebVHNetworkNa
     return 'cleffa';
   }
   return 'magby';
+}
+
+/**
+ * Get the corresponding Bitcoin network for a WebVH network
+ * This ensures consistent environment mapping across the stack:
+ * - magby (dev) → regtest (dev)
+ * - cleffa (staging) → signet (staging)
+ * - pichu (production) → mainnet (production)
+ *
+ * @param webvhNetwork - WebVH network name
+ * @returns Corresponding Bitcoin network name
+ */
+export function getBitcoinNetworkForWebVH(webvhNetwork: WebVHNetworkName): BitcoinNetworkName {
+  return getNetworkConfig(webvhNetwork).bitcoinNetwork;
+}
+
+/**
+ * Get the WebVH network that corresponds to a Bitcoin network
+ * This is the reverse mapping of getBitcoinNetworkForWebVH
+ *
+ * @param bitcoinNetwork - Bitcoin network name
+ * @returns Corresponding WebVH network name, or undefined if no mapping exists
+ */
+export function getWebVHNetworkForBitcoin(bitcoinNetwork: BitcoinNetworkName): WebVHNetworkName | undefined {
+  switch (bitcoinNetwork) {
+    case 'mainnet':
+      return 'pichu';
+    case 'signet':
+      return 'cleffa';
+    case 'regtest':
+      return 'magby';
+    case 'testnet':
+      // Testnet doesn't have a direct WebVH mapping, could default to cleffa or return undefined
+      return undefined;
+    default:
+      return undefined;
+  }
 }

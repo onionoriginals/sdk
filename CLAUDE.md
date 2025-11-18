@@ -236,17 +236,22 @@ The SDK supports three WebVH network deployments with different stability levels
 
 ### Network Tiers
 
+Each WebVH network maps to a corresponding Bitcoin network for consistent environment configuration across the entire stack:
+
 - **`pichu.originals.build`** (Production)
   - **Stability**: Major releases only (X.0.0)
+  - **Bitcoin Network**: `mainnet`
   - **Use case**: Production applications requiring maximum stability
   - **Default**: This is the default network
 
 - **`cleffa.originals.build`** (Staging)
   - **Stability**: Minor releases (X.Y.0)
+  - **Bitcoin Network**: `signet`
   - **Use case**: Pre-production testing and staging environments
 
 - **`magby.originals.build`** (Development)
   - **Stability**: All patch versions (X.Y.Z)
+  - **Bitcoin Network**: `regtest`
   - **Use case**: Development and experimentation with latest features
 
 ### Version Validation
@@ -298,6 +303,27 @@ Each network has its own context URL:
 - `https://magby.originals.build/context`
 
 All three networks use the same context document content, but are served from their respective domains.
+
+### Bitcoin Network Mapping
+
+When migrating assets from `did:webvh` to `did:btco`, the SDK automatically uses the Bitcoin network that corresponds to your configured WebVH network:
+
+```typescript
+const sdk = OriginalsSDK.create({
+  webvhNetwork: 'magby', // Development network
+});
+
+// When migrating to did:btco, automatically uses Bitcoin regtest
+await sdk.did.migrateToDIDBTCO(didDoc, satoshi);
+// Creates: did:btco:reg:123 (regtest network)
+```
+
+The mapping ensures consistent environments:
+- **magby** (dev) → **regtest** (Bitcoin dev network)
+- **cleffa** (staging) → **signet** (Bitcoin test network)
+- **pichu** (production) → **mainnet** (Bitcoin production)
+
+This eliminates configuration errors and ensures that your development environment uses regtest, staging uses signet, and production uses mainnet automatically.
 
 ## Configuration
 

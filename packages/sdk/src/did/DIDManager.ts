@@ -1,5 +1,5 @@
 import { DIDDocument, OriginalsConfig, AssetResource, VerificationMethod, KeyPair, ExternalSigner, ExternalVerifier } from '../types';
-import { getNetworkDomain, DEFAULT_WEBVH_NETWORK } from '../types/network';
+import { getNetworkDomain, DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH } from '../types/network';
 import { BtcoDidResolver } from './BtcoDidResolver';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
 import { createBtcoDidDocument } from './createBtcoDidDocument';
@@ -124,8 +124,16 @@ export class DIDManager {
       throw new Error(`Satoshi identifier must be within Bitcoin's total supply (0 to ${MAX_SATOSHI_SUPPLY.toLocaleString()})`);
     }
 
-    const net = this.config.network || 'mainnet';
-    const network = (net === 'regtest' ? 'signet' : net) as any;
+    // Determine Bitcoin network from WebVH network configuration if available
+    // This ensures consistent environment mapping: magby→regtest, cleffa→signet, pichu→mainnet
+    let network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
+    if (this.config.webvhNetwork) {
+      network = getBitcoinNetworkForWebVH(this.config.webvhNetwork);
+    } else {
+      // Fall back to explicit network config (legacy behavior)
+      const net = this.config.network || 'mainnet';
+      network = (net === 'regtest' ? 'signet' : net) as any;
+    }
 
     // Try to carry over the first multikey VM if present
     const firstVm = (didDoc.verificationMethod && didDoc.verificationMethod[0]) as VerificationMethod | undefined;

@@ -7,7 +7,10 @@ import {
   getNetworkContextUrl,
   validateVersionForNetwork,
   getRecommendedNetworkForVersion,
+  getBitcoinNetworkForWebVH,
+  getWebVHNetworkForBitcoin,
   type WebVHNetworkName,
+  type BitcoinNetworkName,
 } from '../../../src/types/network';
 
 describe('Network Configuration', () => {
@@ -176,6 +179,81 @@ describe('Network Configuration', () => {
       expect(getRecommendedNetworkForVersion('1.0.0-beta')).toBe('pichu');
       expect(getRecommendedNetworkForVersion('1.1.0-alpha')).toBe('cleffa');
       expect(getRecommendedNetworkForVersion('1.1.1-rc.1')).toBe('magby');
+    });
+  });
+
+  describe('Bitcoin Network Mapping', () => {
+    describe('WEBVH_NETWORKS Bitcoin mappings', () => {
+      it('should map magby to regtest', () => {
+        expect(WEBVH_NETWORKS.magby.bitcoinNetwork).toBe('regtest');
+      });
+
+      it('should map cleffa to signet', () => {
+        expect(WEBVH_NETWORKS.cleffa.bitcoinNetwork).toBe('signet');
+      });
+
+      it('should map pichu to mainnet', () => {
+        expect(WEBVH_NETWORKS.pichu.bitcoinNetwork).toBe('mainnet');
+      });
+    });
+
+    describe('getBitcoinNetworkForWebVH', () => {
+      it('should return regtest for magby', () => {
+        expect(getBitcoinNetworkForWebVH('magby')).toBe('regtest');
+      });
+
+      it('should return signet for cleffa', () => {
+        expect(getBitcoinNetworkForWebVH('cleffa')).toBe('signet');
+      });
+
+      it('should return mainnet for pichu', () => {
+        expect(getBitcoinNetworkForWebVH('pichu')).toBe('mainnet');
+      });
+    });
+
+    describe('getWebVHNetworkForBitcoin', () => {
+      it('should return magby for regtest', () => {
+        expect(getWebVHNetworkForBitcoin('regtest')).toBe('magby');
+      });
+
+      it('should return cleffa for signet', () => {
+        expect(getWebVHNetworkForBitcoin('signet')).toBe('cleffa');
+      });
+
+      it('should return pichu for mainnet', () => {
+        expect(getWebVHNetworkForBitcoin('mainnet')).toBe('pichu');
+      });
+
+      it('should return undefined for testnet (no direct mapping)', () => {
+        expect(getWebVHNetworkForBitcoin('testnet')).toBeUndefined();
+      });
+    });
+
+    describe('Network mapping consistency', () => {
+      it('should have bidirectional mapping for all WebVH networks', () => {
+        // magby ↔ regtest
+        const magbyBitcoin = getBitcoinNetworkForWebVH('magby');
+        expect(getWebVHNetworkForBitcoin(magbyBitcoin)).toBe('magby');
+
+        // cleffa ↔ signet
+        const cleffaBitcoin = getBitcoinNetworkForWebVH('cleffa');
+        expect(getWebVHNetworkForBitcoin(cleffaBitcoin)).toBe('cleffa');
+
+        // pichu ↔ mainnet
+        const pichuBitcoin = getBitcoinNetworkForWebVH('pichu');
+        expect(getWebVHNetworkForBitcoin(pichuBitcoin)).toBe('pichu');
+      });
+
+      it('should maintain environment consistency across networks', () => {
+        // Development: magby → regtest
+        expect(getBitcoinNetworkForWebVH('magby')).toBe('regtest');
+
+        // Staging: cleffa → signet
+        expect(getBitcoinNetworkForWebVH('cleffa')).toBe('signet');
+
+        // Production: pichu → mainnet
+        expect(getBitcoinNetworkForWebVH('pichu')).toBe('mainnet');
+      });
     });
   });
 });
