@@ -78,41 +78,42 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
-  // Determine the app directory - check if we're running from root or app directory
+  // Vite builds to dist/public/, so we need to serve from there
+  // When running from root (Railway), process.cwd() is /app
+  // When running from app dir (local dev), process.cwd() is apps/originals-explorer
+  // Check if we're running from root by looking for apps/originals-explorer directory
   const cwd = process.cwd();
-  const appDir = cwd.endsWith('apps/originals-explorer') 
-    ? cwd 
-    : path.join(cwd, 'apps', 'originals-explorer');
-  
-  // Vite builds to dist/public, so serve from there
-  const distPublicPath = path.join(appDir, "dist", "public");
-  
-  // Also need public directory for DID logs (separate from built assets)
-  const publicPath = path.join(appDir, "public");
+  const isRoot = fs.existsSync(path.join(cwd, "apps", "originals-explorer"));
+  const distPath = isRoot 
+    ? path.join(cwd, "apps", "originals-explorer", "dist", "public")
+    : path.join(cwd, "dist", "public");
+  const publicPath = isRoot
+    ? path.join(cwd, "apps", "originals-explorer", "public")
+    : path.join(cwd, "public");
 
-  // Create public directory if it doesn't exist (for DID logs)
-  if (!fs.existsSync(publicPath)) {
-    fs.mkdirSync(publicPath, { recursive: true });
-  }
-
-  // Serve static files from dist/public (built Vite assets)
-  if (fs.existsSync(distPublicPath)) {
-    app.use(express.static(distPublicPath, {
+  // Serve static files from dist/public (built assets)
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath, {
       // Don't serve index.html for all routes - only for SPA fallback
       index: false,
     }));
   }
 
-  // Also serve from public directory for DID logs (e.g., /<userId>/did.jsonl)
+  // Also serve from public directory for DID logs and other static files
+  // This allows files like /<userId>/did.jsonl to be served from public/<userId>/did.jsonl
+  if (!fs.existsSync(publicPath)) {
+    // Create public directory if it doesn't exist (for DID logs)
+    fs.mkdirSync(publicPath, { recursive: true });
+  }
   app.use(express.static(publicPath, {
     index: false, // Don't serve index.html for all routes
   }));
 
   // fall through to index.html if the file doesn't exist (SPA fallback)
   app.use("*", (_req, res) => {
-    const indexPath = path.join(distPublicPath, "index.html");
+    const indexPath = path.resolve(distPath, "index.html");
     if (fs.existsSync(indexPath)) {
-      res.sendFile(path.resolve(indexPath));
+      res.sendFile(indexPath);
     } else {
       res.status(404).send("Not found: index.html not found in dist/public");
     }
