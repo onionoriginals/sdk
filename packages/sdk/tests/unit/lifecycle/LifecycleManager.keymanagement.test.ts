@@ -424,12 +424,12 @@ describe('LifecycleManager Key Management', () => {
       expect((btcoMigratedCredential.credentialSubject as any).inscriptionId).toBe('insc-mock');
       expect((btcoMigratedCredential.credentialSubject as any).satoshi).toBe('123');
 
-      // CRITICAL: Verify issuer matches fromLayer (webvh DID)
-      // This maintains provenance chain integrity
-      expect(btcoMigratedCredential.issuer).toBe(publisherDid);
-      expect(btcoMigratedCredential.issuer).toContain('did:webvh');
+      // CRITICAL: Verify issuer/signer separation
+      // Issuer = original creator (peer DID) - never changes
+      expect(btcoMigratedCredential.issuer).toBe(asset.id);
+      expect(btcoMigratedCredential.issuer).toContain('did:peer');
 
-      // Verify proof is present and signed by webvh DID
+      // Signer = current active context (webvh keys used to sign)
       expect(btcoMigratedCredential.proof).toBeDefined();
       const proof = btcoMigratedCredential.proof as any;
       expect(proof.verificationMethod).toContain('did:webvh');
@@ -468,8 +468,8 @@ describe('LifecycleManager Key Management', () => {
       expect((btcoCredential.credentialSubject as any).fromLayer).toBe('did:peer');
       expect((btcoCredential.credentialSubject as any).toLayer).toBe('did:btco');
 
-      // CRITICAL: Verify issuer matches fromLayer (peer DID)
-      // This maintains provenance chain integrity
+      // CRITICAL: Verify issuer/signer are the same (peer DID)
+      // For peer→btco migration, both issuer and signer are the peer DID
       expect(btcoCredential.issuer).toBe(peerDid);
       expect(btcoCredential.issuer).toContain('did:peer');
 

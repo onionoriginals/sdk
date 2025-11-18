@@ -587,16 +587,20 @@ export class LifecycleManager {
     try {
       const migratedTimestamp = new Date().toISOString();
 
-      // Determine the "current active DID" to use as issuer
-      // This should match the fromLayer to maintain provenance chain integrity
-      let issuerDid = asset.id; // Default to original peer DID
+      // Issuer is always the original creator (asset.id / did:peer)
+      // Only the original creator can issue credentials about their asset
+      const issuerDid = asset.id;
+
+      // Signer is the current active DID context (current layer)
+      // This determines which keys are used to sign the credential
+      let signerDid = asset.id; // Default to original peer DID
 
       if (fromLayer === 'did:webvh' && asset.bindings?.['did:webvh']) {
-        // If migrating from webvh, the webvh DID should be the issuer
-        issuerDid = asset.bindings['did:webvh'];
+        // If migrating from webvh, use webvh keys to sign
+        signerDid = asset.bindings['did:webvh'];
       } else if (fromLayer === 'did:btco' && asset.bindings?.['did:btco']) {
-        // If migrating from btco (shouldn't happen, but handle it)
-        issuerDid = asset.bindings['did:btco'];
+        // If migrating from btco, use btco keys to sign
+        signerDid = asset.bindings['did:btco'];
       }
       // else: use asset.id (did:peer) for peer→btco migrations
 
@@ -612,13 +616,13 @@ export class LifecycleManager {
           satoshi: inscription.satoshi,
           transactionId: revealTxId
         },
-        issuerDid // Use the current active DID, not always asset.id
+        issuerDid // Always the original creator
       );
 
-      // Try to sign with keyStore if available
+      // Sign with current layer's keys
       let signed: VerifiableCredential;
       if (this.keyStore) {
-        signed = await this.signWithKeyStore(unsigned, issuerDid); // Pass issuerDid
+        signed = await this.signWithKeyStore(unsigned, signerDid);
       } else {
         // If no keyStore, store unsigned credential (can be signed later)
         this.logger.warn('Storing unsigned ResourceMigrated credential - keyStore not available');
@@ -630,6 +634,7 @@ export class LifecycleManager {
       this.logger.info('ResourceMigrated credential issued', {
         assetId: asset.id,
         issuerDid,
+        signerDid,
         fromLayer,
         toLayer: 'did:btco',
         inscriptionId: inscription.inscriptionId
