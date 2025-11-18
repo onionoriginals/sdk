@@ -1,6 +1,6 @@
 {
   "name": "@originals/sdk",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "TypeScript SDK for the Originals Protocol - creating, discovering, and transferring digital assets with cryptographically verifiable provenance",
   "type": "module",
   "main": "dist/index.js",
@@ -37,6 +37,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/aviarytech/originals-sdk"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
   },
   "dependencies": {
     "@aviarytech/did-peer": "^1.1.2",
