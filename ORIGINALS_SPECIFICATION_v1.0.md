@@ -347,25 +347,27 @@ did:btco:mainnet:6a8c92b1...
 ```typescript
 interface DIDbtcoDocument {
   "@context": string[];
-  "id": string;                          // did:btco identifier
+  "id": string;                          // did:btco identifier (immutable)
   "method": "did:btco";
   "network": "mainnet" | "testnet" | "signet" | "regtest";
-  "inscriptionId": string;               // Bitcoin Ordinals ID
-  "satoshi": number;                     // Satoshi number
-  "transactionId": string;               // Bitcoin TXID
-  "vout": number;                        // Output index
-  "blockHeight": number;                 // Confirmation block
-  "created": string;                     // ISO timestamp
-  "modified": string;                    // Last update timestamp
+  "inscriptionId": string;               // Bitcoin Ordinals ID (immutable)
+  "satoshi": number;                     // Satoshi number (immutable - DID identifier)
+  "transactionId": string;               // Inscription reveal TXID (immutable)
+  "vout": number;                        // Output index (immutable)
+  "blockHeight": number;                 // Confirmation block (immutable)
+  "created": string;                     // ISO timestamp (immutable)
+  "modified": string;                    // Last update timestamp of current owner
   "verificationMethod": VerificationMethod[];
   "authentication": string[];
   "assertion": string[];
-  "proof": Proof;                        // Bitcoin proof
+  "proof": Proof;                        // Bitcoin proof (immutable)
   "status": "active" | "deactivated";
   "resources": Resource[];
   "credentials": Credential[];
 }
 ```
+
+**Note on Immutability**: All fields except `modified` are immutable once inscribed. The satoshi number is the permanent identifier that never changes, even during ownership transfers.
 
 **Inscription Format**:
 
@@ -388,7 +390,8 @@ Body: CBOR(DIDbtcoDocument)
    - Returns inscription ID and transaction hash
 
 **Constraints**:
-- ✅ Immutable once inscribed
+- ✅ **Immutable once inscribed** - The DID identifier, satoshi number, and inscription cannot be changed
+- ✅ **Ownership transferable** - The UTXO can be moved to a new owner's address, but the DID and its history remain unchanged
 - ✅ Censorship resistant (Bitcoin finality)
 - ✅ Publicly verifiable
 - ✅ Front-running protected via satoshi uniqueness
@@ -404,23 +407,32 @@ Body: CBOR(DIDbtcoDocument)
 - `regtest` - Local regression testing
 
 **Operations**:
-- `inscribe()` - Create did:btco from did:peer or did:webvh
-- `transfer()` - Transfer ownership to new address
-- `resolve()` - Query Bitcoin to retrieve DID document
-- `deactivate()` - Mark as no longer active (🔥 marker)
+- `inscribe()` - Create did:btco from did:peer or did:webvh (creates new inscription on new satoshi)
+- `transfer()` - Transfer ownership to new Bitcoin address (moves UTXO, no new inscription)
+- `resolve()` - Query Bitcoin to retrieve DID document (reads from immutable satoshi)
+- `deactivate()` - Mark as no longer active (appends deactivation marker, does not modify original inscription)
 
 **Ownership Transfer**:
+
+Ownership transfer moves the UTXO containing the inscribed satoshi to a new Bitcoin address. The DID remains bound to the same satoshi and inscription ID.
+
 ```typescript
 // Transfer did:btco to new Bitcoin address
 const transfer = await sdk.bitcoin.transferInscription({
-  inscriptionId: '...',
-  recipientAddress: 'bc1...',  // New owner's address
-  feeRate: 15  // satoshis per byte
+  inscriptionId: '...',                    // Identifies satoshi
+  recipientAddress: 'bc1...',              // New owner's address
+  feeRate: 15                              // satoshis per byte
 });
 
-// Updates DID document on Bitcoin via new inscription
-// Records in transaction history
+// Results in:
+// 1. UTXO moved to recipientAddress (ownership transferred)
+// 2. did:btco identifier remains unchanged (same satoshi)
+// 3. New owner controls the inscribed satoshi
+// 4. DID document is NOT rewritten (immutability preserved)
+// 5. Transfer recorded in ownership/transfer credentials
 ```
+
+**Critical Constraint**: The DID identifier (did:btco:mainnet:6a8c92b1...) is permanently tied to its satoshi number. Transferring ownership changes who controls the satoshi via Bitcoin UTXO ownership, but does NOT change the DID identifier or create a new inscription.
 
 **Resolution Example**:
 ```typescript
@@ -793,6 +805,20 @@ COMPLETED
 5. User must manually investigate
 
 ### 9.4 Batch Migration Optimization
+
+**Important Distinction: Layer Migration vs. Ownership Transfer**
+
+- **Layer Migration** (did:peer → did:webvh or did:webvh → did:btco): Creates a NEW DID document in the target layer
+  - Layer 1→2: New did:webvh document created
+  - Layer 2→3: New did:btco inscription on NEW satoshi
+  - Results in multiple DIDs pointing to same asset (different satoshis)
+
+- **Ownership Transfer** (within did:btco): Transfers control of EXISTING inscription
+  - UTXO moves to new owner's address
+  - Satoshi number remains unchanged
+  - DID identifier remains unchanged
+  - No new inscription created
+  - Original inscription and history preserved forever
 
 **Single-Transaction Inscription**:
 
