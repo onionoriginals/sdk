@@ -1,9 +1,10 @@
-import { 
-  OriginalsConfig, 
-  OrdinalsInscription, 
+import {
+  OriginalsConfig,
+  OrdinalsInscription,
   BitcoinTransaction,
   Utxo,
-  DUST_LIMIT_SATS
+  DUST_LIMIT_SATS,
+  DIDDocument
 } from '../types';
 import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters';
 import { emitTelemetry, StructuredError } from '../utils/telemetry';
@@ -249,6 +250,167 @@ export class BitcoinManager {
       blockHeight: response.blockHeight,
       confirmations: response.confirmations
     };
+  }
+
+  /**
+   * Inscribe a DID document on Bitcoin as a did:btco identifier.
+   *
+   * @param didDocument - The DID document to inscribe
+   * @param feeRate - Optional fee rate in sat/vB for the Bitcoin transaction
+   * @returns Promise<OrdinalsInscription> - The resulting inscription with satoshi identifier
+   * @throws {StructuredError} If the DID document is invalid or inscription fails
+   *
+   * @example
+   * const didDoc = { id: 'did:peer:...', verificationMethod: [...] };
+   * const inscription = await bitcoinManager.inscribeDID(didDoc, 5);
+   */
+  async inscribeDID(
+    didDocument: DIDDocument,
+    feeRate?: number
+  ): Promise<OrdinalsInscription> {
+    // Input validation
+    if (!didDocument || typeof didDocument !== 'object') {
+      throw new StructuredError('INVALID_INPUT', 'DID document must be a valid object');
+    }
+    if (!didDocument.id || typeof didDocument.id !== 'string') {
+      throw new StructuredError('INVALID_INPUT', 'DID document must have a valid id field');
+    }
+    if (!didDocument.verificationMethod || !Array.isArray(didDocument.verificationMethod)) {
+      throw new StructuredError('INVALID_INPUT', 'DID document must have verificationMethod array');
+    }
+    if (didDocument.verificationMethod.length === 0) {
+      throw new StructuredError('INVALID_INPUT', 'DID document must have at least one verification method');
+    }
+    if (feeRate !== undefined && (typeof feeRate !== 'number' || feeRate <= 0 || !Number.isFinite(feeRate))) {
+      throw new StructuredError('INVALID_INPUT', 'Fee rate must be a positive number');
+    }
+
+    // Serialize DID document as JSON
+    let serialized: string;
+    try {
+      serialized = JSON.stringify(didDocument);
+    } catch (error) {
+      throw new StructuredError(
+        'DID_SERIALIZATION_FAILED',
+        `Failed to serialize DID document: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+
+    // Inscribe the serialized DID document
+    const inscription = await this.inscribeData(serialized, 'application/json', feeRate);
+
+    emitTelemetry(this.config.telemetry, {
+      name: 'bitcoin.did.inscribed',
+      attributes: {
+        did: didDocument.id,
+        inscriptionId: inscription.inscriptionId,
+        satoshi: inscription.satoshi
+      }
+    });
+
+    return inscription;
+  }
+
+  /**
+   * Transfer a DID inscription to a new owner address.
+   *
+   * @param didOrSatoshi - The did:btco DID string or satoshi identifier of the inscription
+   * @param toAddress - The Bitcoin address to transfer ownership to
+   * @param feeRate - Optional fee rate in sat/vB for the Bitcoin transaction
+   * @returns Promise<BitcoinTransaction> - The resulting transfer transaction
+   * @throws {StructuredError} If the DID is invalid, inscription not found, or transfer fails
+   *
+   * @example
+   * const txn = await bitcoinManager.transferDID('did:btco:123456', 'bc1q...', 5);
+   */
+  async transferDID(
+    didOrSatoshi: string,
+    toAddress: string,
+    feeRate?: number
+  ): Promise<BitcoinTransaction> {
+    // Input validation
+    if (!didOrSatoshi || typeof didOrSatoshi !== 'string') {
+      throw new StructuredError('INVALID_INPUT', 'DID or satoshi identifier must be a non-empty string');
+    }
+    if (!toAddress || typeof toAddress !== 'string') {
+      throw new StructuredError('INVALID_INPUT', 'Destination address must be a non-empty string');
+    }
+    if (feeRate !== undefined && (typeof feeRate !== 'number' || feeRate <= 0 || !Number.isFinite(feeRate))) {
+      throw new StructuredError('INVALID_INPUT', 'Fee rate must be a positive number');
+    }
+
+    // Validate Bitcoin address format and checksum
+    try {
+      validateBitcoinAddress(toAddress, this.config.network);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid Bitcoin address';
+      throw new StructuredError('INVALID_ADDRESS', message);
+    }
+
+    // Extract satoshi identifier from DID or use directly if already a satoshi
+    let satoshi = didOrSatoshi;
+    if (didOrSatoshi.startsWith('did:btco:')) {
+      satoshi = this.extractSatoshiFromBTCODID(didOrSatoshi);
+      if (!satoshi) {
+        throw new StructuredError(
+          'INVALID_DID',
+          `Failed to extract satoshi identifier from DID: ${didOrSatoshi}`
+        );
+      }
+    }
+
+    // Validate satoshi identifier format
+    const validation = validateSatoshiNumber(satoshi);
+    if (!validation.valid) {
+      throw new StructuredError(
+        'INVALID_SATOSHI',
+        `Invalid satoshi identifier: ${validation.error}`
+      );
+    }
+
+    // Get the inscription for this satoshi
+    if (!this.ord) {
+      throw new StructuredError(
+        'ORD_PROVIDER_REQUIRED',
+        'Ordinals provider must be configured to transfer DIDs on Bitcoin. ' +
+        'Please provide an ordinalsProvider in your SDK configuration.'
+      );
+    }
+
+    // Find the inscription on this satoshi
+    const inscriptions = await this.ord.getInscriptionsBySatoshi(satoshi);
+    if (!inscriptions || inscriptions.length === 0) {
+      throw new StructuredError(
+        'INSCRIPTION_NOT_FOUND',
+        `No inscription found on satoshi ${satoshi}`
+      );
+    }
+
+    // Use the first (should typically be only one) inscription on this satoshi
+    const inscription = inscriptions[0];
+    const inscriptionObj: OrdinalsInscription = {
+      inscriptionId: inscription.inscriptionId,
+      contentType: inscription.contentType,
+      content: inscription.content,
+      txid: inscription.txid,
+      satoshi: satoshi,
+      vout: inscription.vout ?? 0
+    };
+
+    // Transfer the inscription to the new address
+    const txn = await this.transferInscription(inscriptionObj, toAddress);
+
+    emitTelemetry(this.config.telemetry, {
+      name: 'bitcoin.did.transferred',
+      attributes: {
+        didOrSatoshi: didOrSatoshi,
+        toAddress: toAddress,
+        txid: txn.txid,
+        satoshi: satoshi
+      }
+    });
+
+    return txn;
   }
 
   async preventFrontRunning(satoshi: string): Promise<boolean> {

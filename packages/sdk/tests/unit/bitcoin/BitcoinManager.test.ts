@@ -291,3 +291,222 @@ describe('BitcoinManager integration with providers', () => {
     expect(() => sdk.validateBitcoinConfig()).not.toThrow();
   });
 });
+
+describe('BitcoinManager DID-specific methods', () => {
+  test('inscribeDID serializes and inscribes DID document', async () => {
+    const provider = createMockProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+
+    const didDocument = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw',
+      verificationMethod: [
+        {
+          id: 'did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw#z6MkY',
+          type: 'Multikey',
+          controller: 'did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw',
+          publicKeyMultibase: 'z6MkY'
+        }
+      ],
+      authentication: ['did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw#z6MkY']
+    };
+
+    const result = await sdk.bitcoin.inscribeDID(didDocument);
+    expect(result.inscriptionId).toBe('insc-test');
+    expect(result.satoshi).toBe('123456789');
+    expect(result.contentType).toBe('application/json');
+  });
+
+  test('inscribeDID throws for invalid DID document', async () => {
+    const provider = createMockProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+
+    // Missing id
+    try {
+      await sdk.bitcoin.inscribeDID({} as any);
+      throw new Error('Expected error');
+    } catch (error: any) {
+      expect(error.code).toBe('INVALID_INPUT');
+    }
+
+    // Missing verificationMethod
+    try {
+      await sdk.bitcoin.inscribeDID({ id: 'did:test', '@context': [] } as any);
+      throw new Error('Expected error');
+    } catch (error: any) {
+      expect(error.code).toBe('INVALID_INPUT');
+    }
+
+    // Empty verificationMethod
+    try {
+      await sdk.bitcoin.inscribeDID({
+        id: 'did:test',
+        '@context': [],
+        verificationMethod: []
+      } as any);
+      throw new Error('Expected error');
+    } catch (error: any) {
+      expect(error.code).toBe('INVALID_INPUT');
+    }
+  });
+
+  test('inscribeDID respects custom fee rate', async () => {
+    const provider = createMockProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+
+    const didDocument = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw',
+      verificationMethod: [
+        {
+          id: 'did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw#z6MkY',
+          type: 'Multikey',
+          controller: 'did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw',
+          publicKeyMultibase: 'z6MkY'
+        }
+      ],
+      authentication: ['did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw#z6MkY']
+    };
+
+    const result = await sdk.bitcoin.inscribeDID(didDocument, 10);
+    expect((result as any).feeRate).toBe(10);
+  });
+
+  test('inscribeDID throws when provider not configured', async () => {
+    const sdk = OriginalsSDK.create({ network: 'regtest' });
+
+    const didDocument = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw',
+      verificationMethod: [
+        {
+          id: 'did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw#z6MkY',
+          type: 'Multikey',
+          controller: 'did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw',
+          publicKeyMultibase: 'z6MkY'
+        }
+      ],
+      authentication: ['did:peer:z1A1Eh8cKS7jCpjoknp3CAc5JzXw#z6MkY']
+    };
+
+    try {
+      await sdk.bitcoin.inscribeDID(didDocument);
+      throw new Error('Expected error to be thrown');
+    } catch (error: any) {
+      expect(error.code).toBe('ORD_PROVIDER_REQUIRED');
+    }
+  });
+
+  test('transferDID transfers inscription by did:btco identifier', async () => {
+    const provider = createMockProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+
+    // First inscribe to set up satoshi
+    await sdk.bitcoin.inscribeData(Buffer.from('test'), 'text/plain');
+
+    // Transfer using did:btco format
+    const tx = await sdk.bitcoin.transferDID('did:btco:123456789', 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
+    expect(tx.txid).toBe('tx-transfer-1');
+    expect(tx.vout[0].address).toBe('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
+  });
+
+  test('transferDID transfers inscription by raw satoshi identifier', async () => {
+    const provider = createMockProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+
+    // First inscribe to set up satoshi
+    await sdk.bitcoin.inscribeData(Buffer.from('test'), 'text/plain');
+
+    // Transfer using raw satoshi
+    const tx = await sdk.bitcoin.transferDID('123456789', 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
+    expect(tx.txid).toBe('tx-transfer-1');
+  });
+
+  test('transferDID extracts satoshi from network-prefixed did:btco DIDs', async () => {
+    const inscriptions: Record<string, { satoshi?: string }> = { 'test-insc': { satoshi: '999888777' } };
+    const provider: OrdinalsProvider = {
+      ...createMockProvider(),
+      async getInscriptionsBySatoshi(satoshi: string) {
+        if (satoshi === '999888777') {
+          return [
+            {
+              inscriptionId: 'test-insc',
+              contentType: 'application/json',
+              content: Buffer.from('{}'),
+              txid: 'tx-123',
+              vout: 0
+            }
+          ];
+        }
+        return [];
+      },
+      async transferInscription() {
+        return {
+          txid: 'tx-transfer',
+          vin: [{ txid: 'tx-123', vout: 0 }],
+          vout: [{ value: 12000, scriptPubKey: 'script', address: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx' }],
+          fee: 100
+        };
+      }
+    } as OrdinalsProvider;
+
+    const sdk = OriginalsSDK.create({ network: 'testnet', ordinalsProvider: provider } as any);
+
+    // Transfer using network-prefixed did:btco (testnet)
+    const tx = await sdk.bitcoin.transferDID('did:btco:test:999888777', 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
+    expect(tx.txid).toBe('tx-transfer');
+  });
+
+  test('transferDID throws for invalid address', async () => {
+    const provider = createMockProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+
+    try {
+      await sdk.bitcoin.transferDID('did:btco:123456789', 'invalid-address');
+      throw new Error('Expected error to be thrown');
+    } catch (error: any) {
+      expect(error.code).toBe('INVALID_ADDRESS');
+    }
+  });
+
+  test('transferDID throws for invalid satoshi', async () => {
+    const provider = createMockProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+
+    try {
+      await sdk.bitcoin.transferDID('invalid-satoshi', 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
+      throw new Error('Expected error to be thrown');
+    } catch (error: any) {
+      expect(error.code).toBe('INVALID_SATOSHI');
+    }
+  });
+
+  test('transferDID throws when inscription not found', async () => {
+    const provider: OrdinalsProvider = {
+      ...createMockProvider(),
+      async getInscriptionsBySatoshi() {
+        return [];
+      }
+    } as OrdinalsProvider;
+
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+
+    try {
+      await sdk.bitcoin.transferDID('did:btco:999999999', 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
+      throw new Error('Expected error to be thrown');
+    } catch (error: any) {
+      expect(error.code).toBe('INSCRIPTION_NOT_FOUND');
+    }
+  });
+
+  test('transferDID throws when provider not configured', async () => {
+    const sdk = OriginalsSDK.create({ network: 'regtest' });
+
+    try {
+      await sdk.bitcoin.transferDID('did:btco:123456789', 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
+      throw new Error('Expected error to be thrown');
+    } catch (error: any) {
+      expect(error.code).toBe('ORD_PROVIDER_REQUIRED');
+    }
+  });
+});
