@@ -144,21 +144,64 @@ export class LifecycleManager {
       const result = await this.didManager.createDIDPeer(resources, true);
       const didDoc = result.didDocument;
       const keyPair = result.keyPair;
-      
+
       // Register the private key in the keyStore
+      let verificationMethodId = '';
       if (didDoc.verificationMethod && didDoc.verificationMethod.length > 0) {
-        let verificationMethodId = didDoc.verificationMethod[0].id;
-        
+        verificationMethodId = didDoc.verificationMethod[0].id;
+
         // Ensure VM ID is absolute (not just a fragment like #key-0)
         if (verificationMethodId.startsWith('#')) {
           verificationMethodId = `${didDoc.id}${verificationMethodId}`;
         }
-        
+
         await this.keyStore.setPrivateKey(verificationMethodId, keyPair.privateKey);
       }
-      
-      const asset = new OriginalsAsset(resources, didDoc, []);
-      
+
+      // PHASE 1: Issue ResourceCreated credentials for each resource
+      const credentials: VerifiableCredential[] = [];
+      const creationTimestamp = new Date().toISOString();
+
+      for (const resource of resources) {
+        try {
+          const unsigned = await this.credentialManager.createResourceCredential(
+            'ResourceCreated',
+            {
+              id: didDoc.id,
+              resourceId: resource.id,
+              resourceType: resource.type,
+              contentType: resource.contentType,
+              contentHash: resource.hash,
+              createdAt: creationTimestamp,
+              creator: didDoc.id
+            },
+            didDoc.id
+          );
+
+          // Sign the credential with the newly created key
+          const signed = await this.credentialManager.signCredential(
+            unsigned,
+            keyPair.privateKey,
+            verificationMethodId
+          );
+
+          credentials.push(signed);
+
+          this.logger.info('ResourceCreated credential issued', {
+            resourceId: resource.id,
+            assetId: didDoc.id
+          });
+        } catch (err) {
+          // Log error but continue - credentials are important but shouldn't block asset creation
+          this.logger.error('Failed to issue ResourceCreated credential', err as Error, {
+            resourceId: resource.id,
+            assetId: didDoc.id
+          });
+        }
+      }
+
+      const asset = new OriginalsAsset(resources, didDoc, credentials);
+
       // Defer asset:created event emission to next microtask so callers can subscribe first
       queueMicrotask(() => {
         const event = {
@@ -171,22 +214,28 @@ export class LifecycleManager {
             createdAt: asset.getProvenance().createdAt
           }
         };
-        
+
         // Emit from both LifecycleManager and asset emitters
         this.eventEmitter.emit(event);
         (asset as any).eventEmitter.emit(event);
       });
-      
+
       stopTimer();
-      this.logger.info('Asset created successfully', { assetId: asset.id });
+      this.logger.info('Asset created successfully', {
+        assetId: asset.id,
+        credentialCount: credentials.length
+      });
       this.metrics.recordAssetCreated();
-      
+
       return asset;
     } else {
-      // No keyStore, just create the DID document
+      // No keyStore - create asset without credentials
+      // NOTE: Per whitepaper, VCs are core to provenance. Consider requiring keyStore.
+      this.logger.warn('Creating asset without credentials - keyStore not provided. Provenance will be incomplete.');
+
       const didDoc = await this.didManager.createDIDPeer(resources);
       const asset = new OriginalsAsset(resources, didDoc, []);
-      
+
       // Defer asset:created event emission to next microtask so callers can subscribe first
       queueMicrotask(() => {
         const event = {
@@ -199,16 +248,16 @@ export class LifecycleManager {
             createdAt: asset.getProvenance().createdAt
           }
         };
-        
+
         // Emit from both LifecycleManager and asset emitters
         this.eventEmitter.emit(event);
         (asset as any).eventEmitter.emit(event);
       });
-      
+
       stopTimer();
       this.logger.info('Asset created successfully', { assetId: asset.id });
       this.metrics.recordAssetCreated();
-      
+
       return asset;
     }
     } catch (error) {
@@ -533,15 +582,59 @@ export class LifecycleManager {
       ? `did:btco:${inscription.satoshi}`
       : `did:btco:${inscription.inscriptionId}`;
     (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:btco': bindingValue });
-    
+
+    // PHASE 1: Issue ResourceMigrated credential for Bitcoin migration
+    try {
+      const migratedTimestamp = new Date().toISOString();
+      const unsigned = await this.credentialManager.createResourceCredential(
+        'ResourceMigrated',
+        {
+          id: asset.id,
+          resourceId: asset.resources[0]?.id,
+          fromLayer,
+          toLayer: 'did:btco' as const,
+          migratedAt: migratedTimestamp,
+          inscriptionId: inscription.inscriptionId,
+          satoshi: inscription.satoshi,
+          transactionId: revealTxId
+        },
+        asset.id
+      );
+
+      // Try to sign with keyStore if available
+      let signed: VerifiableCredential;
+      if (this.keyStore) {
+        signed = await this.signWithKeyStore(unsigned, asset.id);
+      } else {
+        // If no keyStore, store unsigned credential (can be signed later)
+        this.logger.warn('Storing unsigned ResourceMigrated credential - keyStore not available');
+        signed = unsigned;
+      }
+
+      asset.credentials.push(signed);
+
+      this.logger.info('ResourceMigrated credential issued', {
+        assetId: asset.id,
+        fromLayer,
+        toLayer: 'did:btco',
+        inscriptionId: inscription.inscriptionId
+      });
+    } catch (err) {
+      // Log error but don't fail the inscription
+      this.logger.error('Failed to issue ResourceMigrated credential', err as Error, {
+        assetId: asset.id,
+        inscriptionId: inscription.inscriptionId
+      });
+    }
+
     stopTimer();
-    this.logger.info('Asset inscribed on Bitcoin successfully', { 
-      assetId: asset.id, 
+    this.logger.info('Asset inscribed on Bitcoin successfully', {
+      assetId: asset.id,
       inscriptionId: inscription.inscriptionId,
       transactionId: revealTxId
     });
     this.metrics.recordMigration(fromLayer, 'did:btco');
-    
+
     return asset;
     } catch (error) {
       stopTimer();
