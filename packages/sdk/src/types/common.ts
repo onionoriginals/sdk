@@ -8,7 +8,7 @@ import type { WebVHNetworkName } from './network';
 export type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';
 
 export interface OriginalsConfig {
-  network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
+  network: 'mainnet' | 'regtest' | 'signet';
   bitcoinRpcUrl?: string;
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
   keyStore?: KeyStore;

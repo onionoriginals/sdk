@@ -114,8 +114,8 @@ export class OriginalsSDK {
     if (!config || typeof config !== 'object') {
       throw new Error('Configuration object is required');
     }
-    if (!config.network || !['mainnet', 'testnet', 'regtest', 'signet'].includes(config.network)) {
-      throw new Error('Invalid network: must be mainnet, testnet, regtest, or signet');
+    if (!config.network || !['mainnet', 'regtest', 'signet'].includes(config.network)) {
+      throw new Error('Invalid network: must be mainnet, regtest, or signet');
     }
     if (!config.defaultKeyType || !['ES256K', 'Ed25519', 'ES256'].includes(config.defaultKeyType)) {
       throw new Error('Invalid defaultKeyType: must be ES256K, Ed25519, or ES256');

@@ -13,7 +13,7 @@ describe('OriginalsSDK', () => {
   });
 
   test('create() accepts config overrides', () => {
-    const sdk = OriginalsSDK.create({ network: 'testnet', enableLogging: true });
+    const sdk = OriginalsSDK.create({ network: 'regtest', enableLogging: true });
     expect(sdk).toBeInstanceOf(OriginalsSDK);
   });
 
@@ -27,12 +27,12 @@ describe('OriginalsSDK', () => {
 
   test('constructor throws error when network is invalid', () => {
     expect(() => new OriginalsSDK({ network: 'invalid' as any, defaultKeyType: 'ES256K' }))
-      .toThrow('Invalid network: must be mainnet, testnet, regtest, or signet');
+      .toThrow('Invalid network: must be mainnet, regtest, or signet');
   });
 
   test('constructor throws error when network is missing', () => {
     expect(() => new OriginalsSDK({ defaultKeyType: 'ES256K' } as any))
-      .toThrow('Invalid network: must be mainnet, testnet, regtest, or signet');
+      .toThrow('Invalid network: must be mainnet, regtest, or signet');
   });
 
   test('constructor throws error when defaultKeyType is invalid', () => {

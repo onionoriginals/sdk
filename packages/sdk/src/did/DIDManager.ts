@@ -126,13 +126,12 @@ export class DIDManager {
 
     // Determine Bitcoin network from WebVH network configuration if available
     // This ensures consistent environment mapping: magby→regtest, cleffa→signet, pichu→mainnet
-    let network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
+    let network: 'mainnet' | 'regtest' | 'signet';
     if (this.config.webvhNetwork) {
       network = getBitcoinNetworkForWebVH(this.config.webvhNetwork);
     } else {
-      // Fall back to explicit network config (legacy behavior)
-      const net = this.config.network || 'mainnet';
-      network = (net === 'regtest' ? 'signet' : net) as any;
+      // Fall back to explicit network config
+      network = this.config.network || 'mainnet';
     }
 
     // Try to carry over the first multikey VM if present
@@ -157,7 +156,7 @@ export class DIDManager {
     if (publicKey && keyType) {
       btcoDoc = createBtcoDidDocument(satoshi, network as any, { publicKey, keyType });
     } else {
-      const prefix = network === 'mainnet' ? 'did:btco:' : network === 'testnet' ? 'did:btco:test:' : 'did:btco:sig:';
+      const prefix = network === 'mainnet' ? 'did:btco:' : network === 'regtest' ? 'did:btco:reg:' : 'did:btco:sig:';
       btcoDoc = {
         '@context': ['https://www.w3.org/ns/did/v1'],
         id: prefix + String(satoshi)
@@ -233,7 +232,7 @@ export class DIDManager {
 
   createBtcoDidDocument(
     satNumber: number | string,
-    network: 'mainnet' | 'testnet' | 'signet',
+    network: 'mainnet' | 'regtest' | 'signet',
     options: Parameters<typeof createBtcoDidDocument>[2]
   ): DIDDocument {
     return createBtcoDidDocument(satNumber, network, options as any);

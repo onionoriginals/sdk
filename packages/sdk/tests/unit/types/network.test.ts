@@ -223,10 +223,6 @@ describe('Network Configuration', () => {
       it('should return pichu for mainnet', () => {
         expect(getWebVHNetworkForBitcoin('mainnet')).toBe('pichu');
       });
-
-      it('should return undefined for testnet (no direct mapping)', () => {
-        expect(getWebVHNetworkForBitcoin('testnet')).toBeUndefined();
-      });
     });
 
     describe('Network mapping consistency', () => {

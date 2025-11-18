@@ -331,7 +331,7 @@ The SDK is configured via `OriginalsConfig`:
 
 ```typescript
 const sdk = OriginalsSDK.create({
-  network: 'mainnet' | 'testnet' | 'regtest' | 'signet', // Bitcoin network
+  network: 'mainnet' | 'regtest' | 'signet', // Bitcoin network
   webvhNetwork: 'pichu' | 'cleffa' | 'magby', // WebVH network (default: 'pichu')
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256',
   ordinalsProvider: new OrdMockProvider(), // Required for Bitcoin ops

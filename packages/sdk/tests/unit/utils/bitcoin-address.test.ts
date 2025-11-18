@@ -29,28 +29,9 @@ describe('bitcoin-address validation', () => {
           .toThrow(/Invalid Bitcoin address/i);
       });
 
-      test('rejects testnet address on mainnet network', () => {
-        // Testnet address should fail on mainnet
+      test('rejects regtest address on mainnet network', () => {
+        // Regtest/testnet address should fail on mainnet
         expect(() => validateBitcoinAddress('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', 'mainnet'))
-          .toThrow(/Invalid/i);
-      });
-    });
-
-    describe('testnet addresses', () => {
-      test('accepts valid testnet bech32 (tb1) address', () => {
-        // Valid testnet P2WPKH address
-        expect(() => validateBitcoinAddress('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', 'testnet')).not.toThrow();
-      });
-
-      test('legacy testnet address formats are not fully supported', () => {
-        // bitcoinjs-lib v6 primarily supports bech32 (tb1...) addresses
-        // Legacy formats require additional validation logic
-        expect(true).toBe(true);
-      });
-
-      test('rejects mainnet address on testnet network', () => {
-        // Mainnet address should fail on testnet
-        expect(() => validateBitcoinAddress('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', 'testnet'))
           .toThrow(/Invalid/i);
       });
     });
@@ -148,8 +129,8 @@ describe('bitcoin-address validation', () => {
         expect(() => validateBitcoinAddress('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', 'mainnet'))
           .toThrow(/Invalid/i);
         
-        // Using mainnet prefix on testnet
-        expect(() => validateBitcoinAddress('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', 'testnet'))
+        // Using mainnet prefix on regtest
+        expect(() => validateBitcoinAddress('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', 'regtest'))
           .toThrow(/Invalid/i);
       });
     });
@@ -193,14 +174,14 @@ describe('bitcoin-address validation', () => {
         });
       });
 
-      test('accepts various valid testnet bech32 addresses', () => {
+      test('accepts various valid regtest bech32 addresses', () => {
         const validAddresses = [
           'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7',
           'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
         ];
 
         validAddresses.forEach(address => {
-          expect(() => validateBitcoinAddress(address, 'testnet')).not.toThrow();
+          expect(() => validateBitcoinAddress(address, 'regtest')).not.toThrow();
         });
       });
     });
@@ -209,8 +190,8 @@ describe('bitcoin-address validation', () => {
   describe('isValidBitcoinAddress', () => {
     test('returns true for valid addresses', () => {
       expect(isValidBitcoinAddress('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', 'mainnet')).toBe(true);
-      expect(isValidBitcoinAddress('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', 'testnet')).toBe(true);
-      expect(isValidBitcoinAddress('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', 'regtest')).toBe(true); // testnet format works for regtest
+      expect(isValidBitcoinAddress('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', 'regtest')).toBe(true);
+      expect(isValidBitcoinAddress('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', 'signet')).toBe(true);
     });
 
     test('returns false for invalid addresses', () => {
