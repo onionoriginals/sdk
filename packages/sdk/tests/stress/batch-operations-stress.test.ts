@@ -18,7 +18,7 @@ describe('Batch Operations Stress Tests', () => {
 
   beforeEach(() => {
     config = {
-      network: 'testnet',
+      network: 'regtest',
       defaultKeyType: 'ES256K',
       ordinalsProvider: new OrdMockProvider(),
       enableLogging: false
@@ -489,7 +489,7 @@ async function runConcurrentBatches(
   itemsPerBatch: number
 ): Promise<ConcurrencyResult> {
   const config: OriginalsConfig = {
-    network: 'testnet',
+    network: 'regtest',
     defaultKeyType: 'ES256K',
     ordinalsProvider: new OrdMockProvider(),
     enableLogging: false

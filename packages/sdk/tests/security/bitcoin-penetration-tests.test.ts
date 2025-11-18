@@ -22,7 +22,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
 
   beforeEach(() => {
     config = {
-      network: 'testnet',
+      network: 'regtest',
       defaultKeyType: 'ES256K',
       ordinalsProvider: new OrdMockProvider(),
       enableLogging: false
