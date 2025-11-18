@@ -2,7 +2,7 @@ import { DIDDocument, VerificationMethod } from '../types/did';
 import { multikey, MultikeyType } from '../crypto/Multikey';
 import { validateSatoshiNumber } from '../utils/satoshi-validation';
 
-export type BitcoinNetwork = 'mainnet' | 'testnet' | 'signet';
+export type BitcoinNetwork = 'mainnet' | 'regtest' | 'signet';
 
 interface CreateBtcoDidDocumentParams {
 	publicKey: Uint8Array;
@@ -13,7 +13,7 @@ interface CreateBtcoDidDocumentParams {
 function getDidPrefix(network: BitcoinNetwork): string {
 	if (network === 'mainnet') return 'did:btco';
 	if (network === 'signet') return 'did:btco:sig';
-	if (network === 'testnet') return 'did:btco:test';
+	if (network === 'regtest') return 'did:btco:reg';
 	throw new Error(`Unsupported Bitcoin network: ${network}`);
 }
 

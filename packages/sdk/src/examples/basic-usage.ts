@@ -2,7 +2,7 @@ import { OriginalsSDK } from '../index';
 
 async function basicExample() {
   const sdk = OriginalsSDK.create({
-    network: 'testnet',
+    network: 'regtest',
     enableLogging: true,
     // Example uses defaults; provide adapters in your app or tests
     telemetry: {
