@@ -29,7 +29,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aviarytech/originals-sdk"
+    "url": "https://github.com/onionoriginals/sdk"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",
