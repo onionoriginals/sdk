@@ -100,6 +100,7 @@ class OriginalsWebVHSigner implements Signer {
 class OriginalsAuditSigner {
   private privateKeyMultibase: string;
   private signer: Ed25519Signer;
+  private signerDid: string;  // did:webvh, did:peer, or did:btco
 
   async sign(record: MigrationAuditRecord): Promise<string> {
     const canonical = this.prepareRecordForSigning(record);
@@ -107,9 +108,14 @@ class OriginalsAuditSigner {
     return multikey.encodeMultibase(signature);
   }
 
-  async verify(record: MigrationAuditRecord, publicKeyMultibase: string): Promise<boolean> {
+  async verify(record: MigrationAuditRecord, didDocument: DIDDocument): Promise<boolean> {
     const canonical = this.prepareRecordForSigning(record);
-    return this.signer.verify(canonical, record.signature, publicKeyMultibase);
+    const verificationMethod = didDocument.verificationMethod?.[0];
+    return this.signer.verify(canonical, record.signature, verificationMethod.publicKeyMultibase);
+  }
+
+  getSignerId(): string {
+    return this.signerDid;  // Returns did:webvh:..., did:peer:..., or did:btco:...
   }
 }
 ```
@@ -127,17 +133,22 @@ Add new interfaces for audit signing:
 ```typescript
 /**
  * Audit signer interface - mirrors ExternalSigner pattern
+ * NOTE: signerId should be a fully-qualified Originals DID:
+ * - did:webvh:example.com:alice (most common - production deployments)
+ * - did:peer:abc123 (development/testing)
+ * - did:btco:123456 (Bitcoin-anchored for maximum security)
  */
 export interface AuditSigner {
   sign(record: Omit<MigrationAuditRecord, 'signature'>): Promise<{ signature: string }>;
-  getSignerId(): Promise<string> | string;
+  getSignerId(): Promise<string> | string;  // Returns did:webvh:..., did:peer:..., or did:btco:...
 }
 
 /**
  * Audit verifier interface
+ * Verification requires resolving the signer's DID to get verification methods
  */
 export interface AuditVerifier {
-  verify(record: MigrationAuditRecord, publicKey: string): Promise<boolean>;
+  verify(record: MigrationAuditRecord, signerDidDocument: DIDDocument): Promise<boolean>;
 }
 
 /**
@@ -146,8 +157,9 @@ export interface AuditVerifier {
 export interface AuditConfig {
   signer?: AuditSigner;           // External signer (Turnkey, AWS KMS, etc.)
   verifier?: AuditVerifier;       // External verifier
-  keyPair?: KeyPair;              // SDK-managed key pair
-  autoGenerate?: boolean;         // Auto-generate key if none provided (default: true)
+  signerDid?: string;             // DID of the signer (did:webvh:..., did:peer:..., or did:btco:...)
+  keyPair?: KeyPair;              // SDK-managed key pair (only if signerDid is did:peer)
+  autoGenerate?: boolean;         // Auto-generate did:peer if none provided (default: true)
 }
 ```
 
@@ -172,8 +184,8 @@ export interface MigrationAuditRecord {
 
   // NEW: Signature fields
   signature?: string;              // Multibase-encoded signature
-  signerId?: string;               // DID or identifier of signer
-  signerPublicKey?: string;        // Multibase-encoded public key
+  signerId?: string;               // Full DID of signer (did:webvh:..., did:peer:..., or did:btco:...)
+  signerVerificationMethod?: string; // Specific verification method used (e.g., did:webvh:example.com:alice#key-1)
   signatureAlgorithm?: 'Ed25519' | 'ES256K' | 'ES256'; // Algorithm used
 }
 ```
@@ -193,19 +205,30 @@ import { KeyPair } from '../../types';
 /**
  * SDK-managed audit signer using Ed25519
  * Mirrors OriginalsWebVHSigner pattern from WebVHManager
+ *
+ * Uses Originals DIDs (did:webvh, did:peer, did:btco) instead of did:key
  */
 export class OriginalsAuditSigner implements AuditSigner, AuditVerifier {
   private privateKeyMultibase: string;
   private publicKeyMultibase: string;
   private signer: Ed25519Signer;
-  private signerId: string;
+  private signerDid: string;
+  private verificationMethodId: string;
 
-  constructor(keyPair: KeyPair) {
+  constructor(
+    keyPair: KeyPair,
+    signerDid: string,
+    verificationMethodId?: string
+  ) {
     this.privateKeyMultibase = keyPair.privateKey;
     this.publicKeyMultibase = keyPair.publicKey;
     this.signer = new Ed25519Signer();
-    // Create a did:key identifier for the signer
-    this.signerId = `did:key:${keyPair.publicKey}`;
+
+    // Use provided Originals DID (did:webvh, did:peer, or did:btco)
+    this.signerDid = signerDid;
+
+    // Default to #key-1 if not specified
+    this.verificationMethodId = verificationMethodId || `${signerDid}#key-1`;
   }
 
   /**
@@ -229,13 +252,21 @@ export class OriginalsAuditSigner implements AuditSigner, AuditVerifier {
 
   /**
    * Verify an audit record signature
+   * Requires the signer's DID document to extract verification methods
    */
-  async verify(record: MigrationAuditRecord, publicKeyMultibase?: string): Promise<boolean> {
+  async verify(record: MigrationAuditRecord, signerDidDocument: DIDDocument): Promise<boolean> {
     if (!record.signature) {
       return false;
     }
 
-    const pubKey = publicKeyMultibase || this.publicKeyMultibase;
+    // Extract public key from DID document's verification method
+    const verificationMethod = record.signerVerificationMethod
+      ? signerDidDocument.verificationMethod?.find(vm => vm.id === record.signerVerificationMethod)
+      : signerDidDocument.verificationMethod?.[0];
+
+    if (!verificationMethod || !verificationMethod.publicKeyMultibase) {
+      throw new Error('Cannot find verification method in DID document');
+    }
 
     // Reconstruct canonical representation
     const canonical = this.prepareRecordForSigning(record);
@@ -247,15 +278,22 @@ export class OriginalsAuditSigner implements AuditSigner, AuditVerifier {
     return this.signer.verify(
       Buffer.from(canonical, 'utf8'),
       signatureBuffer,
-      pubKey
+      verificationMethod.publicKeyMultibase
     );
   }
 
   /**
-   * Get signer identifier
+   * Get signer identifier (Originals DID)
    */
   getSignerId(): string {
-    return this.signerId;
+    return this.signerDid;  // Returns did:webvh:..., did:peer:..., or did:btco:...
+  }
+
+  /**
+   * Get verification method ID
+   */
+  getVerificationMethodId(): string {
+    return this.verificationMethodId;
   }
 
   /**
@@ -300,6 +338,26 @@ export class OriginalsAuditSigner implements AuditSigner, AuditVerifier {
     return sorted;
   }
 }
+
+/**
+ * Example usage patterns
+ */
+
+// Pattern 1: Using did:webvh (recommended for production)
+const webvhKeyPair = keyManager.generateKeyPair('Ed25519');
+const webvhDid = 'did:webvh:example.com:audit-signer';
+const webvhSigner = new OriginalsAuditSigner(webvhKeyPair, webvhDid, `${webvhDid}#key-1`);
+
+// Pattern 2: Using did:peer (development/testing)
+const peerKeyPair = keyManager.generateKeyPair('Ed25519');
+const peerDid = 'did:peer:abc123';
+const peerSigner = new OriginalsAuditSigner(peerKeyPair, peerDid);
+
+// Pattern 3: Using did:btco (maximum security, Bitcoin-anchored)
+const btcoKeyPair = keyManager.generateKeyPair('ES256K');
+const btcoDid = 'did:btco:123456789';
+const btcoSigner = new OriginalsAuditSigner(btcoKeyPair, btcoDid, `${btcoDid}#key-1`);
+}
 ```
 
 ---
@@ -312,6 +370,7 @@ export class OriginalsAuditSigner implements AuditSigner, AuditVerifier {
 
 ```typescript
 import { KeyManager } from '../../did/KeyManager';
+import { DIDManager } from '../../did/DIDManager';
 import { OriginalsAuditSigner } from './OriginalsAuditSigner';
 import { AuditConfig, AuditSigner, AuditVerifier } from '../types';
 
@@ -320,10 +379,16 @@ export class AuditLogger implements IAuditLogger {
   private signer: AuditSigner;
   private verifier?: AuditVerifier;
   private keyManager: KeyManager;
+  private didManager: DIDManager;
 
-  constructor(private config: OriginalsConfig, auditConfig?: AuditConfig) {
+  constructor(
+    private config: OriginalsConfig,
+    didManager: DIDManager,
+    auditConfig?: AuditConfig
+  ) {
     this.auditRecords = new Map();
     this.keyManager = new KeyManager();
+    this.didManager = didManager;
 
     // Initialize signer (SDK-managed or external)
     this.signer = this.initializeSigner(auditConfig);
@@ -333,29 +398,42 @@ export class AuditLogger implements IAuditLogger {
   /**
    * Initialize signer based on configuration
    * Mirrors WebVHManager's createDIDWebVH logic
+   *
+   * Priority order:
+   * 1. External signer (Turnkey, AWS KMS, HSM)
+   * 2. Existing DID with key pair (did:webvh, did:peer, did:btco)
+   * 3. Auto-generate did:peer (default)
    */
-  private initializeSigner(auditConfig?: AuditConfig): AuditSigner {
+  private async initializeSigner(auditConfig?: AuditConfig): Promise<AuditSigner> {
     // Option 1: External signer provided (Turnkey, AWS KMS, HSM)
     if (auditConfig?.signer) {
       return auditConfig.signer;
     }
 
-    // Option 2: Key pair provided
-    if (auditConfig?.keyPair) {
-      return new OriginalsAuditSigner(auditConfig.keyPair);
+    // Option 2: Existing DID with key pair provided
+    if (auditConfig?.signerDid && auditConfig?.keyPair) {
+      return new OriginalsAuditSigner(
+        auditConfig.keyPair,
+        auditConfig.signerDid,
+        `${auditConfig.signerDid}#key-1`
+      );
     }
 
-    // Option 3: Auto-generate key pair (default)
+    // Option 3: Auto-generate did:peer (default)
     if (auditConfig?.autoGenerate !== false) {
       const keyPair = this.keyManager.generateKeyPair('Ed25519');
-      console.warn('AuditLogger: Auto-generated audit signing key. Store this securely:', {
+      const peerResult = await this.didManager.createDIDPeer({ keyPair });
+
+      console.warn('AuditLogger: Auto-generated did:peer for audit signing. Store this securely:', {
+        did: peerResult.did,
         publicKey: keyPair.publicKey,
-        signerId: `did:key:${keyPair.publicKey}`
+        privateKey: '***REDACTED***'  // Never log private keys
       });
-      return new OriginalsAuditSigner(keyPair);
+
+      return new OriginalsAuditSigner(keyPair, peerResult.did);
     }
 
-    throw new Error('AuditLogger requires signer, keyPair, or autoGenerate enabled');
+    throw new Error('AuditLogger requires signer, signerDid+keyPair, or autoGenerate enabled');
   }
 
   /**
@@ -369,16 +447,16 @@ export class AuditLogger implements IAuditLogger {
     const { signature: newSignature } = await this.signer.sign(unsignedRecord);
     const signerIdValue = await this.signer.getSignerId();
 
-    // Get signer details
-    const signerPublicKeyValue = this.signer instanceof OriginalsAuditSigner
-      ? this.signer.getPublicKey()
+    // Get signer verification method
+    const signerVerificationMethodValue = this.signer instanceof OriginalsAuditSigner
+      ? this.signer.getVerificationMethodId()
       : undefined;
 
     const signedRecord: MigrationAuditRecord = {
       ...unsignedRecord,
       signature: newSignature,
       signerId: signerIdValue,
-      signerPublicKey: signerPublicKeyValue,
+      signerVerificationMethod: signerVerificationMethodValue,
       signatureAlgorithm: 'Ed25519' // TODO: Detect from signer
     };
 
@@ -401,24 +479,37 @@ export class AuditLogger implements IAuditLogger {
   /**
    * Verify an audit record signature
    * Returns true if signature is valid and authentic
+   *
+   * Verification process:
+   * 1. Resolve signer's DID (did:webvh, did:peer, or did:btco)
+   * 2. Extract verification method from DID document
+   * 3. Verify signature using public key from verification method
    */
   async verifyAuditRecord(record: MigrationAuditRecord): Promise<boolean> {
-    if (!record.signature) {
+    if (!record.signature || !record.signerId) {
       return false;
     }
 
-    // Use external verifier if provided
-    if (this.verifier && record.signerPublicKey) {
-      return this.verifier.verify(record, record.signerPublicKey);
-    }
+    try {
+      // Resolve the signer's DID to get verification methods
+      const signerDidDocument = await this.didManager.resolveDID(record.signerId);
 
-    // Use default verifier with public key from record
-    if (this.signer instanceof OriginalsAuditSigner && record.signerPublicKey) {
-      return this.signer.verify(record, record.signerPublicKey);
-    }
+      // Use external verifier if provided
+      if (this.verifier) {
+        return this.verifier.verify(record, signerDidDocument);
+      }
 
-    // Cannot verify without public key
-    return false;
+      // Use default verifier with DID document
+      if (this.signer instanceof OriginalsAuditSigner) {
+        return this.signer.verify(record, signerDidDocument);
+      }
+
+      // Cannot verify without appropriate verifier
+      return false;
+    } catch (error) {
+      console.error('Failed to verify audit record:', error);
+      return false;
+    }
   }
 
   // ... rest of existing methods (getMigrationHistory, getSystemMigrationLogs, etc.)
@@ -442,9 +533,10 @@ export class AuditLogger implements IAuditLogger {
 import { AuditLogger } from './audit/AuditLogger';
 
 // In constructor:
-this.auditLogger = new AuditLogger(config, {
-  autoGenerate: true,  // Auto-generate audit signing key
-  // OR provide explicit key:
+this.auditLogger = new AuditLogger(config, didManager, {
+  autoGenerate: true,  // Auto-generate did:peer for audit signing
+  // OR provide explicit DID:
+  // signerDid: 'did:webvh:example.com:audit-signer',
   // keyPair: config.auditKeyPair,
   // OR use external signer:
   // signer: config.auditSigner,
@@ -488,10 +580,11 @@ export interface OriginalsConfig {
   // NEW: Audit logging configuration
   auditConfig?: {
     enabled?: boolean;           // Enable/disable audit logging (default: true)
-    signer?: AuditSigner;        // External audit signer
+    signer?: AuditSigner;        // External audit signer (Turnkey, AWS KMS, etc.)
     verifier?: AuditVerifier;    // External audit verifier
-    keyPair?: KeyPair;           // SDK-managed audit key pair
-    autoGenerate?: boolean;      // Auto-generate audit keys (default: true)
+    signerDid?: string;          // DID of audit signer (did:webvh:..., did:peer:..., or did:btco:...)
+    keyPair?: KeyPair;           // SDK-managed key pair (required if signerDid provided)
+    autoGenerate?: boolean;      // Auto-generate did:peer if no signer provided (default: true)
   };
 }
 ```
@@ -860,14 +953,35 @@ describe('OriginalsAuditSigner', () => {
   });
 
   describe('getSignerId()', () => {
-    test('should return did:key identifier', () => {
+    test('should return Originals DID identifier (not did:key)', () => {
       const keyPair = keyManager.generateKeyPair('Ed25519');
-      const signer = new OriginalsAuditSigner(keyPair);
+      const signerDid = 'did:webvh:example.com:audit';
+      const signer = new OriginalsAuditSigner(keyPair, signerDid);
 
       const signerId = signer.getSignerId();
 
-      expect(signerId).toMatch(/^did:key:/);
-      expect(signerId).toContain(keyPair.publicKey);
+      expect(signerId).toBe('did:webvh:example.com:audit');
+      expect(signerId).not.toMatch(/^did:key:/);
+    });
+
+    test('should support did:peer for development', () => {
+      const keyPair = keyManager.generateKeyPair('Ed25519');
+      const signerDid = 'did:peer:abc123';
+      const signer = new OriginalsAuditSigner(keyPair, signerDid);
+
+      const signerId = signer.getSignerId();
+
+      expect(signerId).toBe('did:peer:abc123');
+    });
+
+    test('should support did:btco for Bitcoin-anchored audit', () => {
+      const keyPair = keyManager.generateKeyPair('ES256K');
+      const signerDid = 'did:btco:123456789';
+      const signer = new OriginalsAuditSigner(keyPair, signerDid);
+
+      const signerId = signer.getSignerId();
+
+      expect(signerId).toBe('did:btco:123456789');
     });
   });
 
@@ -1072,31 +1186,72 @@ Create comprehensive documentation covering:
 
 **For users upgrading from v1.0:**
 
-1. **Auto-generate audit keys** (default):
+1. **Auto-generate did:peer** (default - for development):
    ```typescript
    const sdk = OriginalsSDK.create({
      network: 'mainnet',
      auditConfig: {
-       autoGenerate: true  // New in v1.1
+       autoGenerate: true  // Creates did:peer automatically
      }
    });
    ```
 
-2. **Provide explicit keys** (recommended):
+2. **Use did:webvh** (recommended for production):
    ```typescript
+   // First, create a did:webvh for audit signing
    const auditKeyPair = keyManager.generateKeyPair('Ed25519');
-   // Store securely: auditKeyPair.privateKey
+   const auditDid = await sdk.did.createDIDWebVH({
+     domain: 'your-company.com',
+     paths: ['audit', 'signer'],
+     keyPair: auditKeyPair
+   });
+   // Result: did:webvh:your-company.com:audit:signer
 
    const sdk = OriginalsSDK.create({
      network: 'mainnet',
      auditConfig: {
+       signerDid: auditDid.did,
        keyPair: auditKeyPair
      }
    });
    ```
 
-3. **Use external signer** (production):
+3. **Use did:btco** (maximum security - Bitcoin-anchored):
    ```typescript
+   // First, inscribe a did:btco for audit signing
+   const auditKeyPair = keyManager.generateKeyPair('ES256K');
+   const auditDid = await sdk.bitcoin.inscribeDID({
+     keyPair: auditKeyPair,
+     satoshi: '123456789'
+   });
+   // Result: did:btco:123456789
+
+   const sdk = OriginalsSDK.create({
+     network: 'mainnet',
+     auditConfig: {
+       signerDid: auditDid.did,
+       keyPair: auditKeyPair
+     }
+   });
+   ```
+
+4. **Use external signer with did:webvh** (enterprise production):
+   ```typescript
+   // External signer (Turnkey) manages the private key
+   // But the DID is still did:webvh (not did:key)
+   const turnkeyAuditSigner = {
+     async sign(record) {
+       const canonical = JSON.stringify(sortKeys(record));
+       const signature = await turnkeyClient.sign({
+         organizationId: 'your-org',
+         keyId: 'audit-key-id',
+         payload: canonical
+       });
+       return { signature };
+     },
+     getSignerId: () => 'did:webvh:your-company.com:audit:signer'
+   };
+
    const sdk = OriginalsSDK.create({
      network: 'mainnet',
      auditConfig: {
@@ -1109,11 +1264,37 @@ Create comprehensive documentation covering:
 
 ## External Signer Examples
 
-### Turnkey Integration
+### Turnkey Integration with did:webvh
 
 ```typescript
 import { TurnkeyClient } from '@turnkey/sdk-browser';
 
+// Step 1: Create did:webvh with Turnkey as external signer
+const turnkeyWebvhSigner = {
+  async sign(input) {
+    const canonical = prepareDataForSigning(input.document, input.proof);
+    const signResult = await turnkeyClient.signRawPayload({
+      organizationId: 'your-org-id',
+      signWith: 'audit-webvh-key-id',
+      payload: canonical
+    });
+    return { proofValue: signResult.signature };
+  },
+  getVerificationMethodId: () => 'did:webvh:your-company.com:audit#key-1'
+};
+
+const auditDidResult = await sdk.did.createDIDWebVH({
+  domain: 'your-company.com',
+  paths: ['audit'],
+  externalSigner: turnkeyWebvhSigner,
+  verificationMethods: [{
+    type: 'Multikey',
+    publicKeyMultibase: 'z6Mk...'  // From Turnkey public key
+  }]
+});
+// Result: did:webvh:your-company.com:audit
+
+// Step 2: Create audit signer using the did:webvh
 const turnkeyAuditSigner = {
   async sign(record: Omit<MigrationAuditRecord, 'signature'>) {
     const canonical = JSON.stringify(sortKeys(record));
@@ -1124,35 +1305,50 @@ const turnkeyAuditSigner = {
     });
     return { signature: signResult.signature };
   },
-  getSignerId: () => 'did:key:turnkey-audit-key'
+  getSignerId: () => 'did:webvh:your-company.com:audit'  // Uses did:webvh, not did:key
 };
 
+// Step 3: Configure SDK with Turnkey audit signer
 const sdk = OriginalsSDK.create({
   network: 'mainnet',
   auditConfig: { signer: turnkeyAuditSigner }
 });
 ```
 
-### AWS KMS Integration
+### AWS KMS Integration with did:btco
 
 ```typescript
 import { KMSClient, SignCommand } from '@aws-sdk/client-kms';
 
+// Step 1: Create did:btco with KMS as external signer
+// (KMS manages secp256k1 key for Bitcoin compatibility)
+const kmsDidResult = await sdk.bitcoin.inscribeDID({
+  satoshi: '123456789',
+  externalSigner: kmsWebvhSigner,
+  verificationMethods: [{
+    type: 'Multikey',
+    publicKeyMultibase: 'zQ3sh...'  // secp256k1 public key from KMS
+  }]
+});
+// Result: did:btco:123456789
+
+// Step 2: Create audit signer using did:btco
 const kmsAuditSigner = {
   async sign(record: Omit<MigrationAuditRecord, 'signature'>) {
     const canonical = JSON.stringify(sortKeys(record));
     const kmsClient = new KMSClient({ region: 'us-east-1' });
     const signCommand = new SignCommand({
-      KeyId: 'audit-key-arn',
+      KeyId: 'arn:aws:kms:us-east-1:123456789:key/audit-key-id',
       Message: Buffer.from(canonical),
       SigningAlgorithm: 'ECDSA_SHA_256'
     });
     const result = await kmsClient.send(signCommand);
     return { signature: encodeMultibase(result.Signature) };
   },
-  getSignerId: () => 'did:key:aws-kms-audit-key'
+  getSignerId: () => 'did:btco:123456789'  // Uses did:btco, not did:key
 };
 
+// Step 3: Configure SDK with KMS audit signer
 const sdk = OriginalsSDK.create({
   network: 'mainnet',
   auditConfig: { signer: kmsAuditSigner }
