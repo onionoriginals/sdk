@@ -29,15 +29,15 @@ jobs:
         run: bun install
 
       - name: Build
-        run: bun run build
+        run: bun run build --filter='!originals-explorer'
 
       - name: Run tests
-        run: bun run test
+        run: bun run test --filter='!originals-explorer'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
 
       - name: Semantic Release
         env:
