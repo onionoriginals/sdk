@@ -586,6 +586,20 @@ export class LifecycleManager {
     // PHASE 1: Issue ResourceMigrated credential for Bitcoin migration
     try {
       const migratedTimestamp = new Date().toISOString();
+
+      // Determine the "current active DID" to use as issuer
+      // This should match the fromLayer to maintain provenance chain integrity
+      let issuerDid = asset.id; // Default to original peer DID
+
+      if (fromLayer === 'did:webvh' && asset.bindings?.['did:webvh']) {
+        // If migrating from webvh, the webvh DID should be the issuer
+        issuerDid = asset.bindings['did:webvh'];
+      } else if (fromLayer === 'did:btco' && asset.bindings?.['did:btco']) {
+        // If migrating from btco (shouldn't happen, but handle it)
+        issuerDid = asset.bindings['did:btco'];
+      }
+      // else: use asset.id (did:peer) for peer→btco migrations
+
       const unsigned = await this.credentialManager.createResourceCredential(
         'ResourceMigrated',
         {
@@ -598,13 +612,13 @@ export class LifecycleManager {
           satoshi: inscription.satoshi,
           transactionId: revealTxId
         },
-        asset.id
+        issuerDid // Use the current active DID, not always asset.id
       );
 
       // Try to sign with keyStore if available
       let signed: VerifiableCredential;
       if (this.keyStore) {
-        signed = await this.signWithKeyStore(unsigned, asset.id);
+        signed = await this.signWithKeyStore(unsigned, issuerDid); // Pass issuerDid
       } else {
         // If no keyStore, store unsigned credential (can be signed later)
         this.logger.warn('Storing unsigned ResourceMigrated credential - keyStore not available');
@@ -615,6 +629,7 @@ export class LifecycleManager {
 
       this.logger.info('ResourceMigrated credential issued', {
         assetId: asset.id,
+        issuerDid,
         fromLayer,
         toLayer: 'did:btco',
         inscriptionId: inscription.inscriptionId

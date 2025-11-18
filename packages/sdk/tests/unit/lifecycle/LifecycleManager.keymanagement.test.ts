@@ -424,8 +424,15 @@ describe('LifecycleManager Key Management', () => {
       expect((btcoMigratedCredential.credentialSubject as any).inscriptionId).toBe('insc-mock');
       expect((btcoMigratedCredential.credentialSubject as any).satoshi).toBe('123');
 
-      // Verify proof is present
+      // CRITICAL: Verify issuer matches fromLayer (webvh DID)
+      // This maintains provenance chain integrity
+      expect(btcoMigratedCredential.issuer).toBe(publisherDid);
+      expect(btcoMigratedCredential.issuer).toContain('did:webvh');
+
+      // Verify proof is present and signed by webvh DID
       expect(btcoMigratedCredential.proof).toBeDefined();
+      const proof = btcoMigratedCredential.proof as any;
+      expect(proof.verificationMethod).toContain('did:webvh');
     });
 
     test('PHASE 1: should issue ResourceMigrated credential for peer->btco direct migration', async () => {
@@ -447,6 +454,7 @@ describe('LifecycleManager Key Management', () => {
       // Create asset - should have ResourceCreated credentials
       const asset = await lifecycleWithBitcoin.createAsset(resources);
       const credentialCountBeforeInscription = asset.credentials.length;
+      const peerDid = asset.id; // Capture the peer DID for later verification
 
       // Inscribe directly on Bitcoin (skip webvh layer)
       const inscribed = await lifecycleWithBitcoin.inscribeOnBitcoin(asset, 10);
@@ -460,8 +468,15 @@ describe('LifecycleManager Key Management', () => {
       expect((btcoCredential.credentialSubject as any).fromLayer).toBe('did:peer');
       expect((btcoCredential.credentialSubject as any).toLayer).toBe('did:btco');
 
-      // Verify proof is present
+      // CRITICAL: Verify issuer matches fromLayer (peer DID)
+      // This maintains provenance chain integrity
+      expect(btcoCredential.issuer).toBe(peerDid);
+      expect(btcoCredential.issuer).toContain('did:peer');
+
+      // Verify proof is present and signed by peer DID
       expect(btcoCredential.proof).toBeDefined();
+      const proof = btcoCredential.proof as any;
+      expect(proof.verificationMethod).toContain('did:peer');
     });
   });
 
