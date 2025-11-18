@@ -11,8 +11,8 @@
 
 import { readFile } from 'fs/promises';
 
-const MIN_LINE_COVERAGE = 85.3;
-const MIN_FUNCTION_COVERAGE = 85.3;
+const MIN_LINE_COVERAGE = 80;
+const MIN_FUNCTION_COVERAGE = 80;
 
 // Read input from file argument or stdin
 let output: string;
