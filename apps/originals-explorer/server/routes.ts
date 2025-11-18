@@ -14,6 +14,7 @@ import usersRoutes from "./routes/users.routes";
 import assetsRoutes from "./routes/assets.routes";
 import walletRoutes from "./routes/wallet.routes";
 import utilsRoutes from "./routes/utils.routes";
+import devRoutes from "./routes/dev.routes";
 import importRoutes from "./routes/import";
 
 // Turnkey client for key management
@@ -31,9 +32,10 @@ const turnkeyClient = new Turnkey({
  * - /api/auth/* - Authentication (Turnkey email auth, Google OAuth, legacy OTP)
  * - /api/user/* - User management
  * - /api/did/* - DID operations (via routes-did.ts)
- * - /api/assets/* - Asset CRUD, types, spreadsheet upload
+ * - /api/assets/* - Asset CRUD, types, migration, batch operations
  * - /api/wallet/* - Wallet connections
  * - /api/import/* - Google Drive imports
+ * - /api/dev/* - Development/demo endpoints (generate-random-asset)
  * - /api/* - Utilities (health, stats, QR codes)
  *
  * DID Web Hosting Routes (catch-all patterns):
@@ -66,6 +68,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Import routes (Google Drive)
   app.use("/api/import", importRoutes);
+
+  // Development/demo routes
+  app.use("/api/dev", devRoutes);
 
   // Utility routes (health, stats, QR codes)
   app.use("/api", utilsRoutes);
