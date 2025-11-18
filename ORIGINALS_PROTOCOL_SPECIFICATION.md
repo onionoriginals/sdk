@@ -218,10 +218,14 @@ The Originals Protocol organizes digital asset lifecycles through three distinct
 - MUST store transaction ID in audit record
 
 **Transfer Rule:**
-- MUST use Bitcoin transaction to move satoshi
-- MUST update DID document during transfer
+- MUST use Bitcoin transaction to move the same satoshi UTXO to new owner
+- MUST preserve the DID identifier (`did:btco:<satoshi>` remains unchanged)
+- MUST record transfer in migration log/provenance chain (not re-inscribe)
+- MUST derive each migration-log entry from the confirmed Bitcoin transfer transaction (indexers extract txid/vout and produce the log entry)
+- MUST include the transfer transaction ID inside the derived migration log entry so off-chain history can be linked back on-chain
 - MUST preserve all key material and properties
-- MUST maintain unbroken transaction chain
+- MUST maintain unbroken transaction chain for the satoshi
+- MUST NOT create a new inscription (would create a new DID)
 
 **Validation:**
 - Validate DID format and satoshi number
@@ -370,12 +374,14 @@ interface Update {
 5. Must be able to wait for Bitcoin confirmation (10+ minutes)
 6. Estimated time: <10 minutes with 1 confirmation wait
 7. Cost: $75-200 depending on fee rate and network congestion
+8. MUST issue Bitcoin Anchoring Credential capturing inscription metadata (satoshi, inscriptionId, txids, DID hash)
 
 **did:peer → did:btco (Direct) Requirements:**
 1. All webvh requirements apply
 2. Skips public layer, goes direct to Bitcoin
 3. Same cost and time as webvh→btco migration
 4. Use case: High-value original work for direct sale
+5. MUST issue Bitcoin Anchoring Credential capturing inscription metadata (satoshi, inscriptionId, txids, DID hash)
 
 ### Migration Guarantees
 
@@ -431,6 +437,12 @@ interface Update {
 - Enables DID log authenticity
 - Updated on domain transfer
 
+**5. Bitcoin Anchoring Credential** (btco migrations)
+- Issued when migrating to did:btco (either peer→btco or webvh→btco)
+- Captures inscription metadata: satoshi number, inscriptionId, commit/reveal txids, block height, DID document hash, fee rate, and migration timestamp
+- Signed by the appropriate layer authority (owner/controller pre-bitcoin, current inscription owner after confirmation)
+- Provides a verifiable VC linking the DID document to the Bitcoin inscription for auditors and indexers
+
 ### Credential Requirements
 
 **All credentials MUST:**
@@ -447,10 +459,22 @@ interface Update {
 3. BBS+ MAY be used for selective disclosure
 4. External signers MUST be supported
 
+**Signing Authority by Layer:**
+- `did:peer`: Owner/controller keypair is the sole authority; every credential issuance or re-issuance MUST be signed with that controller key.
+- `did:webvh`: Domain controller (same logical owner) signs re-issued credentials using the verification method published in the DID log; migrations MUST rotate or delegate keys before web hosting changes hands.
+- `did:btco`: The current Bitcoin owner of the inscription (holder of the satoshi UTXO) becomes the credential authority; re-issued credentials MUST be signed after proving control of the UTXO (e.g., via Taproot key path or delegated verification method) so provenance corresponds to on-chain ownership.
+
 **Selective Disclosure (Optional):**
 - BBS+ cryptosuite enables hiding specific claims
 - MAY be used for privacy-sensitive credentials
 - MUST preserve verifiability of selective claims
+
+**Bitcoin Anchoring Credential Requirements:**
+1. MUST be generated for every did:webvh → did:btco or did:peer → did:btco migration
+2. MUST include the satoshi number, inscriptionId, commit/reveal transaction IDs, block height, DID document hash, and migration timestamp
+3. MUST reference the originating DID (source layer) and the resulting `did:btco` identifier
+4. MUST be signed by the authorized owner/controller per layer (see Signing Authority by Layer)
+5. MUST be added to the asset's credential set and provenance chain for downstream verification
 
 ---
 
@@ -502,17 +526,38 @@ fee = (commitSize + revealSize) * feeRate
 ### Transfer Mechanism
 
 **Ownership Transfer:**
-1. Create Bitcoin transaction moving satoshi
-2. Update DID document with new owner
-3. Inscribe updated document on new satoshi
-4. Include reference to previous satoshi
-5. Wait for confirmation
+1. Create a standard Ordinals transfer transaction that moves the satoshi UTXO to the new owner's address
+2. Wait for Bitcoin confirmation
+3. Index the confirmed transaction to derive the migration/provenance log entry (capture txid, vout, new owner, timestamp)
+4. Record the derived entry in the migration log/provenance chain; DID identifier (`did:btco:<satoshi>`) remains unchanged
+5. DID document ownership is updated via the derived log entry (no new inscription required)
+
+**Critical Requirements:**
+- MUST move the same satoshi UTXO (not create a new satoshi/DID pair)
+- MUST preserve the DID identifier (`did:btco:<satoshi>` remains constant)
+- MUST record transfer in provenance chain/migration log and include the Bitcoin transaction ID derived from the transfer
+- MUST maintain tooling (indexers/observers) that deterministically derive the log entry from blockchain data
+- MUST NOT create a new inscription (would create a new DID)
+- MUST maintain unbroken transaction chain for the satoshi
 
 **Guarantees:**
-- Previous owner cannot reclaim
+- Previous owner cannot reclaim (UTXO moved to new address)
 - New owner has sole signing authority
-- Complete transfer history recorded
+- Complete transfer history recorded in migration log
+- DID identifier immutability preserved (same satoshi = same DID)
 - No loss of provenance data
+
+### Bitcoin Anchoring Credential (VC)
+
+- Issued exactly once per btco migration (peer→btco or webvh→btco)
+- VC payload MUST include:
+  - Source DID (peer/webvh) and resulting `did:btco`
+  - Satoshi number, inscriptionId, commit and reveal txids, block height, fee data
+  - Hash/fingerprint of the inscribed DID document and migration manifest
+  - Migration timestamp and migrationId
+- Signed by the authorized owner/controller for the source layer (controller for peer/webvh, then acknowledged by btc owner post-confirmation if control changes)
+- Stored with the asset credentials and referenced in the provenance log
+- Serves as the canonical artifact auditors use to link off-chain DID state with the on-chain inscription without modifying Bitcoin transfer transactions
 
 ---
 
@@ -579,12 +624,14 @@ Before claiming Originals Protocol v1.0 compliance:
 - [ ] Migration validation required
 - [ ] Rollback capability tested
 - [ ] Audit logs created
+- [ ] Transfer log entries are deterministically derived from confirmed Bitcoin transactions (txid/vout recorded)
 - [ ] Complete in documented timeframe
 
 **Bitcoin Integration:**
 - [ ] Inscriptions created correctly
 - [ ] Satoshi numbers are unique
 - [ ] Transfers preserve satoshi
+- [ ] Bitcoin Anchoring Credential (VC) issued for every btco migration with inscription metadata
 - [ ] Fees estimated accurately
 - [ ] Confirmations tracked
 - [ ] No funds lost (critical!)

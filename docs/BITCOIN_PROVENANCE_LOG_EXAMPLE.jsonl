@@ -1,0 +1,158 @@
+{
+  "timestamp": "2024-01-10T08:12:04Z",
+  "type": "creation",
+  "layer": "did:peer",
+  "did": "did:peer:4zQmkW9dV5yGnVd7kBXx",
+  "controller": "did:peer:4zQmkW9dV5yGnVd7kBXx",
+  "manifestHash": "sha256-2a4cc3a8c56c2c14fdfbb519d871bc9ce4b4cd5c0c611fa48cf3b8ddfcb2b019",
+  "credentials": [
+    "vc-ownership-001"
+  ],
+  "proof": {
+    "type": "DataIntegrityProof",
+    "verificationMethod": "did:peer:4zQmkW9dV5yGnVd7kBXx#keys-1",
+    "signature": "z3WxKkF9NvcqA9c55vW9QXLfr"
+  }
+}
+{
+  "timestamp": "2024-02-02T14:27:19Z",
+  "type": "migration",
+  "fromLayer": "did:peer",
+  "toLayer": "did:webvh",
+  "sourceDid": "did:peer:4zQmkW9dV5yGnVd7kBXx",
+  "targetDid": "did:webvh:originals.art:gallery:firefly",
+  "domain": "originals.art",
+  "logUri": "https://originals.art/.well-known/did.jsonl?path=gallery/firefly",
+  "manifestHash": "sha256-458b3176a66da3dae6f5a78deb50f7df1f1c1c88922d7de066b98965739c3911",
+  "credentials": [
+    "vc-ownership-002",
+    "vc-resource-001"
+  ],
+  "proof": {
+    "type": "DataIntegrityProof",
+    "verificationMethod": "did:peer:4zQmkW9dV5yGnVd7kBXx#keys-1",
+    "signature": "z4Qmcw8DryPoRqrwFMgj3tYhD"
+  }
+}
+{
+  "timestamp": "2024-03-01T12:04:33Z",
+  "type": "resourceUpdate",
+  "layer": "did:webvh",
+  "did": "did:webvh:originals.art:gallery:firefly",
+  "resourceId": "res-cover",
+  "fromVersion": 1,
+  "toVersion": 2,
+  "hash": "sha256-3cc871f0b04e9a51b3b0fa0a63ec37f5276408900a24714f9a19cab7a0e911d8",
+  "changes": [
+    "Optimized preview image",
+    "Appended catalog metadata"
+  ],
+  "proof": {
+    "type": "DataIntegrityProof",
+    "verificationMethod": "did:webvh:originals.art:gallery:firefly#keys-1",
+    "signature": "z4sV0LT9uxahQ8a3p3XME4N5o"
+  }
+}
+{
+  "timestamp": "2024-03-15T21:03:55Z",
+  "type": "migration",
+  "fromLayer": "did:webvh",
+  "toLayer": "did:btco",
+  "sourceDid": "did:webvh:originals.art:gallery:firefly",
+  "targetDid": "did:btco:2099994098",
+  "satoshi": "2099994098",
+  "inscriptionId": "c8a7e01dc427c8cc2ab80193e4cd9f3d2b20d94b6be3dfd90bfa9d8e7f6cd2f0i0",
+  "commitTxId": "a1b24cd5ef67890ab3c4d5e6f7890a1b2c3d4e5f67890abc1234567890defabc",
+  "revealTxId": "f9e87564d3210bcafe9876543210fedcba9876543210fedcba9876543210d7c6",
+  "blockHeight": 840120,
+  "feeRate": 68,
+  "anchoringCredential": "vc-bitcoin-anchoring-001",
+  "anchoringCredentialPayload": {
+    "issuer": "did:webvh:originals.art:gallery:firefly#keys-1",
+    "subject": {
+      "sourceDid": "did:webvh:originals.art:gallery:firefly",
+      "btcoDid": "did:btco:2099994098",
+      "satoshi": "2099994098",
+      "inscriptionId": "c8a7e01dc427c8cc2ab80193e4cd9f3d2b20d94b6be3dfd90bfa9d8e7f6cd2f0i0",
+      "commitTxId": "a1b24cd5ef67890ab3c4d5e6f7890a1b2c3d4e5f67890abc1234567890defabc",
+      "revealTxId": "f9e87564d3210bcafe9876543210fedcba9876543210fedcba9876543210d7c6",
+      "blockHeight": 840120,
+      "didDocumentHash": "sha256-6dbf5a742afbd9e64f2c3cc0b44b0e1d47a2a882e8d910b004cd6d5a7f228820",
+      "migrationId": "mig-00045"
+    },
+    "proof": {
+      "type": "DataIntegrityProof",
+      "verificationMethod": "did:webvh:originals.art:gallery:firefly#keys-1",
+      "signature": "z5LMkHv1ErN9qSxj2JwV0UkpV"
+    }
+  }
+}
+{
+  "timestamp": "2024-04-05T10:11:09Z",
+  "type": "transfer",
+  "did": "did:btco:2099994098",
+  "fromOwner": "bc1pcreator7k8v0h5t0m2g5f45u2prmtwh5u0r0",
+  "toOwner": "bc1pcollector12345r8p7f0s2kxy3d0t54w3ujq9d",
+  "txid": "34ab90cd12fe4789bcd1234ef567890abcdeffedcba98765a1b2c3d4e5f60708",
+  "vout": 0,
+  "blockHeight": 842210,
+  "confirmations": 12,
+  "derivedBy": "OriginalsIndexer/1.2.3",
+  "proof": {
+    "type": "OrdinalsTransferProof",
+    "source": "bitcoin-mainnet",
+    "satoshi": "2099994098"
+  }
+}
+{
+  "timestamp": "2024-06-01T17:40:12Z",
+  "type": "transfer",
+  "did": "did:btco:2099994098",
+  "fromOwner": "bc1pcollector12345r8p7f0s2kxy3d0t54w3ujq9d",
+  "toOwner": "bc1pinstitution9lmno2qs4tuv6wx8yz0abcd1234",
+  "txid": "9fe8b3c1a4d0e578c6b4a1f2e3d4c5b6a7f8901234567890abcdeffedcba9876",
+  "vout": 0,
+  "blockHeight": 847002,
+  "confirmations": 18,
+  "derivedBy": "OriginalsIndexer/1.2.3",
+  "proof": {
+    "type": "OrdinalsTransferProof",
+    "source": "bitcoin-mainnet",
+    "satoshi": "2099994098"
+  }
+}
+{
+  "timestamp": "2024-08-18T08:55:02Z",
+  "type": "credential",
+  "did": "did:btco:2099994098",
+  "credentialId": "vc-provenance-007",
+  "purpose": "Ownership re-issuance after transfer",
+  "issuer": "did:btco:2099994098#keys-1",
+  "subject": {
+    "currentOwner": "bc1pinstitution9lmno2qs4tuv6wx8yz0abcd1234",
+    "assetId": "did:btco:2099994098"
+  },
+  "proof": {
+    "type": "DataIntegrityProof",
+    "verificationMethod": "did:btco:2099994098#keys-1",
+    "signature": "z6PQwF1Gx9RfUo3JvjWx8BuSn"
+  }
+}
+{
+  "timestamp": "2024-09-10T09:05:44Z",
+  "type": "resourceUpdate",
+  "did": "did:btco:2099994098",
+  "resourceId": "res-cover",
+  "fromVersion": 2,
+  "toVersion": 3,
+  "hash": "sha256-9ab3d8817d45e8eb8d9d3922f6a5b103f4289a5f399bfe657b1c0af45ac5177d",
+  "changes": [
+    "Adjusted metadata with curator note"
+  ],
+  "proof": {
+    "type": "DataIntegrityProof",
+    "verificationMethod": "did:btco:2099994098#keys-1",
+    "signature": "z6Xt4PRu7pwg9YWyVbJ9xm1QH"
+  }
+}
+
