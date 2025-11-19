@@ -4,9 +4,10 @@
  * This module provides repository interfaces and implementations for securely storing
  * and managing verifiable credentials with efficient indexing and retrieval.
  */
-import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import type { VerifiableCredential } from '../types/verifiableCredential';
 
 /**
@@ -618,7 +619,9 @@ export class InMemoryCredentialRepository implements CredentialRepository {
     
     // Create a hash of these properties
     const idSource = `${issuerId}:${subjectId}:${issuanceDate}:${types}:${Date.now()}`;
-    const hash = crypto.createHash('sha256').update(idSource).digest('hex');
+    const data = new TextEncoder().encode(idSource);
+    const hashBytes = sha256(data);
+    const hash = bytesToHex(hashBytes);
     
     return `urn:vc:${hash.substring(0, 16)}`;
   }

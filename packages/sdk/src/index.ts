@@ -73,6 +73,7 @@ export * from './utils/satoshi-validation.js';
 export * from './utils/serialization.js';
 export * from './utils/retry.js';
 export * from './utils/telemetry.js';
+export { sha256Bytes } from './utils/hash.js';
 
 // Adapter exports (for testing and custom integrations)
 export { OrdMockProvider } from './adapters/providers/OrdMockProvider.js';

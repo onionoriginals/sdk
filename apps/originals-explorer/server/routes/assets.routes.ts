@@ -3,7 +3,6 @@ import { authenticateUser } from "../middleware/auth.middleware";
 import { storage } from "../storage";
 import { insertAssetSchema, insertAssetTypeSchema } from "@shared/schema";
 import { z } from "zod";
-import crypto from "crypto";
 import { originalsSdk } from "../originals";
 import multer from "multer";
 import { parse as csvParse } from "csv-parse/sync";

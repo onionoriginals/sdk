@@ -9,7 +9,7 @@
  * - Detailed timing and error tracking
  */
 
-import { randomBytes } from 'crypto';
+import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
 
 /**
  * Result of a batch operation containing successful and failed items
@@ -215,7 +215,7 @@ export class BatchOperationExecutor {
    * Generate unique batch ID
    */
   generateBatchId(): string {
-    return `batch_${Date.now()}_${randomBytes(8).toString('hex')}`;
+    return `batch_${Date.now()}_${bytesToHex(randomBytes(8))}`;
   }
   
   /**

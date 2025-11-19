@@ -1,5 +1,5 @@
 import { type User, type InsertUser, type Asset, type InsertAsset, type WalletConnection, type InsertWalletConnection, type AssetType, type InsertAssetType, type AssetLayer } from "@shared/schema";
-import { randomUUID } from "crypto";
+import { v4 as uuidv4 } from "uuid";
 import { DatabaseStorage } from "./db.ts";
 
 export interface SigningKey {
@@ -135,7 +135,7 @@ export class MemStorage implements IStorage {
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
+    const id = uuidv4();
     const user: User = { 
       ...insertUser, 
       id,
@@ -271,7 +271,7 @@ export class MemStorage implements IStorage {
   }
 
   async createAsset(insertAsset: InsertAsset): Promise<Asset> {
-    const id = `orig_${Date.now()}_${randomUUID().slice(0, 8)}`;
+    const id = `orig_${Date.now()}_${uuidv4().slice(0, 8)}`;
     const asset: Asset = {
       ...insertAsset,
       id,
@@ -319,7 +319,7 @@ export class MemStorage implements IStorage {
     sourceMetadata: any;
   }): Promise<Asset> {
     const asset: Asset = {
-      id: randomUUID(),
+      id: uuidv4(),
       userId: data.userId,
       title: data.title,
       assetType: 'image',
@@ -361,7 +361,7 @@ export class MemStorage implements IStorage {
   }
 
   async createWalletConnection(insertConnection: InsertWalletConnection): Promise<WalletConnection> {
-    const id = randomUUID();
+    const id = uuidv4();
     const connection: WalletConnection = {
       ...insertConnection,
       id,
@@ -405,7 +405,7 @@ export class MemStorage implements IStorage {
   }
 
   async createAssetType(insertAssetType: InsertAssetType): Promise<AssetType> {
-    const id = randomUUID();
+    const id = uuidv4();
     const assetType: AssetType = {
       ...insertAssetType,
       id,
@@ -454,7 +454,7 @@ export class MemStorage implements IStorage {
     processedFiles: string;
     failedFiles: string;
   }) {
-    const id = randomUUID();
+    const id = uuidv4();
     const importRecord = {
       id,
       ...data,

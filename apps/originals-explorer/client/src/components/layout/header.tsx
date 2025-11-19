@@ -5,7 +5,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTr
 import { WalletConnector } from "@/components/wallet/wallet-connector";
 import { useAuth } from "@/hooks/useAuth";
 import { Menu, X, FolderTree, FileText, Upload, LogOut, User as UserIcon, MoreHorizontal, Hash, Copy, Settings } from "lucide-react";
-import { sha256Hex } from "@/lib/hash";
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 interface Document {
@@ -76,22 +77,21 @@ export default function Header() {
   }, [location]);
 
   useEffect(() => {
-    const computeHash = async () => {
-      try {
-        if (currentDocument && currentDocument.content) {
-          const hex = await sha256Hex(currentDocument.content);
-          setContentHash(hex);
-          setDidUrl(`did:webvh:sha256:${hex}`);
-        } else if (!currentDocument) {
-          setContentHash(null);
-          setDidUrl(null);
-        }
-      } catch {
+    try {
+      if (currentDocument && currentDocument.content) {
+        const data = new TextEncoder().encode(currentDocument.content);
+        const hash = sha256(data);
+        const hex = bytesToHex(hash);
+        setContentHash(hex);
+        setDidUrl(`did:webvh:sha256:${hex}`);
+      } else if (!currentDocument) {
         setContentHash(null);
         setDidUrl(null);
       }
-    };
-    computeHash();
+    } catch {
+      setContentHash(null);
+      setDidUrl(null);
+    }
   }, [currentDocument]);
 
   return (

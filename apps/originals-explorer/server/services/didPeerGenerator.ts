@@ -1,6 +1,7 @@
 import { OriginalsSDK } from '@originals/sdk';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import type { DriveFile, GoogleDriveClient } from './googleDriveClient';
-import crypto from 'crypto';
 
 /**
  * DID:Peer result with metadata
@@ -26,7 +27,7 @@ export async function generateDidPeerForDriveFile(
     
     // Download the actual image file
     const imageBuffer = await driveClient.downloadFile(file.id);
-    const imageHash = crypto.createHash('sha256').update(imageBuffer).digest('hex');
+    const imageHash = bytesToHex(sha256(imageBuffer instanceof Buffer ? new Uint8Array(imageBuffer) : imageBuffer));
     
     console.log(`[DIDPeerGenerator] Downloaded ${file.name}, size: ${imageBuffer.length} bytes, hash: ${imageHash.substring(0, 16)}...`);
     
@@ -45,7 +46,7 @@ export async function generateDidPeerForDriveFile(
     };
     
     const metadataString = JSON.stringify(metadata);
-    const metadataHash = crypto.createHash('sha256').update(metadataString).digest('hex');
+    const metadataHash = bytesToHex(sha256(new TextEncoder().encode(metadataString)));
     
     // Create resource array with actual image data
     const resources = [
