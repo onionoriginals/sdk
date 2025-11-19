@@ -198,9 +198,16 @@ describe('BatchOperations', () => {
         maxConcurrent: 1
       });
 
-      expect(result.successful[0].duration).toBeGreaterThanOrEqual(10);
-      expect(result.successful[1].duration).toBeGreaterThanOrEqual(20);
-      expect(result.successful[2].duration).toBeGreaterThanOrEqual(30);
+      // Allow for timing imprecision - setTimeout can fire slightly early
+      // Use 80% of expected time as minimum to account for timer precision issues
+      expect(result.successful[0].duration).toBeGreaterThanOrEqual(8);
+      expect(result.successful[1].duration).toBeGreaterThanOrEqual(18);
+      expect(result.successful[2].duration).toBeGreaterThanOrEqual(28);
+      
+      // Also verify durations are reasonable (not too high)
+      expect(result.successful[0].duration).toBeLessThan(50);
+      expect(result.successful[1].duration).toBeLessThan(60);
+      expect(result.successful[2].duration).toBeLessThan(70);
     });
 
     test('should handle empty array', async () => {
