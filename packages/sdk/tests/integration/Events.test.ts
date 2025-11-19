@@ -197,7 +197,7 @@ describe('Integration: Event System', () => {
         capturedEvent = event;
       });
 
-      await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+      await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, 5);
 
       expect(eventReceived).toBe(true);
       expect(capturedEvent).not.toBeNull();
@@ -223,7 +223,7 @@ describe('Integration: Event System', () => {
 
       const asset = await sdk.lifecycle.createAsset(resources);
       await sdk.lifecycle.publishToWeb(asset, 'example.com');
-      await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+      await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, 5);
 
       let eventReceived = false;
       let capturedEvent: AssetTransferredEvent | null = null;
@@ -337,7 +337,7 @@ describe('Integration: Event System', () => {
 
       // Execute full lifecycle
       await sdk.lifecycle.publishToWeb(asset, 'example.com');
-      await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+      await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, 5);
       await sdk.lifecycle.transferOwnership(asset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
 
       // Verify events were emitted
@@ -372,7 +372,7 @@ describe('Integration: Event System', () => {
 
       unsubscribe();
 
-      await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+      await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, 5);
       expect(callCount).toBe(1); // Should not increment after unsubscribe
     });
 
@@ -397,7 +397,7 @@ describe('Integration: Event System', () => {
       await sdk.lifecycle.publishToWeb(asset, 'example.com');
       expect(callCount).toBe(1);
 
-      await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+      await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, 5);
       expect(callCount).toBe(1); // Should not increment on second migration
     });
   });

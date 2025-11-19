@@ -344,7 +344,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const webAsset = await sdk.lifecycle.publishToWeb(asset, 'integrity.test');
       expect(await webAsset.verify()).toBe(true);
 
-      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
+      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, publisherDid, 5);
       expect(await btcoAsset.verify()).toBe(true);
 
       await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
@@ -396,7 +396,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
         { id: 'fee-test', type: 'data', contentType: 'text/plain', hash: makeHash('fee123'), content: 'test' }
       ]);
       
-      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(asset, undefined);
+      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, undefined);
       const provenance = btcoAsset.getProvenance();
       
       // Should use fee oracle since no feeRate provided
@@ -474,7 +474,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       ]);
 
       // Inscribe without specifying fee rate - should use oracle
-      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(asset, undefined);
+      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, undefined);
       const provenance = btcoAsset.getProvenance();
 
       // Verify fee from oracle was used
@@ -510,7 +510,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
         { id: 'multi-transfer', type: 'data', contentType: 'text/plain', hash: makeHash('multi123'), content: 'test' }
       ]);
 
-      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, 5);
 
       // First transfer
       const recipient1 = 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx';
@@ -577,7 +577,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(Object.keys(webBindings)).toContain('did:webvh');
 
       // After btco
-      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
+      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, publisherDid, 5);
       const btcoBindings = (btcoAsset as any).bindings;
       expect(Object.keys(btcoBindings)).toContain('did:webvh');
       expect(Object.keys(btcoBindings)).toContain('did:btco');
@@ -616,7 +616,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const stored = await memoryStorage.getObject('large.test', path);
       expect(stored?.content.length).toBeGreaterThan(99000);
 
-      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
+      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, publisherDid, 5);
       expect(btcoAsset.currentLayer).toBe('did:btco');
     });
 
@@ -649,7 +649,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
         expect(stored).not.toBeNull();
       }
 
-      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
+      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, publisherDid, 5);
       expect(btcoAsset.currentLayer).toBe('did:btco');
       
       const provenance = btcoAsset.getProvenance();
@@ -666,7 +666,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const startTime = Date.now();
 
       const webAsset = await sdk.lifecycle.publishToWeb(asset, 'audit.test');
-      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 8); // Request 8, but oracle returns 7
+      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, publisherDid, 8); // Request 8, but oracle returns 7
       await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
 
       const provenance = btcoAsset.getProvenance();
@@ -713,7 +713,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const webAsset = await sdk.lifecycle.publishToWeb(asset, 'time.test');
       
       await new Promise(resolve => setTimeout(resolve, 10)); // Small delay
-      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
+      const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, publisherDid, 5);
       
       await new Promise(resolve => setTimeout(resolve, 10)); // Small delay
       await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');

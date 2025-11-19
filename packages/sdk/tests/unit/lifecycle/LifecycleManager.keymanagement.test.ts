@@ -457,7 +457,7 @@ describe('LifecycleManager Key Management', () => {
       const peerDid = asset.id; // Capture the peer DID for later verification
 
       // Inscribe directly on Bitcoin (skip webvh layer)
-      const inscribed = await lifecycleWithBitcoin.inscribeOnBitcoin(asset, 10);
+      const inscribed = await lifecycleWithBitcoin.inscribeOnBitcoin(asset, asset.id, 10);
 
       // Should have ResourceCreated + ResourceMigrated
       expect(inscribed.credentials.length).toBe(credentialCountBeforeInscription + 1);

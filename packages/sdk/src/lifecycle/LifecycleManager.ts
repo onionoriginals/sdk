@@ -529,15 +529,19 @@ export class LifecycleManager {
 
   async inscribeOnBitcoin(
     asset: OriginalsAsset,
+    signerDidOrSigner: string | ExternalSigner,
     feeRate?: number
   ): Promise<OriginalsAsset> {
     const stopTimer = this.logger.startTimer('inscribeOnBitcoin');
     this.logger.info('Inscribing asset on Bitcoin', { assetId: asset.id, feeRate });
-    
+
     try {
       // Input validation
       if (!asset || typeof asset !== 'object') {
         throw new Error('Invalid asset: must be a valid OriginalsAsset');
+      }
+      if (!signerDidOrSigner) {
+        throw new Error('Invalid signer: signerDidOrSigner is required');
       }
       if (feeRate !== undefined) {
         if (typeof feeRate !== 'number' || feeRate <= 0 || !Number.isFinite(feeRate)) {
@@ -587,22 +591,15 @@ export class LifecycleManager {
     try {
       const migratedTimestamp = new Date().toISOString();
 
-      // Issuer is always the original creator (asset.id / did:peer)
+      // Issuer is always the original creator (asset.id)
       // Only the original creator can issue credentials about their asset
       const issuerDid = asset.id;
 
-      // Signer is the current active DID context (current layer)
-      // This determines which keys are used to sign the credential
-      let signerDid = asset.id; // Default to original peer DID
-
-      if (fromLayer === 'did:webvh' && asset.bindings?.['did:webvh']) {
-        // If migrating from webvh, use webvh keys to sign
-        signerDid = asset.bindings['did:webvh'];
-      } else if (fromLayer === 'did:btco' && asset.bindings?.['did:btco']) {
-        // If migrating from btco, use btco keys to sign
-        signerDid = asset.bindings['did:btco'];
-      }
-      // else: use asset.id (did:peer) for peer→btco migrations
+      // Signer is explicitly provided by the caller
+      // The creator can choose to sign with keys from any layer (peer, webvh, or btco)
+      const signerDid = typeof signerDidOrSigner === 'string'
+        ? signerDidOrSigner
+        : await signerDidOrSigner.getVerificationMethodId();
 
       const unsigned = await this.credentialManager.createResourceCredential(
         'ResourceMigrated',
@@ -619,14 +616,22 @@ export class LifecycleManager {
         issuerDid // Always the original creator
       );
 
-      // Sign with current layer's keys
+      // Sign with the signer's chosen keys
       let signed: VerifiableCredential;
-      if (this.keyStore) {
-        signed = await this.signWithKeyStore(unsigned, signerDid);
+      if (typeof signerDidOrSigner === 'string') {
+        // String DID provided - use keyStore to sign
+        if (this.keyStore) {
+          signed = await this.signWithKeyStore(unsigned, signerDid);
+        } else {
+          this.logger.warn('Storing unsigned ResourceMigrated credential - keyStore not available');
+          signed = unsigned;
+        }
       } else {
-        // If no keyStore, store unsigned credential (can be signed later)
-        this.logger.warn('Storing unsigned ResourceMigrated credential - keyStore not available');
-        signed = unsigned;
+        // ExternalSigner provided - use it to sign
+        signed = await this.credentialManager.signCredentialWithExternalSigner(
+          unsigned,
+          signerDidOrSigner
+        );
       }
 
       asset.credentials.push(signed);

@@ -33,7 +33,7 @@ describe('LifecycleManager', () => {
     const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset(resources);
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
-    const btco = await sdk.lifecycle.inscribeOnBitcoin(asset, 9);
+    const btco = await sdk.lifecycle.inscribeOnBitcoin(asset, 'example.com', 9);
     expect(btco.currentLayer).toBe('did:btco');
     const provenance = btco.getProvenance();
     const latest = provenance.migrations[provenance.migrations.length - 1];
@@ -47,13 +47,13 @@ describe('LifecycleManager', () => {
   test('inscribeOnBitcoin without provider throws error', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset(resources);
-    await expect(sdk.lifecycle.inscribeOnBitcoin(asset, 5)).rejects.toThrow('Ordinals provider must be configured');
+    await expect(sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, 5)).rejects.toThrow('Ordinals provider must be configured');
   });
 
   test('inscribeOnBitcoin enforces migration guard', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest' });
     const fakeAsset = { currentLayer: 'did:webvh', migrate: undefined } as unknown as OriginalsAsset;
-    await expect(sdk.lifecycle.inscribeOnBitcoin(fakeAsset, 5)).rejects.toThrow('Not implemented');
+    await expect(sdk.lifecycle.inscribeOnBitcoin(fakeAsset, 'did:peer:test', 5)).rejects.toThrow('Not implemented');
   });
 
   test('publishToWeb throws Not implemented (coverage for throw)', async () => {
@@ -68,7 +68,7 @@ describe('LifecycleManager', () => {
     const sdk = OriginalsSDK.create({ network: 'regtest' });
     const fakeAsset: any = { currentLayer: 'did:webvh' };
     await expect(
-      sdk.lifecycle.inscribeOnBitcoin(fakeAsset, 10)
+      sdk.lifecycle.inscribeOnBitcoin(fakeAsset, 'did:peer:test', 10)
     ).rejects.toThrow('Not implemented');
   });
 
@@ -204,7 +204,7 @@ describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
     const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset(resources);
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
-    await sdk.lifecycle.inscribeOnBitcoin(asset, 8);
+    await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, 8);
     const tx = await sdk.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
     expect(tx.txid).toBe('tx-transfer-mock');
     const provenance = asset.getProvenance();

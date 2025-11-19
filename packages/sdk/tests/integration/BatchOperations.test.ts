@@ -388,7 +388,7 @@ describe('Batch Operations Integration', () => {
         const asset = await sdk.lifecycle.createAsset([
           { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
         ]);
-        const inscribed = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+        const inscribed = await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, 5);
         assets.push(inscribed);
       }
 
@@ -414,7 +414,7 @@ describe('Batch Operations Integration', () => {
       const asset = await sdk.lifecycle.createAsset([
         { id: 'res1', type: 'text', contentType: 'text/plain', hash: makeHash('txt1'), content: 'text1' }
       ]);
-      const inscribed = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+      const inscribed = await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, 5);
 
       const transfers = [
         { asset: inscribed, to: 'invalid-address' }
