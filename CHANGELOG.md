@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/onionoriginals/sdk/compare/v1.0.0...v1.1.0) (2025-11-19)
+
+
+### Features
+
+* release! ([e3ae12c](https://github.com/onionoriginals/sdk/commit/e3ae12c895da79d0413e419427da11987e3b61ce))
+
 # 1.0.0 (2025-11-19)
 
 
