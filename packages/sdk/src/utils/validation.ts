@@ -1,5 +1,6 @@
 import { DIDDocument, VerifiableCredential } from '../types';
-import { createHash } from 'crypto';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 
 export function validateDID(did: string): boolean {
   // Validate DID format according to W3C DID spec
@@ -111,7 +112,8 @@ export function validateDIDDocument(didDoc: DIDDocument): boolean {
 
 export function hashResource(content: Uint8Array): string {
   // Generate SHA-256 hash
-  return createHash('sha256').update(content).digest('hex');
+  const hash = sha256(content);
+  return bytesToHex(hash);
 }
 
 

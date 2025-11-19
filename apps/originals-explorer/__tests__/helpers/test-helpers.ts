@@ -6,7 +6,8 @@
 
 import { storage } from '../../server/storage';
 import type { User } from '@shared/schema';
-import crypto from 'crypto';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 
 /**
  * Creates a test user with DID:WebVH for testing
@@ -127,7 +128,9 @@ export function createTestFile(type: 'image' | 'video' | 'audio' | 'document', s
  */
 export function generateTestHash(input?: string): string {
   const content = input || `test-content-${Date.now()}`;
-  return crypto.createHash('sha256').update(content).digest('hex');
+  const data = new TextEncoder().encode(content);
+  const hash = sha256(data);
+  return bytesToHex(hash);
 }
 
 /**

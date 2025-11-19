@@ -190,8 +190,11 @@ export async function initiateEmailAuth(
   console.log(`📨 Sending OTP to ${email} via Turnkey...`);
 
   // Generate a unique user identifier for rate limiting
-  const crypto = await import('crypto');
-  const userIdentifier = crypto.createHash('sha256').update(email).digest('hex');
+  const { sha256 } = await import('@noble/hashes/sha2.js');
+  const { bytesToHex } = await import('@noble/hashes/utils.js');
+  const data = new TextEncoder().encode(email);
+  const hash = sha256(data);
+  const userIdentifier = bytesToHex(hash);
 
   const otpResult = await turnkeyClient.apiClient().initOtp({
     otpType: 'OTP_TYPE_EMAIL',

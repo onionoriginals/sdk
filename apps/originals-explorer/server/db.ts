@@ -2,6 +2,7 @@
 import { drizzle, NodePgDatabase } from "drizzle-orm/node-postgres";
 import { eq, and } from "drizzle-orm";
 import { Pool } from "pg";
+import { v4 as uuidv4 } from "uuid";
 
 // Import schema
 import { 
@@ -340,7 +341,7 @@ export class DatabaseStorage {
     processedFiles: string;
     failedFiles: string;
   }) {
-    const id = crypto.randomUUID();
+    const id = uuidv4();
     const importRecord = {
       id,
       ...data,
