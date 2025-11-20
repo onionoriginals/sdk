@@ -5,7 +5,6 @@
     "lib": ["ES2020"],
     "allowJs": true,
     "declaration": true,
-    "composite": true,
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
