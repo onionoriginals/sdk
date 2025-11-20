@@ -23,7 +23,7 @@
     "@neondatabase/serverless": "^0.10.4",
     "@noble/ed25519": "^3.0.0",
     "@noble/hashes": "^2.0.1",
-    "@originals/sdk": "1.1.0",
+    "@originals/sdk": "1.2.0",
     "@radix-ui/react-accordion": "^1.2.4",
     "@radix-ui/react-alert-dialog": "^1.1.7",
     "@radix-ui/react-aspect-ratio": "^1.1.3",
