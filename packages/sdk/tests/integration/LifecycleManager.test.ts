@@ -12,7 +12,7 @@ describe('Integration: Lifecycle inscribe updates provenance and btco layer', ()
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res1', type: 'text', contentType: 'text/plain', hash: 'deadbeef' }
     ]);
-    const updated = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+    const updated = await sdk.lifecycle.inscribeOnBitcoin(asset, asset.id, 5);
     expect(updated.currentLayer).toBe('did:btco');
     const prov = (updated as any).getProvenance();
     const latest = prov.migrations[prov.migrations.length - 1];
