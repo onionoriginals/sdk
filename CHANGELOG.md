@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/onionoriginals/sdk/compare/v1.3.0...v1.4.0) (2026-01-02)
+
+
+### Features
+
+* enable npm publishing in release configuration ([684c8b8](https://github.com/onionoriginals/sdk/commit/684c8b871da7a2baa32261004ece88266ee17432))
+
 # [1.3.0](https://github.com/onionoriginals/sdk/compare/v1.2.0...v1.3.0) (2026-01-02)
 
 
