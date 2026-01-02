@@ -5,7 +5,7 @@ on:
     branches:
       - "**"
   pull_request:
-    branches: [ "**" ]
+    branches: ["**"]
 
 jobs:
   tests:
@@ -24,7 +24,7 @@ jobs:
         run: bun install
 
       - name: Run tests
-        run: bun run test --filter='!originals-explorer'
+        run: bun run test
 
   coverage:
     name: Coverage meets thresholds
@@ -42,4 +42,4 @@ jobs:
         run: bun install
 
       - name: Run tests with coverage
-        run: bun run test:ci --filter='!originals-explorer'
+        run: bun run test:ci
