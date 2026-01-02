@@ -1,3 +1,10 @@
+## [1.4.1](https://github.com/onionoriginals/sdk/compare/v1.4.0...v1.4.1) (2026-01-02)
+
+
+### Bug Fixes
+
+* remove unused DependencyRef type from base validator ([27ccb1d](https://github.com/onionoriginals/sdk/commit/27ccb1d3aacf68e7945190211dcbba3b74853d13))
+
 # [1.4.0](https://github.com/onionoriginals/sdk/compare/v1.3.0...v1.4.0) (2026-01-02)
 
 
