@@ -1,3 +1,10 @@
+## [1.4.2](https://github.com/onionoriginals/sdk/compare/v1.4.1...v1.4.2) (2026-01-02)
+
+
+### Bug Fixes
+
+* nil ([7a86a1f](https://github.com/onionoriginals/sdk/commit/7a86a1fc20c7c74215189fc8392829f05a14f63e))
+
 ## [1.4.1](https://github.com/onionoriginals/sdk/compare/v1.4.0...v1.4.1) (2026-01-02)
 
 
