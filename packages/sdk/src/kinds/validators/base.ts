@@ -9,7 +9,6 @@ import type {
   ValidationError, 
   ValidationWarning,
   BaseManifest,
-  DependencyRef,
 } from '../types';
 import type { AssetResource } from '../../types/common';
 
@@ -236,7 +235,7 @@ export abstract class BaseKindValidator<K extends OriginalKind> implements KindV
         errors.push(ValidationUtils.error('INVALID_DEPENDENCIES', 'Dependencies must be an array', 'dependencies'));
       } else {
         for (let i = 0; i < manifest.dependencies.length; i++) {
-          const dep = manifest.dependencies[i] as DependencyRef;
+          const dep = manifest.dependencies[i];
           const depPath = `dependencies[${i}]`;
           
           if (!dep.did || !ValidationUtils.isValidDID(dep.did)) {
