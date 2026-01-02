@@ -58,7 +58,7 @@ export interface KeyStore {
 
 /**
  * External signer interface for DID operations (compatible with didwebvh-ts)
- * This allows integration with external key management systems like Privy
+ * This allows integration with external key management systems like Turnkey
  */
 export interface ExternalSigner {
   /**

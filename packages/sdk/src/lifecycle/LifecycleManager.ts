@@ -4,7 +4,8 @@ import {
   BitcoinTransaction,
   KeyStore,
   ExternalSigner,
-  VerifiableCredential
+  VerifiableCredential,
+  LayerType
 } from '../types';
 import { BitcoinManager } from '../bitcoin/BitcoinManager';
 import { DIDManager } from '../did/DIDManager';
@@ -26,6 +27,97 @@ import {
   type BatchOperationOptions,
   type BatchInscriptionOptions,
 } from './BatchOperations';
+import { 
+  type OriginalKind, 
+  type OriginalManifest, 
+  type CreateTypedOriginalOptions,
+  KindRegistry,
+} from '../kinds';
+
+/**
+ * Cost estimation result for migration operations
+ */
+export interface CostEstimate {
+  /** Total estimated cost in satoshis */
+  totalSats: number;
+  /** Breakdown of costs */
+  breakdown: {
+    /** Network fee in satoshis */
+    networkFee: number;
+    /** Data cost for inscription (sat/vB * size) */
+    dataCost: number;
+    /** Dust output value */
+    dustValue: number;
+  };
+  /** Fee rate used for estimation (sat/vB) */
+  feeRate: number;
+  /** Data size in bytes */
+  dataSize: number;
+  /** Target layer for the migration */
+  targetLayer: LayerType;
+  /** Confidence level of estimate */
+  confidence: 'low' | 'medium' | 'high';
+}
+
+/**
+ * Migration validation result
+ */
+export interface MigrationValidation {
+  /** Whether the migration is valid */
+  valid: boolean;
+  /** List of validation errors */
+  errors: string[];
+  /** List of warnings (non-blocking) */
+  warnings: string[];
+  /** Current layer of the asset */
+  currentLayer: LayerType;
+  /** Target layer for migration */
+  targetLayer: LayerType;
+  /** Checks performed */
+  checks: {
+    layerTransition: boolean;
+    resourcesValid: boolean;
+    credentialsValid: boolean;
+    didDocumentValid: boolean;
+    bitcoinReadiness?: boolean;
+  };
+}
+
+/**
+ * Progress callback for long-running operations
+ */
+export type ProgressCallback = (progress: LifecycleProgress) => void;
+
+/**
+ * Progress information for lifecycle operations
+ */
+export interface LifecycleProgress {
+  /** Current operation phase */
+  phase: 'preparing' | 'validating' | 'processing' | 'committing' | 'confirming' | 'complete' | 'failed';
+  /** Progress percentage (0-100) */
+  percentage: number;
+  /** Human-readable message */
+  message: string;
+  /** Current operation details */
+  details?: {
+    currentStep?: number;
+    totalSteps?: number;
+    transactionId?: string;
+    confirmations?: number;
+  };
+}
+
+/**
+ * Options for lifecycle operations with progress tracking
+ */
+export interface LifecycleOperationOptions {
+  /** Fee rate for Bitcoin operations (sat/vB) */
+  feeRate?: number;
+  /** Progress callback for operation updates */
+  onProgress?: ProgressCallback;
+  /** Enable atomic rollback on failure (default: true) */
+  atomicRollback?: boolean;
+}
 
 export class LifecycleManager {
   private eventEmitter: EventEmitter;
@@ -217,6 +309,239 @@ export class LifecycleManager {
       this.metrics.recordError('ASSET_CREATION_FAILED', 'createAsset');
       throw error;
     }
+  }
+
+  /**
+   * Create a typed Original with kind-specific validation
+   * 
+   * This is the recommended way to create Originals with proper typing and validation.
+   * Each kind (App, Agent, Module, Dataset, Media, Document) has specific metadata
+   * requirements that are validated before creation.
+   * 
+   * @param kind - The kind of Original to create
+   * @param manifest - The manifest containing name, version, resources, and kind-specific metadata
+   * @param options - Optional creation options (skipValidation, strictMode)
+   * @returns The created OriginalsAsset
+   * @throws Error if validation fails (unless skipValidation is true)
+   * 
+   * @example
+   * ```typescript
+   * // Create a Module Original
+   * const moduleAsset = await sdk.lifecycle.createTypedOriginal(
+   *   OriginalKind.Module,
+   *   {
+   *     kind: OriginalKind.Module,
+   *     name: 'my-utility',
+   *     version: '1.0.0',
+   *     resources: [{ id: 'index.js', type: 'code', hash: '...', contentType: 'application/javascript' }],
+   *     metadata: {
+   *       format: 'esm',
+   *       main: 'index.js',
+   *     }
+   *   }
+   * );
+   * ```
+   */
+  async createTypedOriginal<K extends OriginalKind>(
+    kind: K,
+    manifest: OriginalManifest<K>,
+    options?: CreateTypedOriginalOptions
+  ): Promise<OriginalsAsset> {
+    const stopTimer = this.logger.startTimer('createTypedOriginal');
+    this.logger.info('Creating typed Original', { kind, name: manifest.name, version: manifest.version });
+    
+    try {
+      // Verify kind matches
+      if (manifest.kind !== kind) {
+        throw new Error(`Manifest kind "${manifest.kind}" does not match requested kind "${kind}"`);
+      }
+      
+      // Validate manifest using KindRegistry
+      const registry = KindRegistry.getInstance();
+      registry.validateOrThrow(manifest, options);
+      
+      // Log warnings if any
+      if (!options?.skipValidation) {
+        const validationResult = registry.validate(manifest, options);
+        if (validationResult.warnings.length > 0) {
+          for (const warning of validationResult.warnings) {
+            this.logger.warn(`[${warning.code}] ${warning.message}`, { path: warning.path });
+          }
+        }
+      }
+      
+      // Create the asset using existing createAsset method
+      const asset = await this.createAsset(manifest.resources);
+      
+      // Store the manifest metadata on the asset for future reference
+      // We attach it as a non-enumerable property to avoid serialization issues
+      Object.defineProperty(asset, '_manifest', {
+        value: manifest,
+        writable: false,
+        enumerable: false,
+        configurable: false,
+      });
+      
+      // Emit typed:created event
+      queueMicrotask(() => {
+        const event = {
+          type: 'asset:created' as const,
+          timestamp: new Date().toISOString(),
+          asset: {
+            id: asset.id,
+            layer: asset.currentLayer,
+            resourceCount: manifest.resources.length,
+            createdAt: asset.getProvenance().createdAt,
+            kind: kind,
+            name: manifest.name,
+            version: manifest.version,
+          }
+        };
+        
+        // Emit from LifecycleManager
+        this.eventEmitter.emit(event);
+      });
+      
+      stopTimer();
+      this.logger.info('Typed Original created successfully', { 
+        assetId: asset.id,
+        kind,
+        name: manifest.name,
+        version: manifest.version,
+      });
+      this.metrics.recordAssetCreated();
+      
+      return asset;
+    } catch (error) {
+      stopTimer();
+      this.logger.error('Typed Original creation failed', error as Error, { 
+        kind,
+        name: manifest.name,
+        version: manifest.version,
+      });
+      this.metrics.recordError('TYPED_ASSET_CREATION_FAILED', 'createTypedOriginal');
+      throw error;
+    }
+  }
+
+  /**
+   * Get the manifest from a typed Original asset
+   * Returns undefined if the asset was not created with createTypedOriginal
+   * 
+   * @param asset - The OriginalsAsset to get manifest from
+   * @returns The manifest or undefined
+   */
+  getManifest<K extends OriginalKind>(asset: OriginalsAsset): OriginalManifest<K> | undefined {
+    return (asset as any)._manifest as OriginalManifest<K> | undefined;
+  }
+
+  /**
+   * Estimate the cost of creating a typed Original
+   * Useful for showing users estimated fees before creation
+   * 
+   * @param manifest - The manifest to estimate
+   * @param targetLayer - The target layer (did:webvh or did:btco)
+   * @param feeRate - Optional fee rate override (sat/vB)
+   * @returns Cost estimate including fees
+   */
+  async estimateTypedOriginalCost<K extends OriginalKind>(
+    manifest: OriginalManifest<K>,
+    targetLayer: LayerType,
+    feeRate?: number
+  ): Promise<CostEstimate> {
+    // For webvh, costs are minimal
+    if (targetLayer === 'did:webvh') {
+      return {
+        totalSats: 0,
+        breakdown: {
+          networkFee: 0,
+          dataCost: 0,
+          dustValue: 0
+        },
+        feeRate: 0,
+        dataSize: 0,
+        targetLayer,
+        confidence: 'high'
+      };
+    }
+    
+    // Calculate total data size including manifest metadata
+    let dataSize = 0;
+    for (const resource of manifest.resources) {
+      if (resource.size) {
+        dataSize += resource.size;
+      } else if (resource.content) {
+        dataSize += Buffer.from(resource.content).length;
+      } else {
+        // Estimate based on hash length (assume average resource size)
+        dataSize += 1000;
+      }
+    }
+    
+    // Add inscription manifest overhead
+    const inscriptionManifest = {
+      assetId: `did:peer:placeholder`,
+      kind: manifest.kind,
+      name: manifest.name,
+      version: manifest.version,
+      resources: manifest.resources.map(r => ({
+        id: r.id,
+        hash: r.hash,
+        contentType: r.contentType,
+      })),
+      metadata: manifest.metadata,
+      timestamp: new Date().toISOString()
+    };
+    dataSize += Buffer.from(JSON.stringify(inscriptionManifest)).length;
+    
+    // Get fee rate from oracle or use provided/default
+    let effectiveFeeRate = feeRate;
+    let confidence: 'low' | 'medium' | 'high' = 'medium';
+    
+    if (!effectiveFeeRate) {
+      if (this.config.feeOracle) {
+        try {
+          effectiveFeeRate = await this.config.feeOracle.estimateFeeRate(1);
+          confidence = 'high';
+        } catch {
+          // Fallback to default
+        }
+      }
+      
+      if (!effectiveFeeRate && this.config.ordinalsProvider) {
+        try {
+          effectiveFeeRate = await this.config.ordinalsProvider.estimateFee(1);
+          confidence = 'medium';
+        } catch {
+          // Fallback to default
+        }
+      }
+      
+      if (!effectiveFeeRate) {
+        effectiveFeeRate = 10;
+        confidence = 'low';
+      }
+    }
+    
+    // Transaction overhead (commit + reveal structure)
+    const txOverhead = 200 + 122; // Base tx + inscription overhead
+    const totalVbytes = txOverhead + Math.ceil(dataSize / 4); // Witness data is ~1/4 weight
+    
+    const networkFee = totalVbytes * effectiveFeeRate;
+    const dustValue = 330; // Minimum output value
+    
+    return {
+      totalSats: networkFee + dustValue,
+      breakdown: {
+        networkFee,
+        dataCost: Math.ceil(dataSize / 4) * effectiveFeeRate,
+        dustValue
+      },
+      feeRate: effectiveFeeRate,
+      dataSize,
+      targetLayer,
+      confidence
+    };
   }
 
   async publishToWeb(
@@ -1211,6 +1536,589 @@ export class LifecycleManager {
       individualFees,
       savings,
       savingsPercentage
+    };
+  }
+
+  // ===== Clean Lifecycle API =====
+  // These methods provide a cleaner, more intuitive API while maintaining
+  // backward compatibility with the existing methods.
+
+  /**
+   * Create a draft asset (did:peer layer)
+   * 
+   * This is the entry point for creating new Originals. Draft assets are
+   * stored locally and can be published or inscribed later.
+   * 
+   * @param resources - Array of resources to include in the asset
+   * @param options - Optional configuration including progress callback
+   * @returns The newly created OriginalsAsset in did:peer layer
+   * 
+   * @example
+   * ```typescript
+   * const draft = await sdk.lifecycle.createDraft([
+   *   { id: 'main', type: 'code', contentType: 'text/javascript', hash: '...' }
+   * ], {
+   *   onProgress: (p) => console.log(p.message)
+   * });
+   * ```
+   */
+  async createDraft(
+    resources: AssetResource[],
+    options?: LifecycleOperationOptions
+  ): Promise<OriginalsAsset> {
+    const onProgress = options?.onProgress;
+    
+    onProgress?.({
+      phase: 'preparing',
+      percentage: 0,
+      message: 'Preparing draft asset...'
+    });
+    
+    onProgress?.({
+      phase: 'validating',
+      percentage: 20,
+      message: 'Validating resources...'
+    });
+    
+    try {
+      onProgress?.({
+        phase: 'processing',
+        percentage: 50,
+        message: 'Creating DID document...'
+      });
+      
+      const asset = await this.createAsset(resources);
+      
+      onProgress?.({
+        phase: 'complete',
+        percentage: 100,
+        message: 'Draft asset created successfully'
+      });
+      
+      return asset;
+    } catch (error) {
+      onProgress?.({
+        phase: 'failed',
+        percentage: 0,
+        message: `Failed to create draft: ${error instanceof Error ? error.message : String(error)}`
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Publish an asset to the web (did:webvh layer)
+   * 
+   * Migrates a draft asset from did:peer to did:webvh, making it publicly
+   * discoverable via HTTPS.
+   * 
+   * @param asset - The asset to publish (must be in did:peer layer)
+   * @param publisherDidOrSigner - Publisher's DID or external signer
+   * @param options - Optional configuration including progress callback
+   * @returns The published OriginalsAsset in did:webvh layer
+   * 
+   * @example
+   * ```typescript
+   * const published = await sdk.lifecycle.publish(draft, 'did:webvh:example.com:user');
+   * ```
+   */
+  async publish(
+    asset: OriginalsAsset,
+    publisherDidOrSigner: string | ExternalSigner,
+    options?: LifecycleOperationOptions
+  ): Promise<OriginalsAsset> {
+    const onProgress = options?.onProgress;
+    
+    onProgress?.({
+      phase: 'preparing',
+      percentage: 0,
+      message: 'Preparing to publish...'
+    });
+    
+    onProgress?.({
+      phase: 'validating',
+      percentage: 10,
+      message: 'Validating migration...'
+    });
+    
+    // Pre-flight validation
+    const validation = await this.validateMigration(asset, 'did:webvh');
+    if (!validation.valid) {
+      onProgress?.({
+        phase: 'failed',
+        percentage: 0,
+        message: `Validation failed: ${validation.errors.join(', ')}`
+      });
+      throw new Error(`Migration validation failed: ${validation.errors.join(', ')}`);
+    }
+    
+    try {
+      onProgress?.({
+        phase: 'processing',
+        percentage: 30,
+        message: 'Publishing resources...'
+      });
+      
+      onProgress?.({
+        phase: 'committing',
+        percentage: 70,
+        message: 'Finalizing publication...'
+      });
+      
+      const published = await this.publishToWeb(asset, publisherDidOrSigner);
+      
+      onProgress?.({
+        phase: 'complete',
+        percentage: 100,
+        message: 'Asset published successfully'
+      });
+      
+      return published;
+    } catch (error) {
+      onProgress?.({
+        phase: 'failed',
+        percentage: 0,
+        message: `Failed to publish: ${error instanceof Error ? error.message : String(error)}`
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Inscribe an asset on Bitcoin (did:btco layer)
+   * 
+   * Permanently anchors an asset on the Bitcoin blockchain via Ordinals inscription.
+   * This is an irreversible operation.
+   * 
+   * @param asset - The asset to inscribe (must be in did:peer or did:webvh layer)
+   * @param options - Optional configuration including fee rate and progress callback
+   * @returns The inscribed OriginalsAsset in did:btco layer
+   * 
+   * @example
+   * ```typescript
+   * const inscribed = await sdk.lifecycle.inscribe(published, {
+   *   feeRate: 15,
+   *   onProgress: (p) => console.log(`${p.percentage}%: ${p.message}`)
+   * });
+   * ```
+   */
+  async inscribe(
+    asset: OriginalsAsset,
+    options?: LifecycleOperationOptions
+  ): Promise<OriginalsAsset> {
+    const onProgress = options?.onProgress;
+    const feeRate = options?.feeRate;
+    
+    onProgress?.({
+      phase: 'preparing',
+      percentage: 0,
+      message: 'Preparing inscription...'
+    });
+    
+    onProgress?.({
+      phase: 'validating',
+      percentage: 10,
+      message: 'Validating migration...'
+    });
+    
+    // Pre-flight validation
+    const validation = await this.validateMigration(asset, 'did:btco');
+    if (!validation.valid) {
+      onProgress?.({
+        phase: 'failed',
+        percentage: 0,
+        message: `Validation failed: ${validation.errors.join(', ')}`
+      });
+      throw new Error(`Migration validation failed: ${validation.errors.join(', ')}`);
+    }
+    
+    // Show cost estimate
+    if (onProgress) {
+      const estimate = await this.estimateCost(asset, 'did:btco', feeRate);
+      onProgress({
+        phase: 'preparing',
+        percentage: 20,
+        message: `Estimated cost: ${estimate.totalSats} sats (${estimate.feeRate} sat/vB)`
+      });
+    }
+    
+    try {
+      onProgress?.({
+        phase: 'processing',
+        percentage: 30,
+        message: 'Creating commit transaction...',
+        details: { currentStep: 1, totalSteps: 3 }
+      });
+      
+      onProgress?.({
+        phase: 'committing',
+        percentage: 60,
+        message: 'Broadcasting reveal transaction...',
+        details: { currentStep: 2, totalSteps: 3 }
+      });
+      
+      const inscribed = await this.inscribeOnBitcoin(asset, feeRate);
+      
+      onProgress?.({
+        phase: 'confirming',
+        percentage: 90,
+        message: 'Waiting for confirmation...',
+        details: { currentStep: 3, totalSteps: 3 }
+      });
+      
+      onProgress?.({
+        phase: 'complete',
+        percentage: 100,
+        message: 'Asset inscribed successfully'
+      });
+      
+      return inscribed;
+    } catch (error) {
+      onProgress?.({
+        phase: 'failed',
+        percentage: 0,
+        message: `Failed to inscribe: ${error instanceof Error ? error.message : String(error)}`
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Transfer ownership of a Bitcoin-inscribed asset
+   * 
+   * Transfers an inscribed asset to a new owner. Only works for assets
+   * in the did:btco layer.
+   * 
+   * @param asset - The asset to transfer (must be in did:btco layer)
+   * @param newOwnerAddress - Bitcoin address of the new owner
+   * @param options - Optional configuration including progress callback
+   * @returns The Bitcoin transaction for the transfer
+   * 
+   * @example
+   * ```typescript
+   * const tx = await sdk.lifecycle.transfer(inscribed, 'bc1q...newowner');
+   * console.log('Transfer txid:', tx.txid);
+   * ```
+   */
+  async transfer(
+    asset: OriginalsAsset,
+    newOwnerAddress: string,
+    options?: LifecycleOperationOptions
+  ): Promise<BitcoinTransaction> {
+    const onProgress = options?.onProgress;
+    
+    onProgress?.({
+      phase: 'preparing',
+      percentage: 0,
+      message: 'Preparing transfer...'
+    });
+    
+    onProgress?.({
+      phase: 'validating',
+      percentage: 10,
+      message: 'Validating transfer...'
+    });
+    
+    // Validate asset is in correct layer
+    if (asset.currentLayer !== 'did:btco') {
+      onProgress?.({
+        phase: 'failed',
+        percentage: 0,
+        message: 'Asset must be inscribed on Bitcoin before transfer'
+      });
+      throw new Error('Asset must be inscribed on Bitcoin before transfer');
+    }
+    
+    try {
+      onProgress?.({
+        phase: 'processing',
+        percentage: 30,
+        message: 'Creating transfer transaction...'
+      });
+      
+      onProgress?.({
+        phase: 'committing',
+        percentage: 60,
+        message: 'Broadcasting transaction...'
+      });
+      
+      const tx = await this.transferOwnership(asset, newOwnerAddress);
+      
+      onProgress?.({
+        phase: 'confirming',
+        percentage: 90,
+        message: 'Waiting for confirmation...',
+        details: { transactionId: tx.txid }
+      });
+      
+      onProgress?.({
+        phase: 'complete',
+        percentage: 100,
+        message: 'Transfer complete',
+        details: { transactionId: tx.txid }
+      });
+      
+      return tx;
+    } catch (error) {
+      onProgress?.({
+        phase: 'failed',
+        percentage: 0,
+        message: `Failed to transfer: ${error instanceof Error ? error.message : String(error)}`
+      });
+      throw error;
+    }
+  }
+
+  // ===== Cost Estimation =====
+
+  /**
+   * Estimate the cost of migrating an asset to a target layer
+   * 
+   * Returns a detailed breakdown of expected costs for Bitcoin operations.
+   * For did:webvh migrations, costs are minimal (only hosting).
+   * 
+   * @param asset - The asset to estimate costs for
+   * @param targetLayer - The target layer for migration
+   * @param feeRate - Optional fee rate override (sat/vB)
+   * @returns Detailed cost estimate
+   * 
+   * @example
+   * ```typescript
+   * const cost = await sdk.lifecycle.estimateCost(draft, 'did:btco', 10);
+   * console.log(`Estimated cost: ${cost.totalSats} sats`);
+   * ```
+   */
+  async estimateCost(
+    asset: OriginalsAsset,
+    targetLayer: LayerType,
+    feeRate?: number
+  ): Promise<CostEstimate> {
+    // For webvh, costs are minimal (just hosting costs not applicable here)
+    if (targetLayer === 'did:webvh') {
+      return {
+        totalSats: 0,
+        breakdown: {
+          networkFee: 0,
+          dataCost: 0,
+          dustValue: 0
+        },
+        feeRate: 0,
+        dataSize: 0,
+        targetLayer,
+        confidence: 'high'
+      };
+    }
+    
+    // For btco, calculate inscription costs
+    if (targetLayer === 'did:btco') {
+      // Calculate manifest size
+      const manifest = {
+        assetId: asset.id,
+        resources: asset.resources.map(res => ({
+          id: res.id,
+          hash: res.hash,
+          contentType: res.contentType,
+          url: res.url
+        })),
+        timestamp: new Date().toISOString()
+      };
+      const dataSize = Buffer.from(JSON.stringify(manifest)).length;
+      
+      // Get fee rate from oracle or use provided/default
+      let effectiveFeeRate = feeRate;
+      let confidence: 'low' | 'medium' | 'high' = 'medium';
+      
+      if (!effectiveFeeRate) {
+        // Try to get from fee oracle
+        if (this.config.feeOracle) {
+          try {
+            effectiveFeeRate = await this.config.feeOracle.estimateFeeRate(1);
+            confidence = 'high';
+          } catch {
+            // Fallback to default
+          }
+        }
+        
+        // Try ordinals provider
+        if (!effectiveFeeRate && this.config.ordinalsProvider) {
+          try {
+            effectiveFeeRate = await this.config.ordinalsProvider.estimateFee(1);
+            confidence = 'medium';
+          } catch {
+            // Fallback to default
+          }
+        }
+        
+        // Use default if no oracle available
+        if (!effectiveFeeRate) {
+          effectiveFeeRate = 10; // Conservative default
+          confidence = 'low';
+        }
+      }
+      
+      // Transaction structure estimation:
+      // - Commit transaction: ~200 vB base + input overhead
+      // - Reveal transaction: ~200 vB base + inscription envelope + data
+      // Inscription envelope overhead: ~122 bytes
+      const commitTxSize = 200;
+      const revealTxSize = 200 + 122 + dataSize;
+      const totalSize = commitTxSize + revealTxSize;
+      
+      const networkFee = totalSize * effectiveFeeRate;
+      const dustValue = 546; // Standard dust limit for P2TR
+      const totalSats = networkFee + dustValue;
+      
+      return {
+        totalSats,
+        breakdown: {
+          networkFee,
+          dataCost: dataSize * effectiveFeeRate,
+          dustValue
+        },
+        feeRate: effectiveFeeRate,
+        dataSize,
+        targetLayer,
+        confidence
+      };
+    }
+    
+    // For peer layer (no migration needed)
+    return {
+      totalSats: 0,
+      breakdown: {
+        networkFee: 0,
+        dataCost: 0,
+        dustValue: 0
+      },
+      feeRate: 0,
+      dataSize: 0,
+      targetLayer,
+      confidence: 'high'
+    };
+  }
+
+  // ===== Migration Validation =====
+
+  /**
+   * Validate whether an asset can be migrated to a target layer
+   * 
+   * Performs comprehensive pre-flight checks including:
+   * - Valid layer transition
+   * - Resource integrity
+   * - Credential validity
+   * - DID document structure
+   * - Bitcoin readiness (for did:btco)
+   * 
+   * @param asset - The asset to validate
+   * @param targetLayer - The target layer for migration
+   * @returns Detailed validation result
+   * 
+   * @example
+   * ```typescript
+   * const validation = await sdk.lifecycle.validateMigration(draft, 'did:webvh');
+   * if (!validation.valid) {
+   *   console.error('Cannot migrate:', validation.errors);
+   * }
+   * ```
+   */
+  async validateMigration(
+    asset: OriginalsAsset,
+    targetLayer: LayerType
+  ): Promise<MigrationValidation> {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const checks = {
+      layerTransition: false,
+      resourcesValid: false,
+      credentialsValid: false,
+      didDocumentValid: false,
+      bitcoinReadiness: undefined as boolean | undefined
+    };
+    
+    // Check layer transition validity
+    const validTransitions: Record<LayerType, LayerType[]> = {
+      'did:peer': ['did:webvh', 'did:btco'],
+      'did:webvh': ['did:btco'],
+      'did:btco': []
+    };
+    
+    if (validTransitions[asset.currentLayer].includes(targetLayer)) {
+      checks.layerTransition = true;
+    } else {
+      errors.push(`Invalid migration from ${asset.currentLayer} to ${targetLayer}`);
+    }
+    
+    // Validate resources
+    if (asset.resources.length === 0) {
+      errors.push('Asset must have at least one resource');
+    } else {
+      let resourcesValid = true;
+      for (const resource of asset.resources) {
+        if (!resource.id || !resource.type || !resource.contentType || !resource.hash) {
+          resourcesValid = false;
+          errors.push(`Resource ${resource.id || 'unknown'} is missing required fields`);
+        }
+        if (resource.hash && !/^[0-9a-fA-F]+$/.test(resource.hash)) {
+          resourcesValid = false;
+          errors.push(`Resource ${resource.id} has invalid hash format`);
+        }
+      }
+      checks.resourcesValid = resourcesValid;
+    }
+    
+    // Validate DID document
+    if (asset.did && asset.did.id) {
+      checks.didDocumentValid = true;
+    } else {
+      errors.push('Asset has invalid or missing DID document');
+    }
+    
+    // Validate credentials (structural check)
+    if (asset.credentials.length > 0) {
+      let credentialsValid = true;
+      for (const cred of asset.credentials) {
+        if (!cred.type || !cred.issuer || !cred.issuanceDate) {
+          credentialsValid = false;
+          warnings.push('Asset has credentials with missing fields');
+        }
+      }
+      checks.credentialsValid = credentialsValid;
+    } else {
+      checks.credentialsValid = true; // No credentials is valid
+    }
+    
+    // Bitcoin-specific checks
+    if (targetLayer === 'did:btco') {
+      checks.bitcoinReadiness = true;
+      
+      // Check if ordinals provider is configured
+      if (!this.config.ordinalsProvider) {
+        checks.bitcoinReadiness = false;
+        errors.push('Bitcoin inscription requires an ordinalsProvider to be configured');
+      }
+      
+      // Warn about large data sizes
+      const manifestSize = JSON.stringify({
+        assetId: asset.id,
+        resources: asset.resources.map(r => ({
+          id: r.id,
+          hash: r.hash,
+          contentType: r.contentType
+        }))
+      }).length;
+      
+      if (manifestSize > 100000) {
+        warnings.push(`Large manifest size (${manifestSize} bytes) may result in high inscription costs`);
+      }
+    }
+    
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings,
+      currentLayer: asset.currentLayer,
+      targetLayer,
+      checks
     };
   }
 }

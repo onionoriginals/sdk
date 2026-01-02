@@ -6,3 +6,9 @@ coveragePathIgnorePatterns = [
   "dist/**",
   "apps/**"
 ]
+
+# Security scanning can be enabled by installing a scanner:
+# bun add --dev snyk
+# Then uncomment the following:
+# [install.security]
+# scanner = "snyk"

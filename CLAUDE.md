@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## LLM Agent Documentation
+
+For comprehensive API reference optimized for code generation, see:
+- **[docs/LLM_AGENT_GUIDE.md](docs/LLM_AGENT_GUIDE.md)** - Full API reference with signatures, types, and examples
+- **[docs/LLM_QUICK_REFERENCE.md](docs/LLM_QUICK_REFERENCE.md)** - Compact quick-reference card
+
 ## Project Overview
 
 This is a TypeScript SDK for the Originals Protocol - enabling creation, discovery, and transfer of digital assets with cryptographically verifiable provenance. The protocol organizes digital asset lifecycles into three layers:

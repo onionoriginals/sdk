@@ -120,7 +120,7 @@ export interface CreateWebVHOptions {
   paths?: string[];
   portable?: boolean;
   outputDir?: string; // Directory to save the DID log (did.jsonl)
-  externalSigner?: ExternalSigner; // External signer (e.g., Privy integration)
+  externalSigner?: ExternalSigner; // External signer (e.g., Turnkey integration)
   externalVerifier?: ExternalVerifier; // External verifier
   verificationMethods?: VerificationMethod[]; // Pre-configured verification methods
   updateKeys?: string[]; // Pre-configured update keys (e.g., ["did:key:z6Mk..."])
@@ -162,6 +162,15 @@ export class WebVHManager {
       updateKeys: providedUpdateKeys
     } = options;
 
+    // Validate path segments before creating DID to prevent directory traversal
+    if (paths && paths.length > 0) {
+      for (const segment of paths) {
+        if (!this.isValidPathSegment(segment)) {
+          throw new Error(`Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`);
+        }
+      }
+    }
+
     // Dynamically import didwebvh-ts to avoid module resolution issues
     const mod = await import('didwebvh-ts') as unknown as {
       createDID: (options: Record<string, unknown>) => Promise<{
@@ -187,7 +196,7 @@ export class WebVHManager {
     let verificationMethods: VerificationMethod[];
     let updateKeys: string[];
 
-    // Use external signer if provided (e.g., Privy integration)
+    // Use external signer if provided (e.g., Turnkey integration)
     if (externalSigner) {
       if (!providedVerificationMethods || providedVerificationMethods.length === 0) {
         throw new Error('verificationMethods are required when using externalSigner');

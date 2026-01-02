@@ -25,8 +25,24 @@ export { DIDManager, type CreateWebVHOptions, type CreateWebVHResult } from './d
 export { KeyManager } from './did/KeyManager.js';
 export { Ed25519Verifier } from './did/Ed25519Verifier.js';
 export * as encoding from './utils/encoding.js';
-export { CredentialManager } from './vc/CredentialManager.js';
-export { LifecycleManager } from './lifecycle/LifecycleManager.js';
+export { 
+  CredentialManager,
+  type ResourceCreatedSubject,
+  type ResourceUpdatedSubject,
+  type MigrationSubject,
+  type OwnershipSubject,
+  type CredentialChainOptions,
+  type SelectiveDisclosureOptions,
+  type DerivedProofResult
+} from './vc/CredentialManager.js';
+export { 
+  LifecycleManager,
+  type CostEstimate,
+  type MigrationValidation,
+  type LifecycleProgress,
+  type ProgressCallback,
+  type LifecycleOperationOptions
+} from './lifecycle/LifecycleManager.js';
 export { BitcoinManager } from './bitcoin/BitcoinManager.js';
 export { OrdinalsClient } from './bitcoin/OrdinalsClient.js';
 export { buildTransferTransaction } from './bitcoin/transfer.js';
@@ -42,6 +58,19 @@ export { calculateFee } from './bitcoin/fee-calculation.js';
 export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs.js';
 export { BbsSimple } from './vc/cryptosuites/bbsSimple.js';
 export * from './storage/index.js';
+
+// Resource management exports
+export { ResourceManager } from './resources/index.js';
+export type {
+  Resource,
+  ResourceOptions,
+  ResourceUpdateOptions,
+  ResourceVersionHistory,
+  ResourceManagerConfig,
+  ResourceValidationResult,
+  ResourceType,
+} from './resources/index.js';
+export { MIME_TYPE_MAP, DEFAULT_RESOURCE_CONFIG } from './resources/index.js';
 
 // Crypto exports
 export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from './crypto/Signer.js';
@@ -64,8 +93,45 @@ export {
   type BatchOperationOptions,
   type BatchInscriptionOptions,
   type BatchInscriptionResult,
-  type ValidationResult
+  type ValidationResult as BatchValidationResult
 } from './lifecycle/BatchOperations.js';
+
+// Kind system exports
+export {
+  OriginalKind,
+  KindRegistry,
+  type DependencyRef,
+  type BaseManifest,
+  type AppMetadata,
+  type AgentMetadata,
+  type ModuleMetadata,
+  type DatasetMetadata,
+  type MediaMetadata,
+  type DocumentMetadata,
+  type KindMetadataMap,
+  type KindMetadata,
+  type OriginalManifest,
+  type AppManifest,
+  type AgentManifest,
+  type ModuleManifest,
+  type DatasetManifest,
+  type MediaManifest,
+  type DocumentManifest,
+  type AnyManifest,
+  type ValidationResult as KindValidationResult,
+  type ValidationError as KindValidationError,
+  type ValidationWarning,
+  type CreateTypedOriginalOptions,
+  type KindValidator,
+  BaseKindValidator,
+  ValidationUtils,
+  AppValidator,
+  AgentValidator,
+  ModuleValidator,
+  DatasetValidator,
+  MediaValidator,
+  DocumentValidator,
+} from './kinds/index.js';
 
 // Utility exports
 export * from './utils/validation.js';

@@ -1,23 +1,22 @@
-import { PrivyClient } from "@privy-io/node";
 import { storage } from "./storage";
 
 export type KeyPurpose = 'authentication' | 'assertion' | 'update';
 
 /**
- * Sign data using a user's Privy-managed key
- * This function keeps all private keys secure within Privy's infrastructure
+ * Sign data using a user's Turnkey-managed key
+ * This function keeps all private keys secure within Turnkey's infrastructure
  * 
- * @param userId - The Privy user ID
+ * @param userId - The user ID
  * @param keyPurpose - Which key to use ('authentication', 'assertion', or 'update')
  * @param data - The data to sign (as a string or Buffer)
- * @param privyClient - Initialized Privy client
+ * @param turnkeyClient - Initialized Turnkey client (from @originals/auth)
  * @returns The signature as a string
  */
 export async function signWithUserKey(
   userId: string,
   keyPurpose: KeyPurpose,
   data: string | Buffer,
-  privyClient: PrivyClient
+  turnkeyClient: any
 ): Promise<string> {
   try {
     // Get the user's DID metadata from storage
@@ -31,7 +30,7 @@ export async function signWithUserKey(
       throw new Error(`User ${userId} does not have a DID. Please create one first.`);
     }
 
-    // Get the appropriate Privy wallet ID based on key purpose
+    // Get the appropriate Turnkey wallet ID based on key purpose
     let walletId: string | null;
     switch (keyPurpose) {
       case 'authentication':
@@ -54,22 +53,18 @@ export async function signWithUserKey(
     // Convert data to appropriate format
     const dataToSign = typeof data === 'string' ? data : data.toString('hex');
 
-    // Use Privy's signing API to sign the data
-    // Note: The exact API method may vary - check Privy's documentation
-    // This is a placeholder for the actual Privy signing method
+    // Use Turnkey's signing API
+    // Note: This requires @originals/auth to be properly configured
     console.log(`Signing data with ${keyPurpose} key (wallet ${walletId})...`);
     
-    // TODO: Replace with actual Privy signing API call
-    // Example (check Privy docs for exact method):
-    // const signature = await privyClient.walletApi.signMessage({
-    //   walletId,
-    //   message: dataToSign,
-    // });
+    // TODO: Integrate with @originals/auth TurnkeySigner
+    // Example:
+    // const signer = await turnkeyClient.createSigner(walletId);
+    // const signature = await signer.sign(dataToSign);
     
-    // For now, throw an error indicating this needs implementation
     throw new Error(
-      'Privy signing API integration not yet implemented. ' +
-      'Please refer to Privy documentation for the correct signing method. ' +
+      'Turnkey signing integration pending. ' +
+      'Use @originals/auth TurnkeySigner for signing operations. ' +
       `Wallet ID: ${walletId}, Key purpose: ${keyPurpose}`
     );
 
@@ -85,7 +80,7 @@ export async function signWithUserKey(
 /**
  * Verify a signature against a user's public key
  * 
- * @param userId - The Privy user ID
+ * @param userId - The user ID
  * @param keyPurpose - Which key was used ('authentication', 'assertion', or 'update')
  * @param data - The original data that was signed
  * @param signature - The signature to verify
@@ -146,7 +141,7 @@ export async function verifySignature(
 /**
  * Get the verification method ID for a user's key
  * 
- * @param userId - The Privy user ID
+ * @param userId - The user ID
  * @param keyPurpose - Which key ('authentication', 'assertion', or 'update')
  * @returns The verification method ID (e.g., "did:webvh:example.com:user#auth-key")
  */

@@ -12,7 +12,7 @@ const mockStorage = {
   getUserByDid: mock(),
   createUserWithDid: mock(),
   updateUser: mock(),
-  getUserByPrivyId: mock(),
+  getUserByTurnkeyId: mock(),
   createAsset: mock(),
   getAsset: mock(),
   getAssetsByUserId: mock(),
@@ -29,10 +29,8 @@ mock.module("../storage", () => ({
   storage: mockStorage,
 }));
 
-const mockPrivyClient = {
-  walletApi: {
-    signMessage: mock(),
-  },
+const mockTurnkeyClient = {
+  createSigner: mock(),
 } as any;
 
 describe("signing-service", () => {
@@ -46,26 +44,26 @@ describe("signing-service", () => {
       mockStorage.getUser.mockResolvedValue(null);
 
       await expect(
-        signWithUserKey("user-123", "authentication", "data-to-sign", mockPrivyClient)
+        signWithUserKey("user-123", "authentication", "data-to-sign", mockTurnkeyClient)
       ).rejects.toThrow("User not found: user-123");
     });
 
     test("throws error when user has no DID", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-456",
-        privyId: "did:privy:user456",
+        turnkeyId: "turnkey-user456",
         did: null,
       });
 
       await expect(
-        signWithUserKey("user-456", "authentication", "data-to-sign", mockPrivyClient)
+        signWithUserKey("user-456", "authentication", "data-to-sign", mockTurnkeyClient)
       ).rejects.toThrow("User user-456 does not have a DID");
     });
 
     test("throws error when authentication wallet is missing", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-789",
-        privyId: "did:privy:user789",
+        turnkeyId: "turnkey-user789",
         did: "did:webvh:test.com:user789",
         authWalletId: null,
         assertionWalletId: "assertion-wallet",
@@ -73,14 +71,14 @@ describe("signing-service", () => {
       });
 
       await expect(
-        signWithUserKey("user-789", "authentication", "data-to-sign", mockPrivyClient)
+        signWithUserKey("user-789", "authentication", "data-to-sign", mockTurnkeyClient)
       ).rejects.toThrow("No authentication wallet found for user user-789");
     });
 
     test("throws error when assertion wallet is missing", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-000",
-        privyId: "did:privy:user000",
+        turnkeyId: "turnkey-user000",
         did: "did:webvh:test.com:user000",
         authWalletId: "auth-wallet",
         assertionWalletId: null,
@@ -88,14 +86,14 @@ describe("signing-service", () => {
       });
 
       await expect(
-        signWithUserKey("user-000", "assertion", "data-to-sign", mockPrivyClient)
+        signWithUserKey("user-000", "assertion", "data-to-sign", mockTurnkeyClient)
       ).rejects.toThrow("No assertion wallet found for user user-000");
     });
 
     test("throws error when update wallet is missing", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-111",
-        privyId: "did:privy:user111",
+        turnkeyId: "turnkey-user111",
         did: "did:webvh:test.com:user111",
         authWalletId: "auth-wallet",
         assertionWalletId: "assertion-wallet",
@@ -103,14 +101,14 @@ describe("signing-service", () => {
       });
 
       await expect(
-        signWithUserKey("user-111", "update", "data-to-sign", mockPrivyClient)
+        signWithUserKey("user-111", "update", "data-to-sign", mockTurnkeyClient)
       ).rejects.toThrow("No update wallet found for user user-111");
     });
 
     test("throws error for invalid key purpose", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-222",
-        privyId: "did:privy:user222",
+        turnkeyId: "turnkey-user222",
         did: "did:webvh:test.com:user222",
         authWalletId: "auth-wallet",
         assertionWalletId: "assertion-wallet",
@@ -118,14 +116,14 @@ describe("signing-service", () => {
       });
 
       await expect(
-        signWithUserKey("user-222", "invalid" as KeyPurpose, "data-to-sign", mockPrivyClient)
+        signWithUserKey("user-222", "invalid" as KeyPurpose, "data-to-sign", mockTurnkeyClient)
       ).rejects.toThrow("Invalid key purpose: invalid");
     });
 
-    test("throws not implemented error with correct wallet info", async () => {
+    test("throws pending integration error with correct wallet info", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-333",
-        privyId: "did:privy:user333",
+        turnkeyId: "turnkey-user333",
         did: "did:webvh:test.com:user333",
         authWalletId: "auth-wallet-333",
         assertionWalletId: "assertion-wallet-333",
@@ -133,10 +131,10 @@ describe("signing-service", () => {
       });
 
       try {
-        await signWithUserKey("user-333", "authentication", "test-data", mockPrivyClient);
+        await signWithUserKey("user-333", "authentication", "test-data", mockTurnkeyClient);
         expect(false).toBe(true); // Should not reach here
       } catch (error: any) {
-        expect(error.message).toContain("Privy signing API integration not yet implemented");
+        expect(error.message).toContain("Turnkey signing integration pending");
         expect(error.message).toContain("Wallet ID: auth-wallet-333");
         expect(error.message).toContain("Key purpose: authentication");
       }
@@ -145,7 +143,7 @@ describe("signing-service", () => {
     test("handles Buffer data type", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-444",
-        privyId: "did:privy:user444",
+        turnkeyId: "turnkey-user444",
         did: "did:webvh:test.com:user444",
         authWalletId: "auth-wallet-444",
         assertionWalletId: "assertion-wallet-444",
@@ -155,7 +153,7 @@ describe("signing-service", () => {
       const bufferData = Buffer.from("test data");
 
       try {
-        await signWithUserKey("user-444", "assertion", bufferData, mockPrivyClient);
+        await signWithUserKey("user-444", "assertion", bufferData, mockTurnkeyClient);
       } catch (error: any) {
         expect(error.message).toContain("Wallet ID: assertion-wallet-444");
         expect(error.message).toContain("Key purpose: assertion");
@@ -165,7 +163,7 @@ describe("signing-service", () => {
     test("handles update key purpose", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-555",
-        privyId: "did:privy:user555",
+        turnkeyId: "turnkey-user555",
         did: "did:webvh:test.com:user555",
         authWalletId: "auth-wallet-555",
         assertionWalletId: "assertion-wallet-555",
@@ -173,7 +171,7 @@ describe("signing-service", () => {
       });
 
       try {
-        await signWithUserKey("user-555", "update", "update-data", mockPrivyClient);
+        await signWithUserKey("user-555", "update", "update-data", mockTurnkeyClient);
       } catch (error: any) {
         expect(error.message).toContain("Wallet ID: update-wallet-555");
         expect(error.message).toContain("Key purpose: update");
@@ -198,7 +196,7 @@ describe("signing-service", () => {
     test("returns false when user has no DID", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-nodid",
-        privyId: "did:privy:nodid",
+        turnkeyId: "turnkey-nodid",
         did: null,
       });
 
@@ -215,7 +213,7 @@ describe("signing-service", () => {
     test("returns false when authentication public key is missing", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-nokey",
-        privyId: "did:privy:nokey",
+        turnkeyId: "turnkey-nokey",
         did: "did:webvh:test.com:nokey",
         authKeyPublic: null,
         assertionKeyPublic: "assertion-key",
@@ -235,7 +233,7 @@ describe("signing-service", () => {
     test("returns false when assertion public key is missing", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-noassertion",
-        privyId: "did:privy:noassertion",
+        turnkeyId: "turnkey-noassertion",
         did: "did:webvh:test.com:noassertion",
         authKeyPublic: "auth-key",
         assertionKeyPublic: null,
@@ -255,7 +253,7 @@ describe("signing-service", () => {
     test("returns false when update public key is missing", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-noupdate",
-        privyId: "did:privy:noupdate",
+        turnkeyId: "turnkey-noupdate",
         did: "did:webvh:test.com:noupdate",
         authKeyPublic: "auth-key",
         assertionKeyPublic: "assertion-key",
@@ -275,7 +273,7 @@ describe("signing-service", () => {
     test("returns false for invalid key purpose", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-invalid",
-        privyId: "did:privy:invalid",
+        turnkeyId: "turnkey-invalid",
         did: "did:webvh:test.com:invalid",
         authKeyPublic: "auth-key",
         assertionKeyPublic: "assertion-key",
@@ -295,7 +293,7 @@ describe("signing-service", () => {
     test("throws not implemented error for valid inputs", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-valid",
-        privyId: "did:privy:valid",
+        turnkeyId: "turnkey-valid",
         did: "did:webvh:test.com:valid",
         authKeyPublic: "auth-public-key",
         assertionKeyPublic: "assertion-public-key",
@@ -328,7 +326,7 @@ describe("signing-service", () => {
     test("returns null when user has no DID", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-nodid2",
-        privyId: "did:privy:nodid2",
+        turnkeyId: "turnkey-nodid2",
         did: null,
       });
 
@@ -340,7 +338,7 @@ describe("signing-service", () => {
     test("returns authentication verification method ID", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-auth",
-        privyId: "did:privy:auth",
+        turnkeyId: "turnkey-auth",
         did: "did:webvh:test.com:auth",
       });
 
@@ -352,7 +350,7 @@ describe("signing-service", () => {
     test("returns assertion verification method ID", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-assertion",
-        privyId: "did:privy:assertion",
+        turnkeyId: "turnkey-assertion",
         did: "did:webvh:test.com:assertion",
       });
 
@@ -364,7 +362,7 @@ describe("signing-service", () => {
     test("returns update verification method ID", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-update",
-        privyId: "did:privy:update",
+        turnkeyId: "turnkey-update",
         did: "did:webvh:test.com:update",
       });
 
@@ -376,7 +374,7 @@ describe("signing-service", () => {
     test("handles DID with path segments", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-path",
-        privyId: "did:privy:path",
+        turnkeyId: "turnkey-path",
         did: "did:webvh:example.com:users:alice",
       });
 
@@ -388,7 +386,7 @@ describe("signing-service", () => {
     test("handles encoded domain", async () => {
       mockStorage.getUser.mockResolvedValue({
         id: "user-encoded",
-        privyId: "did:privy:encoded",
+        turnkeyId: "turnkey-encoded",
         did: "did:webvh:localhost%3A5000:alice",
       });
 

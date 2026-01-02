@@ -244,6 +244,23 @@ const result = await sdk.did.updateDIDWebVH({
 
 For detailed information about the DID:WebVH integration, including Turnkey setup and external signer implementation, see [DIDWEBVH_INTEGRATION.md](./DIDWEBVH_INTEGRATION.md).
 
+## Documentation
+
+### For LLM Agents
+
+If you're an AI/LLM agent working with this SDK, we provide optimized documentation:
+
+- **[docs/LLM_AGENT_GUIDE.md](./docs/LLM_AGENT_GUIDE.md)** - Comprehensive API reference with complete type signatures, method documentation, and working examples
+- **[docs/LLM_QUICK_REFERENCE.md](./docs/LLM_QUICK_REFERENCE.md)** - Compact quick-reference card for rapid lookups
+- **[CLAUDE.md](./CLAUDE.md)** - Development context and project architecture
+
+### Bitcoin Documentation
+
+- **[docs/BITCOIN_INTEGRATION_GUIDE.md](./docs/BITCOIN_INTEGRATION_GUIDE.md)** - Complete guide for Bitcoin integration
+- **[docs/BITCOIN_API_REFERENCE.md](./docs/BITCOIN_API_REFERENCE.md)** - Bitcoin API reference
+- **[docs/BITCOIN_BEST_PRACTICES.md](./docs/BITCOIN_BEST_PRACTICES.md)** - Best practices for production deployments
+- **[docs/BITCOIN_TROUBLESHOOTING.md](./docs/BITCOIN_TROUBLESHOOTING.md)** - Troubleshooting common issues
+
 ## Development
 
 This is a monorepo managed with [Turborepo](https://turbo.build/repo) for efficient task orchestration.

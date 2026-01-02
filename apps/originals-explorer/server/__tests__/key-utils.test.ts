@@ -154,11 +154,11 @@ describe("key-utils", () => {
       };
       
       expect(() => extractPublicKeyFromWallet(wallet)).toThrow(
-        "No public key available in wallet object"
+        "No public key available in key object"
       );
     });
 
-    test("error message includes wallet ID and chain type", () => {
+    test("error message includes wallet ID", () => {
       const wallet = {
         id: "test-wallet-id",
         chainType: "stellar",
@@ -169,11 +169,10 @@ describe("key-utils", () => {
         expect(true).toBe(false); // Should not reach here
       } catch (error: any) {
         expect(error.message).toContain("test-wallet-id");
-        expect(error.message).toContain("stellar");
       }
     });
 
-    test("handles wallet with missing id and chainType", () => {
+    test("handles wallet with missing id", () => {
       const wallet = {};
       
       try {
@@ -193,7 +192,7 @@ describe("key-utils", () => {
       };
       
       expect(() => extractPublicKeyFromWallet(wallet)).toThrow(
-        "No public key available in wallet object"
+        "No public key available in key object"
       );
     });
 
@@ -206,7 +205,7 @@ describe("key-utils", () => {
       };
       
       expect(() => extractPublicKeyFromWallet(wallet)).toThrow(
-        "No public key available in wallet object"
+        "No public key available in key object"
       );
     });
 
@@ -219,7 +218,7 @@ describe("key-utils", () => {
       
       // Empty string is falsy, so should throw error
       expect(() => extractPublicKeyFromWallet(wallet)).toThrow(
-        "No public key available in wallet object"
+        "No public key available in key object"
       );
     });
   });

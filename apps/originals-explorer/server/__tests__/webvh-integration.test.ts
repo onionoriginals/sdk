@@ -162,24 +162,24 @@ describe("WebVHIntegrationService", () => {
       );
     });
 
-    test("removes did:privy: prefix from slug", async () => {
+    test("handles Turnkey sub-org ID format", async () => {
       const service = new WebVHIntegrationService({
         domain: testDomain,
         publicDir: testPublicDir,
       });
 
       mockCreateDIDWebVH.mockResolvedValue({
-        did: "did:webvh:test.com:user123",
+        did: "did:webvh:test.com:sub-org-abc123",
         didDocument: {},
         log: [],
         logPath: "/path",
       });
 
-      await service.createDIDWithSDK("did:privy:user123");
+      await service.createDIDWithSDK("sub-org-abc123");
 
       expect(mockCreateDIDWebVH).toHaveBeenCalledWith(
         expect.objectContaining({
-          paths: ["user123"],
+          paths: ["sub-org-abc123"],
         })
       );
     });

@@ -289,7 +289,7 @@ export class DIDManager {
     let verificationMethods: WebVHVerificationMethod[];
     let updateKeys: string[];
 
-    // Use external signer if provided (e.g., Privy integration)
+    // Use external signer if provided (e.g., Turnkey integration)
     if (externalSigner) {
       if (!providedVerificationMethods || providedVerificationMethods.length === 0) {
         throw new Error('verificationMethods are required when using externalSigner');

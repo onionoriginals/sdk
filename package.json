@@ -15,11 +15,6 @@
     "test:ci": "turbo run test:ci",
     "test:security": "turbo run test:security",
     "test:stress": "turbo run test:stress",
-    "test:e2e": "turbo run test:e2e",
-    "test:e2e:ui": "turbo run test:e2e:ui",
-    "test:e2e:headed": "turbo run test:e2e:headed",
-    "test:e2e:debug": "turbo run test:e2e:debug",
-    "test:e2e:report": "playwright show-report",
     "lint": "turbo run lint",
     "format": "turbo run format",
     "dev": "turbo run dev",
@@ -32,14 +27,12 @@
     "url": "https://github.com/onionoriginals/sdk"
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.1",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/commit-analyzer": "^13.0.1",
     "@semantic-release/git": "^10.0.1",
     "@semantic-release/github": "^12.0.2",
     "@semantic-release/npm": "^13.1.2",
     "@semantic-release/release-notes-generator": "^14.1.0",
-    "playwright": "^1.56.1",
     "semantic-release": "^25.0.2",
     "turbo": "^2.3.3"
   },

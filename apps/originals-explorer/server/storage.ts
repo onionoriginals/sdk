@@ -15,7 +15,6 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
-  getUserByPrivyId(privyUserId: string): Promise<User | undefined>;
   getUserByTurnkeyId(turnkeySubOrgId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(userId: string, updates: Partial<User>): Promise<User | undefined>;
@@ -82,8 +81,7 @@ export interface IStorage {
 
 export class MemStorage implements IStorage {
   private users: Map<string, User>; // Key: did:webvh, Value: User
-  private privyToDidMapping: Map<string, string>; // Key: Privy user ID, Value: did:webvh
-  private turnkeyToDidMapping: Map<string, string>; // Key: Turnkey sub-org ID, Value: did:webvh (legacy)
+  private turnkeyToDidMapping: Map<string, string>; // Key: Turnkey sub-org ID, Value: did:webvh
   private emailToDidMapping: Map<string, string>; // Key: Email, Value: did:webvh
   private assets: Map<string, Asset>;
   private walletConnections: Map<string, WalletConnection>;
@@ -94,7 +92,6 @@ export class MemStorage implements IStorage {
 
   constructor() {
     this.users = new Map();
-    this.privyToDidMapping = new Map();
     this.turnkeyToDidMapping = new Map();
     this.emailToDidMapping = new Map();
     this.googleDriveImports = new Map();
@@ -113,12 +110,6 @@ export class MemStorage implements IStorage {
     return Array.from(this.users.values()).find(
       (user) => user.username === username,
     );
-  }
-
-  async getUserByPrivyId(privyUserId: string): Promise<User | undefined> {
-    const did = this.privyToDidMapping.get(privyUserId);
-    if (!did) return undefined;
-    return this.users.get(did);
   }
 
   async getUserByTurnkeyId(turnkeySubOrgId: string): Promise<User | undefined> {
@@ -166,20 +157,20 @@ export class MemStorage implements IStorage {
     return updatedUser;
   }
 
-  async ensureUser(privyUserId: string): Promise<User> {
-    // Check if user already exists by Privy ID
-    const existing = await this.getUserByPrivyId(privyUserId);
+  async ensureUser(turnkeySubOrgId: string): Promise<User> {
+    // Check if user already exists by Turnkey ID
+    const existing = await this.getUserByTurnkeyId(turnkeySubOrgId);
     if (existing) {
       return existing;
     }
 
-    // Create a temporary user record with Privy ID - DID will be added later
+    // Create a temporary user record with Turnkey ID - DID will be added later
     const user: User = {
-      id: privyUserId, // Temporary - will be updated to DID
-      username: privyUserId,
-      password: '', // Not used for Privy users
+      id: turnkeySubOrgId, // Temporary - will be updated to DID
+      username: turnkeySubOrgId,
+      password: '', // Not used for Turnkey users
       email: null,
-      turnkeySubOrgId: null,
+      turnkeySubOrgId: turnkeySubOrgId as any,
       did: null,
       didDocument: null,
       didLog: null,
@@ -192,13 +183,14 @@ export class MemStorage implements IStorage {
       updateKeyPublic: null,
       didCreatedAt: null,
     };
-    this.users.set(privyUserId, user);
+    this.users.set(turnkeySubOrgId, user);
+    this.turnkeyToDidMapping.set(turnkeySubOrgId, turnkeySubOrgId); // Temporary mapping
     return user;
   }
 
   async createUserWithDid(identifierId: string, email: string, did: string, didData: any): Promise<User> {
     // Create user with DID as the primary key
-    // identifierId can be either Privy user ID or Turnkey sub-org ID
+    // identifierId is the Turnkey sub-org ID
     const user: User = {
       id: did, // Use DID as primary identifier
       username: email, // Use full email as username to ensure uniqueness

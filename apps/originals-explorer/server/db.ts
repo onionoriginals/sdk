@@ -69,11 +69,6 @@ export class DatabaseStorage {
     return result[0];
   }
 
-  async getUserByPrivyId(privyUserId: string): Promise<User | undefined> {
-    const byUsername = await this.getUserByUsername(privyUserId);
-    return byUsername || undefined;
-  }
-
   async getUserByTurnkeyId(turnkeySubOrgId: string): Promise<User | undefined> {
     const result = await this.db.select().from(users).where(eq(users.turnkeySubOrgId, turnkeySubOrgId)).limit(1);
     return result[0];
@@ -89,10 +84,10 @@ export class DatabaseStorage {
     return result[0];
   }
 
-  async ensureUser(privyUserId: string): Promise<User> {
-    const existing = await this.getUserByPrivyId(privyUserId);
+  async ensureUser(turnkeySubOrgId: string): Promise<User> {
+    const existing = await this.getUserByTurnkeyId(turnkeySubOrgId);
     if (existing) return existing;
-    return this.createUser({ username: privyUserId, password: '' });
+    return this.createUser({ username: turnkeySubOrgId, password: '', turnkeySubOrgId } as any);
   }
 
   async getUserByDidSlug(slug: string): Promise<User | undefined> {
