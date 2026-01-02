@@ -4,10 +4,6 @@
   "private": true,
   "description": "Monorepo for the Originals Protocol SDK and applications",
   "type": "module",
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ],
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
