@@ -1,3 +1,10 @@
+## [1.4.3](https://github.com/onionoriginals/sdk/compare/v1.4.2...v1.4.3) (2026-01-02)
+
+
+### Bug Fixes
+
+* add "files" field to package.json for SDK distribution ([49dcf0c](https://github.com/onionoriginals/sdk/commit/49dcf0ccf81e0a622f14b654a687932bf56a0626))
+
 ## [1.4.2](https://github.com/onionoriginals/sdk/compare/v1.4.1...v1.4.2) (2026-01-02)
 
 
