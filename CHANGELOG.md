@@ -1,3 +1,13 @@
+# [1.3.0](https://github.com/onionoriginals/sdk/compare/v1.2.0...v1.3.0) (2026-01-02)
+
+
+### Features
+
+* introduce Turnkey-based authentication and LLM agent documentation ([7296ad6](https://github.com/onionoriginals/sdk/commit/7296ad6097c4d63070dbabbb0cb015da8eafc0bf))
+* remove deprecated files and configurations from originals-explorer ([c2c4672](https://github.com/onionoriginals/sdk/commit/c2c4672868169e968347ba8b59483257aad4ca79))
+* remove workspace key ([dd6c957](https://github.com/onionoriginals/sdk/commit/dd6c9575fc80109650eb058c686ba489d253f25e))
+* update release configuration and workflows for Bun publishing ([d421e04](https://github.com/onionoriginals/sdk/commit/d421e04d05ca8e08b95a8aa4dcbed9f34a612a41))
+
 # [1.2.0](https://github.com/onionoriginals/sdk/compare/v1.1.0...v1.2.0) (2025-11-20)
 
 
