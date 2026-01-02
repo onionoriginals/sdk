@@ -7,8 +7,14 @@
     [
       "@semantic-release/npm",
       {
-        "npmPublish": true,
+        "npmPublish": false,
         "pkgRoot": "packages/sdk"
+      }
+    ],
+    [
+      "@semantic-release/exec",
+      {
+        "publishCmd": "cd packages/sdk && bun publish --access public --no-git-checks"
       }
     ],
     [
