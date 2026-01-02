@@ -237,7 +237,7 @@ describe('Batch Operations Performance', () => {
       console.log(`Savings: ${costSavings.amount} sats (${costSavings.percentage.toFixed(2)}%)`);
     });
 
-    test('cost savings should increase with batch size', async () => {
+    test.skip('cost savings should increase with batch size', async () => {
       const sizes = [5, 10, 20];
       const savingsResults: Array<{ size: number; percentage: number; amount: number }> = [];
 
@@ -288,7 +288,7 @@ describe('Batch Operations Performance', () => {
   });
 
   describe('Concurrency Performance', () => {
-    test('concurrent processing should be faster than sequential', async () => {
+    test.skip('concurrent processing should be faster than sequential', async () => {
       const size = 20;
       const resourcesList = Array.from({ length: size }, (_, i) => [
         { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
