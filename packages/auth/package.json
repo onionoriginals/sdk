@@ -49,7 +49,7 @@
   "dependencies": {
     "@turnkey/sdk-server": "^5.0.0",
     "@turnkey/core": "^1.10.0",
-    "@originals/sdk": "workspace:*",
+    "@originals/sdk": "^1.4.4",
     "jsonwebtoken": "^9.0.2",
     "@noble/hashes": "^2.0.1",
     "@noble/ed25519": "^2.0.0"
