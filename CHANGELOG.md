@@ -1,3 +1,10 @@
+## [1.4.4](https://github.com/onionoriginals/sdk/compare/v1.4.3...v1.4.4) (2026-01-03)
+
+
+### Bug Fixes
+
+* ensure dist folder is built before npm publish ([9b210ec](https://github.com/onionoriginals/sdk/commit/9b210eca53bea05430227b22d896d79f60ae3a4a))
+
 ## [1.4.3](https://github.com/onionoriginals/sdk/compare/v1.4.2...v1.4.3) (2026-01-02)
 
 

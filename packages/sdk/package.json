@@ -1,6 +1,6 @@
 {
   "name": "@originals/sdk",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "description": "TypeScript SDK for the Originals Protocol - creating, discovering, and transferring digital assets with cryptographically verifiable provenance",
   "type": "module",
   "main": "dist/index.js",
