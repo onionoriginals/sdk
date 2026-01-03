@@ -1,3 +1,10 @@
+## [1.4.5](https://github.com/onionoriginals/sdk/compare/v1.4.4...v1.4.5) (2026-01-03)
+
+
+### Bug Fixes
+
+* update package configuration and dependencies ([440d63f](https://github.com/onionoriginals/sdk/commit/440d63f1b2a8a391bd343ca510b890e59e5cdbf4))
+
 ## [1.4.4](https://github.com/onionoriginals/sdk/compare/v1.4.3...v1.4.4) (2026-01-03)
 
 
