@@ -8,14 +8,14 @@
  * import { createAuthMiddleware, initiateEmailAuth, verifyEmailAuth } from '@originals/auth/server';
  * ```
  *
- * Client-side:
+ * Client-side (pure functions, no React):
  * ```typescript
- * import { useAuth, useTurnkeyAuth } from '@originals/auth/client';
+ * import { initializeTurnkeyClient, initOtp, completeOtp, fetchWallets } from '@originals/auth/client';
  * ```
  *
  * Types:
  * ```typescript
- * import type { AuthUser, TokenPayload } from '@originals/auth/types';
+ * import type { AuthUser, TokenPayload, TurnkeyWallet } from '@originals/auth/types';
  * ```
  */
 

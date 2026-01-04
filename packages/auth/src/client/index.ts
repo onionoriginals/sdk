@@ -1,12 +1,17 @@
 /**
  * Client-side authentication utilities
  *
+ * Pure library functions for Turnkey authentication.
+ * No React dependencies - consuming apps should create their own hooks.
+ *
  * @example
  * ```typescript
  * import {
- *   useAuth,
- *   useTurnkeyAuth,
  *   initializeTurnkeyClient,
+ *   initOtp,
+ *   completeOtp,
+ *   fetchUser,
+ *   fetchWallets,
  *   TurnkeyDIDSigner,
  *   createDIDWithTurnkey
  * } from '@originals/auth/client';
@@ -22,12 +27,11 @@ export {
   getKeyByCurve,
   createWalletWithAccounts,
   ensureWalletWithAccounts,
+  TurnkeySessionExpiredError,
+  withTokenExpiration,
 } from './turnkey-client';
 
 export { TurnkeyDIDSigner, createDIDWithTurnkey } from './turnkey-did-signer';
-
-export { useAuth } from './hooks/useAuth';
-export { useTurnkeyAuth } from './hooks/useTurnkeyAuth';
 
 
 

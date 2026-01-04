@@ -12,11 +12,19 @@
       }
     ],
     [
+      "@semantic-release/npm",
+      {
+        "npmPublish": true,
+        "pkgRoot": "packages/auth"
+      }
+    ],
+    [
       "@semantic-release/git",
       {
         "assets": [
           "packages/sdk/package.json",
           "packages/sdk/CHANGELOG.md",
+          "packages/auth/package.json",
           "CHANGELOG.md"
         ],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
