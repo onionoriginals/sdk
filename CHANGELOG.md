@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/onionoriginals/sdk/compare/v1.4.5...v1.5.0) (2026-01-04)
+
+
+### Features
+
+* **auth:** refactor authentication package to remove React dependencies and add Turnkey support ([d6fe302](https://github.com/onionoriginals/sdk/commit/d6fe3029254d87c66dfd7e5b4b255b4ee043756f))
+
 ## [1.4.5](https://github.com/onionoriginals/sdk/compare/v1.4.4...v1.4.5) (2026-01-03)
 
 
