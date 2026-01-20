@@ -56,3 +56,32 @@ Agent: Background Agent
 - Tests: `bun test packages/sdk/tests/unit/cel/hash.test.ts`
 
 ---
+
+## US-003 - Implement createEventLog algorithm
+Completed: 2026-01-20T19:15:00Z
+Agent: Background Agent
+
+### Changes
+- packages/sdk/src/cel/algorithms/createEventLog.ts: Core algorithm implementation
+  - createEventLog(data: unknown, options: CreateOptions): Promise<EventLog>
+  - Creates a "create" type event with no previousEvent (first event in log)
+  - Uses signer callback from options to generate DataIntegrityProof
+  - Validates proof has required fields (type, cryptosuite, proofValue)
+  - Returns EventLog with single LogEntry
+- packages/sdk/src/cel/algorithms/index.ts: Barrel export for algorithms
+- packages/sdk/src/cel/index.ts: Added export for algorithms module
+- packages/sdk/tests/unit/cel/createEventLog.test.ts: 18 unit tests
+  - Basic functionality: log creation, event type, no previousEvent
+  - Proof generation: eddsa-jcs-2022, DataIntegrityProof structure
+  - Options handling: default and custom proofPurpose
+  - Error handling: invalid proof detection
+  - Data preservation: complex nested data, null values
+
+### Learnings
+- Signer callback pattern keeps createEventLog decoupled from specific signing implementations
+- CreateOptions type already defined in types.ts includes signer, verificationMethod, proofPurpose
+- Tests use mock signer that returns valid DataIntegrityProof structure
+- Typecheck: bunx tsc --noEmit from sdk root
+- Tests: bun test packages/sdk/tests/unit/cel/createEventLog.test.ts
+
+---
