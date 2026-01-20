@@ -1066,3 +1066,28 @@ Agent: Background Agent (Cursor)
 - Typecheck passes for src/ components even when server/ has unrelated errors
 
 ---
+
+## US-036 - Add Provenance tab to original-detail page
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/pages/original-detail.tsx: Added Provenance tab to original detail page
+  - Added Tabs component with "Content" and "Provenance" tabs using Radix Tabs
+  - Extended ApiOriginal interface to include celLog and celVerifiedAt fields
+  - Added verification status badge showing verified/unverified/none states
+  - Integrated useCelVerification hook with handleVerifyCel function
+  - Added verification results display showing per-event breakdown
+  - Integrated CelEventTimeline component for event history display
+  - Shows "No provenance log" message with explanation when celLog is absent
+  - Import additions: Tabs components, CelEventTimeline, useCelVerification, ShieldCheck/FileText/History icons
+
+### Learnings
+- Can use TabsList with grid-cols-2 for equal width tab triggers
+- Verification result includes events array for per-event feedback
+- CelEventTimeline handles empty state internally (shows "No events" message)
+- TanStack Query and Convex hooks can coexist - page uses both patterns
+- Pre-existing Vite polyfill issues block browser verification (same as US-033, US-034, US-035)
+- Pre-existing server/ TypeScript errors don't affect src/ components
+
+---
