@@ -394,7 +394,7 @@
       ],
       "priority": 23,
       "passes": true,
-      "notes": "Implemented CLI migrate command with peer\u2192webvh and webvh\u2192btco migration paths. Supports JSON/CBOR input/output, --domain for webvh, --wallet for btco. 23 unit tests."
+      "notes": "Implemented CLI migrate command with peer→webvh and webvh→btco migration paths. Supports JSON/CBOR input/output, --domain for webvh, --wallet for btco. 23 unit tests."
     },
     {
       "id": "US-024",
@@ -506,8 +506,8 @@
         "Typecheck passes"
       ],
       "priority": 30,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created useOriginal hook with OriginalId type, Original interface including celLog field, UseOriginalResult return type. Also added useOriginalByDid helper for DID-based lookups. Uses Convex skip pattern for conditional queries."
     },
     {
       "id": "US-031",

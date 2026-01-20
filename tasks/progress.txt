@@ -900,3 +900,26 @@ Agent: Background Agent (Cursor)
 - Also fixed pre-existing SDK issues: CelSigner duplicate exports and inspect.ts type errors
 
 ---
+
+## US-030 - Create useOriginal Convex hook
+Completed: 2026-01-20T17:55:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/hooks/useOriginal.ts: Created Convex hook for fetching single Originals
+  - OriginalId type: Branded string type for originals table ID (works pre-codegen)
+  - Original interface: Full document type with celLog, celVersion, celVerifiedAt fields
+  - UseOriginalResult interface: { original, isLoading, error } return type
+  - useOriginal(id): Fetches by Convex document ID using api.originals.getOriginal
+  - useOriginalByDid(did): Fetches by DID using api.originals.getOriginalByDid
+  - Uses Convex "skip" pattern for conditional query execution
+  - Returns undefined while loading, null if not found
+
+### Learnings
+- Convex useQuery returns undefined while loading, result (or null) when done
+- Use "skip" as second argument to conditionally skip query when id is null/undefined
+- For pre-codegen compatibility, use branded string type instead of Id<"tableName">
+- Pre-existing TypeScript errors in server/ directory don't affect src/ hooks
+- Convex hooks automatically re-render on data changes (real-time updates)
+
+---
