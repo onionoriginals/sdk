@@ -5,3 +5,5 @@
  */
 
 export type { WitnessService } from './WitnessService';
+export { HttpWitness, HttpWitnessError } from './HttpWitness';
+export type { HttpWitnessOptions } from './HttpWitness';
