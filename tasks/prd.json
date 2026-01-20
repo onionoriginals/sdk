@@ -376,8 +376,8 @@
         "Typecheck passes"
       ],
       "priority": 22,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented CLI inspect command with event timeline, current state derivation, witness attestation display, and layer history. Supports JSON and CBOR formats. 20 unit tests."
     },
     {
       "id": "US-023",

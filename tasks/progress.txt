@@ -654,3 +654,41 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/cli-verify.test.ts
 
 ---
+
+## US-022 - Implement CLI inspect command
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/cli/inspect.ts: Created CLI inspect command implementation
+  - inspectCommand(flags: InspectFlags): Promise<InspectResult> - main handler function
+  - loadEventLog(filePath): EventLog - loads and parses JSON or CBOR files
+  - deriveCurrentState(log): AssetState - replays events to compute current asset state
+  - extractLayerHistory(log): Array<{layer, timestamp, did}> - extracts migration history
+  - extractWitnesses(log): Array - extracts all witness attestation details
+  - outputInspection(log, state): void - formats and prints inspection report
+  - Pretty-prints event timeline with timestamps and event badges
+  - Shows current state with status, name, layer, DID, resources, metadata
+  - Lists witness attestations with witnessedAt timestamps
+  - Shows layer history for migrated assets
+- packages/sdk/src/cel/cli/index.ts: Integrated inspect command
+  - Added import for inspectCommand and InspectFlags
+  - Added runInspectCommand async helper function
+  - Updated switch case to route to inspectCommand
+- packages/sdk/tests/unit/cel/cli-inspect.test.ts: 20 unit tests
+  - Argument validation: missing log, nonexistent file, help flags
+  - Event timeline display: single event, multi-event, timestamps
+  - Current state derivation: resources, deactivation, multiple updates
+  - Witness attestations: extraction and display
+  - Layer history: migration tracking from peer to webvh to btco
+  - CBOR format support
+  - Error handling: invalid JSON, malformed structure, empty events
+
+### Learnings
+- deriveCurrentState must handle migration events (update layer, did, targetDid fields)
+- Witness proofs are identified by presence of witnessedAt field
+- Layer history is extracted from create events and migration events
+- Use formatTimestamp for human-readable timestamps and formatRelativeTime for relative display
+- Tests: bun test packages/sdk/tests/unit/cel/cli-inspect.test.ts
+
+---
