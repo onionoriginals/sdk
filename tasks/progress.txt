@@ -969,3 +969,32 @@ Agent: Background Agent (Cursor)
 - Pre-existing TypeScript errors in explorer src/ directory don't affect new hooks
 
 ---
+
+## US-033 - Create CelVerificationBadge component
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/components/cel/CelVerificationBadge.tsx: Created verification badge component
+  - Props: originalId: string, size?: "sm" | "md", className?: string
+  - Uses useOriginal hook to fetch original data from Convex
+  - Three visual states: verified (green checkmark), unverified (yellow warning), none (gray icon)
+  - Tooltip shows detailed verification status with timestamp if verified
+  - Loading skeleton while fetching data
+  - Exported types: CelVerificationBadgeProps
+- explorer/src/components/cel/CelVerificationBadgeDemo.tsx: Created demo component
+  - Standalone demo showing all badge states without requiring Convex data
+  - Size variations, status descriptions, usage context example, loading state
+  - Added to components-demo page under CEL Provenance tab
+- explorer/src/components/cel/index.ts: Created barrel export file
+- explorer/src/pages/components-demo.tsx: Added CEL Provenance tab with demo
+
+### Learnings
+- Lucide React (lucide-react) is the icon library used in explorer project
+- Follow LayerBadge pattern for badge components: statusConfig + sizeConfig objects
+- Use TooltipProvider/Tooltip/TooltipTrigger/TooltipContent from @/components/ui/tooltip
+- useOriginal returns undefined while loading, null if not found (Convex pattern)
+- Browser testing blocked by pre-existing Vite polyfill issues with @noble/* and other deps
+- Demo components are useful for visual testing when Convex/live data isn't available
+
+---
