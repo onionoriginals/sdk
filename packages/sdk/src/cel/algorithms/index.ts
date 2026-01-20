@@ -7,3 +7,4 @@
 export { createEventLog } from './createEventLog';
 export { updateEventLog } from './updateEventLog';
 export { deactivateEventLog } from './deactivateEventLog';
+export { verifyEventLog } from './verifyEventLog';
