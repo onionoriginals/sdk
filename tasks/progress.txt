@@ -391,3 +391,34 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/PeerCelManager.test.ts
 
 ---
+
+## US-014 - Implement HttpWitness service
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/witnesses/HttpWitness.ts: Created HTTP witness implementation
+  - HttpWitness class implementing WitnessService interface
+  - Constructor accepts witnessUrl: string and optional HttpWitnessOptions
+  - Options include timeout, custom headers, and custom fetch function (for testing)
+  - witness(digestMultibase) method POSTs to endpoint and parses WitnessProof response
+  - Validates all required WitnessProof fields including witnessedAt
+  - HttpWitnessError class with statusCode, responseBody, witnessUrl properties
+- packages/sdk/src/cel/witnesses/index.ts: Added exports for HttpWitness and HttpWitnessError
+- packages/sdk/tests/unit/cel/HttpWitness.test.ts: 43 unit tests
+  - Constructor tests: valid URL, invalid URL, custom options
+  - witness() tests: POST body, response parsing, custom headers
+  - Error handling: 404/500/401 responses, network errors, timeouts, invalid JSON
+  - WitnessProof validation: all required fields, extra fields ignored
+  - HttpWitnessError properties and inheritance
+  - Integration: WitnessService interface compliance, sequential calls
+  - Different endpoint patterns: paths, localhost, IP, query params
+
+### Learnings
+- Use custom fetch option for mocking in tests instead of global mocking
+- AbortController provides timeout functionality with signal
+- WitnessProof validation should strip unknown fields for security
+- HttpWitnessError extends Error and includes all relevant context
+- Tests: bun test packages/sdk/tests/unit/cel/HttpWitness.test.ts
+
+---
