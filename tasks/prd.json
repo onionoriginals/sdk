@@ -103,8 +103,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented verifyEventLog with default proof verification for eddsa-jcs-2022/eddsa-rdfc-2022 cryptosuites. Supports custom verifier callback. 26 unit tests covering proof verification, tampered proof detection, error handling, and VerificationResult structure."
     },
     {
       "id": "US-007",

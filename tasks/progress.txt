@@ -146,3 +146,35 @@ Agent: Background Agent (Cursor)
 - Tests follow same pattern as updateEventLog tests with sealing-specific cases added
 
 ---
+
+## US-006 - Implement verifyEventLog algorithm - proof verification
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/algorithms/verifyEventLog.ts: Core algorithm implementation
+  - verifyEventLog(log: EventLog, options?: VerifyOptions): Promise<VerificationResult>
+  - Default proof verifier validates DataIntegrityProof structure
+  - Supports eddsa-jcs-2022 and eddsa-rdfc-2022 cryptosuites
+  - Returns detailed per-event verification status with EventVerification[]
+  - Validates proof has required fields: type, cryptosuite, proofValue, verificationMethod, proofPurpose
+  - Validates proofValue has multibase encoding prefix ('z' or 'u')
+  - Supports custom verifier callback via VerifyOptions
+- packages/sdk/src/cel/algorithms/index.ts: Added export for verifyEventLog
+- packages/sdk/tests/unit/cel/verifyEventLog.test.ts: 26 unit tests
+  - Basic verification: single event, multiple events, per-event details
+  - Proof verification: valid structure, wrong type, missing fields, invalid encoding
+  - Tampered proof detection: no proofs, missing proof array, custom verifier detection
+  - Error handling: null/undefined log, missing events, empty events, verifier errors
+  - Multiple proofs per event: all valid, any invalid fails
+  - VerificationResult structure validation
+  - Custom verifier injection and data passing
+
+### Learnings
+- VerifyOptions.verifier is optional; default verifier validates proof structure only
+- Real cryptographic verification requires custom verifier with access to public keys
+- Proofs use multibase encoding: 'z' prefix = base58btc, 'u' prefix = base64url
+- EventVerification.chainValid is always true in US-006 (chain verification in US-007)
+- Tests can reuse createEventLog/updateEventLog to build valid logs for testing
+
+---
