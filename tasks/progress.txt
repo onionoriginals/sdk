@@ -756,3 +756,27 @@ Agent: Background Agent (Cursor)
 - Convex MCP tools require authentication via `npx convex dev` first
 
 ---
+
+## US-025 - Create Convex schema for Originals with CEL
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/schema.ts: Expanded placeholder schema with full table definitions
+  - originals table: name, did, layer (peer|webvh|btco), creatorDid, metadata, celLog, celVersion, celVerifiedAt
+  - users table: did, email, publicKey, didDocument
+  - resources table: originalId (ref to originals), digestMultibase, mediaType, url
+  - Indexes: by_did, by_creatorDid, by_layer, by_layer_and_creator on originals
+  - Indexes: by_did, by_email on users
+  - Indexes: by_originalId, by_digestMultibase on resources
+
+### Learnings
+- Use v.union(v.literal(...), ...) for enum-like fields (layer)
+- v.any() used for flexible JSON fields (metadata, celLog, didDocument) - validation happens in application
+- celVerifiedAt stored as number (ms since epoch) for consistent Convex timestamp handling
+- v.id("tableName") for foreign key references between tables
+- Convex generates types after `npx convex dev` runs - requires interactive auth first
+- Pre-existing TypeScript errors in explorer server/ directory don't affect Convex tsconfig
+- Typecheck Convex independently: `bunx tsc --noEmit -p convex/tsconfig.json`
+
+---
