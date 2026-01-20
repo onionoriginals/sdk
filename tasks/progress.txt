@@ -450,3 +450,35 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/WebVHCelManager.test.ts
 
 ---
+
+## US-016 - Implement BitcoinWitness service
+Completed: 2026-01-20T12:15:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/witnesses/BitcoinWitness.ts: Core implementation
+  - BitcoinWitness class implementing WitnessService interface
+  - Constructor accepts BitcoinManager instance and optional BitcoinWitnessOptions
+  - Options include feeRate and verificationMethod
+  - witness(digestMultibase) inscribes attestation data on Bitcoin via ordinals
+  - Returns BitcoinWitnessProof with txid, blockHeight, satoshi, inscriptionId
+  - Uses bitcoin-ordinals-2024 cryptosuite
+  - BitcoinWitnessError class for descriptive error handling
+- packages/sdk/src/cel/witnesses/index.ts: Added exports for BitcoinWitness and types
+- packages/sdk/tests/unit/cel/BitcoinWitness.test.ts: 35 unit tests
+  - Constructor tests: valid BitcoinManager, error handling, options
+  - witness() tests: inscribeData calls, proof structure, Bitcoin-specific fields
+  - Error handling: inscription failures, missing fields, invalid digests
+  - BitcoinWitnessError properties and inheritance
+  - Integration with WitnessService interface
+  - Witness attestation data structure validation
+
+### Learnings
+- BitcoinWitnessProof extends WitnessProof with txid, blockHeight, satoshi, inscriptionId
+- Use mock BitcoinManager in tests with vi.fn() for inscribeData
+- Attestation data includes @context, type, digestMultibase, witnessedAt
+- Multibase prefix validation: 'u' for base64url-nopad, 'z' for base58btc
+- proofValue uses inscriptionId with 'z' multibase prefix
+- Tests: bun test packages/sdk/tests/unit/cel/BitcoinWitness.test.ts
+
+---

@@ -271,8 +271,8 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented BitcoinWitness class with BitcoinWitnessProof extending WitnessProof with txid, blockHeight, satoshi, inscriptionId. Uses bitcoin-ordinals-2024 cryptosuite. 35 unit tests."
     },
     {
       "id": "US-017",
