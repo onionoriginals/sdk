@@ -1,0 +1,16 @@
+# Ralph Progress Log
+Project: Originals CEL
+Branch: feature/originals-cel
+Started: 2026-01-20
+
+## Codebase Patterns
+<!-- Add reusable patterns here as you discover them -->
+- SDK source is in packages/sdk/src/
+- Explorer source is in explorer/src/
+- Use @noble/* for crypto primitives
+- Run `bun run typecheck` in sdk root to check types
+- Convex functions go in explorer/convex/
+
+---
+
+<!-- Agent progress entries will be appended below -->
