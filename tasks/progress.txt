@@ -422,3 +422,31 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/HttpWitness.test.ts
 
 ---
+
+## US-015 - Implement WebVHCelManager for did:webvh layer
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/layers/WebVHCelManager.ts: Core implementation
+  - WebVHCelManager class with constructor accepting signer, domain, optional witnesses, and config
+  - migrate(peerLog: EventLog): Promise<EventLog> - migrates peer layer log to webvh
+  - Generates did:webvh:{domain}:{id} DIDs from source peer DIDs
+  - Adds update event with migration data (sourceDid, targetDid, layer, domain, migratedAt)
+  - Optionally adds witness proofs from configured WitnessService array
+  - getCurrentState(log): AssetState - derives current state including migration metadata
+- packages/sdk/src/cel/layers/index.ts: Added export for WebVHCelManager
+- packages/sdk/tests/unit/cel/WebVHCelManager.test.ts: 41 unit tests
+  - Constructor tests: valid inputs, error handling, domain validation
+  - migrate() tests: event structure, migration data, hash chain, witness proofs
+  - getCurrentState() tests: state derivation, migration metadata
+  - Integration tests: full peer-to-webvh migration cycle
+
+### Learnings
+- Migration events are update events with special data structure (sourceDid, targetDid, layer, domain, migratedAt)
+- Witnesses are called after the update event is created - witnessEvent modifies the event's proof array
+- did:webvh format: did:webvh:{domain}:{identifier} where identifier is derived from source DID
+- getCurrentState must handle migration events specially to update did and layer fields
+- Tests: bun test packages/sdk/tests/unit/cel/WebVHCelManager.test.ts
+
+---
