@@ -34,8 +34,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented computeDigestMultibase, verifyDigestMultibase, decodeDigestMultibase using @noble/hashes sha256 and existing multibase utilities"
     },
     {
       "id": "US-003",

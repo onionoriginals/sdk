@@ -35,3 +35,24 @@ Agent: Cursor Chat
 - Typecheck runs with ./node_modules/.bin/tsc --noEmit
 
 ---
+
+## US-002 - Implement digestMultibase hash computation
+Completed: 2026-01-20T18:35:00Z
+Agent: Background Agent
+
+### Changes
+- packages/sdk/src/cel/hash.ts: Created CEL hash utilities
+  - computeDigestMultibase(content: Uint8Array): string - computes SHA-256, encodes as Multibase base64url-nopad (prefix 'u')
+  - verifyDigestMultibase(content: Uint8Array, digest: string): boolean - verifies content matches digest
+  - decodeDigestMultibase(digest: string): Uint8Array - decodes digest to raw hash bytes
+- packages/sdk/src/cel/index.ts: Added export for hash module
+- packages/sdk/tests/unit/cel/hash.test.ts: 14 unit tests covering all functions
+
+### Learnings
+- SDK already has robust multibase utilities in src/utils/encoding.ts
+- Use `multibase.encode(bytes, 'base64url')` for 'u' prefix encoding
+- Use `@noble/hashes/sha2.js` sha256 for hashing (already in deps)
+- Typecheck: `bunx tsc --noEmit` (bun install first if node_modules missing)
+- Tests: `bun test packages/sdk/tests/unit/cel/hash.test.ts`
+
+---
