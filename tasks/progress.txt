@@ -844,3 +844,35 @@ Agent: Background Agent (Cursor)
 - Metadata merging preserves existing fields when updating
 
 ---
+
+## US-028 - Create Convex action for CEL verification
+Completed: 2026-01-20T21:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/cel.ts: Created Convex actions for CEL verification
+  - verifyCelLog(originalId): Public action that verifies CEL log using SDK
+  - getOriginalInternal: Internal query to fetch original by ID
+  - updateCelVerifiedAt: Internal mutation to update verification timestamp
+  - Local TypeScript type definitions for pre-codegen compatibility
+  - Dynamic SDK import using `await import("@originals/sdk" as string)`
+  - Returns VerificationResult with detailed per-event status
+  - Updates celVerifiedAt on successful verification
+
+- explorer/convex/_generated/server.ts: Updated stub to support `returns` validator
+  - Added optional `returns` field to QueryConfig, MutationConfig, ActionConfig interfaces
+
+- explorer/convex/_generated/api.ts: Created stub for function references
+  - Exports `api` object for public functions
+  - Exports `internal` object for internal functions
+  - Includes references for cel.verifyCelLog, cel.getOriginalInternal, cel.updateCelVerifiedAt
+
+### Learnings
+- Convex actions with `"use node";` can import npm packages at runtime
+- Pre-codegen TypeScript requires stubs for _generated files
+- Use `await import("module" as string)` to bypass TypeScript module resolution for dynamic imports
+- Internal queries/mutations are used from actions via ctx.runQuery/ctx.runMutation
+- Always include `returns` validator in Convex function definitions per best practices
+- Typecheck Convex files: `bunx tsc --noEmit -p convex/tsconfig.json`
+
+---
