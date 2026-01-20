@@ -807,3 +807,40 @@ Agent: Background Agent (Cursor)
 - Real types generated after `npx convex dev` - stubs provide basic type safety meanwhile
 
 ---
+
+## US-027 - Create Convex mutations for Originals
+Completed: 2026-01-20T20:35:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/originals.ts: Added 4 Convex mutations
+  - createOriginal(args): Creates original with initial CEL log
+    - Validates required fields (name, did, creatorDid)
+    - Checks for duplicate DID before insert
+    - Sets default celVersion to "1.0"
+    - Returns created document
+  - updateOriginal(id, updates): Updates original metadata
+    - Verifies original exists
+    - Validates name/did if provided
+    - Merges metadata with existing
+    - Checks for duplicate DID if changing
+    - Returns updated document
+  - setCelLog(id, log): Stores/updates CEL log
+    - Verifies original exists
+    - Validates CEL log structure (has events array)
+    - Preserves or sets celVersion
+    - Returns updated document
+  - setCelVerified(id, timestamp): Marks CEL as verified
+    - Verifies original exists
+    - Validates timestamp is positive
+    - Warns if no CEL log exists
+    - Returns updated document
+
+### Learnings
+- Use Partial<> type with explicit fields to avoid Record<string, unknown> type errors
+- Type assertion (as any) needed for ctx.db.patch with partial updates before codegen
+- Convex mutations return promises - always await ctx.db operations
+- Basic CEL validation: check for events array existence and non-empty
+- Metadata merging preserves existing fields when updating
+
+---
