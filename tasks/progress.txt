@@ -114,3 +114,35 @@ Agent: Background Agent
 - Tests can reuse createEventLog to build initial logs for update testing
 
 ---
+
+## US-005 - Implement deactivateEventLog algorithm
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/algorithms/deactivateEventLog.ts: Core algorithm implementation
+  - deactivateEventLog(log: EventLog, reason: string, options: DeactivateOptions): Promise<EventLog>
+  - Computes previousEvent as digestMultibase of last event using serializeEntry helper
+  - Creates "deactivate" type event with reason and deactivatedAt in data
+  - Prevents double deactivation (throws if last event is already deactivate)
+  - Returns new EventLog immutably (input not mutated)
+  - Validates proof has required fields (type, cryptosuite, proofValue)
+  - Preserves previousLog reference for chunked logs
+- packages/sdk/src/cel/algorithms/index.ts: Added export for deactivateEventLog
+- packages/sdk/tests/unit/cel/deactivateEventLog.test.ts: 20 unit tests
+  - Basic functionality: event appending, type "deactivate", reason/deactivatedAt in data
+  - Hash chain linking: previousEvent field, digestMultibase matching, multi-event chains
+  - Sealing behavior: prevents double deactivation, last event is deactivate
+  - Immutability: input not mutated, new EventLog instance returned
+  - Proof generation: eddsa-jcs-2022, verificationMethod inclusion
+  - Error handling: empty log rejection, invalid proof detection
+  - previousLog preservation for chunked logs
+  - Reason handling: empty, long, and special characters
+
+### Learnings
+- Deactivate is similar to update but with type "deactivate" and reason in data
+- Adding double-deactivation check prevents accidental multiple deactivations
+- Including deactivatedAt timestamp in data provides audit trail
+- Tests follow same pattern as updateEventLog tests with sealing-specific cases added
+
+---

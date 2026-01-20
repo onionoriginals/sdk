@@ -85,8 +85,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented deactivateEventLog with hash chain linking, double-deactivation prevention, and reason/deactivatedAt in data. 20 unit tests covering all acceptance criteria."
     },
     {
       "id": "US-006",
