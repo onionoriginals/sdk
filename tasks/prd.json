@@ -394,7 +394,7 @@
       ],
       "priority": 23,
       "passes": true,
-      "notes": "Implemented CLI migrate command with peer→webvh and webvh→btco migration paths. Supports JSON/CBOR input/output, --domain for webvh, --wallet for btco. 23 unit tests."
+      "notes": "Implemented CLI migrate command with peer\u2192webvh and webvh\u2192btco migration paths. Supports JSON/CBOR input/output, --domain for webvh, --wallet for btco. 23 unit tests."
     },
     {
       "id": "US-024",
@@ -491,8 +491,8 @@
         "Typecheck passes"
       ],
       "priority": 29,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created explorer/src/lib/convex.ts with ConvexReactClient setup. Updated main.tsx to wrap App in ConvexProvider. Added VITE_CONVEX_URL to .env.example. Browser verification blocked by pre-existing Vite polyfill issue with @aviarytech/did-peer."
     },
     {
       "id": "US-030",
