@@ -359,3 +359,35 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/PeerCelManager.test.ts
 
 ---
+
+## US-013 - Add update and getCurrentState to PeerCelManager
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/layers/PeerCelManager.ts: Added update() and getCurrentState() methods
+  - update(log: EventLog, data: unknown): Promise<EventLog>
+    - Delegates to updateEventLog algorithm
+    - Automatically adds updatedAt timestamp to update data
+    - Validates log is not empty and not deactivated
+    - Uses same signer as create() for proof generation
+  - getCurrentState(log: EventLog): AssetState
+    - Replays all events to derive current state
+    - Extracts initial state from create event (name, did, layer, resources, creator, createdAt)
+    - Applies update events: merges known fields, stores custom fields in metadata
+    - Handles deactivate events: sets deactivated=true, captures reason in metadata
+    - Validates first event is create type
+- packages/sdk/tests/unit/cel/PeerCelManager.test.ts: Added 26 new unit tests
+  - Update tests: event appending, data inclusion, timestamps, previousEvent linking, immutability
+  - getCurrentState tests: initial state, updates, resources, metadata, deactivation
+  - Integration test: full create → update → getCurrentState lifecycle
+
+### Learnings
+- update() wraps updateEventLog but adds convenience features like auto-timestamp
+- getCurrentState() must handle all event types: create, update, deactivate
+- Custom fields not in AssetState core schema go into metadata object
+- Deactivation info (reason, timestamp) also stored in metadata for accessibility
+- Testing pattern: use deactivateEventLog to test deactivated log handling
+- Tests: bun test packages/sdk/tests/unit/cel/PeerCelManager.test.ts
+
+---
