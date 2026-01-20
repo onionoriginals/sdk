@@ -8,8 +8,9 @@
  * @see https://identity.foundation/peer-did-method-spec/
  */
 
-import type { EventLog, ExternalReference, DataIntegrityProof, CreateOptions } from '../types';
+import type { EventLog, ExternalReference, DataIntegrityProof, CreateOptions, UpdateOptions, AssetState } from '../types';
 import { createEventLog } from '../algorithms/createEventLog';
+import { updateEventLog } from '../algorithms/updateEventLog';
 
 /**
  * Configuration options for PeerCelManager
@@ -213,5 +214,158 @@ export class PeerCelManager {
     // Import multikey encoder
     const { multikey } = await import('../../crypto/Multikey');
     return multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519');
+  }
+
+  /**
+   * Updates an existing event log by appending an update event.
+   * 
+   * The new event is cryptographically linked to the previous event
+   * via a hash chain (previousEvent field).
+   * 
+   * @param log - The existing event log to update
+   * @param data - The update data (new metadata, resources, etc.)
+   * @returns Promise resolving to a new EventLog with the update event appended
+   * 
+   * @throws Error if the log is empty or deactivated
+   * @throws Error if signer produces invalid proof
+   * 
+   * @example
+   * ```typescript
+   * const updatedLog = await manager.update(log, {
+   *   name: 'Renamed Asset',
+   *   description: 'Updated description'
+   * });
+   * ```
+   */
+  async update(log: EventLog, data: unknown): Promise<EventLog> {
+    // Validate input log
+    if (!log || !log.events || log.events.length === 0) {
+      throw new Error('Cannot update an empty event log');
+    }
+
+    // Check if log is already deactivated
+    const lastEvent = log.events[log.events.length - 1];
+    if (lastEvent.type === 'deactivate') {
+      throw new Error('Cannot update a deactivated event log');
+    }
+
+    // Get the DID from the create event for verification method construction
+    const createData = log.events[0].data as PeerAssetData;
+    const did = createData.did;
+
+    // Build update options using the same signer
+    const updateOptions: UpdateOptions = {
+      signer: this.signer,
+      verificationMethod: this.config.verificationMethod || `${did}#key-0`,
+      proofPurpose: this.config.proofPurpose,
+    };
+
+    // Add timestamp to update data
+    const updateData = {
+      ...((typeof data === 'object' && data !== null) ? data : { value: data }),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Delegate to updateEventLog algorithm
+    return updateEventLog(log, updateData, updateOptions);
+  }
+
+  /**
+   * Derives the current asset state by replaying all events in the log.
+   * 
+   * This method:
+   * 1. Starts with the initial state from the create event
+   * 2. Applies each update event sequentially
+   * 3. Marks as deactivated if a deactivate event is present
+   * 
+   * @param log - The event log to derive state from
+   * @returns The current AssetState derived from replaying events
+   * 
+   * @throws Error if the log is empty
+   * @throws Error if the first event is not a create event
+   * 
+   * @example
+   * ```typescript
+   * const state = manager.getCurrentState(log);
+   * console.log(state.name);       // Current asset name
+   * console.log(state.deactivated); // Whether asset is deactivated
+   * ```
+   */
+  getCurrentState(log: EventLog): AssetState {
+    // Validate input log
+    if (!log || !log.events || log.events.length === 0) {
+      throw new Error('Cannot get state from an empty event log');
+    }
+
+    // First event must be a create event
+    const createEvent = log.events[0];
+    if (createEvent.type !== 'create') {
+      throw new Error('First event must be a create event');
+    }
+
+    // Extract initial state from create event
+    const createData = createEvent.data as PeerAssetData;
+    
+    // Initialize state from create event
+    const state: AssetState = {
+      did: createData.did,
+      name: createData.name,
+      layer: createData.layer,
+      resources: [...createData.resources],
+      creator: createData.creator,
+      createdAt: createData.createdAt,
+      updatedAt: undefined,
+      deactivated: false,
+      metadata: {},
+    };
+
+    // Apply subsequent events
+    for (let i = 1; i < log.events.length; i++) {
+      const event = log.events[i];
+
+      if (event.type === 'update') {
+        // Merge update data into state
+        const updateData = event.data as Record<string, unknown>;
+        
+        // Update specific known fields
+        if (updateData.name !== undefined) {
+          state.name = updateData.name as string;
+        }
+        if (updateData.resources !== undefined) {
+          state.resources = updateData.resources as ExternalReference[];
+        }
+        if (updateData.updatedAt !== undefined) {
+          state.updatedAt = updateData.updatedAt as string;
+        }
+        if (updateData.did !== undefined) {
+          state.did = updateData.did as string;
+        }
+        if (updateData.layer !== undefined) {
+          state.layer = updateData.layer as 'peer' | 'webvh' | 'btco';
+        }
+        
+        // Store other fields in metadata
+        for (const [key, value] of Object.entries(updateData)) {
+          if (!['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt'].includes(key)) {
+            state.metadata = state.metadata || {};
+            state.metadata[key] = value;
+          }
+        }
+      } else if (event.type === 'deactivate') {
+        state.deactivated = true;
+        
+        // Extract deactivation details
+        const deactivateData = event.data as Record<string, unknown>;
+        if (deactivateData.deactivatedAt !== undefined) {
+          state.updatedAt = deactivateData.deactivatedAt as string;
+        }
+        if (deactivateData.reason !== undefined) {
+          state.metadata = state.metadata || {};
+          state.metadata.deactivationReason = deactivateData.reason;
+        }
+      }
+    }
+
+    return state;
   }
 }
