@@ -8,6 +8,7 @@
 
 import { createCommand, CreateFlags } from './create';
 import { verifyCommand, VerifyFlags } from './verify';
+import { inspectCommand, InspectFlags } from './inspect';
 
 // Version from package.json - will be replaced at build time or read dynamically
 const VERSION = '1.5.0';
@@ -254,6 +255,27 @@ async function runVerifyCommand(flags: Record<string, string | boolean>): Promis
 }
 
 /**
+ * Run the inspect command asynchronously
+ */
+async function runInspectCommand(flags: Record<string, string | boolean>): Promise<void> {
+  try {
+    const inspectFlags: InspectFlags = {
+      log: typeof flags.log === 'string' ? flags.log : undefined,
+      help: flags.help === true,
+      h: flags.h === true,
+    };
+    
+    const result = await inspectCommand(inspectFlags);
+    
+    if (!result.success) {
+      error(result.message.replace('Error: ', ''));
+    }
+  } catch (e) {
+    error((e as Error).message);
+  }
+}
+
+/**
  * Main CLI entry point
  */
 export function main(args: string[] = process.argv.slice(2)): void {
@@ -296,13 +318,13 @@ export function main(args: string[] = process.argv.slice(2)): void {
       return;
 
     case 'inspect':
-      // Will be implemented in US-022
       if (flags.help || flags.h) {
         print(INSPECT_HELP);
         return;
       }
-      print('Inspect command not yet implemented. See US-022.');
-      break;
+      // Run inspect command asynchronously
+      runInspectCommand(flags);
+      return;
 
     case 'migrate':
       // Will be implemented in US-023
