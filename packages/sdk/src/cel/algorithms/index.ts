@@ -5,3 +5,4 @@
  */
 
 export { createEventLog } from './createEventLog';
+export { updateEventLog } from './updateEventLog';
