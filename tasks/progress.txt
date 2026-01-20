@@ -271,3 +271,30 @@ Agent: Background Agent (Cursor)
 - Round-trip tests verify serialize → parse → serialize produces identical output
 
 ---
+
+## US-010 - Implement CBOR serialization for event logs
+Completed: 2026-01-20T12:15:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/serialization/cbor.ts: Core CBOR serialization implementation
+  - serializeEventLogCbor(log: EventLog): Uint8Array - encodes EventLog to compact CBOR binary
+  - parseEventLogCbor(cbor: Uint8Array): EventLog - parses and validates CBOR data
+  - Uses existing utils/cbor.ts wrapper around cbor-js dependency
+  - Full validation of EventLog structure including proofs and WitnessProof
+- packages/sdk/src/cel/serialization/index.ts: Added export for cbor module
+- packages/sdk/tests/unit/cel/cbor-serialization.test.ts: 34 unit tests
+  - serializeEventLogCbor: Uint8Array output, multiple events, previousLog, witness proofs
+  - parseEventLogCbor: validation, error handling, type checking
+  - Round-trip: simple log, multi-event, previousLog, complex nested data, witness proofs
+  - Size comparison: CBOR is 20%+ smaller than JSON for typical event logs
+  - Edge cases: empty data, unicode, large numbers, arrays, deactivate type
+
+### Learnings
+- SDK already has utils/cbor.ts that wraps cbor-js with encode/decode functions
+- CBOR provides ~20-40% size reduction compared to JSON for typical event logs
+- cbor-js returns ArrayBuffer from encode, so utils/cbor.ts converts to Uint8Array
+- Validation logic is identical to JSON parser - reuse same parseProof/parseEntry patterns
+- Tests show CBOR is significantly more efficient for multi-event logs with repeated structures
+
+---
