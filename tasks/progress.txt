@@ -243,3 +243,31 @@ Agent: Background Agent (Cursor)
 - Can apply multiple witnesses by chaining witnessEvent calls
 
 ---
+
+## US-009 - Implement JSON serialization for event logs
+Completed: 2026-01-20T12:15:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/serialization/json.ts: Core serialization implementation
+  - serializeEventLogJson(log: EventLog): string - serializes with deterministic key ordering
+  - parseEventLogJson(json: string): EventLog - parses and validates JSON structure
+  - sortKeys() helper for consistent hash computation
+  - Validates all required DataIntegrityProof/WitnessProof fields
+  - Preserves optional previousLog and previousEvent fields
+- packages/sdk/src/cel/serialization/index.ts: Barrel export for serialization module
+- packages/sdk/src/cel/index.ts: Added export for serialization module
+- packages/sdk/tests/unit/cel/json-serialization.test.ts: 31 unit tests
+  - serializeEventLogJson: valid JSON, deterministic key ordering, multiple events, witness proofs
+  - parseEventLogJson: validation, error handling, type checking
+  - Round-trip: simple log, multi-event, previousLog, complex nested data, witness proofs
+  - Edge cases: empty data, unicode, large numbers, arrays, deactivate type
+
+### Learnings
+- Use Object.keys().sort() recursively for deterministic JSON key ordering
+- WitnessProof is distinguished from DataIntegrityProof by presence of witnessedAt field
+- JSON.stringify with indent 2 produces human-readable output
+- Validation should check all required DataIntegrityProof fields explicitly
+- Round-trip tests verify serialize → parse → serialize produces identical output
+
+---
