@@ -557,3 +557,28 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/OriginalsCel.test.ts
 
 ---
+
+## US-019 - Create CLI entry point with help command
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/cli/index.ts: Created CLI entry point
+  - parseArgs(args): Parses process.argv into command and flags object
+  - main(args): Main CLI handler routing to subcommands
+  - Comprehensive help text for all commands (create, verify, inspect, migrate)
+  - --help/-h shows usage for command or global help
+  - --version/-v shows package version (1.5.0)
+  - Placeholder implementations for subcommands (to be implemented in US-020 through US-023)
+- packages/sdk/package.json: Added bin entry "originals-cel" pointing to dist/cel/cli/index.js
+- packages/sdk/src/cel/index.ts: Added export for celCli function
+
+### Learnings
+- CLI uses process.argv.slice(2) for arguments (skip node and script path)
+- Shebang line (#!/usr/bin/env node) required for bin entry to work
+- No new dependencies needed - native process.argv parsing works well
+- Export main() function for programmatic use (e.g., testing)
+- Tests: bun test packages/sdk/tests/unit/cel/cli.test.ts (to be created in future)
+- Pre-existing CelSigner duplicate export errors in layers module unrelated to CLI changes
+
+---
