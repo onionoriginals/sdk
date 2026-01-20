@@ -12,3 +12,4 @@ export * from './witnesses';
 export * from './serialization';
 export * from './ExternalReferenceManager';
 export * from './layers';
+export * from './OriginalsCel';
