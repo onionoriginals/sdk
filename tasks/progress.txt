@@ -1031,3 +1031,38 @@ Agent: Background Agent (Cursor)
 - Tests: Component typechecks successfully with `bunx tsc --noEmit`
 
 ---
+
+## US-035 - Add expandable event details to CelEventTimeline
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/components/cel/CelEventTimeline.tsx: Added expandable event details
+  - Added useState hook for expand/collapse state per event
+  - Added Collapsible, CollapsibleContent, CollapsibleTrigger from Radix UI
+  - Added Button import for Details/Collapse toggle
+  - Added new icons: ChevronDown, ChevronUp, Shield, Key, Eye
+  - Created isWitnessProof() helper to detect witness proofs by witnessedAt field
+  - Created ProofDetails component showing:
+    - cryptosuite (e.g., eddsa-jcs-2022)
+    - proofPurpose (e.g., assertionMethod)
+    - verificationMethod (full DID key reference)
+    - proofValue (truncated with full value on hover)
+    - witnessedAt timestamp for witness proofs
+  - Created EventExpandedDetails component showing:
+    - Cryptographic Proofs section with controller proofs first, witness proofs grouped
+    - Hash chain link (previousEvent field) if present
+    - Full Event Data as formatted JSON in dark code block
+  - Updated TimelineEvent to use Collapsible wrapper
+  - Added witness count badge next to timestamp
+  - Details/Collapse button with chevron icons
+
+### Learnings
+- Use Radix UI Collapsible for expand/collapse (already in project via shadcn/ui)
+- Distinguish controller proofs from witness proofs by presence of witnessedAt field
+- ProofValue is often long - truncate with hover to show full value
+- Group witness proofs separately with amber/yellow color scheme
+- Pre-existing Vite polyfill issue blocks browser verification (same as US-033, US-034)
+- Typecheck passes for src/ components even when server/ has unrelated errors
+
+---
