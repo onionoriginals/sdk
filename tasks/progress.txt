@@ -482,3 +482,35 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/BitcoinWitness.test.ts
 
 ---
+
+## US-017 - Implement BtcoCelManager for did:btco layer
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/layers/BtcoCelManager.ts: Core implementation
+  - BtcoCelManager class with constructor accepting signer, BitcoinManager, and optional config
+  - migrate(webvhLog: EventLog): Promise<EventLog> - migrates webvh layer log to btco
+  - Validates source log is from webvh layer (peer-to-btco direct migration not allowed)
+  - Generates did:btco:{inscriptionId} DIDs from Bitcoin inscription IDs
+  - Adds mandatory Bitcoin witness proof via BitcoinWitness service
+  - BtcoMigrationData includes sourceDid, targetDid, layer, txid, inscriptionId, migratedAt
+  - getCurrentState(log): AssetState - derives current state including Bitcoin metadata
+- packages/sdk/src/cel/layers/index.ts: Added export for BtcoCelManager
+- packages/sdk/tests/unit/cel/BtcoCelManager.test.ts: 40 unit tests
+  - Constructor tests: valid inputs, error handling, config options
+  - migrate() tests: event structure, migration data, hash chain, Bitcoin witness proofs
+  - getCurrentState() tests: state derivation, Bitcoin metadata (txid, inscriptionId)
+  - Integration tests: full peer-to-webvh-to-btco migration cycle
+  - DID generation: from inscription IDs, consistency across managers
+  - Bitcoin witness integration: automatic adding, proof structure, satoshi/blockHeight
+
+### Learnings
+- BtcoCelManager only accepts webvh logs (must migrate peer->webvh first, then webvh->btco)
+- BitcoinWitness is REQUIRED at btco layer (not optional like HttpWitness at webvh)
+- did:btco format uses sanitized inscription ID for DID identifier
+- Migration event data includes txid and inscriptionId for Bitcoin anchor verification
+- Use mock BitcoinManager with vi.fn() for inscribeData returning {txid, inscriptionId, satoshi, blockHeight}
+- Tests: bun test packages/sdk/tests/unit/cel/BtcoCelManager.test.ts
+
+---
