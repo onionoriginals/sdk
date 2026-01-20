@@ -136,8 +136,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented WitnessService interface and witnessEvent algorithm. 24 unit tests covering proof appending, immutability, error handling, and multiple witnesses."
     },
     {
       "id": "US-009",

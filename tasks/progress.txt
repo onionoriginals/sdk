@@ -210,3 +210,36 @@ Agent: Background Agent (Cursor)
 - EventVerification.chainValid now actually reflects chain status (was always true in US-006)
 
 ---
+
+## US-008 - Implement WitnessService interface and witnessEvent
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/witnesses/WitnessService.ts: Created WitnessService interface
+  - Interface with witness(digestMultibase: string): Promise<WitnessProof> method
+  - Documented for HTTP, Bitcoin, notary, and blockchain attestation services
+- packages/sdk/src/cel/witnesses/index.ts: Barrel export for witnesses module
+- packages/sdk/src/cel/algorithms/witnessEvent.ts: Core algorithm implementation
+  - witnessEvent(event: LogEntry, witness: WitnessService): Promise<LogEntry>
+  - Computes digestMultibase of event using deterministic serialization
+  - Appends witness proof to proof array (preserves controller proof)
+  - Validates witness proof has required fields including witnessedAt
+  - Returns new LogEntry immutably (input not mutated)
+- packages/sdk/src/cel/algorithms/index.ts: Added export for witnessEvent
+- packages/sdk/src/cel/index.ts: Added export for witnesses module
+- packages/sdk/tests/unit/cel/witnessEvent.test.ts: 24 unit tests
+  - Basic functionality: proof appending, original proof preservation
+  - Witness proof structure: type, cryptosuite, proofValue, verificationMethod, witnessedAt
+  - Multiple witnesses: can chain multiple witness proofs
+  - Error handling: null/undefined inputs, missing proof fields, witness service errors
+  - Event data preservation: type, data, previousEvent
+
+### Learnings
+- WitnessProof extends DataIntegrityProof with witnessedAt field (defined in types.ts)
+- Witness proofs APPEND to proof array - never replace controller proof
+- Use same serializeEntry pattern from update/deactivate for deterministic hashing
+- witnessedAt is required field that distinguishes WitnessProof from DataIntegrityProof
+- Can apply multiple witnesses by chaining witnessEvent calls
+
+---
