@@ -9,6 +9,7 @@
 import { createCommand, CreateFlags } from './create';
 import { verifyCommand, VerifyFlags } from './verify';
 import { inspectCommand, InspectFlags } from './inspect';
+import { migrateCommand, MigrateFlags } from './migrate';
 
 // Version from package.json - will be replaced at build time or read dynamically
 const VERSION = '1.5.0';
@@ -276,6 +277,32 @@ async function runInspectCommand(flags: Record<string, string | boolean>): Promi
 }
 
 /**
+ * Run the migrate command asynchronously
+ */
+async function runMigrateCommand(flags: Record<string, string | boolean>): Promise<void> {
+  try {
+    const migrateFlags: MigrateFlags = {
+      log: typeof flags.log === 'string' ? flags.log : undefined,
+      to: typeof flags.to === 'string' ? flags.to : undefined,
+      domain: typeof flags.domain === 'string' ? flags.domain : undefined,
+      wallet: typeof flags.wallet === 'string' ? flags.wallet : undefined,
+      output: typeof flags.output === 'string' ? flags.output : undefined,
+      format: typeof flags.format === 'string' ? flags.format : undefined,
+      help: flags.help === true,
+      h: flags.h === true,
+    };
+    
+    const result = await migrateCommand(migrateFlags);
+    
+    if (!result.success) {
+      error(result.message.replace('Error: ', ''));
+    }
+  } catch (e) {
+    error((e as Error).message);
+  }
+}
+
+/**
  * Main CLI entry point
  */
 export function main(args: string[] = process.argv.slice(2)): void {
@@ -327,13 +354,13 @@ export function main(args: string[] = process.argv.slice(2)): void {
       return;
 
     case 'migrate':
-      // Will be implemented in US-023
       if (flags.help || flags.h) {
         print(MIGRATE_HELP);
         return;
       }
-      print('Migrate command not yet implemented. See US-023.');
-      break;
+      // Run migrate command asynchronously
+      runMigrateCommand(flags);
+      return;
 
     case 'help':
       // Handle "originals-cel help <command>"
