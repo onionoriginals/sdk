@@ -582,3 +582,41 @@ Agent: Background Agent (Cursor)
 - Pre-existing CelSigner duplicate export errors in layers module unrelated to CLI changes
 
 ---
+
+## US-020 - Implement CLI create command
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/cli/create.ts: Core CLI create command implementation
+  - createCommand(flags: CreateFlags): Promise<CreateResult> - main handler function
+  - generateKeyPair(): Promise<{privateKey, publicKey}> - Ed25519 key generation
+  - loadPrivateKey(keyPath): Promise<{privateKey, publicKey}> - key file loading (raw or JSON)
+  - createSigner(privateKey, publicKey): CelSigner - creates eddsa-jcs-2022 signer
+  - getMimeType(filePath): string - MIME type detection from file extension
+  - CreateFlags interface for parsed CLI arguments
+  - CreateResult interface for command result
+- packages/sdk/src/cel/cli/index.ts: Integrated create command
+  - Added import for createCommand and CreateFlags
+  - Added runCreateCommand async helper function
+  - Updated switch case to route to createCommand
+- packages/sdk/tests/unit/cel/cli-create.test.ts: 18 unit tests
+  - Argument validation: missing name, missing file, invalid file, invalid format, missing key
+  - Key generation: generates Ed25519 when not provided, uses provided key, loads JSON key
+  - JSON output: creates valid CEL log, uses JSON by default
+  - CBOR output: creates valid CBOR, CBOR is smaller than JSON
+  - MIME type detection: PNG, JPEG, unknown extensions
+  - Proof structure: eddsa-jcs-2022 cryptosuite
+  - File output: writes to --output path, nested directories
+
+### Learnings
+- Use @noble/ed25519 utils.randomPrivateKey() for key generation
+- multikey.encodePrivateKey/encodePublicKey for Ed25519 multibase encoding
+- CLI commands should return result objects rather than throwing for testability
+- Key file can be raw multibase string or JSON with privateKey field
+- MIME type detection uses simple extension lookup (no magic number detection)
+- For CBOR stdout output, encode as base64 since it's binary
+- Warn about generated keys via console.error to not pollute stdout JSON
+- Tests: bun test packages/sdk/tests/unit/cel/cli-create.test.ts
+
+---

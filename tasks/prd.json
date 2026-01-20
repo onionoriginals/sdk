@@ -342,8 +342,8 @@
         "Typecheck passes"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented CLI create command with Ed25519 key generation, JSON/CBOR output, MIME type detection, and comprehensive error handling. 18 unit tests."
     },
     {
       "id": "US-021",
