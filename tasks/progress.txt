@@ -947,3 +947,25 @@ Agent: Background Agent (Cursor)
 - Pre-existing TypeScript errors in server/ directory don't affect src/ hooks
 
 ---
+
+## US-032 - Create useCelVerification Convex hook
+Completed: 2026-01-20T22:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/hooks/useCelVerification.ts: Created Convex hook for CEL verification
+  - EventType, EventVerification, VerificationResult types defined locally
+  - UseCelVerificationResult interface: { verify, result, isVerifying, error }
+  - useCelVerification(originalId): Hook that returns verification function and state
+  - verify() triggers verifyCelLog Convex action and updates local state
+  - Error handling for network/action errors vs verification failures
+  - Comprehensive JSDoc with two usage examples
+
+### Learnings
+- Convex useAction returns an async function callable from event handlers
+- useState/useCallback pattern provides controlled state management for actions
+- Memoize verify() with useCallback to prevent unnecessary re-renders
+- Distinguish between action execution errors (error state) and verification failures (result.verified=false)
+- Pre-existing TypeScript errors in explorer src/ directory don't affect new hooks
+
+---
