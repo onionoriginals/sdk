@@ -514,3 +514,46 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/BtcoCelManager.test.ts
 
 ---
+
+## US-018 - Create unified OriginalsCel SDK entry point
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/OriginalsCel.ts: Created unified SDK entry point
+  - OriginalsCel class with constructor accepting { layer, signer, config? }
+  - create(name, resources): Promise<EventLog> - creates assets at peer layer
+  - update(log, data): Promise<EventLog> - updates any layer log
+  - verify(log, options?): Promise<VerificationResult> - verifies proofs and chain
+  - migrate(log, targetLayer, options?): Promise<EventLog> - migrates between layers
+  - getCurrentState(log): AssetState - derives state by replaying events
+  - Lazy layer manager creation (PeerCelManager, WebVHCelManager, BtcoCelManager)
+  - Layer detection from event log content
+- packages/sdk/src/cel/index.ts: Added export for OriginalsCel
+- packages/sdk/src/index.ts: Added comprehensive CEL exports
+  - OriginalsCel and related types
+  - All CEL algorithm functions (createEventLog, updateEventLog, etc.)
+  - Hash utilities (computeDigestMultibase, verifyDigestMultibase)
+  - External reference functions
+  - Layer managers (PeerCelManager, WebVHCelManager, BtcoCelManager)
+  - Witness services (WitnessService, HttpWitness, BitcoinWitness)
+  - Serialization functions (JSON and CBOR)
+- packages/sdk/tests/unit/cel/OriginalsCel.test.ts: 35 unit tests
+  - Constructor tests: valid config for all layers, error handling
+  - create() tests: peer layer creation, DID generation, proof inclusion
+  - update() tests: event appending, hash chain linking, immutability
+  - verify() tests: valid logs, tampered proofs, custom verifier
+  - migrate() tests: peer→webvh, webvh→btco, error cases
+  - getCurrentState() tests: state derivation, updates, migrations
+  - Integration test: full lifecycle create→update→migrate→verify
+
+### Learnings
+- Layer managers use CelSigner callback pattern for flexibility
+- Migration validation: peer→webvh→btco (no skipping layers, no reverse)
+- BitcoinWitness uses 'bitcoin-ordinals-2024' cryptosuite (not in default verifier)
+- Custom verifier needed for full Bitcoin proof validation
+- Lazy manager instantiation reduces memory and avoids config errors until needed
+- Domain extraction from log helps WebVHCelManager work with existing logs
+- Tests: bun test packages/sdk/tests/unit/cel/OriginalsCel.test.ts
+
+---
