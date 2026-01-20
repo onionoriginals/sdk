@@ -185,8 +185,8 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented createExternalReference and verifyExternalReference functions. 29 unit tests."
     },
     {
       "id": "US-012",

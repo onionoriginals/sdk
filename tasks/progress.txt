@@ -298,3 +298,32 @@ Agent: Background Agent (Cursor)
 - Tests show CBOR is significantly more efficient for multi-event logs with repeated structures
 
 ---
+
+## US-011 - Implement ExternalReferenceManager
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/ExternalReferenceManager.ts: Created external reference utilities
+  - createExternalReference(content: Uint8Array, mediaType: string, urls?: string[]): ExternalReference
+    - Computes digestMultibase using computeDigestMultibase
+    - Includes optional url array when provided (omits if empty)
+    - Always includes mediaType
+  - verifyExternalReference(ref: ExternalReference, content: Uint8Array): boolean
+    - Uses verifyDigestMultibase from hash.ts to check content against digest
+    - Returns true if content hash matches, false otherwise
+- packages/sdk/src/cel/index.ts: Added export for ExternalReferenceManager
+- packages/sdk/tests/unit/cel/ExternalReferenceManager.test.ts: 29 unit tests
+  - createExternalReference: digest computation, media types, urls handling
+  - verifyExternalReference: matching content, different content, modified, truncated, extended
+  - Round-trip: create and verify, JSON serialization
+  - Edge cases: unicode, null bytes, case sensitivity
+
+### Learnings
+- ExternalReference type defined in types.ts has url[], mediaType, digestMultibase fields
+- computeDigestMultibase and verifyDigestMultibase from hash.ts provide hash utilities
+- Empty url array should be omitted rather than included as empty array
+- Functions are pure - no side effects, just data transformation
+- Tests: bun test packages/sdk/tests/unit/cel/ExternalReferenceManager.test.ts
+
+---
