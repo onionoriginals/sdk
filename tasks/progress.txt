@@ -998,3 +998,36 @@ Agent: Background Agent (Cursor)
 - Demo components are useful for visual testing when Convex/live data isn't available
 
 ---
+
+## US-034 - Create CelEventTimeline component
+Completed: 2026-01-20T23:55:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/components/cel/CelEventTimeline.tsx: Created event timeline component
+  - Props: celLog: EventLog, className?: string
+  - Vertical timeline with connected dots and lines
+  - Event type badges: create (green), update (blue), deactivate (red)
+  - Timestamps extracted from event data or proof
+  - CreateEventSummary: shows asset name, creator DID, layer
+  - UpdateEventSummary: shows changed fields, detects migration events
+  - MigrationEventSummary: shows source→target layer transition with badges
+  - DeactivateEventSummary: shows deactivation reason
+  - Empty state handling for logs with no events
+  - Previous log notice for chunked logs
+- explorer/src/components/cel/CelEventTimelineDemo.tsx: Demo component for testing
+  - Sample logs: simple create, with updates, with migration, deactivated, empty
+  - Showcases all event types and visual states
+  - Added to components-demo page under CEL Provenance tab
+- explorer/src/components/cel/index.ts: Added exports for CelEventTimeline and CelEventTimelineDemo
+- explorer/src/pages/components-demo.tsx: Added CelEventTimelineDemo to CEL Provenance tab
+
+### Learnings
+- Use typeof checks for unknown types in JSX conditionals (e.g., typeof d?.layer === "string")
+- Migration events are update events with sourceDid/targetDid/layer fields
+- Get timestamps from data.createdAt/updatedAt/deactivatedAt/migratedAt or fall back to proof[0].created
+- Pre-existing Vite polyfill issue with @noble/* deps blocks browser rendering (same as US-029, US-033)
+- Use Lucide icons: Plus (create), RefreshCw (update), Ban (deactivate), ArrowRight (migration)
+- Tests: Component typechecks successfully with `bunx tsc --noEmit`
+
+---
