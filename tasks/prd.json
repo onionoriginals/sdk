@@ -17,8 +17,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created CEL types: EventLog, LogEntry, ExternalReference, DataIntegrityProof, WitnessProof, VerificationResult, AssetState"
     },
     {
       "id": "US-002",

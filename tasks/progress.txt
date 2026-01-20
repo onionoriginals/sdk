@@ -13,4 +13,25 @@ Started: 2026-01-20
 
 ---
 
-<!-- Agent progress entries will be appended below -->
+## US-001 - Create CEL types.ts with data model interfaces
+Completed: 2026-01-20T09:15:00Z
+Agent: Cursor Chat
+
+### Changes
+- packages/sdk/src/cel/types.ts: Created CEL data model interfaces
+  - DataIntegrityProof: W3C Data Integrity proof structure
+  - WitnessProof: Extended proof with witnessedAt timestamp
+  - ExternalReference: For large resources (url[], mediaType, digestMultibase)
+  - LogEntry: Single event with type, data, previousEvent, proof[]
+  - EventLog: Complete log with events[] and optional previousLog
+  - VerificationResult, EventVerification: For verify results
+  - CreateOptions, UpdateOptions, DeactivateOptions, VerifyOptions
+  - AssetState: Derived state from replaying events
+- packages/sdk/src/cel/index.ts: Export barrel file
+
+### Learnings
+- Existing Proof interface in types/credentials.ts is simpler than CEL's DataIntegrityProof
+- CEL proofs need cryptosuite field which existing Proof lacks
+- Typecheck runs with ./node_modules/.bin/tsc --noEmit
+
+---
