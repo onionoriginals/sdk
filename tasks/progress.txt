@@ -327,3 +327,35 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/ExternalReferenceManager.test.ts
 
 ---
+
+## US-012 - Implement PeerCelManager for did:peer layer
+Completed: 2026-01-20T12:15:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/layers/PeerCelManager.ts: Core implementation
+  - PeerCelManager class with constructor accepting signer and optional config
+  - create(name: string, resources: ExternalReference[]): Promise<EventLog>
+  - Generates did:peer numalgo 4 (long-form) DIDs using @aviarytech/did-peer
+  - Creates CEL event log with single "create" event
+  - PeerAssetData interface: name, did, layer ('peer'), resources, creator, createdAt
+  - No witness proofs added (only controller proof at peer layer)
+- packages/sdk/src/cel/layers/index.ts: Barrel export for layers module
+- packages/sdk/src/cel/index.ts: Added export for layers module
+- packages/sdk/tests/unit/cel/PeerCelManager.test.ts: 29 unit tests
+  - Constructor tests: valid signer, error on invalid, config acceptance
+  - Create tests: event structure, type, data fields, proofs
+  - Input validation: name/resources validation, empty resources
+  - DID generation: unique DIDs, numalgo 4 format
+  - Integration: create then verify cycle
+  - Config options: verificationMethod, proofPurpose
+  - Complex scenarios: multiple resources, unicode, long names
+
+### Learnings
+- @aviarytech/did-peer provides createNumAlgo4() for long-form DIDs
+- did:peer numalgo 4 embeds full DID document for self-contained resolution
+- PeerAssetData.creator equals PeerAssetData.did for peer layer (self-issued)
+- No witnesses at peer layer - only the controller's DataIntegrityProof
+- Tests: bun test packages/sdk/tests/unit/cel/PeerCelManager.test.ts
+
+---

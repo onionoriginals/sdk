@@ -203,8 +203,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented PeerCelManager with create() method. Generates did:peer numalgo 4 DIDs, creates CEL event log with create event. No witnesses (controller proof only). 29 unit tests."
     },
     {
       "id": "US-013",
