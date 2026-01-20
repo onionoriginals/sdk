@@ -620,3 +620,37 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/cli-create.test.ts
 
 ---
+
+## US-021 - Implement CLI verify command
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/cli/verify.ts: Core CLI verify command implementation
+  - verifyCommand(flags: VerifyFlags): Promise<VerifyResult> - main handler function
+  - loadEventLog(filePath): EventLog - loads and parses JSON or CBOR files
+  - outputResult(log, result): void - outputs formatted verification report
+  - Supports both .cel.json and .cel.cbor file formats
+  - Displays event-by-event breakdown with proof and chain status
+  - Shows witness attestations with witnessedAt timestamps
+  - Exit code 0 on success, 1 on verification failure
+- packages/sdk/src/cel/cli/index.ts: Integrated verify command
+  - Added import for verifyCommand and VerifyFlags
+  - Added runVerifyCommand async helper with exit code handling
+  - Updated switch case to route to verifyCommand
+- packages/sdk/tests/unit/cel/cli-verify.test.ts: 15 unit tests
+  - Argument validation: missing log, nonexistent file, help flags
+  - JSON verification: single-event, multi-event, broken chain, invalid proof
+  - CBOR verification: format support
+  - Witness attestations: display in output
+  - Error handling: invalid JSON, malformed structure, empty events
+  - VerifyResult structure validation
+
+### Learnings
+- Use path.extname() to detect file format (JSON vs CBOR)
+- verifyEventLog from algorithms provides VerificationResult with detailed per-event status
+- WitnessProof is identified by presence of witnessedAt field
+- Exit codes: success returns to caller, verified=false causes process.exit(1)
+- Tests: bun test packages/sdk/tests/unit/cel/cli-verify.test.ts
+
+---
