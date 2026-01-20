@@ -8,3 +8,4 @@
 export * from './types';
 export * from './hash';
 export * from './algorithms';
+export * from './witnesses';
