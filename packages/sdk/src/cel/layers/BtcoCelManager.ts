@@ -16,6 +16,7 @@ import { updateEventLog } from '../algorithms/updateEventLog';
 import { witnessEvent } from '../algorithms/witnessEvent';
 import { BitcoinWitness } from '../witnesses/BitcoinWitness';
 import type { BitcoinManager } from '../../bitcoin/BitcoinManager';
+import type { CelSigner } from './PeerCelManager';
 
 /**
  * Configuration options for BtcoCelManager
@@ -46,11 +47,6 @@ export interface BtcoMigrationData {
   /** ISO 8601 timestamp of migration */
   migratedAt: string;
 }
-
-/**
- * Signer function type that produces a DataIntegrityProof
- */
-export type CelSigner = (data: unknown) => Promise<DataIntegrityProof>;
 
 /**
  * BtcoCelManager - Manages CEL-based asset migration to did:btco layer

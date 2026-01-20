@@ -14,6 +14,7 @@ import type { EventLog, ExternalReference, DataIntegrityProof, UpdateOptions, As
 import { updateEventLog } from '../algorithms/updateEventLog';
 import { witnessEvent } from '../algorithms/witnessEvent';
 import type { WitnessService } from '../witnesses/WitnessService';
+import type { CelSigner } from './PeerCelManager';
 
 /**
  * Configuration options for WebVHCelManager
@@ -40,11 +41,6 @@ export interface WebVHMigrationData {
   /** ISO 8601 timestamp of migration */
   migratedAt: string;
 }
-
-/**
- * Signer function type that produces a DataIntegrityProof
- */
-export type CelSigner = (data: unknown) => Promise<DataIntegrityProof>;
 
 /**
  * WebVHCelManager - Manages CEL-based asset migration to did:webvh layer

@@ -254,16 +254,17 @@ function extractLayerHistory(log: EventLog): Array<{ layer: string; timestamp: s
     if (event.type === 'create' && data.layer) {
       history.push({
         layer: data.layer as string,
-        timestamp: data.createdAt as string || event.proof[0]?.created || 'unknown',
+        timestamp: (data.createdAt as string) || event.proof[0]?.created || 'unknown',
         did: data.did as string,
       });
     }
     
-    if (event.type === 'update' && isMigrationEvent(data)) {
+    if (event.type === 'update' && isMigrationEvent(event.data)) {
+      const migrationData = event.data as MigrationData;
       history.push({
-        layer: data.layer || 'unknown',
-        timestamp: data.migratedAt as string || event.proof[0]?.created || 'unknown',
-        did: data.targetDid,
+        layer: migrationData.layer ?? 'unknown',
+        timestamp: migrationData.migratedAt ?? event.proof[0]?.created ?? 'unknown',
+        did: migrationData.targetDid ?? 'unknown',
       });
     }
   }
@@ -453,10 +454,11 @@ function outputInspection(log: EventLog, state: AssetState): void {
       const changes: string[] = [];
       if (data.name) changes.push(`name → "${data.name}"`);
       if (data.resources) changes.push(`resources updated`);
-      if (isMigrationEvent(data)) {
-        changes.push(`migrated to ${data.layer}`);
-        if (data.domain) changes.push(`domain: ${data.domain}`);
-        if (data.txid) changes.push(`txid: ${truncate(data.txid, 20)}`);
+      if (isMigrationEvent(event.data)) {
+        const migrationData = event.data as MigrationData;
+        changes.push(`migrated to ${migrationData.layer ?? 'unknown'}`);
+        if (migrationData.domain) changes.push(`domain: ${migrationData.domain}`);
+        if (migrationData.txid) changes.push(`txid: ${truncate(migrationData.txid, 20)}`);
       }
       
       if (changes.length > 0) {

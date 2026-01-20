@@ -38,7 +38,7 @@ import type {
   VerifyOptions,
   AssetState
 } from './types';
-import { PeerCelManager, type PeerCelConfig } from './layers/PeerCelManager';
+import { PeerCelManager, type PeerCelConfig, type CelSigner } from './layers/PeerCelManager';
 import { WebVHCelManager, type WebVHCelConfig } from './layers/WebVHCelManager';
 import { BtcoCelManager, type BtcoCelConfig } from './layers/BtcoCelManager';
 import { verifyEventLog } from './algorithms/verifyEventLog';
@@ -50,10 +50,8 @@ import type { BitcoinManager } from '../bitcoin/BitcoinManager';
  */
 export type CelLayer = 'peer' | 'webvh' | 'btco';
 
-/**
- * Signer function type that produces a DataIntegrityProof
- */
-export type CelSigner = (data: unknown) => Promise<DataIntegrityProof>;
+// Re-export CelSigner for convenience
+export type { CelSigner };
 
 /**
  * Configuration options for OriginalsCel

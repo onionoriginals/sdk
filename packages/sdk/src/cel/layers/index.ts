@@ -9,6 +9,19 @@
  * - BtcoCelManager: Layer 2 (did:btco) - Bitcoin-based witnessing
  */
 
+// Export everything from PeerCelManager including CelSigner type
 export * from './PeerCelManager';
-export * from './WebVHCelManager';
-export * from './BtcoCelManager';
+
+// Export specific items from WebVHCelManager (CelSigner is imported from PeerCelManager)
+export { 
+  WebVHCelManager, 
+  type WebVHCelConfig, 
+  type WebVHMigrationData 
+} from './WebVHCelManager';
+
+// Export specific items from BtcoCelManager (CelSigner is imported from PeerCelManager)
+export { 
+  BtcoCelManager, 
+  type BtcoCelConfig, 
+  type BtcoMigrationData 
+} from './BtcoCelManager';
