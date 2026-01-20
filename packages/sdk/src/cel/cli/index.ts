@@ -6,6 +6,8 @@
  * Part of the Originals Protocol SDK.
  */
 
+import { createCommand, CreateFlags } from './create';
+
 // Version from package.json - will be replaced at build time or read dynamically
 const VERSION = '1.5.0';
 
@@ -200,6 +202,31 @@ function showCommandHelp(command: string): void {
 }
 
 /**
+ * Run the create command asynchronously
+ */
+async function runCreateCommand(flags: Record<string, string | boolean>): Promise<void> {
+  try {
+    const createFlags: CreateFlags = {
+      name: typeof flags.name === 'string' ? flags.name : undefined,
+      file: typeof flags.file === 'string' ? flags.file : undefined,
+      key: typeof flags.key === 'string' ? flags.key : undefined,
+      output: typeof flags.output === 'string' ? flags.output : undefined,
+      format: typeof flags.format === 'string' ? flags.format : undefined,
+      help: flags.help === true,
+      h: flags.h === true,
+    };
+    
+    const result = await createCommand(createFlags);
+    
+    if (!result.success) {
+      error(result.message.replace('Error: ', ''));
+    }
+  } catch (e) {
+    error((e as Error).message);
+  }
+}
+
+/**
  * Main CLI entry point
  */
 export function main(args: string[] = process.argv.slice(2)): void {
@@ -224,13 +251,13 @@ export function main(args: string[] = process.argv.slice(2)): void {
   // Route to subcommands
   switch (command) {
     case 'create':
-      // Will be implemented in US-020
       if (flags.help || flags.h) {
         print(CREATE_HELP);
         return;
       }
-      print('Create command not yet implemented. See US-020.');
-      break;
+      // Run create command asynchronously
+      runCreateCommand(flags);
+      return;
 
     case 'verify':
       // Will be implemented in US-021
