@@ -545,4 +545,182 @@ describe('verifyEventLog', () => {
       expect((receivedData as any).data).toEqual(eventData);
     });
   });
+
+  describe('hash chain verification', () => {
+    test('returns verified: true for valid hash chain', async () => {
+      const options: CreateOptions = {
+        signer: createMockSigner(verificationMethod),
+        verificationMethod,
+      };
+
+      let log = await createEventLog({ name: 'Test Asset' }, options);
+      log = await updateEventLog(log, { name: 'Updated Asset' }, options);
+      log = await updateEventLog(log, { name: 'Final Asset' }, options);
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(true);
+      expect(result.events.every(e => e.chainValid)).toBe(true);
+    });
+
+    test('returns verified: false when first event has previousEvent', async () => {
+      const log: EventLog = {
+        events: [{
+          type: 'create',
+          data: { name: 'Test' },
+          previousEvent: 'uShouldNotExistOnFirstEvent',
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: new Date().toISOString(),
+            verificationMethod,
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zValidBase58Signature',
+          }],
+        }],
+      };
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(false);
+      expect(result.events[0].chainValid).toBe(false);
+      expect(result.errors.some(e => e.includes('First event must not have previousEvent'))).toBe(true);
+    });
+
+    test('returns verified: false when second event is missing previousEvent', async () => {
+      const log: EventLog = {
+        events: [
+          {
+            type: 'create',
+            data: { name: 'Test' },
+            proof: [{
+              type: 'DataIntegrityProof',
+              cryptosuite: 'eddsa-jcs-2022',
+              created: new Date().toISOString(),
+              verificationMethod,
+              proofPurpose: 'assertionMethod',
+              proofValue: 'zValidBase58Signature',
+            }],
+          },
+          {
+            type: 'update',
+            data: { name: 'Updated' },
+            // Missing previousEvent!
+            proof: [{
+              type: 'DataIntegrityProof',
+              cryptosuite: 'eddsa-jcs-2022',
+              created: new Date().toISOString(),
+              verificationMethod,
+              proofPurpose: 'assertionMethod',
+              proofValue: 'zAnotherSignature',
+            }],
+          },
+        ],
+      };
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(false);
+      expect(result.events[0].chainValid).toBe(true);
+      expect(result.events[1].chainValid).toBe(false);
+      expect(result.errors.some(e => e.includes('Missing previousEvent reference'))).toBe(true);
+    });
+
+    test('returns verified: false when hash chain is broken', async () => {
+      const options: CreateOptions = {
+        signer: createMockSigner(verificationMethod),
+        verificationMethod,
+      };
+
+      // Create a valid log first
+      let log = await createEventLog({ name: 'Test Asset' }, options);
+      log = await updateEventLog(log, { name: 'Updated Asset' }, options);
+
+      // Tamper with the previousEvent hash
+      const tamperedLog: EventLog = {
+        events: [
+          log.events[0],
+          {
+            ...log.events[1],
+            previousEvent: 'uTamperedHashThatDoesNotMatch',
+          },
+        ],
+      };
+
+      const result = await verifyEventLog(tamperedLog);
+
+      expect(result.verified).toBe(false);
+      expect(result.events[1].chainValid).toBe(false);
+      expect(result.errors.some(e => e.includes('Hash chain broken'))).toBe(true);
+    });
+
+    test('returns verified: false with specific error for broken chain', async () => {
+      const options: CreateOptions = {
+        signer: createMockSigner(verificationMethod),
+        verificationMethod,
+      };
+
+      let log = await createEventLog({ name: 'Test' }, options);
+      log = await updateEventLog(log, { version: 2 }, options);
+      log = await updateEventLog(log, { version: 3 }, options);
+
+      // Tamper with the middle event's previousEvent
+      const tamperedLog: EventLog = {
+        events: [
+          log.events[0],
+          {
+            ...log.events[1],
+            previousEvent: 'uWrongHash123',
+          },
+          log.events[2],
+        ],
+      };
+
+      const result = await verifyEventLog(tamperedLog);
+
+      expect(result.verified).toBe(false);
+      // Should fail on event 1 (second event)
+      expect(result.events[1].chainValid).toBe(false);
+      // Event 2 (third event) also fails because event 1 was tampered
+      expect(result.events[2].chainValid).toBe(false);
+      
+      // Check for specific error message
+      const brokenChainErrors = result.errors.filter(e => e.includes('Hash chain broken'));
+      expect(brokenChainErrors.length).toBeGreaterThan(0);
+    });
+
+    test('chainValid is true for each event in valid chain', async () => {
+      const options: CreateOptions = {
+        signer: createMockSigner(verificationMethod),
+        verificationMethod,
+      };
+
+      let log = await createEventLog({ name: 'Asset' }, options);
+      log = await updateEventLog(log, { v: 2 }, options);
+      log = await updateEventLog(log, { v: 3 }, options);
+      log = await updateEventLog(log, { v: 4 }, options);
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(true);
+      expect(result.events).toHaveLength(4);
+      result.events.forEach((ev, i) => {
+        expect(ev.chainValid).toBe(true);
+        expect(ev.index).toBe(i);
+      });
+    });
+
+    test('valid chain passes with single create event', async () => {
+      const options: CreateOptions = {
+        signer: createMockSigner(verificationMethod),
+        verificationMethod,
+      };
+
+      const log = await createEventLog({ name: 'Single Event' }, options);
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(true);
+      expect(result.events[0].chainValid).toBe(true);
+    });
+  });
 });

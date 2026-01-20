@@ -1,7 +1,7 @@
 /**
  * verifyEventLog Algorithm
  * 
- * Verifies all proofs in a Cryptographic Event Log.
+ * Verifies all proofs and hash chain integrity in a Cryptographic Event Log.
  * Returns detailed per-event verification status.
  * 
  * @see https://w3c-ccg.github.io/cel-spec/
@@ -15,6 +15,7 @@ import type {
   EventVerification,
   DataIntegrityProof 
 } from '../types';
+import { computeDigestMultibase } from '../hash';
 
 /**
  * Serializes data to JCS (JSON Canonicalization Scheme) format.
@@ -34,6 +35,20 @@ function serializeToJcs(data: unknown): Uint8Array {
     }
     return value;
   });
+  return new TextEncoder().encode(json);
+}
+
+/**
+ * Serializes a LogEntry to a deterministic byte representation for hashing.
+ * Uses JSON with sorted keys for reproducibility.
+ * This must match the serialization used in createEventLog/updateEventLog.
+ * 
+ * @param entry - The log entry to serialize
+ * @returns UTF-8 encoded bytes
+ */
+function serializeEntry(entry: LogEntry): Uint8Array {
+  // Use JSON with sorted keys for deterministic serialization
+  const json = JSON.stringify(entry, Object.keys(entry).sort());
   return new TextEncoder().encode(json);
 }
 
@@ -86,19 +101,71 @@ async function defaultVerifier(proof: DataIntegrityProof, data: unknown): Promis
 }
 
 /**
+ * Verifies the hash chain for a single event.
+ * 
+ * @param event - The current event to verify
+ * @param index - The index of the event in the log
+ * @param previousEvent - The previous event in the log (undefined for first event)
+ * @returns Object with chainValid boolean and any errors
+ */
+function verifyChain(
+  event: LogEntry,
+  index: number,
+  previousEvent: LogEntry | undefined
+): { chainValid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  
+  if (index === 0) {
+    // First event must NOT have previousEvent
+    if (event.previousEvent !== undefined) {
+      errors.push(`Event ${index}: First event must not have previousEvent field`);
+      return { chainValid: false, errors };
+    }
+  } else {
+    // Subsequent events must have previousEvent that matches hash of prior event
+    if (event.previousEvent === undefined) {
+      errors.push(`Event ${index}: Missing previousEvent reference`);
+      return { chainValid: false, errors };
+    }
+    
+    if (!previousEvent) {
+      errors.push(`Event ${index}: Cannot verify chain - previous event not provided`);
+      return { chainValid: false, errors };
+    }
+    
+    // Compute the expected hash of the previous event
+    const expectedHash = computeDigestMultibase(serializeEntry(previousEvent));
+    
+    if (event.previousEvent !== expectedHash) {
+      errors.push(`Event ${index}: Hash chain broken - previousEvent does not match hash of prior event`);
+      return { chainValid: false, errors };
+    }
+  }
+  
+  return { chainValid: true, errors: [] };
+}
+
+/**
  * Verifies a single event's proofs.
  * 
  * @param event - The event to verify
  * @param index - The index of the event in the log
  * @param verifier - The proof verification function
+ * @param previousEvent - The previous event in the log (undefined for first event)
  * @returns EventVerification result
  */
 async function verifyEvent(
   event: LogEntry,
   index: number,
-  verifier: (proof: DataIntegrityProof, data: unknown) => Promise<boolean>
+  verifier: (proof: DataIntegrityProof, data: unknown) => Promise<boolean>,
+  previousEvent: LogEntry | undefined
 ): Promise<EventVerification> {
   const errors: string[] = [];
+  
+  // Verify hash chain
+  const chainResult = verifyChain(event, index, previousEvent);
+  const chainValid = chainResult.chainValid;
+  errors.push(...chainResult.errors);
   
   // Check that event has proofs
   if (!event.proof || !Array.isArray(event.proof) || event.proof.length === 0) {
@@ -107,7 +174,7 @@ async function verifyEvent(
       index,
       type: event.type,
       proofValid: false,
-      chainValid: true, // Chain validation is done separately in US-007
+      chainValid,
       errors,
     };
   }
@@ -140,32 +207,34 @@ async function verifyEvent(
     index,
     type: event.type,
     proofValid: allProofsValid,
-    chainValid: true, // Chain validation is done separately in US-007
+    chainValid,
     errors,
   };
 }
 
 /**
- * Verifies all proofs in an event log.
+ * Verifies all proofs and hash chain integrity in an event log.
  * 
  * This algorithm verifies:
  * - Each event has at least one proof
  * - Each proof is structurally valid (type, cryptosuite, proofValue, verificationMethod, proofPurpose)
  * - Proofs use valid cryptosuite (eddsa-jcs-2022 or eddsa-rdfc-2022)
+ * - The first event has no previousEvent field
+ * - Each subsequent event's previousEvent matches the digestMultibase of the prior event
  * 
  * For full cryptographic verification, provide a custom verifier function
  * in the options that can resolve the public key from the verificationMethod.
  * 
  * @param log - The event log to verify
  * @param options - Optional verification options including custom verifier
- * @returns VerificationResult with detailed per-event status
+ * @returns VerificationResult with detailed per-event status including chainValid
  * 
  * @example
  * ```typescript
- * // Basic structural verification
+ * // Basic structural and chain verification
  * const result = await verifyEventLog(eventLog);
  * if (result.verified) {
- *   console.log('All proofs are structurally valid');
+ *   console.log('All proofs are valid and hash chain is intact');
  * }
  * 
  * // With custom cryptographic verifier
@@ -213,22 +282,24 @@ export async function verifyEventLog(
     };
   }
   
-  // Verify each event's proofs
+  // Verify each event's proofs and hash chain
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
-    const eventResult = await verifyEvent(event, i, verifier);
+    const previousEvent = i > 0 ? log.events[i - 1] : undefined;
+    const eventResult = await verifyEvent(event, i, verifier, previousEvent);
     eventVerifications.push(eventResult);
     
-    if (!eventResult.proofValid) {
+    if (!eventResult.proofValid || !eventResult.chainValid) {
       errors.push(...eventResult.errors);
     }
   }
   
-  // Determine overall verification status
+  // Determine overall verification status (both proofs AND chain must be valid)
   const allProofsValid = eventVerifications.every(ev => ev.proofValid);
+  const allChainsValid = eventVerifications.every(ev => ev.chainValid);
   
   return {
-    verified: allProofsValid,
+    verified: allProofsValid && allChainsValid,
     errors,
     events: eventVerifications,
   };
