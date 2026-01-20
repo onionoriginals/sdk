@@ -6,3 +6,4 @@
 
 export { createEventLog } from './createEventLog';
 export { updateEventLog } from './updateEventLog';
+export { deactivateEventLog } from './deactivateEventLog';
