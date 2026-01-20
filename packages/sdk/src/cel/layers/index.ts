@@ -11,3 +11,4 @@
 
 export * from './PeerCelManager';
 export * from './WebVHCelManager';
+export * from './BtcoCelManager';
