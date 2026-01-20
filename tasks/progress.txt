@@ -780,3 +780,30 @@ Agent: Background Agent (Cursor)
 - Typecheck Convex independently: `bunx tsc --noEmit -p convex/tsconfig.json`
 
 ---
+
+## US-026 - Create Convex queries for Originals
+Completed: 2026-01-20T19:45:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/originals.ts: Created Convex queries module
+  - getOriginal(id): Returns single original with all fields including celLog
+  - listOriginals(filters?): Paginated list with optional layer/creatorDid filters
+  - getOriginalsByCreator(creatorDid): Returns all originals by creator
+  - getOriginalByDid(did): Returns original by DID (unique lookup)
+  - All queries use appropriate indexes for performance
+- explorer/convex/_generated/server.ts: Created stub file for pre-codegen typechecking
+  - Exports query, mutation, action builders with basic typing
+  - Will be overwritten by `npx convex dev`
+- explorer/convex/_generated/dataModel.d.ts: Created stub type definitions
+  - Mirrors schema.ts table structures
+- explorer/convex/tsconfig.json: Removed _generated exclusion to allow stub typechecking
+
+### Learnings
+- Convex _generated folder must exist for imports to resolve (create stubs before codegen)
+- Composite index chaining (q.eq().eq()) requires type assertion with generic types
+- listOriginals uses different indexes based on filter combination for optimal performance
+- Pagination via .paginate() returns {page, continueCursor, isDone}
+- Real types generated after `npx convex dev` - stubs provide basic type safety meanwhile
+
+---

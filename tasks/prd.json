@@ -442,8 +442,8 @@
         "Typecheck passes"
       ],
       "priority": 26,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created 4 queries: getOriginal(id), listOriginals(filters), getOriginalsByCreator(creatorDid), getOriginalByDid(did). All include celLog. Added _generated stub files for pre-codegen typechecking."
     },
     {
       "id": "US-027",
