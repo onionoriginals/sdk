@@ -692,3 +692,42 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/cli-inspect.test.ts
 
 ---
+
+## US-023 - Implement CLI migrate command
+Completed: 2026-01-20T19:50:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/cli/migrate.ts: Created CLI migrate command implementation
+  - migrateCommand(flags: MigrateFlags): Promise<MigrateResult> - main handler function
+  - loadEventLog(filePath): EventLog - loads and parses JSON or CBOR files
+  - detectCurrentLayer(log): Detects layer from event log by examining events
+  - getCurrentDid(log): Extracts current DID from event log
+  - validateMigrationPath(currentLayer, targetLayer): Validates migration path rules
+  - loadWalletKey(walletPath): Loads Ed25519 private key from wallet file
+  - createSigner(privateKey, publicKey): Creates CelSigner for proof generation
+  - createMockBitcoinManager(): Mock Bitcoin manager for CLI testing
+  - MigrateFlags and MigrateResult interfaces for typed arguments and results
+- packages/sdk/src/cel/cli/index.ts: Integrated migrate command
+  - Added import for migrateCommand and MigrateFlags
+  - Added runMigrateCommand async helper function
+  - Updated switch case to route to migrateCommand
+- packages/sdk/tests/unit/cel/cli-migrate.test.ts: 23 unit tests
+  - Argument validation: missing log/to, invalid layer, missing domain/wallet
+  - peer to webvh migration: successful migration, sourceDid/targetDid, hash chain preservation
+  - webvh to btco migration: successful migration with wallet, invalid wallet handling
+  - Invalid migration paths: peer→btco direct, webvh→webvh duplicate
+  - Output formats: JSON default, CBOR with --format, invalid format error
+  - CBOR input support: reads .cbor files
+  - Error handling: invalid JSON, malformed structure, empty events
+  - MigrateResult structure validation
+
+### Learnings
+- Migration path validation: peer→webvh→btco (no skipping, no reverse)
+- webvh migration requires --domain, btco migration requires --wallet
+- Mock BitcoinManager needed for CLI btco testing (real integration via SDK)
+- CelSigner pattern consistent across all CLI commands
+- Output to stdout vs --output file follows same pattern as create/verify/inspect
+- Tests: bun test packages/sdk/tests/unit/cel/cli-migrate.test.ts
+
+---

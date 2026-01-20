@@ -393,8 +393,8 @@
         "Typecheck passes"
       ],
       "priority": 23,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented CLI migrate command with peer\u2192webvh and webvh\u2192btco migration paths. Supports JSON/CBOR input/output, --domain for webvh, --wallet for btco. 23 unit tests."
     },
     {
       "id": "US-024",
