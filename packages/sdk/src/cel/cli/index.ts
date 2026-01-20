@@ -7,6 +7,7 @@
  */
 
 import { createCommand, CreateFlags } from './create';
+import { verifyCommand, VerifyFlags } from './verify';
 
 // Version from package.json - will be replaced at build time or read dynamically
 const VERSION = '1.5.0';
@@ -227,6 +228,32 @@ async function runCreateCommand(flags: Record<string, string | boolean>): Promis
 }
 
 /**
+ * Run the verify command asynchronously
+ */
+async function runVerifyCommand(flags: Record<string, string | boolean>): Promise<void> {
+  try {
+    const verifyFlags: VerifyFlags = {
+      log: typeof flags.log === 'string' ? flags.log : undefined,
+      help: flags.help === true,
+      h: flags.h === true,
+    };
+    
+    const result = await verifyCommand(verifyFlags);
+    
+    if (!result.success) {
+      error(result.message.replace('Error: ', ''));
+    }
+    
+    // Exit with appropriate code based on verification result
+    if (result.verified === false) {
+      process.exit(1);
+    }
+  } catch (e) {
+    error((e as Error).message);
+  }
+}
+
+/**
  * Main CLI entry point
  */
 export function main(args: string[] = process.argv.slice(2)): void {
@@ -260,13 +287,13 @@ export function main(args: string[] = process.argv.slice(2)): void {
       return;
 
     case 'verify':
-      // Will be implemented in US-021
       if (flags.help || flags.h) {
         print(VERIFY_HELP);
         return;
       }
-      print('Verify command not yet implemented. See US-021.');
-      break;
+      // Run verify command asynchronously
+      runVerifyCommand(flags);
+      return;
 
     case 'inspect':
       // Will be implemented in US-022
