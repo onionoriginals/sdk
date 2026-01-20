@@ -923,3 +923,27 @@ Agent: Background Agent (Cursor)
 - Convex hooks automatically re-render on data changes (real-time updates)
 
 ---
+
+## US-031 - Create useOriginals Convex hook for lists
+Completed: 2026-01-20T20:05:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/hooks/useOriginals.ts: Created Convex hook for fetching paginated Original lists
+  - OriginalsFilters interface: Optional layer and creatorDid filters
+  - PaginationOptions interface: cursor and limit options for pagination
+  - OriginalsPage interface: paginated response with originals[], continueCursor, isDone
+  - UseOriginalsResult interface: { originals, isLoading, error, continueCursor, isDone }
+  - useOriginals(filters?, pagination?): Paginated list with optional filters
+  - useOriginalsByCreator(creatorDid): All originals by a specific creator (non-paginated)
+  - Uses Convex "skip" pattern for conditional query execution
+  - Comprehensive JSDoc with usage examples including pagination
+
+### Learnings
+- Convex pagination uses cursor-based approach with continueCursor and isDone
+- Keep the UseOriginalsResult interface consistent with UseOriginalResult pattern
+- useOriginalsByCreator is a convenience wrapper for getOriginalsByCreator query
+- Type assertions needed for page results before codegen generates proper types
+- Pre-existing TypeScript errors in server/ directory don't affect src/ hooks
+
+---

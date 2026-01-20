@@ -522,8 +522,8 @@
         "Typecheck passes"
       ],
       "priority": 31,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created useOriginals hook with pagination support (cursor, limit), optional filters (layer, creatorDid), and useOriginalsByCreator helper. Returns { originals, isLoading, error, continueCursor, isDone }."
     },
     {
       "id": "US-032",
