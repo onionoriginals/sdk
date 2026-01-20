@@ -394,7 +394,7 @@
       ],
       "priority": 23,
       "passes": true,
-      "notes": "Implemented CLI migrate command with peer\u2192webvh and webvh\u2192btco migration paths. Supports JSON/CBOR input/output, --domain for webvh, --wallet for btco. 23 unit tests."
+      "notes": "Implemented CLI migrate command with peer→webvh and webvh→btco migration paths. Supports JSON/CBOR input/output, --domain for webvh, --wallet for btco. 23 unit tests."
     },
     {
       "id": "US-024",
@@ -408,8 +408,8 @@
         "Typecheck passes"
       ],
       "priority": 24,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created convex/ folder with schema.ts and tsconfig.json. Added convex:dev and convex:deploy scripts. User must run npx convex dev to authenticate."
     },
     {
       "id": "US-025",

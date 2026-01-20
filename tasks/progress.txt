@@ -731,3 +731,28 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/unit/cel/cli-migrate.test.ts
 
 ---
+
+## US-024 - Initialize Convex project in Explorer
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/schema.ts: Created placeholder Convex schema file
+  - Uses defineSchema, defineTable from "convex/server"
+  - Empty schema as placeholder for US-025
+- explorer/convex/tsconfig.json: Created Convex TypeScript config
+  - Standard Convex tsconfig with ESNext target
+  - Excludes _generated folder
+- explorer/package.json: Added Convex scripts
+  - Added "convex:dev": "convex dev"
+  - Added "convex:deploy": "convex deploy"
+
+### Learnings
+- `npx convex init` is deprecated, use `npx convex dev --once --configure=new` instead
+- For non-interactive setup, create convex/ folder structure manually
+- Convex requires authentication: user must run `npx convex dev` interactively once
+- Convex folder typechecks independently with `bunx tsc --noEmit -p convex/tsconfig.json`
+- Pre-existing TypeScript errors in explorer project are unrelated to Convex setup
+- Convex MCP tools require authentication via `npx convex dev` first
+
+---
