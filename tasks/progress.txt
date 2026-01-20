@@ -178,3 +178,35 @@ Agent: Background Agent (Cursor)
 - Tests can reuse createEventLog/updateEventLog to build valid logs for testing
 
 ---
+
+## US-007 - Implement verifyEventLog - hash chain verification
+Completed: 2026-01-20T12:50:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/algorithms/verifyEventLog.ts: Extended with hash chain verification
+  - Added import for computeDigestMultibase from '../hash'
+  - Added serializeEntry function matching updateEventLog's serialization
+  - Added verifyChain function that checks:
+    - First event (index 0) must NOT have previousEvent field
+    - Subsequent events must have previousEvent matching digestMultibase of prior event
+  - Updated verifyEvent to accept previousEvent param and call verifyChain
+  - Updated verifyEventLog to pass previous event and check chainValid in overall result
+  - Updated JSDoc to document hash chain verification
+- packages/sdk/tests/unit/cel/verifyEventLog.test.ts: Added 7 new hash chain tests
+  - returns verified: true for valid hash chain
+  - returns verified: false when first event has previousEvent
+  - returns verified: false when second event is missing previousEvent
+  - returns verified: false when hash chain is broken
+  - returns verified: false with specific error for broken chain
+  - chainValid is true for each event in valid chain
+  - valid chain passes with single create event
+
+### Learnings
+- serializeEntry must match the serialization in createEventLog/updateEventLog exactly
+- Use JSON.stringify with Object.keys().sort() for deterministic serialization
+- Hash chain errors should be descriptive to help debugging
+- Both proofValid AND chainValid must be true for verified: true
+- EventVerification.chainValid now actually reflects chain status (was always true in US-006)
+
+---

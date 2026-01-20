@@ -119,8 +119,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Extended verifyEventLog with verifyChain function. Validates first event has no previousEvent, subsequent events have previousEvent matching digestMultibase of prior event. Added 7 new unit tests for hash chain verification."
     },
     {
       "id": "US-008",
