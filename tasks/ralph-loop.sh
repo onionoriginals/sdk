@@ -1,13 +1,14 @@
 #!/bin/bash
 # Ralph Loop - Automated Background Agent launcher for Cursor
+# Creates a NEW agent for each iteration (closes existing, opens fresh)
 # Usage: ./ralph-loop.sh [max_iterations]
 #
-# REQUIRES: Accessibility permissions for Terminal
-#   System Preferences → Security & Privacy → Privacy → Accessibility → Add Terminal ✅
+# REQUIRES: Accessibility permissions for Terminal/iTerm
+#   System Settings → Privacy & Security → Accessibility → Add Terminal ✅
 
 set -e
 
-MAX_ITERATIONS=${1:-30}
+MAX_ITERATIONS=${1:-50}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PRD_FILE="$SCRIPT_DIR/prd.json"
@@ -58,7 +59,7 @@ launch_agent() {
   # Copy prompt to clipboard
   cat "$AGENT_PROMPT" | pbcopy
   
-  # AppleScript to open Composer, paste, submit
+  # AppleScript to create NEW agent: close existing, open fresh, paste, submit
   osascript <<'APPLESCRIPT'
 tell application "Cursor"
     activate
@@ -67,10 +68,25 @@ end tell
 
 tell application "System Events"
     tell process "Cursor"
+        -- Close any existing Composer
+        key code 53  -- Escape
+        delay 0.3
+        key code 53  -- Escape again to be sure
+        delay 0.5
+        
+        -- Open new Composer
         keystroke "i" using command down
         delay 1.5
+        
+        -- Start a new chat within Composer (Cmd+N)
+        keystroke "n" using command down
+        delay 0.5
+        
+        -- Paste prompt
         keystroke "v" using command down
         delay 0.5
+        
+        -- Submit
         keystroke return using command down
     end tell
 end tell
