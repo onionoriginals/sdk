@@ -85,3 +85,32 @@ Agent: Background Agent
 - Tests: bun test packages/sdk/tests/unit/cel/createEventLog.test.ts
 
 ---
+## US-004 - Implement updateEventLog algorithm
+Completed: 2026-01-20T12:15:00Z
+Agent: Background Agent
+
+### Changes
+- packages/sdk/src/cel/algorithms/updateEventLog.ts: Core algorithm implementation
+  - updateEventLog(log: EventLog, data: unknown, options: UpdateOptions): Promise<EventLog>
+  - Computes previousEvent as digestMultibase of last event using serializeEntry helper
+  - Creates "update" type event with hash chain link to previous event
+  - Returns new EventLog immutably (input not mutated)
+  - Validates proof has required fields (type, cryptosuite, proofValue)
+  - Preserves previousLog reference for chunked logs
+- packages/sdk/src/cel/algorithms/index.ts: Added export for updateEventLog
+- packages/sdk/tests/unit/cel/updateEventLog.test.ts: 15 unit tests
+  - Basic functionality: event appending, type "update", data preservation
+  - Hash chain linking: previousEvent field, digestMultibase matching, multi-update chains
+  - Immutability: input not mutated, new EventLog instance returned
+  - Proof generation: eddsa-jcs-2022, verificationMethod inclusion
+  - Error handling: empty log rejection, invalid proof detection
+  - previousLog preservation for chunked logs
+
+### Learnings
+- Use JSON.stringify with sorted keys for deterministic event serialization
+- computeDigestMultibase from hash.ts provides CEL-compliant hashing
+- UpdateOptions type extends CreateOptions (same signer pattern)
+- Spread operator [...log.events, entry] creates immutable array update
+- Tests can reuse createEventLog to build initial logs for update testing
+
+---
