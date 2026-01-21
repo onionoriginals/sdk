@@ -1117,3 +1117,27 @@ Agent: Background Agent (Cursor)
 - Browser verification blocked by pre-existing Vite polyfill issues (same as US-029 through US-036)
 
 ---
+
+## US-038 - Create useCreateOriginal mutation hook
+Completed: 2026-01-21T03:55:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/hooks/useCreateOriginal.ts: Created mutation hook for creating Originals
+  - useCreateOriginal(): Returns { createOriginal, isCreating, error }
+  - CreateOriginalInput interface: name, resources, creatorDid, optional metadata
+  - ExternalReference interface: url[], mediaType, digestMultibase
+  - generateCelLog(): Creates CEL event log with create event and DataIntegrityProof
+  - generatePeerDid(): Generates did:peer identifier from timestamp and random value
+  - Full validation of required fields before mutation
+  - Comprehensive JSDoc with usage examples
+  - Uses Convex useMutation with api.originals.createOriginal
+
+### Learnings
+- Hook pattern follows useOriginal and useCelVerification conventions
+- CEL log generation simplified for client-side (real SDK signing in production)
+- did:peer DID generation uses simple deterministic approach (SDK has full numalgo 4)
+- Pre-existing TypeScript errors in server/ directory don't affect src/ hooks
+- Convex useMutation returns a callable function, useCallback wraps user-facing API
+
+---
