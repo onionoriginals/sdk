@@ -1293,3 +1293,27 @@ Agent: Background Agent (Cursor)
 - Typecheck: bunx tsc --noEmit from sdk root
 
 ---
+
+## US-044 - Write Originals CEL Developer Guide
+Completed: 2026-01-21T09:50:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- sdk/docs/ORIGINALS_CEL_GUIDE.md: Created comprehensive developer guide
+  - Section 1: Quick Start (5-minute example) - installation, create asset, verify, CLI
+  - Section 2: Core Concepts - event logs, trust layers, witnesses, hash chain, external references
+  - Section 3: SDK API Reference - OriginalsCel class (create, update, verify, migrate, getCurrentState), layer managers, helper functions, witness services
+  - Section 4: CLI Usage - all 4 commands (create, verify, inspect, migrate) with options and examples
+  - Section 5: Convex Integration - React hooks (useOriginal, useOriginals, useCelVerification, useCreateOriginal, useMigrateOriginal), real-time updates, server-side verification
+  - Section 6: Further Reading - links to spec, whitepaper, external references
+  - Appendix A: Migration Checklist (peer→webvh, webvh→btco)
+  - Appendix B: Troubleshooting common errors
+
+### Learnings
+- Developer guide should include practical code examples for each SDK method
+- Visual diagrams (ASCII) help explain layer migration flow and hash chains
+- Hook examples should show both simple and advanced usage patterns
+- Include troubleshooting section for common errors (migration paths, verification failures)
+- Typecheck: bunx tsc --noEmit from sdk root
+
+---
