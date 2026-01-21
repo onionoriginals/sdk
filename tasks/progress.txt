@@ -1168,3 +1168,31 @@ Agent: Background Agent (Cursor)
 - Pre-existing Vite polyfill issues block browser testing (same as US-029 through US-038)
 
 ---
+
+## US-040 - Create useMigrateOriginal mutation hook
+Completed: 2026-01-21T08:45:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/originals.ts: Added migrateOriginal mutation
+  - Validates migration path: peer→webvh (requires domain), webvh→btco
+  - Generates target DID for each layer (did:webvh:{domain}:{id}, did:btco:{id})
+  - Creates migration event with sourceDid, targetDid, layer, migratedAt
+  - Computes previousEvent hash for CEL chain linking
+  - Updates original's layer, did, celLog, clears celVerifiedAt
+- explorer/convex/_generated/api.ts: Added migrateOriginal to API stub
+- explorer/src/hooks/useMigrateOriginal.ts: Created React hook for migrations
+  - MigrationTargetLayer type: "webvh" | "btco"
+  - MigrateOptions interface with optional domain
+  - UseMigrateOriginalResult: { migrate, isMigrating, error }
+  - migrate(originalId, targetLayer, options?) validates and calls Convex mutation
+  - Comprehensive JSDoc with usage examples
+
+### Learnings
+- Migration path validation: peer→webvh→btco only, no skipping or reversing
+- Domain is required for webvh migration, btco migration needs no extra params
+- Convex v.any() requires careful typing with Record<string, unknown> for nested objects
+- Type assertions needed for pre-codegen compatibility with Convex stubs
+- Pre-existing server/ TypeScript errors don't affect src/ or convex/ code
+
+---

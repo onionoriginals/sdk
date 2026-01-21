@@ -394,7 +394,7 @@
       ],
       "priority": 23,
       "passes": true,
-      "notes": "Implemented CLI migrate command with peer\u2192webvh and webvh\u2192btco migration paths. Supports JSON/CBOR input/output, --domain for webvh, --wallet for btco. 23 unit tests."
+      "notes": "Implemented CLI migrate command with peer→webvh and webvh→btco migration paths. Supports JSON/CBOR input/output, --domain for webvh, --wallet for btco. 23 unit tests."
     },
     {
       "id": "US-024",
@@ -674,8 +674,8 @@
         "Typecheck passes"
       ],
       "priority": 40,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created useMigrateOriginal hook and migrateOriginal Convex mutation. Validates migration paths (peer→webvh→btco), generates target DIDs, adds migration events to CEL log. Domain required for webvh migration. Returns { migrate, isMigrating, error }."
     },
     {
       "id": "US-041",
