@@ -394,7 +394,7 @@
       ],
       "priority": 23,
       "passes": true,
-      "notes": "Implemented CLI migrate command with peer→webvh and webvh→btco migration paths. Supports JSON/CBOR input/output, --domain for webvh, --wallet for btco. 23 unit tests."
+      "notes": "Implemented CLI migrate command with peer\u2192webvh and webvh\u2192btco migration paths. Supports JSON/CBOR input/output, --domain for webvh, --wallet for btco. 23 unit tests."
     },
     {
       "id": "US-024",
@@ -658,8 +658,8 @@
         "Verify in browser using cursor-ide-browser MCP"
       ],
       "priority": 39,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Replaced TanStack Query with Convex useCreateOriginal hook. Added client-side digestMultibase computation via Web Crypto API. Shows CEL provenance badge and info on success. Loading state mentions provenance. Browser verification blocked by pre-existing Vite polyfill issues."
     },
     {
       "id": "US-040",

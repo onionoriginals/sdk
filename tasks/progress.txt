@@ -1141,3 +1141,30 @@ Agent: Background Agent (Cursor)
 - Convex useMutation returns a callable function, useCallback wraps user-facing API
 
 ---
+
+## US-039 - Update create-original page to use Convex
+Completed: 2026-01-21T08:15:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/pages/create-original-simple.tsx: Replaced API calls with Convex hook
+  - Removed TanStack Query useMutation and queryClient invalidations
+  - Imported useCreateOriginal hook and ExternalReference type
+  - Added computeDigestMultibase() function using Web Crypto API for SHA-256 hashing
+  - Added readFileAsUint8Array() helper for file content reading
+  - Added guessMediaTypeFromUrl() for URL-based media type detection
+  - Updated handleSubmit to be async, build ExternalReference from file/URL
+  - Added ShieldCheck icon import for provenance badge
+  - Loading state now says "Creating original with provenance log..."
+  - Success display shows CEL provenance badge with amber styling
+  - Success shows CEL log event count and version number
+  - Success includes explanation that history is cryptographically verifiable
+
+### Learnings
+- Web Crypto API (crypto.subtle.digest) provides native SHA-256 in browser
+- Multibase base64url-nopad uses 'u' prefix and custom alphabet with - and _ instead of + and /
+- Client-side file hashing works well for moderate file sizes
+- Combined loading state from processing + Convex mutation provides better UX
+- Pre-existing Vite polyfill issues block browser testing (same as US-029 through US-038)
+
+---
