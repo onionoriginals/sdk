@@ -1223,3 +1223,45 @@ Agent: Background Agent (Cursor)
 - Filter originals by layer to only show migratable ones (exclude btco layer)
 
 ---
+
+## US-042 - Write CEL lifecycle integration tests
+Completed: 2026-01-21T04:55:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/tests/integration/cel-lifecycle.test.ts: Created integration test suite
+  - 14 tests covering full CEL lifecycle
+  - Create → Update → Verify lifecycle (2 tests)
+  - Migration: peer → webvh (2 tests)
+  - Tampered log detection (2 tests)
+  - Hash chain integrity (3 tests)
+  - Deactivation seals log (3 tests)
+  - OriginalsCel unified SDK (2 tests)
+  - Mock signer and test resource helpers for self-contained tests
+
+### Test Coverage
+- create peer asset then update then verify passes ✓
+- multiple sequential updates maintain valid hash chain ✓
+- migrate peer to webvh adds migration event ✓
+- migration preserves original create event data ✓
+- tampered log verification fails with specific error ✓
+- missing proof array causes verification failure ✓
+- broken hash chain verification fails ✓
+- first event with previousEvent causes verification failure ✓
+- second event missing previousEvent causes verification failure ✓
+- deactivate seals log - further updates rejected ✓
+- deactivated log state reflects deactivation ✓
+- cannot migrate deactivated log ✓
+- create → update → verify lifecycle via unified SDK ✓
+- migration via unified SDK with domain ✓
+
+### Learnings
+- Mock signer pattern: use deterministic hash-based proof generation for testing
+- createExternalReference helper creates valid ExternalReference objects from content
+- PeerCelManager.create requires signer function, returns EventLog
+- deactivateEventLog throws "Cannot update a deactivated event log" on deactivated logs
+- verifyEventLog returns detailed per-event verification with proofValid and chainValid
+- Hash chain errors include "Hash chain broken" message for easy detection
+- Tests: bun test packages/sdk/tests/integration/cel-lifecycle.test.ts
+
+---
