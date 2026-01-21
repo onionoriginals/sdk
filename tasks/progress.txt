@@ -1091,3 +1091,29 @@ Agent: Background Agent (Cursor)
 - Pre-existing server/ TypeScript errors don't affect src/ components
 
 ---
+
+## US-037 - Add raw CEL log viewer to Provenance tab
+Completed: 2026-01-21T03:20:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/pages/original-detail.tsx: Added collapsible Raw CEL Log section
+  - Added imports: Download, Code, ChevronDown, ChevronUp icons from lucide-react
+  - Added import: Collapsible, CollapsibleContent, CollapsibleTrigger from Radix UI
+  - Added state: isRawLogOpen, rawLogCopied for collapsible and copy feedback
+  - Added handleCopyRawLog function: copies formatted JSON to clipboard with toast feedback
+  - Added handleDownloadRawLog function: downloads as {safeName}.cel.json file
+  - Added collapsible "Raw CEL Log" section after Event Timeline
+  - Header shows Code icon, "Raw CEL Log" title, and event count badge
+  - Action buttons: Copy JSON (with checkmark feedback), Download .cel.json
+  - JSON code block: dark slate-900 background, formatted with 2-space indent
+  - Scrollable container: max-h-96 for overflow, overflow-x-auto for wide JSON
+
+### Learnings
+- Reuse existing Collapsible components from @/components/ui/collapsible (Radix UI)
+- Safe filename generation: replace non-alphanumeric chars with hyphens, lowercase
+- Use Blob + URL.createObjectURL pattern for client-side file downloads
+- Pre-existing TypeScript errors in server/ and shared/ don't block src/ changes
+- Browser verification blocked by pre-existing Vite polyfill issues (same as US-029 through US-036)
+
+---
