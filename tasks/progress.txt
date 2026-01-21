@@ -1265,3 +1265,31 @@ Agent: Background Agent (Cursor)
 - Tests: bun test packages/sdk/tests/integration/cel-lifecycle.test.ts
 
 ---
+
+## US-043 - Write Originals CEL Application Specification document
+Completed: 2026-01-21T09:35:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- sdk/docs/ORIGINALS_CEL_SPEC.md: Created comprehensive specification document
+  - Section 1: Introduction (purpose, scope, conformance, terminology, references)
+  - Section 2: Cryptographic Control (DID-based authorization, proof requirements, hash chain)
+  - Section 3: State Derivation (algorithm, AssetState structure, update rules, deactivation)
+  - Section 4: Witness Rules (overview, rules by layer, WitnessProof structure, HTTP/Bitcoin witnesses)
+  - Section 5: Event Types (create, update, deactivate with full examples)
+  - Section 6: Migration Events (valid paths, structure, peer→webvh, webvh→btco)
+  - Section 7: External References (structure, hash verification)
+  - Section 8: Serialization (JSON, CBOR)
+  - Section 9: Verification (algorithm, result structure)
+  - Appendix A: Complete event log example
+  - Appendix B: Error codes
+  - Appendix C: Revision history
+
+### Learnings
+- Specification should include concrete JSON examples for each event type
+- Migration events are update events with specific data fields (sourceDid, targetDid, layer)
+- Witness proofs are identified by presence of witnessedAt field
+- Hash chain uses SHA-256 with multibase base64url-nopad encoding (u prefix)
+- Typecheck: bunx tsc --noEmit from sdk root
+
+---
