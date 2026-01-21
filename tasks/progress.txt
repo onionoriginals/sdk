@@ -1196,3 +1196,30 @@ Agent: Background Agent (Cursor)
 - Pre-existing server/ TypeScript errors don't affect src/ or convex/ code
 
 ---
+
+## US-041 - Update migrate-original page to use Convex
+Completed: 2026-01-21T04:45:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/pages/migrate-original-simple.tsx: Complete rewrite to use Convex
+  - Replaced TanStack Query useMutation with useMigrateOriginal hook
+  - Added useOriginals hook to list originals that can be migrated (peer/webvh only)
+  - Added useOriginal hook to show selected original details
+  - Migration success shows CelEventTimeline component with full event history
+  - Migration event visible in timeline with layer transition badges (peer → webvh → btco)
+  - Added provenance badge and new DID display on success
+  - Error handling for invalid migration paths via error state from hook
+  - Layer path visualization at bottom showing one-way migration direction
+  - Domain input field for webvh migration (required validation)
+  - Original selector dropdown with layer badges
+  - "View Original" and "Migrate Another" buttons on success
+
+### Learnings
+- Use `!= null` instead of `&&` for unknown types in JSX conditionals to avoid TypeScript errors
+- CelEventTimeline detects migration events by presence of sourceDid/targetDid fields
+- Pre-existing Vite polyfill issues block browser testing but code typechecks successfully
+- useMigrateOriginal hook handles mutation state (isMigrating, error) internally
+- Filter originals by layer to only show migratable ones (exclude btco layer)
+
+---

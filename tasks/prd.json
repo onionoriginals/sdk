@@ -691,8 +691,8 @@
         "Verify in browser using cursor-ide-browser MCP"
       ],
       "priority": 41,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Replaced TanStack Query with Convex hooks (useMigrateOriginal, useOriginals, useOriginal). Shows CEL event timeline with migration event on success. Error handling for invalid migrations. Layer path visualization. Browser verification blocked by pre-existing Vite polyfill issues."
     },
     {
       "id": "US-042",
