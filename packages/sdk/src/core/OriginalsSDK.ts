@@ -156,8 +156,9 @@ export class OriginalsSDK {
     if (this.config.logging?.eventLogging) {
       this.eventLogger.configureEventLogging(this.config.logging.eventLogging);
     }
-    
+
     // Subscribe to lifecycle events
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
     this.eventLogger.subscribeToEvents((this.lifecycle as any).eventEmitter);
   }
 
@@ -317,6 +318,7 @@ export class OriginalsSDK {
 
     return {
       did: result.did,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       doc: result.doc,
       log: result.log as unknown as DIDLog,
       meta: result.meta
@@ -336,10 +338,12 @@ export class OriginalsSDK {
     switch (options.type) {
       case 'did':
         return OriginalsSDK.updateDIDOriginal(options);
-      default:
+      default: {
         // TypeScript exhaustiveness check
         const _exhaustive: never = options as never;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
         throw new Error(`Unsupported Original type: ${(_exhaustive as any).type}`);
+      }
     }
   }
 

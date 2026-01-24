@@ -1,8 +1,14 @@
 import { DIDManager } from '../did/DIDManager';
 
-type LoadedDocument = { document: any; documentUrl: string; contextUrl: string | null };
+type LoadedDocument = { document: unknown; documentUrl: string; contextUrl: string | null };
 
-const CONTEXTS: Record<string, any> = {
+interface ContextDocument {
+  '@context': {
+    '@version': number;
+  };
+}
+
+const CONTEXTS: Record<string, ContextDocument> = {
   // Provide 1.1-compatible stubs for jsonld canonize
   'https://www.w3.org/ns/credentials/v2': { '@context': { '@version': 1.1 } },
   'https://w3id.org/security/data-integrity/v2': { '@context': { '@version': 1.1 } }
@@ -28,27 +34,35 @@ export class DocumentLoader {
     if (!didDoc) {
       throw new Error(`DID not resolved: ${did}`);
     }
+
+    interface DIDDocWithContext {
+      '@context'?: unknown;
+      verificationMethod?: Array<{ id?: string }>;
+    }
+
+    const didDocTyped = didDoc as DIDDocWithContext;
+
     if (fragment) {
       // If a VM was registered explicitly, prefer it
       const cached = verificationMethodRegistry.get(didUrl);
       if (cached) {
         return {
-          document: { '@context': (didDoc as any)['@context'], ...cached },
+          document: { '@context': didDocTyped['@context'], ...cached },
           documentUrl: didUrl,
           contextUrl: null
         };
       }
-      const vms = (didDoc as any).verificationMethod as any[] | undefined;
+      const vms = didDocTyped.verificationMethod;
       const vm = vms?.find((m) => m.id === didUrl);
       if (vm) {
         return {
-          document: { '@context': (didDoc as any)['@context'], ...vm },
+          document: { '@context': didDocTyped['@context'], ...vm },
           documentUrl: didUrl,
           contextUrl: null
         };
       }
       return {
-        document: { '@context': (didDoc as any)['@context'], id: didUrl },
+        document: { '@context': didDocTyped['@context'], id: didUrl },
         documentUrl: didUrl,
         contextUrl: null
       };
@@ -60,8 +74,8 @@ export class DocumentLoader {
 export const createDocumentLoader = (didManager: DIDManager) =>
   (iri: string) => new DocumentLoader(didManager).load(iri);
 
-export const verificationMethodRegistry: Map<string, any> = new Map();
-export function registerVerificationMethod(vm: any) {
+export const verificationMethodRegistry: Map<string, Record<string, unknown>> = new Map();
+export function registerVerificationMethod(vm: Record<string, unknown> & { id?: string }): void {
   if (vm?.id) verificationMethodRegistry.set(vm.id, vm);
 }
 

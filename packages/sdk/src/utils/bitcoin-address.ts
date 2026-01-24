@@ -20,8 +20,10 @@ const getNetwork = (network: BitcoinNetwork): bitcoin.Network => {
     case 'signet':
       // Signet uses the same bech32 prefix as testnet (tb1)
       return bitcoin.networks.testnet;
-    default:
-      throw new Error(`Unsupported network: ${network}`);
+    default: {
+      const exhaustiveCheck: never = network;
+      throw new Error(`Unsupported network: ${String(exhaustiveCheck)}`);
+    }
   }
 };
 

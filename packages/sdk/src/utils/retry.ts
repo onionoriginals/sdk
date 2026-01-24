@@ -29,7 +29,7 @@ function computeDelay(attempt: number, opts: Required<RetryOptions>): number {
 }
 
 export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
-  const opts: Required<RetryOptions> = { ...DEFAULTS, ...options } as any;
+  const opts: Required<RetryOptions> = { ...DEFAULTS, ...options as Partial<Required<RetryOptions>> };
   let lastError: unknown;
   for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
     try {

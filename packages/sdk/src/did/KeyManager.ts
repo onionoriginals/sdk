@@ -11,7 +11,8 @@ function toMultikeyType(type: KeyType): MultikeyType {
         if (type === 'ES256K') return 'Secp256k1';
         if (type === 'Ed25519') return 'Ed25519';
         if (type === 'ES256') return 'P256';
-        throw new Error(`Unsupported key type: ${type}`);
+        const _exhaustiveCheck: never = type;
+        throw new Error(`Unsupported key type: ${String(_exhaustiveCheck)}`);
 }
 
 function fromMultikeyType(type: MultikeyType): KeyType {
@@ -38,10 +39,11 @@ export class KeyManager {
 
                 if (type === 'Ed25519') {
                         const privateKeyBytes = ed25519.utils.randomPrivateKey();
-                        const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
+                        const ed25519Module = ed25519 as unknown as { getPublicKeyAsync: (privateKey: Uint8Array) => Promise<Uint8Array> };
+                        const publicKeyBytes = await ed25519Module.getPublicKeyAsync(privateKeyBytes);
                         return {
-                                privateKey: multikey.encodePrivateKey(privateKeyBytes as Uint8Array, 'Ed25519'),
-                                publicKey: multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519')
+                                privateKey: multikey.encodePrivateKey(privateKeyBytes, 'Ed25519'),
+                                publicKey: multikey.encodePublicKey(publicKeyBytes, 'Ed25519')
                         };
                 }
 
@@ -54,10 +56,11 @@ export class KeyManager {
                         };
                 }
 
-		throw new Error(`Unsupported key type: ${type}`);
+		const _exhaustiveCheck: never = type;
+		throw new Error(`Unsupported key type: ${String(_exhaustiveCheck)}`);
         }
 
-	async rotateKeys(didDoc: DIDDocument, newKeyPair: KeyPair): Promise<DIDDocument> {
+	rotateKeys(didDoc: DIDDocument, newKeyPair: KeyPair): DIDDocument {
 		const multikeyContext = 'https://w3id.org/security/multikey/v1';
 		const securityContext = 'https://w3id.org/security/v1';
 		

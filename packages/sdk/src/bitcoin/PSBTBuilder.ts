@@ -93,7 +93,7 @@ export class PSBTBuilder {
     const json = JSON.stringify(payload);
     let psbtBase64: string;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       const B: any = (global as any).Buffer;
       psbtBase64 = B ? B.from(json, 'utf8').toString('base64') : (global as any).btoa(json);
     } catch {

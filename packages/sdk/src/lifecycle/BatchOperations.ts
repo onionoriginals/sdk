@@ -10,6 +10,8 @@
  */
 
 import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
+import type { AssetResource } from '../types';
+import type { OriginalsAsset } from './OriginalsAsset';
 
 /**
  * Result of a batch operation containing successful and failed items
@@ -276,7 +278,7 @@ export class BatchValidator {
   /**
    * Validate batch of resources for asset creation
    */
-  validateBatchCreate(resourcesList: any[][]): ValidationResult[] {
+  validateBatchCreate(resourcesList: AssetResource[][]): ValidationResult[] {
     return resourcesList.map((resources, index) => {
       const errors: string[] = [];
       
@@ -297,6 +299,7 @@ export class BatchValidator {
           errors.push(`Item ${index}, resource ${i}: Invalid resource object`);
           continue;
         }
+        // AssetResource is properly typed, so we can access properties directly
         if (!resource.id || typeof resource.id !== 'string') {
           errors.push(`Item ${index}, resource ${i}: Missing or invalid id`);
         }
@@ -318,29 +321,31 @@ export class BatchValidator {
   /**
    * Validate batch of assets for inscription
    */
-  validateBatchInscription(assets: any[]): ValidationResult[] {
+  validateBatchInscription(assets: OriginalsAsset[]): ValidationResult[] {
     return assets.map((asset, index) => {
       const errors: string[] = [];
-      
+
       if (!asset || typeof asset !== 'object') {
         errors.push(`Item ${index}: Invalid asset object`);
         return { isValid: false, errors };
       }
-      
+
       if (!asset.id || typeof asset.id !== 'string') {
         errors.push(`Item ${index}: Missing or invalid asset id`);
       }
-      
-      if (!asset.currentLayer) {
+
+      const currentLayer = asset.currentLayer;
+      if (!currentLayer) {
         errors.push(`Item ${index}: Missing currentLayer`);
-      } else if (asset.currentLayer === 'did:btco') {
+      } else if (currentLayer === 'did:btco') {
         errors.push(`Item ${index}: Asset already inscribed on Bitcoin`);
       }
-      
-      if (!asset.resources || !Array.isArray(asset.resources) || asset.resources.length === 0) {
+
+      const resources = asset.resources;
+      if (!resources || !Array.isArray(resources) || resources.length === 0) {
         errors.push(`Item ${index}: Asset must have at least one resource`);
       }
-      
+
       return { isValid: errors.length === 0, errors };
     });
   }
@@ -348,25 +353,28 @@ export class BatchValidator {
   /**
    * Validate batch of transfer operations
    */
-  validateBatchTransfer(transfers: Array<{ asset: any; to: string }>): ValidationResult[] {
+  validateBatchTransfer(transfers: Array<{ asset: OriginalsAsset; to: string }>): ValidationResult[] {
     return transfers.map((transfer, index) => {
       const errors: string[] = [];
-      
+
       if (!transfer || typeof transfer !== 'object') {
         errors.push(`Item ${index}: Invalid transfer object`);
         return { isValid: false, errors };
       }
-      
+
       if (!transfer.asset || typeof transfer.asset !== 'object') {
         errors.push(`Item ${index}: Invalid asset`);
-      } else if (transfer.asset.currentLayer !== 'did:btco') {
-        errors.push(`Item ${index}: Asset must be inscribed on Bitcoin before transfer`);
+      } else {
+        const currentLayer = transfer.asset.currentLayer;
+        if (currentLayer !== 'did:btco') {
+          errors.push(`Item ${index}: Asset must be inscribed on Bitcoin before transfer`);
+        }
       }
-      
+
       if (!transfer.to || typeof transfer.to !== 'string') {
         errors.push(`Item ${index}: Invalid destination address`);
       }
-      
+
       return { isValid: errors.length === 0, errors };
     });
   }

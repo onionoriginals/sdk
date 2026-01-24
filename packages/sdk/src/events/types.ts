@@ -239,7 +239,7 @@ export interface MigrationCompletedEvent extends BaseEvent {
 export interface MigrationFailedEvent extends BaseEvent {
   type: 'migration:failed';
   migrationId: string;
-  error: any;
+  error: Error | { message: string; code?: string };
 }
 
 /**

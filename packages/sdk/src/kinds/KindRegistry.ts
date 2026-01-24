@@ -229,58 +229,88 @@ export class KindRegistry {
     
     // Add kind-specific metadata templates
     switch (kind) {
-      case OriginalKind.App:
+      case OriginalKind.App: {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const appMetadata = {
+          runtime: 'node',
+          entrypoint: 'index.js',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any;
         return {
           ...base,
-          metadata: {
-            runtime: 'node',
-            entrypoint: 'index.js',
-          } as any,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          metadata: appMetadata,
         };
-        
-      case OriginalKind.Agent:
+      }
+
+      case OriginalKind.Agent: {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const agentMetadata = {
+          capabilities: [],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any;
         return {
           ...base,
-          metadata: {
-            capabilities: [],
-          } as any,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          metadata: agentMetadata,
         };
-        
-      case OriginalKind.Module:
+      }
+
+      case OriginalKind.Module: {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const moduleMetadata = {
+          format: 'esm',
+          main: 'index.js',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any;
         return {
           ...base,
-          metadata: {
-            format: 'esm',
-            main: 'index.js',
-          } as any,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          metadata: moduleMetadata,
         };
-        
-      case OriginalKind.Dataset:
+      }
+
+      case OriginalKind.Dataset: {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const datasetMetadata = {
+          format: 'json',
+          schema: {},
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any;
         return {
           ...base,
-          metadata: {
-            format: 'json',
-            schema: {},
-          } as any,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          metadata: datasetMetadata,
         };
-        
-      case OriginalKind.Media:
+      }
+
+      case OriginalKind.Media: {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const mediaMetadata = {
+          mediaType: 'image',
+          mimeType: 'image/png',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any;
         return {
           ...base,
-          metadata: {
-            mediaType: 'image',
-            mimeType: 'image/png',
-          } as any,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          metadata: mediaMetadata,
         };
-        
-      case OriginalKind.Document:
+      }
+
+      case OriginalKind.Document: {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const documentMetadata = {
+          format: 'markdown',
+          content: 'content',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any;
         return {
           ...base,
-          metadata: {
-            format: 'markdown',
-            content: 'content',
-          } as any,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          metadata: documentMetadata,
         };
+      }
         
       default:
         return base;

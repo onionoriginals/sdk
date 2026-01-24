@@ -1,7 +1,7 @@
-import { 
-  VerifiableCredential, 
-  VerifiablePresentation, 
-  CredentialSubject, 
+import {
+  VerifiableCredential,
+  VerifiablePresentation,
+  CredentialSubject,
   OriginalsConfig,
   Proof,
   ExternalSigner,
@@ -17,7 +17,6 @@ import { DIDManager } from '../did/DIDManager';
 import { Issuer, VerificationMethodLike } from './Issuer';
 import { createDocumentLoader } from './documentLoader';
 import { Verifier } from './Verifier';
-import { BBSCryptosuiteUtils } from './cryptosuites/bbs';
 
 // ===== Credential Factory Types =====
 
@@ -151,11 +150,11 @@ export interface DerivedProofResult {
 export class CredentialManager {
   constructor(private config: OriginalsConfig, private didManager?: DIDManager) {}
 
-  async createResourceCredential(
+  createResourceCredential(
     type: 'ResourceCreated' | 'ResourceUpdated' | 'ResourceMigrated',
     subject: CredentialSubject,
     issuer: string
-  ): Promise<VerifiableCredential> {
+  ): VerifiableCredential {
     return {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential', type],
@@ -174,18 +173,23 @@ export class CredentialManager {
       try {
         const loader = createDocumentLoader(this.didManager);
         const { document } = await loader(verificationMethod);
-        if (document && document.publicKeyMultibase) {
+        interface DocumentWithKey {
+          publicKeyMultibase?: string;
+          type?: string;
+        }
+        const docWithKey = document as DocumentWithKey;
+        if (docWithKey && docWithKey.publicKeyMultibase) {
           const vm: VerificationMethodLike = {
             id: verificationMethod,
-            controller: typeof credential.issuer === 'string' ? credential.issuer : (credential.issuer as any)?.id,
-            publicKeyMultibase: document.publicKeyMultibase,
+            controller: typeof credential.issuer === 'string' ? credential.issuer : (credential.issuer as { id?: string })?.id ?? '',
+            publicKeyMultibase: docWithKey.publicKeyMultibase,
             secretKeyMultibase: privateKeyMultibase,
-            type: document.type || 'Multikey'
-          } as any;
+            type: docWithKey.type || 'Multikey'
+          };
           const issuer = new Issuer(this.didManager, vm);
-          const unsigned: any = { ...credential };
-          delete unsigned['@context'];
-          delete unsigned.proof;
+          const unsigned = { ...credential };
+          delete (unsigned as Partial<VerifiableCredential>)['@context'];
+          delete (unsigned as Partial<VerifiableCredential>).proof;
           return issuer.issueCredential(unsigned, { proofPurpose: 'assertionMethod' });
         }
       } catch {
@@ -216,8 +220,8 @@ export class CredentialManager {
     credential: VerifiableCredential,
     signer: ExternalSigner
   ): Promise<VerifiableCredential> {
-    const verificationMethodId = await signer.getVerificationMethodId();
-    
+    const verificationMethodId = signer.getVerificationMethodId();
+
     // Create proof structure
     const proofBase = {
       type: 'DataIntegrityProof',
@@ -228,7 +232,7 @@ export class CredentialManager {
     };
 
     // Prepare unsigned credential
-    const unsignedCredential: any = { ...credential };
+    const unsignedCredential: Record<string, unknown> = { ...credential };
     delete unsignedCredential.proof;
 
     // Use external signer to sign
@@ -249,11 +253,20 @@ export class CredentialManager {
 
   async verifyCredential(credential: VerifiableCredential): Promise<boolean> {
     if (this.didManager) {
-      const proofAny: any = (credential as any).proof;
-      if (proofAny && (proofAny.cryptosuite || (Array.isArray(proofAny) && proofAny[0]?.cryptosuite))) {
-        const verifier = new Verifier(this.didManager);
-        const res = await verifier.verifyCredential(credential);
-        return res.verified;
+      interface ProofWithCryptosuite {
+        cryptosuite?: string;
+      }
+      const proofValue = credential.proof;
+      const proofWithSuite = proofValue as ProofWithCryptosuite | ProofWithCryptosuite[] | undefined;
+      if (proofWithSuite) {
+        const hasCryptosuite = Array.isArray(proofWithSuite)
+          ? proofWithSuite[0]?.cryptosuite
+          : proofWithSuite.cryptosuite;
+        if (hasCryptosuite) {
+          const verifier = new Verifier(this.didManager);
+          const res = await verifier.verifyCredential(credential);
+          return res.verified;
+        }
       }
     }
 
@@ -268,14 +281,14 @@ export class CredentialManager {
     const signature = this.decodeMultibase(proofValue);
     if (!signature) return false;
 
-    const proofSansValue = { ...proof } as any;
+    const proofSansValue = { ...proof } as Record<string, unknown>;
     delete proofSansValue.proofValue;
-    const proofInput: any = { ...proofSansValue };
-    const credentialContext = (credential as any)['@context'];
+    const proofInput: Record<string, unknown> = { ...proofSansValue };
+    const credentialContext = credential['@context'];
     if (credentialContext && !proofInput['@context']) {
       proofInput['@context'] = credentialContext;
     }
-    const unsignedCredential: any = { ...credential };
+    const unsignedCredential: Record<string, unknown> = { ...credential };
     delete unsignedCredential.proof;
 
     const c14nProof = await canonicalizeDocument(proofInput);
@@ -285,7 +298,8 @@ export class CredentialManager {
     const digest = Buffer.concat([hProof, hCred]);
     const signer = this.getSigner();
     try {
-      const resolvedKey = (proof as any).publicKeyMultibase
+      const proofWithKey = proof as Proof & { publicKeyMultibase?: string };
+      const resolvedKey = proofWithKey.publicKeyMultibase
         || await this.resolveVerificationMethodMultibase(verificationMethod);
       if (!resolvedKey) {
         return false;
@@ -296,32 +310,32 @@ export class CredentialManager {
     }
   }
 
-  async createPresentation(
+  createPresentation(
     credentials: VerifiableCredential[],
     holder: string
-  ): Promise<VerifiablePresentation> {
+  ): VerifiablePresentation {
     return {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiablePresentation'],
       holder,
       verifiableCredential: credentials
-    } as any;
+    } as VerifiablePresentation;
   }
 
   private async generateProofValue(
-    credential: VerifiableCredential, 
+    credential: VerifiableCredential,
     privateKeyMultibase: string,
     proofBase: Proof
   ): Promise<string> {
     // Construct canonical digest including provided proof sans proofValue
-    const proofSansValue = { ...proofBase } as any;
+    const proofSansValue = { ...proofBase } as Record<string, unknown>;
     delete proofSansValue.proofValue;
-    const proofInput: any = { ...proofSansValue };
-    const credentialContext = (credential as any)['@context'];
+    const proofInput: Record<string, unknown> = { ...proofSansValue };
+    const credentialContext = credential['@context'];
     if (credentialContext && !proofInput['@context']) {
       proofInput['@context'] = credentialContext;
     }
-    const unsignedCredential: any = { ...credential };
+    const unsignedCredential: Record<string, unknown> = { ...credential };
     delete unsignedCredential.proof;
 
     const c14nProof = await canonicalizeDocument(proofInput);
@@ -361,8 +375,12 @@ export class CredentialManager {
     const loader = createDocumentLoader(this.didManager);
     try {
       const { document } = await loader(verificationMethod);
-      if (document && typeof document.publicKeyMultibase === 'string') {
-        return document.publicKeyMultibase;
+      interface DocWithKey {
+        publicKeyMultibase?: unknown;
+      }
+      const docWithKey = document as DocWithKey;
+      if (docWithKey && typeof docWithKey.publicKeyMultibase === 'string') {
+        return docWithKey.publicKeyMultibase;
       }
     } catch (err) {
       // Document loader failed; will try alternative resolution method
@@ -377,9 +395,13 @@ export class CredentialManager {
         return null;
       }
       const didDoc = await this.didManager.resolveDID(did);
-      const vms = (didDoc as any)?.verificationMethod;
+      interface DIDDocWithVMs {
+        verificationMethod?: Array<{ id?: string; publicKeyMultibase?: unknown }>;
+      }
+      const docWithVMs = didDoc as DIDDocWithVMs;
+      const vms = docWithVMs?.verificationMethod;
       if (Array.isArray(vms)) {
-        const vm = vms.find((m: any) => m?.id === verificationMethod);
+        const vm = vms.find((m) => m?.id === verificationMethod);
         if (vm && typeof vm.publicKeyMultibase === 'string') {
           return vm.publicKeyMultibase;
         }
@@ -424,12 +446,12 @@ export class CredentialManager {
    * const signed = await credentialManager.signCredential(credential, privateKey, vmId);
    * ```
    */
-  async issueResourceCredential(
+  issueResourceCredential(
     resource: AssetResource,
     assetDid: string,
     creatorDid: string,
     chainOptions?: CredentialChainOptions
-  ): Promise<VerifiableCredential> {
+  ): VerifiableCredential {
     const subject: ResourceCreatedSubject = {
       id: assetDid,
       resourceId: resource.id,
@@ -440,7 +462,7 @@ export class CredentialManager {
       createdAt: resource.createdAt || new Date().toISOString()
     };
 
-    const credential = await this.createCredentialWithChain(
+    const credential = this.createCredentialWithChain(
       'ResourceCreated',
       subject,
       creatorDid,
@@ -478,7 +500,7 @@ export class CredentialManager {
    * );
    * ```
    */
-  async issueResourceUpdateCredential(
+  issueResourceUpdateCredential(
     resourceId: string,
     assetDid: string,
     previousHash: string,
@@ -488,7 +510,7 @@ export class CredentialManager {
     updaterDid: string,
     updateReason?: string,
     chainOptions?: CredentialChainOptions
-  ): Promise<VerifiableCredential> {
+  ): VerifiableCredential {
     const subject: ResourceUpdatedSubject = {
       id: assetDid,
       resourceId,
@@ -500,7 +522,7 @@ export class CredentialManager {
       ...(updateReason && { updateReason })
     };
 
-    const credential = await this.createCredentialWithChain(
+    const credential = this.createCredentialWithChain(
       'ResourceUpdated',
       subject,
       updaterDid,
@@ -535,7 +557,7 @@ export class CredentialManager {
    * );
    * ```
    */
-  async issueMigrationCredential(
+  issueMigrationCredential(
     sourceDid: string,
     targetDid: string | undefined,
     fromLayer: LayerType,
@@ -548,7 +570,7 @@ export class CredentialManager {
       migrationReason?: string;
     },
     chainOptions?: CredentialChainOptions
-  ): Promise<VerifiableCredential> {
+  ): VerifiableCredential {
     const subject: MigrationSubject = {
       id: targetDid || sourceDid,
       sourceDid,
@@ -562,7 +584,7 @@ export class CredentialManager {
       ...(details?.migrationReason && { migrationReason: details.migrationReason })
     };
 
-    const credential = await this.createCredentialWithChain(
+    const credential = this.createCredentialWithChain(
       'MigrationCompleted',
       subject,
       issuerDid,
@@ -597,7 +619,7 @@ export class CredentialManager {
    * );
    * ```
    */
-  async issueOwnershipCredential(
+  issueOwnershipCredential(
     assetDid: string,
     previousOwner: string,
     newOwner: string,
@@ -608,7 +630,7 @@ export class CredentialManager {
       transferReason?: string;
     },
     chainOptions?: CredentialChainOptions
-  ): Promise<VerifiableCredential> {
+  ): VerifiableCredential {
     const subject: OwnershipSubject = {
       id: assetDid,
       previousOwner,
@@ -619,7 +641,7 @@ export class CredentialManager {
       ...(details?.transferReason && { transferReason: details.transferReason })
     };
 
-    const credential = await this.createCredentialWithChain(
+    const credential = this.createCredentialWithChain(
       'OwnershipTransferred',
       subject,
       issuerDid,
@@ -641,12 +663,12 @@ export class CredentialManager {
    * @param chainOptions - Optional chaining options
    * @returns Unsigned verifiable credential with chain metadata
    */
-  private async createCredentialWithChain(
+  private createCredentialWithChain(
     type: string,
     subject: CredentialSubject,
     issuer: string,
     chainOptions?: CredentialChainOptions
-  ): Promise<VerifiableCredential> {
+  ): VerifiableCredential {
     const credential: VerifiableCredential = {
       '@context': [
         'https://www.w3.org/2018/credentials/v1',
@@ -671,7 +693,14 @@ export class CredentialManager {
 
     // Add chaining metadata if provided
     if (chainOptions?.previousCredentialId || chainOptions?.previousCredentialHash) {
-      (credential.credentialSubject as any).previousCredential = {
+      interface SubjectWithPrevious {
+        previousCredential?: {
+          id?: string;
+          hash?: string;
+        };
+      }
+      const subjectWithPrev = credential.credentialSubject as CredentialSubject & SubjectWithPrevious;
+      subjectWithPrev.previousCredential = {
         ...(chainOptions.previousCredentialId && { id: chainOptions.previousCredentialId }),
         ...(chainOptions.previousCredentialHash && { hash: chainOptions.previousCredentialHash })
       };
@@ -705,7 +734,7 @@ export class CredentialManager {
    * @returns SHA-256 hash of the canonicalized credential
    */
   async computeCredentialHash(credential: VerifiableCredential): Promise<string> {
-    const canonicalized = await canonicalizeDocument(credential as any);
+    const canonicalized = await canonicalizeDocument(credential as unknown as Record<string, unknown>);
     const hash = sha256(Buffer.from(canonicalized, 'utf8'));
     return bytesToHex(hash);
   }
@@ -739,15 +768,22 @@ export class CredentialManager {
     for (let i = 1; i < credentials.length; i++) {
       const current = credentials[i];
       const previous = credentials[i - 1];
-      
-      const previousCredRef = (current.credentialSubject as any)?.previousCredential;
-      
+
+      interface SubjectWithPrevious {
+        previousCredential?: {
+          id?: string;
+          hash?: string;
+        };
+      }
+      const currentSubject = current.credentialSubject as CredentialSubject & SubjectWithPrevious;
+      const previousCredRef = currentSubject?.previousCredential;
+
       if (previousCredRef) {
         // Verify ID link
         if (previousCredRef.id && previousCredRef.id !== previous.id) {
           errors.push(`Chain broken at index ${i}: previousCredential.id doesn't match`);
         }
-        
+
         // Verify hash link
         if (previousCredRef.hash) {
           const expectedHash = await this.computeCredentialHash(previous);
@@ -814,11 +850,11 @@ export class CredentialManager {
       // In a full implementation, this would involve creating a BBS+ base proof
     };
 
-    return {
+    return await Promise.resolve({
       credential: enhancedCredential,
       mandatoryPointers: options.mandatoryPointers,
       selectivePointers
-    };
+    });
   }
 
   /**
@@ -835,7 +871,7 @@ export class CredentialManager {
   async deriveSelectiveProof(
     credential: VerifiableCredential,
     fieldsToDisclose: string[],
-    presentationHeader?: Uint8Array
+    _presentationHeader?: Uint8Array
   ): Promise<DerivedProofResult> {
     // Validate that all disclosed fields are valid JSON pointers
     for (const field of fieldsToDisclose) {
@@ -845,7 +881,7 @@ export class CredentialManager {
     }
 
     // Determine which fields will be hidden
-    const allFields = this.extractFieldPaths(credential);
+    const allFields = this.extractFieldPaths(credential as unknown as Record<string, unknown>);
     const disclosedSet = new Set(fieldsToDisclose);
     const hiddenFields = allFields.filter(f => !disclosedSet.has(f));
 
@@ -855,22 +891,22 @@ export class CredentialManager {
     // 3. Generate the derived BBS+ proof
     // For now, we return a structure showing what would be disclosed
 
-    return {
+    return await Promise.resolve({
       credential: {
         ...credential,
         // A real implementation would have a derived proof here
       },
       disclosedFields: fieldsToDisclose,
       hiddenFields
-    };
+    });
   }
 
   /**
    * Extract all field paths from a credential as JSON Pointers
    */
-  private extractFieldPaths(obj: any, prefix = ''): string[] {
+  private extractFieldPaths(obj: Record<string, unknown>, prefix = ''): string[] {
     const paths: string[] = [];
-    
+
     if (typeof obj !== 'object' || obj === null) {
       return paths;
     }
@@ -878,9 +914,9 @@ export class CredentialManager {
     for (const [key, value] of Object.entries(obj)) {
       const path = `${prefix}/${key}`;
       paths.push(path);
-      
+
       if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        paths.push(...this.extractFieldPaths(value, path));
+        paths.push(...this.extractFieldPaths(value as Record<string, unknown>, path));
       }
     }
 
@@ -894,13 +930,13 @@ export class CredentialManager {
    * @param pointer - JSON Pointer path (e.g., /credentialSubject/name)
    * @returns The value at the pointer path, or undefined if not found
    */
-  getFieldByPointer(credential: VerifiableCredential, pointer: string): any {
+  getFieldByPointer(credential: VerifiableCredential, pointer: string): unknown {
     if (!pointer.startsWith('/')) {
       throw new Error('JSON Pointer must start with /');
     }
 
     const parts = pointer.slice(1).split('/');
-    let current: any = credential;
+    let current: unknown = credential;
 
     for (const part of parts) {
       if (current === null || current === undefined) {
@@ -908,7 +944,8 @@ export class CredentialManager {
       }
       // Handle escaped characters in JSON Pointer
       const unescaped = part.replace(/~1/g, '/').replace(/~0/g, '~');
-      current = current[unescaped];
+      const currentObj = current as Record<string, unknown>;
+      current = currentObj[unescaped];
     }
 
     return current;

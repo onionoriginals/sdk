@@ -26,7 +26,9 @@ export function emitTelemetry(hooks: TelemetryHooks | undefined, event: Telemetr
   if (hooks && typeof hooks.onEvent === 'function') {
     try {
       hooks.onEvent({ level: 'info', ...event });
-    } catch (_) {}
+    } catch (_err) {
+      // Intentionally ignore errors in telemetry hooks
+    }
   }
 }
 
@@ -34,7 +36,9 @@ export function emitError(hooks: TelemetryHooks | undefined, error: StructuredEr
   if (hooks && typeof hooks.onError === 'function') {
     try {
       hooks.onError(error);
-    } catch (_) {}
+    } catch (_err) {
+      // Intentionally ignore errors in telemetry hooks
+    }
   }
 }
 

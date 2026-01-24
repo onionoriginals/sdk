@@ -259,7 +259,7 @@ export class MetricsCollector {
       return this.exportPrometheus();
     }
     
-    throw new Error(`Unsupported export format: ${format}`);
+    throw new Error(`Unsupported export format: ${String(format)}`);
   }
   
   /**

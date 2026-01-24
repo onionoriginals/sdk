@@ -1,5 +1,4 @@
 import { OrdinalsInscription, BitcoinTransaction } from '../types';
-import { emitTelemetry } from '../utils/telemetry';
 import { decode as decodeCbor } from '../utils/cbor';
 import { hexToBytes } from '../utils/encoding';
 
@@ -21,20 +20,20 @@ export class OrdinalsClient {
     return inscriptions.filter((x): x is OrdinalsInscription => x !== null);
   }
 
-  async broadcastTransaction(tx: BitcoinTransaction): Promise<string> {
-    return tx.txid || 'txid';
+  broadcastTransaction(tx: BitcoinTransaction): Promise<string> {
+    return Promise.resolve(tx.txid || 'txid');
   }
 
-  async getTransactionStatus(txid: string): Promise<{
+  getTransactionStatus(_txid: string): Promise<{
     confirmed: boolean;
     blockHeight?: number;
     confirmations?: number;
   }> {
-    return { confirmed: false };
+    return Promise.resolve({ confirmed: false });
   }
 
-  async estimateFee(blocks: number = 1): Promise<number> {
-    return Math.max(1, blocks) * 10;
+  estimateFee(blocks: number = 1): Promise<number> {
+    return Promise.resolve(Math.max(1, blocks) * 10);
   }
 
   // Added provider-like helper methods commonly expected by higher-level resolvers
@@ -55,7 +54,7 @@ export class OrdinalsClient {
 
     // Fetch content bytes
     const contentUrl = info.content_url || `${this.rpcUrl}/content/${identifier}`;
-    const contentRes = await fetch(contentUrl);
+    const contentRes = await fetch(String(contentUrl));
     if (!contentRes.ok) throw new Error(`Failed to fetch inscription content: ${contentRes.status}`);
     const contentArrayBuf = await contentRes.arrayBuffer();
     const content = Buffer.from(new Uint8Array(contentArrayBuf));
@@ -96,7 +95,9 @@ export class OrdinalsClient {
     if (text.startsWith('"') && text.endsWith('"')) {
       try {
         text = JSON.parse(text);
-      } catch (_) {}
+      } catch (_) {
+        // Keep original text if parsing fails
+      }
     }
     try {
       const bytes = hexToBytes(text);
@@ -112,7 +113,7 @@ export class OrdinalsClient {
     if (!res.ok) return null;
     const body: any = await res.json();
     // Accept { data: T } or T
-    return (body && typeof body === 'object' && 'data' in body) ? (body as any).data as T : (body as T);
+    return (body && typeof body === 'object' && 'data' in body) ? body.data : body;
   }
 }
 

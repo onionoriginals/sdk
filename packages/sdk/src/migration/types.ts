@@ -52,6 +52,7 @@ export interface MigrationOptions {
     resumable: boolean;                 // Support resume
   };
   estimateCostOnly?: boolean;           // Return cost estimate without migrating
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata?: Record<string, any>;       // Additional migration metadata
   domain?: string;                      // For webvh migrations
   satoshi?: string;                     // For btco migrations
@@ -83,6 +84,7 @@ export interface ValidationError {
   code: string;
   message: string;
   field?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   details?: any;
 }
 
@@ -117,9 +119,13 @@ export interface MigrationCheckpoint {
   sourceLayer: DIDLayer;
   didDocument: DIDDocument;
   credentials: VerifiableCredential[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   storageReferences: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   lifecycleState: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ownershipProofs: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata: Record<string, any>;
 }
 
@@ -186,6 +192,7 @@ export interface MigrationAuditRecord {
   duration: number;                     // milliseconds
   checkpointId?: string;                 // For rollback reference
   errors: MigrationError[];             // Any errors encountered
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata: Record<string, any>;        // Custom metadata
   signature?: string;                   // Cryptographic signature
 }
@@ -259,6 +266,7 @@ export interface MigrationEvent {
   migrationId: string;
   timestamp: number;
   state: MigrationStateEnum;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data?: any;
 }
 
@@ -284,6 +292,7 @@ export interface StorageMigrationContext {
  */
 export interface BitcoinAnchoringContext {
   didDocument: DIDDocument;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   migrationMetadata: Record<string, any>;
   network: 'mainnet' | 'testnet' | 'signet';
   feeRate?: number;
@@ -296,7 +305,9 @@ export interface BitcoinAnchoringContext {
 export interface LifecycleMigrationContext {
   sourceDid: string;
   targetDid: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   currentState: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   eventHistory: any[];
   migrationId: string;
 }
@@ -340,5 +351,6 @@ export interface IStateTracker {
 export interface IAuditLogger {
   logMigration(record: MigrationAuditRecord): Promise<void>;
   getMigrationHistory(did: string): Promise<MigrationAuditRecord[]>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getSystemMigrationLogs(filters: any): Promise<MigrationAuditRecord[]>;
 }

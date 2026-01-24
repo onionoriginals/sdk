@@ -117,7 +117,7 @@ export function selectUtxos(
   }
   
   // Sort UTXOs based on selected strategy
-  let sortedUtxos = [...utxos];
+  const sortedUtxos = [...utxos];
   
   if (strategy === 'minimize_inputs') {
     // Sort by value descending to use fewest inputs
@@ -196,7 +196,7 @@ export function selectResourceUtxos(
   const requiredAmountBigInt = BigInt(requiredAmount);
 
   // Filter out UTXOs to avoid and those with resources if not allowed
-  let eligibleUtxos = availableUtxos.filter(utxo => {
+  const eligibleUtxos = availableUtxos.filter(utxo => {
     const utxoId = `${utxo.txid}:${utxo.vout}`;
     const shouldAvoid = avoidUtxoIds.includes(utxoId);
     const containsResource = utxo.hasResource === true;

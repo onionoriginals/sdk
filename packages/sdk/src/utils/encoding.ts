@@ -50,10 +50,10 @@ export const MULTICODEC_BLS12381_G2_PUB_HEADER = new Uint8Array([0xeb, 0x01]);
 export const MULTICODEC_BLS12381_G2_PRIV_HEADER = new Uint8Array([0x8a, 0x26]);
 
 export const base64 = {
-	encode: (unencoded: any): string => {
+	encode: (unencoded: string | Uint8Array): string => {
 		return Buffer.from(unencoded || '').toString('base64');
 	},
-	decode: (encoded: any): Uint8Array => {
+	decode: (encoded: string): Uint8Array => {
 		return new Uint8Array(Buffer.from(encoded || '', 'base64').buffer);
 	}
 };
@@ -68,23 +68,31 @@ export const utf8 = {
 }
 
 export const base64url = {
-	encode: (unencoded: any): string => {
+	encode: (unencoded: string | Uint8Array): string => {
 		const encoded = base64.encode(unencoded);
 		return encoded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 	},
-	decode: (encoded: any): Uint8Array => {
-		encoded = encoded.replace(/-/g, '+').replace(/_/g, '/');
-		while (encoded.length % 4) encoded += '=';
-		return base64.decode(encoded);
+	decode: (encoded: string): Uint8Array => {
+		let padded = encoded.replace(/-/g, '+').replace(/_/g, '/');
+		while (padded.length % 4) padded += '=';
+		return base64.decode(padded);
 	}
 };
 
+// Type assertion for b58 library which doesn't have proper types
+interface B58Module {
+  encode: (unencoded: Uint8Array) => string;
+  decode: (encoded: string) => Uint8Array;
+}
+
+const b58Typed = b58 as unknown as B58Module;
+
 export const base58 = {
 	encode: (unencoded: Uint8Array): string => {
-		return b58.encode(unencoded);
+		return b58Typed.encode(unencoded);
 	},
 	decode: (encoded: string): Uint8Array => {
-		return b58.decode(encoded);
+		return b58Typed.decode(encoded);
 	}
 };
 

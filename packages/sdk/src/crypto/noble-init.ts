@@ -26,19 +26,24 @@ const hmacSha256Impl = (key: Uint8Array, ...msgs: Uint8Array[]) =>
 /**
  * Safely set a property on an object, handling readonly properties
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function safeSetProperty(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   obj: any,
   prop: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   value: any,
   options?: { writable?: boolean; configurable?: boolean }
 ): boolean {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
     obj[prop] = value;
     return true;
   } catch {
     // Property might be readonly, try defineProperty
     try {
       Object.defineProperty(obj, prop, {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         value,
         writable: options?.writable ?? true,
         configurable: options?.configurable ?? true,
@@ -55,11 +60,14 @@ function safeSetProperty(
  * Initialize @noble/secp256k1 with hmacSha256Sync utility
  */
 function initSecp256k1(): void {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
   const sAny: any = secp256k1 as any;
-  
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   if (!sAny?.utils) {
     // Try to create utils object if it doesn't exist
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       sAny.utils = {};
     } catch {
       // If we can't create it, try defineProperty
@@ -70,9 +78,11 @@ function initSecp256k1(): void {
       });
     }
   }
-  
+
   // Set hmacSha256Sync if not already set
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   if (typeof sAny.utils.hmacSha256Sync !== 'function') {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     safeSetProperty(sAny.utils, 'hmacSha256Sync', hmacSha256Impl);
   }
 }
@@ -82,16 +92,21 @@ function initSecp256k1(): void {
  * Handles both etc.sha512Sync (v2.x) and utils.sha512Sync (backward compat)
  */
 function initEd25519(): void {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
   const eAny: any = ed25519 as any;
-  
+
   // Set etc.sha512Sync for @noble/ed25519 v2.x (required)
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   if (eAny?.etc && typeof eAny.etc.sha512Sync !== 'function') {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     safeSetProperty(eAny.etc, 'sha512Sync', sha512Impl);
   }
-  
+
   // Set utils.sha512Sync for backward compatibility
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   if (!eAny?.utils) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       eAny.utils = {};
     } catch {
       Object.defineProperty(eAny, 'utils', {
@@ -101,8 +116,10 @@ function initEd25519(): void {
       });
     }
   }
-  
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   if (typeof eAny.utils.sha512Sync !== 'function') {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     safeSetProperty(eAny.utils, 'sha512Sync', sha512Impl);
   }
 }

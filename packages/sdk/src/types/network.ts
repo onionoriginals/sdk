@@ -103,7 +103,7 @@ export function validateVersionForNetwork(version: string, network: WebVHNetwork
     throw new Error(`Invalid version format: ${version}. Expected semver format (e.g., 1.2.3)`);
   }
 
-  const [, major, minor, patch] = match;
+  const [, , minor, patch] = match;
 
   switch (config.stability) {
     case 'major':
@@ -118,8 +118,11 @@ export function validateVersionForNetwork(version: string, network: WebVHNetwork
       // Magby: Allow all versions including patches
       return true;
 
-    default:
-      throw new Error(`Unknown stability level: ${config.stability}`);
+    default: {
+      // TypeScript exhaustiveness check
+      const _exhaustive: never = config.stability;
+      throw new Error(`Unknown stability level: ${String(_exhaustive)}`);
+    }
   }
 }
 

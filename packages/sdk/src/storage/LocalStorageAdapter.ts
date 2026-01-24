@@ -42,8 +42,11 @@ export class LocalStorageAdapter implements StorageAdapter {
     try {
       const content = await fs.readFile(fullPath);
       return { content: new Uint8Array(content) };
-    } catch (e: any) {
-      if (e && e.code === 'ENOENT') return null;
+    } catch (e: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
+      const error = e as any;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      if (error && error.code === 'ENOENT') return null;
       throw e;
     }
   }

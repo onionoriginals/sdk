@@ -85,7 +85,7 @@ export class OriginalsAsset {
     }
     
     // Process each resource ID's versions in sorted order
-    for (const [resourceId, resourceVersions] of resourcesByIdMap.entries()) {
+    for (const resourceVersions of resourcesByIdMap.values()) {
       // Sort by version number (ascending)
       const sorted = resourceVersions.sort((a, b) => {
         const versionA = a.version || 1;
@@ -432,7 +432,7 @@ export class OriginalsAsset {
     };
     
     // Add to resources array (immutable - don't modify old resource)
-    (this.resources as AssetResource[]).push(newResource);
+    this.resources.push(newResource);
     
     // Track in version manager
     this.versionManager.addVersion(
@@ -474,7 +474,7 @@ export class OriginalsAsset {
     
     // Emit asynchronously (don't block)
     queueMicrotask(() => {
-      this.eventEmitter.emit(event);
+      void this.eventEmitter.emit(event);
     });
     
     return newResource;

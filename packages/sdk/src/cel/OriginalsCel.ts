@@ -30,10 +30,9 @@
  * ```
  */
 
-import type { 
-  EventLog, 
-  ExternalReference, 
-  DataIntegrityProof, 
+import type {
+  EventLog,
+  ExternalReference,
   VerificationResult,
   VerifyOptions,
   AssetState
@@ -245,7 +244,7 @@ export class OriginalsCel {
     switch (currentLayer) {
       case 'peer':
         return this.peerManager.update(log, data);
-      case 'webvh':
+      case 'webvh': {
         // For webvh, we need to use the webvh manager
         // Get domain from the log if possible
         const webvhDomain = this.extractDomainFromLog(log);
@@ -253,11 +252,15 @@ export class OriginalsCel {
           // webvh manager doesn't have update, use peer manager's algorithm
           () => this.peerManager.update(log, data)
         );
+      }
       case 'btco':
         // For btco, updates use the same underlying algorithm
         return this.peerManager.update(log, data);
-      default:
-        throw new Error(`Unknown layer: ${currentLayer}`);
+      default: {
+        // TypeScript exhaustiveness check
+        const _exhaustive: never = currentLayer;
+        throw new Error(`Unknown layer: ${String(_exhaustive)}`);
+      }
     }
   }
 
@@ -335,15 +338,16 @@ export class OriginalsCel {
     switch (targetLayer) {
       case 'peer':
         throw new Error('Cannot migrate to peer layer - it is the initial layer');
-        
-      case 'webvh':
+
+      case 'webvh': {
         if (currentLayer !== 'peer') {
           throw new Error(`Invalid migration: ${currentLayer} → webvh. Can only migrate peer → webvh.`);
         }
         const domain = options?.domain || this.config.webvh?.domain;
         return this.getWebVHManager(domain).migrate(log);
-        
-      case 'btco':
+      }
+
+      case 'btco': {
         if (currentLayer === 'peer') {
           // Need to do two-step migration: peer → webvh → btco
           throw new Error(
@@ -352,12 +356,16 @@ export class OriginalsCel {
           );
         }
         if (currentLayer !== 'webvh') {
-          throw new Error(`Invalid migration: ${currentLayer} → btco. Can only migrate webvh → btco.`);
+          throw new Error(`Invalid migration: ${String(currentLayer)} → btco. Can only migrate webvh → btco.`);
         }
         return this.btcoManager.migrate(log);
-        
-      default:
-        throw new Error(`Unknown target layer: ${targetLayer}`);
+      }
+
+      default: {
+        // TypeScript exhaustiveness check
+        const _exhaustive: never = targetLayer;
+        throw new Error(`Unknown target layer: ${String(_exhaustive)}`);
+      }
     }
   }
 
@@ -378,14 +386,15 @@ export class OriginalsCel {
   getCurrentState(log: EventLog): AssetState {
     // Determine current layer and use appropriate manager
     const currentLayer = this.getCurrentLayer(log);
-    
+
     switch (currentLayer) {
       case 'peer':
         return this.peerManager.getCurrentState(log);
-      case 'webvh':
+      case 'webvh': {
         // WebVH manager also handles state derivation correctly
         const domain = this.extractDomainFromLog(log) || 'unknown.com';
         return this.getWebVHManager(domain).getCurrentState(log);
+      }
       case 'btco':
         return this.btcoManager.getCurrentState(log);
       default:
