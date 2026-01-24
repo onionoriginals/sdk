@@ -2,17 +2,17 @@
 
 ## Working Context (For Ralph)
 
-**[RECOVERED] Current Task: Fix SDK Package Build & Lint Errors**
+**Current Task: Fix SDK Package Build & Lint Errors**
 
 ⚠️ **CRITICAL: Previous lint fixes broke the build!**
 
-Ralph's previous session reduced lint errors from 97 → 43, but introduced **22 TypeScript build errors**. The approach was incorrect:
+Ralph's previous session reduced lint errors from 97 → 43, but introduced **24 TypeScript build errors**. The approach was incorrect:
 - ❌ **WRONG**: Replacing types with `Record<string, unknown>` or `{}`
 - ✅ **RIGHT**: Keep existing types, use targeted assertions like `as unknown as TargetType`
 
-### Current State
-- **Build errors**: 22 TypeScript errors (needs fix first!)
-- **Lint errors**: 25 errors + 122 warnings
+### Current State (2026-01-24)
+- **Build errors**: 24 TypeScript errors
+- **Lint errors**: 12 errors + 88 warnings
 - **Working tree**: 40 modified files with uncommitted changes
 
 ---
@@ -23,58 +23,87 @@ Ralph's previous session reduced lint errors from 97 → 43, but introduced **22
 
 **Problem**: Validator functions use `Record<string, unknown>` instead of actual types.
 
-**Fix**: Change method signatures to use proper types:
+**Fix**: Change method signatures to use proper types. The functions validate generic objects but are called with specific types, so we should either:
+- A) Make the signatures accept the specific types (`AssetResource[][]`, `OriginalsAsset[]`, etc.)
+- B) Keep generic signatures but have callers cast to `Record<string, unknown>[]`
+
+**Preferred approach (A)** - proper types:
 
 ```typescript
-// Line 279 - WRONG:
+// Line 279 - Change from:
 validateBatchCreate(resourcesList: Array<Array<Record<string, unknown>>>): ValidationResult[]
-// CORRECT:
+// To:
 validateBatchCreate(resourcesList: AssetResource[][]): ValidationResult[]
 
-// Line 323 - WRONG:
+// Line 323 - Change from:
 validateBatchInscription(assets: Array<Record<string, unknown>>): ValidationResult[]
-// CORRECT:
+// To:
 validateBatchInscription(assets: OriginalsAsset[]): ValidationResult[]
 
-// Line 355 - WRONG:
+// Line 355 - Change from:
 validateBatchTransfer(transfers: Array<{ asset: Record<string, unknown>; to: string }>): ValidationResult[]
-// CORRECT:
+// To:
 validateBatchTransfer(transfers: Array<{ asset: OriginalsAsset; to: string }>): ValidationResult[]
 ```
 
-**Add imports at top:**
+**Add imports at top of file:**
 ```typescript
-import type { AssetResource, OriginalsAsset } from '../types';
-// Or import from where these types are actually defined
+import type { AssetResource } from '../types';
+import type { OriginalsAsset } from './OriginalsAsset';
+```
+
+**Inside the functions**, change type casts from `Record<string, unknown>` to actual types:
+- Line 301: `const resObj: AssetResource = resource;` (instead of `Record<string, unknown>`)
+- Similar changes for asset properties access in the other validators
+
+---
+
+### 2. `packages/sdk/src/vc/CredentialManager.ts` — Lines 171, 222, 737, 884
+
+**Lines 171 and 222 — Missing `Promise<>` in return type:**
+```typescript
+// Line 171 - WRONG:
+async signCredential(...): VerifiableCredential {
+// CORRECT:
+async signCredential(...): Promise<VerifiableCredential> {
+
+// Line 222 - WRONG:
+async signCredentialWithExternalSigner(...): VerifiableCredential {
+// CORRECT:
+async signCredentialWithExternalSigner(...): Promise<VerifiableCredential> {
+```
+
+**Line 737 and 884 — Cast through unknown:**
+```typescript
+// Line 737 - WRONG:
+const canonicalized = await canonicalizeDocument(credential as Record<string, unknown>);
+// CORRECT:
+const canonicalized = await canonicalizeDocument(credential as unknown as Record<string, unknown>);
+
+// Line 884 - Same pattern (check actual code at this line)
 ```
 
 ---
 
-### 2. `packages/sdk/src/did/DIDManager.ts` — Lines 55, 58, 63, 65, 182, 205
+### 3. `packages/sdk/src/did/DIDManager.ts` — Lines 55, 58, 63, 65, 182, 205
 
-**Problem**: Cast from `Record<string, unknown>` to `DIDDocument` fails because the types don't overlap.
+**Problem**: The `resolved` variable was typed as `{}` instead of a proper type (from previous incorrect fix). Cast issues from `Record<string, unknown>` to `DIDDocument`.
 
-**Fix**: Use `as unknown as DIDDocument` pattern:
+**Lines 55, 58** - Find the variable declaration and fix the type annotation. The variable accessing `.length` needs to be properly typed.
 
+**Lines 63, 65, 182, 205** - Use `as unknown as DIDDocument` pattern:
 ```typescript
 // Line 63 - WRONG:
 return { didDocument: resolved as DIDDocument, keyPair };
 // CORRECT:
 return { didDocument: resolved as unknown as DIDDocument, keyPair };
 
-// Line 65 - WRONG:
-return resolved as DIDDocument;
-// CORRECT:
-return resolved as unknown as DIDDocument;
+// Same pattern for lines 65, 182, 205
 ```
-
-Also for lines 182, 205 - same pattern.
-
-For lines 55 and 58, the issue is accessing `.length` on `{}`. Find the actual variable declaration and fix the type annotation (likely the `resolved` variable got typed as `{}` instead of a proper type).
 
 ---
 
-### 3. `packages/sdk/src/did/BtcoDidResolver.ts` — Line 160
+### 4. `packages/sdk/src/did/BtcoDidResolver.ts` — Line 160
 
 **Problem**: Same `Record<string, unknown>` → `DIDDocument` cast issue.
 
@@ -88,33 +117,38 @@ const didDocument = inscriptionData.metadata as unknown as DIDDocument;
 
 ---
 
-### 4. `packages/sdk/src/lifecycle/LifecycleManager.ts` — Lines 269, 297, 695, 740, 808, 968, 1129, 1425
+### 5. `packages/sdk/src/lifecycle/LifecycleManager.ts` — Lines 269, 297, 694, 722, 739, 807, 967, 1128, 1424
 
-**Multiple issues:**
-
-**Lines 269, 297, 695, 740** - Private property access:
+**Lines 269, 297, 694, 739** - Private property access (cast through unknown):
 ```typescript
 // WRONG:
 void (asset as { eventEmitter: EventEmitter }).eventEmitter.emit(event);
-// CORRECT - access via internal method or cast through unknown:
-void ((asset as unknown as { eventEmitter: EventEmitter }).eventEmitter.emit(event));
-// OR better - add a public method to OriginalsAsset like `emitEvent()`
+// CORRECT:
+void (asset as unknown as { eventEmitter: EventEmitter }).eventEmitter.emit(event);
 ```
 
-**Line 808** - Null check needed:
+**Line 722** - Wrong cast (trying to cast sync result as Promise):
+The issue is `signCredentialWithExternalSigner` is async but returns `VerifiableCredential` instead of `Promise<VerifiableCredential>`. After fixing CredentialManager.ts lines 171/222, this cast is no longer needed:
+```typescript
+// Line 722 - WRONG (once CredentialManager is fixed, change to):
+? await this.credentialManager.signCredentialWithExternalSigner(unsigned, signer)
+// Remove the 'as Promise<VerifiableCredential>' cast entirely
+```
+
+**Line 807** - Null check needed:
 ```typescript
 // WRONG:
 privateKey = await this.keyStore.getPrivateKey(vmId);
-// The vmId could be null, so add a null check before calling
+// The vmId could be null, so add a null check before calling:
 if (!vmId) throw new Error('Verification method ID is null');
 privateKey = await this.keyStore.getPrivateKey(vmId);
 ```
 
-**Lines 968, 1129, 1425** - These errors stem from BatchOperations.ts having wrong types. After fixing BatchOperations.ts, these should resolve automatically.
+**Lines 967, 1128, 1424** - These errors will resolve after fixing BatchOperations.ts type signatures.
 
 ---
 
-### 5. `packages/sdk/src/utils/cbor.ts` — Lines 20, 24
+### 6. `packages/sdk/src/utils/cbor.ts` — Lines 20, 24
 
 **Problem**: `ArrayBufferLike` (could be SharedArrayBuffer) assigned to `ArrayBuffer`.
 
@@ -125,86 +159,95 @@ arrayBuffer = bytes.buffer;
 // CORRECT:
 arrayBuffer = bytes.buffer.slice(0) as ArrayBuffer;
 
-// Line 24 - WRONG:
-arrayBuffer = bufferInstance.buffer.slice(...)
-// CORRECT - the slice is good but needs assertion:
+// Line 24 - the slice is good but needs assertion:
 arrayBuffer = bufferInstance.buffer.slice(...) as ArrayBuffer;
 ```
 
 ---
 
-### 6. `packages/sdk/src/vc/Verifier.ts` — Lines 21, 45
+### 7. `packages/sdk/src/vc/Verifier.ts` — Lines 21, 45
 
 **Problem**: `Proof` interface doesn't have `cryptosuite` property that `DataIntegrityProof` requires.
 
 **Fix**: Cast through unknown:
 ```typescript
-// Line 21 - WRONG:
+// Lines 21, 45 - WRONG:
 const result = await DataIntegrityProofManager.verifyProof(vc, proof, { documentLoader: loader });
 // CORRECT:
-const result = await DataIntegrityProofManager.verifyProof(vc, proof as unknown as DataIntegrityProof, { documentLoader: loader });
-
-// Line 45 - same fix
+const result = await DataIntegrityProofManager.verifyProof(
+  vc,
+  proof as unknown as DataIntegrityProof,
+  { documentLoader: loader }
+);
 ```
 
-**Add import:**
+**Add import if not present:**
 ```typescript
-import type { DataIntegrityProof } from './proofs/data-integrity';
-// Or wherever DataIntegrityProof is exported from
+import type { DataIntegrityProof } from '../types';
 ```
 
 ---
 
-### 7. `packages/sdk/src/vc/CredentialManager.ts` — Lines 737, 884
+## Lint Errors to Fix (After Build Passes)
 
-**Line 737** - `VerifiableCredential` to `Record<string, unknown>`:
+### 8. Example Files — `await-thenable` errors
+
+**Files:**
+- `packages/sdk/src/examples/create-module-original.ts:368`
+- `packages/sdk/src/examples/full-lifecycle-flow.ts:171,176`
+
+**Problem**: `validateMigration()` is synchronous but being awaited.
+
+**Fix**: Remove `await` from these calls:
 ```typescript
 // WRONG:
-const canonicalized = await canonicalizeDocument(credential as Record<string, unknown>);
+const validation = await sdk.lifecycle.validateMigration(asset, 'did:btco');
 // CORRECT:
-const canonicalized = await canonicalizeDocument(credential as unknown as Record<string, unknown>);
+const validation = sdk.lifecycle.validateMigration(asset, 'did:btco');
 ```
-
-**Line 884** - Same pattern, cast through unknown.
 
 ---
 
-## Lint Errors (After Build Passes)
+### 9. MigrationManager.ts — Multiple lint errors
 
-### `require-await` errors — CredentialManager.ts lines 449, 503, 560, 622
+**Location**: `packages/sdk/src/migration/MigrationManager.ts`
 
-These methods are marked `async` but don't use `await`. Fix:
+Many `no-unsafe-*` warnings stem from `any` types. The main lint ERROR is:
+- Line 302: `require-await` - async function `getMigrationHistory` has no await
+
+**Fix for line 302**:
 ```typescript
-// Option A: Remove async keyword (preferred if return type is synchronous)
-issueResourceCredential(...): VerifiableCredential { ... }
+// Option A (preferred if nothing awaits): Remove async keyword
+getMigrationHistory(assetId: string): MigrationRecord[] {
+  // ... implementation
+}
 
-// Option B: Wrap return in Promise.resolve if it must be async
-async issueResourceCredential(...): Promise<VerifiableCredential> {
-  return Promise.resolve(this.createCredentialWithChain(...));
+// Option B: Wrap return in Promise.resolve
+async getMigrationHistory(assetId: string): Promise<MigrationRecord[]> {
+  return Promise.resolve(this.history.get(assetId) || []);
 }
 ```
 
-**Preferred**: Option A — check if callers expect a Promise. If not, just remove `async`.
-
-### Remaining lint errors in MigrationManager.ts
-
-The lint output shows many `no-unsafe-*` warnings in `/packages/sdk/src/migration/MigrationManager.ts`. These are mostly about accessing properties on `any` typed values. Fix with proper type assertions.
+The other errors (lines 389, 404, 501, 503, 507, 509, 546) need proper type assertions for function arguments.
 
 ---
 
 ## Step-by-Step Fix Order
 
-1. **Fix BatchOperations.ts first** — This fixes 3 build errors AND unblocks LifecycleManager errors
-2. **Fix cbor.ts** — 2 build errors
-3. **Fix DIDManager.ts** — 6 build errors
-4. **Fix BtcoDidResolver.ts** — 1 build error
-5. **Fix LifecycleManager.ts** — Remaining 4 build errors
-6. **Fix Verifier.ts** — 2 build errors
-7. **Fix CredentialManager.ts** — 2 build errors + 4 lint errors
-8. **Run build** — Verify 0 errors
-9. **Run lint** — Fix remaining errors
-10. **Run tests** — Verify all pass
-11. **Commit** — `fix(sdk): resolve lint and build errors`
+1. **Fix BatchOperations.ts first** — This fixes 3 build errors AND unblocks LifecycleManager errors (967, 1128, 1424)
+2. **Fix CredentialManager.ts lines 171, 222** — Fixes 2 build errors AND unblocks LifecycleManager:722
+3. **Fix cbor.ts** — 2 build errors
+4. **Fix DIDManager.ts** — 6 build errors
+5. **Fix BtcoDidResolver.ts** — 1 build error
+6. **Fix LifecycleManager.ts** — Remaining ~5 build errors
+7. **Fix Verifier.ts** — 2 build errors
+8. **Fix CredentialManager.ts lines 737, 884** — 2 build errors
+9. **Run build** — Verify 0 errors
+10. **Fix example files** — Remove `await` from sync calls
+11. **Fix MigrationManager.ts** — require-await and unsafe-argument errors
+12. **Run lint** — Verify 0 errors
+13. **Run tests** — Verify all pass
+14. **Commit** — `fix(sdk): resolve lint and build errors`
 
 ---
 
@@ -217,6 +260,15 @@ const doc = result as DIDDocument;
 
 // RIGHT - cast through unknown
 const doc = result as unknown as DIDDocument;
+```
+
+**When async function has wrong return type:**
+```typescript
+// WRONG
+async signCredential(): VerifiableCredential { ... }
+
+// RIGHT
+async signCredential(): Promise<VerifiableCredential> { ... }
 ```
 
 **When dealing with ArrayBuffer types:**
@@ -269,7 +321,7 @@ const buf = uint8Array.buffer.slice(0) as ArrayBuffer;
 
 ### 0. [IN PROGRESS] Fix SDK Package Build & Lint Errors
 
-**Status**: Build broken (22 errors), 25 lint errors remain.
+**Status**: Build broken (24 errors), 12 lint errors remain.
 
 See Working Context above for detailed fix instructions.
 
@@ -347,8 +399,8 @@ The auth package has only 14 tests covering 2 test files. Missing coverage for c
 |------|--------|
 | **Auth Package Implementation** | ✅ Feature complete (27/27 functions) |
 | **Auth Package Lint** | ✅ Passes |
-| **SDK Package Build** | ❌ 22 TypeScript errors (needs fix) |
-| **SDK Package Lint** | ⚠️ 25 errors + 122 warnings |
+| **SDK Package Build** | ❌ 24 TypeScript errors (needs fix) |
+| **SDK Package Lint** | ⚠️ 12 errors + 88 warnings |
 | **Spec Coverage** | ⚠️ 3 deviations to resolve |
 | **Test Coverage** | ⚠️ ~12% (critical gaps) |
 | **Tests** | ⚠️ Unknown (build broken) |
