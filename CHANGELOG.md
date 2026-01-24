@@ -1,3 +1,10 @@
+## [1.6.1](https://github.com/onionoriginals/sdk/compare/v1.6.0...v1.6.1) (2026-01-24)
+
+
+### Bug Fixes
+
+* remove npm token ([8b638cd](https://github.com/onionoriginals/sdk/commit/8b638cd4ea768e1deec8992f302bf0c654efcc4c))
+
 # [1.6.0](https://github.com/onionoriginals/sdk/compare/v1.5.0...v1.6.0) (2026-01-24)
 
 
