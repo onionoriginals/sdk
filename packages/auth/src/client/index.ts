@@ -33,5 +33,4 @@ export {
 
 export { TurnkeyDIDSigner, createDIDWithTurnkey } from './turnkey-did-signer';
 
-
-
+export { sendOtp, verifyOtp, type ServerAuthOptions } from './server-auth';
