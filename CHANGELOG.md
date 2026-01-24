@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/onionoriginals/sdk/compare/v1.5.0...v1.6.0) (2026-01-24)
+
+
+### Features
+
+* bump version ([6310894](https://github.com/onionoriginals/sdk/commit/6310894f312fe750827170a7ac67bab0ba855b64))
+
 # [1.5.0](https://github.com/onionoriginals/sdk/compare/v1.4.5...v1.5.0) (2026-01-04)
 
 
