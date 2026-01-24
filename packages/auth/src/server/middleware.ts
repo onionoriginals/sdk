@@ -41,7 +41,8 @@ export function createAuthMiddleware(
   return async (req: Request, res: Response, next: NextFunction): Promise<void | Response> => {
     try {
       // Get JWT token from HTTP-only cookie
-      const token = req.cookies?.[cookieName];
+      const cookies = req.cookies as Record<string, string> | undefined;
+      const token = cookies?.[cookieName];
 
       if (!token) {
         return res.status(401).json({ error: 'Not authenticated' });
@@ -101,7 +102,8 @@ export function createOptionalAuthMiddleware(
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const token = req.cookies?.[cookieName];
+      const cookies = req.cookies as Record<string, string> | undefined;
+      const token = cookies?.[cookieName];
 
       if (!token) {
         next();
