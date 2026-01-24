@@ -1,0 +1,888 @@
+{
+  "id": "originals-cel",
+  "title": "Originals CEL Reference Implementation",
+  "version": "1.0.0",
+  "created": "2026-01-20",
+  "status": "planned",
+  "summary": "Reference implementation combining the Originals Protocol with W3C CCG Cryptographic Event Log (CEL) specification",
+  "specs": {
+    "cel": "https://w3c-ccg.github.io/cel-spec/",
+    "originals": "./originals-whitepaper.md"
+  },
+  "config": {
+    "language": "typescript",
+    "layers": ["did:peer", "did:webvh", "did:btco"],
+    "cryptosuite": "eddsa-jcs-2022",
+    "witnesses": {
+      "did:peer": "none",
+      "did:webvh": "optional-http",
+      "did:btco": "bitcoin-required"
+    }
+  },
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Core CEL Implementation",
+      "description": "Data model, algorithms, and specification document",
+      "stories": ["US-001", "US-002", "US-003", "US-004", "US-005", "US-006", "US-007", "US-010", "US-015"]
+    },
+    {
+      "id": "phase-2",
+      "name": "Witness Services",
+      "description": "HTTP and Bitcoin witness implementations",
+      "stories": ["US-008", "US-009"]
+    },
+    {
+      "id": "phase-3",
+      "name": "Layer Integrations",
+      "description": "did:peer, did:webvh, did:btco managers",
+      "stories": ["US-011", "US-012", "US-013", "US-014"]
+    },
+    {
+      "id": "phase-4",
+      "name": "CLI Tools",
+      "description": "Command-line interface for CEL operations",
+      "stories": ["US-016", "US-017", "US-018", "US-019", "US-020"]
+    },
+    {
+      "id": "phase-5",
+      "name": "Explorer Integration",
+      "description": "React hooks and UI components for Explorer app",
+      "stories": ["US-021", "US-022", "US-023", "US-024", "US-025", "US-026", "US-027"]
+    },
+    {
+      "id": "phase-6",
+      "name": "Server & Finalization",
+      "description": "API endpoints, database, tests, and documentation",
+      "stories": ["US-028", "US-029", "US-030", "US-031", "US-032"]
+    }
+  ],
+  "stories": [
+    {
+      "id": "US-001",
+      "title": "Define Originals CEL Application Specification",
+      "description": "As a protocol implementer, I need a formal application specification document so that any implementation can interoperate.",
+      "type": "documentation",
+      "priority": "high",
+      "estimate": "4h",
+      "dependencies": [],
+      "files": ["docs/ORIGINALS_CEL_SPEC.md"],
+      "acceptance": [
+        "Create docs/ORIGINALS_CEL_SPEC.md defining the Originals CEL Application Specification",
+        "Document how cryptographic control is established (DID-based key authorization)",
+        "Document how current asset state is derived from the event log",
+        "Document witness validation rules per layer (none/HTTP/Bitcoin)",
+        "Include JSON examples for each event type",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Implement CEL Event Log Data Model",
+      "description": "As a developer, I need TypeScript types and classes representing the CEL data model so I can work with event logs programmatically.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "3h",
+      "dependencies": [],
+      "files": ["packages/sdk/src/cel/types.ts"],
+      "acceptance": [
+        "Create src/cel/types.ts with interfaces: EventLog, LogEntry, ExternalReference, EventWitness",
+        "EventLog contains events: LogEntry[] and optional previousLog reference",
+        "LogEntry contains type ('create' | 'update' | 'deactivate'), data, previousEvent, proof[]",
+        "ExternalReference contains url[], mediaType, digestMultibase (required)",
+        "Types align exactly with CEL spec Section 2 (Data Model)",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Implement Create Event Algorithm",
+      "description": "As a developer, I need to create new event logs for assets so that I can establish cryptographic provenance from the first moment.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "4h",
+      "dependencies": ["US-002"],
+      "files": ["packages/sdk/src/cel/algorithms/createEvent.ts"],
+      "acceptance": [
+        "Create src/cel/algorithms/createEvent.ts implementing CEL Section 3.2 'Create Event'",
+        "Function signature: createEventLog(data: AssetData, options: CreateOptions): Promise<EventLog>",
+        "First event has type: 'create' and no previousEvent",
+        "Proof is generated using eddsa-jcs-2022 by default",
+        "Returns a valid EventLog with one entry",
+        "Unit tests verify algorithm matches CEL spec",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Implement Update Event Algorithm",
+      "description": "As a developer, I need to append update events to an existing log so that asset changes are recorded with full history.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "4h",
+      "dependencies": ["US-002", "US-003"],
+      "files": ["packages/sdk/src/cel/algorithms/updateEvent.ts"],
+      "acceptance": [
+        "Create src/cel/algorithms/updateEvent.ts implementing CEL Section 3.4 'Update Event Log'",
+        "Function signature: updateEventLog(log: EventLog, update: UpdateData, options: UpdateOptions): Promise<EventLog>",
+        "New event has type: 'update' and previousEvent referencing prior event's digest",
+        "Proof is generated and appended",
+        "Original log is not mutated (returns new log)",
+        "Unit tests verify hash chain integrity",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Implement Deactivate Event Algorithm",
+      "description": "As a developer, I need to deactivate event logs when assets are burned or permanently transferred so the log is properly closed.",
+      "type": "feature",
+      "priority": "medium",
+      "estimate": "3h",
+      "dependencies": ["US-002", "US-004"],
+      "files": ["packages/sdk/src/cel/algorithms/deactivateEvent.ts"],
+      "acceptance": [
+        "Create src/cel/algorithms/deactivateEvent.ts implementing CEL Section 3.5 'Deactivate Event Log'",
+        "Function signature: deactivateEventLog(log: EventLog, reason: string, options: DeactivateOptions): Promise<EventLog>",
+        "Final event has type: 'deactivate'",
+        "No further updates are valid after deactivation",
+        "Unit tests verify deactivation seals the log",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Implement Verify Event Log Algorithm",
+      "description": "As a verifier, I need to cryptographically verify an entire event log so I can trust its integrity.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "6h",
+      "dependencies": ["US-002", "US-003", "US-004"],
+      "files": ["packages/sdk/src/cel/algorithms/verifyEventLog.ts"],
+      "acceptance": [
+        "Create src/cel/algorithms/verifyEventLog.ts implementing CEL Section 3.6 'Verify Event Log'",
+        "Function signature: verifyEventLog(log: EventLog, options: VerifyOptions): Promise<VerificationResult>",
+        "Verifies each event's proof using the specified cryptosuite",
+        "Verifies hash chain (previousEvent references are correct)",
+        "Verifies witness proofs if present",
+        "Returns { verified: boolean, errors: string[], events: EventVerification[] }",
+        "Unit tests cover valid logs, tampered logs, and broken chains",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-007",
+      "title": "Implement Witness Event Algorithm",
+      "description": "As a developer, I need to add witness proofs to events so third parties can attest to event timing.",
+      "type": "feature",
+      "priority": "medium",
+      "estimate": "3h",
+      "dependencies": ["US-002"],
+      "files": ["packages/sdk/src/cel/algorithms/witnessEvent.ts"],
+      "acceptance": [
+        "Create src/cel/algorithms/witnessEvent.ts implementing CEL Section 3.3 'Witness Event'",
+        "Function signature: witnessEvent(event: LogEntry, witness: WitnessService): Promise<LogEntry>",
+        "Witness proof is appended to the event's proof array (not replacing controller proof)",
+        "Supports pluggable witness services via interface",
+        "Unit tests verify multi-proof structure",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-008",
+      "title": "Implement HTTP Witness Service",
+      "description": "As a developer using did:webvh, I need an HTTP witness service integration so events can be timestamped by trusted servers.",
+      "type": "feature",
+      "priority": "medium",
+      "estimate": "4h",
+      "dependencies": ["US-007"],
+      "files": ["packages/sdk/src/cel/witnesses/HttpWitness.ts"],
+      "acceptance": [
+        "Create src/cel/witnesses/HttpWitness.ts implementing WitnessService interface",
+        "Sends digestMultibase to configured witness endpoint",
+        "Receives and validates witness proof response",
+        "Configurable witness URLs",
+        "Graceful handling of witness unavailability",
+        "Integration test with mock witness server",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-009",
+      "title": "Implement Bitcoin Witness Service",
+      "description": "As a developer using did:btco, I need Bitcoin-based witnessing so events are anchored to Bitcoin's blockchain.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "6h",
+      "dependencies": ["US-007"],
+      "files": ["packages/sdk/src/cel/witnesses/BitcoinWitness.ts"],
+      "acceptance": [
+        "Create src/cel/witnesses/BitcoinWitness.ts implementing WitnessService interface",
+        "Integrates with existing BitcoinManager for inscription",
+        "Witness proof includes Bitcoin transaction ID and block height",
+        "Proof format compatible with OpenTimestamps-style verification",
+        "Uses the satoshi ordinal as the witness anchor",
+        "Integration test with mock Bitcoin provider",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-010",
+      "title": "Implement External Reference Handler",
+      "description": "As a developer, I need to handle external resource references so large assets aren't embedded in the log.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "4h",
+      "dependencies": ["US-002"],
+      "files": ["packages/sdk/src/cel/ExternalReferenceManager.ts"],
+      "acceptance": [
+        "Create src/cel/ExternalReferenceManager.ts",
+        "Function createExternalReference(content: Buffer, options: RefOptions): ExternalReference",
+        "Computes digestMultibase as Multibase-encoded (base64url-nopad) Multihash (sha2-256)",
+        "Stores content at provided URLs or returns upload instructions",
+        "Function resolveExternalReference(ref: ExternalReference): Promise<Buffer>",
+        "Verifies content hash matches digestMultibase on retrieval",
+        "Unit tests verify hash computation matches CEL spec",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-011",
+      "title": "Implement did:peer CEL Integration",
+      "description": "As a creator, I need to create CEL-based assets in did:peer layer so I can experiment offline at zero cost.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "4h",
+      "dependencies": ["US-003", "US-004", "US-006"],
+      "files": ["packages/sdk/src/cel/layers/PeerCelManager.ts"],
+      "acceptance": [
+        "Create src/cel/layers/PeerCelManager.ts",
+        "Creates self-contained event logs with did:peer DIDs",
+        "No witness requirement (witnesses array empty)",
+        "Exports log as JSON or CBOR",
+        "Verification is fully offline",
+        "Integration test: create → update → verify cycle",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-012",
+      "title": "Implement did:webvh CEL Integration",
+      "description": "As a creator, I need to publish CEL-based assets to did:webvh so they become discoverable on the web.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "6h",
+      "dependencies": ["US-011", "US-008"],
+      "files": ["packages/sdk/src/cel/layers/WebVHCelManager.ts"],
+      "acceptance": [
+        "Create src/cel/layers/WebVHCelManager.ts",
+        "Migrates did:peer log to did:webvh with migration event",
+        "Supports optional HTTP witnesses",
+        "Publishes log to /{userSlug}/cel/{assetId}.jsonl endpoint",
+        "DID document references the CEL log URL",
+        "Integration test: peer → webvh migration with witness",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-013",
+      "title": "Implement did:btco CEL Integration",
+      "description": "As a creator, I need to inscribe CEL-based assets on Bitcoin so ownership becomes transferable.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "8h",
+      "dependencies": ["US-012", "US-009"],
+      "files": ["packages/sdk/src/cel/layers/BtcoCelManager.ts"],
+      "acceptance": [
+        "Create src/cel/layers/BtcoCelManager.ts",
+        "Migrates did:webvh log to did:btco with migration event",
+        "Bitcoin witness is required (inscription provides timestamp)",
+        "Current state hash inscribed on unique satoshi",
+        "Log remains resolvable from web; Bitcoin provides ownership anchor",
+        "Integration test: webvh → btco migration",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-014",
+      "title": "Create Originals CEL SDK Entry Point",
+      "description": "As a developer, I need a unified SDK entry point so I can easily work with CEL-based Originals.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "4h",
+      "dependencies": ["US-011", "US-012", "US-013"],
+      "files": ["packages/sdk/src/cel/OriginalsCel.ts"],
+      "acceptance": [
+        "Create src/cel/OriginalsCel.ts as main entry class",
+        "Constructor accepts config: { layer: 'peer' | 'webvh' | 'btco', signer, witnesses? }",
+        "Methods: create(), update(), deactivate(), verify(), migrate(), getLog(), getCurrentState()",
+        "Delegates to appropriate layer manager based on config",
+        "Full JSDoc documentation",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-015",
+      "title": "Implement CEL Serialization (JSON and CBOR)",
+      "description": "As a developer, I need to serialize event logs in both JSON and CBOR formats as specified by CEL.",
+      "type": "feature",
+      "priority": "medium",
+      "estimate": "3h",
+      "dependencies": ["US-002"],
+      "files": [
+        "packages/sdk/src/cel/serialization/json.ts",
+        "packages/sdk/src/cel/serialization/cbor.ts"
+      ],
+      "acceptance": [
+        "Create src/cel/serialization/json.ts for JSON serialization",
+        "Create src/cel/serialization/cbor.ts for CBOR serialization (using existing cbor-js dependency)",
+        "JSON is default; CBOR provides ~50% size reduction as noted in CEL spec",
+        "Round-trip tests: serialize → deserialize → verify equality",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-016",
+      "title": "Implement CLI Tool - Create Asset",
+      "description": "As a user, I want a CLI command to create a new CEL-based Original so I can work without a GUI.",
+      "type": "feature",
+      "priority": "medium",
+      "estimate": "4h",
+      "dependencies": ["US-014"],
+      "files": ["packages/sdk/src/cel/cli/create.ts"],
+      "acceptance": [
+        "Create src/cel/cli/create.ts command",
+        "Usage: originals-cel create --name \"My Asset\" --file ./content.png --layer peer",
+        "Outputs event log to stdout or specified file",
+        "Supports --output json|cbor format flag",
+        "Generates new key pair if none provided",
+        "Clear error messages for invalid input",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-017",
+      "title": "Implement CLI Tool - Verify Log",
+      "description": "As a user, I want a CLI command to verify a CEL event log so I can audit any asset's provenance.",
+      "type": "feature",
+      "priority": "medium",
+      "estimate": "3h",
+      "dependencies": ["US-006", "US-020"],
+      "files": ["packages/sdk/src/cel/cli/verify.ts"],
+      "acceptance": [
+        "Create src/cel/cli/verify.ts command",
+        "Usage: originals-cel verify --log ./asset.cel.json",
+        "Outputs verification result with event-by-event breakdown",
+        "Shows witness attestations if present",
+        "Exit code 0 on success, 1 on failure",
+        "Clear error messages showing which event/proof failed",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-018",
+      "title": "Implement CLI Tool - Migrate Asset",
+      "description": "As a user, I want a CLI command to migrate assets between layers so I can upgrade provenance as needed.",
+      "type": "feature",
+      "priority": "medium",
+      "estimate": "4h",
+      "dependencies": ["US-014", "US-020"],
+      "files": ["packages/sdk/src/cel/cli/migrate.ts"],
+      "acceptance": [
+        "Create src/cel/cli/migrate.ts command",
+        "Usage: originals-cel migrate --log ./asset.cel.json --to webvh --domain example.com",
+        "Adds migration event to log",
+        "For webvh: publishes to web endpoint",
+        "For btco: creates Bitcoin transaction (requires wallet)",
+        "Outputs updated log",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-019",
+      "title": "Implement CLI Tool - Inspect Log",
+      "description": "As a user, I want a CLI command to inspect a CEL event log in human-readable format.",
+      "type": "feature",
+      "priority": "low",
+      "estimate": "3h",
+      "dependencies": ["US-006", "US-020"],
+      "files": ["packages/sdk/src/cel/cli/inspect.ts"],
+      "acceptance": [
+        "Create src/cel/cli/inspect.ts command",
+        "Usage: originals-cel inspect --log ./asset.cel.json",
+        "Pretty-prints event timeline with timestamps",
+        "Shows current state derived from events",
+        "Lists all witnesses and their attestation times",
+        "Shows layer history (peer → webvh → btco)",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-020",
+      "title": "Create CLI Entry Point and Help",
+      "description": "As a user, I need a unified CLI entry point with help documentation.",
+      "type": "feature",
+      "priority": "medium",
+      "estimate": "2h",
+      "dependencies": ["US-016"],
+      "files": ["packages/sdk/src/cel/cli/index.ts"],
+      "acceptance": [
+        "Create src/cel/cli/index.ts as CLI entry",
+        "Add bin entry to package.json: \"originals-cel\": \"./dist/cel/cli/index.js\"",
+        "Subcommands: create, verify, migrate, inspect, witness",
+        "--help shows usage for all commands",
+        "--version shows package version",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-021",
+      "title": "React Hook - useOriginalsCel",
+      "description": "As a frontend developer, I need React hooks to work with CEL-based Originals in the Explorer.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "4h",
+      "dependencies": ["US-014"],
+      "files": ["packages/sdk/src/cel/react/useOriginalsCel.ts"],
+      "acceptance": [
+        "Create src/cel/react/useOriginalsCel.ts",
+        "Hook returns: { create, update, verify, migrate, isLoading, error }",
+        "Integrates with TurnkeySessionContext for signing",
+        "Handles async operations with proper loading states",
+        "Uses React Query for caching",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-022",
+      "title": "React Hook - useCelEventLog",
+      "description": "As a frontend developer, I need to fetch and display CEL event logs for assets.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "3h",
+      "dependencies": ["US-006"],
+      "files": ["packages/sdk/src/cel/react/useCelEventLog.ts"],
+      "acceptance": [
+        "Create src/cel/react/useCelEventLog.ts",
+        "Hook signature: useCelEventLog(assetId: string)",
+        "Returns: { log, events, currentState, isLoading, error, refetch }",
+        "Fetches log from appropriate endpoint based on layer",
+        "Automatically verifies log on fetch",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-023",
+      "title": "Explorer Integration - CEL Event Timeline Component",
+      "description": "As an Explorer user, I want to see the CEL event timeline for any asset so I can understand its full history.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "6h",
+      "dependencies": ["US-022"],
+      "files": ["explorer/src/components/cel/CelEventTimeline.tsx"],
+      "acceptance": [
+        "Create explorer/src/components/cel/CelEventTimeline.tsx",
+        "Displays chronological list of events (create, updates, migrations, deactivation)",
+        "Each event shows: type, timestamp, data summary, proof status, witnesses",
+        "Expandable event details showing full data",
+        "Visual indicators for verified vs unverified events",
+        "Typecheck passes",
+        "Verify in browser"
+      ]
+    },
+    {
+      "id": "US-024",
+      "title": "Explorer Integration - CEL Verification Badge",
+      "description": "As an Explorer user, I want to see a verification badge on assets so I know their CEL log is valid.",
+      "type": "feature",
+      "priority": "medium",
+      "estimate": "3h",
+      "dependencies": ["US-022"],
+      "files": ["explorer/src/components/cel/CelVerificationBadge.tsx"],
+      "acceptance": [
+        "Create explorer/src/components/cel/CelVerificationBadge.tsx",
+        "Shows green checkmark when fully verified",
+        "Shows warning icon if any verification issues",
+        "Tooltip shows verification details (events verified, witness count)",
+        "Click opens full verification report modal",
+        "Typecheck passes",
+        "Verify in browser"
+      ]
+    },
+    {
+      "id": "US-025",
+      "title": "Explorer Integration - Asset Detail CEL Tab",
+      "description": "As an Explorer user, I want a dedicated CEL tab on asset detail pages showing provenance data.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "4h",
+      "dependencies": ["US-023", "US-024"],
+      "files": ["explorer/src/pages/original-detail.tsx"],
+      "acceptance": [
+        "Add 'Provenance' tab to explorer/src/pages/original-detail.tsx",
+        "Tab contains: CelEventTimeline, current state viewer, witness list",
+        "Shows raw CEL log with copy/download buttons",
+        "Links to witnesses (HTTP URLs or Bitcoin explorer for btco)",
+        "Typecheck passes",
+        "Verify in browser"
+      ]
+    },
+    {
+      "id": "US-026",
+      "title": "Explorer Integration - Create Original with CEL",
+      "description": "As an Explorer user, I want to create new Originals using the CEL format through the existing UI.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "6h",
+      "dependencies": ["US-021", "US-028"],
+      "files": ["explorer/src/pages/create-original-simple.tsx"],
+      "acceptance": [
+        "Modify explorer/src/pages/create-original-simple.tsx to use CEL backend",
+        "Creation flow: upload content → sign → generate CEL log → store",
+        "Event log is persisted with asset record",
+        "Shows CEL verification badge on success",
+        "Backwards compatible with existing non-CEL assets",
+        "Typecheck passes",
+        "Verify in browser"
+      ]
+    },
+    {
+      "id": "US-027",
+      "title": "Explorer Integration - Migrate with CEL",
+      "description": "As an Explorer user, I want to migrate assets between layers and see the migration recorded in the CEL log.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "6h",
+      "dependencies": ["US-021", "US-028"],
+      "files": ["explorer/src/pages/migrate-original-simple.tsx"],
+      "acceptance": [
+        "Modify explorer/src/pages/migrate-original-simple.tsx to use CEL backend",
+        "Migration adds proper update event with migration metadata",
+        "For webvh: shows witness options",
+        "For btco: integrates with existing Bitcoin flow",
+        "CEL log updated and re-published at new layer",
+        "Typecheck passes",
+        "Verify in browser"
+      ]
+    },
+    {
+      "id": "US-028",
+      "title": "Server API - CEL Log Endpoints",
+      "description": "As a developer, I need server endpoints to store and retrieve CEL logs.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "4h",
+      "dependencies": ["US-014", "US-030"],
+      "files": ["explorer/server/routes/cel.routes.ts"],
+      "acceptance": [
+        "Add POST /api/originals/:id/cel to create/update CEL log",
+        "Add GET /api/originals/:id/cel to retrieve CEL log (JSON)",
+        "Add GET /api/originals/:id/cel.cbor for CBOR format",
+        "Add POST /api/originals/:id/cel/verify to verify and return result",
+        "Authentication required for write operations",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-029",
+      "title": "Server API - Witness Endpoint",
+      "description": "As a witness service operator, I need an endpoint that can witness CEL events.",
+      "type": "feature",
+      "priority": "medium",
+      "estimate": "4h",
+      "dependencies": ["US-007"],
+      "files": ["explorer/server/routes/witness.routes.ts"],
+      "acceptance": [
+        "Add POST /api/witness endpoint",
+        "Accepts digestMultibase in request body",
+        "Returns signed witness proof",
+        "Uses server's Ed25519 key for signing",
+        "Rate limiting to prevent abuse",
+        "Optional: require authentication",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-030",
+      "title": "Database Schema - CEL Storage",
+      "description": "As a developer, I need database columns to store CEL logs alongside existing Original records.",
+      "type": "feature",
+      "priority": "high",
+      "estimate": "2h",
+      "dependencies": [],
+      "files": ["explorer/migrations/add-cel-columns.sql"],
+      "acceptance": [
+        "Add cel_log JSONB column to originals table (nullable for backwards compat)",
+        "Add cel_version integer column for format versioning",
+        "Add cel_verified_at timestamp column for caching verification",
+        "Create migration file",
+        "Update storage layer types",
+        "Typecheck passes"
+      ]
+    },
+    {
+      "id": "US-031",
+      "title": "Integration Tests - Full Lifecycle",
+      "description": "As a developer, I need comprehensive integration tests covering the full CEL lifecycle.",
+      "type": "test",
+      "priority": "high",
+      "estimate": "6h",
+      "dependencies": ["US-011", "US-012", "US-013"],
+      "files": ["packages/sdk/tests/integration/cel-lifecycle.test.ts"],
+      "acceptance": [
+        "Test: Create peer asset → update → verify",
+        "Test: Migrate peer → webvh with HTTP witness",
+        "Test: Migrate webvh → btco with Bitcoin witness",
+        "Test: Verify full chain from btco back to peer origin",
+        "Test: Deactivate and verify sealed log",
+        "Test: Tampered log detection",
+        "All tests pass"
+      ]
+    },
+    {
+      "id": "US-032",
+      "title": "Documentation - Developer Guide",
+      "description": "As a developer, I need comprehensive documentation to use the Originals CEL SDK.",
+      "type": "documentation",
+      "priority": "medium",
+      "estimate": "4h",
+      "dependencies": ["US-014", "US-020"],
+      "files": ["docs/ORIGINALS_CEL_GUIDE.md"],
+      "acceptance": [
+        "Create docs/ORIGINALS_CEL_GUIDE.md",
+        "Sections: Quick Start, Core Concepts, API Reference, CLI Usage, Explorer Integration",
+        "Include code examples for each major use case",
+        "Explain layer model and migration",
+        "Document witness configuration",
+        "Link to CEL spec and Originals whitepaper"
+      ]
+    }
+  ],
+  "functionalRequirements": [
+    {
+      "id": "FR-1",
+      "category": "core",
+      "description": "The system MUST implement the CEL data model as specified in W3C CCG CEL v0.1"
+    },
+    {
+      "id": "FR-2",
+      "category": "core",
+      "description": "Event logs MUST be hash-chained using previousEvent references"
+    },
+    {
+      "id": "FR-3",
+      "category": "core",
+      "description": "All events MUST include at least one Data Integrity Proof (controller proof)"
+    },
+    {
+      "id": "FR-4",
+      "category": "core",
+      "description": "The default cryptosuite MUST be eddsa-jcs-2022 (Ed25519)"
+    },
+    {
+      "id": "FR-5",
+      "category": "core",
+      "description": "External references MUST use Multibase-encoded Multihash (sha2-256) for digestMultibase"
+    },
+    {
+      "id": "FR-6",
+      "category": "layer",
+      "description": "did:peer assets MUST NOT require witnesses"
+    },
+    {
+      "id": "FR-7",
+      "category": "layer",
+      "description": "did:webvh assets MAY include HTTP witness proofs"
+    },
+    {
+      "id": "FR-8",
+      "category": "layer",
+      "description": "did:btco assets MUST include Bitcoin-based witness proof (inscription transaction)"
+    },
+    {
+      "id": "FR-9",
+      "category": "layer",
+      "description": "Migration events MUST record source layer, target layer, and migration timestamp"
+    },
+    {
+      "id": "FR-10",
+      "category": "layer",
+      "description": "Each layer MUST be able to resolve and verify logs from lower layers"
+    },
+    {
+      "id": "FR-11",
+      "category": "verification",
+      "description": "verifyEventLog MUST check all controller proofs in the log"
+    },
+    {
+      "id": "FR-12",
+      "category": "verification",
+      "description": "verifyEventLog MUST validate hash chain integrity"
+    },
+    {
+      "id": "FR-13",
+      "category": "verification",
+      "description": "verifyEventLog MUST validate witness proofs when present"
+    },
+    {
+      "id": "FR-14",
+      "category": "verification",
+      "description": "Verification MUST fail if any event proof is invalid"
+    },
+    {
+      "id": "FR-15",
+      "category": "verification",
+      "description": "Verification MUST fail if hash chain is broken"
+    },
+    {
+      "id": "FR-16",
+      "category": "serialization",
+      "description": "JSON MUST be the default serialization format"
+    },
+    {
+      "id": "FR-17",
+      "category": "serialization",
+      "description": "CBOR MUST be supported as an alternative compact format"
+    },
+    {
+      "id": "FR-18",
+      "category": "serialization",
+      "description": "Serialization/deserialization MUST be lossless"
+    },
+    {
+      "id": "FR-19",
+      "category": "cli",
+      "description": "CLI MUST support create, verify, migrate, inspect commands"
+    },
+    {
+      "id": "FR-20",
+      "category": "cli",
+      "description": "CLI MUST exit with code 0 on success, 1 on failure"
+    },
+    {
+      "id": "FR-21",
+      "category": "cli",
+      "description": "CLI MUST provide clear error messages"
+    },
+    {
+      "id": "FR-22",
+      "category": "explorer",
+      "description": "Explorer MUST display CEL event timeline for CEL-enabled assets"
+    },
+    {
+      "id": "FR-23",
+      "category": "explorer",
+      "description": "Explorer MUST show verification status via badge"
+    },
+    {
+      "id": "FR-24",
+      "category": "explorer",
+      "description": "Explorer MUST allow creating new assets with CEL format"
+    },
+    {
+      "id": "FR-25",
+      "category": "explorer",
+      "description": "Explorer MUST support migration with CEL logging"
+    },
+    {
+      "id": "FR-26",
+      "category": "api",
+      "description": "Server MUST provide endpoints to store and retrieve CEL logs"
+    },
+    {
+      "id": "FR-27",
+      "category": "api",
+      "description": "Server MAY provide a witness endpoint for HTTP witnessing"
+    },
+    {
+      "id": "FR-28",
+      "category": "api",
+      "description": "Write operations MUST require authentication"
+    }
+  ],
+  "nonGoals": [
+    "Not implementing a new specification — We strictly implement CEL + Originals",
+    "Not creating a blockchain — Bitcoin is the only settlement layer",
+    "Not building a witness network — Individual witnesses are pluggable",
+    "Not supporting non-Ed25519 keys in v1 — Other key types may be added later",
+    "Not migrating existing non-CEL assets automatically — Opt-in migration only",
+    "Not implementing CEL Macros — Standard event types only",
+    "Not building mobile apps — Web and CLI only",
+    "Not implementing real-time sync — Fetch-based model only"
+  ],
+  "successMetrics": [
+    {
+      "id": "SM-1",
+      "metric": "Spec Compliance",
+      "target": "100% alignment with CEL v0.1 data model and algorithms"
+    },
+    {
+      "id": "SM-2",
+      "metric": "Test Coverage",
+      "target": ">90% code coverage for CEL module"
+    },
+    {
+      "id": "SM-3",
+      "metric": "Performance",
+      "target": "Event log verification <100ms for logs with <50 events"
+    },
+    {
+      "id": "SM-4",
+      "metric": "Integration",
+      "target": "Explorer can create, display, and migrate CEL-based assets"
+    },
+    {
+      "id": "SM-5",
+      "metric": "Interoperability",
+      "target": "CEL logs exported from SDK can be verified by any CEL-compliant verifier"
+    },
+    {
+      "id": "SM-6",
+      "metric": "Zero Invention",
+      "target": "No protocol logic invented; 100% derived from existing specs"
+    }
+  ],
+  "openQuestions": [
+    {
+      "id": "OQ-1",
+      "question": "Should we implement witness discovery via DID service endpoints, or require explicit configuration?",
+      "status": "open"
+    },
+    {
+      "id": "OQ-2",
+      "question": "At what event count should we start a new log file (previousLog chunking)?",
+      "status": "open"
+    },
+    {
+      "id": "OQ-3",
+      "question": "Should we support BBS+ signatures for selective disclosure in future versions?",
+      "status": "open"
+    },
+    {
+      "id": "OQ-4",
+      "question": "Should CBOR become the default for did:btco to minimize inscription size?",
+      "status": "open"
+    },
+    {
+      "id": "OQ-5",
+      "question": "For did:webvh, should we require a minimum number of witnesses?",
+      "status": "open"
+    },
+    {
+      "id": "OQ-6",
+      "question": "Can a did:btco asset ever migrate down to did:webvh (e.g., for burning)?",
+      "status": "open"
+    }
+  ],
+  "estimates": {
+    "totalHours": 127,
+    "breakdown": {
+      "phase-1": "33h",
+      "phase-2": "10h",
+      "phase-3": "22h",
+      "phase-4": "16h",
+      "phase-5": "26h",
+      "phase-6": "20h"
+    }
+  }
+}

@@ -365,7 +365,7 @@ async function estimateModuleCosts(): Promise<void> {
   console.log('');
 
   // Validate migration before attempting
-  const validation = await sdk.lifecycle.validateMigration(moduleAsset, 'did:btco');
+  const validation = sdk.lifecycle.validateMigration(moduleAsset, 'did:btco');
   console.log('Migration validation:');
   console.log(`  Valid: ${validation.valid}`);
   console.log(`  Checks:`);

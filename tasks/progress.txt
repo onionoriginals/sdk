@@ -1,0 +1,1319 @@
+# Ralph Progress Log
+Project: Originals CEL
+Branch: feature/originals-cel
+Started: 2026-01-20
+
+## Codebase Patterns
+<!-- Add reusable patterns here as you discover them -->
+- SDK source is in packages/sdk/src/
+- Explorer source is in explorer/src/
+- Use @noble/* for crypto primitives
+- Run `bun run typecheck` in sdk root to check types
+- Convex functions go in explorer/convex/
+
+---
+
+## US-001 - Create CEL types.ts with data model interfaces
+Completed: 2026-01-20T09:15:00Z
+Agent: Cursor Chat
+
+### Changes
+- packages/sdk/src/cel/types.ts: Created CEL data model interfaces
+  - DataIntegrityProof: W3C Data Integrity proof structure
+  - WitnessProof: Extended proof with witnessedAt timestamp
+  - ExternalReference: For large resources (url[], mediaType, digestMultibase)
+  - LogEntry: Single event with type, data, previousEvent, proof[]
+  - EventLog: Complete log with events[] and optional previousLog
+  - VerificationResult, EventVerification: For verify results
+  - CreateOptions, UpdateOptions, DeactivateOptions, VerifyOptions
+  - AssetState: Derived state from replaying events
+- packages/sdk/src/cel/index.ts: Export barrel file
+
+### Learnings
+- Existing Proof interface in types/credentials.ts is simpler than CEL's DataIntegrityProof
+- CEL proofs need cryptosuite field which existing Proof lacks
+- Typecheck runs with ./node_modules/.bin/tsc --noEmit
+
+---
+
+## US-002 - Implement digestMultibase hash computation
+Completed: 2026-01-20T18:35:00Z
+Agent: Background Agent
+
+### Changes
+- packages/sdk/src/cel/hash.ts: Created CEL hash utilities
+  - computeDigestMultibase(content: Uint8Array): string - computes SHA-256, encodes as Multibase base64url-nopad (prefix 'u')
+  - verifyDigestMultibase(content: Uint8Array, digest: string): boolean - verifies content matches digest
+  - decodeDigestMultibase(digest: string): Uint8Array - decodes digest to raw hash bytes
+- packages/sdk/src/cel/index.ts: Added export for hash module
+- packages/sdk/tests/unit/cel/hash.test.ts: 14 unit tests covering all functions
+
+### Learnings
+- SDK already has robust multibase utilities in src/utils/encoding.ts
+- Use `multibase.encode(bytes, 'base64url')` for 'u' prefix encoding
+- Use `@noble/hashes/sha2.js` sha256 for hashing (already in deps)
+- Typecheck: `bunx tsc --noEmit` (bun install first if node_modules missing)
+- Tests: `bun test packages/sdk/tests/unit/cel/hash.test.ts`
+
+---
+
+## US-003 - Implement createEventLog algorithm
+Completed: 2026-01-20T19:15:00Z
+Agent: Background Agent
+
+### Changes
+- packages/sdk/src/cel/algorithms/createEventLog.ts: Core algorithm implementation
+  - createEventLog(data: unknown, options: CreateOptions): Promise<EventLog>
+  - Creates a "create" type event with no previousEvent (first event in log)
+  - Uses signer callback from options to generate DataIntegrityProof
+  - Validates proof has required fields (type, cryptosuite, proofValue)
+  - Returns EventLog with single LogEntry
+- packages/sdk/src/cel/algorithms/index.ts: Barrel export for algorithms
+- packages/sdk/src/cel/index.ts: Added export for algorithms module
+- packages/sdk/tests/unit/cel/createEventLog.test.ts: 18 unit tests
+  - Basic functionality: log creation, event type, no previousEvent
+  - Proof generation: eddsa-jcs-2022, DataIntegrityProof structure
+  - Options handling: default and custom proofPurpose
+  - Error handling: invalid proof detection
+  - Data preservation: complex nested data, null values
+
+### Learnings
+- Signer callback pattern keeps createEventLog decoupled from specific signing implementations
+- CreateOptions type already defined in types.ts includes signer, verificationMethod, proofPurpose
+- Tests use mock signer that returns valid DataIntegrityProof structure
+- Typecheck: bunx tsc --noEmit from sdk root
+- Tests: bun test packages/sdk/tests/unit/cel/createEventLog.test.ts
+
+---
+## US-004 - Implement updateEventLog algorithm
+Completed: 2026-01-20T12:15:00Z
+Agent: Background Agent
+
+### Changes
+- packages/sdk/src/cel/algorithms/updateEventLog.ts: Core algorithm implementation
+  - updateEventLog(log: EventLog, data: unknown, options: UpdateOptions): Promise<EventLog>
+  - Computes previousEvent as digestMultibase of last event using serializeEntry helper
+  - Creates "update" type event with hash chain link to previous event
+  - Returns new EventLog immutably (input not mutated)
+  - Validates proof has required fields (type, cryptosuite, proofValue)
+  - Preserves previousLog reference for chunked logs
+- packages/sdk/src/cel/algorithms/index.ts: Added export for updateEventLog
+- packages/sdk/tests/unit/cel/updateEventLog.test.ts: 15 unit tests
+  - Basic functionality: event appending, type "update", data preservation
+  - Hash chain linking: previousEvent field, digestMultibase matching, multi-update chains
+  - Immutability: input not mutated, new EventLog instance returned
+  - Proof generation: eddsa-jcs-2022, verificationMethod inclusion
+  - Error handling: empty log rejection, invalid proof detection
+  - previousLog preservation for chunked logs
+
+### Learnings
+- Use JSON.stringify with sorted keys for deterministic event serialization
+- computeDigestMultibase from hash.ts provides CEL-compliant hashing
+- UpdateOptions type extends CreateOptions (same signer pattern)
+- Spread operator [...log.events, entry] creates immutable array update
+- Tests can reuse createEventLog to build initial logs for update testing
+
+---
+
+## US-005 - Implement deactivateEventLog algorithm
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/algorithms/deactivateEventLog.ts: Core algorithm implementation
+  - deactivateEventLog(log: EventLog, reason: string, options: DeactivateOptions): Promise<EventLog>
+  - Computes previousEvent as digestMultibase of last event using serializeEntry helper
+  - Creates "deactivate" type event with reason and deactivatedAt in data
+  - Prevents double deactivation (throws if last event is already deactivate)
+  - Returns new EventLog immutably (input not mutated)
+  - Validates proof has required fields (type, cryptosuite, proofValue)
+  - Preserves previousLog reference for chunked logs
+- packages/sdk/src/cel/algorithms/index.ts: Added export for deactivateEventLog
+- packages/sdk/tests/unit/cel/deactivateEventLog.test.ts: 20 unit tests
+  - Basic functionality: event appending, type "deactivate", reason/deactivatedAt in data
+  - Hash chain linking: previousEvent field, digestMultibase matching, multi-event chains
+  - Sealing behavior: prevents double deactivation, last event is deactivate
+  - Immutability: input not mutated, new EventLog instance returned
+  - Proof generation: eddsa-jcs-2022, verificationMethod inclusion
+  - Error handling: empty log rejection, invalid proof detection
+  - previousLog preservation for chunked logs
+  - Reason handling: empty, long, and special characters
+
+### Learnings
+- Deactivate is similar to update but with type "deactivate" and reason in data
+- Adding double-deactivation check prevents accidental multiple deactivations
+- Including deactivatedAt timestamp in data provides audit trail
+- Tests follow same pattern as updateEventLog tests with sealing-specific cases added
+
+---
+
+## US-006 - Implement verifyEventLog algorithm - proof verification
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/algorithms/verifyEventLog.ts: Core algorithm implementation
+  - verifyEventLog(log: EventLog, options?: VerifyOptions): Promise<VerificationResult>
+  - Default proof verifier validates DataIntegrityProof structure
+  - Supports eddsa-jcs-2022 and eddsa-rdfc-2022 cryptosuites
+  - Returns detailed per-event verification status with EventVerification[]
+  - Validates proof has required fields: type, cryptosuite, proofValue, verificationMethod, proofPurpose
+  - Validates proofValue has multibase encoding prefix ('z' or 'u')
+  - Supports custom verifier callback via VerifyOptions
+- packages/sdk/src/cel/algorithms/index.ts: Added export for verifyEventLog
+- packages/sdk/tests/unit/cel/verifyEventLog.test.ts: 26 unit tests
+  - Basic verification: single event, multiple events, per-event details
+  - Proof verification: valid structure, wrong type, missing fields, invalid encoding
+  - Tampered proof detection: no proofs, missing proof array, custom verifier detection
+  - Error handling: null/undefined log, missing events, empty events, verifier errors
+  - Multiple proofs per event: all valid, any invalid fails
+  - VerificationResult structure validation
+  - Custom verifier injection and data passing
+
+### Learnings
+- VerifyOptions.verifier is optional; default verifier validates proof structure only
+- Real cryptographic verification requires custom verifier with access to public keys
+- Proofs use multibase encoding: 'z' prefix = base58btc, 'u' prefix = base64url
+- EventVerification.chainValid is always true in US-006 (chain verification in US-007)
+- Tests can reuse createEventLog/updateEventLog to build valid logs for testing
+
+---
+
+## US-007 - Implement verifyEventLog - hash chain verification
+Completed: 2026-01-20T12:50:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/algorithms/verifyEventLog.ts: Extended with hash chain verification
+  - Added import for computeDigestMultibase from '../hash'
+  - Added serializeEntry function matching updateEventLog's serialization
+  - Added verifyChain function that checks:
+    - First event (index 0) must NOT have previousEvent field
+    - Subsequent events must have previousEvent matching digestMultibase of prior event
+  - Updated verifyEvent to accept previousEvent param and call verifyChain
+  - Updated verifyEventLog to pass previous event and check chainValid in overall result
+  - Updated JSDoc to document hash chain verification
+- packages/sdk/tests/unit/cel/verifyEventLog.test.ts: Added 7 new hash chain tests
+  - returns verified: true for valid hash chain
+  - returns verified: false when first event has previousEvent
+  - returns verified: false when second event is missing previousEvent
+  - returns verified: false when hash chain is broken
+  - returns verified: false with specific error for broken chain
+  - chainValid is true for each event in valid chain
+  - valid chain passes with single create event
+
+### Learnings
+- serializeEntry must match the serialization in createEventLog/updateEventLog exactly
+- Use JSON.stringify with Object.keys().sort() for deterministic serialization
+- Hash chain errors should be descriptive to help debugging
+- Both proofValid AND chainValid must be true for verified: true
+- EventVerification.chainValid now actually reflects chain status (was always true in US-006)
+
+---
+
+## US-008 - Implement WitnessService interface and witnessEvent
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/witnesses/WitnessService.ts: Created WitnessService interface
+  - Interface with witness(digestMultibase: string): Promise<WitnessProof> method
+  - Documented for HTTP, Bitcoin, notary, and blockchain attestation services
+- packages/sdk/src/cel/witnesses/index.ts: Barrel export for witnesses module
+- packages/sdk/src/cel/algorithms/witnessEvent.ts: Core algorithm implementation
+  - witnessEvent(event: LogEntry, witness: WitnessService): Promise<LogEntry>
+  - Computes digestMultibase of event using deterministic serialization
+  - Appends witness proof to proof array (preserves controller proof)
+  - Validates witness proof has required fields including witnessedAt
+  - Returns new LogEntry immutably (input not mutated)
+- packages/sdk/src/cel/algorithms/index.ts: Added export for witnessEvent
+- packages/sdk/src/cel/index.ts: Added export for witnesses module
+- packages/sdk/tests/unit/cel/witnessEvent.test.ts: 24 unit tests
+  - Basic functionality: proof appending, original proof preservation
+  - Witness proof structure: type, cryptosuite, proofValue, verificationMethod, witnessedAt
+  - Multiple witnesses: can chain multiple witness proofs
+  - Error handling: null/undefined inputs, missing proof fields, witness service errors
+  - Event data preservation: type, data, previousEvent
+
+### Learnings
+- WitnessProof extends DataIntegrityProof with witnessedAt field (defined in types.ts)
+- Witness proofs APPEND to proof array - never replace controller proof
+- Use same serializeEntry pattern from update/deactivate for deterministic hashing
+- witnessedAt is required field that distinguishes WitnessProof from DataIntegrityProof
+- Can apply multiple witnesses by chaining witnessEvent calls
+
+---
+
+## US-009 - Implement JSON serialization for event logs
+Completed: 2026-01-20T12:15:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/serialization/json.ts: Core serialization implementation
+  - serializeEventLogJson(log: EventLog): string - serializes with deterministic key ordering
+  - parseEventLogJson(json: string): EventLog - parses and validates JSON structure
+  - sortKeys() helper for consistent hash computation
+  - Validates all required DataIntegrityProof/WitnessProof fields
+  - Preserves optional previousLog and previousEvent fields
+- packages/sdk/src/cel/serialization/index.ts: Barrel export for serialization module
+- packages/sdk/src/cel/index.ts: Added export for serialization module
+- packages/sdk/tests/unit/cel/json-serialization.test.ts: 31 unit tests
+  - serializeEventLogJson: valid JSON, deterministic key ordering, multiple events, witness proofs
+  - parseEventLogJson: validation, error handling, type checking
+  - Round-trip: simple log, multi-event, previousLog, complex nested data, witness proofs
+  - Edge cases: empty data, unicode, large numbers, arrays, deactivate type
+
+### Learnings
+- Use Object.keys().sort() recursively for deterministic JSON key ordering
+- WitnessProof is distinguished from DataIntegrityProof by presence of witnessedAt field
+- JSON.stringify with indent 2 produces human-readable output
+- Validation should check all required DataIntegrityProof fields explicitly
+- Round-trip tests verify serialize → parse → serialize produces identical output
+
+---
+
+## US-010 - Implement CBOR serialization for event logs
+Completed: 2026-01-20T12:15:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/serialization/cbor.ts: Core CBOR serialization implementation
+  - serializeEventLogCbor(log: EventLog): Uint8Array - encodes EventLog to compact CBOR binary
+  - parseEventLogCbor(cbor: Uint8Array): EventLog - parses and validates CBOR data
+  - Uses existing utils/cbor.ts wrapper around cbor-js dependency
+  - Full validation of EventLog structure including proofs and WitnessProof
+- packages/sdk/src/cel/serialization/index.ts: Added export for cbor module
+- packages/sdk/tests/unit/cel/cbor-serialization.test.ts: 34 unit tests
+  - serializeEventLogCbor: Uint8Array output, multiple events, previousLog, witness proofs
+  - parseEventLogCbor: validation, error handling, type checking
+  - Round-trip: simple log, multi-event, previousLog, complex nested data, witness proofs
+  - Size comparison: CBOR is 20%+ smaller than JSON for typical event logs
+  - Edge cases: empty data, unicode, large numbers, arrays, deactivate type
+
+### Learnings
+- SDK already has utils/cbor.ts that wraps cbor-js with encode/decode functions
+- CBOR provides ~20-40% size reduction compared to JSON for typical event logs
+- cbor-js returns ArrayBuffer from encode, so utils/cbor.ts converts to Uint8Array
+- Validation logic is identical to JSON parser - reuse same parseProof/parseEntry patterns
+- Tests show CBOR is significantly more efficient for multi-event logs with repeated structures
+
+---
+
+## US-011 - Implement ExternalReferenceManager
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/ExternalReferenceManager.ts: Created external reference utilities
+  - createExternalReference(content: Uint8Array, mediaType: string, urls?: string[]): ExternalReference
+    - Computes digestMultibase using computeDigestMultibase
+    - Includes optional url array when provided (omits if empty)
+    - Always includes mediaType
+  - verifyExternalReference(ref: ExternalReference, content: Uint8Array): boolean
+    - Uses verifyDigestMultibase from hash.ts to check content against digest
+    - Returns true if content hash matches, false otherwise
+- packages/sdk/src/cel/index.ts: Added export for ExternalReferenceManager
+- packages/sdk/tests/unit/cel/ExternalReferenceManager.test.ts: 29 unit tests
+  - createExternalReference: digest computation, media types, urls handling
+  - verifyExternalReference: matching content, different content, modified, truncated, extended
+  - Round-trip: create and verify, JSON serialization
+  - Edge cases: unicode, null bytes, case sensitivity
+
+### Learnings
+- ExternalReference type defined in types.ts has url[], mediaType, digestMultibase fields
+- computeDigestMultibase and verifyDigestMultibase from hash.ts provide hash utilities
+- Empty url array should be omitted rather than included as empty array
+- Functions are pure - no side effects, just data transformation
+- Tests: bun test packages/sdk/tests/unit/cel/ExternalReferenceManager.test.ts
+
+---
+
+## US-012 - Implement PeerCelManager for did:peer layer
+Completed: 2026-01-20T12:15:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/layers/PeerCelManager.ts: Core implementation
+  - PeerCelManager class with constructor accepting signer and optional config
+  - create(name: string, resources: ExternalReference[]): Promise<EventLog>
+  - Generates did:peer numalgo 4 (long-form) DIDs using @aviarytech/did-peer
+  - Creates CEL event log with single "create" event
+  - PeerAssetData interface: name, did, layer ('peer'), resources, creator, createdAt
+  - No witness proofs added (only controller proof at peer layer)
+- packages/sdk/src/cel/layers/index.ts: Barrel export for layers module
+- packages/sdk/src/cel/index.ts: Added export for layers module
+- packages/sdk/tests/unit/cel/PeerCelManager.test.ts: 29 unit tests
+  - Constructor tests: valid signer, error on invalid, config acceptance
+  - Create tests: event structure, type, data fields, proofs
+  - Input validation: name/resources validation, empty resources
+  - DID generation: unique DIDs, numalgo 4 format
+  - Integration: create then verify cycle
+  - Config options: verificationMethod, proofPurpose
+  - Complex scenarios: multiple resources, unicode, long names
+
+### Learnings
+- @aviarytech/did-peer provides createNumAlgo4() for long-form DIDs
+- did:peer numalgo 4 embeds full DID document for self-contained resolution
+- PeerAssetData.creator equals PeerAssetData.did for peer layer (self-issued)
+- No witnesses at peer layer - only the controller's DataIntegrityProof
+- Tests: bun test packages/sdk/tests/unit/cel/PeerCelManager.test.ts
+
+---
+
+## US-013 - Add update and getCurrentState to PeerCelManager
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/layers/PeerCelManager.ts: Added update() and getCurrentState() methods
+  - update(log: EventLog, data: unknown): Promise<EventLog>
+    - Delegates to updateEventLog algorithm
+    - Automatically adds updatedAt timestamp to update data
+    - Validates log is not empty and not deactivated
+    - Uses same signer as create() for proof generation
+  - getCurrentState(log: EventLog): AssetState
+    - Replays all events to derive current state
+    - Extracts initial state from create event (name, did, layer, resources, creator, createdAt)
+    - Applies update events: merges known fields, stores custom fields in metadata
+    - Handles deactivate events: sets deactivated=true, captures reason in metadata
+    - Validates first event is create type
+- packages/sdk/tests/unit/cel/PeerCelManager.test.ts: Added 26 new unit tests
+  - Update tests: event appending, data inclusion, timestamps, previousEvent linking, immutability
+  - getCurrentState tests: initial state, updates, resources, metadata, deactivation
+  - Integration test: full create → update → getCurrentState lifecycle
+
+### Learnings
+- update() wraps updateEventLog but adds convenience features like auto-timestamp
+- getCurrentState() must handle all event types: create, update, deactivate
+- Custom fields not in AssetState core schema go into metadata object
+- Deactivation info (reason, timestamp) also stored in metadata for accessibility
+- Testing pattern: use deactivateEventLog to test deactivated log handling
+- Tests: bun test packages/sdk/tests/unit/cel/PeerCelManager.test.ts
+
+---
+
+## US-014 - Implement HttpWitness service
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/witnesses/HttpWitness.ts: Created HTTP witness implementation
+  - HttpWitness class implementing WitnessService interface
+  - Constructor accepts witnessUrl: string and optional HttpWitnessOptions
+  - Options include timeout, custom headers, and custom fetch function (for testing)
+  - witness(digestMultibase) method POSTs to endpoint and parses WitnessProof response
+  - Validates all required WitnessProof fields including witnessedAt
+  - HttpWitnessError class with statusCode, responseBody, witnessUrl properties
+- packages/sdk/src/cel/witnesses/index.ts: Added exports for HttpWitness and HttpWitnessError
+- packages/sdk/tests/unit/cel/HttpWitness.test.ts: 43 unit tests
+  - Constructor tests: valid URL, invalid URL, custom options
+  - witness() tests: POST body, response parsing, custom headers
+  - Error handling: 404/500/401 responses, network errors, timeouts, invalid JSON
+  - WitnessProof validation: all required fields, extra fields ignored
+  - HttpWitnessError properties and inheritance
+  - Integration: WitnessService interface compliance, sequential calls
+  - Different endpoint patterns: paths, localhost, IP, query params
+
+### Learnings
+- Use custom fetch option for mocking in tests instead of global mocking
+- AbortController provides timeout functionality with signal
+- WitnessProof validation should strip unknown fields for security
+- HttpWitnessError extends Error and includes all relevant context
+- Tests: bun test packages/sdk/tests/unit/cel/HttpWitness.test.ts
+
+---
+
+## US-015 - Implement WebVHCelManager for did:webvh layer
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/layers/WebVHCelManager.ts: Core implementation
+  - WebVHCelManager class with constructor accepting signer, domain, optional witnesses, and config
+  - migrate(peerLog: EventLog): Promise<EventLog> - migrates peer layer log to webvh
+  - Generates did:webvh:{domain}:{id} DIDs from source peer DIDs
+  - Adds update event with migration data (sourceDid, targetDid, layer, domain, migratedAt)
+  - Optionally adds witness proofs from configured WitnessService array
+  - getCurrentState(log): AssetState - derives current state including migration metadata
+- packages/sdk/src/cel/layers/index.ts: Added export for WebVHCelManager
+- packages/sdk/tests/unit/cel/WebVHCelManager.test.ts: 41 unit tests
+  - Constructor tests: valid inputs, error handling, domain validation
+  - migrate() tests: event structure, migration data, hash chain, witness proofs
+  - getCurrentState() tests: state derivation, migration metadata
+  - Integration tests: full peer-to-webvh migration cycle
+
+### Learnings
+- Migration events are update events with special data structure (sourceDid, targetDid, layer, domain, migratedAt)
+- Witnesses are called after the update event is created - witnessEvent modifies the event's proof array
+- did:webvh format: did:webvh:{domain}:{identifier} where identifier is derived from source DID
+- getCurrentState must handle migration events specially to update did and layer fields
+- Tests: bun test packages/sdk/tests/unit/cel/WebVHCelManager.test.ts
+
+---
+
+## US-016 - Implement BitcoinWitness service
+Completed: 2026-01-20T12:15:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/witnesses/BitcoinWitness.ts: Core implementation
+  - BitcoinWitness class implementing WitnessService interface
+  - Constructor accepts BitcoinManager instance and optional BitcoinWitnessOptions
+  - Options include feeRate and verificationMethod
+  - witness(digestMultibase) inscribes attestation data on Bitcoin via ordinals
+  - Returns BitcoinWitnessProof with txid, blockHeight, satoshi, inscriptionId
+  - Uses bitcoin-ordinals-2024 cryptosuite
+  - BitcoinWitnessError class for descriptive error handling
+- packages/sdk/src/cel/witnesses/index.ts: Added exports for BitcoinWitness and types
+- packages/sdk/tests/unit/cel/BitcoinWitness.test.ts: 35 unit tests
+  - Constructor tests: valid BitcoinManager, error handling, options
+  - witness() tests: inscribeData calls, proof structure, Bitcoin-specific fields
+  - Error handling: inscription failures, missing fields, invalid digests
+  - BitcoinWitnessError properties and inheritance
+  - Integration with WitnessService interface
+  - Witness attestation data structure validation
+
+### Learnings
+- BitcoinWitnessProof extends WitnessProof with txid, blockHeight, satoshi, inscriptionId
+- Use mock BitcoinManager in tests with vi.fn() for inscribeData
+- Attestation data includes @context, type, digestMultibase, witnessedAt
+- Multibase prefix validation: 'u' for base64url-nopad, 'z' for base58btc
+- proofValue uses inscriptionId with 'z' multibase prefix
+- Tests: bun test packages/sdk/tests/unit/cel/BitcoinWitness.test.ts
+
+---
+
+## US-017 - Implement BtcoCelManager for did:btco layer
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/layers/BtcoCelManager.ts: Core implementation
+  - BtcoCelManager class with constructor accepting signer, BitcoinManager, and optional config
+  - migrate(webvhLog: EventLog): Promise<EventLog> - migrates webvh layer log to btco
+  - Validates source log is from webvh layer (peer-to-btco direct migration not allowed)
+  - Generates did:btco:{inscriptionId} DIDs from Bitcoin inscription IDs
+  - Adds mandatory Bitcoin witness proof via BitcoinWitness service
+  - BtcoMigrationData includes sourceDid, targetDid, layer, txid, inscriptionId, migratedAt
+  - getCurrentState(log): AssetState - derives current state including Bitcoin metadata
+- packages/sdk/src/cel/layers/index.ts: Added export for BtcoCelManager
+- packages/sdk/tests/unit/cel/BtcoCelManager.test.ts: 40 unit tests
+  - Constructor tests: valid inputs, error handling, config options
+  - migrate() tests: event structure, migration data, hash chain, Bitcoin witness proofs
+  - getCurrentState() tests: state derivation, Bitcoin metadata (txid, inscriptionId)
+  - Integration tests: full peer-to-webvh-to-btco migration cycle
+  - DID generation: from inscription IDs, consistency across managers
+  - Bitcoin witness integration: automatic adding, proof structure, satoshi/blockHeight
+
+### Learnings
+- BtcoCelManager only accepts webvh logs (must migrate peer->webvh first, then webvh->btco)
+- BitcoinWitness is REQUIRED at btco layer (not optional like HttpWitness at webvh)
+- did:btco format uses sanitized inscription ID for DID identifier
+- Migration event data includes txid and inscriptionId for Bitcoin anchor verification
+- Use mock BitcoinManager with vi.fn() for inscribeData returning {txid, inscriptionId, satoshi, blockHeight}
+- Tests: bun test packages/sdk/tests/unit/cel/BtcoCelManager.test.ts
+
+---
+
+## US-018 - Create unified OriginalsCel SDK entry point
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/OriginalsCel.ts: Created unified SDK entry point
+  - OriginalsCel class with constructor accepting { layer, signer, config? }
+  - create(name, resources): Promise<EventLog> - creates assets at peer layer
+  - update(log, data): Promise<EventLog> - updates any layer log
+  - verify(log, options?): Promise<VerificationResult> - verifies proofs and chain
+  - migrate(log, targetLayer, options?): Promise<EventLog> - migrates between layers
+  - getCurrentState(log): AssetState - derives state by replaying events
+  - Lazy layer manager creation (PeerCelManager, WebVHCelManager, BtcoCelManager)
+  - Layer detection from event log content
+- packages/sdk/src/cel/index.ts: Added export for OriginalsCel
+- packages/sdk/src/index.ts: Added comprehensive CEL exports
+  - OriginalsCel and related types
+  - All CEL algorithm functions (createEventLog, updateEventLog, etc.)
+  - Hash utilities (computeDigestMultibase, verifyDigestMultibase)
+  - External reference functions
+  - Layer managers (PeerCelManager, WebVHCelManager, BtcoCelManager)
+  - Witness services (WitnessService, HttpWitness, BitcoinWitness)
+  - Serialization functions (JSON and CBOR)
+- packages/sdk/tests/unit/cel/OriginalsCel.test.ts: 35 unit tests
+  - Constructor tests: valid config for all layers, error handling
+  - create() tests: peer layer creation, DID generation, proof inclusion
+  - update() tests: event appending, hash chain linking, immutability
+  - verify() tests: valid logs, tampered proofs, custom verifier
+  - migrate() tests: peer→webvh, webvh→btco, error cases
+  - getCurrentState() tests: state derivation, updates, migrations
+  - Integration test: full lifecycle create→update→migrate→verify
+
+### Learnings
+- Layer managers use CelSigner callback pattern for flexibility
+- Migration validation: peer→webvh→btco (no skipping layers, no reverse)
+- BitcoinWitness uses 'bitcoin-ordinals-2024' cryptosuite (not in default verifier)
+- Custom verifier needed for full Bitcoin proof validation
+- Lazy manager instantiation reduces memory and avoids config errors until needed
+- Domain extraction from log helps WebVHCelManager work with existing logs
+- Tests: bun test packages/sdk/tests/unit/cel/OriginalsCel.test.ts
+
+---
+
+## US-019 - Create CLI entry point with help command
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/cli/index.ts: Created CLI entry point
+  - parseArgs(args): Parses process.argv into command and flags object
+  - main(args): Main CLI handler routing to subcommands
+  - Comprehensive help text for all commands (create, verify, inspect, migrate)
+  - --help/-h shows usage for command or global help
+  - --version/-v shows package version (1.5.0)
+  - Placeholder implementations for subcommands (to be implemented in US-020 through US-023)
+- packages/sdk/package.json: Added bin entry "originals-cel" pointing to dist/cel/cli/index.js
+- packages/sdk/src/cel/index.ts: Added export for celCli function
+
+### Learnings
+- CLI uses process.argv.slice(2) for arguments (skip node and script path)
+- Shebang line (#!/usr/bin/env node) required for bin entry to work
+- No new dependencies needed - native process.argv parsing works well
+- Export main() function for programmatic use (e.g., testing)
+- Tests: bun test packages/sdk/tests/unit/cel/cli.test.ts (to be created in future)
+- Pre-existing CelSigner duplicate export errors in layers module unrelated to CLI changes
+
+---
+
+## US-020 - Implement CLI create command
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/cli/create.ts: Core CLI create command implementation
+  - createCommand(flags: CreateFlags): Promise<CreateResult> - main handler function
+  - generateKeyPair(): Promise<{privateKey, publicKey}> - Ed25519 key generation
+  - loadPrivateKey(keyPath): Promise<{privateKey, publicKey}> - key file loading (raw or JSON)
+  - createSigner(privateKey, publicKey): CelSigner - creates eddsa-jcs-2022 signer
+  - getMimeType(filePath): string - MIME type detection from file extension
+  - CreateFlags interface for parsed CLI arguments
+  - CreateResult interface for command result
+- packages/sdk/src/cel/cli/index.ts: Integrated create command
+  - Added import for createCommand and CreateFlags
+  - Added runCreateCommand async helper function
+  - Updated switch case to route to createCommand
+- packages/sdk/tests/unit/cel/cli-create.test.ts: 18 unit tests
+  - Argument validation: missing name, missing file, invalid file, invalid format, missing key
+  - Key generation: generates Ed25519 when not provided, uses provided key, loads JSON key
+  - JSON output: creates valid CEL log, uses JSON by default
+  - CBOR output: creates valid CBOR, CBOR is smaller than JSON
+  - MIME type detection: PNG, JPEG, unknown extensions
+  - Proof structure: eddsa-jcs-2022 cryptosuite
+  - File output: writes to --output path, nested directories
+
+### Learnings
+- Use @noble/ed25519 utils.randomPrivateKey() for key generation
+- multikey.encodePrivateKey/encodePublicKey for Ed25519 multibase encoding
+- CLI commands should return result objects rather than throwing for testability
+- Key file can be raw multibase string or JSON with privateKey field
+- MIME type detection uses simple extension lookup (no magic number detection)
+- For CBOR stdout output, encode as base64 since it's binary
+- Warn about generated keys via console.error to not pollute stdout JSON
+- Tests: bun test packages/sdk/tests/unit/cel/cli-create.test.ts
+
+---
+
+## US-021 - Implement CLI verify command
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/cli/verify.ts: Core CLI verify command implementation
+  - verifyCommand(flags: VerifyFlags): Promise<VerifyResult> - main handler function
+  - loadEventLog(filePath): EventLog - loads and parses JSON or CBOR files
+  - outputResult(log, result): void - outputs formatted verification report
+  - Supports both .cel.json and .cel.cbor file formats
+  - Displays event-by-event breakdown with proof and chain status
+  - Shows witness attestations with witnessedAt timestamps
+  - Exit code 0 on success, 1 on verification failure
+- packages/sdk/src/cel/cli/index.ts: Integrated verify command
+  - Added import for verifyCommand and VerifyFlags
+  - Added runVerifyCommand async helper with exit code handling
+  - Updated switch case to route to verifyCommand
+- packages/sdk/tests/unit/cel/cli-verify.test.ts: 15 unit tests
+  - Argument validation: missing log, nonexistent file, help flags
+  - JSON verification: single-event, multi-event, broken chain, invalid proof
+  - CBOR verification: format support
+  - Witness attestations: display in output
+  - Error handling: invalid JSON, malformed structure, empty events
+  - VerifyResult structure validation
+
+### Learnings
+- Use path.extname() to detect file format (JSON vs CBOR)
+- verifyEventLog from algorithms provides VerificationResult with detailed per-event status
+- WitnessProof is identified by presence of witnessedAt field
+- Exit codes: success returns to caller, verified=false causes process.exit(1)
+- Tests: bun test packages/sdk/tests/unit/cel/cli-verify.test.ts
+
+---
+
+## US-022 - Implement CLI inspect command
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/cli/inspect.ts: Created CLI inspect command implementation
+  - inspectCommand(flags: InspectFlags): Promise<InspectResult> - main handler function
+  - loadEventLog(filePath): EventLog - loads and parses JSON or CBOR files
+  - deriveCurrentState(log): AssetState - replays events to compute current asset state
+  - extractLayerHistory(log): Array<{layer, timestamp, did}> - extracts migration history
+  - extractWitnesses(log): Array - extracts all witness attestation details
+  - outputInspection(log, state): void - formats and prints inspection report
+  - Pretty-prints event timeline with timestamps and event badges
+  - Shows current state with status, name, layer, DID, resources, metadata
+  - Lists witness attestations with witnessedAt timestamps
+  - Shows layer history for migrated assets
+- packages/sdk/src/cel/cli/index.ts: Integrated inspect command
+  - Added import for inspectCommand and InspectFlags
+  - Added runInspectCommand async helper function
+  - Updated switch case to route to inspectCommand
+- packages/sdk/tests/unit/cel/cli-inspect.test.ts: 20 unit tests
+  - Argument validation: missing log, nonexistent file, help flags
+  - Event timeline display: single event, multi-event, timestamps
+  - Current state derivation: resources, deactivation, multiple updates
+  - Witness attestations: extraction and display
+  - Layer history: migration tracking from peer to webvh to btco
+  - CBOR format support
+  - Error handling: invalid JSON, malformed structure, empty events
+
+### Learnings
+- deriveCurrentState must handle migration events (update layer, did, targetDid fields)
+- Witness proofs are identified by presence of witnessedAt field
+- Layer history is extracted from create events and migration events
+- Use formatTimestamp for human-readable timestamps and formatRelativeTime for relative display
+- Tests: bun test packages/sdk/tests/unit/cel/cli-inspect.test.ts
+
+---
+
+## US-023 - Implement CLI migrate command
+Completed: 2026-01-20T19:50:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/src/cel/cli/migrate.ts: Created CLI migrate command implementation
+  - migrateCommand(flags: MigrateFlags): Promise<MigrateResult> - main handler function
+  - loadEventLog(filePath): EventLog - loads and parses JSON or CBOR files
+  - detectCurrentLayer(log): Detects layer from event log by examining events
+  - getCurrentDid(log): Extracts current DID from event log
+  - validateMigrationPath(currentLayer, targetLayer): Validates migration path rules
+  - loadWalletKey(walletPath): Loads Ed25519 private key from wallet file
+  - createSigner(privateKey, publicKey): Creates CelSigner for proof generation
+  - createMockBitcoinManager(): Mock Bitcoin manager for CLI testing
+  - MigrateFlags and MigrateResult interfaces for typed arguments and results
+- packages/sdk/src/cel/cli/index.ts: Integrated migrate command
+  - Added import for migrateCommand and MigrateFlags
+  - Added runMigrateCommand async helper function
+  - Updated switch case to route to migrateCommand
+- packages/sdk/tests/unit/cel/cli-migrate.test.ts: 23 unit tests
+  - Argument validation: missing log/to, invalid layer, missing domain/wallet
+  - peer to webvh migration: successful migration, sourceDid/targetDid, hash chain preservation
+  - webvh to btco migration: successful migration with wallet, invalid wallet handling
+  - Invalid migration paths: peer→btco direct, webvh→webvh duplicate
+  - Output formats: JSON default, CBOR with --format, invalid format error
+  - CBOR input support: reads .cbor files
+  - Error handling: invalid JSON, malformed structure, empty events
+  - MigrateResult structure validation
+
+### Learnings
+- Migration path validation: peer→webvh→btco (no skipping, no reverse)
+- webvh migration requires --domain, btco migration requires --wallet
+- Mock BitcoinManager needed for CLI btco testing (real integration via SDK)
+- CelSigner pattern consistent across all CLI commands
+- Output to stdout vs --output file follows same pattern as create/verify/inspect
+- Tests: bun test packages/sdk/tests/unit/cel/cli-migrate.test.ts
+
+---
+
+## US-024 - Initialize Convex project in Explorer
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/schema.ts: Created placeholder Convex schema file
+  - Uses defineSchema, defineTable from "convex/server"
+  - Empty schema as placeholder for US-025
+- explorer/convex/tsconfig.json: Created Convex TypeScript config
+  - Standard Convex tsconfig with ESNext target
+  - Excludes _generated folder
+- explorer/package.json: Added Convex scripts
+  - Added "convex:dev": "convex dev"
+  - Added "convex:deploy": "convex deploy"
+
+### Learnings
+- `npx convex init` is deprecated, use `npx convex dev --once --configure=new` instead
+- For non-interactive setup, create convex/ folder structure manually
+- Convex requires authentication: user must run `npx convex dev` interactively once
+- Convex folder typechecks independently with `bunx tsc --noEmit -p convex/tsconfig.json`
+- Pre-existing TypeScript errors in explorer project are unrelated to Convex setup
+- Convex MCP tools require authentication via `npx convex dev` first
+
+---
+
+## US-025 - Create Convex schema for Originals with CEL
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/schema.ts: Expanded placeholder schema with full table definitions
+  - originals table: name, did, layer (peer|webvh|btco), creatorDid, metadata, celLog, celVersion, celVerifiedAt
+  - users table: did, email, publicKey, didDocument
+  - resources table: originalId (ref to originals), digestMultibase, mediaType, url
+  - Indexes: by_did, by_creatorDid, by_layer, by_layer_and_creator on originals
+  - Indexes: by_did, by_email on users
+  - Indexes: by_originalId, by_digestMultibase on resources
+
+### Learnings
+- Use v.union(v.literal(...), ...) for enum-like fields (layer)
+- v.any() used for flexible JSON fields (metadata, celLog, didDocument) - validation happens in application
+- celVerifiedAt stored as number (ms since epoch) for consistent Convex timestamp handling
+- v.id("tableName") for foreign key references between tables
+- Convex generates types after `npx convex dev` runs - requires interactive auth first
+- Pre-existing TypeScript errors in explorer server/ directory don't affect Convex tsconfig
+- Typecheck Convex independently: `bunx tsc --noEmit -p convex/tsconfig.json`
+
+---
+
+## US-026 - Create Convex queries for Originals
+Completed: 2026-01-20T19:45:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/originals.ts: Created Convex queries module
+  - getOriginal(id): Returns single original with all fields including celLog
+  - listOriginals(filters?): Paginated list with optional layer/creatorDid filters
+  - getOriginalsByCreator(creatorDid): Returns all originals by creator
+  - getOriginalByDid(did): Returns original by DID (unique lookup)
+  - All queries use appropriate indexes for performance
+- explorer/convex/_generated/server.ts: Created stub file for pre-codegen typechecking
+  - Exports query, mutation, action builders with basic typing
+  - Will be overwritten by `npx convex dev`
+- explorer/convex/_generated/dataModel.d.ts: Created stub type definitions
+  - Mirrors schema.ts table structures
+- explorer/convex/tsconfig.json: Removed _generated exclusion to allow stub typechecking
+
+### Learnings
+- Convex _generated folder must exist for imports to resolve (create stubs before codegen)
+- Composite index chaining (q.eq().eq()) requires type assertion with generic types
+- listOriginals uses different indexes based on filter combination for optimal performance
+- Pagination via .paginate() returns {page, continueCursor, isDone}
+- Real types generated after `npx convex dev` - stubs provide basic type safety meanwhile
+
+---
+
+## US-027 - Create Convex mutations for Originals
+Completed: 2026-01-20T20:35:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/originals.ts: Added 4 Convex mutations
+  - createOriginal(args): Creates original with initial CEL log
+    - Validates required fields (name, did, creatorDid)
+    - Checks for duplicate DID before insert
+    - Sets default celVersion to "1.0"
+    - Returns created document
+  - updateOriginal(id, updates): Updates original metadata
+    - Verifies original exists
+    - Validates name/did if provided
+    - Merges metadata with existing
+    - Checks for duplicate DID if changing
+    - Returns updated document
+  - setCelLog(id, log): Stores/updates CEL log
+    - Verifies original exists
+    - Validates CEL log structure (has events array)
+    - Preserves or sets celVersion
+    - Returns updated document
+  - setCelVerified(id, timestamp): Marks CEL as verified
+    - Verifies original exists
+    - Validates timestamp is positive
+    - Warns if no CEL log exists
+    - Returns updated document
+
+### Learnings
+- Use Partial<> type with explicit fields to avoid Record<string, unknown> type errors
+- Type assertion (as any) needed for ctx.db.patch with partial updates before codegen
+- Convex mutations return promises - always await ctx.db operations
+- Basic CEL validation: check for events array existence and non-empty
+- Metadata merging preserves existing fields when updating
+
+---
+
+## US-028 - Create Convex action for CEL verification
+Completed: 2026-01-20T21:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/cel.ts: Created Convex actions for CEL verification
+  - verifyCelLog(originalId): Public action that verifies CEL log using SDK
+  - getOriginalInternal: Internal query to fetch original by ID
+  - updateCelVerifiedAt: Internal mutation to update verification timestamp
+  - Local TypeScript type definitions for pre-codegen compatibility
+  - Dynamic SDK import using `await import("@originals/sdk" as string)`
+  - Returns VerificationResult with detailed per-event status
+  - Updates celVerifiedAt on successful verification
+
+- explorer/convex/_generated/server.ts: Updated stub to support `returns` validator
+  - Added optional `returns` field to QueryConfig, MutationConfig, ActionConfig interfaces
+
+- explorer/convex/_generated/api.ts: Created stub for function references
+  - Exports `api` object for public functions
+  - Exports `internal` object for internal functions
+  - Includes references for cel.verifyCelLog, cel.getOriginalInternal, cel.updateCelVerifiedAt
+
+### Learnings
+- Convex actions with `"use node";` can import npm packages at runtime
+- Pre-codegen TypeScript requires stubs for _generated files
+- Use `await import("module" as string)` to bypass TypeScript module resolution for dynamic imports
+- Internal queries/mutations are used from actions via ctx.runQuery/ctx.runMutation
+- Always include `returns` validator in Convex function definitions per best practices
+- Typecheck Convex files: `bunx tsc --noEmit -p convex/tsconfig.json`
+
+---
+
+## US-029 - Set up Convex provider in Explorer React app
+Completed: 2026-01-20T22:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/lib/convex.ts: Created Convex client setup
+  - ConvexReactClient instance initialized from VITE_CONVEX_URL
+  - Graceful handling when VITE_CONVEX_URL is not set
+  - isConvexEnabled() helper function
+- explorer/src/main.tsx: Added ConvexProvider wrapper
+  - Root component conditionally wraps App in ConvexProvider
+  - Console logs Convex connection status for debugging
+- explorer/.env.example: Added VITE_CONVEX_URL placeholder
+  - With helpful comment explaining how to get the URL
+
+### Learnings
+- ConvexReactClient is the React-specific client from convex/react
+- Can gracefully disable Convex if URL not configured (null client pattern)
+- Environment variable must be prefixed with VITE_ for Vite to expose to client
+- Browser verification blocked by pre-existing Vite polyfill issue with @aviarytech/did-peer buffer import
+- Also fixed pre-existing SDK issues: CelSigner duplicate exports and inspect.ts type errors
+
+---
+
+## US-030 - Create useOriginal Convex hook
+Completed: 2026-01-20T17:55:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/hooks/useOriginal.ts: Created Convex hook for fetching single Originals
+  - OriginalId type: Branded string type for originals table ID (works pre-codegen)
+  - Original interface: Full document type with celLog, celVersion, celVerifiedAt fields
+  - UseOriginalResult interface: { original, isLoading, error } return type
+  - useOriginal(id): Fetches by Convex document ID using api.originals.getOriginal
+  - useOriginalByDid(did): Fetches by DID using api.originals.getOriginalByDid
+  - Uses Convex "skip" pattern for conditional query execution
+  - Returns undefined while loading, null if not found
+
+### Learnings
+- Convex useQuery returns undefined while loading, result (or null) when done
+- Use "skip" as second argument to conditionally skip query when id is null/undefined
+- For pre-codegen compatibility, use branded string type instead of Id<"tableName">
+- Pre-existing TypeScript errors in server/ directory don't affect src/ hooks
+- Convex hooks automatically re-render on data changes (real-time updates)
+
+---
+
+## US-031 - Create useOriginals Convex hook for lists
+Completed: 2026-01-20T20:05:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/hooks/useOriginals.ts: Created Convex hook for fetching paginated Original lists
+  - OriginalsFilters interface: Optional layer and creatorDid filters
+  - PaginationOptions interface: cursor and limit options for pagination
+  - OriginalsPage interface: paginated response with originals[], continueCursor, isDone
+  - UseOriginalsResult interface: { originals, isLoading, error, continueCursor, isDone }
+  - useOriginals(filters?, pagination?): Paginated list with optional filters
+  - useOriginalsByCreator(creatorDid): All originals by a specific creator (non-paginated)
+  - Uses Convex "skip" pattern for conditional query execution
+  - Comprehensive JSDoc with usage examples including pagination
+
+### Learnings
+- Convex pagination uses cursor-based approach with continueCursor and isDone
+- Keep the UseOriginalsResult interface consistent with UseOriginalResult pattern
+- useOriginalsByCreator is a convenience wrapper for getOriginalsByCreator query
+- Type assertions needed for page results before codegen generates proper types
+- Pre-existing TypeScript errors in server/ directory don't affect src/ hooks
+
+---
+
+## US-032 - Create useCelVerification Convex hook
+Completed: 2026-01-20T22:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/hooks/useCelVerification.ts: Created Convex hook for CEL verification
+  - EventType, EventVerification, VerificationResult types defined locally
+  - UseCelVerificationResult interface: { verify, result, isVerifying, error }
+  - useCelVerification(originalId): Hook that returns verification function and state
+  - verify() triggers verifyCelLog Convex action and updates local state
+  - Error handling for network/action errors vs verification failures
+  - Comprehensive JSDoc with two usage examples
+
+### Learnings
+- Convex useAction returns an async function callable from event handlers
+- useState/useCallback pattern provides controlled state management for actions
+- Memoize verify() with useCallback to prevent unnecessary re-renders
+- Distinguish between action execution errors (error state) and verification failures (result.verified=false)
+- Pre-existing TypeScript errors in explorer src/ directory don't affect new hooks
+
+---
+
+## US-033 - Create CelVerificationBadge component
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/components/cel/CelVerificationBadge.tsx: Created verification badge component
+  - Props: originalId: string, size?: "sm" | "md", className?: string
+  - Uses useOriginal hook to fetch original data from Convex
+  - Three visual states: verified (green checkmark), unverified (yellow warning), none (gray icon)
+  - Tooltip shows detailed verification status with timestamp if verified
+  - Loading skeleton while fetching data
+  - Exported types: CelVerificationBadgeProps
+- explorer/src/components/cel/CelVerificationBadgeDemo.tsx: Created demo component
+  - Standalone demo showing all badge states without requiring Convex data
+  - Size variations, status descriptions, usage context example, loading state
+  - Added to components-demo page under CEL Provenance tab
+- explorer/src/components/cel/index.ts: Created barrel export file
+- explorer/src/pages/components-demo.tsx: Added CEL Provenance tab with demo
+
+### Learnings
+- Lucide React (lucide-react) is the icon library used in explorer project
+- Follow LayerBadge pattern for badge components: statusConfig + sizeConfig objects
+- Use TooltipProvider/Tooltip/TooltipTrigger/TooltipContent from @/components/ui/tooltip
+- useOriginal returns undefined while loading, null if not found (Convex pattern)
+- Browser testing blocked by pre-existing Vite polyfill issues with @noble/* and other deps
+- Demo components are useful for visual testing when Convex/live data isn't available
+
+---
+
+## US-034 - Create CelEventTimeline component
+Completed: 2026-01-20T23:55:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/components/cel/CelEventTimeline.tsx: Created event timeline component
+  - Props: celLog: EventLog, className?: string
+  - Vertical timeline with connected dots and lines
+  - Event type badges: create (green), update (blue), deactivate (red)
+  - Timestamps extracted from event data or proof
+  - CreateEventSummary: shows asset name, creator DID, layer
+  - UpdateEventSummary: shows changed fields, detects migration events
+  - MigrationEventSummary: shows source→target layer transition with badges
+  - DeactivateEventSummary: shows deactivation reason
+  - Empty state handling for logs with no events
+  - Previous log notice for chunked logs
+- explorer/src/components/cel/CelEventTimelineDemo.tsx: Demo component for testing
+  - Sample logs: simple create, with updates, with migration, deactivated, empty
+  - Showcases all event types and visual states
+  - Added to components-demo page under CEL Provenance tab
+- explorer/src/components/cel/index.ts: Added exports for CelEventTimeline and CelEventTimelineDemo
+- explorer/src/pages/components-demo.tsx: Added CelEventTimelineDemo to CEL Provenance tab
+
+### Learnings
+- Use typeof checks for unknown types in JSX conditionals (e.g., typeof d?.layer === "string")
+- Migration events are update events with sourceDid/targetDid/layer fields
+- Get timestamps from data.createdAt/updatedAt/deactivatedAt/migratedAt or fall back to proof[0].created
+- Pre-existing Vite polyfill issue with @noble/* deps blocks browser rendering (same as US-029, US-033)
+- Use Lucide icons: Plus (create), RefreshCw (update), Ban (deactivate), ArrowRight (migration)
+- Tests: Component typechecks successfully with `bunx tsc --noEmit`
+
+---
+
+## US-035 - Add expandable event details to CelEventTimeline
+Completed: 2026-01-20T12:00:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/components/cel/CelEventTimeline.tsx: Added expandable event details
+  - Added useState hook for expand/collapse state per event
+  - Added Collapsible, CollapsibleContent, CollapsibleTrigger from Radix UI
+  - Added Button import for Details/Collapse toggle
+  - Added new icons: ChevronDown, ChevronUp, Shield, Key, Eye
+  - Created isWitnessProof() helper to detect witness proofs by witnessedAt field
+  - Created ProofDetails component showing:
+    - cryptosuite (e.g., eddsa-jcs-2022)
+    - proofPurpose (e.g., assertionMethod)
+    - verificationMethod (full DID key reference)
+    - proofValue (truncated with full value on hover)
+    - witnessedAt timestamp for witness proofs
+  - Created EventExpandedDetails component showing:
+    - Cryptographic Proofs section with controller proofs first, witness proofs grouped
+    - Hash chain link (previousEvent field) if present
+    - Full Event Data as formatted JSON in dark code block
+  - Updated TimelineEvent to use Collapsible wrapper
+  - Added witness count badge next to timestamp
+  - Details/Collapse button with chevron icons
+
+### Learnings
+- Use Radix UI Collapsible for expand/collapse (already in project via shadcn/ui)
+- Distinguish controller proofs from witness proofs by presence of witnessedAt field
+- ProofValue is often long - truncate with hover to show full value
+- Group witness proofs separately with amber/yellow color scheme
+- Pre-existing Vite polyfill issue blocks browser verification (same as US-033, US-034)
+- Typecheck passes for src/ components even when server/ has unrelated errors
+
+---
+
+## US-036 - Add Provenance tab to original-detail page
+Completed: 2026-01-20T12:30:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/pages/original-detail.tsx: Added Provenance tab to original detail page
+  - Added Tabs component with "Content" and "Provenance" tabs using Radix Tabs
+  - Extended ApiOriginal interface to include celLog and celVerifiedAt fields
+  - Added verification status badge showing verified/unverified/none states
+  - Integrated useCelVerification hook with handleVerifyCel function
+  - Added verification results display showing per-event breakdown
+  - Integrated CelEventTimeline component for event history display
+  - Shows "No provenance log" message with explanation when celLog is absent
+  - Import additions: Tabs components, CelEventTimeline, useCelVerification, ShieldCheck/FileText/History icons
+
+### Learnings
+- Can use TabsList with grid-cols-2 for equal width tab triggers
+- Verification result includes events array for per-event feedback
+- CelEventTimeline handles empty state internally (shows "No events" message)
+- TanStack Query and Convex hooks can coexist - page uses both patterns
+- Pre-existing Vite polyfill issues block browser verification (same as US-033, US-034, US-035)
+- Pre-existing server/ TypeScript errors don't affect src/ components
+
+---
+
+## US-037 - Add raw CEL log viewer to Provenance tab
+Completed: 2026-01-21T03:20:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/pages/original-detail.tsx: Added collapsible Raw CEL Log section
+  - Added imports: Download, Code, ChevronDown, ChevronUp icons from lucide-react
+  - Added import: Collapsible, CollapsibleContent, CollapsibleTrigger from Radix UI
+  - Added state: isRawLogOpen, rawLogCopied for collapsible and copy feedback
+  - Added handleCopyRawLog function: copies formatted JSON to clipboard with toast feedback
+  - Added handleDownloadRawLog function: downloads as {safeName}.cel.json file
+  - Added collapsible "Raw CEL Log" section after Event Timeline
+  - Header shows Code icon, "Raw CEL Log" title, and event count badge
+  - Action buttons: Copy JSON (with checkmark feedback), Download .cel.json
+  - JSON code block: dark slate-900 background, formatted with 2-space indent
+  - Scrollable container: max-h-96 for overflow, overflow-x-auto for wide JSON
+
+### Learnings
+- Reuse existing Collapsible components from @/components/ui/collapsible (Radix UI)
+- Safe filename generation: replace non-alphanumeric chars with hyphens, lowercase
+- Use Blob + URL.createObjectURL pattern for client-side file downloads
+- Pre-existing TypeScript errors in server/ and shared/ don't block src/ changes
+- Browser verification blocked by pre-existing Vite polyfill issues (same as US-029 through US-036)
+
+---
+
+## US-038 - Create useCreateOriginal mutation hook
+Completed: 2026-01-21T03:55:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/hooks/useCreateOriginal.ts: Created mutation hook for creating Originals
+  - useCreateOriginal(): Returns { createOriginal, isCreating, error }
+  - CreateOriginalInput interface: name, resources, creatorDid, optional metadata
+  - ExternalReference interface: url[], mediaType, digestMultibase
+  - generateCelLog(): Creates CEL event log with create event and DataIntegrityProof
+  - generatePeerDid(): Generates did:peer identifier from timestamp and random value
+  - Full validation of required fields before mutation
+  - Comprehensive JSDoc with usage examples
+  - Uses Convex useMutation with api.originals.createOriginal
+
+### Learnings
+- Hook pattern follows useOriginal and useCelVerification conventions
+- CEL log generation simplified for client-side (real SDK signing in production)
+- did:peer DID generation uses simple deterministic approach (SDK has full numalgo 4)
+- Pre-existing TypeScript errors in server/ directory don't affect src/ hooks
+- Convex useMutation returns a callable function, useCallback wraps user-facing API
+
+---
+
+## US-039 - Update create-original page to use Convex
+Completed: 2026-01-21T08:15:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/pages/create-original-simple.tsx: Replaced API calls with Convex hook
+  - Removed TanStack Query useMutation and queryClient invalidations
+  - Imported useCreateOriginal hook and ExternalReference type
+  - Added computeDigestMultibase() function using Web Crypto API for SHA-256 hashing
+  - Added readFileAsUint8Array() helper for file content reading
+  - Added guessMediaTypeFromUrl() for URL-based media type detection
+  - Updated handleSubmit to be async, build ExternalReference from file/URL
+  - Added ShieldCheck icon import for provenance badge
+  - Loading state now says "Creating original with provenance log..."
+  - Success display shows CEL provenance badge with amber styling
+  - Success shows CEL log event count and version number
+  - Success includes explanation that history is cryptographically verifiable
+
+### Learnings
+- Web Crypto API (crypto.subtle.digest) provides native SHA-256 in browser
+- Multibase base64url-nopad uses 'u' prefix and custom alphabet with - and _ instead of + and /
+- Client-side file hashing works well for moderate file sizes
+- Combined loading state from processing + Convex mutation provides better UX
+- Pre-existing Vite polyfill issues block browser testing (same as US-029 through US-038)
+
+---
+
+## US-040 - Create useMigrateOriginal mutation hook
+Completed: 2026-01-21T08:45:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/convex/originals.ts: Added migrateOriginal mutation
+  - Validates migration path: peer→webvh (requires domain), webvh→btco
+  - Generates target DID for each layer (did:webvh:{domain}:{id}, did:btco:{id})
+  - Creates migration event with sourceDid, targetDid, layer, migratedAt
+  - Computes previousEvent hash for CEL chain linking
+  - Updates original's layer, did, celLog, clears celVerifiedAt
+- explorer/convex/_generated/api.ts: Added migrateOriginal to API stub
+- explorer/src/hooks/useMigrateOriginal.ts: Created React hook for migrations
+  - MigrationTargetLayer type: "webvh" | "btco"
+  - MigrateOptions interface with optional domain
+  - UseMigrateOriginalResult: { migrate, isMigrating, error }
+  - migrate(originalId, targetLayer, options?) validates and calls Convex mutation
+  - Comprehensive JSDoc with usage examples
+
+### Learnings
+- Migration path validation: peer→webvh→btco only, no skipping or reversing
+- Domain is required for webvh migration, btco migration needs no extra params
+- Convex v.any() requires careful typing with Record<string, unknown> for nested objects
+- Type assertions needed for pre-codegen compatibility with Convex stubs
+- Pre-existing server/ TypeScript errors don't affect src/ or convex/ code
+
+---
+
+## US-041 - Update migrate-original page to use Convex
+Completed: 2026-01-21T04:45:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- explorer/src/pages/migrate-original-simple.tsx: Complete rewrite to use Convex
+  - Replaced TanStack Query useMutation with useMigrateOriginal hook
+  - Added useOriginals hook to list originals that can be migrated (peer/webvh only)
+  - Added useOriginal hook to show selected original details
+  - Migration success shows CelEventTimeline component with full event history
+  - Migration event visible in timeline with layer transition badges (peer → webvh → btco)
+  - Added provenance badge and new DID display on success
+  - Error handling for invalid migration paths via error state from hook
+  - Layer path visualization at bottom showing one-way migration direction
+  - Domain input field for webvh migration (required validation)
+  - Original selector dropdown with layer badges
+  - "View Original" and "Migrate Another" buttons on success
+
+### Learnings
+- Use `!= null` instead of `&&` for unknown types in JSX conditionals to avoid TypeScript errors
+- CelEventTimeline detects migration events by presence of sourceDid/targetDid fields
+- Pre-existing Vite polyfill issues block browser testing but code typechecks successfully
+- useMigrateOriginal hook handles mutation state (isMigrating, error) internally
+- Filter originals by layer to only show migratable ones (exclude btco layer)
+
+---
+
+## US-042 - Write CEL lifecycle integration tests
+Completed: 2026-01-21T04:55:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- packages/sdk/tests/integration/cel-lifecycle.test.ts: Created integration test suite
+  - 14 tests covering full CEL lifecycle
+  - Create → Update → Verify lifecycle (2 tests)
+  - Migration: peer → webvh (2 tests)
+  - Tampered log detection (2 tests)
+  - Hash chain integrity (3 tests)
+  - Deactivation seals log (3 tests)
+  - OriginalsCel unified SDK (2 tests)
+  - Mock signer and test resource helpers for self-contained tests
+
+### Test Coverage
+- create peer asset then update then verify passes ✓
+- multiple sequential updates maintain valid hash chain ✓
+- migrate peer to webvh adds migration event ✓
+- migration preserves original create event data ✓
+- tampered log verification fails with specific error ✓
+- missing proof array causes verification failure ✓
+- broken hash chain verification fails ✓
+- first event with previousEvent causes verification failure ✓
+- second event missing previousEvent causes verification failure ✓
+- deactivate seals log - further updates rejected ✓
+- deactivated log state reflects deactivation ✓
+- cannot migrate deactivated log ✓
+- create → update → verify lifecycle via unified SDK ✓
+- migration via unified SDK with domain ✓
+
+### Learnings
+- Mock signer pattern: use deterministic hash-based proof generation for testing
+- createExternalReference helper creates valid ExternalReference objects from content
+- PeerCelManager.create requires signer function, returns EventLog
+- deactivateEventLog throws "Cannot update a deactivated event log" on deactivated logs
+- verifyEventLog returns detailed per-event verification with proofValid and chainValid
+- Hash chain errors include "Hash chain broken" message for easy detection
+- Tests: bun test packages/sdk/tests/integration/cel-lifecycle.test.ts
+
+---
+
+## US-043 - Write Originals CEL Application Specification document
+Completed: 2026-01-21T09:35:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- sdk/docs/ORIGINALS_CEL_SPEC.md: Created comprehensive specification document
+  - Section 1: Introduction (purpose, scope, conformance, terminology, references)
+  - Section 2: Cryptographic Control (DID-based authorization, proof requirements, hash chain)
+  - Section 3: State Derivation (algorithm, AssetState structure, update rules, deactivation)
+  - Section 4: Witness Rules (overview, rules by layer, WitnessProof structure, HTTP/Bitcoin witnesses)
+  - Section 5: Event Types (create, update, deactivate with full examples)
+  - Section 6: Migration Events (valid paths, structure, peer→webvh, webvh→btco)
+  - Section 7: External References (structure, hash verification)
+  - Section 8: Serialization (JSON, CBOR)
+  - Section 9: Verification (algorithm, result structure)
+  - Appendix A: Complete event log example
+  - Appendix B: Error codes
+  - Appendix C: Revision history
+
+### Learnings
+- Specification should include concrete JSON examples for each event type
+- Migration events are update events with specific data fields (sourceDid, targetDid, layer)
+- Witness proofs are identified by presence of witnessedAt field
+- Hash chain uses SHA-256 with multibase base64url-nopad encoding (u prefix)
+- Typecheck: bunx tsc --noEmit from sdk root
+
+---
+
+## US-044 - Write Originals CEL Developer Guide
+Completed: 2026-01-21T09:50:00Z
+Agent: Background Agent (Cursor)
+
+### Changes
+- sdk/docs/ORIGINALS_CEL_GUIDE.md: Created comprehensive developer guide
+  - Section 1: Quick Start (5-minute example) - installation, create asset, verify, CLI
+  - Section 2: Core Concepts - event logs, trust layers, witnesses, hash chain, external references
+  - Section 3: SDK API Reference - OriginalsCel class (create, update, verify, migrate, getCurrentState), layer managers, helper functions, witness services
+  - Section 4: CLI Usage - all 4 commands (create, verify, inspect, migrate) with options and examples
+  - Section 5: Convex Integration - React hooks (useOriginal, useOriginals, useCelVerification, useCreateOriginal, useMigrateOriginal), real-time updates, server-side verification
+  - Section 6: Further Reading - links to spec, whitepaper, external references
+  - Appendix A: Migration Checklist (peer→webvh, webvh→btco)
+  - Appendix B: Troubleshooting common errors
+
+### Learnings
+- Developer guide should include practical code examples for each SDK method
+- Visual diagrams (ASCII) help explain layer migration flow and hash chains
+- Hook examples should show both simple and advanced usage patterns
+- Include troubleshooting section for common errors (migration paths, verification failures)
+- Typecheck: bunx tsc --noEmit from sdk root
+
+---

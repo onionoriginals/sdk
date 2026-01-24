@@ -1,5 +1,5 @@
 import { BitcoinTransaction, TransactionInput, TransactionOutput, Utxo, DUST_LIMIT_SATS } from '../types';
-import { estimateFeeSats, selectUtxos, SelectionOptions, SelectionResult } from './utxo';
+import { selectUtxos, SelectionOptions, SelectionResult } from './utxo';
 
 export interface BuildTransferOptions extends Omit<SelectionOptions, 'targetAmountSats' | 'feeRateSatsPerVb'> {
   changeAddress?: string;

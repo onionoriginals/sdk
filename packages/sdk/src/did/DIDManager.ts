@@ -1,4 +1,4 @@
-import { DIDDocument, OriginalsConfig, AssetResource, VerificationMethod, KeyPair, ExternalSigner, ExternalVerifier } from '../types';
+import { DIDDocument, OriginalsConfig, AssetResource, KeyPair, ExternalSigner, ExternalVerifier } from '../types';
 import { getNetworkDomain, DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH } from '../types/network';
 import { BtcoDidResolver } from './BtcoDidResolver';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
@@ -23,7 +23,10 @@ export class DIDManager {
     const keyPair = await keyManager.generateKeyPair(desiredType);
 
     // Use @aviarytech/did-peer to create a did:peer (variant 4 long-form for full VM+context)
-    const didPeerMod: any = await import('@aviarytech/did-peer');
+    const didPeerMod = await import('@aviarytech/did-peer') as {
+      createNumAlgo4: (vms: unknown[], service?: unknown, extra?: unknown) => Promise<string>;
+      resolve: (did: string) => Promise<Record<string, unknown>>;
+    };
     const did: string = await didPeerMod.createNumAlgo4(
       [
         {
@@ -37,17 +40,25 @@ export class DIDManager {
     );
 
     // Resolve to DID Document using the same library
-    const resolved: any = await didPeerMod.resolve(did);
+    const rawResolved = await didPeerMod.resolve(did);
+    // Type the resolved document properly
+    const resolved = rawResolved as unknown as {
+      id?: string;
+      verificationMethod?: Array<Record<string, unknown>>;
+      authentication?: string[];
+      assertionMethod?: string[];
+      [key: string]: unknown;
+    };
     // Ensure controller is set on VM entries for compatibility
     if (resolved && Array.isArray(resolved.verificationMethod)) {
-      resolved.verificationMethod = resolved.verificationMethod.map((vm: any) => ({
+      resolved.verificationMethod = resolved.verificationMethod.map((vm) => ({
         controller: did,
         ...vm
       }));
     }
     // Ensure relationships exist and reference a VM
     const vmIds: string[] = Array.isArray(resolved?.verificationMethod)
-      ? resolved.verificationMethod.map((vm: any) => vm.id).filter(Boolean)
+      ? (resolved.verificationMethod as Array<{ id?: string }>).map((vm) => vm.id).filter(Boolean) as string[]
       : [];
     if (!resolved.authentication || resolved.authentication.length === 0) {
       if (vmIds.length > 0) resolved.authentication = [vmIds[0]];
@@ -55,11 +66,11 @@ export class DIDManager {
     if (!resolved.assertionMethod || resolved.assertionMethod.length === 0) {
       resolved.assertionMethod = resolved.authentication || (vmIds.length > 0 ? [vmIds[0]] : []);
     }
-    
+
     if (returnKeyPair) {
-      return { didDocument: resolved as DIDDocument, keyPair };
+      return { didDocument: resolved as unknown as DIDDocument, keyPair };
     }
-    return resolved as DIDDocument;
+    return resolved as unknown as DIDDocument;
   }
 
   async migrateToDIDWebVH(didDoc: DIDDocument, domain?: string): Promise<DIDDocument> {
@@ -105,7 +116,7 @@ export class DIDManager {
       ...didDoc,
       id: `did:webvh:${normalized}:${slug}`
     };
-    return migrated;
+    return await Promise.resolve(migrated);
   }
 
   async migrateToDIDBTCO(didDoc: DIDDocument, satoshi: string): Promise<DIDDocument> {
@@ -135,7 +146,7 @@ export class DIDManager {
     }
 
     // Try to carry over the first multikey VM if present
-    const firstVm = (didDoc.verificationMethod && didDoc.verificationMethod[0]) as VerificationMethod | undefined;
+    const firstVm = didDoc.verificationMethod?.[0];
     let publicKey: Uint8Array | undefined;
     let keyType: Parameters<typeof createBtcoDidDocument>[2]['keyType'] | undefined;
     try {
@@ -154,7 +165,7 @@ export class DIDManager {
     // If no key material is available, generate a minimal btco DID doc without keys
     let btcoDoc: DIDDocument;
     if (publicKey && keyType) {
-      btcoDoc = createBtcoDidDocument(satoshi, network as any, { publicKey, keyType });
+      btcoDoc = createBtcoDidDocument(satoshi, network, { publicKey, keyType });
     } else {
       const prefix = network === 'mainnet' ? 'did:btco:' : network === 'regtest' ? 'did:btco:reg:' : 'did:btco:sig:';
       btcoDoc = {
@@ -167,16 +178,16 @@ export class DIDManager {
     if (didDoc.service && didDoc.service.length > 0) {
       btcoDoc.service = didDoc.service;
     }
-    return btcoDoc;
+    return await Promise.resolve(btcoDoc);
   }
 
   async resolveDID(did: string): Promise<DIDDocument | null> {
     try {
       if (did.startsWith('did:peer:')) {
         try {
-          const mod: any = await import('@aviarytech/did-peer');
+          const mod = await import('@aviarytech/did-peer') as { resolve: (did: string) => Promise<Record<string, unknown>> };
           const doc = await mod.resolve(did);
-          return doc as DIDDocument;
+          return doc as unknown as DIDDocument;
         } catch (err) {
           // Failed to resolve did:peer; returning minimal document
           if (this.config.enableLogging) {
@@ -196,10 +207,10 @@ export class DIDManager {
       }
       if (did.startsWith('did:webvh:')) {
         try {
-          const mod: any = await import('didwebvh-ts');
+          const mod = await import('didwebvh-ts') as { resolveDID?: (did: string) => Promise<{ doc?: Record<string, unknown> }> };
           if (mod && typeof mod.resolveDID === 'function') {
             const result = await mod.resolveDID(did);
-            if (result && result.doc) return result.doc as DIDDocument;
+            if (result && result.doc) return result.doc as unknown as DIDDocument;
           }
         } catch (err) {
           // Failed to resolve did:webvh; returning minimal document
@@ -235,7 +246,7 @@ export class DIDManager {
     network: 'mainnet' | 'regtest' | 'signet',
     options: Parameters<typeof createBtcoDidDocument>[2]
   ): DIDDocument {
-    return createBtcoDidDocument(satNumber, network, options as any);
+    return createBtcoDidDocument(satNumber, network, options);
   }
 
   // ========================================================================
@@ -297,9 +308,9 @@ export class DIDManager {
       if (!providedUpdateKeys || providedUpdateKeys.length === 0) {
         throw new Error('updateKeys are required when using externalSigner');
       }
-      
+
       signer = externalSigner;
-      verifier = externalVerifier || externalSigner as any; // Use signer as verifier if not provided
+      verifier = externalVerifier || (externalSigner as unknown as ExternalVerifier); // Use signer as verifier if not provided
       verificationMethods = providedVerificationMethods;
       updateKeys = providedUpdateKeys;
       keyPair = undefined; // No key pair when using external signer
@@ -404,11 +415,11 @@ export class DIDManager {
     // Check if using external signer or internal keypair
     if ('sign' in providedSigner && 'getVerificationMethodId' in providedSigner) {
       // External signer
-      signer = providedSigner as ExternalSigner;
+      signer = providedSigner;
       verifier = providedVerifier;
     } else {
       // Internal signer with keypair
-      const keyPair = providedSigner as { privateKey: string; publicKey: string };
+      const keyPair = providedSigner;
       const verificationMethod: WebVHVerificationMethod = {
         type: 'Multikey',
         publicKeyMultibase: keyPair.publicKey,
@@ -534,7 +545,7 @@ export class DIDManager {
   async loadDIDLog(logPath: string): Promise<DIDLog> {
     const content = await fs.promises.readFile(logPath, 'utf8');
     const lines = content.trim().split('\n');
-    return lines.map(line => JSON.parse(line));
+    return lines.map(line => JSON.parse(line) as DIDLogEntry);
   }
 
   /**

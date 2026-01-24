@@ -3,7 +3,7 @@ import { DIDDocument, VerifiableCredential } from '../types';
 
 type DocumentLoader = (url: string) => Promise<{
   documentUrl: string;
-  document: any;
+  document: unknown;
   contextUrl: string | null;
 }>;
 
@@ -17,7 +17,7 @@ import ordinalsContext from '../contexts/ordinals-plus.json';
 import originalsContext from '../contexts/originals.json';
 
 // Full context documents for proper canonicalization
-const PRELOADED_CONTEXTS: Record<string, any> = {
+const PRELOADED_CONTEXTS: Record<string, unknown> = {
   // W3C and standard contexts
   'https://www.w3.org/2018/credentials/v1': credentialsV1Context,
   'https://www.w3.org/ns/credentials/v2': credentialsV2Context,
@@ -36,12 +36,12 @@ const PRELOADED_CONTEXTS: Record<string, any> = {
 };
 
 
-const defaultDocumentLoader: DocumentLoader = async (url: string) => {
+const defaultDocumentLoader: DocumentLoader = (url: string) => {
   const preloaded = PRELOADED_CONTEXTS[url];
   if (preloaded) {
-    return { documentUrl: url, document: preloaded, contextUrl: null };
+    return Promise.resolve({ documentUrl: url, document: preloaded, contextUrl: null });
   }
-  throw new Error(`Document not found in PRELOADED_CONTEXTS: ${url}`);
+  return Promise.reject(new Error(`Document not found in PRELOADED_CONTEXTS: ${url}`));
 };
 
 export function serializeDIDDocument(didDoc: DIDDocument): string {
@@ -52,7 +52,7 @@ export function serializeDIDDocument(didDoc: DIDDocument): string {
 export function deserializeDIDDocument(data: string): DIDDocument {
   // Parse from JSON-LD
   try {
-    const parsed = JSON.parse(data);
+    const parsed: unknown = JSON.parse(data);
     return parsed as DIDDocument;
   } catch (error) {
     throw new Error('Invalid DID Document JSON');
@@ -67,7 +67,7 @@ export function serializeCredential(vc: VerifiableCredential): string {
 export function deserializeCredential(data: string): VerifiableCredential {
   // Parse VC from JSON-LD
   try {
-    const parsed = JSON.parse(data);
+    const parsed: unknown = JSON.parse(data);
     return parsed as VerifiableCredential;
   } catch (error) {
     throw new Error('Invalid Verifiable Credential JSON');
@@ -75,20 +75,26 @@ export function deserializeCredential(data: string): VerifiableCredential {
 }
 
 export async function canonicalizeDocument(
-  doc: any,
+  doc: unknown,
   options: { documentLoader?: DocumentLoader } = {}
 ): Promise<string> {
   try {
-    return await jsonld.canonize(doc, {
+    // Type assertion needed due to jsonld library's loose typing
+    interface JsonLdModule {
+      canonize: (doc: unknown, options: Record<string, unknown>) => Promise<string>;
+    }
+    const jsonldTyped = jsonld as unknown as JsonLdModule;
+    const result = await jsonldTyped.canonize(doc, {
       algorithm: 'URDNA2015',
       format: 'application/n-quads',
       documentLoader: options.documentLoader ?? defaultDocumentLoader,
       useNative: false,
       rdfDirection: 'i18n-datatype',
       safe: false  // Disable safe mode to allow custom contexts
-    } as any);
-  } catch (error: any) {
-    const message = error?.message ?? String(error);
+    });
+    return result;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to canonicalize document: ${message}`);
   }
 }

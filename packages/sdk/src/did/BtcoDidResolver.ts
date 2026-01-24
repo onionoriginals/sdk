@@ -3,7 +3,7 @@ import type { DIDDocument } from '../types/did';
 export interface BtcoInscriptionData {
   inscriptionId: string;
   content: string;
-  metadata: any;
+  metadata: Record<string, unknown> | null;
   contentUrl?: string;
   contentType?: string;
   isValidDid?: boolean;
@@ -35,7 +35,7 @@ export interface BtcoDidResolutionResult {
 export interface ResourceProviderLike {
   getSatInfo(satNumber: string): Promise<{ inscription_ids: string[] }>;
   resolveInscription(inscriptionId: string): Promise<{ id: string; sat: number; content_type: string; content_url: string }>;
-  getMetadata(inscriptionId: string): Promise<any>;
+  getMetadata(inscriptionId: string): Promise<Record<string, unknown> | null>;
 }
 
 export interface BtcoDidResolutionOptions {
@@ -89,8 +89,9 @@ export class BtcoDidResolver {
     try {
       const satInfo = await provider.getSatInfo(satNumber);
       inscriptionIds = satInfo?.inscription_ids || [];
-    } catch (e: any) {
-      return this.createErrorResult('notFound', `Failed to retrieve inscriptions for satoshi ${satNumber}: ${e?.message || String(e)}`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      return this.createErrorResult('notFound', `Failed to retrieve inscriptions for satoshi ${satNumber}: ${message}`);
     }
 
     if (inscriptionIds.length === 0) {
@@ -140,8 +141,9 @@ export class BtcoDidResolver {
           } finally {
             clearTimeout(timeoutId);
           }
-        } catch (err: any) {
-          inscriptionData.error = `Failed to fetch content: ${err?.message || String(err)}`;
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          inscriptionData.error = `Failed to fetch content: ${message}`;
           inscriptionDataList.push(inscriptionData);
           continue;
         }
@@ -155,7 +157,7 @@ export class BtcoDidResolver {
         inscriptionData.isValidDid = didPattern.test(inscriptionData.content);
 
         if (inscriptionData.isValidDid && inscriptionData.metadata) {
-          const didDocument = inscriptionData.metadata as DIDDocument;
+          const didDocument = inscriptionData.metadata as unknown as DIDDocument;
           if (this.isValidDidDocument(didDocument) && didDocument.id === expectedDid) {
             inscriptionData.didDocument = didDocument;
           } else {
@@ -169,8 +171,9 @@ export class BtcoDidResolver {
             inscriptionData.error = 'DID has been deactivated';
           }
         }
-      } catch (err: any) {
-        inscriptionData.error = `Failed to process inscription: ${err?.message || String(err)}`;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        inscriptionData.error = `Failed to process inscription: ${message}`;
       }
 
       inscriptionDataList.push(inscriptionData);
@@ -203,16 +206,17 @@ export class BtcoDidResolver {
     };
   }
 
-  private isValidDidDocument(doc: any): doc is DIDDocument {
+  private isValidDidDocument(doc: unknown): doc is DIDDocument {
     if (!doc || typeof doc !== 'object') return false;
-    if (!doc.id || typeof doc.id !== 'string') return false;
-    if (!doc['@context']) return false;
-    const contexts = Array.isArray(doc['@context']) ? doc['@context'] : [doc['@context']];
+    const d = doc as Record<string, unknown>;
+    if (!d.id || typeof d.id !== 'string') return false;
+    if (!d['@context']) return false;
+    const contexts = Array.isArray(d['@context']) ? d['@context'] : [d['@context']];
     if (!contexts.includes('https://www.w3.org/ns/did/v1') && !contexts.includes('https://w3id.org/did/v1')) {
       return false;
     }
-    if (doc.verificationMethod && !Array.isArray(doc.verificationMethod)) return false;
-    if (doc.authentication && !Array.isArray(doc.authentication)) return false;
+    if (d.verificationMethod && !Array.isArray(d.verificationMethod)) return false;
+    if (d.authentication && !Array.isArray(d.authentication)) return false;
     return true;
   }
 

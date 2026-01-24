@@ -8,6 +8,9 @@
   "files": [
     "dist"
   ],
+  "bin": {
+    "originals-cel": "./dist/cel/cli/index.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

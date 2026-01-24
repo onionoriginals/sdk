@@ -146,5 +146,59 @@ export { OrdMockProvider } from './adapters/providers/OrdMockProvider.js';
 export { FeeOracleMock } from './adapters/FeeOracleMock.js';
 export type { OrdinalsProvider, FeeOracleAdapter, StorageAdapter } from './adapters/types.js';
 
+// CEL (Cryptographic Event Log) exports
+export {
+  OriginalsCel,
+  type CelLayer,
+  type CelSigner,
+  type OriginalsCelConfig,
+  type OriginalsCelOptions,
+} from './cel/OriginalsCel.js';
+export type {
+  EventLog,
+  LogEntry,
+  EventType,
+  DataIntegrityProof,
+  WitnessProof,
+  ExternalReference,
+  VerificationResult,
+  EventVerification,
+  AssetState,
+  CreateOptions,
+  UpdateOptions,
+  DeactivateOptions,
+  VerifyOptions,
+} from './cel/types.js';
+export {
+  createEventLog,
+  updateEventLog,
+  deactivateEventLog,
+  verifyEventLog,
+  witnessEvent,
+} from './cel/algorithms/index.js';
+export {
+  computeDigestMultibase,
+  verifyDigestMultibase,
+  decodeDigestMultibase,
+} from './cel/hash.js';
+export {
+  createExternalReference,
+  verifyExternalReference,
+} from './cel/ExternalReferenceManager.js';
+export { PeerCelManager } from './cel/layers/PeerCelManager.js';
+export { WebVHCelManager } from './cel/layers/WebVHCelManager.js';
+export { BtcoCelManager } from './cel/layers/BtcoCelManager.js';
+export type { WitnessService } from './cel/witnesses/WitnessService.js';
+export { HttpWitness, HttpWitnessError } from './cel/witnesses/HttpWitness.js';
+export { BitcoinWitness, BitcoinWitnessError, type BitcoinWitnessProof } from './cel/witnesses/BitcoinWitness.js';
+export {
+  serializeEventLogJson,
+  parseEventLogJson,
+} from './cel/serialization/json.js';
+export {
+  serializeEventLogCbor,
+  parseEventLogCbor,
+} from './cel/serialization/cbor.js';
+
 // Default export
 export default OriginalsSDK;

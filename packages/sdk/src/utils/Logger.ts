@@ -25,7 +25,7 @@ export interface LogEntry {
   level: LogLevel;
   context: string;
   message: string;
-  data?: any;
+  data?: unknown;
   duration?: number; // For performance tracking
   traceId?: string; // For request correlation
 }
@@ -73,19 +73,21 @@ export class ConsoleLogOutput implements LogOutput {
  */
 export class FileLogOutput implements LogOutput {
   private buffer: string[] = [];
-  private flushTimeout: any = null;
+  private flushTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly flushInterval = 1000; // Flush every 1 second
-  
+
   constructor(private filePath: string) {}
-  
-  async write(entry: LogEntry): Promise<void> {
+
+  write(entry: LogEntry): void {
     // Format as JSON line
     const line = JSON.stringify(entry) + '\n';
     this.buffer.push(line);
-    
+
     // Schedule flush
     if (!this.flushTimeout) {
-      this.flushTimeout = setTimeout(() => this.flush(), this.flushInterval);
+      this.flushTimeout = setTimeout(() => {
+        void this.flush();
+      }, this.flushInterval);
     }
   }
   
@@ -157,37 +159,37 @@ export class Logger {
   /**
    * Log a debug message
    */
-  debug(message: string, data?: any): void {
+  debug(message: string, data?: unknown): void {
     this.log('debug', message, data);
   }
-  
+
   /**
    * Log an info message
    */
-  info(message: string, data?: any): void {
+  info(message: string, data?: unknown): void {
     this.log('info', message, data);
   }
-  
+
   /**
    * Log a warning message
    */
-  warn(message: string, data?: any): void {
+  warn(message: string, data?: unknown): void {
     this.log('warn', message, data);
   }
-  
+
   /**
    * Log an error message
    */
-  error(message: string, error?: Error, data?: any): void {
-    const errorData = error ? {
-      ...data,
+  error(message: string, error?: Error, data?: unknown): void {
+    const errorData: unknown = error ? {
+      ...(data && typeof data === 'object' ? data : {}),
       error: {
         name: error.name,
         message: error.message,
         stack: error.stack
       }
     } : data;
-    
+
     this.log('error', message, errorData);
   }
   
@@ -208,7 +210,7 @@ export class Logger {
    * Create a child logger with nested context
    */
   child(childContext: string): Logger {
-    const newLogger = Object.create(Logger.prototype);
+    const newLogger = Object.create(Logger.prototype) as Logger;
     newLogger.context = `${this.context}:${childContext}`;
     newLogger.outputs = this.outputs;
     newLogger.minLevel = this.minLevel;
@@ -235,7 +237,7 @@ export class Logger {
   /**
    * Internal log method
    */
-  private log(level: LogLevel, message: string, data?: any, duration?: number): void {
+  private log(level: LogLevel, message: string, data?: unknown, duration?: number): void {
     // Check if we should log this level
     if (Logger.LEVEL_PRIORITY[level] < Logger.LEVEL_PRIORITY[this.minLevel]) {
       return;
@@ -279,19 +281,19 @@ export class Logger {
   /**
    * Sanitize sensitive data from logs
    */
-  private sanitize(data: any): any {
+  private sanitize(data: unknown): unknown {
     if (!data) {
       return data;
     }
-    
+
     // Handle arrays
     if (Array.isArray(data)) {
       return data.map(item => this.sanitize(item));
     }
-    
+
     // Handle objects
     if (typeof data === 'object') {
-      const sanitized: any = {};
+      const sanitized: Record<string, unknown> = {};
       
       for (const [key, value] of Object.entries(data)) {
         const lowerKey = key.toLowerCase();

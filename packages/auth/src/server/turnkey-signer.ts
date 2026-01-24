@@ -133,7 +133,7 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
         ed25519Module.utils!.sha512Sync = sha512Fn;
       }
 
-      return await ed25519.verify(signature, message, ed25519PublicKey);
+      return await ed25519.verifyAsync(signature, message, ed25519PublicKey);
     } catch (error) {
       console.error('Error verifying signature:', error);
       return false;
@@ -152,13 +152,13 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
 /**
  * Create a Turnkey signer for use with the Originals SDK
  */
-export async function createTurnkeySigner(
+export function createTurnkeySigner(
   subOrgId: string,
   keyId: string,
   turnkeyClient: Turnkey,
   verificationMethodId: string,
   publicKeyMultibase: string
-): Promise<TurnkeyWebVHSigner> {
+): TurnkeyWebVHSigner {
   return new TurnkeyWebVHSigner(
     subOrgId,
     keyId,

@@ -20,6 +20,7 @@ export interface Issuer {
 
 export interface CredentialSubject {
   id?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
 }
 

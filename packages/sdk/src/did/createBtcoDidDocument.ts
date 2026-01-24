@@ -14,7 +14,8 @@ function getDidPrefix(network: BitcoinNetwork): string {
 	if (network === 'mainnet') return 'did:btco';
 	if (network === 'signet') return 'did:btco:sig';
 	if (network === 'regtest') return 'did:btco:reg';
-	throw new Error(`Unsupported Bitcoin network: ${network}`);
+	const _exhaustiveCheck: never = network;
+	throw new Error(`Unsupported Bitcoin network: ${String(_exhaustiveCheck)}`);
 }
 
 function buildVerificationMethod(did: string, params: CreateBtcoDidDocumentParams): VerificationMethod {

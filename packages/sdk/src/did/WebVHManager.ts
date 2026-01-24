@@ -204,9 +204,10 @@ export class WebVHManager {
       if (!providedUpdateKeys || providedUpdateKeys.length === 0) {
         throw new Error('updateKeys are required when using externalSigner');
       }
-      
+
+
       signer = externalSigner;
-      verifier = externalVerifier || externalSigner as any; // Use signer as verifier if not provided
+      verifier = externalVerifier || (externalSigner as unknown as ExternalVerifier); // Use signer as verifier if not provided
       verificationMethods = providedVerificationMethods;
       updateKeys = providedUpdateKeys;
       keyPair = undefined; // No key pair when using external signer
@@ -392,7 +393,7 @@ export class WebVHManager {
   async loadDIDLog(logPath: string): Promise<DIDLog> {
     const content = await fs.promises.readFile(logPath, 'utf8');
     const lines = content.trim().split('\n');
-    return lines.map(line => JSON.parse(line));
+    return lines.map(line => JSON.parse(line) as DIDLogEntry);
   }
 
   /**
@@ -438,11 +439,11 @@ export class WebVHManager {
     // Check if using external signer or internal keypair
     if ('sign' in providedSigner && 'getVerificationMethodId' in providedSigner) {
       // External signer
-      signer = providedSigner as ExternalSigner;
+      signer = providedSigner;
       verifier = providedVerifier;
     } else {
       // Internal signer with keypair
-      const keyPair = providedSigner as { privateKey: string; publicKey: string };
+      const keyPair = providedSigner;
       const verificationMethod: VerificationMethod = {
         type: 'Multikey',
         publicKeyMultibase: keyPair.publicKey,
@@ -475,7 +476,7 @@ export class WebVHManager {
       log: currentLog,
       doc: updatedDoc,
       signer,
-      verifier,
+      verifier: verifier || undefined,
     });
 
     // Validate the returned DID document

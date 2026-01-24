@@ -168,12 +168,12 @@ async function validateAndEstimate(sdk: OriginalsSDK, asset: OriginalsAsset): Pr
 
   // Validate migration to did:webvh
   console.log('Validating migration to did:webvh:');
-  const webvhValidation = await sdk.lifecycle.validateMigration(asset, 'did:webvh');
+  const webvhValidation = sdk.lifecycle.validateMigration(asset, 'did:webvh');
   printValidation(webvhValidation);
 
   // Validate migration to did:btco
   console.log('\nValidating migration to did:btco:');
-  const btcoValidation = await sdk.lifecycle.validateMigration(asset, 'did:btco');
+  const btcoValidation = sdk.lifecycle.validateMigration(asset, 'did:btco');
   printValidation(btcoValidation);
 
   // Estimate costs for Bitcoin inscription

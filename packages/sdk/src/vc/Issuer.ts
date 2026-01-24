@@ -1,4 +1,4 @@
-import { VerifiableCredential, VerifiablePresentation, Proof } from '../types';
+import { VerifiableCredential, VerifiablePresentation } from '../types';
 import { multikey, MultikeyType } from '../crypto/Multikey';
 import { DIDManager } from '../did/DIDManager';
 import { createDocumentLoader } from './documentLoader';
@@ -6,7 +6,7 @@ import { DataIntegrityProofManager } from './proofs/data-integrity';
 
 export interface IssueOptions {
   proofPurpose: 'assertionMethod' | 'authentication';
-  documentLoader?: (iri: string) => Promise<{ document: any; documentUrl: string; contextUrl: string | null }>;
+  documentLoader?: (iri: string) => Promise<{ document: unknown; documentUrl: string; contextUrl: string | null }>;
   challenge?: string;
   domain?: string;
 }
@@ -16,7 +16,7 @@ export type VerificationMethodLike = {
   controller: string;
   publicKeyMultibase: string;
   secretKeyMultibase?: string;
-  type?: 'Multikey' | string;
+  type?: string;
 };
 
 export class Issuer {
@@ -37,13 +37,13 @@ export class Issuer {
     const documentLoader = options.documentLoader || createDocumentLoader(this.didManager);
     await documentLoader(this.verificationMethod.id);
 
-    const issuerId = typeof unsigned.issuer === 'string' ? unsigned.issuer : (unsigned.issuer as any)?.id;
+    const issuerId = typeof unsigned.issuer === 'string' ? unsigned.issuer : (unsigned.issuer as { id?: string })?.id;
     const credential: VerifiableCredential = {
       ...unsigned,
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       issuer: issuerId || this.verificationMethod.controller,
       proof: undefined
-    } as any;
+    } as VerifiableCredential;
 
     if (!this.verificationMethod.secretKeyMultibase) {
       throw new Error('Missing secretKeyMultibase for issuance');
@@ -60,7 +60,7 @@ export class Issuer {
       privateKey: this.verificationMethod.secretKeyMultibase,
       documentLoader
     });
-    return { ...credential, proof } as any;
+    return { ...credential, proof } as VerifiableCredential;
   }
 
   async issuePresentation(
@@ -77,8 +77,13 @@ export class Issuer {
     if (keyType !== 'Ed25519') {
       throw new Error('Only Ed25519 supported for eddsa-rdfc-2022');
     }
+    const presentationWithContext = {
+      ...presentation,
+      '@context': ['https://www.w3.org/ns/credentials/v2']
+    } as Record<string, unknown>;
+
     const proof = await DataIntegrityProofManager.createProof(
-      { ...(presentation as any), '@context': ['https://www.w3.org/ns/credentials/v2'] },
+      presentationWithContext,
       {
         verificationMethod: this.verificationMethod.id,
         proofPurpose: options.proofPurpose,
@@ -91,7 +96,7 @@ export class Issuer {
       }
     );
     return {
-      ...(presentation as any),
+      ...presentation,
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       proof
     } as VerifiablePresentation;

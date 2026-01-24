@@ -1,14 +1,13 @@
-import { 
-  OriginalsConfig, 
-  OrdinalsInscription, 
+import {
+  OriginalsConfig,
+  OrdinalsInscription,
   BitcoinTransaction,
-  Utxo,
   DUST_LIMIT_SATS
 } from '../types';
 import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters';
 import { emitTelemetry, StructuredError } from '../utils/telemetry';
 import { validateBitcoinAddress } from '../utils/bitcoin-address';
-import { validateSatoshiNumber, parseSatoshiIdentifier } from '../utils/satoshi-validation';
+import { validateSatoshiNumber } from '../utils/satoshi-validation';
 
 export class BitcoinManager {
   private readonly feeOracle?: FeeOracleAdapter;

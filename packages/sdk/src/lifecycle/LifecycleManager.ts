@@ -263,10 +263,10 @@ export class LifecycleManager {
             createdAt: asset.getProvenance().createdAt
           }
         };
-        
+
         // Emit from both LifecycleManager and asset emitters
-        this.eventEmitter.emit(event);
-        (asset as any).eventEmitter.emit(event);
+        void this.eventEmitter.emit(event);
+        void (asset as unknown as { eventEmitter: EventEmitter }).eventEmitter.emit(event);
       });
       
       stopTimer();
@@ -291,10 +291,10 @@ export class LifecycleManager {
             createdAt: asset.getProvenance().createdAt
           }
         };
-        
+
         // Emit from both LifecycleManager and asset emitters
-        this.eventEmitter.emit(event);
-        (asset as any).eventEmitter.emit(event);
+        void this.eventEmitter.emit(event);
+        void (asset as unknown as { eventEmitter: EventEmitter }).eventEmitter.emit(event);
       });
       
       stopTimer();
@@ -397,9 +397,9 @@ export class LifecycleManager {
             version: manifest.version,
           }
         };
-        
+
         // Emit from LifecycleManager
-        this.eventEmitter.emit(event);
+        void this.eventEmitter.emit(event);
       });
       
       stopTimer();
@@ -432,7 +432,7 @@ export class LifecycleManager {
    * @returns The manifest or undefined
    */
   getManifest<K extends OriginalKind>(asset: OriginalsAsset): OriginalManifest<K> | undefined {
-    return (asset as any)._manifest as OriginalManifest<K> | undefined;
+    return (asset as { _manifest?: OriginalManifest<K> })._manifest;
   }
 
   /**
@@ -555,7 +555,7 @@ export class LifecycleManager {
         throw new Error('Asset must be in did:peer layer to publish to web');
       }
       
-      const { publisherDid, signer } = await this.extractPublisherInfo(publisherDidOrSigner);
+      const { publisherDid, signer } = this.extractPublisherInfo(publisherDidOrSigner);
       const { domain, userPath } = this.parseWebVHDid(publisherDid);
       
       this.logger.info('Publishing asset to web', { assetId: asset.id, publisherDid });
@@ -568,7 +568,7 @@ export class LifecycleManager {
       
       // Migrate asset to did:webvh layer
       await asset.migrate('did:webvh');
-      asset.bindings = { ...(asset as any).bindings, 'did:peer': originalPeerDid, 'did:webvh': publisherDid };
+      asset.bindings = { ...(asset.bindings || {}), 'did:peer': originalPeerDid, 'did:webvh': publisherDid };
       
       // Issue publication credential (best-effort)
       await this.issuePublicationCredential(asset, publisherDid, signer);
@@ -590,16 +590,16 @@ export class LifecycleManager {
     }
   }
 
-  private async extractPublisherInfo(publisherDidOrSigner: string | ExternalSigner): Promise<{
+  private extractPublisherInfo(publisherDidOrSigner: string | ExternalSigner): {
     publisherDid: string;
     signer?: ExternalSigner;
-  }> {
+  } {
     if (typeof publisherDidOrSigner === 'string') {
       // If it's already a did:webvh DID, use it as-is
       if (publisherDidOrSigner.startsWith('did:webvh:')) {
         return { publisherDid: publisherDidOrSigner };
       }
-      
+
       // Otherwise, treat it as a domain and construct a did:webvh DID
       // Format: did:webvh:domain:user (use 'user' as default user path)
       // Encode the domain to handle ports (e.g., localhost:5000 -> localhost%3A5000)
@@ -608,15 +608,15 @@ export class LifecycleManager {
       const publisherDid = `did:webvh:${encodedDomain}:user`;
       return { publisherDid };
     }
-    
+
     const signer = publisherDidOrSigner;
-    const vmId = await signer.getVerificationMethodId();
-    const publisherDid = vmId.includes('#') ? vmId.split('#')[0] : vmId;
-    
+    const resolvedVmId = signer.getVerificationMethodId();
+    const publisherDid = resolvedVmId.includes('#') ? resolvedVmId.split('#')[0] : resolvedVmId;
+
     if (!publisherDid.startsWith('did:webvh:')) {
       throw new Error('Signer must be associated with a did:webvh identifier');
     }
-    
+
     return { publisherDid, signer };
   }
 
@@ -638,7 +638,7 @@ export class LifecycleManager {
     domain: string,
     userPath: string
   ): Promise<void> {
-    const storage = (this.config as any).storageAdapter || new MemoryStorageAdapter();
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter || new MemoryStorageAdapter();
     
     for (const resource of asset.resources) {
       const hashBytes = hexToBytes(resource.hash);
@@ -647,18 +647,21 @@ export class LifecycleManager {
       const relativePath = `${userPath}/resources/${multibase}`;
       
       // Store resource content
-      const data = resource.content 
+      const data = resource.content
         ? Buffer.from(resource.content)
         : Buffer.from(resource.hash);
-        
-      if (typeof storage.put === 'function') {
-        await storage.put(`${domain}/${relativePath}`, data, { contentType: resource.contentType });
-      } else {
+
+      const storageWithPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<void> };
+      const storageWithPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<void> };
+
+      if (typeof storageWithPut.put === 'function') {
+        await storageWithPut.put(`${domain}/${relativePath}`, data, { contentType: resource.contentType });
+      } else if (typeof storageWithPutObject.putObject === 'function') {
         const encoded = new TextEncoder().encode(resource.content || resource.hash);
-        await storage.putObject(domain, relativePath, encoded);
+        await storageWithPutObject.putObject(domain, relativePath, encoded);
       }
-      
-      (resource as any).url = resourceUrl;
+
+      (resource as { url?: string }).url = resourceUrl;
       
       await this.emitResourcePublishedEvent(asset, resource, resourceUrl, publisherDid, domain);
     }
@@ -688,7 +691,7 @@ export class LifecycleManager {
     try {
       // Emit from both LifecycleManager and asset emitters
       await this.eventEmitter.emit(event);
-      await (asset as any).eventEmitter.emit(event);
+      await (asset as unknown as { eventEmitter: EventEmitter }).eventEmitter.emit(event);
     } catch (err) {
       this.logger.error('Event handler error', err as Error, { event: event.type });
     }
@@ -709,12 +712,12 @@ export class LifecycleManager {
         migratedAt: new Date().toISOString()
       };
       
-      const unsigned = await this.credentialManager.createResourceCredential(
+      const unsigned = this.credentialManager.createResourceCredential(
         'ResourceMigrated',
         subject,
         publisherDid
       );
-      
+
       const signed = signer
         ? await this.credentialManager.signCredentialWithExternalSigner(unsigned, signer)
         : await this.signWithKeyStore(unsigned, publisherDid);
@@ -733,7 +736,7 @@ export class LifecycleManager {
       
       // Emit from both LifecycleManager and asset emitters
       await this.eventEmitter.emit(event);
-      await (asset as any).eventEmitter.emit(event);
+      await (asset as unknown as { eventEmitter: EventEmitter }).eventEmitter.emit(event);
     } catch (err) {
       this.logger.error('Failed to issue credential during publish', err as Error);
     }
@@ -768,8 +771,9 @@ export class LifecycleManager {
     }
     
     // If not found, try to find ANY key that starts with the issuer DID
-    if (!privateKey && typeof (this.keyStore as any).getAllVerificationMethodIds === 'function') {
-      const allVmIds = (this.keyStore as any).getAllVerificationMethodIds();
+    const keyStoreWithGetAll = this.keyStore as { getAllVerificationMethodIds?: () => string[] };
+    if (!privateKey && typeof keyStoreWithGetAll.getAllVerificationMethodIds === 'function') {
+      const allVmIds = keyStoreWithGetAll.getAllVerificationMethodIds();
       for (const testVmId of allVmIds) {
         if (testVmId.startsWith(issuer)) {
           const key = await this.keyStore.getPrivateKey(testVmId);
@@ -799,8 +803,12 @@ export class LifecycleManager {
         throw new Error('Private key not found in keyStore');
       }
     }
-    
-    return this.credentialManager.signCredential(credential, privateKey!, vmId!);
+
+    if (!vmId) {
+      throw new Error('Verification method ID could not be determined');
+    }
+
+    return this.credentialManager.signCredential(credential, privateKey, vmId);
   }
 
   async inscribeOnBitcoin(
@@ -824,7 +832,7 @@ export class LifecycleManager {
         }
       }
     
-    if (typeof (asset as any).migrate !== 'function') {
+    if (typeof asset.migrate !== 'function') {
       throw new Error('Not implemented');
     }
     if (asset.currentLayer !== 'did:webvh' && asset.currentLayer !== 'did:peer') {
@@ -837,7 +845,14 @@ export class LifecycleManager {
       timestamp: new Date().toISOString()
     };
     const payload = Buffer.from(JSON.stringify(manifest));
-    const inscription: any = await bitcoinManager.inscribeData(payload, 'application/json', feeRate);
+    const inscription = await bitcoinManager.inscribeData(payload, 'application/json', feeRate) as {
+      revealTxId?: string;
+      txid: string;
+      commitTxId?: string;
+      inscriptionId: string;
+      satoshi?: string;
+      feeRate?: number;
+    };
     const revealTxId = inscription.revealTxId ?? inscription.txid;
     const commitTxId = inscription.commitTxId;
     const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : feeRate;
@@ -857,7 +872,7 @@ export class LifecycleManager {
     const bindingValue = inscription.satoshi
       ? `did:btco:${inscription.satoshi}`
       : `did:btco:${inscription.inscriptionId}`;
-    (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:btco': bindingValue });
+    asset.bindings = Object.assign({}, asset.bindings || {}, { 'did:btco': bindingValue });
     
     stopTimer();
     this.logger.info('Asset inscribed on Bitcoin successfully', { 
@@ -916,8 +931,9 @@ export class LifecycleManager {
       contentType: 'application/octet-stream',
       txid: latestMigration?.transactionId ?? 'unknown-tx',
       vout: 0
-    };
-    const tx = await bm.transferInscription(inscription as any, newOwner);
+    } as const;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+    const tx = await bm.transferInscription(inscription as never, newOwner);
     await asset.recordTransfer(asset.id, newOwner, tx.txid);
     
     stopTimer();
@@ -973,7 +989,7 @@ export class LifecycleManager {
       // Use batch executor to process all asset creations
       const result = await this.batchExecutor.execute(
         resourcesList,
-        async (resources, index) => {
+        async (resources, _index) => {
           const asset = await this.createAsset(resources);
           return asset;
         },
@@ -1064,7 +1080,7 @@ export class LifecycleManager {
     try {
       const result = await this.batchExecutor.execute(
         assets,
-        async (asset, index) => {
+        async (asset, _index) => {
           return await this.publishToWeb(asset, domain);
         },
         options,
@@ -1158,7 +1174,7 @@ export class LifecycleManager {
       const totalDataSize = this.calculateTotalDataSize(assets);
       
       // Estimate savings from batch inscription
-      const estimatedSavings = await this.estimateBatchSavings(assets, options?.feeRate);
+      const estimatedSavings = this.estimateBatchSavings(assets, options?.feeRate);
       
       // Create manifests for all assets
       const manifests = assets.map(asset => ({
@@ -1183,11 +1199,18 @@ export class LifecycleManager {
       
       // Inscribe the batch manifest as a single transaction
       const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
-      const inscription: any = await bitcoinManager.inscribeData(
+      const inscription = await bitcoinManager.inscribeData(
         payload,
         'application/json',
         options?.feeRate
-      );
+      ) as {
+        revealTxId?: string;
+        txid: string;
+        commitTxId?: string;
+        inscriptionId: string;
+        satoshi?: string;
+        feeRate?: number;
+      };
       
       const revealTxId = inscription.revealTxId ?? inscription.txid;
       const commitTxId = inscription.commitTxId;
@@ -1209,9 +1232,10 @@ export class LifecycleManager {
         
         // Add resource content sizes
         const contentSize = asset.resources.reduce((sum, r) => {
-          const content = (r as any).content;
+          const content = (r as { content?: string | Buffer }).content;
           if (content) {
-            return sum + (typeof content === 'string' ? Buffer.byteLength(content) : content.length || 0);
+            const length = typeof content === 'string' ? Buffer.byteLength(content) : content.length;
+            return sum + (length || 0);
           }
           return sum;
         }, 0);
@@ -1254,15 +1278,21 @@ export class LifecycleManager {
         // Add batch metadata to provenance
         const provenance = asset.getProvenance();
         const latestMigration = provenance.migrations[provenance.migrations.length - 1];
-        (latestMigration as any).batchId = batchId;
-        (latestMigration as any).batchInscription = true;
-        (latestMigration as any).batchIndex = i; // Store index as metadata
-        (latestMigration as any).feePaid = feePerAsset[i];
+        const migrationWithBatchData = latestMigration as typeof latestMigration & {
+          batchId?: string;
+          batchInscription?: boolean;
+          batchIndex?: number;
+          feePaid?: number;
+        };
+        migrationWithBatchData.batchId = batchId;
+        migrationWithBatchData.batchInscription = true;
+        migrationWithBatchData.batchIndex = i; // Store index as metadata
+        migrationWithBatchData.feePaid = feePerAsset[i];
         
         const bindingValue = inscription.satoshi
           ? `did:btco:${inscription.satoshi}`
           : `did:btco:${individualInscriptionId}`;
-        (asset as any).bindings = Object.assign({}, (asset as any).bindings, { 'did:btco': bindingValue });
+        asset.bindings = Object.assign({}, asset.bindings || {}, { 'did:btco': bindingValue });
         
         successful.push({
           index: i,
@@ -1345,7 +1375,7 @@ export class LifecycleManager {
     try {
       const result = await this.batchExecutor.execute(
         assets,
-        async (asset, index) => {
+        async (asset, _index) => {
           return await this.inscribeOnBitcoin(asset, options?.feeRate);
         },
         options,
@@ -1425,7 +1455,7 @@ export class LifecycleManager {
     try {
       const result = await this.batchExecutor.execute(
         transfers,
-        async (transfer, index) => {
+        async (transfer, _index) => {
           return await this.transferOwnership(transfer.asset, transfer.to);
         },
         options,
@@ -1482,15 +1512,15 @@ export class LifecycleManager {
   /**
    * Estimate cost savings from batch inscription vs individual inscriptions
    */
-  private async estimateBatchSavings(
+  private estimateBatchSavings(
     assets: OriginalsAsset[],
     feeRate?: number
-  ): Promise<{
+  ): {
     batchFee: number;
     individualFees: number;
     savings: number;
     savingsPercentage: number;
-  }> {
+  } {
     // Calculate total size for batch
     const batchSize = this.calculateTotalDataSize(assets);
     
@@ -1642,7 +1672,7 @@ export class LifecycleManager {
     });
     
     // Pre-flight validation
-    const validation = await this.validateMigration(asset, 'did:webvh');
+    const validation = this.validateMigration(asset, 'did:webvh');
     if (!validation.valid) {
       onProgress?.({
         phase: 'failed',
@@ -1722,7 +1752,7 @@ export class LifecycleManager {
     });
     
     // Pre-flight validation
-    const validation = await this.validateMigration(asset, 'did:btco');
+    const validation = this.validateMigration(asset, 'did:btco');
     if (!validation.valid) {
       onProgress?.({
         phase: 'failed',
@@ -2001,18 +2031,18 @@ export class LifecycleManager {
 
   /**
    * Validate whether an asset can be migrated to a target layer
-   * 
+   *
    * Performs comprehensive pre-flight checks including:
    * - Valid layer transition
    * - Resource integrity
    * - Credential validity
    * - DID document structure
    * - Bitcoin readiness (for did:btco)
-   * 
+   *
    * @param asset - The asset to validate
    * @param targetLayer - The target layer for migration
    * @returns Detailed validation result
-   * 
+   *
    * @example
    * ```typescript
    * const validation = await sdk.lifecycle.validateMigration(draft, 'did:webvh');
@@ -2021,10 +2051,10 @@ export class LifecycleManager {
    * }
    * ```
    */
-  async validateMigration(
+  validateMigration(
     asset: OriginalsAsset,
     targetLayer: LayerType
-  ): Promise<MigrationValidation> {
+  ): MigrationValidation {
     const errors: string[] = [];
     const warnings: string[] = [];
     const checks = {

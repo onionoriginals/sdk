@@ -51,12 +51,15 @@ export function validateCredential(vc: VerifiableCredential): boolean {
   }
 
   // issuer must be a DID string or an object with DID id
-  const issuerIsValidDid = (iss: any): boolean => {
+  const issuerIsValidDid = (iss: unknown): boolean => {
     if (typeof iss === 'string') return validateDID(iss);
-    if (iss && typeof iss.id === 'string') return validateDID(iss.id);
+    if (iss && typeof iss === 'object' && 'id' in iss) {
+      const issObj = iss as { id: unknown };
+      if (typeof issObj.id === 'string') return validateDID(issObj.id);
+    }
     return false;
   };
-  if (!issuerIsValidDid(vc.issuer as any)) {
+  if (!issuerIsValidDid(vc.issuer)) {
     return false;
   }
 
@@ -100,9 +103,10 @@ export function validateDIDDocument(didDoc: DIDDocument): boolean {
   }
 
   // If controller array present on the DID Document, validate entries are DIDs
-  if (Array.isArray((didDoc as any).controller)) {
-    const ctrls = (didDoc as any).controller as string[];
-    if (!ctrls.every((c) => typeof c === 'string' && validateDID(c))) {
+  const didDocWithController = didDoc as DIDDocument & { controller?: unknown };
+  if (Array.isArray(didDocWithController.controller)) {
+    const ctrls = didDocWithController.controller;
+    if (!ctrls.every((c: unknown) => typeof c === 'string' && validateDID(c))) {
       return false;
     }
   }

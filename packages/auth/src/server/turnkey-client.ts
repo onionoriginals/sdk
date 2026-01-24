@@ -90,7 +90,7 @@ export async function getOrCreateTurnkeySubOrg(
         return existingSubOrgId;
       }
     }
-  } catch (lookupError) {
+  } catch {
     console.log(`📝 No existing sub-org found, will create new one`);
   }
 

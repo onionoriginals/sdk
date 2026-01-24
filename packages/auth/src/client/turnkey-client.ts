@@ -111,7 +111,7 @@ export async function completeOtp(
     return {
       sessionToken: response.sessionToken,
       userId: userInfo.userId,
-      action: response.action === 'LOGIN' ? 'login' : 'signup',
+      action: String(response.action) === 'LOGIN' ? 'login' : 'signup',
     };
   } catch (error) {
     console.error('Error completing OTP:', error);

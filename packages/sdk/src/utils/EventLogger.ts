@@ -149,7 +149,7 @@ export class EventLogger {
    */
   private logEvent(event: OriginalsEvent, level: LogLevel): void {
     let message: string;
-    let data: Record<string, any>;
+    let data: Record<string, unknown>;
     
     switch (event.type) {
       case 'asset:created':
