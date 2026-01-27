@@ -33,6 +33,7 @@
     "@semantic-release/github": "^12.0.2",
     "@semantic-release/npm": "^13.1.2",
     "@semantic-release/release-notes-generator": "^14.1.0",
+    "@turnkey/core": "^1.10.0",
     "semantic-release": "^25.0.2",
     "turbo": "^2.3.3"
   },

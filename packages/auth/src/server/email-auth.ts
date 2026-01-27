@@ -3,11 +3,10 @@
  * Implements email-based authentication using Turnkey's OTP flow
  */
 
-import { Turnkey } from '@turnkey/sdk-server';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import type { EmailAuthSession, InitiateAuthResult, VerifyAuthResult } from '../types';
-import { getOrCreateTurnkeySubOrg } from './turnkey-client';
+import { getOrCreateTurnkeySubOrg, type TurnkeyHttpClient } from './turnkey-client';
 
 // Session timeout (15 minutes to match Turnkey OTP)
 const SESSION_TIMEOUT = 15 * 60 * 1000;
@@ -78,7 +77,7 @@ function generateSessionId(): string {
  */
 export async function initiateEmailAuth(
   email: string,
-  turnkeyClient: Turnkey,
+  turnkeyClient: TurnkeyHttpClient,
   sessionStorage?: SessionStorage
 ): Promise<InitiateAuthResult> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
@@ -147,7 +146,7 @@ export async function initiateEmailAuth(
 export async function verifyEmailAuth(
   sessionId: string,
   code: string,
-  turnkeyClient: Turnkey,
+  turnkeyClient: TurnkeyHttpClient,
   sessionStorage?: SessionStorage
 ): Promise<VerifyAuthResult> {
   const storage = sessionStorage ?? getDefaultSessionStorage();

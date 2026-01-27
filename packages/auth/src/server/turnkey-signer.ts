@@ -5,11 +5,11 @@
  * keys for use with the Originals SDK's DID creation and signing operations.
  */
 
-import { Turnkey } from '@turnkey/sdk-server';
 import { ExternalSigner, ExternalVerifier, multikey, OriginalsSDK } from '@originals/sdk';
 import { sha512 } from '@noble/hashes/sha2.js';
 import { concatBytes, bytesToHex } from '@noble/hashes/utils.js';
 import * as ed25519 from '@noble/ed25519';
+import type { TurnkeyHttpClient } from './turnkey-client';
 
 // Configure @noble/ed25519 with required SHA-512 function
 const sha512Fn = (...msgs: Uint8Array[]): Uint8Array => sha512(concatBytes(...msgs));
@@ -38,14 +38,14 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
   private subOrgId: string;
   private keyId: string;
   private publicKeyMultibase: string;
-  private turnkeyClient: Turnkey;
+  private turnkeyClient: TurnkeyHttpClient;
   private verificationMethodId: string;
 
   constructor(
     subOrgId: string,
     keyId: string,
     publicKeyMultibase: string,
-    turnkeyClient: Turnkey,
+    turnkeyClient: TurnkeyHttpClient,
     verificationMethodId: string
   ) {
     this.subOrgId = subOrgId;
@@ -155,7 +155,7 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
 export function createTurnkeySigner(
   subOrgId: string,
   keyId: string,
-  turnkeyClient: Turnkey,
+  turnkeyClient: TurnkeyHttpClient,
   verificationMethodId: string,
   publicKeyMultibase: string
 ): TurnkeyWebVHSigner {
