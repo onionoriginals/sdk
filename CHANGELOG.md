@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/onionoriginals/sdk/compare/v1.6.1...v1.7.0) (2026-01-27)
+
+
+### Features
+
+* **auth:** refactor Turnkey client integration ([39cef00](https://github.com/onionoriginals/sdk/commit/39cef005863d30946d0f942038e0986320f07563))
+
 ## [1.6.1](https://github.com/onionoriginals/sdk/compare/v1.6.0...v1.6.1) (2026-01-24)
 
 
