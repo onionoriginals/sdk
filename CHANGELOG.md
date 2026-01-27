@@ -1,3 +1,10 @@
+## [1.7.1](https://github.com/onionoriginals/sdk/compare/v1.7.0...v1.7.1) (2026-01-27)
+
+
+### Bug Fixes
+
+* bump ([82d0b35](https://github.com/onionoriginals/sdk/commit/82d0b350f15eca73637116d58fa72664d95d8b49))
+
 # [1.7.0](https://github.com/onionoriginals/sdk/compare/v1.6.1...v1.7.0) (2026-01-27)
 
 
