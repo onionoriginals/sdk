@@ -1,6 +1,6 @@
 {
   "name": "@originals/auth",
-  "version": "1.8.2",
+  "version": "1.8.3",
   "description": "Turnkey-based authentication for the Originals Protocol",
   "type": "module",
   "main": "./dist/index.js",

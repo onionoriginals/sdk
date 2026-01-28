@@ -1,3 +1,10 @@
+## [1.8.3](https://github.com/onionoriginals/sdk/compare/v1.8.2...v1.8.3) (2026-01-28)
+
+
+### Bug Fixes
+
+* update package.json for auth and sdk packages to use dist directory for main and types ([1a97029](https://github.com/onionoriginals/sdk/commit/1a97029547a09cbec9c722b68046b2593ba32901))
+
 ## [1.8.2](https://github.com/onionoriginals/sdk/compare/v1.8.1...v1.8.2) (2026-01-28)
 
 
