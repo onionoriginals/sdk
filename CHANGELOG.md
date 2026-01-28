@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/onionoriginals/sdk/compare/v1.7.1...v1.8.0) (2026-01-28)
+
+
+### Features
+
+* **auth:** migrate to @turnkey/sdk-server for client operations ([9321766](https://github.com/onionoriginals/sdk/commit/932176632468b6bd2536fc24f7925ad8067b3bc4))
+
 ## [1.7.1](https://github.com/onionoriginals/sdk/compare/v1.7.0...v1.7.1) (2026-01-27)
 
 
