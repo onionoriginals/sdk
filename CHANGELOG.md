@@ -1,3 +1,10 @@
+## [1.8.1](https://github.com/onionoriginals/sdk/compare/v1.8.0...v1.8.1) (2026-01-28)
+
+
+### Bug Fixes
+
+* add export ([82eb685](https://github.com/onionoriginals/sdk/commit/82eb6850a582ce10a1293936da427a4685d694fd))
+
 # [1.8.0](https://github.com/onionoriginals/sdk/compare/v1.7.1...v1.8.0) (2026-01-28)
 
 
