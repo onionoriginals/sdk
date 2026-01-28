@@ -14,17 +14,9 @@
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js"
     },
-    "./server/*": {
-      "types": "./dist/server/*.d.ts",
-      "import": "./dist/server/*.js"
-    },
     "./client": {
       "types": "./dist/client/index.d.ts",
       "import": "./dist/client/index.js"
-    },
-    "./client/*": {
-      "types": "./dist/client/*.d.ts",
-      "import": "./dist/client/*.js"
     },
     "./types": {
       "types": "./dist/types.d.ts",
@@ -55,8 +47,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@turnkey/http": "^3.16.0",
-    "@turnkey/api-key-stamper": "^0.5.0",
+    "@turnkey/sdk-server": "^5.0.0",
     "@originals/sdk": "^1.4.4",
     "jsonwebtoken": "^9.0.2",
     "@noble/hashes": "^2.0.1",
@@ -76,14 +67,10 @@
     "typescript-eslint": "^8.0.0"
   },
   "peerDependencies": {
-    "express": ">=4.0.0",
-    "@turnkey/core": ">=1.0.0"
+    "express": ">=4.0.0"
   },
   "peerDependenciesMeta": {
     "express": {
-      "optional": true
-    },
-    "@turnkey/core": {
       "optional": true
     }
   },

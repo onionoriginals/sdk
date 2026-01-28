@@ -1,10 +1,12 @@
 /**
  * Turnkey DID Signer Adapter
  * Adapts Turnkey signing to work with didwebvh-ts signer interface
+ * Uses @turnkey/sdk-server for all Turnkey operations (no viem/ethers dependency)
  */
 
-import { TurnkeyClient, WalletAccount } from '@turnkey/core';
+import { Turnkey } from '@turnkey/sdk-server';
 import { OriginalsSDK, encoding } from '@originals/sdk';
+import type { TurnkeyWalletAccount } from '../types';
 import { TurnkeySessionExpiredError, withTokenExpiration } from './turnkey-client';
 
 interface SigningInput {
@@ -21,19 +23,22 @@ interface SigningOutput {
  * Compatible with didwebvh-ts signer interface
  */
 export class TurnkeyDIDSigner {
-  private turnkeyClient: TurnkeyClient;
-  private walletAccount: WalletAccount;
+  private turnkeyClient: Turnkey;
+  private signWith: string;
+  private subOrgId: string;
   private publicKeyMultibase: string;
   private onExpired?: () => void;
 
   constructor(
-    turnkeyClient: TurnkeyClient,
-    walletAccount: WalletAccount,
+    turnkeyClient: Turnkey,
+    signWith: string,
+    subOrgId: string,
     publicKeyMultibase: string,
     onExpired?: () => void
   ) {
     this.turnkeyClient = turnkeyClient;
-    this.walletAccount = walletAccount;
+    this.signWith = signWith;
+    this.subOrgId = subOrgId;
     this.publicKeyMultibase = publicKeyMultibase;
     this.onExpired = onExpired;
   }
@@ -47,21 +52,25 @@ export class TurnkeyDIDSigner {
         // Use SDK's prepareDIDDataForSigning
         const dataToSign = await OriginalsSDK.prepareDIDDataForSigning(input.document, input.proof);
 
-        // Sign with Turnkey
-        const response = await this.turnkeyClient.httpClient.signRawPayload({
-          signWith: this.walletAccount.address,
+        // Sign with Turnkey via server SDK
+        const result = await this.turnkeyClient.apiClient().signRawPayload({
+          organizationId: this.subOrgId,
+          signWith: this.signWith,
           payload: Buffer.from(dataToSign).toString('hex'),
           encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
-          hashFunction: 'HASH_FUNCTION_NOT_APPLICABLE',
+          hashFunction: 'HASH_FUNCTION_NO_OP',
         });
 
-        if (!response.r || !response.s) {
+        const r = result.r;
+        const s = result.s;
+
+        if (!r || !s) {
           throw new Error('Invalid signature response from Turnkey');
         }
 
         // For Ed25519, combine r+s only (64 bytes total)
-        const cleanR = response.r.startsWith('0x') ? response.r.slice(2) : response.r;
-        const cleanS = response.s.startsWith('0x') ? response.s.slice(2) : response.s;
+        const cleanR = r.startsWith('0x') ? r.slice(2) : r;
+        const cleanS = s.startsWith('0x') ? s.slice(2) : s;
         const combinedHex = cleanR + cleanS;
 
         const signatureBytes = Buffer.from(combinedHex, 'hex');
@@ -124,8 +133,9 @@ export class TurnkeyDIDSigner {
  * Create a DID:WebVH using OriginalsSDK.createDIDOriginal() with Turnkey signing
  */
 export async function createDIDWithTurnkey(params: {
-  turnkeyClient: TurnkeyClient;
-  updateKeyAccount: WalletAccount;
+  turnkeyClient: Turnkey;
+  updateKeyAccount: TurnkeyWalletAccount;
+  subOrgId: string;
   authKeyPublic: string;
   assertionKeyPublic: string;
   updateKeyPublic: string;
@@ -140,6 +150,7 @@ export async function createDIDWithTurnkey(params: {
   const {
     turnkeyClient,
     updateKeyAccount,
+    subOrgId,
     authKeyPublic,
     assertionKeyPublic,
     updateKeyPublic,
@@ -149,7 +160,13 @@ export async function createDIDWithTurnkey(params: {
   } = params;
 
   // Create Turnkey signer for the update key
-  const signer = new TurnkeyDIDSigner(turnkeyClient, updateKeyAccount, updateKeyPublic, onExpired);
+  const signer = new TurnkeyDIDSigner(
+    turnkeyClient,
+    updateKeyAccount.address,
+    subOrgId,
+    updateKeyPublic,
+    onExpired
+  );
 
   // Use SDK's createDIDOriginal
   const result = await OriginalsSDK.createDIDOriginal({
@@ -184,10 +201,3 @@ export async function createDIDWithTurnkey(params: {
     didLog: result.log,
   };
 }
-
-
-
-
-
-
-

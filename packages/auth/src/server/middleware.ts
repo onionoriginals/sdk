@@ -3,7 +3,7 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
-import { verifyToken } from './jwt';
+import { verifyToken } from './jwt.js';
 import type { AuthMiddlewareOptions, AuthUser, AuthenticatedRequest } from '../types';
 
 /**

@@ -1,10 +1,10 @@
 /**
  * Client-side Turnkey utilities
- * Handles Turnkey client initialization and authentication flow in the browser
+ * Uses @turnkey/sdk-server for all Turnkey operations (no viem/ethers dependency)
  */
 
-import { TurnkeyClient, OtpType, WalletAccount } from '@turnkey/core';
-import type { TurnkeyWallet } from '../types';
+import { Turnkey } from '@turnkey/sdk-server';
+import type { TurnkeyWallet, TurnkeyWalletAccount } from '../types';
 
 /**
  * Session expired error for handling token expiration
@@ -43,39 +43,59 @@ export async function withTokenExpiration<T>(
 }
 
 /**
- * Initialize Turnkey client with auth proxy configuration
+ * Initialize Turnkey server client
+ * Reads from environment variables or provided config
  */
-export function initializeTurnkeyClient(): TurnkeyClient {
-  // Access Vite environment variables
-  const env = (import.meta as { env?: Record<string, string | undefined> }).env;
-  const authProxyConfigId = env?.VITE_TURNKEY_AUTH_PROXY_CONFIG_ID;
-  const organizationId = env?.VITE_TURNKEY_ORGANIZATION_ID ?? '';
+export function initializeTurnkeyClient(config?: {
+  apiBaseUrl?: string;
+  apiPublicKey?: string;
+  apiPrivateKey?: string;
+  organizationId?: string;
+}): Turnkey {
+  const apiPublicKey = config?.apiPublicKey ?? process.env.TURNKEY_API_PUBLIC_KEY;
+  const apiPrivateKey = config?.apiPrivateKey ?? process.env.TURNKEY_API_PRIVATE_KEY;
+  const organizationId = config?.organizationId ?? process.env.TURNKEY_ORGANIZATION_ID;
 
-  if (!authProxyConfigId) {
-    throw new Error('VITE_TURNKEY_AUTH_PROXY_CONFIG_ID environment variable not set');
+  if (!apiPublicKey) {
+    throw new Error('TURNKEY_API_PUBLIC_KEY is required');
+  }
+  if (!apiPrivateKey) {
+    throw new Error('TURNKEY_API_PRIVATE_KEY is required');
+  }
+  if (!organizationId) {
+    throw new Error('TURNKEY_ORGANIZATION_ID is required');
   }
 
-  return new TurnkeyClient({
-    authProxyConfigId,
-    organizationId,
+  return new Turnkey({
+    apiBaseUrl: config?.apiBaseUrl ?? 'https://api.turnkey.com',
+    apiPublicKey,
+    apiPrivateKey,
+    defaultOrganizationId: organizationId,
   });
 }
 
 /**
- * Send OTP code to email
+ * Send OTP code to email via Turnkey
  */
-export async function initOtp(turnkeyClient: TurnkeyClient, email: string): Promise<string> {
+export async function initOtp(
+  turnkeyClient: Turnkey,
+  email: string,
+  subOrgId?: string
+): Promise<string> {
   try {
-    const response = await turnkeyClient.initOtp({
-      otpType: OtpType.Email,
+    const result = await turnkeyClient.apiClient().initOtp({
+      otpType: 'OTP_TYPE_EMAIL',
       contact: email,
+      appName: 'Originals',
+      ...(subOrgId ? { organizationId: subOrgId } : {}),
     });
 
-    if (!response || typeof response !== 'string') {
+    const otpId = result.otpId;
+    if (!otpId) {
       throw new Error('No OTP ID returned from Turnkey');
     }
 
-    return response;
+    return otpId;
   } catch (error) {
     console.error('Error initializing OTP:', error);
     throw new Error(
@@ -85,33 +105,30 @@ export async function initOtp(turnkeyClient: TurnkeyClient, email: string): Prom
 }
 
 /**
- * Complete OTP authentication flow (verifies OTP and logs in/signs up)
+ * Complete OTP verification flow
+ * Returns verification token and sub-org ID
  */
 export async function completeOtp(
-  turnkeyClient: TurnkeyClient,
+  turnkeyClient: Turnkey,
   otpId: string,
   otpCode: string,
-  email: string
-): Promise<{ sessionToken: string; userId: string; action: 'login' | 'signup' }> {
+  subOrgId: string
+): Promise<{ verificationToken: string; subOrgId: string }> {
   try {
-    const response = await turnkeyClient.completeOtp({
+    const result = await turnkeyClient.apiClient().verifyOtp({
       otpId,
       otpCode,
-      contact: email,
-      otpType: OtpType.Email,
+      expirationSeconds: '900',
+      organizationId: subOrgId,
     });
 
-    if (!response.sessionToken) {
-      throw new Error('No session token returned from completeOtp');
+    if (!result.verificationToken) {
+      throw new Error('OTP verification failed - no verification token returned');
     }
 
-    // Fetch user info to get stable identifiers
-    const userInfo = await turnkeyClient.fetchUser();
-
     return {
-      sessionToken: response.sessionToken,
-      userId: userInfo.userId,
-      action: String(response.action) === 'LOGIN' ? 'login' : 'signup',
+      verificationToken: result.verificationToken,
+      subOrgId,
     };
   } catch (error) {
     console.error('Error completing OTP:', error);
@@ -122,16 +139,20 @@ export async function completeOtp(
 }
 
 /**
- * Fetch user information
+ * Fetch users in a sub-organization
  */
 export async function fetchUser(
-  turnkeyClient: TurnkeyClient,
+  turnkeyClient: Turnkey,
+  subOrgId: string,
   onExpired?: () => void
 ): Promise<unknown> {
   return withTokenExpiration(async () => {
     try {
-      const response = await turnkeyClient.fetchUser();
-      return response;
+      const response = await turnkeyClient.apiClient().getUsers({
+        organizationId: subOrgId,
+      });
+      const users = response.users ?? [];
+      return users[0] ?? null;
     } catch (error) {
       console.error('Error fetching user:', error);
       throw new Error(
@@ -142,32 +163,38 @@ export async function fetchUser(
 }
 
 /**
- * Fetch user's wallets
+ * Fetch user's wallets with accounts
  */
 export async function fetchWallets(
-  turnkeyClient: TurnkeyClient,
+  turnkeyClient: Turnkey,
+  subOrgId: string,
   onExpired?: () => void
 ): Promise<TurnkeyWallet[]> {
   return withTokenExpiration(async () => {
     try {
-      const response = await turnkeyClient.fetchWallets();
+      const response = await turnkeyClient.apiClient().getWallets({
+        organizationId: subOrgId,
+      });
 
       const wallets: TurnkeyWallet[] = [];
 
-      for (const wallet of response || []) {
-        const accountsResponse = await turnkeyClient.fetchWalletAccounts({
-          wallet: wallet,
+      for (const wallet of response.wallets || []) {
+        const accountsResponse = await turnkeyClient.apiClient().getWalletAccounts({
+          organizationId: subOrgId,
+          walletId: wallet.walletId,
         });
 
         wallets.push({
           walletId: wallet.walletId,
           walletName: wallet.walletName,
-          accounts: accountsResponse.map((acc: WalletAccount) => ({
-            address: acc.address,
-            curve: acc.curve as 'CURVE_SECP256K1' | 'CURVE_ED25519',
-            path: acc.path,
-            addressFormat: acc.addressFormat,
-          })),
+          accounts: (accountsResponse.accounts || []).map(
+            (acc: { address: string; curve: string; path: string; addressFormat: string }) => ({
+              address: acc.address,
+              curve: acc.curve as 'CURVE_SECP256K1' | 'CURVE_ED25519',
+              path: acc.path,
+              addressFormat: acc.addressFormat,
+            })
+          ),
         });
       }
 
@@ -182,16 +209,16 @@ export async function fetchWallets(
 }
 
 /**
- * Get key by curve type
+ * Get key by curve type from wallets
  */
 export function getKeyByCurve(
   wallets: TurnkeyWallet[],
   curve: 'CURVE_SECP256K1' | 'CURVE_ED25519'
-): WalletAccount | null {
+): TurnkeyWalletAccount | null {
   for (const wallet of wallets) {
     for (const account of wallet.accounts) {
       if (account.curve === curve) {
-        return account as unknown as WalletAccount;
+        return account;
       }
     }
   }
@@ -202,12 +229,13 @@ export function getKeyByCurve(
  * Create a wallet with the required accounts for DID creation
  */
 export async function createWalletWithAccounts(
-  turnkeyClient: TurnkeyClient,
+  turnkeyClient: Turnkey,
+  subOrgId: string,
   onExpired?: () => void
 ): Promise<TurnkeyWallet> {
   return withTokenExpiration(async () => {
     try {
-      const response = await turnkeyClient.createWallet({
+      const response = await turnkeyClient.apiClient().createWallet({
         walletName: 'default-wallet',
         accounts: [
           {
@@ -229,15 +257,10 @@ export async function createWalletWithAccounts(
             addressFormat: 'ADDRESS_FORMAT_SOLANA',
           },
         ],
+        organizationId: subOrgId,
       });
 
-      let walletId: string;
-      if (typeof response === 'string') {
-        walletId = response;
-      } else {
-        walletId = (response as { walletId?: string })?.walletId ?? '';
-      }
-
+      const walletId = response.walletId;
       if (!walletId) {
         throw new Error('No wallet ID returned from createWallet');
       }
@@ -245,7 +268,7 @@ export async function createWalletWithAccounts(
       // Wait for wallet to be created, then fetch it
       await new Promise((resolve) => setTimeout(resolve, 500));
 
-      const wallets = await fetchWallets(turnkeyClient, onExpired);
+      const wallets = await fetchWallets(turnkeyClient, subOrgId, onExpired);
       const createdWallet = wallets.find((w) => w.walletId === walletId);
 
       if (!createdWallet) {
@@ -266,16 +289,17 @@ export async function createWalletWithAccounts(
  * Ensure user has a wallet with the required accounts for DID creation
  */
 export async function ensureWalletWithAccounts(
-  turnkeyClient: TurnkeyClient,
+  turnkeyClient: Turnkey,
+  subOrgId: string,
   onExpired?: () => void
 ): Promise<TurnkeyWallet[]> {
   return withTokenExpiration(async () => {
     try {
-      let wallets = await fetchWallets(turnkeyClient, onExpired);
+      let wallets = await fetchWallets(turnkeyClient, subOrgId, onExpired);
 
       if (wallets.length === 0) {
         console.log('No wallets found, creating new wallet with accounts...');
-        const newWallet = await createWalletWithAccounts(turnkeyClient, onExpired);
+        const newWallet = await createWalletWithAccounts(turnkeyClient, subOrgId, onExpired);
         wallets = [newWallet];
         return wallets;
       }
@@ -320,12 +344,13 @@ export async function ensureWalletWithAccounts(
 
       if (accountsToCreate.length > 0) {
         console.log(`Creating ${accountsToCreate.length} missing account(s)...`);
-        await turnkeyClient.createWalletAccounts({
+        await turnkeyClient.apiClient().createWalletAccounts({
           walletId: defaultWallet.walletId,
           accounts: accountsToCreate,
+          organizationId: subOrgId,
         });
 
-        wallets = await fetchWallets(turnkeyClient, onExpired);
+        wallets = await fetchWallets(turnkeyClient, subOrgId, onExpired);
       }
 
       return wallets;
@@ -337,4 +362,3 @@ export async function ensureWalletWithAccounts(
     }
   }, onExpired);
 }
-
