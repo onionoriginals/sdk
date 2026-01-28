@@ -1,3 +1,10 @@
+## [1.8.2](https://github.com/onionoriginals/sdk/compare/v1.8.1...v1.8.2) (2026-01-28)
+
+
+### Bug Fixes
+
+* update type assertions for dynamic imports and enhance type compatibility in SDK ([9a8123f](https://github.com/onionoriginals/sdk/commit/9a8123f23c7a07619d4ad592b8c3e72a8af9a305))
+
 ## [1.8.1](https://github.com/onionoriginals/sdk/compare/v1.8.0...v1.8.1) (2026-01-28)
 
 
