@@ -23,7 +23,7 @@ export class DIDManager {
     const keyPair = await keyManager.generateKeyPair(desiredType);
 
     // Use @aviarytech/did-peer to create a did:peer (variant 4 long-form for full VM+context)
-    const didPeerMod = await import('@aviarytech/did-peer') as {
+    const didPeerMod = await import('@aviarytech/did-peer') as unknown as {
       createNumAlgo4: (vms: unknown[], service?: unknown, extra?: unknown) => Promise<string>;
       resolve: (did: string) => Promise<Record<string, unknown>>;
     };
@@ -185,7 +185,7 @@ export class DIDManager {
     try {
       if (did.startsWith('did:peer:')) {
         try {
-          const mod = await import('@aviarytech/did-peer') as { resolve: (did: string) => Promise<Record<string, unknown>> };
+          const mod = await import('@aviarytech/did-peer') as unknown as { resolve: (did: string) => Promise<Record<string, unknown>> };
           const doc = await mod.resolve(did);
           return doc as unknown as DIDDocument;
         } catch (err) {

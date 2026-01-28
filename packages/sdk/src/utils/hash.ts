@@ -5,7 +5,8 @@ export async function sha256Bytes(input: string | Uint8Array): Promise<Uint8Arra
   if (!subtle) {
     throw new Error('SubtleCrypto not available in this environment');
   }
-  const digest = await subtle.digest('SHA-256', data);
+  // Use type assertion to handle Uint8Array<ArrayBufferLike> compatibility with SubtleCrypto
+  const digest = await subtle.digest('SHA-256', data as unknown as ArrayBuffer);
   return new Uint8Array(digest);
 }
 
