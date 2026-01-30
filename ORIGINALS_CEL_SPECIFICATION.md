@@ -472,16 +472,37 @@ A fork occurs when two different events claim the same `previousEvent`:
 
 ### 5.1 Witness Proof Structure
 
-Witness proofs use the W3C Data Integrity format:
+Witness proofs use the W3C Data Integrity format. Each layer has specific requirements based on its resolution model:
 
+**Base Witness Proof Structure:**
 ```json
 {
   "type": "DataIntegrityProof",
-  "cryptosuite": "ecdsa-jcs-2019",
+  "cryptosuite": "eddsa-jcs-2022",
   "created": "2026-01-30T12:00:05Z",
-  "verificationMethod": "https://witness.example/keys#attestation-1",
+  "verificationMethod": "<verification-method>",
   "proofPurpose": "assertionMethod",
   "proofValue": "zJdq6PrUMCtqY5obCSsrQxuF..."
+}
+```
+
+**Migration-Specific Witness Requirements:**
+When migrating between layers, the event requires *dual-attestation* — proof from both the outgoing and incoming DID systems. This creates cryptographic continuity and prevents unauthorized transfers.
+
+```json
+{
+  "migration": {
+    "fromWitness": {
+      "type": "DataIntegrityProof",
+      "verificationMethod": "did:peer:old#key-1",
+      "proofPurpose": "capabilityDelegation"
+    },
+    "toWitness": {
+      "type": "DataIntegrityProof", 
+      "verificationMethod": "did:webvh:new#key-1",
+      "proofPurpose": "capabilityInvocation"
+    }
+  }
 }
 ```
 
@@ -1017,3 +1038,99 @@ interface MigrationData {
 ---
 
 *This specification is an Application Specification building upon the W3C CCG Cryptographic Event Log specification. It defines the Originals-specific semantics for digital asset provenance across three infrastructure layers.*
+
+## Appendix B: Validation Implementation Guide
+
+### B.1 Migration-Cross Validation Algorithm
+
+The core challenge in the Originals protocol is ensuring cryptographically valid transitions between layers. The validation algorithm must verify three key aspects during migration:
+
+1. **Continuity**: Prove the outgoing DID authorized the migration
+2. **Preparation**: Prove the incoming DID is ready to receive  
+3. **Binding**: Create an indelible link between the two identities
+
+**Enhanced Validation Pseudocode:**
+```python
+def validate_migration(event):
+  # 1. Verify migration event signature from source DID
+  source_valid = verify_signature(
+    event.migration.fromDid, 
+    event.migration.proof
+  )
+  
+  # 2. Verify destination DID has capability invocation setup
+  dest_ready = verify_capability_invocation(
+    event.migration.toDid,
+    "cryptographic-event-log"
+  )
+  
+  # 3. Create cross-DID verification record
+  cross_record = {
+    "migration_proof": compute_hash(event),
+    "source_identity": event.migration.fromDid,
+    "dest_identity": event.migration.toDid,
+    "timestamp": event.migration.timestamp,
+    "layer_progression": [1, 2]  # or [2, 3] or [1, 3]
+  }
+  
+  # 4. Embed cross-record in both DID documents
+  append_cross_reference(
+    event.migration.fromDid,
+    cross_record
+  )
+  append_cross_reference(
+    event.migration.toDid, 
+    cross_record
+  )
+  
+  return source_valid and dest_ready
+```
+
+### B.2 Implementation Testing Suite
+
+**Test Case: Cross-Layer Migration**
+
+1. **Setup**: Create asset in Layer 1 (did:peer)
+2. **Action**: Migrate to Layer 2 (did:webvh) 
+3. **Verification**:
+   - Verify chain still validates
+   - Verify dual-attestation proofs
+   - Verify continuity links
+   - Verify DID resolution works in new layer
+
+**Test Case: Fork Detection**
+
+1. **Setup**: Create valid chain
+2. **Action**: Attempt to create parallel chain with same prior event hash
+3. **Verification**: 
+   - Fork should be detected by witnesses
+   - Previous witnesses should reject conflicting chains
+
+**Test Case: Cross-DID Verification**
+
+1. **Setup**: Asset migrates did:peer → did:webvh → did:btco
+2. **Action**: Verify full trace
+3. **Verification**:
+   - Verify all migration events
+   - Verify link between did:peer and did:btco
+   - Verify Bitcoin inscription contains complete history
+
+## Appendix C: Research Extensions
+
+### C.1 Bitcoin Taproot Integration
+
+Future versions should consider Bitcoin Taproot (BIP-340/341) for enhanced privacy and efficiency:
+
+- **Key Aggregation**: Multiple migration keys into single aggregate signature
+- **Scriptless Scripts**: Conditional migration conditions without revealing them on-chain
+- **Better Mempool Handling**: Reduced transaction malleability concerns
+
+### C.2 Zero-Knowledge Proofs
+
+For enhanced privacy in migration sequences:
+
+- **ZK Timeline Proofs**: Prove migration sequence without revealing content metadata
+- **ZK Ownership Transfers**: Transfer cryptographic control without revealing previous owner
+- **ZK Compliance**: Prove regulatory compliance without exposing internal data
+
+This enhanced specification provides a robust foundation for verifiable digital asset provenance with clear migration paths between privacy-protecting, web-accessible, and permanently anchored states.
