@@ -108,3 +108,20 @@ export {
   type UpdateWebVHOptions,
   type DeactivateWebVHOptions,
 } from './webvh'
+
+// Witness
+export {
+  witnessEvent,
+  addWitnessProofs,
+  getWitnessProofs,
+  isWitnessProof,
+  countWitnessProofs,
+  verifyWitnessProofs,
+  createBitcoinWitness,
+  HttpWitness,
+  LocalWitness,
+  type WitnessService,
+  type WitnessConfig,
+  type WitnessResult,
+  type BitcoinWitnessConfig,
+} from './witness'
