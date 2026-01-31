@@ -86,3 +86,18 @@ export {
   type InscriptionResult,
   type OrdinalsProvider,
 } from './bitcoin'
+
+// WebVH
+export {
+  publish,
+  updateWebVH,
+  resolveWebVH,
+  deactivateWebVH,
+  serializeLog,
+  parseLog,
+  getHostingPath,
+  type PublishOptions,
+  type PublishResult,
+  type UpdateWebVHOptions,
+  type DeactivateWebVHOptions,
+} from './webvh'
