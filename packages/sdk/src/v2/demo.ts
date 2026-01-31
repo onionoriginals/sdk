@@ -5,21 +5,25 @@
  * Shows the complete lifecycle of an Original:
  * 1. Create on peer layer
  * 2. Update with new resources
- * 3. Migrate to webvh
- * 4. Verify provenance
- * 5. Deactivate
+ * 3. Add witness attestation
+ * 4. Migrate to webvh
+ * 5. Inscribe to Bitcoin (mock)
+ * 6. Verify provenance
  */
 
 import {
   create,
   update,
   migrate,
-  deactivate,
   verify,
   generateKeyPair,
   createSigner,
   createVerifier,
   hash,
+  LocalWitness,
+  addWitnessProofs,
+  MockOrdinalsProvider,
+  inscribeOriginal,
 } from './index'
 import type { Resource, Original } from './types'
 
@@ -113,6 +117,37 @@ async function main() {
   })
 
   // ==========================================================================
+  // WITNESS
+  // ==========================================================================
+  
+  console.log('\n👁️  Adding witness attestation...')
+  
+  // Create a witness (in production, this would be an external service)
+  const witnessKeyPair = await generateKeyPair('Ed25519')
+  const witnessSigner = createSigner(witnessKeyPair, 'did:key:witness#key-1')
+  const witness = new LocalWitness('did:key:witness', witnessSigner)
+  
+  // Get witness proof for the latest event
+  const latestEvent = original.log.events[original.log.events.length - 1]
+  const witnessProof = await witness.witness(latestEvent)
+  
+  // Add witness proof to the event
+  const witnessedEvent = addWitnessProofs(latestEvent, [witnessProof])
+  original = {
+    ...original,
+    log: {
+      ...original.log,
+      events: [...original.log.events.slice(0, -1), witnessedEvent],
+    },
+  }
+  
+  log('Witnessed Event', {
+    eventType: witnessedEvent.type,
+    proofCount: witnessedEvent.proof.length,
+    witnessedAt: witnessProof.witnessedAt,
+  })
+
+  // ==========================================================================
   // VERIFY
   // ==========================================================================
   
@@ -129,7 +164,7 @@ async function main() {
   }
 
   // ==========================================================================
-  // MIGRATE
+  // MIGRATE TO WEBVH
   // ==========================================================================
   
   console.log('\n🚀 Migrating to webvh...')
@@ -155,22 +190,26 @@ async function main() {
   })
 
   // ==========================================================================
-  // DEACTIVATE
+  // INSCRIBE TO BITCOIN
   // ==========================================================================
   
-  console.log('\n💀 Deactivating Original...')
+  console.log('\n₿ Inscribing to Bitcoin (mock)...')
   
-  original = await deactivate({
+  const provider = new MockOrdinalsProvider()
+  
+  const inscription = await inscribeOriginal({
     original,
-    reason: 'Demo complete',
-    signer,
+    provider,
+    format: 'json',
   })
 
-  log('Deactivated Original', {
-    did: original.did,
-    deactivated: original.deactivated,
-    events: original.log.events.length,
+  log('Inscribed to Bitcoin', {
+    did: inscription.did,
+    inscriptionId: inscription.inscriptionId,
+    txid: inscription.txid,
   })
+  
+  console.log('  → Original now has permanent Bitcoin anchor!')
 
   // ==========================================================================
   // FULL LOG
@@ -194,11 +233,13 @@ async function main() {
 Summary:
   - Created Original on peer layer
   - Added thumbnail resource
+  - Added witness attestation
   - Verified provenance chain
-  - Migrated to webvh layer  
-  - Deactivated
+  - Migrated to webvh layer
+  - Inscribed to Bitcoin
 
 Total events in log: ${original.log.events.length}
+Bitcoin inscription: ${inscription.inscriptionId}
   `)
 }
 
