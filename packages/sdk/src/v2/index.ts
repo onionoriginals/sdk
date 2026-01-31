@@ -74,18 +74,25 @@ export {
   isValidDID,
 } from './did'
 
-// Bitcoin
+// Ordinals (Bitcoin layer)
 export {
   inscribeOriginal,
   inscribeEventLog,
   fetchOriginal,
-  fetchEventLog,
-  estimateInscriptionFee,
+  fetchOriginalByDID,
+  didToInscriptionId,
   parseInscriptionId,
-  type InscriptionData,
-  type InscriptionResult,
+  estimateInscriptionFee,
+  MockOrdinalsProvider,
   type OrdinalsProvider,
-} from './bitcoin'
+  type CreateInscriptionParams,
+  type InscriptionResult,
+  type Inscription,
+  type TransferResult,
+  type InscribeOriginalOptions,
+  type InscribeOriginalResult,
+  type InscribeLogOptions,
+} from './ordinals'
 
 // WebVH
 export {
