@@ -36,6 +36,14 @@ export interface OriginalsConfig {
     exportFormat?: 'json' | 'prometheus';
     collectCache?: boolean;
   };
+  // DID caching configuration
+  didCache?: {
+    enabled?: boolean;           // Enable/disable caching (default: true)
+    ttl?: number;                // Time-to-live in ms (default: 24 hours)
+    maxSize?: number;            // Max DIDs to cache (default: 1000)
+    verifyHash?: boolean;        // Verify content hash on retrieval (default: true)
+    autoCacheOnResolve?: boolean; // Auto-cache after resolution (default: true)
+  };
 }
 
 export interface AssetResource {
