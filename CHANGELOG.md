@@ -1,3 +1,10 @@
+## [1.8.4](https://github.com/onionoriginals/sdk/compare/v1.8.3...v1.8.4) (2026-02-04)
+
+
+### Bug Fixes
+
+* **auth:** Add wildcard subpath exports for Convex compatibility ([#136](https://github.com/onionoriginals/sdk/issues/136)) ([67d3d95](https://github.com/onionoriginals/sdk/commit/67d3d9557ddac53372e5359d2bd33da2d1ec10e1))
+
 ## [1.8.3](https://github.com/onionoriginals/sdk/compare/v1.8.2...v1.8.3) (2026-01-28)
 
 
