@@ -1,6 +1,6 @@
 {
   "name": "@originals/auth",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "description": "Turnkey-based authentication for the Originals Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,9 +17,17 @@
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js"
     },
+    "./server/*": {
+      "types": "./dist/server/*.d.ts",
+      "import": "./dist/server/*.js"
+    },
     "./client": {
       "types": "./dist/client/index.d.ts",
       "import": "./dist/client/index.js"
+    },
+    "./client/*": {
+      "types": "./dist/client/*.d.ts",
+      "import": "./dist/client/*.js"
     },
     "./types": {
       "types": "./dist/types.d.ts",
