@@ -52,14 +52,19 @@ await originals.lifecycle.inscribeOnBitcoin(asset);
 
 ## Architecture
 
+The protocol now uses **CEL (Cryptographic Event Log)** as the universal event format across all three layers, ensuring consistent data structures while allowing different DID methods for resolvability at each stage.
+
+See [ORIGINALS_CEL_SPECIFICATION.md](./ORIGINALS_CEL_SPECIFICATION.md) for the complete specification.
+
 ### Core Classes
 
 - **OriginalsSDK** - Main entry point and orchestration
 - **OriginalsAsset** - Represents a digital asset through its lifecycle
 - **DIDManager** - DID document creation and resolution (did:peer, did:webvh, did:btco) with external signer support
 - **CredentialManager** - Verifiable Credential handling
-- **LifecycleManager** - Asset migration between layers
+- **LifecycleManager** - Asset migration between layers using CEL event format
 - **BitcoinManager** - Bitcoin/Ordinals integration
+- **CelManager** - Universal CEL event handling across all layers
 
 ### Key Features
 
@@ -243,6 +248,16 @@ const result = await sdk.did.updateDIDWebVH({
 ```
 
 For detailed information about the DID:WebVH integration, including Turnkey setup and external signer implementation, see [DIDWEBVH_INTEGRATION.md](./DIDWEBVH_INTEGRATION.md).
+
+## Protocol Specification
+
+This SDK implements the **Originals Protocol** as specified in [ORIGINALS_CEL_SPECIFICATION.md](./ORIGINALS_CEL_SPECIFICATION.md). The specification has been updated from the previous `did:cel`-only approach to use CEL (Cryptographic Event Log) as the universal event format across three distinct DID layers:
+
+- **did:peer**: Private creation and offline validation
+- **did:webvh**: Public discovery and web hosting  
+- **did:btco**: Bitcoin anchoring and tradeable ownership
+
+This architecture resolves the resolvability issues with content-addressed DIDs while maintaining consistent event structures across all asset lifecycle stages.
 
 ## Documentation
 
