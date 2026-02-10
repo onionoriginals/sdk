@@ -8,11 +8,68 @@ import { multikey } from '../crypto/Multikey';
 import { KeyManager } from './KeyManager';
 import { Ed25519Signer } from '../crypto/Signer';
 import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation';
+import { DIDCache, DIDCacheStats } from './DIDCache';
 import * as fs from 'fs';
 import * as path from 'path';
 
 export class DIDManager {
-  constructor(private config: OriginalsConfig) {}
+  private cache: DIDCache;
+
+  constructor(private config: OriginalsConfig) {
+    // Initialize DID cache with config or defaults
+    this.cache = new DIDCache({
+      enabled: config.didCache?.enabled ?? true,
+      ttl: config.didCache?.ttl,
+      maxSize: config.didCache?.maxSize,
+      verifyHash: config.didCache?.verifyHash,
+      autoCacheOnResolve: config.didCache?.autoCacheOnResolve,
+    });
+  }
+
+  /**
+   * Get cache statistics for monitoring
+   */
+  async getCacheStats(): Promise<DIDCacheStats> {
+    return this.cache.getStats();
+  }
+
+  /**
+   * Clear the DID cache
+   */
+  async clearCache(): Promise<void> {
+    await this.cache.clear();
+  }
+
+  /**
+   * Remove expired entries from the cache
+   */
+  async clearExpiredCache(): Promise<number> {
+    return this.cache.clearExpired();
+  }
+
+  /**
+   * Pin a DID to cache with optional custom TTL
+   */
+  async pinDID(did: string, customTtl?: number): Promise<void> {
+    const doc = await this.resolveDID(did, { bypassCache: true });
+    if (doc) {
+      await this.cache.set(did, doc, customTtl);
+    }
+  }
+
+  /**
+   * Unpin a DID from cache
+   */
+  async unpinDID(did: string): Promise<boolean> {
+    return this.cache.delete(did);
+  }
+
+  /**
+   * Check if a DID is cached
+   */
+  async isCached(did: string): Promise<boolean> {
+    return this.cache.has(did);
+  }
 
   async createDIDPeer(resources: AssetResource[], returnKeyPair?: false): Promise<DIDDocument>;
   async createDIDPeer(resources: AssetResource[], returnKeyPair: true): Promise<{ didDocument: DIDDocument; keyPair: { privateKey: string; publicKey: string } }>;
@@ -181,46 +238,83 @@ export class DIDManager {
     return await Promise.resolve(btcoDoc);
   }
 
-  async resolveDID(did: string): Promise<DIDDocument | null> {
+  /**
+   * Resolve a DID to its document
+   * 
+   * Uses local cache by default for faster resolution.
+   * Set bypassCache: true to always resolve from network.
+   * 
+   * @param did - The DID to resolve
+   * @param options - Resolution options
+   * @returns The resolved DID document or null
+   */
+  async resolveDID(
+    did: string,
+    options: { bypassCache?: boolean } = {}
+  ): Promise<DIDDocument | null> {
+    const { bypassCache = false } = options;
+
+    // Check cache first (unless bypassed)
+    if (!bypassCache && this.cache.enabled) {
+      const cached = await this.cache.get(did);
+      if (cached) {
+        if (this.config.enableLogging) {
+          console.log(`DID cache hit: ${did}`);
+        }
+        return cached;
+      }
+    }
+
+    // Resolve from network
     try {
+      let doc: DIDDocument | null = null;
+
       if (did.startsWith('did:peer:')) {
         try {
           const mod = await import('@aviarytech/did-peer') as unknown as { resolve: (did: string) => Promise<Record<string, unknown>> };
-          const doc = await mod.resolve(did);
-          return doc as unknown as DIDDocument;
+          doc = await mod.resolve(did) as unknown as DIDDocument;
         } catch (err) {
           // Failed to resolve did:peer; returning minimal document
           if (this.config.enableLogging) {
             console.warn('Failed to resolve did:peer:', err);
           }
+          doc = { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
         }
-        return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
-      }
-      if (did.startsWith('did:btco:') || did.startsWith('did:btco:test:') || did.startsWith('did:btco:sig:')) {
+      } else if (did.startsWith('did:btco:') || did.startsWith('did:btco:test:') || did.startsWith('did:btco:sig:')) {
         const rpcUrl = this.config.bitcoinRpcUrl || 'http://localhost:3000';
         const network = this.config.network || 'mainnet';
         const client = new OrdinalsClient(rpcUrl, network);
         const adapter = new OrdinalsClientProviderAdapter(client, rpcUrl);
         const resolver = new BtcoDidResolver({ provider: adapter });
         const result = await resolver.resolve(did);
-        return result.didDocument || null;
-      }
-      if (did.startsWith('did:webvh:')) {
+        doc = result.didDocument || null;
+      } else if (did.startsWith('did:webvh:')) {
         try {
           const mod = await import('didwebvh-ts') as { resolveDID?: (did: string) => Promise<{ doc?: Record<string, unknown> }> };
           if (mod && typeof mod.resolveDID === 'function') {
             const result = await mod.resolveDID(did);
-            if (result && result.doc) return result.doc as unknown as DIDDocument;
+            if (result && result.doc) doc = result.doc as unknown as DIDDocument;
           }
         } catch (err) {
           // Failed to resolve did:webvh; returning minimal document
           if (this.config.enableLogging) {
             console.warn('Failed to resolve did:webvh:', err);
           }
+          doc = { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
         }
-        return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+      } else {
+        doc = { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
       }
-      return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+
+      // Cache the resolved document if auto-caching is enabled
+      if (doc && this.cache.enabled && (this.config.didCache?.autoCacheOnResolve ?? true)) {
+        await this.cache.set(did, doc);
+        if (this.config.enableLogging) {
+          console.log(`DID cached: ${did}`);
+        }
+      }
+
+      return doc;
     } catch (err) {
       // DID resolution failed
       if (this.config.enableLogging) {
