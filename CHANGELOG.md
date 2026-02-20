@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/onionoriginals/sdk/compare/v1.8.4...v1.9.0) (2026-02-04)
+
+
+### Features
+
+* **sdk:** add subpath exports for Convex bundler compatibility ([#137](https://github.com/onionoriginals/sdk/issues/137)) ([4bda7c6](https://github.com/onionoriginals/sdk/commit/4bda7c6052e2daac32083a9da8f0e43d9046a085))
+
 ## [1.8.4](https://github.com/onionoriginals/sdk/compare/v1.8.3...v1.8.4) (2026-02-04)
 
 
