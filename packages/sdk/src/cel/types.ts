@@ -25,6 +25,20 @@ export interface DataIntegrityProof {
 }
 
 /**
+ * Required v1.1 operation names for provenance-changing events.
+ */
+export type RequiredEventOperation = 'ResourceAdded' | 'ResourceUpdated';
+
+/**
+ * Minimal semantic event payload contract for v1.1 required events.
+ * Field names may vary in external payloads; algorithms normalize to this shape.
+ */
+export interface V11EventPayload {
+  operation: RequiredEventOperation;
+  [key: string]: unknown;
+}
+
+/**
  * Witness Proof - extends DataIntegrityProof with witness-specific fields
  * Used when a third party attests to the existence of an event at a point in time
  */

@@ -33,8 +33,22 @@ describe('BtcoDidResolver', () => {
     const resolver = new BtcoDidResolver();
     const res = await resolver.resolve('did:btco:123');
     expect(res.didDocument).toBeNull();
-    expect(res.resolutionMetadata.error).toBe('noProvider');
+    expect(res.resolutionMetadata.error).toBe('notFound');
     expect(res.resolutionMetadata.message).toBe('No provider supplied');
+  });
+
+  test('returns representationNotSupported for unsupported accept header', async () => {
+    const resolver = new BtcoDidResolver({ provider });
+    const res = await resolver.resolve('did:btco:123', { accept: 'application/did+ld+json' });
+    expect(res.didDocument).toBeNull();
+    expect(res.resolutionMetadata.error).toBe('representationNotSupported');
+  });
+
+  test('returns representationNotSupported for DID URL path dereference', async () => {
+    const resolver = new BtcoDidResolver({ provider });
+    const res = await resolver.resolve('did:btco:123/some/path');
+    expect(res.didDocument).toBeNull();
+    expect(res.resolutionMetadata.error).toBe('representationNotSupported');
   });
 
   test('provider.getSatInfo failure path', async () => {
@@ -312,7 +326,7 @@ describe('BtcoDidResolver branches', () => {
   test('no provider supplied', async () => {
     const r = new BtcoDidResolver();
     const res = await r.resolve('did:btco:1');
-    expect(res.resolutionMetadata?.error).toBe('noProvider');
+    expect(res.resolutionMetadata?.error).toBe('notFound');
   });
 
   test('provider getSatInfo throws', async () => {

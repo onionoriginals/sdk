@@ -16,6 +16,7 @@ import { updateEventLog } from '../algorithms/updateEventLog';
 import { witnessEvent } from '../algorithms/witnessEvent';
 import { BitcoinWitness } from '../witnesses/BitcoinWitness';
 import type { BitcoinManager } from '../../bitcoin/BitcoinManager';
+import { computeDigestMultibase } from '../hash';
 import type { CelSigner } from './PeerCelManager';
 
 /**
@@ -28,6 +29,33 @@ export interface BtcoCelConfig {
   proofPurpose?: string;
   /** Fee rate in sat/vB for Bitcoin transactions (optional - BitcoinManager will estimate if not provided) */
   feeRate?: number;
+  /** Optional custom final artifact materializer. MUST be deterministic for equivalent input. */
+  materializeFinalArtifact?: (input: {
+    log: EventLog;
+    sourceDid: string;
+    targetDid: string;
+    celHeadDigest: string;
+    state: AssetState;
+  }) => Uint8Array | Promise<Uint8Array>;
+}
+
+export interface FinalArtifactMaterialization {
+  mediaType: 'application/json';
+  digestMultibase: string;
+  bytes: Uint8Array;
+}
+
+export interface FinalAnchoringAttestation {
+  type: 'OriginalsFinalAnchoringAttestation';
+  sourceDid: string;
+  targetDid: string;
+  celHeadDigest: string;
+  artifactDigest: string;
+  chain: 'bitcoin';
+  txid?: string;
+  inscriptionId?: string;
+  timestamp: string;
+  finalityStatus: 'final';
 }
 
 /**
@@ -44,6 +72,10 @@ export interface BtcoMigrationData {
   txid?: string;
   /** The inscription ID on Bitcoin */
   inscriptionId?: string;
+  /** Deterministic final artifact details */
+  finalArtifact?: Omit<FinalArtifactMaterialization, 'bytes'>;
+  /** Final btco anchoring attestation */
+  finalAttestation?: FinalAnchoringAttestation;
   /** ISO 8601 timestamp of migration */
   migratedAt: string;
 }
@@ -228,15 +260,75 @@ export class BtcoCelManager {
       targetDid = this.generateBtcoDid(currentDid);
     }
 
-    // Update migration data with Bitcoin details
-    const updatedMigrationData: BtcoMigrationData = {
+    // Build a provisional migration event with Bitcoin details
+    const provisionalMigrationData: BtcoMigrationData = {
       ...migrationData,
       targetDid,
       txid,
       inscriptionId,
     };
 
-    // Replace the event data with updated migration data
+    const provisionalEvent = {
+      ...witnessedEvent,
+      data: provisionalMigrationData,
+    };
+
+    const provisionalLog: EventLog = {
+      ...updatedLog,
+      events: [
+        ...updatedLog.events.slice(0, lastEventIndex),
+        provisionalEvent,
+      ],
+    };
+
+    // Deterministic final artifact materialization from CEL state
+    const celHeadDigest = this.computeCelHeadDigest(provisionalEvent);
+    const state = this.getCurrentState(provisionalLog);
+    const finalArtifact = await this.materializeFinalArtifact({
+      log: provisionalLog,
+      sourceDid: currentDid,
+      targetDid,
+      celHeadDigest,
+      state,
+    });
+
+    // Final anchoring attestation (btco finalization)
+    const attestationPayload: Omit<FinalAnchoringAttestation, 'timestamp' | 'txid' | 'inscriptionId'> = {
+      type: 'OriginalsFinalAnchoringAttestation',
+      sourceDid: currentDid,
+      targetDid,
+      celHeadDigest,
+      artifactDigest: finalArtifact.digestMultibase,
+      chain: 'bitcoin',
+      finalityStatus: 'final',
+    };
+
+    const attestationInscription = await this.bitcoinManager.inscribeData(
+      {
+        ...attestationPayload,
+        timestamp: new Date().toISOString(),
+      },
+      'application/json',
+      this.config.feeRate
+    );
+
+    const finalAttestation: FinalAnchoringAttestation = {
+      ...attestationPayload,
+      txid: attestationInscription.txid,
+      inscriptionId: attestationInscription.inscriptionId,
+      timestamp: new Date().toISOString(),
+    };
+
+    const updatedMigrationData: BtcoMigrationData = {
+      ...provisionalMigrationData,
+      finalArtifact: {
+        mediaType: finalArtifact.mediaType,
+        digestMultibase: finalArtifact.digestMultibase,
+      },
+      finalAttestation,
+    };
+
+    // Replace the event data with finalized migration data
     witnessedEvent = {
       ...witnessedEvent,
       data: updatedMigrationData,
@@ -397,6 +489,56 @@ export class BtcoCelManager {
     }
 
     return state;
+  }
+
+  private computeCelHeadDigest(event: unknown): string {
+    const bytes = new TextEncoder().encode(this.toCanonicalJson(event));
+    return computeDigestMultibase(bytes);
+  }
+
+  private async materializeFinalArtifact(input: {
+    log: EventLog;
+    sourceDid: string;
+    targetDid: string;
+    celHeadDigest: string;
+    state: AssetState;
+  }): Promise<FinalArtifactMaterialization> {
+    const customMaterializer = this.config.materializeFinalArtifact;
+    const bytes = customMaterializer
+      ? await customMaterializer(input)
+      : new TextEncoder().encode(this.toCanonicalJson({
+        type: 'OriginalsFinalArtifact',
+        version: '1.1',
+        sourceDid: input.sourceDid,
+        targetDid: input.targetDid,
+        celHeadDigest: input.celHeadDigest,
+        state: input.state,
+      }));
+
+    return {
+      mediaType: 'application/json',
+      bytes,
+      digestMultibase: computeDigestMultibase(bytes),
+    };
+  }
+
+  private toCanonicalJson(value: unknown): string {
+    return JSON.stringify(this.sortKeys(value));
+  }
+
+  private sortKeys(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sortKeys(item));
+    }
+    if (!value || typeof value !== 'object') {
+      return value;
+    }
+    const obj = value as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(obj).sort()) {
+      sorted[key] = this.sortKeys(obj[key]);
+    }
+    return sorted;
   }
 
   /**

@@ -12,7 +12,8 @@ export type {
   CreateOriginalOptions,
   UpdateOriginalOptions,
   CreateDIDOriginalOptions,
-  UpdateDIDOriginalOptions
+  UpdateDIDOriginalOptions,
+  CreateCelOptions
 } from './core/OriginalsSDK.js';
 export { OriginalsAsset } from './lifecycle/OriginalsAsset.js';
 export type { ProvenanceChain } from './lifecycle/OriginalsAsset.js';
@@ -168,6 +169,8 @@ export type {
   UpdateOptions,
   DeactivateOptions,
   VerifyOptions,
+  RequiredEventOperation,
+  V11EventPayload,
 } from './cel/types.js';
 export {
   createEventLog,
