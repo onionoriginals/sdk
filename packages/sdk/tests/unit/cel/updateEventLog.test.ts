@@ -86,7 +86,22 @@ describe('updateEventLog', () => {
       
       const updatedLog = await updateEventLog(initialLog, updateData, updateOptions);
       
-      expect(updatedLog.events[1].data).toEqual(updateData);
+      expect(updatedLog.events[1].data).toEqual({ ...updateData, operation: 'ResourceUpdated' });
+    });
+
+    test('normalizes update event with ResourceUpdated operation', async () => {
+      const createOptions: CreateOptions = {
+        signer: createMockSigner(verificationMethod),
+        verificationMethod,
+      };
+      const initialLog = await createEventLog({ name: 'Initial' }, createOptions);
+      const updateOptions: UpdateOptions = {
+        signer: createMockSigner(verificationMethod),
+        verificationMethod,
+      };
+
+      const updatedLog = await updateEventLog(initialLog, { name: 'Updated' }, updateOptions);
+      expect((updatedLog.events[1].data as Record<string, unknown>).operation).toBe('ResourceUpdated');
     });
   });
 
@@ -306,6 +321,28 @@ describe('updateEventLog', () => {
       
       await expect(updateEventLog(initialLog, { name: 'Changed' }, updateOptions)).rejects.toThrow('Invalid proof');
     });
+
+    test('throws error when proof uses non-v1.1 cryptosuite', async () => {
+      const createOptions: CreateOptions = {
+        signer: createMockSigner(verificationMethod),
+        verificationMethod,
+      };
+      const initialLog = await createEventLog({ name: 'Test' }, createOptions);
+
+      const invalidSuiteSigner = async (): Promise<DataIntegrityProof> => ({
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-rdfc-2022',
+        created: new Date().toISOString(),
+        verificationMethod,
+        proofPurpose: 'assertionMethod',
+        proofValue: 'zMockSignature',
+      });
+
+      await expect(updateEventLog(initialLog, { name: 'Changed' }, {
+        signer: invalidSuiteSigner,
+        verificationMethod,
+      })).rejects.toThrow('Invalid proof cryptosuite for required event');
+    });
   });
 
   describe('previousLog preservation', () => {
@@ -361,7 +398,7 @@ describe('updateEventLog', () => {
       
       const updatedLog = await updateEventLog(initialLog, complexUpdateData, updateOptions);
       
-      expect(updatedLog.events[1].data).toEqual(complexUpdateData);
+      expect(updatedLog.events[1].data).toEqual({ ...complexUpdateData, operation: 'ResourceUpdated' });
     });
   });
 });

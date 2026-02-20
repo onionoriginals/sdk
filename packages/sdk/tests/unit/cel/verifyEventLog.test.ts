@@ -212,11 +212,11 @@ describe('verifyEventLog', () => {
       expect(result.verified).toBe(false);
     });
 
-    test('accepts eddsa-rdfc-2022 cryptosuite', async () => {
+    test('rejects eddsa-rdfc-2022 cryptosuite for required events', async () => {
       const log: EventLog = {
         events: [{
           type: 'create',
-          data: { name: 'Test' },
+          data: { name: 'Test', operation: 'ResourceAdded' },
           proof: [{
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-rdfc-2022',
@@ -230,7 +230,7 @@ describe('verifyEventLog', () => {
 
       const result = await verifyEventLog(log);
 
-      expect(result.verified).toBe(true);
+      expect(result.verified).toBe(false);
     });
 
     test('returns verified: false for unknown cryptosuite', async () => {
@@ -252,6 +252,27 @@ describe('verifyEventLog', () => {
       const result = await verifyEventLog(log);
 
       expect(result.verified).toBe(false);
+    });
+
+    test('returns verified: false when required operation is wrong', async () => {
+      const log: EventLog = {
+        events: [{
+          type: 'create',
+          data: { name: 'Test', operation: 'ResourceUpdated' },
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: new Date().toISOString(),
+            verificationMethod,
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zValidBase58Signature',
+          }],
+        }],
+      };
+
+      const result = await verifyEventLog(log);
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => e.includes('Required operation mismatch'))).toBe(true);
     });
   });
 
@@ -542,7 +563,7 @@ describe('verifyEventLog', () => {
       expect(receivedProof?.cryptosuite).toBe('eddsa-jcs-2022');
       expect(receivedData).not.toBeNull();
       expect((receivedData as any).type).toBe('create');
-      expect((receivedData as any).data).toEqual(eventData);
+      expect((receivedData as any).data).toEqual({ ...eventData, operation: 'ResourceAdded' });
     });
   });
 

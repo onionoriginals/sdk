@@ -10,6 +10,7 @@ import { Logger } from '../utils/Logger';
 import { MetricsCollector } from '../utils/MetricsCollector';
 import { EventLogger } from '../utils/EventLogger';
 import { createDID } from 'didwebvh-ts';
+import { OriginalsCel, type OriginalsCelOptions } from '../cel/OriginalsCel';
 
 // Type for DID log (from didwebvh-ts)
 interface DIDLogEntry {
@@ -98,6 +99,8 @@ export type UpdateOriginalOptions = UpdateDIDOriginalOptions;
 export interface OriginalsSDKOptions extends Partial<OriginalsConfig> {
   keyStore?: KeyStore;
 }
+
+export type CreateCelOptions = OriginalsCelOptions;
 
 export class OriginalsSDK {
   public readonly did: DIDManager;
@@ -189,6 +192,15 @@ export class OriginalsSDK {
       webvhNetwork: DEFAULT_WEBVH_NETWORK, // Default to 'pichu' (production)
     };
     return new OriginalsSDK({ ...defaultConfig, ...configOptions }, keyStore);
+  }
+
+  /**
+   * CEL-first factory for protocol v1.1 workflows.
+   *
+   * Prefer this API over createOriginal()/updateOriginal() for new integrations.
+   */
+  static createCel(options: CreateCelOptions): OriginalsCel {
+    return new OriginalsCel(options);
   }
 
   /**
