@@ -1,0 +1,4 @@
+{
+  "errors": ["invalidDid", "notFound", "representationNotSupported"],
+  "spec": "Originals Protocol v1.1"
+}

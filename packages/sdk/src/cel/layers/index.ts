@@ -23,5 +23,7 @@ export {
 export { 
   BtcoCelManager, 
   type BtcoCelConfig, 
-  type BtcoMigrationData 
+  type BtcoMigrationData,
+  type FinalArtifactMaterialization,
+  type FinalAnchoringAttestation
 } from './BtcoCelManager';
