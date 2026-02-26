@@ -75,7 +75,18 @@ describe('createEventLog', () => {
 
       const log = await createEventLog(data, options);
 
-      expect(log.events[0].data).toEqual(data);
+      expect(log.events[0].data).toEqual({ ...data, operation: 'ResourceAdded' });
+    });
+
+    test('normalizes create event with ResourceAdded operation', async () => {
+      const data = { name: 'Op Test' };
+      const options: CreateOptions = {
+        signer: createMockSigner(verificationMethod),
+        verificationMethod,
+      };
+
+      const log = await createEventLog(data, options);
+      expect((log.events[0].data as Record<string, unknown>).operation).toBe('ResourceAdded');
     });
   });
 
@@ -241,6 +252,22 @@ describe('createEventLog', () => {
 
       await expect(createEventLog(data, options)).rejects.toThrow('Invalid proof');
     });
+
+    test('throws error when proof uses non-v1.1 cryptosuite', async () => {
+      const invalidSuiteSigner = async (): Promise<DataIntegrityProof> => ({
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-rdfc-2022',
+        created: new Date().toISOString(),
+        verificationMethod,
+        proofPurpose: 'assertionMethod',
+        proofValue: 'zMockSignature',
+      });
+
+      await expect(createEventLog({ name: 'Test Asset' }, {
+        signer: invalidSuiteSigner,
+        verificationMethod,
+      })).rejects.toThrow('Invalid proof cryptosuite for required event');
+    });
   });
 
   describe('event log structure', () => {
@@ -299,7 +326,7 @@ describe('createEventLog', () => {
 
       const log = await createEventLog(complexData, options);
 
-      expect(log.events[0].data).toEqual(complexData);
+      expect(log.events[0].data).toEqual({ ...complexData, operation: 'ResourceAdded' });
     });
 
     test('handles null and undefined values in data', async () => {
@@ -316,7 +343,7 @@ describe('createEventLog', () => {
 
       const log = await createEventLog(dataWithNulls, options);
 
-      expect(log.events[0].data).toEqual(dataWithNulls);
+      expect(log.events[0].data).toEqual({ ...dataWithNulls, operation: 'ResourceAdded' });
     });
   });
 });

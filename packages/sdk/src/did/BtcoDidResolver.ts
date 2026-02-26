@@ -42,6 +42,7 @@ export interface BtcoDidResolutionOptions {
   provider?: ResourceProviderLike;
   fetchFn?: (url: string) => Promise<Response>;
   timeout?: number;
+  accept?: string;
 }
 
 export class BtcoDidResolver {
@@ -79,10 +80,20 @@ export class BtcoDidResolver {
       return this.createErrorResult('invalidDid', `Invalid BTCO DID format: ${did}`);
     }
 
-    const { satNumber, network } = parsed;
+    const { satNumber, network, path } = parsed;
+
+    const requestedAccept = options.accept || this.options.accept;
+    if (requestedAccept && !this.isSupportedRepresentation(requestedAccept)) {
+      return this.createErrorResult('representationNotSupported', `Unsupported representation: ${requestedAccept}`);
+    }
+
+    if (path) {
+      return this.createErrorResult('representationNotSupported', `DID URL dereferencing is not supported for BTCO paths: /${path}`);
+    }
+
     const provider = options.provider || this.options.provider;
     if (!provider) {
-      return this.createErrorResult('noProvider', 'No provider supplied');
+      return this.createErrorResult('notFound', 'No provider supplied');
     }
 
     let inscriptionIds: string[] = [];
@@ -218,6 +229,11 @@ export class BtcoDidResolver {
     if (d.verificationMethod && !Array.isArray(d.verificationMethod)) return false;
     if (d.authentication && !Array.isArray(d.authentication)) return false;
     return true;
+  }
+
+  private isSupportedRepresentation(accept: string): boolean {
+    const normalized = accept.toLowerCase();
+    return normalized.includes('application/did+json') || normalized.includes('application/json') || normalized.includes('*/*');
   }
 
   private createErrorResult(error: string, message: string): BtcoDidResolutionResult {
