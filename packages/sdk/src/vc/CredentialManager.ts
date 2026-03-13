@@ -6,8 +6,13 @@ import {
   Proof,
   ExternalSigner,
   LayerType,
-  AssetResource
+  AssetResource,
+  BitstringStatusListEntry,
+  MultiSigPolicy,
+  MultiSigSignOptions,
+  MultiSigVerificationResult,
 } from '../types';
+import { StatusListManager, type StatusCheckResult } from './StatusListManager';
 import { canonicalizeDocument } from '../utils/serialization';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -17,6 +22,8 @@ import { DIDManager } from '../did/DIDManager';
 import { Issuer, VerificationMethodLike } from './Issuer';
 import { createDocumentLoader } from './documentLoader';
 import { Verifier } from './Verifier';
+import { MultiSigManager } from './MultiSigManager';
+import type { MetricsCollector } from '../utils/MetricsCollector';
 
 // ===== Credential Factory Types =====
 
@@ -118,10 +125,11 @@ export interface CredentialChainOptions {
   previousCredentialHash?: string;
   /** Optional expiration date */
   expirationDate?: string;
-  /** Optional credential status information */
+  /** Optional credential status (e.g., BitstringStatusListEntry for revocation) */
   credentialStatus?: {
     id: string;
     type: string;
+    [key: string]: unknown;
   };
 }
 
@@ -133,6 +141,12 @@ export interface SelectiveDisclosureOptions {
   mandatoryPointers: string[];
   /** JSON Pointer paths to fields the holder can selectively disclose */
   selectivePointers?: string[];
+  /** BBS+ private key (Uint8Array or multibase-encoded Bls12381G2 key) for signing */
+  privateKey?: Uint8Array | string;
+  /** BBS+ public key (Uint8Array or multibase-encoded Bls12381G2 key) */
+  publicKey?: Uint8Array | string;
+  /** Verification method ID for the BBS+ proof */
+  verificationMethod?: string;
 }
 
 /**
@@ -148,7 +162,17 @@ export interface DerivedProofResult {
 }
 
 export class CredentialManager {
-  constructor(private config: OriginalsConfig, private didManager?: DIDManager) {}
+  private readonly metrics?: MetricsCollector;
+  public readonly statusList: StatusListManager;
+
+  constructor(private config: OriginalsConfig, private didManager?: DIDManager, metrics?: MetricsCollector) {
+    this.metrics = metrics;
+    this.statusList = new StatusListManager();
+  }
+
+  private tracked<T>(op: string, fn: () => Promise<T>): Promise<T> {
+    return this.metrics ? this.metrics.track(op, fn) : fn();
+  }
 
   createResourceCredential(
     type: 'ResourceCreated' | 'ResourceUpdated' | 'ResourceMigrated',
@@ -169,6 +193,7 @@ export class CredentialManager {
     privateKeyMultibase: string,
     verificationMethod: string
   ): Promise<VerifiableCredential> {
+    return this.tracked('credential.sign', async () => {
     if (this.didManager && typeof verificationMethod === 'string' && verificationMethod.startsWith('did:')) {
       try {
         const loader = createDocumentLoader(this.didManager);
@@ -208,6 +233,7 @@ export class CredentialManager {
     const proofValue = await this.generateProofValue(credential, privateKeyMultibase, proofBase);
     const proof: Proof = { ...proofBase, proofValue };
     return { ...credential, proof };
+    }); // end tracked
   }
 
   /**
@@ -220,6 +246,7 @@ export class CredentialManager {
     credential: VerifiableCredential,
     signer: ExternalSigner
   ): Promise<VerifiableCredential> {
+    return this.tracked('credential.signExternal', async () => {
     const verificationMethodId = signer.getVerificationMethodId();
 
     // Create proof structure
@@ -249,9 +276,11 @@ export class CredentialManager {
         proofValue
       }
     };
+    }); // end tracked
   }
 
   async verifyCredential(credential: VerifiableCredential): Promise<boolean> {
+    return this.tracked('credential.verify', async () => {
     if (this.didManager) {
       interface ProofWithCryptosuite {
         cryptosuite?: string;
@@ -308,6 +337,67 @@ export class CredentialManager {
     } catch {
       return false;
     }
+    }); // end tracked
+  }
+
+  /**
+   * Verify a credential's signature and check its revocation status.
+   *
+   * If the credential has a `credentialStatus` of type `BitstringStatusListEntry`,
+   * the status is checked against the provided status list credential.
+   *
+   * @param credential - The credential to verify
+   * @param statusListCredential - The resolved status list credential (required if credential has credentialStatus)
+   * @returns Result with signature validity and revocation status
+   */
+  async verifyCredentialWithStatus(
+    credential: VerifiableCredential,
+    statusListCredential?: VerifiableCredential
+  ): Promise<{
+    verified: boolean;
+    revoked: boolean;
+    suspended: boolean;
+    errors: string[];
+  }> {
+    const errors: string[] = [];
+    let verified = false;
+    let revoked = false;
+    let suspended = false;
+
+    // Verify signature
+    try {
+      verified = await this.verifyCredential(credential);
+      if (!verified) {
+        errors.push('Credential signature verification failed');
+      }
+    } catch (err) {
+      errors.push(`Signature verification error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Check revocation status if applicable
+    const status = credential.credentialStatus as BitstringStatusListEntry | undefined;
+    if (status?.type === 'BitstringStatusListEntry') {
+      if (!statusListCredential) {
+        errors.push('Credential has a BitstringStatusListEntry but no status list credential was provided');
+      } else {
+        try {
+          const result = this.statusList.checkStatus(status, statusListCredential);
+          if (result.isSet) {
+            if (result.statusPurpose === 'revocation') {
+              revoked = true;
+              errors.push('Credential has been revoked');
+            } else {
+              suspended = true;
+              errors.push('Credential has been suspended');
+            }
+          }
+        } catch (err) {
+          errors.push(`Status check error: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    return { verified, revoked, suspended, errors };
   }
 
   createPresentation(
@@ -718,10 +808,7 @@ export class CredentialManager {
     if (typeof globalThis.crypto?.getRandomValues === 'function') {
       globalThis.crypto.getRandomValues(randomBytes);
     } else {
-      // Fallback for environments without crypto.getRandomValues
-      for (let i = 0; i < 16; i++) {
-        randomBytes[i] = Math.floor(Math.random() * 256);
-      }
+      throw new Error('crypto.getRandomValues is required for secure credential ID generation. Ensure your runtime supports the Web Crypto API.');
     }
     const randomHex = bytesToHex(randomBytes);
     return `urn:uuid:${timestamp}-${randomHex.substring(0, 8)}-${randomHex.substring(8, 16)}`;
@@ -734,9 +821,11 @@ export class CredentialManager {
    * @returns SHA-256 hash of the canonicalized credential
    */
   async computeCredentialHash(credential: VerifiableCredential): Promise<string> {
+    return this.tracked('credential.computeHash', async () => {
     const canonicalized = await canonicalizeDocument(credential as unknown as Record<string, unknown>);
     const hash = sha256(Buffer.from(canonicalized, 'utf8'));
     return bytesToHex(hash);
+    }); // end tracked
   }
 
   /**
@@ -805,16 +894,13 @@ export class CredentialManager {
 
   /**
    * Prepare a credential for BBS+ selective disclosure
-   * 
-   * This creates a base proof that can later be derived into a proof
-   * that selectively discloses only certain fields.
-   * 
-   * Note: This requires BBS+ keys and is primarily used for privacy-preserving
-   * credential presentations.
-   * 
+   *
+   * Signs the credential with a BBS+ proof, enabling later derivation
+   * of selective disclosure proofs that reveal only chosen fields.
+   *
    * @param credential - The credential to prepare
-   * @param options - Selective disclosure options
-   * @returns The credential with BBS+ base proof metadata
+   * @param options - Selective disclosure options including BBS+ key pair
+   * @returns The credential with BBS+ base proof and pointer metadata
    */
   async prepareSelectiveDisclosure(
     credential: VerifiableCredential,
@@ -829,7 +915,6 @@ export class CredentialManager {
       throw new Error('At least one mandatory pointer is required for selective disclosure');
     }
 
-    // Validate pointer format (JSON Pointers must start with /)
     for (const pointer of options.mandatoryPointers) {
       if (!pointer.startsWith('/')) {
         throw new Error(`Invalid JSON Pointer: ${pointer} (must start with /)`);
@@ -843,62 +928,102 @@ export class CredentialManager {
       }
     }
 
-    // Add selective disclosure metadata to credential
-    const enhancedCredential = {
-      ...credential,
-      // Store pointers in credential for later derivation
-      // In a full implementation, this would involve creating a BBS+ base proof
-    };
+    // If BBS+ key pair provided, create a real BBS+ base proof
+    if (options.privateKey) {
+      const { BBSCryptosuiteManager } = await import('./cryptosuites/bbsCryptosuite');
+      const documentLoader = this.didManager ? createDocumentLoader(this.didManager) : undefined;
 
-    return await Promise.resolve({
-      credential: enhancedCredential,
+      const bbsProof = await BBSCryptosuiteManager.createProof(credential, {
+        verificationMethod: options.verificationMethod || '',
+        proofPurpose: 'assertionMethod',
+        privateKey: options.privateKey,
+        publicKey: options.publicKey,
+        documentLoader,
+        mandatoryPointers: options.mandatoryPointers,
+      });
+
+      const enhancedCredential: VerifiableCredential = {
+        ...credential,
+        proof: {
+          ...bbsProof,
+          created: bbsProof.created || new Date().toISOString(),
+        },
+      };
+
+      return {
+        credential: enhancedCredential,
+        mandatoryPointers: options.mandatoryPointers,
+        selectivePointers,
+      };
+    }
+
+    // Fallback: return credential with metadata only (no BBS+ key provided)
+    return {
+      credential: { ...credential },
       mandatoryPointers: options.mandatoryPointers,
-      selectivePointers
-    });
+      selectivePointers,
+    };
   }
 
   /**
    * Create a derived proof with selective disclosure
-   * 
+   *
    * Given a credential with a BBS+ base proof, creates a derived proof
-   * that only reveals the specified fields.
-   * 
+   * that only reveals the specified fields while cryptographically proving
+   * the hidden fields exist in the original credential.
+   *
    * @param credential - The credential with BBS+ base proof
    * @param fieldsToDisclose - JSON Pointer paths to disclose
    * @param presentationHeader - Optional presentation-specific data
-   * @returns The credential with derived proof
+   * @returns The credential with derived proof and field visibility info
    */
   async deriveSelectiveProof(
     credential: VerifiableCredential,
     fieldsToDisclose: string[],
-    _presentationHeader?: Uint8Array
+    presentationHeader?: Uint8Array
   ): Promise<DerivedProofResult> {
-    // Validate that all disclosed fields are valid JSON pointers
     for (const field of fieldsToDisclose) {
       if (!field.startsWith('/')) {
         throw new Error(`Invalid JSON Pointer for disclosure: ${field}`);
       }
     }
 
-    // Determine which fields will be hidden
     const allFields = this.extractFieldPaths(credential as unknown as Record<string, unknown>);
     const disclosedSet = new Set(fieldsToDisclose);
     const hiddenFields = allFields.filter(f => !disclosedSet.has(f));
 
-    // In a full implementation, this would:
-    // 1. Parse the base proof
-    // 2. Create selective indexes from fieldsToDisclose
-    // 3. Generate the derived BBS+ proof
-    // For now, we return a structure showing what would be disclosed
+    // If the credential has a BBS+ proof, derive a real selective disclosure proof
+    const proof = credential.proof as any;
+    if (proof && proof.cryptosuite === 'bbs-2023') {
+      const { BBSCryptosuiteManager } = await import('./cryptosuites/bbsCryptosuite');
+      const documentLoader = this.didManager ? createDocumentLoader(this.didManager) : undefined;
 
-    return await Promise.resolve({
-      credential: {
-        ...credential,
-        // A real implementation would have a derived proof here
-      },
+      const derived = await BBSCryptosuiteManager.deriveProof(
+        credential,
+        proof,
+        {
+          documentLoader,
+          presentationHeader,
+          selectivePointers: fieldsToDisclose,
+        }
+      );
+
+      return {
+        credential: {
+          ...derived.document,
+          proof: derived.proof,
+        } as VerifiableCredential,
+        disclosedFields: fieldsToDisclose,
+        hiddenFields,
+      };
+    }
+
+    // Fallback for non-BBS+ credentials
+    return {
+      credential: { ...credential },
       disclosedFields: fieldsToDisclose,
-      hiddenFields
-    });
+      hiddenFields,
+    };
   }
 
   /**
@@ -949,6 +1074,194 @@ export class CredentialManager {
     }
 
     return current;
+  }
+
+  // ===== Credential Revocation Convenience Methods =====
+
+  /**
+   * Revoke a credential by setting its status bit in the status list credential.
+   *
+   * The credential must have a `credentialStatus` of type `BitstringStatusListEntry`.
+   * Revocation is permanent — once revoked, a credential cannot be un-revoked.
+   *
+   * @param credential - The credential to revoke (must have credentialStatus)
+   * @param statusListCredential - The status list credential to update
+   * @returns Updated status list credential with the revocation bit set
+   */
+  revokeCredential(
+    credential: VerifiableCredential,
+    statusListCredential: VerifiableCredential
+  ): VerifiableCredential {
+    const entry = this.extractStatusEntry(credential);
+    if (entry.statusPurpose !== 'revocation') {
+      throw new Error(
+        `Cannot revoke: credential status purpose is '${entry.statusPurpose}', expected 'revocation'`
+      );
+    }
+    const manager = new StatusListManager();
+    const index = parseInt(entry.statusListIndex, 10);
+    return manager.setStatus(statusListCredential, index, true);
+  }
+
+  /**
+   * Suspend a credential by setting its status bit in the status list credential.
+   *
+   * The credential must have a `credentialStatus` with statusPurpose 'suspension'.
+   * Unlike revocation, suspension is reversible via `unsuspendCredential()`.
+   *
+   * @param credential - The credential to suspend (must have credentialStatus)
+   * @param statusListCredential - The status list credential to update
+   * @returns Updated status list credential with the suspension bit set
+   */
+  suspendCredential(
+    credential: VerifiableCredential,
+    statusListCredential: VerifiableCredential
+  ): VerifiableCredential {
+    const entry = this.extractStatusEntry(credential);
+    if (entry.statusPurpose !== 'suspension') {
+      throw new Error(
+        `Cannot suspend: credential status purpose is '${entry.statusPurpose}', expected 'suspension'`
+      );
+    }
+    const manager = new StatusListManager();
+    const index = parseInt(entry.statusListIndex, 10);
+    return manager.setStatus(statusListCredential, index, true);
+  }
+
+  /**
+   * Unsuspend a previously suspended credential.
+   *
+   * Clears the suspension bit in the status list credential. Only works with
+   * credentials whose statusPurpose is 'suspension' (not 'revocation').
+   *
+   * @param credential - The credential to unsuspend (must have credentialStatus)
+   * @param statusListCredential - The status list credential to update
+   * @returns Updated status list credential with the suspension bit cleared
+   */
+  unsuspendCredential(
+    credential: VerifiableCredential,
+    statusListCredential: VerifiableCredential
+  ): VerifiableCredential {
+    const entry = this.extractStatusEntry(credential);
+    if (entry.statusPurpose !== 'suspension') {
+      throw new Error(
+        `Cannot unsuspend: credential status purpose is '${entry.statusPurpose}', expected 'suspension'`
+      );
+    }
+    const manager = new StatusListManager();
+    const index = parseInt(entry.statusListIndex, 10);
+    return manager.setStatus(statusListCredential, index, false);
+  }
+
+  /**
+   * Check the revocation or suspension status of a credential.
+   *
+   * @param credential - The credential to check (must have credentialStatus)
+   * @param statusListCredential - The resolved status list credential
+   * @returns Status check result with isSet, statusPurpose, and statusListIndex
+   */
+  checkRevocationStatus(
+    credential: VerifiableCredential,
+    statusListCredential: VerifiableCredential
+  ): StatusCheckResult {
+    const entry = this.extractStatusEntry(credential);
+    const manager = new StatusListManager();
+    return manager.checkStatus(entry, statusListCredential);
+  }
+
+  /**
+   * Check whether a credential is revoked.
+   *
+   * Convenience method that returns a simple boolean. The credential must have
+   * a credentialStatus with statusPurpose 'revocation'.
+   *
+   * @param credential - The credential to check
+   * @param statusListCredential - The resolved status list credential
+   * @returns true if the credential is revoked
+   */
+  isRevoked(
+    credential: VerifiableCredential,
+    statusListCredential: VerifiableCredential
+  ): boolean {
+    const result = this.checkRevocationStatus(credential, statusListCredential);
+    return result.isSet;
+  }
+
+  /**
+   * Extract and validate the BitstringStatusListEntry from a credential.
+   */
+  private extractStatusEntry(credential: VerifiableCredential): BitstringStatusListEntry {
+    const status = credential.credentialStatus;
+    if (!status) {
+      throw new Error('Credential has no credentialStatus field');
+    }
+    if (status.type !== 'BitstringStatusListEntry') {
+      throw new Error(
+        `Unsupported credentialStatus type: '${status.type}'. Expected 'BitstringStatusListEntry'`
+      );
+    }
+    return status as BitstringStatusListEntry;
+  }
+
+  // ===== Multi-Signature Methods =====
+
+  /**
+   * Get a MultiSigManager instance for multi-signature operations.
+   *
+   * @returns A MultiSigManager configured with this credential manager's config
+   *
+   * @example
+   * ```typescript
+   * const multiSig = credentialManager.multiSig();
+   *
+   * // Sign with 2-of-3 threshold
+   * const signed = await multiSig.signCredentialMultiSig(credential, {
+   *   policy: { required: 2, total: 3, signerVerificationMethods: [vm1, vm2, vm3] },
+   *   privateKeys: new Map([[vm1, key1], [vm2, key2]])
+   * });
+   *
+   * // Verify against policy
+   * const result = await multiSig.verifyMultiSig(signed, policy);
+   * ```
+   */
+  multiSig(): MultiSigManager {
+    return new MultiSigManager(this.config);
+  }
+
+  /**
+   * Sign a credential with multiple signers to meet a threshold policy.
+   * Convenience wrapper around MultiSigManager.signCredentialMultiSig().
+   *
+   * @param credential - The unsigned credential
+   * @param options - Signing options including policy and keys/signers
+   * @returns The credential with multiple proofs attached
+   */
+  async signCredentialMultiSig(
+    credential: VerifiableCredential,
+    options: MultiSigSignOptions
+  ): Promise<VerifiableCredential> {
+    return this.tracked('credential.signMultiSig', async () => {
+      const manager = new MultiSigManager(this.config);
+      return manager.signCredentialMultiSig(credential, options);
+    });
+  }
+
+  /**
+   * Verify a multi-sig credential against a threshold policy.
+   * Convenience wrapper around MultiSigManager.verifyMultiSig().
+   *
+   * @param credential - The credential with multiple proofs
+   * @param policy - The multi-sig policy to verify against
+   * @returns Detailed verification result
+   */
+  async verifyCredentialMultiSig(
+    credential: VerifiableCredential,
+    policy: MultiSigPolicy
+  ): Promise<MultiSigVerificationResult> {
+    return this.tracked('credential.verifyMultiSig', async () => {
+      const manager = new MultiSigManager(this.config);
+      return manager.verifyMultiSig(credential, policy);
+    });
   }
 }
 

@@ -3,5 +3,6 @@ export * from './did';
 export * from './credentials';
 export * from './bitcoin';
 export * from './network';
+export * from './multisig';
 
 
