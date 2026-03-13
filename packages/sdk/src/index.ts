@@ -22,6 +22,7 @@ export * from './types/index.js';
 
 // Manager exports
 export { DIDManager, type CreateWebVHOptions, type CreateWebVHResult } from './did/DIDManager.js';
+export { DIDCache, type DIDCacheConfig, type DIDCacheStorage, type DIDCacheEntry } from './did/DIDCache.js';
 export { KeyManager } from './did/KeyManager.js';
 export { Ed25519Verifier } from './did/Ed25519Verifier.js';
 export * as encoding from './utils/encoding.js';
@@ -35,7 +36,13 @@ export {
   type SelectiveDisclosureOptions,
   type DerivedProofResult
 } from './vc/CredentialManager.js';
-export { 
+export {
+  StatusListManager,
+  type StatusListOptions,
+  type StatusCheckResult,
+} from './vc/StatusListManager.js';
+export { BitstringStatusList } from './vc/BitstringStatusList.js';
+export {
   LifecycleManager,
   type CostEstimate,
   type MigrationValidation,
@@ -57,6 +64,10 @@ export {
 export { calculateFee } from './bitcoin/fee-calculation.js';
 export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs.js';
 export { BbsSimple } from './vc/cryptosuites/bbsSimple.js';
+export { BBSCryptosuiteManager } from './vc/cryptosuites/bbsCryptosuite.js';
+export type { BBSProofOptions, BBSDeriveOptions } from './vc/cryptosuites/bbsCryptosuite.js';
+export type { StatusListResolver } from './vc/Verifier.js';
+export { MultiSigManager } from './vc/MultiSigManager.js';
 export * from './storage/index.js';
 
 // Resource management exports
@@ -133,17 +144,32 @@ export {
   DocumentValidator,
 } from './kinds/index.js';
 
+// Observability exports
+export {
+  MetricsCollector,
+  type OperationMetrics,
+  type FeeMetrics,
+  type Metrics,
+} from './utils/MetricsCollector.js';
+export { Logger } from './utils/Logger.js';
+export type { LogLevel, LogOutput } from './utils/Logger.js';
+export { EventLogger } from './utils/EventLogger.js';
+export type { EventLoggingConfig } from './utils/EventLogger.js';
+
 // Utility exports
 export * from './utils/validation.js';
 export * from './utils/satoshi-validation.js';
 export * from './utils/serialization.js';
 export * from './utils/retry.js';
 export * from './utils/telemetry.js';
+export * from './utils/circuit-breaker.js';
 export { sha256Bytes } from './utils/hash.js';
 
 // Adapter exports (for testing and custom integrations)
 export { OrdMockProvider } from './adapters/providers/OrdMockProvider.js';
 export { FeeOracleMock } from './adapters/FeeOracleMock.js';
+export { SignetProvider } from './bitcoin/providers/SignetProvider.js';
+export type { SignetProviderOptions } from './bitcoin/providers/SignetProvider.js';
 export type { OrdinalsProvider, FeeOracleAdapter, StorageAdapter } from './adapters/types.js';
 
 // CEL (Cryptographic Event Log) exports
