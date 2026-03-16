@@ -61,7 +61,7 @@ export class MigrationManager {
     this.checkpointManager = new CheckpointManager(config, didManager, credentialManager);
     this.stateTracker = new StateTracker(config);
     this.rollbackManager = new RollbackManager(config, this.checkpointManager, didManager);
-    this.auditLogger = new AuditLogger(config, config.auditSigner);
+    this.auditLogger = new AuditLogger(config);
     this.eventEmitter = new EventEmitter();
 
     // Initialize migration operations
@@ -210,7 +210,12 @@ export class MigrationManager {
         metadata: options.metadata || {}
       };
 
-      await this.auditLogger.logMigration(auditRecord);
+      try {
+        await this.auditLogger.logMigration(auditRecord);
+      } catch (auditError) {
+        // Audit log failure must not abort a completed migration
+        console.error('Failed to write audit log for completed migration:', auditError);
+      }
 
       // Clean up checkpoint after successful migration
       setTimeout(() => {
@@ -452,7 +457,12 @@ export class MigrationManager {
       metadata: options.metadata || {}
     };
 
-    await this.auditLogger.logMigration(auditRecord);
+    try {
+      await this.auditLogger.logMigration(auditRecord);
+    } catch (auditError) {
+      // Audit log failure must not abort a completed migration
+      console.error('Failed to write audit log for failed migration:', auditError);
+    }
 
     return {
       migrationId,
