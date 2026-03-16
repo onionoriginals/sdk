@@ -18,6 +18,7 @@ import { multikey } from '../crypto/Multikey';
 import { EventEmitter } from '../events/EventEmitter';
 import type { EventHandler, EventTypeMap } from '../events/types';
 import { Logger } from '../utils/Logger';
+import { StructuredError } from '../utils/telemetry';
 import { MetricsCollector } from '../utils/MetricsCollector';
 import { 
   BatchOperationExecutor, 
@@ -703,10 +704,17 @@ export class LifecycleManager {
     signer?: ExternalSigner
   ): Promise<void> {
     try {
+      if (!asset.resources.length || !asset.resources[0].id) {
+        throw new StructuredError(
+          'EMPTY_RESOURCE_LIST',
+          'Cannot issue publication credential: asset has no resources'
+        );
+      }
+
       const subject = {
         id: asset.id,
         publishedAs: publisherDid,
-        resourceId: asset.resources[0]?.id,
+        resourceId: asset.resources[0].id,
         fromLayer: 'did:peer' as const,
         toLayer: 'did:webvh' as const,
         migratedAt: new Date().toISOString()
