@@ -1,14 +1,16 @@
 import { StorageAdapter, FeeOracleAdapter, OrdinalsProvider } from '../adapters';
 import { TelemetryHooks } from '../utils/telemetry';
+import type { CircuitBreakerOptions } from '../utils/circuit-breaker';
 import type { LogLevel, LogOutput } from '../utils/Logger';
 import type { EventLoggingConfig } from '../utils/EventLogger';
-import type { WebVHNetworkName } from './network';
+import type { WebVHNetworkName, BitcoinNetworkName } from './network';
+import type { DIDCacheStorage } from '../did/DIDCache';
 
 // Base types for the Originals protocol
 export type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';
 
 export interface OriginalsConfig {
-  network: 'mainnet' | 'regtest' | 'signet';
+  network: BitcoinNetworkName;
   bitcoinRpcUrl?: string;
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
   keyStore?: KeyStore;
@@ -30,11 +32,30 @@ export interface OriginalsConfig {
     eventLogging?: EventLoggingConfig;
     sanitizeLogs?: boolean; // Remove sensitive data
   };
+  // Audit record signing (Ed25519 keys for migration audit trail)
+  auditSigner?: {
+    privateKey: Uint8Array;
+    publicKey: Uint8Array;
+    verificationMethod: string;
+  };
+  // Circuit breaker for Bitcoin provider calls
+  circuitBreaker?: CircuitBreakerOptions;
   // Metrics configuration
   metrics?: {
     enabled?: boolean;
     exportFormat?: 'json' | 'prometheus';
     collectCache?: boolean;
+  };
+  // DID cache configuration
+  didCache?: {
+    /** Enable DID document caching. Default: false */
+    enabled?: boolean;
+    /** Time-to-live in milliseconds. Default: 86400000 (24 hours) */
+    ttlMs?: number;
+    /** Maximum cached entries. Default: 1000 */
+    maxEntries?: number;
+    /** Optional pluggable storage adapter for offline persistence */
+    storage?: DIDCacheStorage;
   };
 }
 
