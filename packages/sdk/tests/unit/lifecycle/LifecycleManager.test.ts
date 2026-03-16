@@ -53,7 +53,7 @@ describe('LifecycleManager', () => {
   test('inscribeOnBitcoin enforces migration guard', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest' });
     const fakeAsset = { currentLayer: 'did:webvh', migrate: undefined } as unknown as OriginalsAsset;
-    await expect(sdk.lifecycle.inscribeOnBitcoin(fakeAsset, 5)).rejects.toThrow('Not implemented');
+    await expect(sdk.lifecycle.inscribeOnBitcoin(fakeAsset, 5)).rejects.toThrow('not yet implemented for this asset type');
   });
 
   test('publishToWeb throws Not implemented (coverage for throw)', async () => {
@@ -69,7 +69,7 @@ describe('LifecycleManager', () => {
     const fakeAsset: any = { currentLayer: 'did:webvh' };
     await expect(
       sdk.lifecycle.inscribeOnBitcoin(fakeAsset, 10)
-    ).rejects.toThrow('Not implemented');
+    ).rejects.toThrow('not yet implemented for this asset type');
   });
 
   test('transferOwnership succeeds when on btco (returns tx)', async () => {
@@ -178,7 +178,7 @@ describe('LifecycleManager additional branches', () => {
 
   test('inscribeOnBitcoin throws for invalid layer', async () => {
     const asset: any = { currentLayer: 'did:wrong', migrate: async () => { } };
-    await expect(lm.inscribeOnBitcoin(asset)).rejects.toThrow('Not implemented');
+    await expect(lm.inscribeOnBitcoin(asset)).rejects.toThrow('not yet implemented for this layer');
   });
 });
 
@@ -209,5 +209,24 @@ describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
     expect(tx.txid).toBe('tx-transfer-mock');
     const provenance = asset.getProvenance();
     expect(provenance.transfers[provenance.transfers.length - 1].transactionId).toBe('tx-transfer-mock');
+  });
+});
+
+
+describe('LifecycleManager.issuePublicationCredential guard', () => {
+  test('publishToWeb with empty resources does not crash on credential issuance', async () => {
+    const provider = new MockOrdinalsProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    // Create asset then clear its resources to simulate empty-resource edge case
+    const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }]);
+    // Forcefully empty the resources array
+    (asset as any)._resources = [];
+    Object.defineProperty(asset, 'resources', { get: () => [] });
+
+    // publishToWeb should not throw due to empty resources in credential issuance
+    // The credential issuance should be skipped gracefully
+    await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    // Verify no ResourceMigrated credential was issued (since resources were empty)
+    expect(asset.credentials.length).toBe(0);
   });
 });
