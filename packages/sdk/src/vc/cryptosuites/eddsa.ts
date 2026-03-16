@@ -3,17 +3,9 @@ import * as ed25519 from '@noble/ed25519';
 import { canonize, canonizeProof } from '../utils/jsonld';
 import { multikey } from '../../crypto/Multikey';
 import { sha256Bytes } from '../../utils/hash';
+import type { DataIntegrityProof } from '../../cel/types';
 
-export interface DataIntegrityProof {
-  type: 'DataIntegrityProof';
-  cryptosuite: string;
-  created?: string;
-  verificationMethod: string;
-  proofPurpose: string;
-  proofValue: string;
-  id?: string;
-  previousProof?: string | string[];
-}
+export type { DataIntegrityProof };
 
 export interface VerificationResult {
   verified: boolean;
@@ -85,8 +77,7 @@ export class EdDSACryptosuiteManager {
 
   static async sign({ data, privateKey }: { data: Uint8Array; privateKey: Uint8Array }): Promise<Uint8Array> {
     if (privateKey.length !== 32) {
-      if (privateKey.length === 64) privateKey = privateKey.slice(32);
-      else throw new Error('Invalid private key length');
+      throw new Error(`Invalid Ed25519 private key length: expected 32 bytes, got ${privateKey.length}. Ensure the key is a raw 32-byte seed.`);
     }
     const signature = await ed25519.signAsync(Buffer.from(data).toString('hex'), Buffer.from(privateKey).toString('hex'));
     return signature;

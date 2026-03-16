@@ -27,6 +27,12 @@ export interface AssetCreatedEvent extends BaseEvent {
     layer: LayerType;
     resourceCount: number;
     createdAt: string;
+    /** Present when created via createTypedOriginal() */
+    kind?: string;
+    /** Present when created via createTypedOriginal() */
+    name?: string;
+    /** Present when created via createTypedOriginal() */
+    version?: string;
   };
 }
 
@@ -84,6 +90,7 @@ export interface ResourcePublishedEvent extends BaseEvent {
     hash: string;
   };
   publisherDid: string;
+  domain: string;
 }
 
 /**

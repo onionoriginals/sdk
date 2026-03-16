@@ -15,10 +15,15 @@ export interface ResourceVersion {
   previousVersionHash?: string;
 }
 
+/**
+ * Lightweight version history using ResourceVersion metadata records.
+ * @see ResourceVersionHistory in resources/types.ts for the full Resource-based equivalent.
+ */
 export interface ResourceHistory {
   resourceId: string;         // Logical ID (same across versions)
   versions: ResourceVersion[];
   currentVersion: ResourceVersion;
+  versionCount: number;       // Total number of versions
 }
 
 /**
@@ -77,7 +82,8 @@ export class ResourceVersionManager {
     return {
       resourceId,
       versions: [...versions],
-      currentVersion: versions[versions.length - 1]
+      currentVersion: versions[versions.length - 1],
+      versionCount: versions.length
     };
   }
 

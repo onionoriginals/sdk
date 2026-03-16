@@ -84,7 +84,8 @@ export interface Resource extends AssetResource {
 }
 
 /**
- * Complete history of a resource including all versions
+ * Complete history of a resource including all versions (uses full Resource objects).
+ * @see ResourceHistory in lifecycle/ResourceVersioning.ts for the lightweight version metadata equivalent.
  */
 export interface ResourceVersionHistory {
   /** Logical resource ID (stable across all versions) */

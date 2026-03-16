@@ -3,12 +3,61 @@
  * Defines all types used across the migration infrastructure
  */
 
-import { DIDDocument, VerifiableCredential } from '../types';
+import { DIDDocument, VerifiableCredential, LayerType } from '../types';
+import type { BitcoinNetworkName } from '../types/network';
 
 /**
- * DID layer types
+ * DID layer types (short form used in migration system)
+ *
+ * `DIDLayer` uses short names ('peer', 'webvh', 'btco') while
+ * `LayerType` uses DID method prefixes ('did:peer', 'did:webvh', 'did:btco').
+ * Both represent the same three-layer concept. Use the conversion helpers
+ * `layerToLayerType()` and `layerTypeToLayer()` to bridge between them.
  */
 export type DIDLayer = 'peer' | 'webvh' | 'btco';
+
+const LAYER_TO_LAYER_TYPE: Record<DIDLayer, LayerType> = {
+  peer: 'did:peer',
+  webvh: 'did:webvh',
+  btco: 'did:btco',
+};
+
+const LAYER_TYPE_TO_LAYER: Record<LayerType, DIDLayer> = {
+  'did:peer': 'peer',
+  'did:webvh': 'webvh',
+  'did:btco': 'btco',
+};
+
+/**
+ * Convert a short DIDLayer value to the full LayerType form.
+ * Throws if the input is not a valid DIDLayer.
+ */
+export function layerToLayerType(layer: DIDLayer): LayerType {
+  const result = LAYER_TO_LAYER_TYPE[layer];
+  if (!result) {
+    throw new Error(`Invalid DIDLayer: '${layer}'. Must be one of: peer, webvh, btco`);
+  }
+  return result;
+}
+
+/**
+ * Convert a full LayerType value to the short DIDLayer form.
+ * Throws if the input is not a valid LayerType.
+ */
+export function layerTypeToLayer(layerType: LayerType): DIDLayer {
+  const result = LAYER_TYPE_TO_LAYER[layerType];
+  if (!result) {
+    throw new Error(`Invalid LayerType: '${layerType}'. Must be one of: did:peer, did:webvh, did:btco`);
+  }
+  return result;
+}
+
+/**
+ * Check if a string is a valid DIDLayer value.
+ */
+export function isDIDLayer(value: string): value is DIDLayer {
+  return value === 'peer' || value === 'webvh' || value === 'btco';
+}
 
 /**
  * Migration state enum
@@ -75,6 +124,7 @@ export interface CostEstimate {
   networkFees: number;                  // Bitcoin network fees (btco only)
   totalCost: number;                    // Total cost
   currency: string;                     // Currency unit (e.g., 'sats', 'USD')
+  estimatedDuration?: number;           // Estimated duration in milliseconds
 }
 
 /**
@@ -294,7 +344,7 @@ export interface BitcoinAnchoringContext {
   didDocument: DIDDocument;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   migrationMetadata: Record<string, any>;
-  network: 'mainnet' | 'testnet' | 'signet';
+  network: BitcoinNetworkName;
   feeRate?: number;
   satoshi?: string;
 }

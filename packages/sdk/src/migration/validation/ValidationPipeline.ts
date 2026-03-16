@@ -71,28 +71,64 @@ export class ValidationPipeline {
       }
 
       // Run DID compatibility validation
-      const didResult = await this.validators.get('did')!.validate(options);
-      errors.push(...didResult.errors);
-      warnings.push(...didResult.warnings);
-      estimatedDuration = Math.max(estimatedDuration, didResult.estimatedDuration);
+      const didValidator = this.validators.get('did');
+      if (!didValidator) {
+        errors.push({
+          code: 'VALIDATOR_NOT_CONFIGURED',
+          message: 'DID compatibility validator is not configured',
+          details: { validator: 'did' }
+        });
+      } else {
+        const didResult = await didValidator.validate(options);
+        errors.push(...didResult.errors);
+        warnings.push(...didResult.warnings);
+        estimatedDuration = Math.max(estimatedDuration, didResult.estimatedDuration);
+      }
 
       // Run credential validation if enabled
       if (options.credentialIssuance !== false) {
-        const credResult = await this.validators.get('credential')!.validate(options);
-        errors.push(...credResult.errors);
-        warnings.push(...credResult.warnings);
+        const credValidator = this.validators.get('credential');
+        if (!credValidator) {
+          errors.push({
+            code: 'VALIDATOR_NOT_CONFIGURED',
+            message: 'Credential validator is not configured',
+            details: { validator: 'credential' }
+          });
+        } else {
+          const credResult = await credValidator.validate(options);
+          errors.push(...credResult.errors);
+          warnings.push(...credResult.warnings);
+        }
       }
 
       // Run storage validation
-      const storageResult = await this.validators.get('storage')!.validate(options);
-      errors.push(...storageResult.errors);
-      warnings.push(...storageResult.warnings);
-      estimatedCost.storageCost = storageResult.estimatedCost.storageCost;
+      const storageValidator = this.validators.get('storage');
+      if (!storageValidator) {
+        errors.push({
+          code: 'VALIDATOR_NOT_CONFIGURED',
+          message: 'Storage validator is not configured',
+          details: { validator: 'storage' }
+        });
+      } else {
+        const storageResult = await storageValidator.validate(options);
+        errors.push(...storageResult.errors);
+        warnings.push(...storageResult.warnings);
+        estimatedCost.storageCost = storageResult.estimatedCost.storageCost;
+      }
 
       // Run lifecycle validation
-      const lifecycleResult = await this.validators.get('lifecycle')!.validate(options);
-      errors.push(...lifecycleResult.errors);
-      warnings.push(...lifecycleResult.warnings);
+      const lifecycleValidator = this.validators.get('lifecycle');
+      if (!lifecycleValidator) {
+        errors.push({
+          code: 'VALIDATOR_NOT_CONFIGURED',
+          message: 'Lifecycle validator is not configured',
+          details: { validator: 'lifecycle' }
+        });
+      } else {
+        const lifecycleResult = await lifecycleValidator.validate(options);
+        errors.push(...lifecycleResult.errors);
+        warnings.push(...lifecycleResult.warnings);
+      }
 
       // Run Bitcoin validation for btco migrations
       if (options.targetLayer === 'btco') {

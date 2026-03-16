@@ -15,13 +15,17 @@ export interface DataIntegrityProof {
   /** The cryptosuite used (e.g., "eddsa-jcs-2022") */
   cryptosuite: string;
   /** ISO 8601 timestamp when the proof was created */
-  created: string;
+  created?: string;
   /** DID URL of the verification method used to create the proof */
   verificationMethod: string;
   /** The purpose of the proof (e.g., "assertionMethod") */
   proofPurpose: string;
   /** The multibase-encoded proof value */
   proofValue: string;
+  /** Optional proof identifier */
+  id?: string;
+  /** Reference to previous proof(s) in a proof chain */
+  previousProof?: string | string[];
 }
 
 /**
