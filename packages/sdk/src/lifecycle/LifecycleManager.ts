@@ -712,9 +712,11 @@ export class LifecycleManager {
     signer?: ExternalSigner
   ): Promise<void> {
     try {
-      if (!asset.resources || asset.resources.length === 0) {
-        this.logger.warn('Skipping publication credential: asset has no resources', { assetId: asset.id });
-        return;
+      if (!asset.resources.length || !asset.resources[0].id) {
+        throw new StructuredError(
+          'EMPTY_RESOURCE_LIST',
+          'Cannot issue publication credential: asset has no resources'
+        );
       }
 
       const subject = {
