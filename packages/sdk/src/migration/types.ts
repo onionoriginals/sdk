@@ -124,6 +124,7 @@ export interface CostEstimate {
   networkFees: number;                  // Bitcoin network fees (btco only)
   totalCost: number;                    // Total cost
   currency: string;                     // Currency unit (e.g., 'sats', 'USD')
+  estimatedDuration?: number;           // Estimated duration in milliseconds
 }
 
 /**
