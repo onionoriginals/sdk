@@ -84,6 +84,7 @@ export interface ResourcePublishedEvent extends BaseEvent {
     hash: string;
   };
   publisherDid: string;
+  domain: string;
 }
 
 /**

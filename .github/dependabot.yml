@@ -1,0 +1,38 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    groups:
+      noble-crypto:
+        patterns:
+          - "@noble/*"
+          - "@scure/*"
+      dev-tools:
+        patterns:
+          - "@types/*"
+          - "@typescript-eslint/*"
+          - "eslint"
+          - "prettier"
+          - "typescript"
+          - "typedoc"
+          - "tsc-alias"
+          - "@babel/*"
+    reviewers:
+      - "onionoriginals/maintainers"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"
