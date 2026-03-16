@@ -1,5 +1,6 @@
 import jsonld from 'jsonld';
 import { DIDDocument, VerifiableCredential } from '../types';
+import { StructuredError } from './telemetry';
 
 type DocumentLoader = (url: string) => Promise<{
   documentUrl: string;
@@ -50,13 +51,84 @@ export function serializeDIDDocument(didDoc: DIDDocument): string {
 }
 
 export function deserializeDIDDocument(data: string): DIDDocument {
-  // Parse from JSON-LD
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(data);
-    return parsed as DIDDocument;
-  } catch (error) {
-    throw new Error('Invalid DID Document JSON');
+    parsed = JSON.parse(data);
+  } catch {
+    throw new StructuredError('INVALID_DID_DOCUMENT', 'Invalid DID Document JSON: malformed JSON');
   }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new StructuredError('INVALID_DID_DOCUMENT', 'Invalid DID Document: must be a JSON object');
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  const errors: string[] = [];
+
+  // @context is required and must be an array of strings
+  if (!Array.isArray(obj['@context'])) {
+    errors.push('@context must be an array');
+  } else if (!obj['@context'].every((c: unknown) => typeof c === 'string')) {
+    errors.push('@context must contain only strings');
+  }
+
+  // id is required and must be a string
+  if (typeof obj.id !== 'string' || obj.id.length === 0) {
+    errors.push('id must be a non-empty string');
+  }
+
+  // verificationMethod, if present, must be an array of objects with required fields
+  if (obj.verificationMethod !== undefined) {
+    if (!Array.isArray(obj.verificationMethod)) {
+      errors.push('verificationMethod must be an array');
+    } else {
+      for (let i = 0; i < obj.verificationMethod.length; i++) {
+        const vm = obj.verificationMethod[i];
+        if (typeof vm !== 'object' || vm === null || Array.isArray(vm)) {
+          errors.push(`verificationMethod[${i}] must be an object`);
+          continue;
+        }
+        const vmObj = vm as Record<string, unknown>;
+        if (typeof vmObj.id !== 'string') errors.push(`verificationMethod[${i}].id must be a string`);
+        if (typeof vmObj.type !== 'string') errors.push(`verificationMethod[${i}].type must be a string`);
+        if (typeof vmObj.controller !== 'string') errors.push(`verificationMethod[${i}].controller must be a string`);
+        if (typeof vmObj.publicKeyMultibase !== 'string') errors.push(`verificationMethod[${i}].publicKeyMultibase must be a string`);
+      }
+    }
+  }
+
+  // Validate optional reference arrays (authentication, assertionMethod, etc.)
+  const refArrayFields = ['authentication', 'assertionMethod', 'keyAgreement', 'capabilityInvocation', 'capabilityDelegation'];
+  for (const field of refArrayFields) {
+    if (obj[field] !== undefined && !Array.isArray(obj[field])) {
+      errors.push(`${field} must be an array`);
+    }
+  }
+
+  // service, if present, must be an array of objects with required fields
+  if (obj.service !== undefined) {
+    if (!Array.isArray(obj.service)) {
+      errors.push('service must be an array');
+    } else {
+      for (let i = 0; i < obj.service.length; i++) {
+        const svc = obj.service[i];
+        if (typeof svc !== 'object' || svc === null || Array.isArray(svc)) {
+          errors.push(`service[${i}] must be an object`);
+          continue;
+        }
+        const svcObj = svc as Record<string, unknown>;
+        if (typeof svcObj.id !== 'string') errors.push(`service[${i}].id must be a string`);
+        if (typeof svcObj.type !== 'string') errors.push(`service[${i}].type must be a string`);
+        if (svcObj.serviceEndpoint === undefined) errors.push(`service[${i}].serviceEndpoint is required`);
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new StructuredError('INVALID_DID_DOCUMENT', `Invalid DID Document: ${errors.join('; ')}`, { fields: errors });
+  }
+
+  return parsed as DIDDocument;
 }
 
 export function serializeCredential(vc: VerifiableCredential): string {
@@ -65,13 +137,78 @@ export function serializeCredential(vc: VerifiableCredential): string {
 }
 
 export function deserializeCredential(data: string): VerifiableCredential {
-  // Parse VC from JSON-LD
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(data);
-    return parsed as VerifiableCredential;
-  } catch (error) {
-    throw new Error('Invalid Verifiable Credential JSON');
+    parsed = JSON.parse(data);
+  } catch {
+    throw new StructuredError('INVALID_CREDENTIAL', 'Invalid Verifiable Credential JSON: malformed JSON');
   }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new StructuredError('INVALID_CREDENTIAL', 'Invalid Verifiable Credential: must be a JSON object');
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  const errors: string[] = [];
+
+  // @context is required and must be an array of strings
+  if (!Array.isArray(obj['@context'])) {
+    errors.push('@context must be an array');
+  } else if (!obj['@context'].every((c: unknown) => typeof c === 'string')) {
+    errors.push('@context must contain only strings');
+  }
+
+  // type is required and must be an array of strings
+  if (!Array.isArray(obj.type)) {
+    errors.push('type must be an array');
+  } else if (!obj.type.every((t: unknown) => typeof t === 'string')) {
+    errors.push('type must contain only strings');
+  }
+
+  // issuer is required and must be a string or an object with id
+  if (obj.issuer === undefined || obj.issuer === null) {
+    errors.push('issuer is required');
+  } else if (typeof obj.issuer !== 'string') {
+    if (typeof obj.issuer !== 'object' || Array.isArray(obj.issuer)) {
+      errors.push('issuer must be a string or an object with an id');
+    } else {
+      const issuerObj = obj.issuer as Record<string, unknown>;
+      if (typeof issuerObj.id !== 'string') {
+        errors.push('issuer.id must be a string');
+      }
+    }
+  }
+
+  // issuanceDate is required and must be a string
+  if (typeof obj.issuanceDate !== 'string' || obj.issuanceDate.length === 0) {
+    errors.push('issuanceDate must be a non-empty string');
+  }
+
+  // credentialSubject is required and must be an object
+  if (typeof obj.credentialSubject !== 'object' || obj.credentialSubject === null || Array.isArray(obj.credentialSubject)) {
+    errors.push('credentialSubject must be an object');
+  }
+
+  // proof, if present, must be an object or array of objects
+  if (obj.proof !== undefined) {
+    const proofs = Array.isArray(obj.proof) ? obj.proof : [obj.proof];
+    for (let i = 0; i < proofs.length; i++) {
+      const p = proofs[i];
+      if (typeof p !== 'object' || p === null || Array.isArray(p)) {
+        errors.push(`proof${Array.isArray(obj.proof) ? `[${i}]` : ''} must be an object`);
+        continue;
+      }
+      const pObj = p as Record<string, unknown>;
+      if (typeof pObj.type !== 'string') errors.push(`proof${Array.isArray(obj.proof) ? `[${i}]` : ''}.type must be a string`);
+      if (typeof pObj.proofValue !== 'string') errors.push(`proof${Array.isArray(obj.proof) ? `[${i}]` : ''}.proofValue must be a string`);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new StructuredError('INVALID_CREDENTIAL', `Invalid Verifiable Credential: ${errors.join('; ')}`, { fields: errors });
+  }
+
+  return parsed as VerifiableCredential;
 }
 
 export async function canonicalizeDocument(
