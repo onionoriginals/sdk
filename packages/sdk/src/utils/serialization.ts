@@ -1,5 +1,6 @@
 import jsonld from 'jsonld';
 import { DIDDocument, VerifiableCredential } from '../types';
+import { validateDIDDocument, validateCredential } from './validation';
 
 type DocumentLoader = (url: string) => Promise<{
   documentUrl: string;
@@ -51,12 +52,40 @@ export function serializeDIDDocument(didDoc: DIDDocument): string {
 
 export function deserializeDIDDocument(data: string): DIDDocument {
   // Parse from JSON-LD
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(data);
-    return parsed as DIDDocument;
+    parsed = JSON.parse(data);
   } catch (error) {
     throw new Error('Invalid DID Document JSON');
   }
+
+  // Runtime shape validation
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Invalid DID Document: expected a JSON object');
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  const errors: string[] = [];
+
+  // Pre-validate shape before calling validateDIDDocument (which assumes correct types)
+  if (!Array.isArray(obj['@context']) || obj['@context'].length === 0) {
+    errors.push('@context must be a non-empty array of strings');
+  } else if (!obj['@context'].every((c: unknown) => typeof c === 'string')) {
+    errors.push('@context must contain only strings');
+  }
+  if (typeof obj.id !== 'string' || obj.id === '') {
+    errors.push('id must be a valid DID string');
+  }
+  if (errors.length > 0) {
+    throw new Error(`Invalid DID Document: ${errors.join('; ')}`);
+  }
+
+  const doc = parsed as DIDDocument;
+  if (!validateDIDDocument(doc)) {
+    throw new Error('Invalid DID Document: failed validation');
+  }
+
+  return doc;
 }
 
 export function serializeCredential(vc: VerifiableCredential): string {
@@ -66,12 +95,51 @@ export function serializeCredential(vc: VerifiableCredential): string {
 
 export function deserializeCredential(data: string): VerifiableCredential {
   // Parse VC from JSON-LD
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(data);
-    return parsed as VerifiableCredential;
+    parsed = JSON.parse(data);
   } catch (error) {
     throw new Error('Invalid Verifiable Credential JSON');
   }
+
+  // Runtime shape validation
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Invalid Verifiable Credential: expected a JSON object');
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  const errors: string[] = [];
+
+  // Pre-validate shape before calling validateCredential (which assumes correct types)
+  if (!Array.isArray(obj['@context']) || obj['@context'].length === 0) {
+    errors.push('@context must be a non-empty array of strings');
+  } else if (!obj['@context'].includes('https://www.w3.org/2018/credentials/v1')) {
+    errors.push('@context must include W3C VC v1 context');
+  }
+  if (!Array.isArray(obj.type) || obj.type.length === 0) {
+    errors.push('type must be a non-empty array of strings');
+  } else if (!obj.type.includes('VerifiableCredential')) {
+    errors.push('type must include "VerifiableCredential"');
+  }
+  if (obj.issuer === undefined || obj.issuer === null) {
+    errors.push('issuer is required');
+  }
+  if (typeof obj.issuanceDate !== 'string') {
+    errors.push('issuanceDate is required');
+  }
+  if (!obj.credentialSubject || typeof obj.credentialSubject !== 'object' || Array.isArray(obj.credentialSubject)) {
+    errors.push('credentialSubject must be a non-null object');
+  }
+  if (errors.length > 0) {
+    throw new Error(`Invalid Verifiable Credential: ${errors.join('; ')}`);
+  }
+
+  const vc = parsed as VerifiableCredential;
+  if (!validateCredential(vc)) {
+    throw new Error('Invalid Verifiable Credential: failed validation');
+  }
+
+  return vc;
 }
 
 export async function canonicalizeDocument(
