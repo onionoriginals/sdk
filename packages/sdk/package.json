@@ -108,7 +108,7 @@
     "@scure/btc-signer": "^1.8.0",
     "@stablelib/ed25519": "^2.0.2",
     "b58": "^4.0.3",
-    "bitcoinjs-lib": "^6.1.0",
+    "bitcoinjs-lib": "^7.0.1",
     "cbor-js": "^0.1.0",
     "didwebvh-ts": "^2.5.5",
     "jsonld": "^8.3.3",
