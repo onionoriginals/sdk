@@ -6,20 +6,13 @@
  * version via previousVersionHash. Old versions remain accessible.
  */
 
-export interface ResourceVersion {
-  version: number;
-  hash: string;               // Unique content hash
-  timestamp: string;          // ISO timestamp
-  contentType: string;
-  changes?: string;           // Optional change description
-  previousVersionHash?: string;
-}
+import type { ResourceVersion, ResourceVersionHistory } from '../types/resource-version';
+export type { ResourceVersion, ResourceVersionHistory };
 
-export interface ResourceHistory {
-  resourceId: string;         // Logical ID (same across versions)
-  versions: ResourceVersion[];
-  currentVersion: ResourceVersion;
-}
+/**
+ * @deprecated Use ResourceVersionHistory instead
+ */
+export type ResourceHistory = ResourceVersionHistory;
 
 /**
  * ResourceVersionManager manages the versioning of immutable resources.
@@ -66,9 +59,9 @@ export class ResourceVersionManager {
   /**
    * Get the complete version history for a resource
    * @param resourceId - Logical resource ID
-   * @returns ResourceHistory or null if resource doesn't exist
+   * @returns ResourceVersionHistory or null if resource doesn't exist
    */
-  getHistory(resourceId: string): ResourceHistory | null {
+  getHistory(resourceId: string): ResourceVersionHistory | null {
     const versions = this.versionMap.get(resourceId);
     if (!versions || versions.length === 0) {
       return null;
@@ -77,7 +70,8 @@ export class ResourceVersionManager {
     return {
       resourceId,
       versions: [...versions],
-      currentVersion: versions[versions.length - 1]
+      currentVersion: versions[versions.length - 1],
+      versionCount: versions.length
     };
   }
 

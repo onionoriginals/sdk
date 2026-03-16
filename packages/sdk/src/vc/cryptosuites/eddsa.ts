@@ -4,16 +4,9 @@ import { canonize, canonizeProof } from '../utils/jsonld';
 import { multikey } from '../../crypto/Multikey';
 import { sha256Bytes } from '../../utils/hash';
 
-export interface DataIntegrityProof {
-  type: 'DataIntegrityProof';
-  cryptosuite: string;
-  created?: string;
-  verificationMethod: string;
-  proofPurpose: string;
-  proofValue: string;
-  id?: string;
-  previousProof?: string | string[];
-}
+// Re-export canonical DataIntegrityProof from shared types
+export type { DataIntegrityProof } from '../../types/proof';
+import type { DataIntegrityProof } from '../../types/proof';
 
 export interface VerificationResult {
   verified: boolean;

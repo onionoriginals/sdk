@@ -272,7 +272,7 @@ export class ResourceManager {
    * @param resourceId - The logical resource ID
    * @returns ResourceVersionHistory object or null if not found
    */
-  getResourceVersionHistory(resourceId: string): ResourceVersionHistory | null {
+  getResourceVersionHistory(resourceId: string): ResourceVersionHistory<Resource> | null {
     const versions = this.resources.get(resourceId);
     if (!versions || versions.length === 0) {
       return null;

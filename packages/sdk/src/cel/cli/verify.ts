@@ -80,7 +80,7 @@ function formatTimestamp(timestamp: string): string {
 function formatProofDetails(proof: DataIntegrityProof | WitnessProof, indent: string = '    '): string {
   const lines: string[] = [];
   lines.push(`${indent}Cryptosuite: ${proof.cryptosuite}`);
-  lines.push(`${indent}Created: ${formatTimestamp(proof.created)}`);
+  lines.push(`${indent}Created: ${proof.created ? formatTimestamp(proof.created) : 'N/A'}`);
   lines.push(`${indent}Verification Method: ${proof.verificationMethod}`);
   lines.push(`${indent}Proof Purpose: ${proof.proofPurpose}`);
   

@@ -83,22 +83,8 @@ export interface Resource extends AssetResource {
   description?: string;
 }
 
-/**
- * Complete history of a resource including all versions
- */
-export interface ResourceVersionHistory {
-  /** Logical resource ID (stable across all versions) */
-  resourceId: string;
-  
-  /** All versions in chronological order (oldest first) */
-  versions: Resource[];
-  
-  /** The current (latest) version */
-  currentVersion: Resource;
-  
-  /** Total number of versions */
-  versionCount: number;
-}
+// Re-export canonical ResourceVersionHistory and ResourceVersion from shared types
+export type { ResourceVersionHistory, ResourceVersion } from '../types/resource-version';
 
 /**
  * Configuration for the ResourceManager

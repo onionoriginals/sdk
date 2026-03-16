@@ -1,28 +1,13 @@
 /**
  * CEL (Cryptographic Event Log) Types
- * 
+ *
  * Based on W3C CCG CEL Specification v0.1
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-/**
- * Data Integrity Proof as defined in W3C Data Integrity spec
- * Used for signing events and witness attestations
- */
-export interface DataIntegrityProof {
-  /** The type of proof (e.g., "DataIntegrityProof") */
-  type: string;
-  /** The cryptosuite used (e.g., "eddsa-jcs-2022") */
-  cryptosuite: string;
-  /** ISO 8601 timestamp when the proof was created */
-  created: string;
-  /** DID URL of the verification method used to create the proof */
-  verificationMethod: string;
-  /** The purpose of the proof (e.g., "assertionMethod") */
-  proofPurpose: string;
-  /** The multibase-encoded proof value */
-  proofValue: string;
-}
+// Re-export canonical DataIntegrityProof from shared types
+import type { DataIntegrityProof } from '../types/proof';
+export type { DataIntegrityProof } from '../types/proof';
 
 /**
  * Witness Proof - extends DataIntegrityProof with witness-specific fields

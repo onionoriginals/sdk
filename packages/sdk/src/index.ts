@@ -77,6 +77,7 @@ export type {
   ResourceOptions,
   ResourceUpdateOptions,
   ResourceVersionHistory,
+  ResourceVersion,
   ResourceManagerConfig,
   ResourceValidationResult,
   ResourceType,
