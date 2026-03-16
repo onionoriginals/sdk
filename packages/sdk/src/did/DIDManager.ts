@@ -1,5 +1,5 @@
 import { DIDDocument, OriginalsConfig, AssetResource, KeyPair, ExternalSigner, ExternalVerifier } from '../types';
-import { getNetworkDomain, DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH } from '../types/network';
+import { getNetworkDomain, DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH, type BitcoinNetworkName } from '../types/network';
 import { BtcoDidResolver } from './BtcoDidResolver';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
 import { createBtcoDidDocument } from './createBtcoDidDocument';
@@ -137,7 +137,7 @@ export class DIDManager {
 
     // Determine Bitcoin network from WebVH network configuration if available
     // This ensures consistent environment mapping: magby→regtest, cleffa→signet, pichu→mainnet
-    let network: 'mainnet' | 'regtest' | 'signet';
+    let network: BitcoinNetworkName;
     if (this.config.webvhNetwork) {
       network = getBitcoinNetworkForWebVH(this.config.webvhNetwork);
     } else {
@@ -243,7 +243,7 @@ export class DIDManager {
 
   createBtcoDidDocument(
     satNumber: number | string,
-    network: 'mainnet' | 'regtest' | 'signet',
+    network: BitcoinNetworkName,
     options: Parameters<typeof createBtcoDidDocument>[2]
   ): DIDDocument {
     return createBtcoDidDocument(satNumber, network, options);

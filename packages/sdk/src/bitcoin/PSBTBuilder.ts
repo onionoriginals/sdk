@@ -1,4 +1,5 @@
 import type { Utxo } from '../types/bitcoin';
+import type { BitcoinNetworkName } from '../types/network';
 
 export interface PsbtOutput {
   address: string;
@@ -10,7 +11,7 @@ export interface BuildPsbtParams {
   outputs: PsbtOutput[];
   changeAddress: string;
   feeRate: number; // sat/vB
-  network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
+  network: BitcoinNetworkName;
   dustLimit?: number;
 }
 

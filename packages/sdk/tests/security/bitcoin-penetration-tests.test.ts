@@ -50,7 +50,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
         outputs: [{ address: 'tb1qreceiver1', value: 50000 }],
         changeAddress: 'tb1qchange',
         feeRate: 10,
-        network: 'testnet'
+        network: 'regtest'
       });
 
       const tx2Promise = builder.build({
@@ -58,7 +58,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
         outputs: [{ address: 'tb1qreceiver2', value: 50000 }],
         changeAddress: 'tb1qchange',
         feeRate: 10,
-        network: 'testnet'
+        network: 'regtest'
       });
 
       // Both should succeed in building (race condition)

@@ -11,6 +11,7 @@ import * as btc from '@scure/btc-signer';
 import * as ordinals from 'micro-ordinals';
 import { schnorr } from '@noble/curves/secp256k1';
 import { Utxo } from '../../types/bitcoin.js';
+import type { BitcoinNetworkName } from '../../types/network.js';
 import { calculateFee } from '../fee-calculation.js';
 import { selectUtxos, SimpleUtxoSelectionOptions } from '../utxo-selection.js';
 
@@ -21,18 +22,12 @@ const MIN_DUST_LIMIT = 546;
 const MAX_SELECTION_ITERATIONS = 5;
 
 /**
- * Bitcoin network type for @scure/btc-signer
- */
-type BitcoinNetwork = 'mainnet' | 'testnet' | 'regtest' | 'signet';
-
-/**
  * Get @scure/btc-signer network configuration
  */
-function getScureNetwork(network: BitcoinNetwork): typeof btc.NETWORK {
+function getScureNetwork(network: BitcoinNetworkName): typeof btc.NETWORK {
   switch (network) {
     case 'mainnet':
       return btc.NETWORK;
-    case 'testnet':
     case 'signet':
     case 'regtest':
       return btc.TEST_NETWORK;
@@ -72,7 +67,7 @@ export interface CommitTransactionParams {
   /** Fee rate in sats/vB */
   feeRate: number;
   /** Bitcoin network configuration */
-  network: BitcoinNetwork;
+  network: BitcoinNetworkName;
   /** Optional minimum amount for the commit output */
   minimumCommitAmount?: number;
   /** Optional metadata for the inscription */

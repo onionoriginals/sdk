@@ -1,15 +1,16 @@
 import type { ResourceProvider, LinkedResource, ResourceInfo, Inscription, ResourceCrawlOptions } from './types';
+import type { BitcoinNetworkName } from '../../types/network';
 
 export interface OrdNodeProviderOptions {
   nodeUrl: string;
   timeout?: number;
-  network?: 'mainnet' | 'testnet' | 'signet';
+  network?: BitcoinNetworkName;
 }
 
 export class OrdNodeProvider implements ResourceProvider {
   private readonly nodeUrl: string;
   private readonly timeout: number;
-  private readonly network: 'mainnet' | 'testnet' | 'signet';
+  private readonly network: BitcoinNetworkName;
 
   constructor(options: OrdNodeProviderOptions) {
     this.nodeUrl = options.nodeUrl;

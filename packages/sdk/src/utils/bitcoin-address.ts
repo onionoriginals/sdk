@@ -1,9 +1,12 @@
 import * as bitcoin from 'bitcoinjs-lib';
 
+import type { BitcoinNetworkName } from '../types/network';
+
 /**
  * Bitcoin network types supported by the validation
+ * @deprecated Use BitcoinNetworkName from types/network instead
  */
-export type BitcoinNetwork = 'mainnet' | 'regtest' | 'signet';
+export type BitcoinNetwork = BitcoinNetworkName;
 
 /**
  * Maps our network names to bitcoinjs-lib network configurations
