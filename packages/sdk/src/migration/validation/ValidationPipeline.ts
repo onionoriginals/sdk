@@ -71,28 +71,64 @@ export class ValidationPipeline {
       }
 
       // Run DID compatibility validation
-      const didResult = await this.validators.get('did')!.validate(options);
-      errors.push(...didResult.errors);
-      warnings.push(...didResult.warnings);
-      estimatedDuration = Math.max(estimatedDuration, didResult.estimatedDuration);
+      const didValidator = this.validators.get('did');
+      if (!didValidator) {
+        errors.push({
+          code: 'DID_VALIDATOR_MISSING',
+          message: 'DID compatibility validator not initialized',
+          details: { validator: 'did' }
+        });
+      } else {
+        const didResult = await didValidator.validate(options);
+        errors.push(...didResult.errors);
+        warnings.push(...didResult.warnings);
+        estimatedDuration = Math.max(estimatedDuration, didResult.estimatedDuration);
+      }
 
       // Run credential validation if enabled
       if (options.credentialIssuance !== false) {
-        const credResult = await this.validators.get('credential')!.validate(options);
-        errors.push(...credResult.errors);
-        warnings.push(...credResult.warnings);
+        const credentialValidator = this.validators.get('credential');
+        if (!credentialValidator) {
+          errors.push({
+            code: 'CREDENTIAL_VALIDATOR_MISSING',
+            message: 'Credential validator not initialized',
+            details: { validator: 'credential' }
+          });
+        } else {
+          const credResult = await credentialValidator.validate(options);
+          errors.push(...credResult.errors);
+          warnings.push(...credResult.warnings);
+        }
       }
 
       // Run storage validation
-      const storageResult = await this.validators.get('storage')!.validate(options);
-      errors.push(...storageResult.errors);
-      warnings.push(...storageResult.warnings);
-      estimatedCost.storageCost = storageResult.estimatedCost.storageCost;
+      const storageValidator = this.validators.get('storage');
+      if (!storageValidator) {
+        errors.push({
+          code: 'STORAGE_VALIDATOR_MISSING',
+          message: 'Storage validator not initialized',
+          details: { validator: 'storage' }
+        });
+      } else {
+        const storageResult = await storageValidator.validate(options);
+        errors.push(...storageResult.errors);
+        warnings.push(...storageResult.warnings);
+        estimatedCost.storageCost = storageResult.estimatedCost.storageCost;
+      }
 
       // Run lifecycle validation
-      const lifecycleResult = await this.validators.get('lifecycle')!.validate(options);
-      errors.push(...lifecycleResult.errors);
-      warnings.push(...lifecycleResult.warnings);
+      const lifecycleValidator = this.validators.get('lifecycle');
+      if (!lifecycleValidator) {
+        errors.push({
+          code: 'LIFECYCLE_VALIDATOR_MISSING',
+          message: 'Lifecycle validator not initialized',
+          details: { validator: 'lifecycle' }
+        });
+      } else {
+        const lifecycleResult = await lifecycleValidator.validate(options);
+        errors.push(...lifecycleResult.errors);
+        warnings.push(...lifecycleResult.warnings);
+      }
 
       // Run Bitcoin validation for btco migrations
       if (options.targetLayer === 'btco') {
