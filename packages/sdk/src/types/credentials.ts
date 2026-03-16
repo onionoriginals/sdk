@@ -20,14 +20,48 @@ export interface Issuer {
 
 export interface CredentialSubject {
   id?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface CredentialStatus {
   id: string;
   type: string;
 }
+
+/**
+ * W3C Bitstring Status List Entry - embedded in credentials to reference their
+ * position in a status list. See: https://www.w3.org/TR/vc-bitstring-status-list/
+ */
+export interface BitstringStatusListEntry extends CredentialStatus {
+  type: 'BitstringStatusListEntry';
+  /** The purpose of the status entry (e.g., 'revocation', 'suspension') */
+  statusPurpose: StatusPurpose;
+  /** The index position in the status list bitstring */
+  statusListIndex: string;
+  /** URL or ID of the BitstringStatusListCredential */
+  statusListCredential: string;
+}
+
+/**
+ * W3C Bitstring Status List Credential - a credential containing a compressed
+ * bitstring where each bit represents a credential's status.
+ */
+export interface BitstringStatusListCredential extends VerifiableCredential {
+  type: ['VerifiableCredential', 'BitstringStatusListCredential'];
+  credentialSubject: BitstringStatusListSubject;
+}
+
+export interface BitstringStatusListSubject {
+  id?: string;
+  type: 'BitstringStatusList';
+  /** The purpose of this status list */
+  statusPurpose: StatusPurpose;
+  /** GZIP-compressed, base64-encoded bitstring */
+  encodedList: string;
+}
+
+/** Supported status purposes per W3C spec */
+export type StatusPurpose = 'revocation' | 'suspension';
 
 export interface Proof {
   type: string;
