@@ -18,6 +18,7 @@ import { multikey } from '../crypto/Multikey';
 import { EventEmitter } from '../events/EventEmitter';
 import type { EventHandler, EventTypeMap } from '../events/types';
 import { Logger } from '../utils/Logger';
+import { StructuredError } from '../utils/telemetry';
 import { MetricsCollector } from '../utils/MetricsCollector';
 import { 
   BatchOperationExecutor, 
@@ -131,13 +132,14 @@ export class LifecycleManager {
     private didManager: DIDManager,
     private credentialManager: CredentialManager,
     private deps?: { bitcoinManager?: BitcoinManager },
-    private keyStore?: KeyStore
+    private keyStore?: KeyStore,
+    metrics?: MetricsCollector
   ) {
     this.eventEmitter = new EventEmitter();
     this.batchExecutor = new BatchOperationExecutor();
     this.batchValidator = new BatchValidator();
     this.logger = new Logger('LifecycleManager', config);
-    this.metrics = new MetricsCollector();
+    this.metrics = metrics || new MetricsCollector();
   }
 
   /**
@@ -171,24 +173,24 @@ export class LifecycleManager {
 
   async registerKey(verificationMethodId: string, privateKey: string): Promise<void> {
     if (!this.keyStore) {
-      throw new Error('KeyStore not configured. Provide keyStore to LifecycleManager constructor.');
+      throw new StructuredError('KEYSTORE_REQUIRED', 'KeyStore not configured. Provide keyStore to LifecycleManager constructor.');
     }
-    
+
     // Validate verification method ID format
     if (!verificationMethodId || typeof verificationMethodId !== 'string') {
-      throw new Error('Invalid verificationMethodId: must be a non-empty string');
+      throw new StructuredError('INVALID_INPUT', 'Invalid verificationMethodId: must be a non-empty string');
     }
-    
+
     // Validate private key format (should be multibase encoded)
     if (!privateKey || typeof privateKey !== 'string') {
-      throw new Error('Invalid privateKey: must be a non-empty string');
+      throw new StructuredError('INVALID_INPUT', 'Invalid privateKey: must be a non-empty string');
     }
-    
+
     // Validate that it's a valid multibase-encoded private key
     try {
       multikey.decodePrivateKey(privateKey);
     } catch (err) {
-      throw new Error('Invalid privateKey format: must be a valid multibase-encoded private key');
+      throw new StructuredError('INVALID_KEY', 'Invalid privateKey format: must be a valid multibase-encoded private key');
     }
     
     await this.keyStore.setPrivateKey(verificationMethodId, privateKey);
@@ -196,37 +198,38 @@ export class LifecycleManager {
 
   async createAsset(resources: AssetResource[]): Promise<OriginalsAsset> {
     const stopTimer = this.logger.startTimer('createAsset');
+    const metricsStart = performance.now();
     this.logger.info('Creating asset', { resourceCount: resources.length });
     
     try {
       // Input validation
       if (!Array.isArray(resources)) {
-        throw new Error('Resources must be an array');
+        throw new StructuredError('INVALID_INPUT', 'Resources must be an array. Provide an array of AssetResource objects.');
       }
       if (resources.length === 0) {
-        throw new Error('At least one resource is required');
+        throw new StructuredError('INVALID_INPUT', 'At least one resource is required');
       }
-      
+
       // Validate each resource
       for (const resource of resources) {
         if (!resource || typeof resource !== 'object') {
-          throw new Error('Invalid resource: must be an object');
+          throw new StructuredError('INVALID_RESOURCE', 'Invalid resource: must be an object');
         }
         if (!resource.id || typeof resource.id !== 'string') {
-          throw new Error('Invalid resource: missing or invalid id');
+          throw new StructuredError('INVALID_RESOURCE', 'Invalid resource: missing or invalid id');
         }
         if (!resource.type || typeof resource.type !== 'string') {
-          throw new Error('Invalid resource: missing or invalid type');
+          throw new StructuredError('INVALID_RESOURCE', 'Invalid resource: missing or invalid type');
         }
         if (!resource.contentType || typeof resource.contentType !== 'string') {
-          throw new Error('Invalid resource: missing or invalid contentType');
+          throw new StructuredError('INVALID_RESOURCE', 'Invalid resource: missing or invalid contentType');
         }
         if (!resource.hash || typeof resource.hash !== 'string' || !/^[0-9a-fA-F]+$/.test(resource.hash)) {
-          throw new Error('Invalid resource: missing or invalid hash (must be hex string)');
+          throw new StructuredError('INVALID_RESOURCE', 'Invalid resource: missing or invalid hash (must be hex string)');
         }
         // Validate contentType is a valid MIME type
         if (!/^[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]{0,126}\/[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]{0,126}$/.test(resource.contentType)) {
-          throw new Error(`Invalid resource: invalid contentType MIME format: ${resource.contentType}`);
+          throw new StructuredError('INVALID_RESOURCE', `Invalid resource: invalid contentType MIME format: ${resource.contentType}`);
         }
       }
     
@@ -271,8 +274,9 @@ export class LifecycleManager {
       
       stopTimer();
       this.logger.info('Asset created successfully', { assetId: asset.id });
+      this.metrics.recordOperation('lifecycle.createAsset', performance.now() - metricsStart, true);
       this.metrics.recordAssetCreated();
-      
+
       return asset;
     } else {
       // No keyStore, just create the DID document
@@ -299,13 +303,15 @@ export class LifecycleManager {
       
       stopTimer();
       this.logger.info('Asset created successfully', { assetId: asset.id });
+      this.metrics.recordOperation('lifecycle.createAsset', performance.now() - metricsStart, true);
       this.metrics.recordAssetCreated();
-      
+
       return asset;
     }
     } catch (error) {
       stopTimer();
       this.logger.error('Asset creation failed', error as Error, { resourceCount: resources.length });
+      this.metrics.recordOperation('lifecycle.createAsset', performance.now() - metricsStart, false);
       this.metrics.recordError('ASSET_CREATION_FAILED', 'createAsset');
       throw error;
     }
@@ -353,7 +359,7 @@ export class LifecycleManager {
     try {
       // Verify kind matches
       if (manifest.kind !== kind) {
-        throw new Error(`Manifest kind "${manifest.kind}" does not match requested kind "${kind}"`);
+        throw new StructuredError('INVALID_INPUT', `Manifest kind "${manifest.kind}" does not match requested kind "${kind}"`);
       }
       
       // Validate manifest using KindRegistry
@@ -549,10 +555,11 @@ export class LifecycleManager {
     publisherDidOrSigner: string | ExternalSigner
   ): Promise<OriginalsAsset> {
     const stopTimer = this.logger.startTimer('publishToWeb');
-    
+    const metricsStart = performance.now();
+
     try {
       if (asset.currentLayer !== 'did:peer') {
-        throw new Error('Asset must be in did:peer layer to publish to web');
+        throw new StructuredError('INVALID_STATE', 'Asset must be in did:peer layer to publish to web. Assets can only be published from the did:peer layer.');
       }
       
       const { publisherDid, signer } = this.extractPublisherInfo(publisherDidOrSigner);
@@ -579,12 +586,14 @@ export class LifecycleManager {
         publisherDid, 
         resourceCount: asset.resources.length 
       });
+      this.metrics.recordOperation('lifecycle.publishToWeb', performance.now() - metricsStart, true);
       this.metrics.recordMigration('did:peer', 'did:webvh');
-      
+
       return asset;
     } catch (error) {
       stopTimer();
       this.logger.error('Publish to web failed', error as Error, { assetId: asset.id });
+      this.metrics.recordOperation('lifecycle.publishToWeb', performance.now() - metricsStart, false);
       this.metrics.recordError('PUBLISH_FAILED', 'publishToWeb');
       throw error;
     }
@@ -614,7 +623,7 @@ export class LifecycleManager {
     const publisherDid = resolvedVmId.includes('#') ? resolvedVmId.split('#')[0] : resolvedVmId;
 
     if (!publisherDid.startsWith('did:webvh:')) {
-      throw new Error('Signer must be associated with a did:webvh identifier');
+      throw new StructuredError('INVALID_INPUT', 'Signer must be associated with a did:webvh identifier');
     }
 
     return { publisherDid, signer };
@@ -623,7 +632,7 @@ export class LifecycleManager {
   private parseWebVHDid(did: string): { domain: string; userPath: string } {
     const parts = did.split(':');
     if (parts.length < 4) {
-      throw new Error('Invalid did:webvh format: must include domain and user path');
+      throw new StructuredError('INVALID_DID', 'Invalid did:webvh format: must include domain and user path');
     }
     
     const domain = decodeURIComponent(parts[2]);
@@ -703,10 +712,15 @@ export class LifecycleManager {
     signer?: ExternalSigner
   ): Promise<void> {
     try {
+      if (!asset.resources || asset.resources.length === 0) {
+        this.logger.warn('Skipping publication credential: asset has no resources', { assetId: asset.id });
+        return;
+      }
+
       const subject = {
         id: asset.id,
         publishedAs: publisherDid,
-        resourceId: asset.resources[0]?.id,
+        resourceId: asset.resources[0].id,
         fromLayer: 'did:peer' as const,
         toLayer: 'did:webvh' as const,
         migratedAt: new Date().toISOString()
@@ -747,7 +761,7 @@ export class LifecycleManager {
     issuer: string
   ): Promise<VerifiableCredential> {
     if (!this.keyStore) {
-      throw new Error('KeyStore required for signing. Provide keyStore or external signer.');
+      throw new StructuredError('KEYSTORE_REQUIRED', 'KeyStore required for signing. Provide keyStore to LifecycleManager constructor or use an external signer.');
     }
     
     // Try to find a key in the keyStore for this DID
@@ -790,7 +804,7 @@ export class LifecycleManager {
     if (!privateKey) {
       const didDoc = await this.didManager.resolveDID(issuer);
       if (!didDoc?.verificationMethod?.[0]) {
-        throw new Error('No verification method found in publisher DID document');
+        throw new StructuredError('INVALID_DID_DOCUMENT', 'No verification method found in publisher DID document. Ensure the DID document includes at least one verificationMethod.');
       }
       
       vmId = didDoc.verificationMethod[0].id;
@@ -800,12 +814,12 @@ export class LifecycleManager {
       
       privateKey = await this.keyStore.getPrivateKey(vmId);
       if (!privateKey) {
-        throw new Error('Private key not found in keyStore');
+        throw new StructuredError('KEYSTORE_REQUIRED', 'Private key not found in keyStore. Register the key with lifecycle.registerKey() before signing.');
       }
     }
 
     if (!vmId) {
-      throw new Error('Verification method ID could not be determined');
+      throw new StructuredError('INVALID_DID_DOCUMENT', 'Verification method ID could not be determined from the DID document. Ensure the DID document contains a verificationMethod with an id field.');
     }
 
     return this.credentialManager.signCredential(credential, privateKey, vmId);
@@ -816,27 +830,28 @@ export class LifecycleManager {
     feeRate?: number
   ): Promise<OriginalsAsset> {
     const stopTimer = this.logger.startTimer('inscribeOnBitcoin');
+    const metricsStart = performance.now();
     this.logger.info('Inscribing asset on Bitcoin', { assetId: asset.id, feeRate });
     
     try {
       // Input validation
       if (!asset || typeof asset !== 'object') {
-        throw new Error('Invalid asset: must be a valid OriginalsAsset');
+        throw new StructuredError('INVALID_INPUT', 'Invalid asset: must be a valid OriginalsAsset');
       }
       if (feeRate !== undefined) {
         if (typeof feeRate !== 'number' || feeRate <= 0 || !Number.isFinite(feeRate)) {
-          throw new Error('Invalid feeRate: must be a positive number');
+          throw new StructuredError('INVALID_INPUT', 'Invalid feeRate: must be a positive number');
         }
         if (feeRate < 1 || feeRate > 1000000) {
-          throw new Error('Invalid feeRate: must be between 1 and 1000000 sat/vB');
+          throw new StructuredError('INVALID_INPUT', 'Invalid feeRate: must be between 1 and 1000000 sat/vB');
         }
       }
-    
+
     if (typeof asset.migrate !== 'function') {
-      throw new Error('Not implemented');
+      throw new StructuredError('NOT_IMPLEMENTED', 'Asset inscription is not yet implemented for this asset type. Use a standard OriginalsAsset created via lifecycle.createAsset().');
     }
     if (asset.currentLayer !== 'did:webvh' && asset.currentLayer !== 'did:peer') {
-      throw new Error('Not implemented');
+      throw new StructuredError('NOT_IMPLEMENTED', 'Asset inscription is not yet implemented for this layer. Assets must be in did:peer or did:webvh layer to inscribe.');
     }
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const manifest = {
@@ -880,12 +895,14 @@ export class LifecycleManager {
       inscriptionId: inscription.inscriptionId,
       transactionId: revealTxId
     });
+    this.metrics.recordOperation('lifecycle.inscribeOnBitcoin', performance.now() - metricsStart, true);
     this.metrics.recordMigration(fromLayer, 'did:btco');
-    
+
     return asset;
     } catch (error) {
       stopTimer();
       this.logger.error('Bitcoin inscription failed', error as Error, { assetId: asset.id, feeRate });
+      this.metrics.recordOperation('lifecycle.inscribeOnBitcoin', performance.now() - metricsStart, false);
       this.metrics.recordError('INSCRIPTION_FAILED', 'inscribeOnBitcoin');
       throw error;
     }
@@ -896,29 +913,30 @@ export class LifecycleManager {
     newOwner: string
   ): Promise<BitcoinTransaction> {
     const stopTimer = this.logger.startTimer('transferOwnership');
+    const metricsStart = performance.now();
     this.logger.info('Transferring asset ownership', { assetId: asset.id, newOwner });
     
     try {
       // Input validation
       if (!asset || typeof asset !== 'object') {
-        throw new Error('Invalid asset: must be a valid OriginalsAsset');
+        throw new StructuredError('INVALID_INPUT', 'Invalid asset: must be a valid OriginalsAsset');
       }
       if (!newOwner || typeof newOwner !== 'string') {
-        throw new Error('Invalid newOwner: must be a non-empty string');
+        throw new StructuredError('INVALID_INPUT', 'Invalid newOwner: must be a non-empty string');
       }
-      
+
       // Validate Bitcoin address format and checksum
       try {
         validateBitcoinAddress(newOwner, this.config.network);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid Bitcoin address';
-        throw new Error(`Invalid Bitcoin address for ownership transfer: ${message}`);
+        throw new StructuredError('INVALID_ADDRESS', `Invalid Bitcoin address for ownership transfer: ${message}`);
       }
-    
+
     // Transfer Bitcoin-anchored asset ownership
     // Only works for assets in did:btco layer
     if (asset.currentLayer !== 'did:btco') {
-      throw new Error('Asset must be inscribed on Bitcoin before transfer');
+      throw new StructuredError('INVALID_STATE', 'Asset must be inscribed on Bitcoin before transfer. Migrate to did:btco first.');
     }
     const bm = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const provenance = asset.getProvenance();
@@ -942,12 +960,14 @@ export class LifecycleManager {
       newOwner, 
       transactionId: tx.txid 
     });
+    this.metrics.recordOperation('lifecycle.transferOwnership', performance.now() - metricsStart, true);
     this.metrics.recordTransfer();
-    
+
     return tx;
     } catch (error) {
       stopTimer();
       this.logger.error('Ownership transfer failed', error as Error, { assetId: asset.id, newOwner });
+      this.metrics.recordOperation('lifecycle.transferOwnership', performance.now() - metricsStart, false);
       this.metrics.recordError('TRANSFER_FAILED', 'transferOwnership');
       throw error;
     }
@@ -972,7 +992,7 @@ export class LifecycleManager {
       const invalid = validationResults.filter(r => !r.isValid);
       if (invalid.length > 0) {
         const errors = invalid.flatMap(r => r.errors).join('; ');
-        throw new Error(`Batch validation failed: ${errors}`);
+        throw new StructuredError('BATCH_VALIDATION_FAILED', `Batch validation failed: ${errors}`);
       }
     }
     
@@ -1042,7 +1062,7 @@ export class LifecycleManager {
     
     // Validate domain once
     if (!domain || typeof domain !== 'string') {
-      throw new Error('Invalid domain: must be a non-empty string');
+      throw new StructuredError('INVALID_DOMAIN', 'Invalid domain: must be a non-empty string');
     }
     
     const normalized = domain.trim().toLowerCase();
@@ -1052,7 +1072,7 @@ export class LifecycleManager {
     
     // Validate port if present
     if (portPart && (!/^\d+$/.test(portPart) || parseInt(portPart) < 1 || parseInt(portPart) > 65535)) {
-      throw new Error(`Invalid domain format: ${domain} - invalid port`);
+      throw new StructuredError('INVALID_DOMAIN', `Invalid domain format: ${domain} - invalid port`);
     }
     
     // Allow localhost and IP addresses for development
@@ -1064,7 +1084,7 @@ export class LifecycleManager {
       const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
       const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
       if (!domainRegex.test(domainPart)) {
-        throw new Error(`Invalid domain format: ${domain}`);
+        throw new StructuredError('INVALID_DOMAIN', `Invalid domain format: ${domain}. Must be a valid hostname (e.g., example.com) or localhost.`);
       }
     }
     
@@ -1133,7 +1153,7 @@ export class LifecycleManager {
       const invalid = validationResults.filter(r => !r.isValid);
       if (invalid.length > 0) {
         const errors = invalid.flatMap(r => r.errors).join('; ');
-        throw new Error(`Batch validation failed: ${errors}`);
+        throw new StructuredError('BATCH_VALIDATION_FAILED', `Batch validation failed: ${errors}`);
       }
     }
     
@@ -1429,7 +1449,7 @@ export class LifecycleManager {
       const invalid = validationResults.filter(r => !r.isValid);
       if (invalid.length > 0) {
         const errors = invalid.flatMap(r => r.errors).join('; ');
-        throw new Error(`Batch validation failed: ${errors}`);
+        throw new StructuredError('BATCH_VALIDATION_FAILED', `Batch validation failed: ${errors}`);
       }
       
       // Validate all Bitcoin addresses
@@ -1438,7 +1458,7 @@ export class LifecycleManager {
           validateBitcoinAddress(transfers[i].to, this.config.network);
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Invalid Bitcoin address';
-          throw new Error(`Transfer ${i}: Invalid Bitcoin address: ${message}`);
+          throw new StructuredError('INVALID_ADDRESS', `Transfer ${i}: Invalid Bitcoin address: ${message}`);
         }
       }
     }
@@ -1679,7 +1699,7 @@ export class LifecycleManager {
         percentage: 0,
         message: `Validation failed: ${validation.errors.join(', ')}`
       });
-      throw new Error(`Migration validation failed: ${validation.errors.join(', ')}`);
+      throw new StructuredError('MIGRATION_VALIDATION_FAILED', `Migration validation failed: ${validation.errors.join(', ')}`);
     }
     
     try {
@@ -1759,7 +1779,7 @@ export class LifecycleManager {
         percentage: 0,
         message: `Validation failed: ${validation.errors.join(', ')}`
       });
-      throw new Error(`Migration validation failed: ${validation.errors.join(', ')}`);
+      throw new StructuredError('MIGRATION_VALIDATION_FAILED', `Migration validation failed: ${validation.errors.join(', ')}`);
     }
     
     // Show cost estimate
@@ -1856,7 +1876,7 @@ export class LifecycleManager {
         percentage: 0,
         message: 'Asset must be inscribed on Bitcoin before transfer'
       });
-      throw new Error('Asset must be inscribed on Bitcoin before transfer');
+      throw new StructuredError('INVALID_STATE', 'Asset must be inscribed on Bitcoin before transfer. Migrate to did:btco first.');
     }
     
     try {
