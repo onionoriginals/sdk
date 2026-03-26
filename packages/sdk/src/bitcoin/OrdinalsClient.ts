@@ -1,11 +1,12 @@
 import { OrdinalsInscription, BitcoinTransaction } from '../types';
+import type { BitcoinNetworkName } from '../types/network';
 import { decode as decodeCbor } from '../utils/cbor';
 import { hexToBytes } from '../utils/encoding';
 
 export class OrdinalsClient {
   constructor(
     private rpcUrl: string,
-    private network: 'mainnet' | 'regtest' | 'signet'
+    private network: BitcoinNetworkName
   ) {}
 
   async getInscriptionById(id: string): Promise<OrdinalsInscription | null> {

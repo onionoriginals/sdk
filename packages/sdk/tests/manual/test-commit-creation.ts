@@ -268,24 +268,24 @@ async function main() {
     logInfo(`Inscription Script Size: ${result3.inscriptionScript.script.length} bytes`);
     logInfo(`Commit Fee: ${result3.fees.commit} sats`);
 
-    // Test 4: Testnet address
-    logSection('Test 4: Testnet Address Generation');
+    // Test 4: Regtest address
+    logSection('Test 4: Regtest Address Generation');
 
     const result4 = await createCommitTransaction({
-      content: Buffer.from('Testnet inscription'),
+      content: Buffer.from('Regtest inscription'),
       contentType: 'text/plain',
       utxos: createMockUtxos(),
-      changeAddress: 'tb1qtest_testnet_change',
+      changeAddress: 'tb1qtest_regtest_change',
       feeRate: 5,
-      network: 'testnet'
+      network: 'regtest'
     });
 
-    logInfo(`Testnet Commit Address: ${result4.commitAddress}`);
+    logInfo(`Regtest Commit Address: ${result4.commitAddress}`);
 
     if (result4.commitAddress.startsWith('tb1p')) {
-      logSuccess('Testnet address is valid (tb1p...)');
+      logSuccess('Regtest address is valid (tb1p...)');
     } else {
-      logWarning(`Unexpected testnet address format: ${result4.commitAddress}`);
+      logWarning(`Unexpected regtest address format: ${result4.commitAddress}`);
     }
 
     // Final summary

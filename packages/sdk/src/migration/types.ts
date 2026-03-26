@@ -4,6 +4,7 @@
  */
 
 import { DIDDocument, VerifiableCredential } from '../types';
+import type { BitcoinNetworkName } from '../types/network';
 
 /**
  * DID layer types
@@ -295,7 +296,7 @@ export interface BitcoinAnchoringContext {
   didDocument: DIDDocument;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   migrationMetadata: Record<string, any>;
-  network: 'mainnet' | 'testnet' | 'signet';
+  network: BitcoinNetworkName;
   feeRate?: number;
   satoshi?: string;
 }

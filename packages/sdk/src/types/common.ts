@@ -2,13 +2,13 @@ import { StorageAdapter, FeeOracleAdapter, OrdinalsProvider } from '../adapters'
 import { TelemetryHooks } from '../utils/telemetry';
 import type { LogLevel, LogOutput } from '../utils/Logger';
 import type { EventLoggingConfig } from '../utils/EventLogger';
-import type { WebVHNetworkName } from './network';
+import type { WebVHNetworkName, BitcoinNetworkName } from './network';
 
 // Base types for the Originals protocol
 export type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';
 
 export interface OriginalsConfig {
-  network: 'mainnet' | 'regtest' | 'signet';
+  network: BitcoinNetworkName;
   bitcoinRpcUrl?: string;
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
   keyStore?: KeyStore;

@@ -10,12 +10,11 @@ import {
 import type { Utxo } from '../../../../src/types/bitcoin.js';
 
 // Helper to create test UTXOs
-const createUtxo = (value: number, index: number = 0, network: 'mainnet' | 'testnet' | 'signet' | 'regtest' = 'mainnet'): Utxo => {
+const createUtxo = (value: number, index: number = 0, network: 'mainnet' | 'signet' | 'regtest' = 'mainnet'): Utxo => {
   const addressMap = {
     mainnet: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4',
-    testnet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
     signet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
-    regtest: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx' // Use testnet format for regtest compatibility with @scure/btc-signer
+    regtest: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx'
   };
 
   return {
@@ -32,9 +31,8 @@ const createCommitParams = (overrides: Partial<CommitTransactionParams> = {}): C
   const network = overrides.network || 'mainnet';
   const addressMap = {
     mainnet: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4',
-    testnet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
     signet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
-    regtest: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx' // Use testnet format for regtest compatibility with @scure/btc-signer
+    regtest: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx'
   };
 
   return {
@@ -314,8 +312,8 @@ describe('createCommitTransaction', () => {
       expect(result.commitAddress).toMatch(/^bc1p/);
     });
 
-    test('creates testnet commit address', async () => {
-      const params = createCommitParams({ network: 'testnet' });
+    test('creates regtest commit address', async () => {
+      const params = createCommitParams({ network: 'regtest' });
       const result = await createCommitTransaction(params);
 
       expect(result.commitAddress).toMatch(/^tb1p/);

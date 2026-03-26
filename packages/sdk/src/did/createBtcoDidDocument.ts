@@ -2,7 +2,9 @@ import { DIDDocument, VerificationMethod } from '../types/did';
 import { multikey, MultikeyType } from '../crypto/Multikey';
 import { validateSatoshiNumber } from '../utils/satoshi-validation';
 
-export type BitcoinNetwork = 'mainnet' | 'regtest' | 'signet';
+import type { BitcoinNetworkName } from '../types/network';
+
+export type BitcoinNetwork = BitcoinNetworkName;
 
 interface CreateBtcoDidDocumentParams {
 	publicKey: Uint8Array;
