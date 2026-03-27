@@ -9,9 +9,11 @@ import {
   MigrationStateEnum,
   MigrationError,
   MigrationErrorType,
+  MigrationAuditRecord,
   BatchMigrationOptions,
   BatchMigrationResult,
-  CostEstimate
+  CostEstimate,
+  DIDLayer
 } from './types';
 import { OriginalsConfig } from '../types';
 import { DIDManager } from '../did/DIDManager';
@@ -21,13 +23,12 @@ import { ValidationPipeline } from './validation/ValidationPipeline';
 import { CheckpointManager } from './checkpoint/CheckpointManager';
 import { RollbackManager } from './rollback/RollbackManager';
 import { StateTracker } from './state/StateTracker';
-// TODO: AuditLogger temporarily disabled for v1.0 release
-// Will be re-enabled in v1.1 with proper Ed25519 digital signatures
-// import { AuditLogger } from './audit/AuditLogger';
+import { AuditLogger } from './audit/AuditLogger';
 import { PeerToWebvhMigration } from './operations/PeerToWebvhMigration';
 import { WebvhToBtcoMigration } from './operations/WebvhToBtcoMigration';
 import { PeerToBtcoMigration } from './operations/PeerToBtcoMigration';
 import { EventEmitter } from '../events/EventEmitter';
+import { StructuredError } from '../utils/telemetry';
 
 export class MigrationManager {
   private static instance: MigrationManager | null = null;
@@ -36,14 +37,8 @@ export class MigrationManager {
   private checkpointManager: CheckpointManager;
   private rollbackManager: RollbackManager;
   private stateTracker: StateTracker;
-  // TODO: AuditLogger temporarily disabled for v1.0 release
-  // private auditLogger: AuditLogger;
+  private auditLogger: AuditLogger;
   private eventEmitter: EventEmitter;
-
-  // Temporary in-memory audit storage for v1.0 (unsigned records)
-  // Will be replaced by proper AuditLogger with signatures in v1.1
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private inMemoryAuditRecords: Map<string, any[]>;
 
   // Migration operation handlers
   private peerToWebvh: PeerToWebvhMigration;
@@ -66,12 +61,8 @@ export class MigrationManager {
     this.checkpointManager = new CheckpointManager(config, didManager, credentialManager);
     this.stateTracker = new StateTracker(config);
     this.rollbackManager = new RollbackManager(config, this.checkpointManager, didManager);
-    // TODO: AuditLogger temporarily disabled for v1.0 release
-    // this.auditLogger = new AuditLogger(config);
+    this.auditLogger = new AuditLogger(config);
     this.eventEmitter = new EventEmitter();
-
-    // Initialize in-memory audit storage for v1.0
-    this.inMemoryAuditRecords = new Map();
 
     // Initialize migration operations
     this.peerToWebvh = new PeerToWebvhMigration(config, didManager, credentialManager, this.stateTracker);
@@ -99,7 +90,7 @@ export class MigrationManager {
   ): MigrationManager {
     if (!MigrationManager.instance) {
       if (!config || !didManager || !credentialManager) {
-        throw new Error('Configuration and managers required for first initialization');
+        throw new StructuredError('INVALID_CONFIG', 'Configuration and managers required for first initialization. Call MigrationManager.getInstance(config, didManager, credentialManager) on first use.');
       }
       MigrationManager.instance = new MigrationManager(config, didManager, credentialManager, bitcoinManager);
     }
@@ -219,9 +210,12 @@ export class MigrationManager {
         metadata: options.metadata || {}
       };
 
-      // TODO: AuditLogger temporarily disabled for v1.0 release
-      // Store in-memory for v1.0 (unsigned, will be replaced with signed records in v1.1)
-      this.storeAuditRecordInMemory(auditRecord);
+      try {
+        await this.auditLogger.logMigration(auditRecord);
+      } catch (auditError) {
+        // Audit log failure must not abort a completed migration
+        console.error('Failed to write audit log for completed migration:', auditError);
+      }
 
       // Clean up checkpoint after successful migration
       setTimeout(() => {
@@ -258,11 +252,10 @@ export class MigrationManager {
   /**
    * Estimate migration cost without executing
    */
-  async estimateMigrationCost(sourceDid: string, targetLayer: string, feeRate?: number): Promise<CostEstimate> {
+  async estimateMigrationCost(sourceDid: string, targetLayer: DIDLayer, feeRate?: number): Promise<CostEstimate> {
     const options: MigrationOptions = {
       sourceDid,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
-      targetLayer: targetLayer as any,
+      targetLayer,
       feeRate,
       estimateCostOnly: true
     };
@@ -286,7 +279,7 @@ export class MigrationManager {
   async rollback(migrationId: string): Promise<any> {
     const state = await this.stateTracker.getState(migrationId);
     if (!state || !state.checkpointId) {
-      throw new Error(`Migration ${migrationId} not found or has no checkpoint`);
+      throw new StructuredError('MIGRATION_NOT_FOUND', `Migration ${migrationId} not found or has no checkpoint. Ensure the migration ID is valid and a checkpoint was created.`);
     }
 
     const rollbackResult = await this.rollbackManager.rollback(migrationId, state.checkpointId);
@@ -298,19 +291,15 @@ export class MigrationManager {
 
   /**
    * Get migration history for a DID
-   * TODO: AuditLogger temporarily disabled for v1.0 release
-   * Returns in-memory audit records (unsigned) - will use proper AuditLogger in v1.1
    */
-  // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-explicit-any
-  async getMigrationHistory(did: string): Promise<any[]> {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-    return this.inMemoryAuditRecords.get(did) || [];
+  async getMigrationHistory(did: string): Promise<MigrationAuditRecord[]> {
+    return this.auditLogger.getMigrationHistory(did);
   }
 
   /**
    * Batch migration
    */
-  async migrateBatch(dids: string[], targetLayer: string, options?: BatchMigrationOptions): Promise<BatchMigrationResult> {
+  async migrateBatch(dids: string[], targetLayer: DIDLayer, options?: BatchMigrationOptions): Promise<BatchMigrationResult> {
     const batchId = `batch_${Date.now()}`;
     const results = new Map<string, MigrationResult>();
     const errors: MigrationError[] = [];
@@ -323,7 +312,7 @@ export class MigrationManager {
       try {
         const migrationOptions: MigrationOptions = {
           sourceDid: did,
-          targetLayer: targetLayer as any,
+          targetLayer,
           ...options
         };
 
@@ -468,9 +457,12 @@ export class MigrationManager {
       metadata: options.metadata || {}
     };
 
-    // TODO: AuditLogger temporarily disabled for v1.0 release
-    // Store in-memory for v1.0 (unsigned, will be replaced with signed records in v1.1)
-    this.storeAuditRecordInMemory(auditRecord);
+    try {
+      await this.auditLogger.logMigration(auditRecord);
+    } catch (auditError) {
+      // Audit log failure must not abort a completed migration
+      console.error('Failed to write audit log for failed migration:', auditError);
+    }
 
     return {
       migrationId,
@@ -499,44 +491,19 @@ export class MigrationManager {
 
     if (sourceLayer === 'webvh' && options.targetLayer === 'btco') {
       if (!this.webvhToBtco) {
-        throw new Error('Bitcoin manager required for btco migrations');
+        throw new StructuredError('BITCOIN_MANAGER_REQUIRED', 'Bitcoin manager required for btco migrations. Configure ordinalsProvider when creating the SDK.');
       }
       return this.webvhToBtco;
     }
 
     if (sourceLayer === 'peer' && options.targetLayer === 'btco') {
       if (!this.peerToBtco) {
-        throw new Error('Bitcoin manager required for btco migrations');
+        throw new StructuredError('BITCOIN_MANAGER_REQUIRED', 'Bitcoin manager required for btco migrations. Configure ordinalsProvider when creating the SDK.');
       }
       return this.peerToBtco;
     }
 
-    throw new Error(`Unsupported migration path: ${sourceLayer} → ${options.targetLayer}`);
-  }
-
-  /**
-   * Store audit record in memory for v1.0
-   * Stores by both source and target DID for easy lookup
-   * TODO: Remove in v1.1 when AuditLogger is re-enabled with signatures
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private storeAuditRecordInMemory(record: any): void {
-    // Store by source DID
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-    const sourceRecords = this.inMemoryAuditRecords.get(record.sourceDid) || [];
-    sourceRecords.push(record);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-    this.inMemoryAuditRecords.set(record.sourceDid, sourceRecords);
-
-    // Also store by target DID if available
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    if (record.targetDid) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-      const targetRecords = this.inMemoryAuditRecords.get(record.targetDid) || [];
-      targetRecords.push(record);
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-      this.inMemoryAuditRecords.set(record.targetDid, targetRecords);
-    }
+    throw new StructuredError('UNSUPPORTED_MIGRATION_PATH', `Unsupported migration path: ${sourceLayer} → ${options.targetLayer}. Valid paths: peer→webvh, webvh→btco, peer→btco`);
   }
 
   /**
@@ -546,7 +513,7 @@ export class MigrationManager {
     if (did.startsWith('did:peer:')) return 'peer';
     if (did.startsWith('did:webvh:')) return 'webvh';
     if (did.startsWith('did:btco:')) return 'btco';
-    throw new Error(`Unsupported DID method: ${did}`);
+    throw new StructuredError('UNSUPPORTED_DID_METHOD', `Unsupported DID method: ${did}. Supported methods: did:peer, did:webvh, did:btco`);
   }
 
   /**
