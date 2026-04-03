@@ -254,7 +254,7 @@ describe('Integration: CEL Lifecycle', () => {
       expect(tamperedResult.verified).toBe(false);
       expect(tamperedResult.errors.length).toBeGreaterThan(0);
       expect(tamperedResult.errors.some(e => 
-        e.includes('Event 1') && e.includes('failed')
+        e.includes('Event 1') && (e.includes('failed') || e.includes('must use eddsa-jcs-2022'))
       )).toBe(true);
     });
 

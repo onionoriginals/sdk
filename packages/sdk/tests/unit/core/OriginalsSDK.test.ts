@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
+import { OriginalsCel } from '../../../src/cel/OriginalsCel';
 import { signAsync, getPublicKeyAsync } from '@noble/ed25519';
 
 describe('OriginalsSDK', () => {
@@ -121,6 +122,22 @@ describe('OriginalsSDK', () => {
       // This test verifies the method exists and delegates to didwebvh-ts
       const result = await OriginalsSDK.prepareDIDDataForSigning(document, proof);
       expect(result).toBeInstanceOf(Uint8Array);
+    });
+  });
+
+  describe('createCel', () => {
+    test('creates CEL-first API instance', () => {
+      const signer = mock(async () => ({
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: new Date().toISOString(),
+        verificationMethod: 'did:key:z6MkTest#z6MkTest',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'zMockSignature',
+      }));
+
+      const cel = OriginalsSDK.createCel({ layer: 'peer', signer });
+      expect(cel).toBeInstanceOf(OriginalsCel);
     });
   });
 

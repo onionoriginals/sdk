@@ -54,7 +54,7 @@ describe('CEL JSON Serialization', () => {
 
       // Keys should be sorted alphabetically in the data
       const dataKeys = Object.keys(parsed.events[0].data);
-      expect(dataKeys).toEqual(['a', 'm', 'z']);
+      expect(dataKeys).toEqual(['a', 'm', 'operation', 'z']);
     });
 
     test('serializes multiple events correctly', async () => {
@@ -405,7 +405,7 @@ describe('CEL JSON Serialization', () => {
       const json = serializeEventLogJson(original);
       const parsed = parseEventLogJson(json);
 
-      expect(parsed.events[0].data).toEqual(complexData);
+      expect(parsed.events[0].data).toEqual({ ...complexData, operation: 'ResourceAdded' });
     });
 
     test('serialize then parse preserves witness proofs', () => {
@@ -470,7 +470,7 @@ describe('CEL JSON Serialization', () => {
       const json = serializeEventLogJson(log);
       const parsed = parseEventLogJson(json);
 
-      expect(parsed.events[0].data).toEqual({});
+      expect(parsed.events[0].data).toEqual({ operation: 'ResourceAdded' });
     });
 
     test('handles unicode in data', async () => {

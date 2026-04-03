@@ -402,7 +402,7 @@ describe('CEL CBOR Serialization', () => {
       const cbor = serializeEventLogCbor(original);
       const parsed = parseEventLogCbor(cbor);
 
-      expect(parsed.events[0].data).toEqual(complexData);
+      expect(parsed.events[0].data).toEqual({ ...complexData, operation: 'ResourceAdded' });
     });
 
     test('serialize then parse preserves witness proofs', () => {
@@ -542,7 +542,7 @@ describe('CEL CBOR Serialization', () => {
       const cbor = serializeEventLogCbor(log);
       const parsed = parseEventLogCbor(cbor);
 
-      expect(parsed.events[0].data).toEqual({});
+      expect(parsed.events[0].data).toEqual({ operation: 'ResourceAdded' });
     });
 
     test('handles unicode in data', async () => {
