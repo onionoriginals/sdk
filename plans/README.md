@@ -14,7 +14,7 @@ forgery** in the legacy verification path.
 | Plan | Title | Priority | Effort | Risk | Depends on | Status |
 |------|-------|----------|--------|------|------------|--------|
 | 001 | Bind credential verification to issuer DID (close forgery) | P1 | M | MED | — | DONE |
-| 002 | Stop logging private keys in CEL CLI | P1 | S | LOW | — | TODO |
+| 002 | Stop logging private keys in CEL CLI | P1 | S | LOW | — | DONE |
 | 003 | Make `tsc` pass — fix 12 build errors | P1 | S–M | LOW | — | TODO |
 | 004 | AuditLogger Ed25519 signing + re-enable in MigrationManager | P1 | M | MED | — | TODO |
 | 005 | Implement `rotateDIDWebVHKeys` / `recoverDIDWebVH` | P2 | L | HIGH | — | TODO |
