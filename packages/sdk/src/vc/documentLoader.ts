@@ -65,8 +65,13 @@ export class DocumentLoader {
   }
 }
 
-export const createDocumentLoader = (didManager: DIDManager) =>
-  (iri: string) => new DocumentLoader(didManager).load(iri);
+export const createDocumentLoader = (didManager: DIDManager) => {
+  // Reuse one DocumentLoader per factory call. It holds no per-IRI state (it
+  // reads from module-level PRELOADED_CONTEXTS and verificationMethodRegistry),
+  // so this removes the per-IRI allocation with no behavior change.
+  const loader = new DocumentLoader(didManager);
+  return (iri: string) => loader.load(iri);
+};
 
 export const verificationMethodRegistry: Map<string, Record<string, unknown>> = new Map();
 export function registerVerificationMethod(vm: Record<string, unknown> & { id?: string }): void {

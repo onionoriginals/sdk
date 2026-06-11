@@ -19,7 +19,7 @@ forgery** in the legacy verification path.
 | 004 | AuditLogger Ed25519 signing + re-enable in MigrationManager | P1 | M | MED | — | DONE |
 | 005 | Implement `rotateDIDWebVHKeys` / `recoverDIDWebVH` | P2 | L | HIGH | — | DONE |
 | 006 | Extract shared credential digest helper | P2 | M | MED | 001 | DONE |
-| 007 | Cache the DocumentLoader per factory | P2 | S | LOW | — | TODO |
+| 007 | Cache the DocumentLoader per factory | P2 | S | LOW | — | DONE |
 | 008 | DIDCache O(1) LRU + EventEmitter alloc | P3 | S | LOW | — | TODO |
 | 009 | Exclude examples/playground from published build | P3 | S | LOW | 003 | TODO |
 | 010 | Gate CI on typecheck + test exit code | P1* | S | LOW/MED | 003, 004, 005 | TODO |
