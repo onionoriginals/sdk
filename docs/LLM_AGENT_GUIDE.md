@@ -1180,9 +1180,11 @@ asset.on('asset:migrated', (event) => {
 });
 
 // 5. Publish to web (did:webvh layer)
+// The second argument is the publisher's did:webvh DID (or an ExternalSigner),
+// not a bare domain.
 const published = await sdk.lifecycle.publishToWeb(
   asset,
-  'localhost:5000'
+  'did:webvh:example.com:user'
 );
 console.log('Published:', published.id);
 
@@ -1270,7 +1272,7 @@ console.log(`Estimated inscription cost: ${cost.totalSats} sats`);
 // Validate migration
 const validation = await sdk.lifecycle.validateMigration(moduleAsset, 'did:webvh');
 if (validation.valid) {
-  const published = await sdk.lifecycle.publish(moduleAsset, 'example.com');
+  const published = await sdk.lifecycle.publish(moduleAsset, 'did:webvh:example.com:user');
   console.log('Published:', published.id);
 }
 ```
