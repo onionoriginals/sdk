@@ -18,7 +18,7 @@ forgery** in the legacy verification path.
 | 003 | Make `tsc` pass — fix 12 build errors | P1 | S–M | LOW | — | DONE |
 | 004 | AuditLogger Ed25519 signing + re-enable in MigrationManager | P1 | M | MED | — | DONE |
 | 005 | Implement `rotateDIDWebVHKeys` / `recoverDIDWebVH` | P2 | L | HIGH | — | DONE |
-| 006 | Extract shared credential digest helper | P2 | M | MED | 001 | TODO |
+| 006 | Extract shared credential digest helper | P2 | M | MED | 001 | DONE |
 | 007 | Cache the DocumentLoader per factory | P2 | S | LOW | — | TODO |
 | 008 | DIDCache O(1) LRU + EventEmitter alloc | P3 | S | LOW | — | TODO |
 | 009 | Exclude examples/playground from published build | P3 | S | LOW | 003 | TODO |

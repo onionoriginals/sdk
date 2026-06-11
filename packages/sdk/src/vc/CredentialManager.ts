@@ -14,6 +14,7 @@ import {
 } from '../types';
 import { StatusListManager, type StatusCheckResult } from './StatusListManager';
 import { canonicalizeDocument } from '../utils/serialization';
+import { computeCredentialDigest } from '../utils/credential-digest';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
@@ -321,24 +322,9 @@ export class CredentialManager {
     const signature = this.decodeMultibase(proofValue);
     if (!signature) return false;
 
-    const proofSansValue = { ...proof } as Record<string, unknown>;
-    delete proofSansValue.proofValue;
-    // publicKeyMultibase is a key-discovery hint attached after signing; the
-    // sign-time digest never includes it, so exclude it here as well.
-    delete proofSansValue.publicKeyMultibase;
-    const proofInput: Record<string, unknown> = { ...proofSansValue };
-    const credentialContext = credential['@context'];
-    if (credentialContext && !proofInput['@context']) {
-      proofInput['@context'] = credentialContext;
-    }
-    const unsignedCredential: Record<string, unknown> = { ...credential };
-    delete unsignedCredential.proof;
-
-    const c14nProof = await canonicalizeDocument(proofInput);
-    const c14nCred = await canonicalizeDocument(unsignedCredential);
-    const hProof = Buffer.from(sha256(Buffer.from(c14nProof, 'utf8')));
-    const hCred = Buffer.from(sha256(Buffer.from(c14nCred, 'utf8')));
-    const digest = Buffer.concat([hProof, hCred]);
+    const digest = Buffer.from(
+      await computeCredentialDigest(credential as unknown as Record<string, unknown>, proof as unknown as Record<string, unknown>)
+    );
     const signer = this.getSigner();
     try {
       const resolvedKey = await this.resolveVerificationMethodMultibase(
@@ -432,22 +418,9 @@ export class CredentialManager {
     privateKeyMultibase: string,
     proofBase: Proof
   ): Promise<string> {
-    // Construct canonical digest including provided proof sans proofValue
-    const proofSansValue = { ...proofBase } as Record<string, unknown>;
-    delete proofSansValue.proofValue;
-    const proofInput: Record<string, unknown> = { ...proofSansValue };
-    const credentialContext = credential['@context'];
-    if (credentialContext && !proofInput['@context']) {
-      proofInput['@context'] = credentialContext;
-    }
-    const unsignedCredential: Record<string, unknown> = { ...credential };
-    delete unsignedCredential.proof;
-
-    const c14nProof = await canonicalizeDocument(proofInput);
-    const c14nCred = await canonicalizeDocument(unsignedCredential);
-    const hProof = Buffer.from(sha256(Buffer.from(c14nProof, 'utf8')));
-    const hCred = Buffer.from(sha256(Buffer.from(c14nCred, 'utf8')));
-    const digest = Buffer.concat([hProof, hCred]);
+    const digest = Buffer.from(
+      await computeCredentialDigest(credential as unknown as Record<string, unknown>, proofBase as unknown as Record<string, unknown>)
+    );
     const signer = this.getSigner();
     const sig = await signer.sign(Buffer.from(digest), privateKeyMultibase);
     return encodeBase64UrlMultibase(sig);
