@@ -17,7 +17,7 @@ import ordinalsContext from '../contexts/ordinals-plus.json';
 import originalsContext from '../contexts/originals.json';
 
 // Full context documents for proper canonicalization
-const PRELOADED_CONTEXTS: Record<string, unknown> = {
+export const PRELOADED_CONTEXTS: Record<string, unknown> = {
   // W3C and standard contexts
   'https://www.w3.org/2018/credentials/v1': credentialsV1Context,
   'https://www.w3.org/ns/credentials/v2': credentialsV2Context,
@@ -90,7 +90,9 @@ export async function canonicalizeDocument(
       documentLoader: options.documentLoader ?? defaultDocumentLoader,
       useNative: false,
       rdfDirection: 'i18n-datatype',
-      safe: false  // Disable safe mode to allow custom contexts
+      // Error on undefined terms instead of silently excluding them from the
+      // canonical dataset used for signing/hashing (issue #167).
+      safe: true
     });
     return result;
   } catch (error: unknown) {

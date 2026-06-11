@@ -21,6 +21,7 @@ describe('serialization utils', () => {
       '@version': 1.1,
       id: '@id',
       type: '@type',
+      ExampleCredential: 'https://example.org/ExampleCredential',
       name: 'https://schema.org/name',
       details: {
         '@id': 'https://example.org/details',
@@ -112,7 +113,7 @@ describe('serialization utils', () => {
     const doc = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       id: 'urn:test:1',
-      type: 'TestType'
+      type: 'VerifiableCredential'
     };
 
     // Normal case should work

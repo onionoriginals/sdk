@@ -11,6 +11,33 @@ export interface IssueOptions {
   domain?: string;
 }
 
+// Default contexts for credentials issued without an explicit @context.
+// The Originals context supplies an @vocab so issuer-specific terms are
+// defined (and therefore signed) during safe-mode canonicalization.
+const DEFAULT_CONTEXTS = [
+  'https://www.w3.org/ns/credentials/v2',
+  'https://originals.build/context'
+];
+
+const DATA_INTEGRITY_CONTEXT = 'https://w3id.org/security/data-integrity/v2';
+// Contexts that already define the DataIntegrityProof terms used in proofs.
+const SECURING_CONTEXTS = ['https://www.w3.org/ns/credentials/v2', DATA_INTEGRITY_CONTEXT];
+
+/**
+ * Ensure the document's @context defines the Data Integrity proof terms,
+ * appending the data-integrity/v2 context when missing (mirrors the
+ * behaviour of jsonld-signatures). Without it, safe-mode canonicalization
+ * of the proof configuration fails for e.g. plain VCDM 1.1 credentials.
+ */
+function withSecuringContext(
+  context: VerifiableCredential['@context'] | undefined
+): VerifiableCredential['@context'] {
+  if (context === undefined) return [...DEFAULT_CONTEXTS];
+  const list = Array.isArray(context) ? context : [context];
+  const hasSecuring = list.some((c) => typeof c === 'string' && SECURING_CONTEXTS.includes(c));
+  return hasSecuring ? context : [...list, DATA_INTEGRITY_CONTEXT];
+}
+
 export type VerificationMethodLike = {
   id: string;
   controller: string;
@@ -31,7 +58,7 @@ export class Issuer {
   }
 
   async issueCredential(
-    unsigned: Omit<VerifiableCredential, '@context' | 'proof'>,
+    unsigned: Omit<VerifiableCredential, '@context' | 'proof'> & { '@context'?: VerifiableCredential['@context'] },
     options: IssueOptions
   ): Promise<VerifiableCredential> {
     const documentLoader = options.documentLoader || createDocumentLoader(this.didManager);
@@ -40,10 +67,12 @@ export class Issuer {
     const issuerId = typeof unsigned.issuer === 'string' ? unsigned.issuer : (unsigned.issuer as { id?: string })?.id;
     const credential: VerifiableCredential = {
       ...unsigned,
-      '@context': ['https://www.w3.org/ns/credentials/v2'],
-      issuer: issuerId || this.verificationMethod.controller,
-      proof: undefined
+      // Preserve the issuer-supplied @context so every stated term is part of
+      // the signed dataset; only default when none was provided (issue #167).
+      '@context': withSecuringContext(unsigned['@context']),
+      issuer: issuerId || this.verificationMethod.controller
     } as VerifiableCredential;
+    delete (credential as unknown as Record<string, unknown>).proof;
 
     if (!this.verificationMethod.secretKeyMultibase) {
       throw new Error('Missing secretKeyMultibase for issuance');
@@ -64,7 +93,7 @@ export class Issuer {
   }
 
   async issuePresentation(
-    presentation: Omit<VerifiablePresentation, '@context' | 'proof'>,
+    presentation: Omit<VerifiablePresentation, '@context' | 'proof'> & { '@context'?: VerifiablePresentation['@context'] },
     options: IssueOptions
   ): Promise<VerifiablePresentation> {
     const documentLoader = options.documentLoader || createDocumentLoader(this.didManager);
@@ -77,9 +106,10 @@ export class Issuer {
     if (keyType !== 'Ed25519') {
       throw new Error('Only Ed25519 supported for eddsa-rdfc-2022');
     }
+    const presentationContext = withSecuringContext(presentation['@context']);
     const presentationWithContext = {
       ...presentation,
-      '@context': ['https://www.w3.org/ns/credentials/v2']
+      '@context': presentationContext
     } as Record<string, unknown>;
 
     const proof = await DataIntegrityProofManager.createProof(
@@ -97,7 +127,7 @@ export class Issuer {
     );
     return {
       ...presentation,
-      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      '@context': presentationContext,
       proof
     } as VerifiablePresentation;
   }

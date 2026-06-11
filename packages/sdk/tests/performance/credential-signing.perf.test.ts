@@ -28,7 +28,7 @@ function makeSubject(id: string): CredentialSubject {
 
 function makeBaseVC(id: string): VerifiableCredential {
   return {
-    '@context': ['https://www.w3.org/2018/credentials/v1'],
+    '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
     type: ['VerifiableCredential', 'ResourceCreated'],
     issuer: 'did:peer:issuer',
     issuanceDate: new Date().toISOString(),

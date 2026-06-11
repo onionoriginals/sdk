@@ -180,7 +180,11 @@ export class CredentialManager {
     issuer: string
   ): VerifiableCredential {
     return {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': [
+        'https://www.w3.org/2018/credentials/v1',
+        'https://w3id.org/security/data-integrity/v2',
+        'https://originals.build/context'
+      ],
       type: ['VerifiableCredential', type],
       issuer,
       issuanceDate: new Date().toISOString(),
@@ -212,8 +216,9 @@ export class CredentialManager {
             type: docWithKey.type || 'Multikey'
           };
           const issuer = new Issuer(this.didManager, vm);
+          // Keep the credential's @context: replacing it would strip the term
+          // definitions its fields rely on, excluding them from the signature.
           const unsigned = { ...credential };
-          delete (unsigned as Partial<VerifiableCredential>)['@context'];
           delete (unsigned as Partial<VerifiableCredential>).proof;
           return issuer.issueCredential(unsigned, { proofPurpose: 'assertionMethod' });
         }
@@ -312,6 +317,9 @@ export class CredentialManager {
 
     const proofSansValue = { ...proof } as Record<string, unknown>;
     delete proofSansValue.proofValue;
+    // publicKeyMultibase is a key-discovery hint attached after signing; the
+    // sign-time digest never includes it, so exclude it here as well.
+    delete proofSansValue.publicKeyMultibase;
     const proofInput: Record<string, unknown> = { ...proofSansValue };
     const credentialContext = credential['@context'];
     if (credentialContext && !proofInput['@context']) {
@@ -762,7 +770,8 @@ export class CredentialManager {
     const credential: VerifiableCredential = {
       '@context': [
         'https://www.w3.org/2018/credentials/v1',
-        'https://w3id.org/security/data-integrity/v2'
+        'https://w3id.org/security/data-integrity/v2',
+        'https://originals.build/context'
       ],
       type: ['VerifiableCredential', type],
       id: this.generateCredentialId(),

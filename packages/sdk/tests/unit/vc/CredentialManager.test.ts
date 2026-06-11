@@ -18,7 +18,7 @@ describe('CredentialManager', () => {
   } as any;
 
   const baseVC: VerifiableCredential = {
-    '@context': ['https://www.w3.org/2018/credentials/v1'],
+    '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
     type: ['VerifiableCredential', 'ResourceCreated'],
     issuer: 'did:peer:issuer',
     issuanceDate: new Date().toISOString(),
@@ -135,7 +135,7 @@ import { DIDManager } from '../../../src/did/DIDManager';
 describe('CredentialManager verification method resolution', () => {
   const baseConfig = { network: 'mainnet', defaultKeyType: 'ES256K' } as any;
   const credentialTemplate: VerifiableCredential = {
-    '@context': ['https://www.w3.org/2018/credentials/v1'],
+    '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
     type: ['VerifiableCredential', 'ResourceCreated'],
     issuer: 'did:example:issuer',
     issuanceDate: new Date().toISOString(),
@@ -197,7 +197,7 @@ describe('CredentialManager verify with didManager present but legacy path', () 
     const dm = new DIDManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any, dm);
     const vc: any = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
       issuer: 'did:ex',
       issuanceDate: new Date().toISOString(),
@@ -229,7 +229,7 @@ describe('CredentialManager with didManager provided falls back to local signer 
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
 
     const vc: any = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
       issuer: 'did:ex',
       issuanceDate: new Date().toISOString(),
@@ -255,7 +255,7 @@ describe('CredentialManager DID path fallback when VM doc lacks type', () => {
     registerVerificationMethod({ id: 'did:ex:vm#x', controller: 'did:ex' } as any);
     const sk = new Uint8Array(32).fill(1);
     const pk = new Uint8Array(33).fill(2);
-    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
+    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const signed = await cm.signCredential(vc, multikey.encodePrivateKey(sk, 'Secp256k1'), 'did:ex:vm#x');
     expect(signed.proof).toBeDefined();
   });
@@ -270,7 +270,7 @@ describe('CredentialManager local verify path without didManager', () => {
   test('signs and verifies locally when didManager is undefined', async () => {
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
     const baseVC: VerifiableCredential = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
       issuer: 'did:ex',
       issuanceDate: new Date().toISOString(),
@@ -294,7 +294,7 @@ describe('CredentialManager local verify path without didManager', () => {
     const issuanceDate = '2024-01-01T00:00:00Z';
 
     const credentialA: VerifiableCredential = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
       issuer: 'did:ex',
       issuanceDate,
@@ -312,7 +312,7 @@ describe('CredentialManager local verify path without didManager', () => {
     } as any;
 
     const credentialB: VerifiableCredential = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
       issuer: 'did:ex',
       issuanceDate,
@@ -330,12 +330,12 @@ describe('CredentialManager local verify path without didManager', () => {
     } as any;
 
     const signedA = await cm.signCredential(credentialA, skMb, pkMb);
-    const signedB = await cm.signCredential(credentialB, skMb, pkMb);
 
-    // Handle both single proof and proof array cases
-    const proofA = Array.isArray(signedA.proof) ? signedA.proof[0] : signedA.proof;
-    const proofB = Array.isArray(signedB.proof) ? signedB.proof[0] : signedB.proof;
-    expect(proofA?.proofValue).toEqual(proofB?.proofValue);
+    // Canonicalization is order-independent: the proof produced over A must
+    // verify against the same content with reordered properties. (proofValue
+    // can't be compared across two signing calls since the proof's `created`
+    // timestamp is part of the signed dataset.)
+    const signedB = { ...credentialB, proof: signedA.proof } as VerifiableCredential;
     await expect(cm.verifyCredential(signedA)).resolves.toBe(true);
     await expect(cm.verifyCredential(signedB)).resolves.toBe(true);
   });
@@ -348,7 +348,7 @@ describe('CredentialManager local verify path without didManager', () => {
     const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
 
     const credential: VerifiableCredential = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
       issuer: 'did:ex',
       issuanceDate: '2024-01-01T00:00:00Z',
@@ -394,7 +394,7 @@ describe('CredentialManager DID path with VM missing type defaults to Multikey',
     const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
     // Register VM without type so code path uses document.type || 'Multikey'
     registerVerificationMethod({ id: 'did:ex:vm#3', controller: 'did:ex', publicKeyMultibase: pkMb } as any);
-    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
+    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const signed = await cm.signCredential(vc, skMb, 'did:ex:vm#3');
     expect(signed.proof).toBeDefined();
   });
@@ -411,7 +411,7 @@ describe('CredentialManager additional branches', () => {
   });
   test('getSigner default case used for unknown key type', async () => {
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Unknown' as any });
-    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
+    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const sk = new Uint8Array(32).fill(1);
     const pk = new Uint8Array(33).fill(2);
     const signed = await cm.signCredential(vc, multikey.encodePrivateKey(sk, 'Secp256k1'), multikey.encodePublicKey(pk, 'Secp256k1'));
@@ -425,7 +425,7 @@ describe('CredentialManager additional branches', () => {
     const pk = new Uint8Array(32).fill(7);
     const vm = { id: 'did:ex:vm#1', controller: 'did:ex', publicKeyMultibase: (await import('../../../src/crypto/Multikey')).multikey.encodePublicKey(pk, 'Ed25519'), type: 'Multikey' } as any;
     registerVerificationMethod(vm as any);
-    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
+    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const skMb = (await import('../../../src/crypto/Multikey')).multikey.encodePrivateKey(sk, 'Ed25519');
     const signed = await cm.signCredential(vc, skMb, 'did:ex:vm#1');
     expect(signed.proof).toBeDefined();
@@ -439,7 +439,7 @@ describe('CredentialManager additional branches', () => {
     const { multikey } = await import('../../../src/crypto/Multikey');
     const vm = { id: 'did:ex:vm#2', controller: 'did:ex', publicKeyMultibase: multikey.encodePublicKey(pk, 'Ed25519'), type: 'Multikey' } as any;
     registerVerificationMethod(vm as any);
-    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: { id: 'did:ex' }, issuanceDate: new Date().toISOString(), credentialSubject: {} };
+    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'], type: ['VerifiableCredential'], issuer: { id: 'did:ex' }, issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
     const signed = await cm.signCredential(vc, skMb, 'did:ex:vm#2');
     expect(signed.proof).toBeDefined();
@@ -455,7 +455,8 @@ describe('CredentialManager additional branches', () => {
     const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
     const loader = async (iri: string) => {
       if (iri.includes('#')) return { document: { '@context': ['https://www.w3.org/ns/credentials/v2'], id: iri, publicKeyMultibase: pkMb }, documentUrl: iri, contextUrl: null };
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      const { PRELOADED_CONTEXTS } = await import('../../../src/utils/serialization');
+      return { document: PRELOADED_CONTEXTS[iri] ?? { '@context': {} }, documentUrl: iri, contextUrl: null } as any;
     };
     const issuer = new (await import('../../../src/vc/Issuer')).Issuer(dm, { id: 'did:ex#k', controller: 'did:ex', publicKeyMultibase: pkMb, secretKeyMultibase: skMb } as any);
     // Register VM so verifier documentLoader can resolve the key by fragment
@@ -478,7 +479,7 @@ describe('CredentialManager additional branches', () => {
 describe('CredentialManager.getSigner default case when config keyType undefined', () => {
   test('defaults to ES256K', async () => {
     const cm = new CredentialManager({ network: 'mainnet' } as any);
-    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
+    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const sk = new Uint8Array(32).fill(3);
     const pk = new Uint8Array(33).fill(2);
     const signed = await cm.signCredential(vc, multikey.encodePrivateKey(sk, 'Secp256k1'), multikey.encodePublicKey(pk, 'Secp256k1'));
