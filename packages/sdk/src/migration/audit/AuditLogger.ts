@@ -5,12 +5,27 @@
 import { MigrationAuditRecord, IAuditLogger } from '../types';
 import { OriginalsConfig } from '../../types';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { encodeBase64UrlMultibase } from '../../utils/encoding';
+import * as ed25519 from '@noble/ed25519';
+import { encodeBase64UrlMultibase, base58, MULTIBASE_BASE58BTC_HEADER } from '../../utils/encoding';
+
+/**
+ * Key material for signing audit records with Ed25519. When omitted, the
+ * AuditLogger falls back to a keyless SHA-256 integrity hash (integrity-only:
+ * anyone can recompute it; it does not authenticate the signer).
+ */
+export interface AuditSignerConfig {
+  privateKey: Uint8Array;
+  publicKey: Uint8Array;
+  verificationMethod: string;
+}
 
 export class AuditLogger implements IAuditLogger {
   private auditRecords: Map<string, MigrationAuditRecord[]>;
 
-  constructor(private config: OriginalsConfig) {
+  constructor(
+    private config: OriginalsConfig,
+    private signerConfig?: AuditSignerConfig
+  ) {
     this.auditRecords = new Map();
   }
 
@@ -76,28 +91,35 @@ export class AuditLogger implements IAuditLogger {
   }
 
   /**
-   * Sign an audit record for integrity
+   * Produce the canonical byte representation of a record (excluding its
+   * signature) used for both signing and verification.
+   */
+  private canonicalBytes(record: MigrationAuditRecord): Uint8Array {
+    const { signature, ...recordWithoutSig } = record as any;
+    return Buffer.from(JSON.stringify(recordWithoutSig), 'utf8');
+  }
+
+  /**
+   * Sign an audit record.
    *
-   * TODO: Replace with real digital signatures (Ed25519/ECDSA)
-   * Current implementation uses SHA256 hash for integrity verification.
-   * In production, use config.signer.sign(bytes)/verify(bytes, signature) with:
-   * - Ed25519 for performance
-   * - ECDSA (secp256k1/secp256r1) for compatibility
-   *
-   * Example:
-   * const signer = config.signer; // Ed25519Signer or ES256KSigner
-   * const signature = await signer.sign(Buffer.from(canonical), privateKey);
-   * return encodeBase64UrlMultibase(signature);
+   * With an {@link AuditSignerConfig} configured, records are signed with
+   * Ed25519 (base58btc multibase, 'z' prefix) and verification is key-bound.
+   * Without one, a keyless SHA-256 integrity hash is used — this detects
+   * tampering but does NOT authenticate the signer (anyone can recompute it).
    */
   private async signAuditRecord(record: MigrationAuditRecord): Promise<string> {
-    // Create a canonical representation of the record (without signature)
-    const { signature, ...recordWithoutSig } = record as any;
-    const canonical = JSON.stringify(recordWithoutSig);
+    const canonical = this.canonicalBytes(record);
 
-    // Hash the canonical representation (placeholder for real signature)
-    const hash = sha256(Buffer.from(canonical, 'utf8'));
+    if (this.signerConfig) {
+      const signature = await ed25519.signAsync(
+        Buffer.from(canonical).toString('hex'),
+        Buffer.from(this.signerConfig.privateKey).toString('hex')
+      );
+      return MULTIBASE_BASE58BTC_HEADER + base58.encode(signature);
+    }
 
-    // Encode as multibase for storage
+    // Keyless fallback: SHA-256 integrity hash (integrity-only, not signer-authenticated).
+    const hash = sha256(canonical);
     return encodeBase64UrlMultibase(Buffer.from(hash));
   }
 
@@ -109,7 +131,23 @@ export class AuditLogger implements IAuditLogger {
       return false;
     }
 
-    const expectedSignature = await this.signAuditRecord(record);
+    const canonical = this.canonicalBytes(record);
+
+    if (this.signerConfig) {
+      try {
+        const sig = base58.decode(record.signature.slice(1));
+        return await ed25519.verifyAsync(
+          Buffer.from(sig).toString('hex'),
+          Buffer.from(canonical).toString('hex'),
+          Buffer.from(this.signerConfig.publicKey).toString('hex')
+        );
+      } catch {
+        return false;
+      }
+    }
+
+    // Keyless fallback: recompute the SHA-256 integrity hash and compare.
+    const expectedSignature = encodeBase64UrlMultibase(Buffer.from(sha256(canonical)));
     return expectedSignature === record.signature;
   }
 

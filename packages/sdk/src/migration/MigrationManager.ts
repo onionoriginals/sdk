@@ -21,9 +21,7 @@ import { ValidationPipeline } from './validation/ValidationPipeline';
 import { CheckpointManager } from './checkpoint/CheckpointManager';
 import { RollbackManager } from './rollback/RollbackManager';
 import { StateTracker } from './state/StateTracker';
-// TODO: AuditLogger temporarily disabled for v1.0 release
-// Will be re-enabled in v1.1 with proper Ed25519 digital signatures
-// import { AuditLogger } from './audit/AuditLogger';
+import { AuditLogger, AuditSignerConfig } from './audit/AuditLogger';
 import { PeerToWebvhMigration } from './operations/PeerToWebvhMigration';
 import { WebvhToBtcoMigration } from './operations/WebvhToBtcoMigration';
 import { PeerToBtcoMigration } from './operations/PeerToBtcoMigration';
@@ -36,14 +34,8 @@ export class MigrationManager {
   private checkpointManager: CheckpointManager;
   private rollbackManager: RollbackManager;
   private stateTracker: StateTracker;
-  // TODO: AuditLogger temporarily disabled for v1.0 release
-  // private auditLogger: AuditLogger;
+  private auditLogger: AuditLogger;
   private eventEmitter: EventEmitter;
-
-  // Temporary in-memory audit storage for v1.0 (unsigned records)
-  // Will be replaced by proper AuditLogger with signatures in v1.1
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private inMemoryAuditRecords: Map<string, any[]>;
 
   // Migration operation handlers
   private peerToWebvh: PeerToWebvhMigration;
@@ -66,12 +58,11 @@ export class MigrationManager {
     this.checkpointManager = new CheckpointManager(config, didManager, credentialManager);
     this.stateTracker = new StateTracker(config);
     this.rollbackManager = new RollbackManager(config, this.checkpointManager, didManager);
-    // TODO: AuditLogger temporarily disabled for v1.0 release
-    // this.auditLogger = new AuditLogger(config);
+    // Sign audit records with Ed25519 when the config supplies signer material;
+    // otherwise the AuditLogger falls back to a keyless SHA-256 integrity hash.
+    const auditSigner = (config as { auditSigner?: AuditSignerConfig }).auditSigner;
+    this.auditLogger = new AuditLogger(config, auditSigner);
     this.eventEmitter = new EventEmitter();
-
-    // Initialize in-memory audit storage for v1.0
-    this.inMemoryAuditRecords = new Map();
 
     // Initialize migration operations
     this.peerToWebvh = new PeerToWebvhMigration(config, didManager, credentialManager, this.stateTracker);
@@ -219,9 +210,8 @@ export class MigrationManager {
         metadata: options.metadata || {}
       };
 
-      // TODO: AuditLogger temporarily disabled for v1.0 release
-      // Store in-memory for v1.0 (unsigned, will be replaced with signed records in v1.1)
-      this.storeAuditRecordInMemory(auditRecord);
+      // Record a signed audit entry for the migration.
+      await this.auditLogger.logMigration(auditRecord as any);
 
       // Clean up checkpoint after successful migration
       setTimeout(() => {
@@ -297,14 +287,12 @@ export class MigrationManager {
   }
 
   /**
-   * Get migration history for a DID
-   * TODO: AuditLogger temporarily disabled for v1.0 release
-   * Returns in-memory audit records (unsigned) - will use proper AuditLogger in v1.1
+   * Get migration history for a DID. Records are signed (Ed25519 when a signer
+   * is configured, otherwise a keyless SHA-256 integrity hash).
    */
-  // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getMigrationHistory(did: string): Promise<any[]> {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-    return this.inMemoryAuditRecords.get(did) || [];
+    return this.auditLogger.getMigrationHistory(did);
   }
 
   /**
@@ -468,9 +456,8 @@ export class MigrationManager {
       metadata: options.metadata || {}
     };
 
-    // TODO: AuditLogger temporarily disabled for v1.0 release
-    // Store in-memory for v1.0 (unsigned, will be replaced with signed records in v1.1)
-    this.storeAuditRecordInMemory(auditRecord);
+    // Record a signed audit entry for the failed/rolled-back migration.
+    await this.auditLogger.logMigration(auditRecord as any);
 
     return {
       migrationId,
@@ -512,31 +499,6 @@ export class MigrationManager {
     }
 
     throw new Error(`Unsupported migration path: ${sourceLayer} → ${options.targetLayer}`);
-  }
-
-  /**
-   * Store audit record in memory for v1.0
-   * Stores by both source and target DID for easy lookup
-   * TODO: Remove in v1.1 when AuditLogger is re-enabled with signatures
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private storeAuditRecordInMemory(record: any): void {
-    // Store by source DID
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-    const sourceRecords = this.inMemoryAuditRecords.get(record.sourceDid) || [];
-    sourceRecords.push(record);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-    this.inMemoryAuditRecords.set(record.sourceDid, sourceRecords);
-
-    // Also store by target DID if available
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    if (record.targetDid) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-      const targetRecords = this.inMemoryAuditRecords.get(record.targetDid) || [];
-      targetRecords.push(record);
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-      this.inMemoryAuditRecords.set(record.targetDid, targetRecords);
-    }
   }
 
   /**
