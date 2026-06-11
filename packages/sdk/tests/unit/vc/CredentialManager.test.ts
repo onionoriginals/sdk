@@ -42,7 +42,10 @@ describe('CredentialManager', () => {
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
-    const signed = await sdkES256K.credentials.signCredential(baseVC, skMb, pkMb);
+    // Bind the credential to a self-certifying did:key issuer whose key is the
+    // signing key, so verification can authenticate the key against the issuer.
+    const vc = { ...baseVC, issuer: `did:key:${pkMb}` };
+    const signed = await sdkES256K.credentials.signCredential(vc, skMb, `did:key:${pkMb}`);
     expect(signed.proof).toBeDefined();
     await expect(sdkES256K.credentials.verifyCredential(signed)).resolves.toBe(true);
   });
@@ -111,7 +114,8 @@ describe('CredentialManager', () => {
     const pk = await (ed25519 as any).getPublicKeyAsync(sk);
     const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
     const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
-    const signed = await sdkEd.credentials.signCredential(baseVC, skMb, pkMb);
+    const vc = { ...baseVC, issuer: `did:key:${pkMb}` };
+    const signed = await sdkEd.credentials.signCredential(vc, skMb, `did:key:${pkMb}`);
     expect(signed.proof).toBeDefined();
     await expect(sdkEd.credentials.verifyCredential(signed)).resolves.toBe(true);
   });
@@ -122,7 +126,8 @@ describe('CredentialManager', () => {
     const pk = p256.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'P256');
     const pkMb = multikey.encodePublicKey(pk, 'P256');
-    const signed = await sdkES256.credentials.signCredential(baseVC, skMb, pkMb);
+    const vc = { ...baseVC, issuer: `did:key:${pkMb}` };
+    const signed = await sdkES256.credentials.signCredential(vc, skMb, `did:key:${pkMb}`);
     expect(signed.proof).toBeDefined();
     await expect(sdkES256.credentials.verifyCredential(signed)).resolves.toBe(true);
   });
@@ -150,7 +155,9 @@ describe('CredentialManager verification method resolution', () => {
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
     const verificationMethod = 'did:example:123#key-1';
 
-    const signed = await signingManager.signCredential(credentialTemplate, skMb, verificationMethod);
+    // The verification method must belong to the credential issuer's DID.
+    const credential = { ...credentialTemplate, issuer: 'did:example:123' };
+    const signed = await signingManager.signCredential(credential, skMb, verificationMethod);
 
     const dm = new DIDManager(baseConfig);
     spyOn(dm, 'resolveDID').mockResolvedValue({
@@ -170,7 +177,7 @@ describe('CredentialManager verification method resolution', () => {
     await expect(verifyingManager.verifyCredential(signed)).resolves.toBe(true);
   });
 
-  test('falls back to proof.publicKeyMultibase when DID resolution lacks key material', async () => {
+  test('does NOT trust proof.publicKeyMultibase when DID resolution lacks key material', async () => {
     const signingManager = new CredentialManager(baseConfig);
     const sk = secp256k1.utils.randomPrivateKey();
     const pk = secp256k1.getPublicKey(sk, true);
@@ -178,7 +185,10 @@ describe('CredentialManager verification method resolution', () => {
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
     const verificationMethod = 'did:example:456#key-1';
 
-    const signed = await signingManager.signCredential(credentialTemplate, skMb, verificationMethod);
+    const credential = { ...credentialTemplate, issuer: 'did:example:456' };
+    const signed = await signingManager.signCredential(credential, skMb, verificationMethod);
+    // A proof-embedded public key is a forgery vector and must never be trusted:
+    // if the issuer's DID document lacks the key, verification must fail.
     (signed.proof as any).publicKeyMultibase = pkMb;
 
     const dm = new DIDManager(baseConfig);
@@ -188,7 +198,7 @@ describe('CredentialManager verification method resolution', () => {
     } as any);
 
     const verifyingManager = new CredentialManager(baseConfig, dm);
-    await expect(verifyingManager.verifyCredential(signed)).resolves.toBe(true);
+    await expect(verifyingManager.verifyCredential(signed)).resolves.toBe(false);
   });
 });
 
@@ -269,18 +279,19 @@ describe('CredentialManager DID path fallback when VM doc lacks type', () => {
 describe('CredentialManager local verify path without didManager', () => {
   test('signs and verifies locally when didManager is undefined', async () => {
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
-    const baseVC: VerifiableCredential = {
-      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
-      type: ['VerifiableCredential'],
-      issuer: 'did:ex',
-      issuanceDate: new Date().toISOString(),
-      credentialSubject: {}
-    } as any;
     const sk = secp256k1.utils.randomPrivateKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
-    const signed = await cm.signCredential(baseVC, skMb, pkMb);
+    // A self-certifying did:key issuer is verifiable without a didManager.
+    const baseVC: VerifiableCredential = {
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
+      type: ['VerifiableCredential'],
+      issuer: `did:key:${pkMb}`,
+      issuanceDate: new Date().toISOString(),
+      credentialSubject: {}
+    } as any;
+    const signed = await cm.signCredential(baseVC, skMb, `did:key:${pkMb}`);
     const ok = await cm.verifyCredential(signed);
     expect(ok).toBe(true);
   });
@@ -291,12 +302,13 @@ describe('CredentialManager local verify path without didManager', () => {
     const skMb = multikey.encodePrivateKey(seed, 'Ed25519');
     const pk = await (ed25519 as any).getPublicKeyAsync(seed);
     const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
+    const issuer = `did:key:${pkMb}`;
     const issuanceDate = '2024-01-01T00:00:00Z';
 
     const credentialA: VerifiableCredential = {
       '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
-      issuer: 'did:ex',
+      issuer,
       issuanceDate,
       credentialSubject: {
         id: 'did:ex:subject',
@@ -314,7 +326,7 @@ describe('CredentialManager local verify path without didManager', () => {
     const credentialB: VerifiableCredential = {
       '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
-      issuer: 'did:ex',
+      issuer,
       issuanceDate,
       credentialSubject: {
         profile: {
@@ -329,7 +341,7 @@ describe('CredentialManager local verify path without didManager', () => {
       }
     } as any;
 
-    const signedA = await cm.signCredential(credentialA, skMb, pkMb);
+    const signedA = await cm.signCredential(credentialA, skMb, issuer);
 
     // Canonicalization is order-independent: the proof produced over A must
     // verify against the same content with reordered properties. (proofValue
@@ -346,11 +358,12 @@ describe('CredentialManager local verify path without didManager', () => {
     const skMb = multikey.encodePrivateKey(seed, 'Ed25519');
     const pk = await (ed25519 as any).getPublicKeyAsync(seed);
     const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
+    const issuer = `did:key:${pkMb}`;
 
     const credential: VerifiableCredential = {
       '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
-      issuer: 'did:ex',
+      issuer,
       issuanceDate: '2024-01-01T00:00:00Z',
       credentialSubject: {
         id: 'did:ex:subject',
@@ -358,7 +371,7 @@ describe('CredentialManager local verify path without didManager', () => {
       }
     } as any;
 
-    const signed = await cm.signCredential(credential, skMb, pkMb);
+    const signed = await cm.signCredential(credential, skMb, issuer);
     const proof = signed.proof as Proof;
     const reorderedProof: Proof = {
       proofValue: proof.proofValue,

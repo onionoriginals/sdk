@@ -296,6 +296,12 @@ export class CredentialManager {
         const hasCryptosuite = Array.isArray(proofWithSuite)
           ? proofWithSuite[0]?.cryptosuite
           : proofWithSuite.cryptosuite;
+        // A Data Integrity proof (cryptosuite present) must be checked by the
+        // strong verifier. Stripping the cryptosuite to force the legacy path is
+        // not a downgrade attack: the legacy path resolves the signing key from
+        // the issuer's DID (see resolveVerificationMethodMultibase) and the
+        // RDF-canonicalized signature will not match the legacy digest, so a
+        // stripped DI proof simply fails to verify rather than being forgeable.
         if (hasCryptosuite) {
           const verifier = new Verifier(this.didManager);
           const res = await verifier.verifyCredential(credential);
@@ -335,9 +341,10 @@ export class CredentialManager {
     const digest = Buffer.concat([hProof, hCred]);
     const signer = this.getSigner();
     try {
-      const proofWithKey = proof as Proof & { publicKeyMultibase?: string };
-      const resolvedKey = proofWithKey.publicKeyMultibase
-        || await this.resolveVerificationMethodMultibase(verificationMethod);
+      const resolvedKey = await this.resolveVerificationMethodMultibase(
+        verificationMethod,
+        credential.issuer
+      );
       if (!resolvedKey) {
         return false;
       }
@@ -460,13 +467,33 @@ export class CredentialManager {
   }
 
   private async resolveVerificationMethodMultibase(
-    verificationMethod: string
+    verificationMethod: string,
+    issuer?: string | { id?: string }
   ): Promise<string | null> {
-    if (typeof verificationMethod === 'string' && verificationMethod.startsWith('z')) {
-      return verificationMethod;
+    // A bare multibase string is NOT a trusted key — it has no binding to the
+    // issuer. Only did:key (self-certifying) and DID-document resolution are
+    // trusted, and both must match the issuer.
+    const issuerDid = typeof issuer === 'string' ? issuer : issuer?.id;
+
+    if (typeof verificationMethod !== 'string') {
+      return null;
     }
 
-    if (!this.didManager || typeof verificationMethod !== 'string' || !verificationMethod.startsWith('did:')) {
+    // did:key is self-certifying: the key is the identifier. Trust it only when
+    // the issuer is that same did:key.
+    if (verificationMethod.startsWith('did:key:')) {
+      const vmDid = verificationMethod.split('#')[0];
+      if (issuerDid && vmDid !== issuerDid) return null;
+      return vmDid.replace('did:key:', '');
+    }
+
+    if (!this.didManager || !verificationMethod.startsWith('did:')) {
+      // No way to resolve/authenticate the key against an issuer DID.
+      return null;
+    }
+
+    // The verification method must belong to the credential issuer's DID.
+    if (issuerDid && verificationMethod.split('#')[0] !== issuerDid) {
       return null;
     }
 
