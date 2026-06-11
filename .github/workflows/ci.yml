@@ -8,6 +8,45 @@ on:
     branches: ["**"]
 
 jobs:
+  typecheck:
+    name: Typecheck passes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies (bun)
+        run: bun install
+
+      - name: Typecheck
+        run: bun run typecheck
+
+  lint:
+    name: Lint (non-blocking)
+    runs-on: ubuntu-latest
+    # TODO: drop continue-on-error once the pre-existing lint errors are fixed,
+    # making lint a required gate.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies (bun)
+        run: bun install
+
+      - name: Lint
+        run: bun run lint
+
   tests:
     name: Tests pass
     runs-on: ubuntu-latest

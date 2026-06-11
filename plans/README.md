@@ -22,12 +22,28 @@ forgery** in the legacy verification path.
 | 007 | Cache the DocumentLoader per factory | P2 | S | LOW | — | DONE |
 | 008 | DIDCache O(1) LRU + EventEmitter alloc | P3 | S | LOW | — | DONE (DIDCache only; emitter snapshot is load-bearing, left per STOP) |
 | 009 | Exclude examples/playground from published build | P3 | S | LOW | 003 | DONE |
-| 010 | Gate CI on typecheck + test exit code | P1* | S | LOW/MED | 003, 004, 005 | TODO |
+| 010 | Gate CI on typecheck + test exit code | P1* | S | LOW/MED | 003, 004, 005 | DONE (gates added; tests job stays red until 15 pre-existing integration failures are fixed — see note) |
 | 011 | Reconcile README/example lifecycle API drift | P3 | M | LOW | — | TODO |
 | 012 | Decompose LifecycleManager god module | P3 | L | HIGH | 003, 010 | TODO |
 | 013 | (SPIKE) Unified `verify()` entry point | P3 | M | LOW | 001 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)
+
+> **Plan 010 / green-suite note (added during execution):** Plans 001–009 are
+> done and `tsc` is green (0 errors). However, the test suite still has **15
+> pre-existing integration failures** that none of the 13 plans target:
+> - 4× `DIDCache` "DIDManager integration" / "OriginalsSDK config passthrough"
+>   (the DID cache is not wired into `DIDManager`/`OriginalsSDK`),
+> - 7× `Metrics Integration` for `DIDManager` and the SDK's aggregated metrics
+>   (DIDManager operations are not wrapped in `metrics.track`),
+> - 4× `StatusListManager` integration (`OriginalsSDK` does not expose a
+>   `statusList` manager).
+>
+> These are SDK wiring gaps, not regressions from this work (they fail identically
+> at base commit `879ab0c`). Plan 010's CI gates (typecheck job + non-blocking
+> lint) are in place and the `tests` job hard-gates, but the `tests` job will stay
+> red until these 15 are fixed. Recommend a follow-up plan to wire
+> `sdk.statusList`, DIDManager metrics, and the DIDManager↔DIDCache integration.
 
 \* 010 is conceptually P1 (it's the gate that lets everything else rot) but is
 ordered last because turning it on while the repo is red just makes CI red. Land
