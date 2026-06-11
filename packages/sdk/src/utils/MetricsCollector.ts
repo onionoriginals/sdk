@@ -79,6 +79,23 @@ export class MetricsCollector {
   }
   
   /**
+   * Time an async operation and record it via {@link recordOperation}.
+   * Re-throws any error after recording the failure.
+   */
+  async track<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+    const start = Date.now();
+    let success = true;
+    try {
+      return await fn();
+    } catch (e) {
+      success = false;
+      throw e;
+    } finally {
+      this.recordOperation(operation, Date.now() - start, success);
+    }
+  }
+
+  /**
    * Record an operation with timing and success status
    */
   recordOperation(operation: string, duration: number, success: boolean): void {

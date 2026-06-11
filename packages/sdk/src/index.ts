@@ -149,7 +149,6 @@ export {
 export {
   MetricsCollector,
   type OperationMetrics,
-  type FeeMetrics,
   type Metrics,
 } from './utils/MetricsCollector.js';
 export { Logger } from './utils/Logger.js';
