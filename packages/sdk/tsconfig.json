@@ -26,6 +26,8 @@
     "node_modules",
     "dist",
     "coverage",
-    "tests"
+    "tests",
+    "src/examples",
+    "src/playground"
   ]
 }

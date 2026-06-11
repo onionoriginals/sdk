@@ -21,7 +21,7 @@ forgery** in the legacy verification path.
 | 006 | Extract shared credential digest helper | P2 | M | MED | 001 | DONE |
 | 007 | Cache the DocumentLoader per factory | P2 | S | LOW | — | DONE |
 | 008 | DIDCache O(1) LRU + EventEmitter alloc | P3 | S | LOW | — | DONE (DIDCache only; emitter snapshot is load-bearing, left per STOP) |
-| 009 | Exclude examples/playground from published build | P3 | S | LOW | 003 | TODO |
+| 009 | Exclude examples/playground from published build | P3 | S | LOW | 003 | DONE |
 | 010 | Gate CI on typecheck + test exit code | P1* | S | LOW/MED | 003, 004, 005 | TODO |
 | 011 | Reconcile README/example lifecycle API drift | P3 | M | LOW | — | TODO |
 | 012 | Decompose LifecycleManager god module | P3 | L | HIGH | 003, 010 | TODO |
