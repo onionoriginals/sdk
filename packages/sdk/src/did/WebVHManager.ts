@@ -134,6 +134,56 @@ export interface CreateWebVHResult {
   logPath?: string; // Path where the DID log was saved
 }
 
+export interface RotateWebVHKeysOptions {
+  did: string;
+  currentLog: DIDLog;
+  /** The current (authorized) key pair that signs the rotation entry. */
+  currentKeyPair: KeyPair;
+  /** Optional replacement key pair; a fresh Ed25519 pair is generated if omitted. */
+  newKeyPair?: KeyPair;
+  outputDir?: string;
+}
+
+export interface RotateWebVHKeysResult {
+  log: DIDLog;
+  didDocument: DIDDocument;
+  newKeyPair: KeyPair;
+  logPath?: string;
+}
+
+export interface RecoverWebVHOptions {
+  did: string;
+  currentLog: DIDLog;
+  /** The current (possibly compromised) key pair used to authorize recovery. */
+  signingKeyPair: KeyPair;
+  /** Optional new key pair to recover to; a fresh Ed25519 pair is generated if omitted. */
+  recoveryKeyPair?: KeyPair;
+  outputDir?: string;
+}
+
+/** Minimal W3C VC documenting a key-compromise recovery. */
+export interface KeyRecoveryCredential {
+  '@context': string[];
+  type: string[];
+  issuer: string;
+  issuanceDate: string;
+  credentialSubject: {
+    id: string;
+    recoveredAt: string;
+    recoveryReason: string;
+    previousVerificationMethods: string[];
+    newVerificationMethod: string;
+  };
+}
+
+export interface RecoverWebVHResult {
+  log: DIDLog;
+  didDocument: DIDDocument;
+  newKeyPair: KeyPair;
+  recoveryCredential: KeyRecoveryCredential;
+  logPath?: string;
+}
+
 /**
  * WebVH DID Manager for creating and managing did:webvh identifiers
  */
@@ -495,5 +545,142 @@ export class WebVHManager {
       log: result.log,
       logPath,
     };
+  }
+
+  /**
+   * Append a did:webvh log entry that rotates the signing key. The CURRENT key
+   * pair (authorized by the latest entry's updateKeys) signs the rotation, and
+   * the NEW key becomes both the verification method and the updateKey
+   * authorized for the next rotation.
+   */
+  async rotateDIDWebVHKeys(options: RotateWebVHKeysOptions): Promise<RotateWebVHKeysResult> {
+    const { did, currentLog, currentKeyPair, newKeyPair: providedNewKeyPair, outputDir } = options;
+
+    const newKeyPair = providedNewKeyPair || await this.keyManager.generateKeyPair('Ed25519');
+    const result = await this.appendKeyChange(did, currentLog, currentKeyPair, newKeyPair);
+
+    let logPath: string | undefined;
+    if (outputDir) {
+      logPath = await this.saveDIDLog(did, result.log, outputDir);
+    }
+
+    return { log: result.log, didDocument: result.didDocument, newKeyPair, logPath };
+  }
+
+  /**
+   * Recover a did:webvh after key compromise. Behaves like a rotation (the
+   * compromised key authorizes the recovery entry, a new key takes over) and
+   * additionally emits a W3C KeyRecoveryCredential documenting the event.
+   */
+  async recoverDIDWebVH(options: RecoverWebVHOptions): Promise<RecoverWebVHResult> {
+    const { did, currentLog, signingKeyPair, recoveryKeyPair: providedRecoveryKeyPair, outputDir } = options;
+
+    const newKeyPair = providedRecoveryKeyPair || await this.keyManager.generateKeyPair('Ed25519');
+
+    const previousVerificationMethods = this.extractVerificationMethodIds(currentLog, signingKeyPair);
+    const result = await this.appendKeyChange(did, currentLog, signingKeyPair, newKeyPair);
+    const newVerificationMethod = this.extractVerificationMethodIds(result.log, newKeyPair)[0]
+      || `did:key:${newKeyPair.publicKey}`;
+
+    const now = new Date().toISOString();
+    const recoveryCredential: KeyRecoveryCredential = {
+      '@context': [
+        'https://www.w3.org/2018/credentials/v1',
+        'https://w3id.org/security/multikey/v1'
+      ],
+      type: ['VerifiableCredential', 'KeyRecoveryCredential'],
+      issuer: did,
+      issuanceDate: now,
+      credentialSubject: {
+        id: did,
+        recoveredAt: now,
+        recoveryReason: 'key_compromise',
+        previousVerificationMethods,
+        newVerificationMethod,
+      },
+    };
+
+    let logPath: string | undefined;
+    if (outputDir) {
+      logPath = await this.saveDIDLog(did, result.log, outputDir);
+    }
+
+    return { log: result.log, didDocument: result.didDocument, newKeyPair, recoveryCredential, logPath };
+  }
+
+  /**
+   * Shared primitive: append a signed did:webvh log entry that replaces the
+   * verification method and updateKey with `newKeyPair`, signed by
+   * `currentKeyPair`.
+   */
+  private async appendKeyChange(
+    did: string,
+    currentLog: DIDLog,
+    currentKeyPair: KeyPair,
+    newKeyPair: KeyPair
+  ): Promise<{ didDocument: DIDDocument; log: DIDLog }> {
+    const mod = await import('didwebvh-ts') as unknown as {
+      updateDID: (options: Record<string, unknown>) => Promise<{
+        doc: Record<string, unknown>;
+        log: DIDLog;
+      }>;
+      prepareDataForSigning: (
+        document: Record<string, unknown>,
+        proof: Record<string, unknown>
+      ) => Promise<Uint8Array>;
+    };
+    const { updateDID, prepareDataForSigning } = mod;
+    if (typeof updateDID !== 'function') {
+      throw new Error('Failed to load didwebvh-ts: invalid module exports');
+    }
+
+    const currentVerificationMethod: VerificationMethod = {
+      type: 'Multikey',
+      publicKeyMultibase: currentKeyPair.publicKey,
+    };
+    const signer = new OriginalsWebVHSigner(
+      currentKeyPair.privateKey,
+      currentVerificationMethod,
+      prepareDataForSigning,
+      { verificationMethod: currentVerificationMethod }
+    );
+
+    const newVerificationMethod: VerificationMethod = {
+      type: 'Multikey',
+      publicKeyMultibase: newKeyPair.publicKey,
+    };
+
+    const result = await updateDID({
+      log: currentLog,
+      signer,
+      verifier: signer,
+      updateKeys: [`did:key:${newKeyPair.publicKey}`],
+      verificationMethods: [newVerificationMethod],
+      authentication: ['#key-0'],
+      assertionMethod: ['#key-0'],
+    });
+
+    if (!this.isDIDDocument(result.doc)) {
+      throw new Error('Invalid DID document returned from updateDID');
+    }
+
+    return { didDocument: result.doc, log: result.log };
+  }
+
+  /**
+   * Extract verification method identifiers from the latest log entry's DID
+   * document, falling back to the did:key form of the supplied key pair.
+   */
+  private extractVerificationMethodIds(log: DIDLog, keyPair: KeyPair): string[] {
+    const lastEntry = log[log.length - 1];
+    const state = lastEntry?.state as { verificationMethod?: Array<{ id?: string }> } | undefined;
+    const vms = state?.verificationMethod;
+    if (Array.isArray(vms) && vms.length > 0) {
+      const ids = vms.map(vm => vm?.id).filter((id): id is string => typeof id === 'string');
+      if (ids.length > 0) {
+        return ids;
+      }
+    }
+    return [`did:key:${keyPair.publicKey}`];
   }
 }
