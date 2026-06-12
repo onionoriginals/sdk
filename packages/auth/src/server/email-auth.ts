@@ -24,8 +24,12 @@ export interface SessionStorage {
 }
 
 /**
- * Create an in-memory session storage
- * For production, consider using Redis or a database
+ * Create an in-memory session storage.
+ *
+ * **Production warning**: This store is ephemeral — sessions are lost on
+ * process restart and are not shared across multiple instances. For
+ * production deployments, pass a persistent {@link SessionStorage}
+ * implementation backed by Redis, a database, or another shared store.
  */
 export function createInMemorySessionStorage(): SessionStorage {
   const sessions = new Map<string, EmailAuthSession>();
@@ -61,6 +65,12 @@ let defaultSessionStorage: SessionStorage | null = null;
 
 function getDefaultSessionStorage(): SessionStorage {
   if (!defaultSessionStorage) {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn(
+        '[auth] Using in-memory session storage in production: sessions are lost on restart ' +
+          'and not shared across instances. Pass a persistent SessionStorage.'
+      );
+    }
     defaultSessionStorage = createInMemorySessionStorage();
   }
   return defaultSessionStorage;
