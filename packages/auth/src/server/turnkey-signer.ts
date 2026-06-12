@@ -150,7 +150,22 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
 }
 
 /**
- * Create a Turnkey signer for use with the Originals SDK
+ * Options object for creating a Turnkey signer.
+ */
+export interface CreateTurnkeySignerOptions {
+  turnkeyClient: Turnkey;
+  organizationId: string;
+  privateKeyId: string;
+  verificationMethodId: string;
+  publicKeyMultibase: string;
+}
+
+/**
+ * Create a Turnkey signer for use with the Originals SDK.
+ */
+export function createTurnkeySigner(options: CreateTurnkeySignerOptions): TurnkeyWebVHSigner;
+/**
+ * @deprecated Use the options-object form. TODO(@next-major): remove this overload.
  */
 export function createTurnkeySigner(
   subOrgId: string,
@@ -158,13 +173,30 @@ export function createTurnkeySigner(
   turnkeyClient: Turnkey,
   verificationMethodId: string,
   publicKeyMultibase: string
+): TurnkeyWebVHSigner;
+export function createTurnkeySigner(
+  optionsOrSubOrgId: CreateTurnkeySignerOptions | string,
+  keyId?: string,
+  turnkeyClient?: Turnkey,
+  verificationMethodId?: string,
+  publicKeyMultibase?: string
 ): TurnkeyWebVHSigner {
+  if (typeof optionsOrSubOrgId === 'string') {
+    return new TurnkeyWebVHSigner(
+      optionsOrSubOrgId,
+      keyId!,
+      publicKeyMultibase!,
+      turnkeyClient!,
+      verificationMethodId!
+    );
+  }
+  const o = optionsOrSubOrgId;
   return new TurnkeyWebVHSigner(
-    subOrgId,
-    keyId,
-    publicKeyMultibase,
-    turnkeyClient,
-    verificationMethodId
+    o.organizationId,
+    o.privateKeyId,
+    o.publicKeyMultibase,
+    o.turnkeyClient,
+    o.verificationMethodId
   );
 }
 
