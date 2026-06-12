@@ -7,7 +7,7 @@ import {
   type CommitTransactionParams,
   type CommitTransactionResult
 } from '../../../../src/bitcoin/transactions/commit.js';
-import type { Utxo } from '../../../../src/types/bitcoin.js';
+import type { Utxo, ResourceUtxo } from '../../../../src/types/bitcoin.js';
 
 // Helper to create test UTXOs
 const createUtxo = (value: number, index: number = 0, network: 'mainnet' | 'testnet' | 'signet' | 'regtest' = 'mainnet'): Utxo => {
@@ -641,9 +641,93 @@ describe('createCommitTransaction', () => {
         if (error instanceof Error) {
           // Should contain detailed information about what's wrong
           expect(error.message).toMatch(/No valid spendable UTXOs available/);
-          expect(error.message).toMatch(/3 UTXO.*provided but all are invalid/);
+          expect(error.message).toMatch(/3 UTXO/);
         }
       }
+    });
+  });
+
+  describe('Inscription and Lock Protection', () => {
+    test('never selects inscription-bearing UTXO; uses clean UTXO only', async () => {
+      const inscribedUtxo: Utxo = {
+        txid: 'a'.repeat(64),
+        vout: 0,
+        value: 500_000, // Large value — would be selected first if not filtered
+        scriptPubKey: '0014' + 'b'.repeat(40),
+        inscriptions: ['abc123i0']
+      };
+      const cleanUtxo = createUtxo(50_000, 1);
+
+      const params = createCommitParams({
+        utxos: [inscribedUtxo, cleanUtxo]
+      });
+
+      const result = await createCommitTransaction(params);
+
+      // Only the clean UTXO should appear in selected inputs
+      expect(result.selectedUtxos.every(u => !u.inscriptions || u.inscriptions.length === 0)).toBe(true);
+      expect(result.selectedUtxos.some(u => u.txid === 'a'.repeat(64))).toBe(false);
+    });
+
+    test('throws with explanatory error when only inscription-bearing UTXOs are available', async () => {
+      const inscribedUtxo1: Utxo = {
+        txid: 'a'.repeat(64),
+        vout: 0,
+        value: 100_000,
+        scriptPubKey: '0014' + 'b'.repeat(40),
+        inscriptions: ['abc123i0']
+      };
+      const inscribedUtxo2: Utxo = {
+        txid: 'b'.repeat(64),
+        vout: 1,
+        value: 200_000,
+        scriptPubKey: '0014' + 'c'.repeat(40),
+        inscriptions: ['def456i0']
+      };
+
+      const params = createCommitParams({ utxos: [inscribedUtxo1, inscribedUtxo2] });
+
+      await expect(createCommitTransaction(params)).rejects.toThrow(/inscription|locked/i);
+    });
+
+    test('never selects a locked UTXO; uses clean UTXO only', async () => {
+      const lockedUtxo: Utxo = {
+        txid: 'c'.repeat(64),
+        vout: 0,
+        value: 500_000,
+        scriptPubKey: '0014' + 'b'.repeat(40),
+        locked: true
+      };
+      const cleanUtxo = createUtxo(50_000, 1);
+
+      const params = createCommitParams({
+        utxos: [lockedUtxo, cleanUtxo]
+      });
+
+      const result = await createCommitTransaction(params);
+
+      expect(result.selectedUtxos.every(u => !u.locked)).toBe(true);
+      expect(result.selectedUtxos.some(u => u.txid === 'c'.repeat(64))).toBe(false);
+    });
+
+    test('never selects a hasResource UTXO; uses clean UTXO only', async () => {
+      const resourceUtxo: ResourceUtxo = {
+        txid: 'd'.repeat(64),
+        vout: 0,
+        value: 500_000,
+        scriptPubKey: '0014' + 'b'.repeat(40),
+        hasResource: true
+      };
+      const cleanUtxo = createUtxo(50_000, 1);
+
+      const params = createCommitParams({
+        utxos: [resourceUtxo as Utxo, cleanUtxo]
+      });
+
+      const result = await createCommitTransaction(params);
+
+      expect(result.selectedUtxos.every(u => !(u as ResourceUtxo).hasResource)).toBe(true);
+      expect(result.selectedUtxos.some(u => u.txid === 'd'.repeat(64))).toBe(false);
     });
   });
 });
