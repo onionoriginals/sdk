@@ -25,7 +25,7 @@ forgery** in the legacy verification path.
 | 010 | Gate CI on typecheck + test exit code | P1* | S | LOW/MED | 003, 004, 005 | DONE (gates added; tests job stays red until 15 pre-existing integration failures are fixed — see note) |
 | 011 | Reconcile README/example lifecycle API drift | P3 | M | LOW | — | DONE |
 | 012 | Decompose LifecycleManager god module | P3 | L | HIGH | 003, 010 | DONE (batch ops extracted; 2178→1604 lines; 410 lifecycle/integration tests unchanged) |
-| 013 | (SPIKE) Unified `verify()` entry point | P3 | M | LOW | 001 | TODO |
+| 013 | (SPIKE) Unified `verify()` entry point | P3 | M | LOW | 001 | DONE (spike: design doc + PoC + 5 passing tests; recommends building, scoped to VC+CEL) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)
 
