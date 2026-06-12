@@ -110,7 +110,19 @@ describe('email-auth', () => {
       const result = await initiateEmailAuth('user@example.com', client, storage);
 
       expect(result.sessionId).toMatch(/^session_/);
+      // CSPRNG session IDs: prefix + 32 chars of base64url (24 random bytes)
+      expect(result.sessionId.length).toBeGreaterThanOrEqual(32);
       expect(result.message).toContain('Verification code sent');
+    });
+
+    test('session IDs are unique across calls', async () => {
+      const client = createMockTurnkeyClient();
+      const storage2 = createInMemorySessionStorage();
+      const result1 = await initiateEmailAuth('user@example.com', client, storage);
+      const result2 = await initiateEmailAuth('user@example.com', client, storage2);
+
+      expect(result1.sessionId).not.toBe(result2.sessionId);
+      storage2.cleanup();
     });
 
     test('stores session in storage with correct data', async () => {
