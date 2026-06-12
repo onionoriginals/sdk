@@ -86,4 +86,30 @@ export interface KeyRecoveryCredential extends VerifiableCredential {
   };
 }
 
+/**
+ * W3C Bitstring Status List v1 types — used for credential revocation and
+ * suspension. See https://www.w3.org/TR/vc-bitstring-status-list/.
+ */
+export type StatusPurpose = 'revocation' | 'suspension';
+
+/** A `credentialStatus` entry pointing into a Bitstring Status List credential. */
+export interface BitstringStatusListEntry {
+  id?: string;
+  type: 'BitstringStatusListEntry';
+  statusPurpose: StatusPurpose;
+  /** Bit index within the status list, serialized as a string per spec. */
+  statusListIndex: string;
+  /** URL/URN of the status list credential. */
+  statusListCredential: string;
+}
+
+/** The `credentialSubject` of a Bitstring Status List credential. */
+export interface BitstringStatusListSubject {
+  id?: string;
+  type: 'BitstringStatusList';
+  statusPurpose: StatusPurpose;
+  /** GZIP-compressed, base64url-encoded bitstring. */
+  encodedList: string;
+}
+
 

@@ -67,6 +67,7 @@
   },
   "scripts": {
     "build": "tsc && tsc-alias",
+    "typecheck": "tsc --noEmit -p .",
     "prepublishOnly": "npm run build",
     "test": "bun test tests/integration && bun test tests/unit && bun test tests/security && bun test tests/stress",
     "test:coverage": "bun test tests/integration tests/unit --coverage",

@@ -1,18 +1,12 @@
 import { DIDManager } from '../did/DIDManager';
+import { PRELOADED_CONTEXTS } from '../utils/serialization';
 
 type LoadedDocument = { document: unknown; documentUrl: string; contextUrl: string | null };
 
-interface ContextDocument {
-  '@context': {
-    '@version': number;
-  };
-}
-
-const CONTEXTS: Record<string, ContextDocument> = {
-  // Provide 1.1-compatible stubs for jsonld canonize
-  'https://www.w3.org/ns/credentials/v2': { '@context': { '@version': 1.1 } },
-  'https://w3id.org/security/data-integrity/v2': { '@context': { '@version': 1.1 } }
-};
+// Serve the full bundled context documents so canonicalization sees real term
+// definitions. Stub contexts here previously caused every credential field to
+// be dropped from the signed dataset (issue #167).
+const CONTEXTS: Record<string, unknown> = PRELOADED_CONTEXTS;
 
 export class DocumentLoader {
   constructor(private didManager: DIDManager) {}
@@ -71,8 +65,13 @@ export class DocumentLoader {
   }
 }
 
-export const createDocumentLoader = (didManager: DIDManager) =>
-  (iri: string) => new DocumentLoader(didManager).load(iri);
+export const createDocumentLoader = (didManager: DIDManager) => {
+  // Reuse one DocumentLoader per factory call. It holds no per-IRI state (it
+  // reads from module-level PRELOADED_CONTEXTS and verificationMethodRegistry),
+  // so this removes the per-IRI allocation with no behavior change.
+  const loader = new DocumentLoader(didManager);
+  return (iri: string) => loader.load(iri);
+};
 
 export const verificationMethodRegistry: Map<string, Record<string, unknown>> = new Map();
 export function registerVerificationMethod(vm: Record<string, unknown> & { id?: string }): void {

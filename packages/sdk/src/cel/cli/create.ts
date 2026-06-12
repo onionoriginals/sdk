@@ -318,12 +318,17 @@ export async function createCommand(flags: CreateFlags): Promise<CreateResult> {
   if (keyGenerated) {
     result.privateKey = privateKey;
     result.publicKey = publicKey;
-    
-    // Print key info to stderr so it doesn't mix with JSON output
-    console.error(`\n⚠️  New Ed25519 key pair generated. Save these keys securely!`);
-    console.error(`Private Key: ${privateKey}`);
+
+    // Never print the private key to a shared stream (stderr lands in shell
+    // history, terminal transcripts, and CI logs). Write it to an owner-only
+    // file and report the path instead.
+    const keyBase = flags.output || (flags.name ? flags.name.replace(/[^a-zA-Z0-9._-]/g, '_') : 'cel-asset');
+    const keyPath = `${keyBase}.key`;
+    fs.writeFileSync(keyPath, JSON.stringify({ privateKey, publicKey }, null, 2), { mode: 0o600 });
+    console.error(`\n⚠️  New Ed25519 key pair generated.`);
+    console.error(`Private key written to ${keyPath} (mode 0600 — keep it secret).`);
     console.error(`Public Key:  ${publicKey}`);
-    console.error(`\nTo reuse this key, save it to a file and use --key <path>\n`);
+    console.error(`\nTo reuse this key, run with --key ${keyPath}\n`);
   }
   
   return result;

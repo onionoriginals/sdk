@@ -41,14 +41,23 @@ const resources = [{
   hash: 'sha256-hash-of-content'
 }];
 
-const asset = await originals.lifecycle.createAsset(resources);
+const draft = await originals.lifecycle.createDraft(resources);
 
-// Publish for discovery
-await originals.lifecycle.publishToWeb(asset, 'my-domain.com');
+// Publish for discovery (second arg is the publisher's did:webvh DID or an ExternalSigner)
+const published = await originals.lifecycle.publish(draft, 'did:webvh:my-domain.com:my-user');
 
 // Inscribe on Bitcoin for permanent ownership
-await originals.lifecycle.inscribeOnBitcoin(asset);
+const inscribed = await originals.lifecycle.inscribe(published);
+
+// Transfer ownership of an inscribed asset
+// await originals.lifecycle.transfer(inscribed, 'bc1q...newowner');
 ```
+
+> **Lifecycle API:** `createDraft` / `publish` / `inscribe` / `transfer` are the
+> primary, ergonomic API (they add progress callbacks, pre-flight validation, and
+> cost estimates). They delegate to the lower-level `createAsset` / `publishToWeb`
+> / `inscribeOnBitcoin` methods, which remain available for direct use. Prefer the
+> `createDraft` family for new code.
 
 ## Architecture
 

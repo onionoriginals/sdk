@@ -39,7 +39,9 @@ describe('MultiSigManager', () => {
     manager = new MultiSigManager(config);
 
     baseVC = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      // The Originals context defines the custom subject terms so safe-mode
+      // canonicalization includes them in the signed dataset (issue #167).
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential', 'ResourceCreated'],
       issuer: 'did:peer:issuer',
       issuanceDate: new Date().toISOString(),

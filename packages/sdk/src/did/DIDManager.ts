@@ -6,12 +6,21 @@ import { createBtcoDidDocument } from './createBtcoDidDocument';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter';
 import { multikey } from '../crypto/Multikey';
 import { KeyManager } from './KeyManager';
+import { WebVHManager } from './WebVHManager';
+import type {
+  RotateWebVHKeysOptions,
+  RotateWebVHKeysResult,
+  RecoverWebVHOptions,
+  RecoverWebVHResult,
+} from './WebVHManager';
 import { Ed25519Signer } from '../crypto/Signer';
 import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation';
 import * as fs from 'fs';
 import * as path from 'path';
 
 export class DIDManager {
+  private webvhManager?: WebVHManager;
+
   constructor(private config: OriginalsConfig) {}
 
   async createDIDPeer(resources: AssetResource[], returnKeyPair?: false): Promise<DIDDocument>;
@@ -474,6 +483,33 @@ export class DIDManager {
   }
 
   /**
+   * Append a new did:webvh log entry that rotates the signing key. The CURRENT
+   * key pair (which must be authorized by the latest entry's updateKeys) signs
+   * the rotation, and the NEW key becomes both the verification method and the
+   * updateKey authorized for the next rotation.
+   */
+  async rotateDIDWebVHKeys(options: RotateWebVHKeysOptions): Promise<RotateWebVHKeysResult> {
+    return this.getWebVHManager().rotateDIDWebVHKeys(options);
+  }
+
+  /**
+   * Recover a did:webvh after key compromise. Behaves like a rotation (the
+   * compromised key authorizes the recovery entry, a new key takes over), and
+   * additionally emits a W3C KeyRecoveryCredential documenting the event.
+   */
+  async recoverDIDWebVH(options: RecoverWebVHOptions): Promise<RecoverWebVHResult> {
+    return this.getWebVHManager().recoverDIDWebVH(options);
+  }
+
+  /** Lazily instantiate the WebVHManager used for rotation/recovery primitives. */
+  private getWebVHManager(): WebVHManager {
+    if (!this.webvhManager) {
+      this.webvhManager = new WebVHManager();
+    }
+    return this.webvhManager;
+  }
+
+  /**
    * Saves the DID log to the appropriate did.jsonl path
    * @param did - The DID identifier
    * @param log - The DID log to save
@@ -635,6 +671,16 @@ export interface CreateWebVHResult {
   keyPair: KeyPair;
   logPath?: string;
 }
+
+// Rotation/recovery option and result shapes are defined alongside the
+// WebVHManager primitives they drive.
+export type {
+  RotateWebVHKeysOptions,
+  RotateWebVHKeysResult,
+  RecoverWebVHOptions,
+  RecoverWebVHResult,
+  KeyRecoveryCredential,
+} from './WebVHManager';
 
 /**
  * Adapter to use Originals SDK signers with didwebvh-ts

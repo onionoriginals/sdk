@@ -228,7 +228,7 @@ async function handleDidPeer(state: SessionState, args: string[]): Promise<void>
 
   const result = await state.sdk.did.createDIDPeer(resources, true);
   const didDoc = 'didDocument' in result ? result.didDocument : result;
-  const did = (didDoc as Record<string, unknown>).id as string;
+  const did = (didDoc as unknown as Record<string, unknown>).id as string;
 
   console.log(`\n  Created did:peer`);
   console.log(`  DID: ${did}`);

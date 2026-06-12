@@ -4,18 +4,24 @@
 import { describe, test, expect } from 'bun:test';
 import { EdDSACryptosuiteManager } from '../../../../src/vc/cryptosuites/eddsa';
 import { multikey } from '../../../../src/crypto/Multikey';
+import { PRELOADED_CONTEXTS } from '../../../../src/utils/serialization';
+
+// Safe-mode canonicalization requires real context documents (issue #167);
+// stub contexts would silently drop every term from the signed dataset.
+const contextDocument = (iri: string) =>
+  ({ document: PRELOADED_CONTEXTS[iri] ?? { '@context': {} }, documentUrl: iri, contextUrl: null }) as any;
 
 describe('EdDSA additional branches', () => {
   test('createProof throws on invalid private key format', async () => {
-    await expect(EdDSACryptosuiteManager.createProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'x' }, {
+    await expect(EdDSACryptosuiteManager.createProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' }, {
       verificationMethod: 'did:ex#k', proofPurpose: 'assertionMethod', cryptosuite: 'eddsa-rdfc-2022', privateKey: 123 as any,
-      documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null })
+      documentLoader: async (iri: string) => contextDocument(iri)
     } as any)).rejects.toThrow('Invalid private key format');
   });
 
   test('verifyProof returns error for non-Ed25519 VM', async () => {
     const pkMb = multikey.encodePublicKey(new Uint8Array(33).fill(1), 'Secp256k1');
-    const res = await EdDSACryptosuiteManager.verifyProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'x' }, {
+    const res = await EdDSACryptosuiteManager.verifyProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' }, {
       type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:ex#k', proofPurpose: 'assertionMethod', proofValue: 'z1L'
     } as any, { documentLoader: async () => ({ document: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:ex#k', publicKeyMultibase: pkMb }, documentUrl: '', contextUrl: null }) });
     expect(res.verified).toBe(false);
@@ -39,9 +45,9 @@ describe('EdDSA coverage extras', () => {
       if (iri.includes('#')) {
         return { document: { '@context': goodContext, id: iri, publicKeyMultibase: pkMb }, documentUrl: iri, contextUrl: null };
       }
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
-    const doc: any = { '@context': goodContext, id: 'urn:doc-default-purpose' };
+    const doc: any = { '@context': goodContext, id: 'urn:doc-default-purpose', name: 'test' };
     const proof = await EdDSACryptosuiteManager.createProof(doc, { verificationMethod: vm, privateKey: sk, cryptosuite: 'eddsa-rdfc-2022', documentLoader: loader });
     // The method deletes @context before returning, so we assert the purpose value
     expect(proof.proofPurpose).toBe('assertionMethod');
@@ -55,9 +61,9 @@ describe('EdDSA coverage extras', () => {
       if (iri.includes('#')) {
         return { document: { '@context': goodContext, id: iri, publicKeyMultibase: pkMb }, documentUrl: iri, contextUrl: null };
       }
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
-    const proof = await EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:chal' }, { verificationMethod: vm, privateKey: sk, cryptosuite: 'eddsa-rdfc-2022', challenge: '123', documentLoader: loader });
+    const proof = await EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:chal', name: 'test' }, { verificationMethod: vm, privateKey: sk, cryptosuite: 'eddsa-rdfc-2022', challenge: '123', documentLoader: loader });
     expect((proof as any).challenge).toBe('123');
     expect((proof as any).domain).toBeUndefined();
   });
@@ -70,9 +76,9 @@ describe('EdDSA coverage extras', () => {
       if (iri.includes('#')) {
         return { document: { '@context': goodContext, id: iri, publicKeyMultibase: pkMb }, documentUrl: iri, contextUrl: null };
       }
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
-    const proof = await EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:domain' }, { verificationMethod: vm, privateKey: sk, cryptosuite: 'eddsa-rdfc-2022', domain: 'ex.org', documentLoader: loader });
+    const proof = await EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:domain', name: 'test' }, { verificationMethod: vm, privateKey: sk, cryptosuite: 'eddsa-rdfc-2022', domain: 'ex.org', documentLoader: loader });
     expect((proof as any).domain).toBe('ex.org');
     expect((proof as any).challenge).toBeUndefined();
   });
@@ -83,9 +89,9 @@ describe('EdDSA coverage extras', () => {
       if (iri.includes('#')) {
         return { document: { '@context': goodContext, id: iri, publicKeyMultibase: pkMb }, documentUrl: iri, contextUrl: null };
       }
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
-    const doc: any = { '@context': goodContext, id: 'urn:doc' };
+    const doc: any = { '@context': goodContext, id: 'urn:doc', name: 'test' };
     const badProof: any = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:ex#k', proofPurpose: 'assertionMethod', proofValue: 'not-multibase' };
     const res = await EdDSACryptosuiteManager.verifyProof(doc, badProof, { documentLoader: loader });
     expect(res.verified).toBe(false);
@@ -95,14 +101,14 @@ describe('EdDSA coverage extras', () => {
 
   test('verifyProof uses Unknown verification error when thrown value lacks message', async () => {
     const pkMb = multikey.encodePublicKey(new Uint8Array(32).fill(4), 'Ed25519');
-    const doc: any = { '@context': goodContext, id: 'urn:doc-unknown' };
+    const doc: any = { '@context': goodContext, id: 'urn:doc-unknown', name: 'test' };
     const proof: any = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:ex#vm-unknown', proofPurpose: 'assertionMethod', proofValue: 'z1L' };
     const loader = async (iri: string) => {
       if (iri.includes('#')) {
         // Throw a primitive string (no message property) only on VM fetch, after transform/hash succeeded
         throw '';
       }
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
     const res = await EdDSACryptosuiteManager.verifyProof(doc, proof, { documentLoader: loader });
     expect(res.verified).toBe(false);
@@ -126,11 +132,11 @@ describe('EdDSA cryptosuite edge cases', () => {
     if (iri.includes('#')) {
       return { document: { '@context': goodContext, id: iri, publicKeyMultibase: pkMb }, documentUrl: iri, contextUrl: null };
     }
-    return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+    return contextDocument(iri);
   };
 
   test('createProof signs with raw Uint8Array 32-byte private key', async () => {
-    const proof = await EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:raw32' }, {
+    const proof = await EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:raw32', name: 'test' }, {
       verificationMethod: 'did:ex#key-raw', proofPurpose: 'assertionMethod', privateKey: pk32,
       cryptosuite: 'eddsa-rdfc-2022', documentLoader: okLoader
     });
@@ -139,7 +145,7 @@ describe('EdDSA cryptosuite edge cases', () => {
   });
 
   test('createProof includes challenge and domain options', async () => {
-    const proof = await EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:opts' }, {
+    const proof = await EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:opts', name: 'test' }, {
       verificationMethod: 'did:ex#key-opts', proofPurpose: 'assertionMethod', privateKey: pk32,
       cryptosuite: 'eddsa-rdfc-2022', challenge: 'abc', domain: 'example.org', documentLoader: okLoader
     });
@@ -149,7 +155,7 @@ describe('EdDSA cryptosuite edge cases', () => {
 
   test('createProof invalid private key length 33 throws', async () => {
     const bad33 = new Uint8Array(33);
-    await expect(EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:bad33' }, {
+    await expect(EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:bad33', name: 'test' }, {
       verificationMethod: 'did:ex#key-bad33', proofPurpose: 'assertionMethod', privateKey: bad33,
       cryptosuite: 'eddsa-rdfc-2022', documentLoader: okLoader
     })).rejects.toThrow('Invalid private key length');
@@ -157,7 +163,7 @@ describe('EdDSA cryptosuite edge cases', () => {
 
   test('createProof invalid private key length 63 throws', async () => {
     const bad63 = new Uint8Array(63);
-    await expect(EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:bad63' }, {
+    await expect(EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:bad63', name: 'test' }, {
       verificationMethod: 'did:ex#key-bad63', proofPurpose: 'assertionMethod', privateKey: bad63,
       cryptosuite: 'eddsa-rdfc-2022', documentLoader: okLoader
     })).rejects.toThrow('Invalid private key length');
@@ -166,7 +172,7 @@ describe('EdDSA cryptosuite edge cases', () => {
   test('createProof with non-Ed25519 multikey string errors', async () => {
     const secpSk = new Uint8Array(32).fill(5);
     const secpSkMb = multikey.encodePrivateKey(secpSk, 'Secp256k1');
-    await expect(EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:secpSk' }, {
+    await expect(EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:secpSk', name: 'test' }, {
       verificationMethod: 'did:ex#key-non-ed', proofPurpose: 'assertionMethod', privateKey: secpSkMb,
       cryptosuite: 'eddsa-rdfc-2022', documentLoader: okLoader
     })).rejects.toThrow('Invalid key type for EdDSA');
@@ -182,9 +188,9 @@ describe('EdDSA cryptosuite edge cases', () => {
       if (iri.includes('#')) {
         return { document: { '@context': goodContext, id: iri, publicKeyMultibase: signingPkMb }, documentUrl: iri, contextUrl: null };
       }
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
-    const doc = { '@context': goodContext, id: 'urn:test:verify-wrong-pk' };
+    const doc = { '@context': goodContext, id: 'urn:test:verify-wrong-pk', name: 'test' };
     const proof = await EdDSACryptosuiteManager.createProof(doc, {
       verificationMethod: vmId, proofPurpose: 'assertionMethod', privateKey: signingSk,
       cryptosuite: 'eddsa-rdfc-2022', documentLoader: signingLoader
@@ -196,7 +202,7 @@ describe('EdDSA cryptosuite edge cases', () => {
       if (iri.includes('#')) {
         return { document: { '@context': goodContext, id: iri, publicKeyMultibase: wrongPkMb }, documentUrl: iri, contextUrl: null };
       }
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
     const res = await EdDSACryptosuiteManager.verifyProof(doc, proof as any, { documentLoader: wrongLoader });
     expect(res.verified).toBe(false);
@@ -212,9 +218,9 @@ describe('EdDSA cryptosuite edge cases', () => {
       if (iri.includes('#')) {
         return { document: { '@context': goodContext, id: iri, publicKeyMultibase: pkMbLocal }, documentUrl: iri, contextUrl: null };
       }
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
-    const doc = { '@context': goodContext, id: 'urn:test:verify-ok' };
+    const doc = { '@context': goodContext, id: 'urn:test:verify-ok', name: 'test' };
     const proof = await EdDSACryptosuiteManager.createProof(doc, {
       verificationMethod: vm, proofPurpose: 'assertionMethod', privateKey: sk, cryptosuite: 'eddsa-rdfc-2022', documentLoader: loader
     });
@@ -223,17 +229,21 @@ describe('EdDSA cryptosuite edge cases', () => {
   });
 
   test('createProof propagates canonizeProof/hash-stage exception via loader', async () => {
-    // Fail only during proof canonization stage (hash path), not during transform
+    // Fail only during proof canonization stage (hash path), not during transform.
+    // The proof config is canonicalized with the document's @context, so the
+    // context is loaded once for transform and again for the proof config.
+    let contextLoads = 0;
     const loader = async (iri: string) => {
-      if (iri.includes('w3id.org/security/data-integrity')) {
-        throw new Error('hash-stage canonize fail');
-      }
       if (iri.includes('#')) {
         return { document: { '@context': goodContext, id: iri, publicKeyMultibase: pkMb }, documentUrl: iri, contextUrl: null };
       }
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      contextLoads++;
+      if (contextLoads > 1) {
+        throw new Error('hash-stage canonize fail');
+      }
+      return contextDocument(iri);
     };
-    await expect(EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:hash-fail' }, {
+    await expect(EdDSACryptosuiteManager.createProof({ '@context': goodContext, id: 'urn:test:hash-fail', name: 'test' }, {
       verificationMethod: 'did:ex#key-hash', proofPurpose: 'assertionMethod', privateKey: pk32,
       cryptosuite: 'eddsa-rdfc-2022', documentLoader: loader
     } as any)).rejects.toThrow();
@@ -251,9 +261,9 @@ describe('EdDSA error branches', () => {
     const skMbSecp = multikey.encodePrivateKey(sk, 'Secp256k1');
     const loader = async (iri: string) => {
       if (iri.includes('#')) return { document: { '@context': ['https://www.w3.org/ns/credentials/v2'], id: iri }, documentUrl: iri, contextUrl: null } as any;
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
-    await expect(EdDSACryptosuiteManager.createProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x' }, {
+    await expect(EdDSACryptosuiteManager.createProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' }, {
       verificationMethod: 'did:ex#key-1', proofPurpose: 'assertionMethod', privateKey: skMbSecp, cryptosuite: 'eddsa-rdfc-2022', documentLoader: loader
     })).rejects.toThrow('Invalid key type for EdDSA');
   });
@@ -263,7 +273,7 @@ describe('EdDSA error branches', () => {
     const pkMbSecp = multikey.encodePublicKey(pkSecp, 'Secp256k1');
     const loader = async (iri: string) => {
       if (iri.includes('#')) return { document: { '@context': ['https://www.w3.org/ns/credentials/v2'], id: iri, publicKeyMultibase: pkMbSecp }, documentUrl: iri, contextUrl: null } as any;
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
     const proof = {
       type: 'DataIntegrityProof',
@@ -272,7 +282,7 @@ describe('EdDSA error branches', () => {
       proofPurpose: 'assertionMethod',
       proofValue: 'z1L'
     } as any;
-    const res = await EdDSACryptosuiteManager.verifyProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x' }, proof, { documentLoader: loader });
+    const res = await EdDSACryptosuiteManager.verifyProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' }, proof, { documentLoader: loader });
     expect(res.verified).toBe(false);
     expect(res.errors?.[0]).toBe('Invalid key type for EdDSA');
   });
@@ -306,26 +316,26 @@ describe('EdDSACryptosuiteManager extra branches', () => {
     if (iri.includes('#')) {
       return { document: { '@context': ['https://www.w3.org/ns/credentials/v2'], id: iri, publicKeyMultibase: pubMb }, documentUrl: iri, contextUrl: null };
     }
-    return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+    return contextDocument(iri);
   };
 
   test('sign with 64-byte private key slices to 32', async () => {
     const sixtyFour = new Uint8Array(64);
     sixtyFour.set(pkRaw);
-    const proof = await EdDSACryptosuiteManager.createProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'x' }, {
+    const proof = await EdDSACryptosuiteManager.createProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' }, {
       verificationMethod: 'did:ex#k', proofPurpose: 'assertionMethod', privateKey: sixtyFour, cryptosuite: 'eddsa-rdfc-2022', documentLoader: loader
     });
     expect(proof.proofValue).toBeTruthy();
   });
 
   test('invalid private key length throws', async () => {
-    await expect(EdDSACryptosuiteManager.createProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'x' }, {
+    await expect(EdDSACryptosuiteManager.createProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' }, {
       verificationMethod: 'did:ex#k', proofPurpose: 'assertionMethod', privateKey: new Uint8Array(31), cryptosuite: 'eddsa-rdfc-2022', documentLoader: loader
     })).rejects.toThrow('Invalid private key length');
   });
 
   test('verify returns false on signature mismatch', async () => {
-    const res = await EdDSACryptosuiteManager.verifyProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'x' }, {
+    const res = await EdDSACryptosuiteManager.verifyProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' }, {
       type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:ex#k', proofPurpose: 'assertionMethod', proofValue: 'z1L' // invalid base58btc
     } as any, { documentLoader: loader });
     expect(res.verified).toBe(false);
@@ -336,7 +346,7 @@ describe('EdDSACryptosuiteManager extra branches', () => {
       if (iri.includes('#')) {
         return { document: { '@context': ['https://www.w3.org/ns/credentials/v2'], id: iri, publicKeyMultibase: pubMb }, documentUrl: iri, contextUrl: null };
       }
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
     const proof: any = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:ex#k', proofPurpose: 'assertionMethod', proofValue: 'z1L' };
     const doc: any = { '@context': ['https://www.w3.org/ns/credentials/v2'] };
@@ -359,9 +369,9 @@ describe('EdDSA createProof with multikey string', () => {
     const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
     const loader = async (iri: string) => {
       if (iri.includes('#')) return { document: { '@context': ['https://www.w3.org/ns/credentials/v2'], id: iri, publicKeyMultibase: pkMb }, documentUrl: iri, contextUrl: null };
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
-    const proof = await EdDSACryptosuiteManager.createProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x' }, {
+    const proof = await EdDSACryptosuiteManager.createProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' }, {
       verificationMethod: 'did:ex#key-1', proofPurpose: 'assertionMethod', privateKey: skMb, cryptosuite: 'eddsa-rdfc-2022', documentLoader: loader
     });
     expect(proof.type).toBe('DataIntegrityProof');
@@ -388,9 +398,9 @@ describe('EdDSA verifyProof success path', () => {
       if (iri.includes('#')) {
         return { document: { '@context': ['https://www.w3.org/ns/credentials/v2'], id: iri, publicKeyMultibase: pkMb }, documentUrl: iri, contextUrl: null };
       }
-      return { document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null } as any;
+      return contextDocument(iri);
     };
-    const doc: any = { '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:doc' };
+    const doc: any = { '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:doc', name: 'test' };
     const proof = await EdDSACryptosuiteManager.createProof(doc, { verificationMethod: vmId, proofPurpose: 'assertionMethod', privateKey: skMb, cryptosuite: 'eddsa-rdfc-2022', documentLoader: loader });
     const res = await EdDSACryptosuiteManager.verifyProof({ ...doc, proof }, proof as any, { documentLoader: loader });
     expect(res.verified).toBe(true);

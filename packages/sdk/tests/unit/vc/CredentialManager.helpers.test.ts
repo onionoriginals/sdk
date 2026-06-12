@@ -251,7 +251,7 @@ describe('CredentialManager - Credential Chaining', () => {
   describe('computeCredentialHash', () => {
     test('computes consistent hash for same credential', async () => {
       const credential: VerifiableCredential = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential', 'TestCredential'],
         issuer: 'did:test:issuer',
         issuanceDate: '2024-01-15T10:00:00Z',
@@ -267,24 +267,24 @@ describe('CredentialManager - Credential Chaining', () => {
 
     test('computes different hash for different credentials', async () => {
       const credential1: VerifiableCredential = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential', 'TypeOne'],
         issuer: 'did:test:issuer1',
         issuanceDate: '2024-01-15T10:00:00Z',
         credentialSubject: { 
-          id: 'subject1',
+          id: 'did:test:subject1',
           name: 'Alice',
           role: 'admin'
         }
       };
       
       const credential2: VerifiableCredential = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential', 'TypeTwo'],
         issuer: 'did:test:issuer2',
         issuanceDate: '2024-01-16T10:00:00Z',
         credentialSubject: { 
-          id: 'subject2',
+          id: 'did:test:subject2',
           name: 'Bob',
           role: 'user'
         }
@@ -309,12 +309,12 @@ describe('CredentialManager - Credential Chaining', () => {
     test('validates chain with linked credentials', async () => {
       // Create first credential
       const cred1: VerifiableCredential = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential'],
         id: 'urn:uuid:cred1',
         issuer: 'did:test:issuer',
         issuanceDate: '2024-01-01T00:00:00Z',
-        credentialSubject: { id: 'subject', value: 1 }
+        credentialSubject: { id: 'did:test:subject', value: 1 }
       };
       
       // Compute hash of first credential
@@ -322,13 +322,13 @@ describe('CredentialManager - Credential Chaining', () => {
       
       // Create second credential linked to first
       const cred2: VerifiableCredential = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential'],
         id: 'urn:uuid:cred2',
         issuer: 'did:test:issuer',
         issuanceDate: '2024-01-02T00:00:00Z',
         credentialSubject: { 
-          id: 'subject', 
+          id: 'did:test:subject', 
           value: 2,
           previousCredential: { id: 'urn:uuid:cred1', hash: cred1Hash }
         }
@@ -352,7 +352,7 @@ describe('CredentialManager - Selective Disclosure', () => {
   describe('prepareSelectiveDisclosure', () => {
     test('prepares credential with mandatory pointers', async () => {
       const credential: VerifiableCredential = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential'],
         issuer: 'did:test:issuer',
         issuanceDate: '2024-01-15T10:00:00Z',
@@ -377,11 +377,11 @@ describe('CredentialManager - Selective Disclosure', () => {
 
     test('throws error for empty mandatory pointers', async () => {
       const credential: VerifiableCredential = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential'],
         issuer: 'did:test:issuer',
         issuanceDate: '2024-01-15T10:00:00Z',
-        credentialSubject: { id: 'subject' }
+        credentialSubject: { id: 'did:test:subject' }
       };
       
       await expect(
@@ -393,11 +393,11 @@ describe('CredentialManager - Selective Disclosure', () => {
 
     test('throws error for invalid JSON Pointer format', async () => {
       const credential: VerifiableCredential = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential'],
         issuer: 'did:test:issuer',
         issuanceDate: '2024-01-15T10:00:00Z',
-        credentialSubject: { id: 'subject' }
+        credentialSubject: { id: 'did:test:subject' }
       };
       
       await expect(
@@ -411,7 +411,7 @@ describe('CredentialManager - Selective Disclosure', () => {
   describe('deriveSelectiveProof', () => {
     test('creates derived proof result with disclosed/hidden fields', async () => {
       const credential: VerifiableCredential = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential'],
         issuer: 'did:test:issuer',
         issuanceDate: '2024-01-15T10:00:00Z',
@@ -435,11 +435,11 @@ describe('CredentialManager - Selective Disclosure', () => {
 
     test('throws error for invalid JSON Pointer in disclosure', async () => {
       const credential: VerifiableCredential = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential'],
         issuer: 'did:test:issuer',
         issuanceDate: '2024-01-15T10:00:00Z',
-        credentialSubject: { id: 'subject' }
+        credentialSubject: { id: 'did:test:subject' }
       };
       
       await expect(
@@ -450,7 +450,7 @@ describe('CredentialManager - Selective Disclosure', () => {
 
   describe('getFieldByPointer', () => {
     const credential: VerifiableCredential = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
       issuer: 'did:test:issuer',
       issuanceDate: '2024-01-15T10:00:00Z',

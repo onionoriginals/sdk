@@ -14,6 +14,7 @@ import {
 } from '../types';
 import { StatusListManager, type StatusCheckResult } from './StatusListManager';
 import { canonicalizeDocument } from '../utils/serialization';
+import { computeCredentialDigest } from '../utils/credential-digest';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
@@ -180,7 +181,11 @@ export class CredentialManager {
     issuer: string
   ): VerifiableCredential {
     return {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': [
+        'https://www.w3.org/2018/credentials/v1',
+        'https://w3id.org/security/data-integrity/v2',
+        'https://originals.build/context'
+      ],
       type: ['VerifiableCredential', type],
       issuer,
       issuanceDate: new Date().toISOString(),
@@ -212,8 +217,9 @@ export class CredentialManager {
             type: docWithKey.type || 'Multikey'
           };
           const issuer = new Issuer(this.didManager, vm);
+          // Keep the credential's @context: replacing it would strip the term
+          // definitions its fields rely on, excluding them from the signature.
           const unsigned = { ...credential };
-          delete (unsigned as Partial<VerifiableCredential>)['@context'];
           delete (unsigned as Partial<VerifiableCredential>).proof;
           return issuer.issueCredential(unsigned, { proofPurpose: 'assertionMethod' });
         }
@@ -291,6 +297,12 @@ export class CredentialManager {
         const hasCryptosuite = Array.isArray(proofWithSuite)
           ? proofWithSuite[0]?.cryptosuite
           : proofWithSuite.cryptosuite;
+        // A Data Integrity proof (cryptosuite present) must be checked by the
+        // strong verifier. Stripping the cryptosuite to force the legacy path is
+        // not a downgrade attack: the legacy path resolves the signing key from
+        // the issuer's DID (see resolveVerificationMethodMultibase) and the
+        // RDF-canonicalized signature will not match the legacy digest, so a
+        // stripped DI proof simply fails to verify rather than being forgeable.
         if (hasCryptosuite) {
           const verifier = new Verifier(this.didManager);
           const res = await verifier.verifyCredential(credential);
@@ -310,26 +322,15 @@ export class CredentialManager {
     const signature = this.decodeMultibase(proofValue);
     if (!signature) return false;
 
-    const proofSansValue = { ...proof } as Record<string, unknown>;
-    delete proofSansValue.proofValue;
-    const proofInput: Record<string, unknown> = { ...proofSansValue };
-    const credentialContext = credential['@context'];
-    if (credentialContext && !proofInput['@context']) {
-      proofInput['@context'] = credentialContext;
-    }
-    const unsignedCredential: Record<string, unknown> = { ...credential };
-    delete unsignedCredential.proof;
-
-    const c14nProof = await canonicalizeDocument(proofInput);
-    const c14nCred = await canonicalizeDocument(unsignedCredential);
-    const hProof = Buffer.from(sha256(Buffer.from(c14nProof, 'utf8')));
-    const hCred = Buffer.from(sha256(Buffer.from(c14nCred, 'utf8')));
-    const digest = Buffer.concat([hProof, hCred]);
+    const digest = Buffer.from(
+      await computeCredentialDigest(credential as unknown as Record<string, unknown>, proof as unknown as Record<string, unknown>)
+    );
     const signer = this.getSigner();
     try {
-      const proofWithKey = proof as Proof & { publicKeyMultibase?: string };
-      const resolvedKey = proofWithKey.publicKeyMultibase
-        || await this.resolveVerificationMethodMultibase(verificationMethod);
+      const resolvedKey = await this.resolveVerificationMethodMultibase(
+        verificationMethod,
+        credential.issuer
+      );
       if (!resolvedKey) {
         return false;
       }
@@ -417,22 +418,9 @@ export class CredentialManager {
     privateKeyMultibase: string,
     proofBase: Proof
   ): Promise<string> {
-    // Construct canonical digest including provided proof sans proofValue
-    const proofSansValue = { ...proofBase } as Record<string, unknown>;
-    delete proofSansValue.proofValue;
-    const proofInput: Record<string, unknown> = { ...proofSansValue };
-    const credentialContext = credential['@context'];
-    if (credentialContext && !proofInput['@context']) {
-      proofInput['@context'] = credentialContext;
-    }
-    const unsignedCredential: Record<string, unknown> = { ...credential };
-    delete unsignedCredential.proof;
-
-    const c14nProof = await canonicalizeDocument(proofInput);
-    const c14nCred = await canonicalizeDocument(unsignedCredential);
-    const hProof = Buffer.from(sha256(Buffer.from(c14nProof, 'utf8')));
-    const hCred = Buffer.from(sha256(Buffer.from(c14nCred, 'utf8')));
-    const digest = Buffer.concat([hProof, hCred]);
+    const digest = Buffer.from(
+      await computeCredentialDigest(credential as unknown as Record<string, unknown>, proofBase as unknown as Record<string, unknown>)
+    );
     const signer = this.getSigner();
     const sig = await signer.sign(Buffer.from(digest), privateKeyMultibase);
     return encodeBase64UrlMultibase(sig);
@@ -452,13 +440,33 @@ export class CredentialManager {
   }
 
   private async resolveVerificationMethodMultibase(
-    verificationMethod: string
+    verificationMethod: string,
+    issuer?: string | { id?: string }
   ): Promise<string | null> {
-    if (typeof verificationMethod === 'string' && verificationMethod.startsWith('z')) {
-      return verificationMethod;
+    // A bare multibase string is NOT a trusted key — it has no binding to the
+    // issuer. Only did:key (self-certifying) and DID-document resolution are
+    // trusted, and both must match the issuer.
+    const issuerDid = typeof issuer === 'string' ? issuer : issuer?.id;
+
+    if (typeof verificationMethod !== 'string') {
+      return null;
     }
 
-    if (!this.didManager || typeof verificationMethod !== 'string' || !verificationMethod.startsWith('did:')) {
+    // did:key is self-certifying: the key is the identifier. Trust it only when
+    // the issuer is that same did:key.
+    if (verificationMethod.startsWith('did:key:')) {
+      const vmDid = verificationMethod.split('#')[0];
+      if (issuerDid && vmDid !== issuerDid) return null;
+      return vmDid.replace('did:key:', '');
+    }
+
+    if (!this.didManager || !verificationMethod.startsWith('did:')) {
+      // No way to resolve/authenticate the key against an issuer DID.
+      return null;
+    }
+
+    // The verification method must belong to the credential issuer's DID.
+    if (issuerDid && verificationMethod.split('#')[0] !== issuerDid) {
       return null;
     }
 
@@ -762,7 +770,8 @@ export class CredentialManager {
     const credential: VerifiableCredential = {
       '@context': [
         'https://www.w3.org/2018/credentials/v1',
-        'https://w3id.org/security/data-integrity/v2'
+        'https://w3id.org/security/data-integrity/v2',
+        'https://originals.build/context'
       ],
       type: ['VerifiableCredential', type],
       id: this.generateCredentialId(),

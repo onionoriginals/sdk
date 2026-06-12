@@ -56,8 +56,12 @@ export class DIDCache {
 
   /** In-memory cache: did -> entry */
   private cache = new Map<string, DIDCacheEntry>();
-  /** LRU order tracking: most recent access at end */
-  private accessOrder: string[] = [];
+  /**
+   * LRU order tracking: most recent access last. A Set preserves insertion
+   * order and gives O(1) delete/re-insert, so touch/evict are O(1) rather than
+   * the linear array search+splice this previously used.
+   */
+  private accessOrder = new Set<string>();
 
   constructor(config?: DIDCacheConfig) {
     this.ttlMs = config?.ttlMs ?? DEFAULT_TTL_MS;
@@ -210,7 +214,7 @@ export class DIDCache {
    */
   async clear(): Promise<void> {
     this.cache.clear();
-    this.accessOrder = [];
+    this.accessOrder.clear();
     if (this.storage) await this.storage.clear();
   }
 
@@ -248,13 +252,13 @@ export class DIDCache {
   }
 
   private touchAccessOrder(did: string): void {
-    this.removeFromAccessOrder(did);
-    this.accessOrder.push(did);
+    // Delete then re-insert to move the key to the most-recent (last) position.
+    this.accessOrder.delete(did);
+    this.accessOrder.add(did);
   }
 
   private removeFromAccessOrder(did: string): void {
-    const idx = this.accessOrder.indexOf(did);
-    if (idx !== -1) this.accessOrder.splice(idx, 1);
+    this.accessOrder.delete(did);
   }
 
   /**

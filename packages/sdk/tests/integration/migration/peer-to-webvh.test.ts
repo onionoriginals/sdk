@@ -3,8 +3,10 @@
  */
 
 import { describe, test, expect, beforeEach } from 'bun:test';
+import * as ed25519 from '@noble/ed25519';
 import { OriginalsSDK } from '../../../src';
 import { MigrationManager } from '../../../src/migration';
+import { AuditLogger, AuditSignerConfig } from '../../../src/migration/audit/AuditLogger';
 import { MigrationStateEnum } from '../../../src/migration/types';
 
 describe('Peer to WebVH Migration', () => {
@@ -168,5 +170,48 @@ describe('Peer to WebVH Migration', () => {
     expect(cost.storageCost).toBeDefined();
     expect(cost.totalCost).toBeDefined();
     expect(cost.currency).toBe('sats');
+  });
+
+  test('records a signed audit entry that verifies when a signer is configured', async () => {
+    const privateKey = ed25519.utils.randomPrivateKey();
+    const publicKey = await ed25519.getPublicKeyAsync(Buffer.from(privateKey).toString('hex'));
+    const auditSigner: AuditSignerConfig = {
+      privateKey,
+      publicKey,
+      verificationMethod: 'did:key:z6MkAudit#z6MkAudit',
+    };
+
+    MigrationManager.resetInstance();
+    const signedSdk = OriginalsSDK.create({ network: 'signet', defaultKeyType: 'Ed25519' });
+    const signedManager = MigrationManager.getInstance(
+      { ...signedSdk['config'], auditSigner } as any,
+      signedSdk.did,
+      signedSdk.credentials
+    );
+
+    const peerDid = await signedSdk.did.createDIDPeer([
+      { id: 'resource-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'test-content' }
+    ]);
+
+    await signedManager.migrate({ sourceDid: peerDid.id, targetLayer: 'webvh', domain: 'example.com' });
+
+    const history = await signedManager.getMigrationHistory(peerDid.id);
+    expect(history.length).toBeGreaterThan(0);
+    const record = history[0];
+    expect(record.signature?.startsWith('z')).toBe(true);
+
+    // The signed record verifies under the configured public key...
+    const verifier = new AuditLogger(signedSdk['config'], auditSigner);
+    expect(await verifier.verifyAuditRecord(record)).toBe(true);
+
+    // ...but not under a different key (signatures are key-bound).
+    const otherPriv = ed25519.utils.randomPrivateKey();
+    const otherPub = await ed25519.getPublicKeyAsync(Buffer.from(otherPriv).toString('hex'));
+    const wrongVerifier = new AuditLogger(signedSdk['config'], {
+      privateKey: otherPriv,
+      publicKey: otherPub,
+      verificationMethod: 'did:key:z6MkOther#z6MkOther',
+    });
+    expect(await wrongVerifier.verifyAuditRecord(record)).toBe(false);
   });
 });

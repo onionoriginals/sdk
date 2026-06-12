@@ -16,7 +16,7 @@ export interface VerificationResult {
 export class EdDSACryptosuiteManager {
 
   static async createProof(document: any, options: any): Promise<DataIntegrityProof> {
-    const proofConfig = await this.createProofConfiguration(options);
+    const proofConfig = await this.createProofConfiguration(options, document?.['@context']);
     const transformedData = await this.transform(document, options);
     const hashData = await this.hash(transformedData, proofConfig, options);
     let privateKey: Uint8Array;
@@ -31,7 +31,8 @@ export class EdDSACryptosuiteManager {
     }
     const proofValueBytes = await this.sign({ data: hashData, privateKey });
     delete (proofConfig as any)['@context'];
-    return { ...proofConfig, proofValue: base58.encode(proofValueBytes) } as DataIntegrityProof;
+    // proofValue is multibase base58btc per the Data Integrity spec
+    return { ...proofConfig, proofValue: `z${base58.encode(proofValueBytes)}` } as DataIntegrityProof;
   }
 
   static async verifyProof(document: any, proof: DataIntegrityProof, options: any): Promise<VerificationResult> {
@@ -39,12 +40,19 @@ export class EdDSACryptosuiteManager {
       const documentToVerify = { ...document };
       delete (documentToVerify as any).proof;
       const transformedData = await this.transform(documentToVerify, options);
-      const hashData = await this.hash(transformedData, { '@context': document['@context'], ...proof }, options);
+      const hashData = await this.hash(
+        transformedData,
+        { '@context': document['@context'] ?? 'https://w3id.org/security/data-integrity/v2', ...proof },
+        options
+      );
       const vmDoc = await options.documentLoader(proof.verificationMethod);
       const pk = vmDoc.document.publicKeyMultibase as string;
       const dec = multikey.decodePublicKey(pk);
       if (dec.type !== 'Ed25519') throw new Error('Invalid key type for EdDSA');
-      const signature = base58.decode(proof.proofValue);
+      if (typeof proof.proofValue !== 'string' || !proof.proofValue.startsWith('z')) {
+        throw new Error('proofValue must be multibase base58btc (z-prefixed)');
+      }
+      const signature = base58.decode(proof.proofValue.slice(1));
       const verified = await this.verify({ data: hashData, signature, publicKey: dec.key });
       return verified ? { verified: true } : { verified: false, errors: ['Proof verification failed'] };
     } catch (e: any) {
@@ -52,9 +60,11 @@ export class EdDSACryptosuiteManager {
     }
   }
 
-  private static async createProofConfiguration(options: any): Promise<any> {
+  private static async createProofConfiguration(options: any, documentContext?: unknown): Promise<any> {
+    // Per eddsa-rdfc-2022, the proof configuration is canonicalized with the
+    // secured document's @context so create and verify hash identical data.
     return {
-      '@context': 'https://w3id.org/security/data-integrity/v2',
+      '@context': documentContext ?? 'https://w3id.org/security/data-integrity/v2',
       type: 'DataIntegrityProof',
       cryptosuite: 'eddsa-rdfc-2022',
       created: new Date().toISOString(),

@@ -115,6 +115,24 @@ describe('DIDCache', () => {
       expect(await cache.get('did:peer:d')).not.toBeNull();
     });
 
+    test('preserves LRU order across interleaved accesses', async () => {
+      cache = new DIDCache({ maxEntries: 3 });
+      await cache.set('did:peer:a', makeDIDDoc('did:peer:a'));
+      await cache.set('did:peer:b', makeDIDDoc('did:peer:b'));
+      await cache.set('did:peer:c', makeDIDDoc('did:peer:c'));
+
+      // Touch in an order that makes 'c' the least recently used: a, b.
+      await cache.get('did:peer:a');
+      await cache.get('did:peer:b');
+
+      // Adding 'd' should evict 'c' (the LRU after the touches).
+      await cache.set('did:peer:d', makeDIDDoc('did:peer:d'));
+      expect(await cache.get('did:peer:c')).toBeNull();
+      expect(await cache.get('did:peer:a')).not.toBeNull();
+      expect(await cache.get('did:peer:b')).not.toBeNull();
+      expect(await cache.get('did:peer:d')).not.toBeNull();
+    });
+
     test('should not evict pinned entries', async () => {
       cache = new DIDCache({ maxEntries: 2 });
       await cache.set('did:peer:a', makeDIDDoc('did:peer:a'));

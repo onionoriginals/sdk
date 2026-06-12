@@ -12,6 +12,7 @@ import type {
 } from '../types';
 import type { OriginalsConfig } from '../types/common';
 import { canonicalizeDocument } from '../utils/serialization';
+import { computeCredentialDigest } from '../utils/credential-digest';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer';
@@ -538,27 +539,10 @@ export class MultiSigManager {
     credential: VerifiableCredential,
     proofBase: Proof
   ): Promise<Uint8Array> {
-    const proofSansValue = { ...proofBase } as Record<string, unknown>;
-    delete proofSansValue.proofValue;
-
-    const proofInput: Record<string, unknown> = { ...proofSansValue };
-    const credentialContext = credential['@context'];
-    if (credentialContext && !proofInput['@context']) {
-      proofInput['@context'] = credentialContext;
-    }
-
-    const unsignedCredential: Record<string, unknown> = { ...credential };
-    delete unsignedCredential.proof;
-
-    const c14nProof = await canonicalizeDocument(proofInput);
-    const c14nCred = await canonicalizeDocument(unsignedCredential);
-    const hProof = sha256(Buffer.from(c14nProof, 'utf8'));
-    const hCred = sha256(Buffer.from(c14nCred, 'utf8'));
-
-    const digest = new Uint8Array(hProof.length + hCred.length);
-    digest.set(hProof, 0);
-    digest.set(hCred, hProof.length);
-    return digest;
+    return computeCredentialDigest(
+      credential as unknown as Record<string, unknown>,
+      proofBase as unknown as Record<string, unknown>
+    );
   }
 
   private async verifyProof(
