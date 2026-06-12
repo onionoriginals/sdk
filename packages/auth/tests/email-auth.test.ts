@@ -283,6 +283,35 @@ describe('email-auth', () => {
       );
     });
 
+    test('rejects code shorter than 4 characters', async () => {
+      const client = createMockTurnkeyClient();
+      const sessionId = await setupSession(client);
+      await expect(verifyEmailAuth(sessionId, '123', client, storage)).rejects.toThrow(
+        'Invalid verification code format'
+      );
+    });
+
+    test('rejects oversized code without calling Turnkey', async () => {
+      const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token' }));
+      const client = createMockTurnkeyClient({ verifyOtp });
+      const sessionId = await setupSession(client);
+
+      const hugeCode = 'A'.repeat(5000);
+      await expect(verifyEmailAuth(sessionId, hugeCode, client, storage)).rejects.toThrow(
+        'Invalid verification code format'
+      );
+      // Turnkey must NOT have been called
+      expect(verifyOtp).not.toHaveBeenCalled();
+    });
+
+    test('rejects code with non-alphanumeric characters', async () => {
+      const client = createMockTurnkeyClient();
+      const sessionId = await setupSession(client);
+      await expect(verifyEmailAuth(sessionId, '12 456', client, storage)).rejects.toThrow(
+        'Invalid verification code format'
+      );
+    });
+
     test('calls Turnkey verifyOtp with correct parameters', async () => {
       const verifyOtp = mock(() =>
         Promise.resolve({ verificationToken: 'token_xyz' })

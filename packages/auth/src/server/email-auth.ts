@@ -175,6 +175,11 @@ export async function verifyEmailAuth(
     throw new Error('Sub-organization ID not found');
   }
 
+  // Reject malformed or oversized codes before hitting Turnkey
+  if (!/^[A-Za-z0-9]{4,10}$/.test(code)) {
+    throw new Error('Invalid verification code format');
+  }
+
   console.log('[email-auth] Verifying OTP');
 
   try {
