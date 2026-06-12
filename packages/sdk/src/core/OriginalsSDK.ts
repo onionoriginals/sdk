@@ -2,6 +2,7 @@ import { DIDManager } from '../did/DIDManager';
 import { CredentialManager } from '../vc/CredentialManager';
 import { LifecycleManager } from '../lifecycle/LifecycleManager';
 import { BitcoinManager } from '../bitcoin/BitcoinManager';
+import { StatusListManager } from '../vc/StatusListManager';
 import { OriginalsConfig, KeyStore, ExternalSigner, ExternalVerifier } from '../types';
 import { DIDDocument, VerificationMethod, ServiceEndpoint } from '../types/did';
 import { DEFAULT_WEBVH_NETWORK } from '../types/network';
@@ -104,6 +105,7 @@ export class OriginalsSDK {
   public readonly credentials: CredentialManager;
   public readonly lifecycle: LifecycleManager;
   public readonly bitcoin: BitcoinManager;
+  public readonly statusList: StatusListManager;
   public readonly logger: Logger;
   public readonly metrics: MetricsCollector;
   private eventLogger: EventLogger;
@@ -126,7 +128,9 @@ export class OriginalsSDK {
     // Initialize logger and metrics
     this.logger = new Logger('SDK', config);
     this.metrics = new MetricsCollector();
-    this.eventLogger = new EventLogger(this.logger.child('Events'), this.metrics);
+    // EventLogger gets its own MetricsCollector so it doesn't double-count asset metrics
+    // that LifecycleManager already records directly on sdk.metrics.
+    this.eventLogger = new EventLogger(this.logger.child('Events'), new MetricsCollector());
     
     // Log SDK initialization
     this.logger.info('Initializing Originals SDK', { 
@@ -137,10 +141,11 @@ export class OriginalsSDK {
     emitTelemetry(config.telemetry, { name: 'sdk.init', attributes: { network: config.network } });
     
     // Initialize managers
-    this.did = new DIDManager(config);
-    this.credentials = new CredentialManager(config, this.did);
-    this.lifecycle = new LifecycleManager(config, this.did, this.credentials, undefined, keyStore);
+    this.did = new DIDManager(config, this.metrics);
+    this.credentials = new CredentialManager(config, this.did, this.metrics);
+    this.lifecycle = new LifecycleManager(config, this.did, this.credentials, undefined, keyStore, this.metrics);
     this.bitcoin = new BitcoinManager(config);
+    this.statusList = new StatusListManager();
     
     // Set up event logging integration
     this.setupEventLogging();
@@ -157,7 +162,7 @@ export class OriginalsSDK {
       this.eventLogger.configureEventLogging(this.config.logging.eventLogging);
     }
 
-    // Subscribe to lifecycle events
+    // Subscribe to lifecycle events (for logging only — EventLogger has its own MetricsCollector)
     // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
     this.eventLogger.subscribeToEvents((this.lifecycle as any).eventEmitter);
   }
