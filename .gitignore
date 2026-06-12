@@ -105,3 +105,6 @@ playwright/.cache/
 
 # Turborepo
 .turbo/
+
+# CLI-generated key files (written by `cel create`/`cel migrate`, incl. during tests)
+*.key
