@@ -16,41 +16,7 @@ import type {
   DataIntegrityProof 
 } from '../types';
 import { computeDigestMultibase } from '../hash';
-
-/**
- * Serializes data to JCS (JSON Canonicalization Scheme) format.
- * Uses JSON with sorted keys for deterministic serialization.
- * 
- * @param data - The data to serialize
- * @returns UTF-8 encoded bytes
- */
-function serializeToJcs(data: unknown): Uint8Array {
-  // JCS uses JSON with lexicographically sorted keys
-  const json = JSON.stringify(data, (_, value) => {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      return Object.keys(value).sort().reduce((sorted: Record<string, unknown>, key) => {
-        sorted[key] = value[key];
-        return sorted;
-      }, {});
-    }
-    return value;
-  });
-  return new TextEncoder().encode(json);
-}
-
-/**
- * Serializes a LogEntry to a deterministic byte representation for hashing.
- * Uses JSON with sorted keys for reproducibility.
- * This must match the serialization used in createEventLog/updateEventLog.
- * 
- * @param entry - The log entry to serialize
- * @returns UTF-8 encoded bytes
- */
-function serializeEntry(entry: LogEntry): Uint8Array {
-  // Use JSON with sorted keys for deterministic serialization
-  const json = JSON.stringify(entry, Object.keys(entry).sort());
-  return new TextEncoder().encode(json);
-}
+import { canonicalizeEvent } from '../canonicalize';
 
 /**
  * Default proof verifier using eddsa-jcs-2022 cryptosuite.
@@ -134,7 +100,7 @@ function verifyChain(
     }
     
     // Compute the expected hash of the previous event
-    const expectedHash = computeDigestMultibase(serializeEntry(previousEvent));
+    const expectedHash = computeDigestMultibase(canonicalizeEvent(previousEvent));
     
     if (event.previousEvent !== expectedHash) {
       errors.push(`Event ${index}: Hash chain broken - previousEvent does not match hash of prior event`);

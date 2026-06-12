@@ -7,6 +7,7 @@
 
 export * from './types';
 export * from './hash';
+export * from './canonicalize';
 export * from './algorithms';
 export * from './witnesses';
 export * from './serialization';
