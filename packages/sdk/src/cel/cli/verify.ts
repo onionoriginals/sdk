@@ -120,6 +120,16 @@ function outputResult(log: EventLog, result: VerificationResult): void {
   const chainPassed = result.events.filter(e => e.chainValid).length;
   console.log(`   Proofs Valid: ${proofsPassed}/${result.events.length}`);
   console.log(`   Chain Valid:  ${chainPassed}/${result.events.length}`);
+
+  // Warn when any event's proof was not cryptographically verified
+  const structuralOnlyCount = result.events.filter(
+    e => e.cryptographicallyVerified === false
+  ).length;
+  if (structuralOnlyCount > 0) {
+    console.log(
+      `\n⚠ proof structure checked only — signature NOT cryptographically verified (${structuralOnlyCount}/${result.events.length} event(s))`
+    );
+  }
   
   // Count witness proofs
   let totalWitnessProofs = 0;

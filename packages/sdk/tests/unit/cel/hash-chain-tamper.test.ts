@@ -10,21 +10,50 @@
  * of the hash input, so any mutation of nested data breaks the chain.
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, beforeAll } from 'bun:test';
 import {
   createEventLog,
   updateEventLog,
   verifyEventLog,
 } from '../../../src/cel/algorithms';
 import type { DataIntegrityProof, CreateOptions, UpdateOptions } from '../../../src/cel/types';
+import { multikey } from '../../../src/crypto/Multikey';
+import { canonicalizeEvent } from '../../../src/cel/canonicalize';
 
 // ---------------------------------------------------------------------------
-// Stub signer — produces structurally valid DataIntegrityProofs for testing.
-// Not cryptographically real; the defaultVerifier only checks structure.
+// Real Ed25519 signer — signs canonicalizeEvent(data) so that the default
+// crypto verifier accepts the proofs.  The stub signer is kept only for the
+// tamper tests where the chain breaks before the proof is ever checked.
 // ---------------------------------------------------------------------------
-function createStubSigner(keyId: string = 'did:key:z6MkTest#key-0') {
+async function createRealSigner(): Promise<{ signer: (data: unknown) => Promise<DataIntegrityProof>; publicKey: string }> {
+  const ed25519 = await import('@noble/ed25519');
+  const privateKeyBytes = ed25519.utils.randomPrivateKey();
+  const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
+  const publicKey = multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519');
+
+  const signer = async (data: unknown): Promise<DataIntegrityProof> => {
+    const dataBytes = canonicalizeEvent(data);
+    const signature = await (ed25519 as any).signAsync(dataBytes, privateKeyBytes);
+    const proofValue = multikey.encodeMultibase(new Uint8Array(signature));
+    return {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      verificationMethod: `did:key:${publicKey}#${publicKey}`,
+      proofPurpose: 'assertionMethod',
+      proofValue,
+      created: new Date().toISOString(),
+    };
+  };
+  return { signer, publicKey };
+}
+
+// ---------------------------------------------------------------------------
+// Stub signer — produces structurally valid proofs using a non-did:key VM so
+// the verifier takes the structural-only path.  Used only for the tamper tests
+// where we care about chain-hash detection, not signature verification.
+// ---------------------------------------------------------------------------
+function createStubSigner(keyId: string = 'did:web:example.com#key-0') {
   return async (data: unknown): Promise<DataIntegrityProof> => {
-    // Simple deterministic proof value so the structural verifier accepts it
     const dataStr = JSON.stringify(data);
     let hash = 0;
     for (let i = 0; i < dataStr.length; i++) {
@@ -36,7 +65,6 @@ function createStubSigner(keyId: string = 'did:key:z6MkTest#key-0') {
       cryptosuite: 'eddsa-jcs-2022',
       verificationMethod: keyId,
       proofPurpose: 'assertionMethod',
-      // Prefix with 'z' (base58btc) so the structural check passes
       proofValue: `z${Math.abs(hash).toString(36)}stub`,
       created: new Date().toISOString(),
     };
@@ -44,21 +72,36 @@ function createStubSigner(keyId: string = 'did:key:z6MkTest#key-0') {
 }
 
 describe('CEL hash chain tamper detection', () => {
-  const signer = createStubSigner();
-  const createOptions: CreateOptions = { signer, verificationMethod: 'did:key:z6MkTest#key-0' };
-  const updateOptions: UpdateOptions = { signer, verificationMethod: 'did:key:z6MkTest#key-0' };
+  let realSigner: (data: unknown) => Promise<DataIntegrityProof>;
+  let realPublicKey: string;
+
+  beforeAll(async () => {
+    const result = await createRealSigner();
+    realSigner = result.signer;
+    realPublicKey = result.publicKey;
+  });
+
+  const stubSigner = createStubSigner();
+  const createOptions: CreateOptions = { signer: stubSigner, verificationMethod: 'did:web:example.com#key-0' };
+  const updateOptions: UpdateOptions = { signer: stubSigner, verificationMethod: 'did:web:example.com#key-0' };
 
   test('valid log verifies successfully (baseline)', async () => {
+    const realOptions: CreateOptions = {
+      signer: realSigner,
+      verificationMethod: `did:key:${realPublicKey}#${realPublicKey}`,
+    };
     const log0 = await createEventLog(
       { name: 'asset', resources: [{ id: 'r1', digestMultibase: 'uAbc' }] },
-      createOptions,
+      realOptions,
     );
-    const log1 = await updateEventLog(log0, { version: 2, note: 'first update' }, updateOptions);
-    const log2 = await updateEventLog(log1, { version: 3, note: 'second update' }, updateOptions);
+    const log1 = await updateEventLog(log0, { version: 2, note: 'first update' }, realOptions);
+    const log2 = await updateEventLog(log1, { version: 3, note: 'second update' }, realOptions);
 
     const result = await verifyEventLog(log2);
     expect(result.verified).toBe(true);
     expect(result.errors).toHaveLength(0);
+    // All proofs cryptographically verified (did:key Ed25519)
+    expect(result.events.every(e => e.cryptographicallyVerified === true)).toBe(true);
   });
 
   test('tampering a NESTED field of event 0 breaks the chain at event 1', async () => {

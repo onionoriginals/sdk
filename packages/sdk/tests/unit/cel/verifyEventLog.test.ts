@@ -12,6 +12,8 @@ import type {
 
 /**
  * Mock signer that creates a valid DataIntegrityProof structure.
+ * Uses a non-did:key verificationMethod so that structural tests route to the
+ * structural-only verification path and do not require real Ed25519 keys.
  */
 function createMockSigner(verificationMethod: string) {
   return async (data: unknown): Promise<DataIntegrityProof> => {
@@ -27,7 +29,9 @@ function createMockSigner(verificationMethod: string) {
 }
 
 describe('verifyEventLog', () => {
-  const verificationMethod = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+  // Use a non-did:key VM so structural tests don't trigger crypto verification.
+  // Full cryptographic round-trip tests live in proof-verification.test.ts.
+  const verificationMethod = 'did:web:example.com#key-1';
 
   describe('basic verification', () => {
     test('verifies a valid event log with single create event', async () => {

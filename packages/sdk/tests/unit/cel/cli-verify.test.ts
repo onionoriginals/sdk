@@ -15,8 +15,11 @@ import { serializeEventLogJson } from '../../../src/cel/serialization/json';
 import { serializeEventLogCbor } from '../../../src/cel/serialization/cbor';
 import type { DataIntegrityProof, WitnessProof, EventLog } from '../../../src/cel/types';
 
-// Mock signer that creates valid proofs
-function createMockSigner(verificationMethod: string = 'did:key:z6MkTest#key-1') {
+// Mock signer that creates structurally valid proofs.
+// Uses a non-did:key verificationMethod so tests hit the structural-only path
+// and do not require real Ed25519 keys.  Cryptographic round-trips live in
+// tests/unit/cel/proof-verification.test.ts.
+function createMockSigner(verificationMethod: string = 'did:web:example.com#key-1') {
   return async (data: unknown): Promise<DataIntegrityProof> => ({
     type: 'DataIntegrityProof',
     cryptosuite: 'eddsa-jcs-2022',
@@ -33,7 +36,7 @@ function createMockWitnessSigner(witnessedAt: string): (data: unknown) => Promis
     type: 'DataIntegrityProof',
     cryptosuite: 'eddsa-jcs-2022',
     created: new Date().toISOString(),
-    verificationMethod: 'did:key:z6MkWitness#key-1',
+    verificationMethod: 'did:web:witness.example.com#key-1',
     proofPurpose: 'assertionMethod',
     proofValue: 'z3WitnessProof123',
     witnessedAt,
@@ -91,7 +94,7 @@ describe('CLI Verify Command', () => {
       const signer = createMockSigner();
       const log = await createEventLog({ name: 'Test Asset' }, {
         signer,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod: 'did:web:example.com#key-1',
         proofPurpose: 'assertionMethod',
       });
       
@@ -113,7 +116,7 @@ describe('CLI Verify Command', () => {
       const signer = createMockSigner();
       const options = {
         signer,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod: 'did:web:example.com#key-1',
         proofPurpose: 'assertionMethod',
       };
       
@@ -144,7 +147,7 @@ describe('CLI Verify Command', () => {
       const signer = createMockSigner();
       const options = {
         signer,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod: 'did:web:example.com#key-1',
         proofPurpose: 'assertionMethod',
       };
       
@@ -183,7 +186,7 @@ describe('CLI Verify Command', () => {
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
             created: new Date().toISOString(),
-            verificationMethod: 'did:key:z6MkTest#key-1',
+            verificationMethod: 'did:web:example.com#key-1',
             proofPurpose: 'assertionMethod',
             proofValue: 'invalid_no_multibase_prefix', // Invalid - no z or u prefix
           }],
@@ -213,7 +216,7 @@ describe('CLI Verify Command', () => {
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
             created: new Date().toISOString(),
-            verificationMethod: 'did:key:z6MkTest#key-1',
+            verificationMethod: 'did:web:example.com#key-1',
             proofPurpose: 'assertionMethod',
             proofValue: 'z3ABC123mockProofValue',
           }],
@@ -240,7 +243,7 @@ describe('CLI Verify Command', () => {
       const signer = createMockSigner();
       const log = await createEventLog({ name: 'CBOR Test Asset' }, {
         signer,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod: 'did:web:example.com#key-1',
         proofPurpose: 'assertionMethod',
       });
       
@@ -262,7 +265,7 @@ describe('CLI Verify Command', () => {
       const controllerSigner = createMockSigner();
       const log = await createEventLog({ name: 'Witnessed Asset' }, {
         signer: controllerSigner,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod: 'did:web:example.com#key-1',
         proofPurpose: 'assertionMethod',
       });
       
@@ -272,7 +275,7 @@ describe('CLI Verify Command', () => {
         type: 'DataIntegrityProof',
         cryptosuite: 'eddsa-jcs-2022',
         created: new Date().toISOString(),
-        verificationMethod: 'did:key:z6MkWitness#key-1',
+        verificationMethod: 'did:web:witness.example.com#key-1',
         proofPurpose: 'assertionMethod',
         proofValue: 'z3WitnessProof123',
         witnessedAt,
@@ -336,7 +339,7 @@ describe('CLI Verify Command', () => {
       const signer = createMockSigner();
       const log = await createEventLog({ name: 'Test' }, {
         signer,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod: 'did:web:example.com#key-1',
         proofPurpose: 'assertionMethod',
       });
       

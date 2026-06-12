@@ -74,6 +74,14 @@ export interface EventVerification {
   proofValid: boolean;
   /** Whether the hash chain link is valid (previousEvent matches) */
   chainValid: boolean;
+  /**
+   * True when all proofs for this event were cryptographically verified
+   * (e.g. Ed25519 signature checked against the public key in a did:key VM).
+   * False when only structural validation was possible — the proof fields were
+   * well-formed but no signature check was performed.  Absent when a
+   * caller-supplied custom verifier was used.
+   */
+  cryptographicallyVerified?: boolean;
   /** Any errors encountered during verification */
   errors: string[];
 }

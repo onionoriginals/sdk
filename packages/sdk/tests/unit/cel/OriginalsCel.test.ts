@@ -7,14 +7,16 @@ import { OriginalsCel, type CelSigner, type OriginalsCelConfig } from '../../../
 import type { DataIntegrityProof, EventLog, ExternalReference } from '../../../src/cel/types';
 
 /**
- * Creates a mock signer that returns valid DataIntegrityProof
+ * Creates a mock signer that returns structurally valid DataIntegrityProofs.
+ * Uses a non-did:key verificationMethod so verification takes the structural-only
+ * path and does not require real Ed25519 keys.
  */
 function createMockSigner(): CelSigner {
   return vi.fn(async () => ({
     type: 'DataIntegrityProof',
     cryptosuite: 'eddsa-jcs-2022',
     created: new Date().toISOString(),
-    verificationMethod: 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#key-0',
+    verificationMethod: 'did:web:example.com#key-0',
     proofPurpose: 'assertionMethod',
     proofValue: 'z' + 'a'.repeat(86), // Mock base58btc encoded signature
   }));
