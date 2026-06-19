@@ -157,14 +157,24 @@ function outputResult(log: EventLog, result: VerificationResult): void {
     // Show proof details
     if (event.proof && event.proof.length > 0) {
       console.log(`\n  Proofs (${event.proof.length}):`);
-      
+
       for (let j = 0; j < event.proof.length; j++) {
         const proof = event.proof[j];
         const isWitness = isWitnessProof(proof);
         const proofLabel = isWitness ? '🔏 Witness Proof' : '🔐 Controller Proof';
-        
+
         console.log(`\n  [${j + 1}] ${proofLabel}`);
         console.log(formatProofDetails(proof, '      '));
+      }
+    }
+
+    // Show witness verification status (non-gating — separate from controller result).
+    if (eventResult.witnessProofs && eventResult.witnessProofs.length > 0) {
+      console.log(`\n  Witness Attestations (non-gating):`);
+      for (const w of eventResult.witnessProofs) {
+        const icon = w.verified ? '✅' : '⚠️ ';
+        const status = w.verified ? 'verified' : 'unverified (could not resolve)';
+        console.log(`      ${icon} witness ${w.verificationMethod}: ${status}`);
       }
     }
     

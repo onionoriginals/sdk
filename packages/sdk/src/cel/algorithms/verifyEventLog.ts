@@ -216,11 +216,27 @@ function verifyChain(
 }
 
 /**
+ * Returns true when the proof is a third-party witness attestation.
+ * Mirrors the discriminator in src/cel/serialization/cbor.ts.
+ * Controller proofs never carry `witnessedAt` (confirmed: createSigner /
+ * createEventLog do not set this field).
+ */
+function isWitnessProof(p: DataIntegrityProof): boolean {
+  return 'witnessedAt' in p && typeof (p as { witnessedAt?: unknown }).witnessedAt === 'string';
+}
+
+/**
  * Verifies a single event's proofs.
  *
- * When a custom verifier is provided it is used as-is (legacy / test path).
- * When no custom verifier is provided the built-in `dispatchVerify` is used,
- * which performs full cryptographic verification for every proof or fails closed.
+ * Controller proofs (those without `witnessedAt`) gate the overall
+ * `proofValid`/`cryptographicallyVerified` result.  Witness proofs (those with
+ * `witnessedAt`) are verified with the same mechanism and reported in
+ * `witnessProofs`, but a failed or unresolvable witness does NOT affect the
+ * overall result — witnesses add trust, they do not let a third party's
+ * availability invalidate the controller's signature.
+ *
+ * When a custom verifier is provided it is used for every proof (controller +
+ * witness) on the legacy / test path.
  *
  * @param event - The event to verify
  * @param index - The index of the event in the log
@@ -257,53 +273,100 @@ async function verifyEvent(
 
   // Build the signed payload — must exactly match what createSigner in the CLI
   // passes to canonicalizeEvent: { type, data, ...(previousEvent ? { previousEvent } : {}) }
-  let allProofsValid = true;
-  let allCryptographicallyVerified = true;
   const eventData = {
     type: event.type,
     data: event.data,
     ...(event.previousEvent ? { previousEvent: event.previousEvent } : {}),
   };
 
-  for (let proofIndex = 0; proofIndex < event.proof.length; proofIndex++) {
-    const proof = event.proof[proofIndex];
+  // Separate controller proofs from witness proofs.
+  const controllerProofs: { proof: DataIntegrityProof; originalIndex: number }[] = [];
+  const witnessProofEntries: { proof: DataIntegrityProof; originalIndex: number }[] = [];
 
+  for (let i = 0; i < event.proof.length; i++) {
+    if (isWitnessProof(event.proof[i])) {
+      witnessProofEntries.push({ proof: event.proof[i], originalIndex: i });
+    } else {
+      controllerProofs.push({ proof: event.proof[i], originalIndex: i });
+    }
+  }
+
+  // Require at least one controller proof.
+  if (controllerProofs.length === 0) {
+    errors.push(`Event ${index}: no controller proof`);
+    return {
+      index,
+      type: event.type,
+      proofValid: false,
+      chainValid,
+      errors,
+    };
+  }
+
+  // Verify controller proofs — these gate `proofValid` and `cryptographicallyVerified`.
+  let allControllerProofsValid = true;
+  let allCryptographicallyVerified = true;
+
+  for (const { proof, originalIndex } of controllerProofs) {
     try {
       if (customVerifier) {
-        // Caller-supplied verifier: boolean result, no cryptographic tracking.
         const isValid = await customVerifier(proof, eventData);
         if (!isValid) {
-          allProofsValid = false;
-          errors.push(`Event ${index}, Proof ${proofIndex}: Verification failed`);
+          allControllerProofsValid = false;
+          errors.push(`Event ${index}, Proof ${originalIndex}: Verification failed`);
         }
         // When a custom verifier is used we cannot assert cryptographic verification.
         allCryptographicallyVerified = false;
       } else {
         const { verified, cryptographicallyVerified } = await dispatchVerify(proof, eventData, resolveKey);
         if (!verified) {
-          allProofsValid = false;
-          errors.push(`Event ${index}, Proof ${proofIndex}: Verification failed`);
+          allControllerProofsValid = false;
+          errors.push(`Event ${index}, Proof ${originalIndex}: Verification failed`);
         }
         if (!cryptographicallyVerified) {
           allCryptographicallyVerified = false;
         }
       }
     } catch (error) {
-      allProofsValid = false;
+      allControllerProofsValid = false;
       allCryptographicallyVerified = false;
       const message = error instanceof Error ? error.message : 'Unknown error';
-      errors.push(`Event ${index}, Proof ${proofIndex}: ${message}`);
+      errors.push(`Event ${index}, Proof ${originalIndex}: ${message}`);
     }
   }
 
-  return {
+  // Verify witness proofs — NON-GATING: results go into `witnessProofs` only.
+  const witnessResults: { verificationMethod: string; verified: boolean }[] = [];
+
+  for (const { proof, originalIndex: _originalIndex } of witnessProofEntries) {
+    let witnessVerified = false;
+    try {
+      if (customVerifier) {
+        witnessVerified = await customVerifier(proof, eventData);
+      } else {
+        const { verified } = await dispatchVerify(proof, eventData, resolveKey);
+        witnessVerified = verified;
+      }
+    } catch {
+      witnessVerified = false;
+    }
+    witnessResults.push({ verificationMethod: proof.verificationMethod, verified: witnessVerified });
+  }
+
+  const result: EventVerification = {
     index,
     type: event.type,
-    proofValid: allProofsValid,
+    proofValid: allControllerProofsValid,
     chainValid,
     cryptographicallyVerified: allCryptographicallyVerified,
     errors,
   };
+
+  if (witnessResults.length > 0) {
+    result.witnessProofs = witnessResults;
+  }
+
+  return result;
 }
 
 /**

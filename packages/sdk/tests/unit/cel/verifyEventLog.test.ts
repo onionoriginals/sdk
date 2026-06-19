@@ -764,4 +764,166 @@ describe('verifyEventLog', () => {
       expect(result.events[0].chainValid).toBe(true);
     });
   });
+
+  describe('witness proof non-gating', () => {
+    test('controller (did:key) + unresolvable witness → verified: true, witnessProofs[0].verified: false', async () => {
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const eventData = { name: 'Witnessed Asset' };
+      const controllerProof = await signer({ type: 'create', data: eventData });
+
+      // Witness proof with witnessedAt — cannot be resolved (no resolver, did:web VM).
+      const witnessProof = {
+        type: 'DataIntegrityProof' as const,
+        cryptosuite: 'eddsa-jcs-2022',
+        created: new Date().toISOString(),
+        verificationMethod: 'did:web:witness.example.com#key-1',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'z3WitnessProof123',
+        witnessedAt: '2026-01-20T12:00:00Z',
+      };
+
+      const log: EventLog = {
+        events: [{
+          type: 'create',
+          data: eventData,
+          proof: [controllerProof, witnessProof],
+        }],
+      };
+
+      // No resolveKey provided — witness fails closed, but it is NON-GATING.
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(true);
+      expect(result.events[0].proofValid).toBe(true);
+      expect(result.events[0].witnessProofs).toBeDefined();
+      expect(result.events[0].witnessProofs).toHaveLength(1);
+      expect(result.events[0].witnessProofs![0].verificationMethod).toBe('did:web:witness.example.com#key-1');
+      expect(result.events[0].witnessProofs![0].verified).toBe(false);
+    });
+
+    test('controller (did:key) + resolvable correctly-signed witness → verified: true, witnessProofs[0].verified: true', async () => {
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const eventData = { name: 'Well-Witnessed Asset' };
+      const controllerProof = await signer({ type: 'create', data: eventData });
+
+      // Generate a real Ed25519 keypair for the witness.
+      const ed25519 = await import('@noble/ed25519');
+      const witnessPrivateKey = ed25519.utils.randomPrivateKey();
+      const witnessPublicKey = new Uint8Array(
+        await (ed25519 as any).getPublicKeyAsync(witnessPrivateKey),
+      );
+      const witnessVm = 'did:webvh:witness.example.com#key-ed25519';
+
+      // Sign the event data with the witness key.
+      const dataBytes = canonicalizeEvent({ type: 'create', data: eventData });
+      const witnessSig = await (ed25519 as any).signAsync(dataBytes, witnessPrivateKey);
+      const witnessProofValue = multikey.encodeMultibase(new Uint8Array(witnessSig));
+
+      const witnessProof = {
+        type: 'DataIntegrityProof' as const,
+        cryptosuite: 'eddsa-jcs-2022',
+        created: new Date().toISOString(),
+        verificationMethod: witnessVm,
+        proofPurpose: 'assertionMethod',
+        proofValue: witnessProofValue,
+        witnessedAt: '2026-01-20T12:00:00Z',
+      };
+
+      const log: EventLog = {
+        events: [{
+          type: 'create',
+          data: eventData,
+          proof: [controllerProof, witnessProof],
+        }],
+      };
+
+      // Resolver returns the witness public key when asked.
+      const resolveKey = async (method: string): Promise<Uint8Array | null> => {
+        if (method === witnessVm) return witnessPublicKey;
+        return null;
+      };
+
+      const result = await verifyEventLog(log, { resolveKey });
+
+      expect(result.verified).toBe(true);
+      expect(result.events[0].proofValid).toBe(true);
+      expect(result.events[0].witnessProofs).toBeDefined();
+      expect(result.events[0].witnessProofs).toHaveLength(1);
+      expect(result.events[0].witnessProofs![0].verificationMethod).toBe(witnessVm);
+      expect(result.events[0].witnessProofs![0].verified).toBe(true);
+    });
+
+    test('event with ONLY a witness proof (no controller proof) → verified: false', async () => {
+      const witnessOnlyProof = {
+        type: 'DataIntegrityProof' as const,
+        cryptosuite: 'eddsa-jcs-2022',
+        created: new Date().toISOString(),
+        verificationMethod: 'did:web:witness.example.com#key-1',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'z3WitnessOnlyProof123',
+        witnessedAt: '2026-01-20T12:00:00Z',
+      };
+
+      const log: EventLog = {
+        events: [{
+          type: 'create',
+          data: { name: 'Witness-Only' },
+          proof: [witnessOnlyProof],
+        }],
+      };
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(false);
+      expect(result.events[0].proofValid).toBe(false);
+      expect(result.errors.some(e => e.includes('no controller proof'))).toBe(true);
+    });
+
+    test('bad controller proof still fails the log (gating unchanged)', async () => {
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const eventData = { name: 'Tamper Test' };
+      const controllerProof = await signer({ type: 'create', data: eventData });
+
+      // Corrupt the controller proof signature.
+      const tamperedControllerProof = {
+        ...controllerProof,
+        proofValue: 'z' + 'X'.repeat(86),
+      };
+
+      const witnessProof = {
+        type: 'DataIntegrityProof' as const,
+        cryptosuite: 'eddsa-jcs-2022',
+        created: new Date().toISOString(),
+        verificationMethod: 'did:web:witness.example.com#key-1',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'z3WitnessProof123',
+        witnessedAt: '2026-01-20T12:00:00Z',
+      };
+
+      const log: EventLog = {
+        events: [{
+          type: 'create',
+          data: eventData,
+          proof: [tamperedControllerProof, witnessProof],
+        }],
+      };
+
+      const result = await verifyEventLog(log);
+
+      // Bad controller proof → log fails even with a witness present.
+      expect(result.verified).toBe(false);
+      expect(result.events[0].proofValid).toBe(false);
+    });
+
+    test('no witnessProofs field when event has no witness proofs', async () => {
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const log = await createEventLog({ name: 'No Witnesses' }, { signer, verificationMethod: vm });
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(true);
+      // witnessProofs should be absent when there are no witnesses.
+      expect(result.events[0].witnessProofs).toBeUndefined();
+    });
+  });
 });

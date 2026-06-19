@@ -82,6 +82,13 @@ export interface EventVerification {
    * caller-supplied custom verifier was used.
    */
   cryptographicallyVerified?: boolean;
+  /**
+   * Per-witness verification results. Witness proofs are cryptographically
+   * checked when resolvable but are NON-GATING: a failed or unresolvable witness
+   * does not affect `proofValid` / the log's overall `verified`. Empty/absent
+   * when the event carries no witness proofs.
+   */
+  witnessProofs?: { verificationMethod: string; verified: boolean }[];
   /** Any errors encountered during verification */
   errors: string[];
 }

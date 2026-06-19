@@ -288,7 +288,7 @@ describe('CLI Verify Command', () => {
   });
 
   describe('witness attestations', () => {
-    it('shows witness proofs in output (controller proof valid; witness proof fails closed without resolver)', async () => {
+    it('witness non-gating: controller valid + unresolvable witness → verified: true, witness reported unverified', async () => {
       // Controller proof uses a real did:key signer — verifies offline.
       const { signer: controllerSigner, verificationMethod } = await createRealDidKeySigner();
       const log = await createEventLog({ name: 'Witnessed Asset' }, {
@@ -320,15 +320,21 @@ describe('CLI Verify Command', () => {
       const filePath = path.join(tempDir, 'witnessed.cel.json');
       fs.writeFileSync(filePath, serializeEventLogJson(witnessedLog));
 
-      // Verify — the witness proof (did:web) fails closed because the CLI's
-      // DIDManager can't resolve the fake witness DID.  Overall: verified: false.
+      // Verify — the controller proof (did:key) verifies offline, so the log is
+      // verified: true.  The witness proof (did:web) fails closed because the CLI's
+      // DIDManager can't resolve the fake witness DID, but this is NON-GATING.
       const result = await verifyCommand({ log: filePath });
 
       expect(result.success).toBe(true);
-      // Witness proof fails closed — overall result is false.
-      expect(result.verified).toBe(false);
-      // Chain is still valid.
+      // Controller proof passes — witness failure is non-gating.
+      expect(result.verified).toBe(true);
+      // Chain is valid.
       expect(result.result?.events[0].chainValid).toBe(true);
+      // The witness proof is reported but marked unverified.
+      expect(result.result?.events[0].witnessProofs).toBeDefined();
+      expect(result.result?.events[0].witnessProofs).toHaveLength(1);
+      expect(result.result?.events[0].witnessProofs![0].verificationMethod).toBe('did:web:witness.example.com#key-1');
+      expect(result.result?.events[0].witnessProofs![0].verified).toBe(false);
     });
   });
   
