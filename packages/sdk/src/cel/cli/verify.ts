@@ -12,14 +12,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { EventLog, VerificationResult, DataIntegrityProof, WitnessProof } from '../types';
 import { verifyEventLog } from '../algorithms/verifyEventLog';
+import { createDidManagerKeyResolver } from '../keyResolver';
 import { parseEventLogJson } from '../serialization/json';
 import { parseEventLogCbor } from '../serialization/cbor';
+import { OriginalsSDK } from '../../core/OriginalsSDK';
+import type { BitcoinNetworkName } from '../../types/network';
 
 /**
  * Flags parsed from command line arguments
  */
 export interface VerifyFlags {
   log?: string;
+  network?: string;
   help?: boolean;
   h?: boolean;
 }
@@ -121,16 +125,6 @@ function outputResult(log: EventLog, result: VerificationResult): void {
   console.log(`   Proofs Valid: ${proofsPassed}/${result.events.length}`);
   console.log(`   Chain Valid:  ${chainPassed}/${result.events.length}`);
 
-  // Warn when any event's proof was not cryptographically verified
-  const structuralOnlyCount = result.events.filter(
-    e => e.cryptographicallyVerified === false
-  ).length;
-  if (structuralOnlyCount > 0) {
-    console.log(
-      `\n⚠ proof structure checked only — signature NOT cryptographically verified (${structuralOnlyCount}/${result.events.length} event(s))`
-    );
-  }
-  
   // Count witness proofs
   let totalWitnessProofs = 0;
   for (const event of log.events) {
@@ -226,10 +220,29 @@ export async function verifyCommand(flags: VerifyFlags): Promise<VerifyResult> {
     };
   }
   
+  // Determine Bitcoin network from flag (default: mainnet).
+  let network: BitcoinNetworkName = 'mainnet';
+  if (flags.network) {
+    const n = flags.network.toLowerCase();
+    if (n === 'mainnet' || n === 'regtest' || n === 'signet') {
+      network = n;
+    } else {
+      return {
+        success: false,
+        message: 'Error: --network must be "mainnet", "regtest", or "signet"',
+      };
+    }
+  }
+
+  // Build a DIDManager-backed key resolver so non-did:key proofs can be
+  // cryptographically verified.  Without a resolver those proofs fail closed.
+  const sdk = OriginalsSDK.create({ network });
+  const resolveKey = createDidManagerKeyResolver(sdk.did);
+
   // Verify the event log
   let result: VerificationResult;
   try {
-    result = await verifyEventLog(eventLog);
+    result = await verifyEventLog(eventLog, { resolveKey });
   } catch (e) {
     return {
       success: false,

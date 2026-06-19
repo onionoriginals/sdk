@@ -126,6 +126,13 @@ export interface DeactivateOptions extends CreateOptions {}
 export interface VerifyOptions {
   /** Optional custom proof verifier */
   verifier?: (proof: DataIntegrityProof, data: unknown) => Promise<boolean>;
+  /**
+   * Resolves the Ed25519 public key bytes for a proof's verificationMethod.
+   * Required to verify proofs whose key is NOT embedded in the identifier
+   * (did:webvh, did:btco, did:peer). Return null when the method cannot be
+   * resolved or its key is not Ed25519 — the proof then fails closed.
+   */
+  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>;
 }
 
 /**

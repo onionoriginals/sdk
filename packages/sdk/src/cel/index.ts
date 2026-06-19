@@ -14,4 +14,5 @@ export * from './serialization';
 export * from './ExternalReferenceManager';
 export * from './layers';
 export * from './OriginalsCel';
+export * from './keyResolver';
 export { main as celCli } from './cli/index';

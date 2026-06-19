@@ -1,47 +1,80 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, beforeAll } from 'bun:test';
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
-import type { 
-  EventLog, 
-  LogEntry, 
-  DataIntegrityProof, 
+import type {
+  EventLog,
+  LogEntry,
+  DataIntegrityProof,
   CreateOptions,
-  VerifyOptions 
+  VerifyOptions,
 } from '../../../src/cel/types';
+import { multikey } from '../../../src/crypto/Multikey';
+import { canonicalizeEvent } from '../../../src/cel/canonicalize';
 
 /**
- * Mock signer that creates a valid DataIntegrityProof structure.
- * Uses a non-did:key verificationMethod so that structural tests route to the
- * structural-only verification path and do not require real Ed25519 keys.
+ * Mock signer that creates a structurally valid DataIntegrityProof.
+ * Uses a non-did:key verificationMethod — proofs from this signer fail closed
+ * (no resolver).  Use only in tests that:
+ *   (a) supply a custom verifier, or
+ *   (b) expect verified: false (testing chain/structure failures).
  */
 function createMockSigner(verificationMethod: string) {
-  return async (data: unknown): Promise<DataIntegrityProof> => {
+  return async (_data: unknown): Promise<DataIntegrityProof> => ({
+    type: 'DataIntegrityProof',
+    cryptosuite: 'eddsa-jcs-2022',
+    created: new Date().toISOString(),
+    verificationMethod,
+    proofPurpose: 'assertionMethod',
+    proofValue: 'z' + 'a'.repeat(86),
+  });
+}
+
+/**
+ * Builds a real Ed25519 did:key signer.  The public key is embedded in the
+ * DID identifier, so `verifyEventLog` can verify the signature offline without
+ * any DID resolver.
+ */
+async function makeRealSigner(): Promise<{
+  signer: (data: unknown) => Promise<DataIntegrityProof>;
+  verificationMethod: string;
+}> {
+  const ed25519 = await import('@noble/ed25519');
+  const privateKeyBytes = ed25519.utils.randomPrivateKey();
+  const publicKeyBytes = new Uint8Array(
+    await (ed25519 as any).getPublicKeyAsync(privateKeyBytes),
+  );
+  const pub = multikey.encodePublicKey(publicKeyBytes, 'Ed25519');
+  const verificationMethod = `did:key:${pub}#${pub}`;
+
+  const signer = async (data: unknown): Promise<DataIntegrityProof> => {
+    const sig = await (ed25519 as any).signAsync(canonicalizeEvent(data), privateKeyBytes);
     return {
       type: 'DataIntegrityProof',
       cryptosuite: 'eddsa-jcs-2022',
       created: new Date().toISOString(),
       verificationMethod,
       proofPurpose: 'assertionMethod',
-      proofValue: 'z' + Buffer.from('mock-signature-' + JSON.stringify(data)).toString('base64'),
+      proofValue: multikey.encodeMultibase(new Uint8Array(sig)),
     };
   };
+
+  return { signer, verificationMethod };
 }
 
 describe('verifyEventLog', () => {
-  // Use a non-did:key VM so structural tests don't trigger crypto verification.
-  // Full cryptographic round-trip tests live in proof-verification.test.ts.
-  const verificationMethod = 'did:web:example.com#key-1';
+  // A non-did:key VM used in tests that expect verified: false or supply a
+  // custom verifier.  Proofs with this VM fail closed (no resolver in unit tests).
+  const structuralVm = 'did:web:example.com#key-1';
+  // Legacy alias used in a few test-data literals below.
+  const verificationMethod = structuralVm;
 
   describe('basic verification', () => {
     test('verifies a valid event log with single create event', async () => {
-      const data = { name: 'Test Asset' };
-      const options: CreateOptions = {
-        signer: createMockSigner(verificationMethod),
-        verificationMethod,
-      };
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const options: CreateOptions = { signer, verificationMethod: vm };
 
-      const log = await createEventLog(data, options);
+      const log = await createEventLog({ name: 'Test Asset' }, options);
       const result = await verifyEventLog(log);
 
       expect(result.verified).toBe(true);
@@ -50,10 +83,8 @@ describe('verifyEventLog', () => {
     });
 
     test('verifies a valid event log with multiple events', async () => {
-      const options: CreateOptions = {
-        signer: createMockSigner(verificationMethod),
-        verificationMethod,
-      };
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const options: CreateOptions = { signer, verificationMethod: vm };
 
       let log = await createEventLog({ name: 'Test Asset' }, options);
       log = await updateEventLog(log, { name: 'Updated Asset' }, options);
@@ -67,10 +98,8 @@ describe('verifyEventLog', () => {
     });
 
     test('returns per-event verification details', async () => {
-      const options: CreateOptions = {
-        signer: createMockSigner(verificationMethod),
-        verificationMethod,
-      };
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const options: CreateOptions = { signer, verificationMethod: vm };
 
       let log = await createEventLog({ name: 'Test Asset' }, options);
       log = await updateEventLog(log, { version: 2 }, options);
@@ -88,21 +117,11 @@ describe('verifyEventLog', () => {
   });
 
   describe('proof verification', () => {
-    test('returns verified: true when proof structure is valid', async () => {
-      const log: EventLog = {
-        events: [{
-          type: 'create',
-          data: { name: 'Test' },
-          proof: [{
-            type: 'DataIntegrityProof',
-            cryptosuite: 'eddsa-jcs-2022',
-            created: new Date().toISOString(),
-            verificationMethod,
-            proofPurpose: 'assertionMethod',
-            proofValue: 'zValidBase58Signature',
-          }],
-        }],
-      };
+    test('returns verified: true when proof structure is valid and key resolves', async () => {
+      // Uses a real did:key signer — verifiable offline without a resolver.
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const options: CreateOptions = { signer, verificationMethod: vm };
+      const log = await createEventLog({ name: 'Test' }, options);
 
       const result = await verifyEventLog(log);
 
@@ -216,7 +235,8 @@ describe('verifyEventLog', () => {
       expect(result.verified).toBe(false);
     });
 
-    test('accepts eddsa-rdfc-2022 cryptosuite', async () => {
+    test('rejects eddsa-rdfc-2022 cryptosuite (CEL only supports eddsa-jcs-2022)', async () => {
+      // CEL uses Ed25519-over-JCS; eddsa-rdfc-2022 cannot be verified here — fail closed.
       const log: EventLog = {
         events: [{
           type: 'create',
@@ -234,7 +254,7 @@ describe('verifyEventLog', () => {
 
       const result = await verifyEventLog(log);
 
-      expect(result.verified).toBe(true);
+      expect(result.verified).toBe(false);
     });
 
     test('returns verified: false for unknown cryptosuite', async () => {
@@ -397,20 +417,42 @@ describe('verifyEventLog', () => {
   });
 
   describe('multiple proofs per event', () => {
-    test('verifies event with multiple valid proofs', async () => {
+    test('verifies event with multiple valid proofs (all did:key, resolved offline)', async () => {
+      // Both proofs must pass; use real did:key signers for both controller and witness.
+      const { signer: s1, verificationMethod: vm1 } = await makeRealSigner();
+      const { signer: s2, verificationMethod: vm2 } = await makeRealSigner();
+
+      // Build the event data manually — two proofs sign the same canonical payload.
+      const eventData = { name: 'Test' };
+      const proof1 = await s1({ type: 'create', data: eventData });
+      const proof2 = await s2({ type: 'create', data: eventData });
+
       const log: EventLog = {
         events: [{
           type: 'create',
-          data: { name: 'Test' },
+          data: eventData,
+          proof: [proof1, proof2],
+        }],
+      };
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(true);
+      expect(result.events[0].proofValid).toBe(true);
+    });
+
+    test('verifies event with one valid and one non-did:key proof (second fails closed)', async () => {
+      // Without a resolver, the did:web proof fails closed.
+      const { signer: s1, verificationMethod: vm1 } = await makeRealSigner();
+      const eventData = { name: 'Test' };
+      const proof1 = await s1({ type: 'create', data: eventData });
+
+      const log: EventLog = {
+        events: [{
+          type: 'create',
+          data: eventData,
           proof: [
-            {
-              type: 'DataIntegrityProof',
-              cryptosuite: 'eddsa-jcs-2022',
-              created: new Date().toISOString(),
-              verificationMethod,
-              proofPurpose: 'assertionMethod',
-              proofValue: 'zControllerSignature',
-            },
+            proof1,
             {
               type: 'DataIntegrityProof',
               cryptosuite: 'eddsa-jcs-2022',
@@ -423,10 +465,11 @@ describe('verifyEventLog', () => {
         }],
       };
 
+      // No resolver — second proof fails closed → overall proofValid: false.
       const result = await verifyEventLog(log);
 
-      expect(result.verified).toBe(true);
-      expect(result.events[0].proofValid).toBe(true);
+      expect(result.verified).toBe(false);
+      expect(result.events[0].proofValid).toBe(false);
     });
 
     test('returns verified: false if any proof in event is invalid', async () => {
@@ -552,10 +595,8 @@ describe('verifyEventLog', () => {
 
   describe('hash chain verification', () => {
     test('returns verified: true for valid hash chain', async () => {
-      const options: CreateOptions = {
-        signer: createMockSigner(verificationMethod),
-        verificationMethod,
-      };
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const options: CreateOptions = { signer, verificationMethod: vm };
 
       let log = await createEventLog({ name: 'Test Asset' }, options);
       log = await updateEventLog(log, { name: 'Updated Asset' }, options);
@@ -694,10 +735,8 @@ describe('verifyEventLog', () => {
     });
 
     test('chainValid is true for each event in valid chain', async () => {
-      const options: CreateOptions = {
-        signer: createMockSigner(verificationMethod),
-        verificationMethod,
-      };
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const options: CreateOptions = { signer, verificationMethod: vm };
 
       let log = await createEventLog({ name: 'Asset' }, options);
       log = await updateEventLog(log, { v: 2 }, options);
@@ -715,10 +754,8 @@ describe('verifyEventLog', () => {
     });
 
     test('valid chain passes with single create event', async () => {
-      const options: CreateOptions = {
-        signer: createMockSigner(verificationMethod),
-        verificationMethod,
-      };
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const options: CreateOptions = { signer, verificationMethod: vm };
 
       const log = await createEventLog({ name: 'Single Event' }, options);
       const result = await verifyEventLog(log);

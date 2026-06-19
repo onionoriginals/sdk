@@ -9,7 +9,12 @@
  *  2. Tampered data: mutated event data causes signature failure
  *  3. Tampered signature: corrupted proofValue causes signature failure
  *  4. Wrong key: verificationMethod contains a different public key → fails
- *  5. Non-did:key VM: structural-only path, cryptographicallyVerified: false
+ *  5. Non-did:key VM without resolver: fails closed (verified: false)
+ *  6. Non-Ed25519 did:key (ES256K): eddsa-jcs-2022 + secp256k1 VM → verified: false
+ *  7. eddsa-rdfc-2022 cryptosuite: rejected even for did:key → verified: false
+ *  8. Non-did:key VM with correct resolver: verified: true
+ *  9. Non-did:key VM with correct resolver, tampered data: verified: false
+ * 10. Non-did:key VM with resolver returning null: verified: false (fail closed)
  */
 
 import { describe, test, expect, beforeAll } from 'bun:test';
@@ -208,14 +213,14 @@ describe('CEL Proof Verification', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Test 5: Non-did:key VM → structural-only path, cryptographicallyVerified: false
+  // Test 5: Non-did:key VM without resolver → fails closed
   // -------------------------------------------------------------------------
-  test('5. Non-did:key VM: structural path only → cryptographicallyVerified: false, no throw', async () => {
-    const structuralOnlyLog: EventLog = {
+  test('5. Non-did:key VM (no resolver): fails closed → verified: false, cryptographicallyVerified: false', async () => {
+    const nonDidKeyLog: EventLog = {
       events: [
         {
           type: 'create',
-          data: { name: 'structural-only-asset' },
+          data: { name: 'non-didkey-asset' },
           proof: [
             {
               type: 'DataIntegrityProof',
@@ -230,14 +235,160 @@ describe('CEL Proof Verification', () => {
       ],
     };
 
-    const result = await verifyEventLog(structuralOnlyLog);
+    // No resolveKey provided — must fail closed.
+    const result = await verifyEventLog(nonDidKeyLog);
 
-    // Structural checks pass (valid fields, z-prefix), chain is valid (single event).
+    expect(result.verified).toBe(false);
+    expect(result.events[0].proofValid).toBe(false);
+    // Chain is valid (single event), but the overall result is false.
+    expect(result.events[0].chainValid).toBe(true);
+    expect(result.events[0].cryptographicallyVerified).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 7: eddsa-rdfc-2022 cryptosuite → rejected even for did:key
+  // -------------------------------------------------------------------------
+  test('7. eddsa-rdfc-2022 with did:key → verified: false (CEL only supports eddsa-jcs-2022)', async () => {
+    const rdfc2022Log: EventLog = {
+      events: [
+        {
+          type: 'create',
+          data: { name: 'rdfc-asset' },
+          proof: [
+            {
+              type: 'DataIntegrityProof',
+              cryptosuite: 'eddsa-rdfc-2022',
+              created: new Date().toISOString(),
+              verificationMethod: `did:key:${keypair.publicKeyMultikey}#${keypair.publicKeyMultikey}`,
+              proofPurpose: 'assertionMethod',
+              proofValue: 'z' + 'B'.repeat(86),
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = await verifyEventLog(rdfc2022Log);
+
+    expect(result.verified).toBe(false);
+    expect(result.events[0].proofValid).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 8: Non-did:key VM with correct resolveKey → verified: true
+  // -------------------------------------------------------------------------
+  test('8. Non-did:key VM with correct resolveKey: verified: true, cryptographicallyVerified: true', async () => {
+    // Sign a log using a real Ed25519 key but with a non-did:key VM string.
+    const ed25519 = await import('@noble/ed25519');
+    const nonDidKeyVm = 'did:webvh:example.com#key-ed25519';
+
+    const nonDidKeySigner = async (data: unknown): Promise<DataIntegrityProof> => {
+      const dataBytes = canonicalizeEvent(data);
+      const signature = await (ed25519 as any).signAsync(dataBytes, keypair.privateKeyBytes);
+      const proofValue = multikey.encodeMultibase(new Uint8Array(signature));
+      return {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: new Date().toISOString(),
+        verificationMethod: nonDidKeyVm,
+        proofPurpose: 'assertionMethod',
+        proofValue,
+      };
+    };
+
+    const log = await createEventLog(
+      { name: 'webvh-asset', layer: 'webvh', did: 'did:webvh:example.com' },
+      { signer: nonDidKeySigner, verificationMethod: nonDidKeyVm },
+    );
+
+    // Resolver returns the real public key for this VM.
+    const resolveKey = async (vm: string): Promise<Uint8Array | null> => {
+      if (vm === nonDidKeyVm) return keypair.publicKeyBytes;
+      return null;
+    };
+
+    const result = await verifyEventLog(log, { resolveKey });
+
     expect(result.verified).toBe(true);
     expect(result.errors).toHaveLength(0);
     expect(result.events[0].proofValid).toBe(true);
-    expect(result.events[0].chainValid).toBe(true);
-    // But no cryptographic verification was performed.
+    expect(result.events[0].cryptographicallyVerified).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 9: Non-did:key VM, correct resolver, tampered data → verified: false
+  // -------------------------------------------------------------------------
+  test('9. Non-did:key VM with resolver, tampered data → verified: false', async () => {
+    const ed25519 = await import('@noble/ed25519');
+    const nonDidKeyVm = 'did:webvh:example.com#key-ed25519';
+
+    const nonDidKeySigner = async (data: unknown): Promise<DataIntegrityProof> => {
+      const dataBytes = canonicalizeEvent(data);
+      const signature = await (ed25519 as any).signAsync(dataBytes, keypair.privateKeyBytes);
+      const proofValue = multikey.encodeMultibase(new Uint8Array(signature));
+      return {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: new Date().toISOString(),
+        verificationMethod: nonDidKeyVm,
+        proofPurpose: 'assertionMethod',
+        proofValue,
+      };
+    };
+
+    const log = await createEventLog(
+      { name: 'original-value', layer: 'webvh', did: 'did:webvh:example.com' },
+      { signer: nonDidKeySigner, verificationMethod: nonDidKeyVm },
+    );
+
+    // Tamper the data after signing.
+    const tampered: EventLog = JSON.parse(JSON.stringify(log));
+    (tampered.events[0].data as any).name = 'TAMPERED';
+
+    const resolveKey = async (vm: string): Promise<Uint8Array | null> => {
+      if (vm === nonDidKeyVm) return keypair.publicKeyBytes;
+      return null;
+    };
+
+    const result = await verifyEventLog(tampered, { resolveKey });
+
+    expect(result.verified).toBe(false);
+    expect(result.events[0].proofValid).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 10: Non-did:key VM, resolver returns null → fail closed
+  // -------------------------------------------------------------------------
+  test('10. Non-did:key VM, resolver returns null → verified: false (fail closed)', async () => {
+    const ed25519 = await import('@noble/ed25519');
+    const nonDidKeyVm = 'did:webvh:example.com#key-ed25519';
+
+    const nonDidKeySigner = async (data: unknown): Promise<DataIntegrityProof> => {
+      const dataBytes = canonicalizeEvent(data);
+      const signature = await (ed25519 as any).signAsync(dataBytes, keypair.privateKeyBytes);
+      const proofValue = multikey.encodeMultibase(new Uint8Array(signature));
+      return {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: new Date().toISOString(),
+        verificationMethod: nonDidKeyVm,
+        proofPurpose: 'assertionMethod',
+        proofValue,
+      };
+    };
+
+    const log = await createEventLog(
+      { name: 'unresolvable-asset', layer: 'webvh', did: 'did:webvh:example.com' },
+      { signer: nonDidKeySigner, verificationMethod: nonDidKeyVm },
+    );
+
+    // Resolver always returns null (simulates unresolvable DID).
+    const resolveKey = async (_vm: string): Promise<Uint8Array | null> => null;
+
+    const result = await verifyEventLog(log, { resolveKey });
+
+    expect(result.verified).toBe(false);
+    expect(result.events[0].proofValid).toBe(false);
     expect(result.events[0].cryptographicallyVerified).toBe(false);
   });
 });
