@@ -31,6 +31,18 @@ Two audit runs so far:
 | 017 | Fix `createTurnkeySigner` API mismatch (2 failing auth tests) | P2 | S | LOW | — | DONE (reviewed+approved; commit `2f687f0` on worktree branch `worktree-agent-af301f8e8a33a5055`; 139/139 auth tests pass; merges clean with `2b86eaa`) |
 | 018 | Harden email auth (CSPRNG session IDs, PII-free logs, client/server boundary) | P2 | M | MED | — | DONE (reviewed+approved; 4 commits ending `149356e` on worktree branch `worktree-agent-afbfc1bb906cac0bb`; all done-criteria greps clean, 131 pass / 4 envt-or-017 fails; merges clean with `2b86eaa` and with 017; BREAKING: client `initializeTurnkeyClient` now throws-with-pointer) |
 | 019 | Inscription-safe commit funding + real scriptPubKeys in transfer builder | P2 | M | MED | — | DONE (reviewed+approved; commit `b534961` on worktree branch `worktree-agent-a5cf45cb611463d6e`; 198/0 bitcoin tests, placeholder greps clean, regtest supported; merges clean with `2b86eaa`) |
+| 020 | CEL verification checks EVERY signature (resolve did:webvh/did:btco keys; fail closed) | P1 | L | MED | 014, 015 | DONE-with-followup (controller-proof verification reviewed+approved, commit `08087b2`, full suite 0 fail; review found it over-gates witness proofs → plan 021. NOT pushed alone) |
+| 021 | Witness proofs non-gating (controller gates `verified`; witnesses checked + reported separately) | P1 | M | MED | 020 | IN PROGRESS (executor dispatched on 020 state `08087b2`) |
+
+> **Post-merge review findings (review #1 + #2) → fixed/in-progress.** After the
+> six plans landed, two review passes of the run-2 code surfaced edge cases the
+> plans' tests missed: (1) CEL fail-open for non-Ed25519 did:key proofs and
+> resolveDID caching the degraded fallback stub — both **fixed** in commit
+> `54170ab` (now on PR branch / PR #170). (2) The fail-open was broader — any
+> proof not on the did:key+eddsa-jcs-2022 crypto path (incl. all did:webvh/
+> did:btco proofs and did:key+eddsa-rdfc-2022) returned `verified:true` with no
+> signature check. Maintainer decision: **every signature must be checked, fail
+> closed otherwise** → **plan 020** (in progress).
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)
 
