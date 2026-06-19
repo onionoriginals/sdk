@@ -223,12 +223,14 @@ export class DIDManager {
       }
 
       let result: DIDDocument | null = null;
+      let resolvedSuccessfully = false;
       try {
         if (did.startsWith('did:peer:')) {
           try {
             const mod = await import('@aviarytech/did-peer') as unknown as { resolve: (did: string) => Promise<Record<string, unknown>> };
             const doc = await mod.resolve(did);
             result = doc as unknown as DIDDocument;
+            resolvedSuccessfully = true;
           } catch (err) {
             // Failed to resolve did:peer; returning minimal document
             if (this.config.enableLogging) {
@@ -244,6 +246,7 @@ export class DIDManager {
           const resolver = new BtcoDidResolver({ provider: adapter });
           const resolved = await resolver.resolve(did);
           result = resolved.didDocument || null;
+          if (result) resolvedSuccessfully = true;
         } else if (did.startsWith('did:webvh:')) {
           try {
             const mod = await import('didwebvh-ts') as { resolveDID?: (did: string) => Promise<{ doc?: Record<string, unknown> }> };
@@ -251,6 +254,7 @@ export class DIDManager {
               const resolved = await mod.resolveDID(did);
               if (resolved && resolved.doc) {
                 result = resolved.doc as unknown as DIDDocument;
+                resolvedSuccessfully = true;
               }
             }
           } catch (err) {
@@ -271,8 +275,9 @@ export class DIDManager {
         return null;
       }
 
-      // Store in cache if we got a result
-      if (result) {
+      // Only cache genuinely-resolved documents; transient failures (e.g. network
+      // blips on did:webvh) must not poison the cache with a degraded stub.
+      if (result && resolvedSuccessfully) {
         await this.cache.set(did, result);
       }
       return result;

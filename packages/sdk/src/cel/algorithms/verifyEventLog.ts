@@ -88,8 +88,9 @@ export async function verifyDidKeyEd25519Proof(
     // Decode the multikey-encoded Ed25519 public key (strips multicodec header).
     const decoded = multikey.decodePublicKey(multikeyStr);
     if (decoded.type !== 'Ed25519') {
-      // Not an Ed25519 key — fall back to structural only.
-      return { verified: true, cryptographicallyVerified: false };
+      // eddsa-jcs-2022 requires an Ed25519 key; a did:key carrying any other
+      // key type is invalid under this cryptosuite — fail closed.
+      return { verified: false, cryptographicallyVerified: false };
     }
     const publicKeyBytes = decoded.key;
 

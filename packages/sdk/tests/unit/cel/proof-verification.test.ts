@@ -169,6 +169,45 @@ describe('CEL Proof Verification', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Test 6: did:key with non-Ed25519 key type → fail closed (security)
+  // -------------------------------------------------------------------------
+  test('6. Non-Ed25519 did:key (ES256K): eddsa-jcs-2022 + secp256k1 VM → verified: false', async () => {
+    // Generate a real secp256k1 (ES256K) key pair; its publicKeyMultibase is
+    // multikey-encoded with the secp256k1 multicodec prefix, so decodePublicKey
+    // returns type === 'Secp256k1', not 'Ed25519'.
+    const { KeyManager } = await import('../../../src/did/KeyManager');
+    const km = new KeyManager();
+    const secp256k1Pair = await km.generateKeyPair('ES256K');
+    const nonEd25519Multikey = secp256k1Pair.publicKey; // e.g. "zQ3s..."
+
+    const forgedProof: DataIntegrityProof = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: new Date().toISOString(),
+      verificationMethod: `did:key:${nonEd25519Multikey}#${nonEd25519Multikey}`,
+      proofPurpose: 'assertionMethod',
+      // Bogus z-prefixed proof value — would pass structural checks but
+      // must not pass cryptographic verification.
+      proofValue: 'z' + 'A'.repeat(40),
+    };
+
+    const forgedLog: EventLog = {
+      events: [
+        {
+          type: 'create',
+          data: { x: 1 },
+          proof: [forgedProof],
+        },
+      ],
+    };
+
+    const result = await verifyEventLog(forgedLog);
+
+    // Must fail closed: a non-Ed25519 key under eddsa-jcs-2022 is invalid.
+    expect(result.verified).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
   // Test 5: Non-did:key VM → structural-only path, cryptographicallyVerified: false
   // -------------------------------------------------------------------------
   test('5. Non-did:key VM: structural path only → cryptographicallyVerified: false, no throw', async () => {
