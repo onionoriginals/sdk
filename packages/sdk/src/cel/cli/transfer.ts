@@ -17,7 +17,7 @@ import { parseEventLogCbor } from '../serialization/cbor';
 import { serializeEventLogJson } from '../serialization/json';
 import { serializeEventLogCbor } from '../serialization/cbor';
 import { multikey } from '../../crypto/Multikey';
-import { canonicalizeEvent } from '../canonicalize';
+import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize';
 import { computeDigestMultibase } from '../hash';
 
 /**
@@ -229,7 +229,7 @@ export async function transferCommand(flags: TransferFlags): Promise<TransferRes
   // `transferData` would produce a signature that verification cannot reproduce,
   // yielding proofValid: false on every transferred log.
   const lastEvent = eventLog.events[eventLog.events.length - 1];
-  const previousEvent = computeDigestMultibase(canonicalizeEvent(lastEvent));
+  const previousEvent = computeDigestMultibase(canonicalizeEntryForChain(lastEvent));
 
   const eventBase = {
     type: 'update' as const,

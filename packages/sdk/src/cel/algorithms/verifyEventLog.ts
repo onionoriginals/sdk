@@ -17,7 +17,7 @@ import type {
   DataIntegrityProof
 } from '../types';
 import { computeDigestMultibase } from '../hash';
-import { canonicalizeEvent } from '../canonicalize';
+import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize';
 import { multikey } from '../../crypto/Multikey';
 
 /**
@@ -203,8 +203,13 @@ function verifyChain(
       return { chainValid: false, errors };
     }
     
-    // Compute the expected hash of the previous event
-    const expectedHash = computeDigestMultibase(canonicalizeEvent(previousEvent));
+    // Compute the expected hash of the previous event. The chain link covers
+    // ONLY the committed fields ({type, data, previousEvent}) — the same
+    // message the signer signed. The proof array (proofValue + unsigned
+    // metadata like created/verificationMethod, plus any witness proofs added
+    // later) is excluded, so the chain cannot depend on data no signature
+    // commits to. See canonicalizeEntryForChain.
+    const expectedHash = computeDigestMultibase(canonicalizeEntryForChain(previousEvent));
     
     if (event.previousEvent !== expectedHash) {
       errors.push(`Event ${index}: Hash chain broken - previousEvent does not match hash of prior event`);

@@ -33,6 +33,7 @@ Two audit runs so far:
 | 019 | Inscription-safe commit funding + real scriptPubKeys in transfer builder | P2 | M | MED | — | DONE (reviewed+approved; commit `b534961` on worktree branch `worktree-agent-a5cf45cb611463d6e`; 198/0 bitcoin tests, placeholder greps clean, regtest supported; merges clean with `2b86eaa`) |
 | 020 | CEL verification checks EVERY signature (resolve did:webvh/did:btco keys; fail closed) | P1 | L | MED | 014, 015 | DONE-with-followup (controller-proof verification reviewed+approved, commit `08087b2`, full suite 0 fail; review found it over-gates witness proofs → plan 021. NOT pushed alone) |
 | 021 | Witness proofs non-gating (controller gates `verified`; witnesses checked + reported separately) | P1 | M | MED | 020 | IN PROGRESS (executor dispatched on 020 state `08087b2`) |
+| 022 | Hash-chain link covers only committed fields, not mutable proof metadata | P1 | S | MED | 014, 015 | DONE (worktree branch `correctness/round1-5` atop `0b8cd11`; chain preimage now `canonicalizeEntryForChain` = `{type,data,previousEvent?}`, proof array excluded; tsc 0, build ok, full suite 0 fail; tamper test updated: proofValue→proofValid (not chain), created→no-op; NOT pushed) |
 
 > **Post-merge review findings (review #1 + #2) → fixed/in-progress.** After the
 > six plans landed, two review passes of the run-2 code surfaced edge cases the
