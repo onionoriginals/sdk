@@ -276,7 +276,12 @@ export class DIDManager {
       // Only cache genuinely-resolved documents; transient failures (e.g. network
       // blips on did:webvh) must not poison the cache with a degraded stub.
       if (result && resolvedSuccessfully) {
-        await this.cache.set(did, result);
+        try {
+          await this.cache.set(did, result);
+        } catch {
+          // Cache write is best-effort; a storage failure must not discard a
+          // successfully-resolved document.
+        }
       }
       return result;
     }); // end track did.resolveDID

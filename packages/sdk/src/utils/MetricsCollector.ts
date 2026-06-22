@@ -317,7 +317,8 @@ export class MetricsCollector {
     lines.push('# HELP originals_operation_total Total number of operations by name');
     lines.push('# TYPE originals_operation_total counter');
     for (const [operation, opMetrics] of Object.entries(metrics.operationTimes)) {
-      lines.push(`originals_operation_total{operation="${operation}"} ${opMetrics.count}`);
+      const escaped = operation.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+      lines.push(`originals_operation_total{operation="${escaped}"} ${opMetrics.count}`);
     }
     lines.push('');
 
