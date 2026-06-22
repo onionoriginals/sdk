@@ -147,6 +147,13 @@ export const multikey = {
     return 'z' + base58.encode(data instanceof Buffer ? new Uint8Array(data) : data);
   },
 
+  decodeMultibase: (encoded: string): Uint8Array => {
+    if (!encoded || encoded[0] !== 'z') {
+      throw new Error('Invalid Multibase encoding: only z-base58btc is supported');
+    }
+    return base58.decode(encoded.slice(1));
+  },
+
   decodePublicKey: (publicKeyMultibase: string): { key: Uint8Array; type: MultikeyType } => {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid Multibase encoding');

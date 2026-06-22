@@ -74,6 +74,21 @@ export interface EventVerification {
   proofValid: boolean;
   /** Whether the hash chain link is valid (previousEvent matches) */
   chainValid: boolean;
+  /**
+   * True when all proofs for this event were cryptographically verified
+   * (e.g. Ed25519 signature checked against the public key in a did:key VM).
+   * False when only structural validation was possible — the proof fields were
+   * well-formed but no signature check was performed.  Absent when a
+   * caller-supplied custom verifier was used.
+   */
+  cryptographicallyVerified?: boolean;
+  /**
+   * Per-witness verification results. Witness proofs are cryptographically
+   * checked when resolvable but are NON-GATING: a failed or unresolvable witness
+   * does not affect `proofValid` / the log's overall `verified`. Empty/absent
+   * when the event carries no witness proofs.
+   */
+  witnessProofs?: { verificationMethod: string; verified: boolean }[];
   /** Any errors encountered during verification */
   errors: string[];
 }
@@ -118,6 +133,13 @@ export interface DeactivateOptions extends CreateOptions {}
 export interface VerifyOptions {
   /** Optional custom proof verifier */
   verifier?: (proof: DataIntegrityProof, data: unknown) => Promise<boolean>;
+  /**
+   * Resolves the Ed25519 public key bytes for a proof's verificationMethod.
+   * Required to verify proofs whose key is NOT embedded in the identifier
+   * (did:webvh, did:btco, did:peer). Return null when the method cannot be
+   * resolved or its key is not Ed25519 — the proof then fails closed.
+   */
+  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>;
 }
 
 /**

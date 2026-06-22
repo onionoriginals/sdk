@@ -17,6 +17,8 @@ import { parseEventLogCbor } from '../serialization/cbor';
 import { serializeEventLogJson } from '../serialization/json';
 import { serializeEventLogCbor } from '../serialization/cbor';
 import { multikey } from '../../crypto/Multikey';
+import { canonicalizeEvent } from '../canonicalize';
+import { computeDigestMultibase } from '../hash';
 
 /**
  * Flags parsed from command line arguments
@@ -127,8 +129,7 @@ function createSigner(privateKey: string, publicKey: string): CelSigner {
     const ed25519 = await import('@noble/ed25519');
     const decoded = multikey.decodePrivateKey(privateKey);
 
-    const dataStr = JSON.stringify(data, Object.keys(data as object).sort());
-    const dataBytes = new TextEncoder().encode(dataStr);
+    const dataBytes = canonicalizeEvent(data);
 
     const signature = await (ed25519 as any).signAsync(dataBytes, decoded.key);
     const proofValue = multikey.encodeMultibase(new Uint8Array(signature));
@@ -232,12 +233,9 @@ export async function transferCommand(flags: TransferFlags): Promise<TransferRes
     };
   }
 
-  // Compute previous event hash
+  // Compute previous event hash using the same canonicalization as updateEventLog
   const lastEvent = eventLog.events[eventLog.events.length - 1];
-  const lastEventStr = JSON.stringify(lastEvent);
-  const { sha256 } = await import('@noble/hashes/sha2.js');
-  const hashBytes = sha256(new TextEncoder().encode(lastEventStr));
-  const previousEvent = multikey.encodeMultibase(hashBytes);
+  const previousEvent = computeDigestMultibase(canonicalizeEvent(lastEvent));
 
   // Append transfer event to log
   eventLog.events.push({

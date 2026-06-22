@@ -83,7 +83,11 @@ export class MetricsCollector {
    * Re-throws any error after recording the failure.
    */
   async track<T>(operation: string, fn: () => Promise<T>): Promise<T> {
-    const start = Date.now();
+    // Use performance.now() (sub-millisecond resolution) rather than Date.now()
+    // so that fast operations still record a non-zero duration. With Date.now()'s
+    // 1ms granularity a quick operation completing within the same millisecond
+    // would record a duration of exactly 0, intermittently failing timing assertions.
+    const start = performance.now();
     let success = true;
     try {
       return await fn();
@@ -91,7 +95,7 @@ export class MetricsCollector {
       success = false;
       throw e;
     } finally {
-      this.recordOperation(operation, Date.now() - start, success);
+      this.recordOperation(operation, performance.now() - start, success);
     }
   }
 
@@ -125,13 +129,13 @@ export class MetricsCollector {
    */
   startOperation(operation: string): () => void {
     const startTime = performance.now();
-    
+
     return (success: boolean = true) => {
       const duration = performance.now() - startTime;
       this.recordOperation(operation, duration, success);
     };
   }
-  
+
   /**
    * Record an asset creation
    */
@@ -313,15 +317,24 @@ export class MetricsCollector {
     }
     lines.push('');
     
-    // Operation metrics
+    // Operation metrics — label-based counters for multi-dimensional queries
+    lines.push('# HELP originals_operation_total Total number of operations by name');
+    lines.push('# TYPE originals_operation_total counter');
+    for (const [operation, opMetrics] of Object.entries(metrics.operationTimes)) {
+      const escaped = operation.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+      lines.push(`originals_operation_total{operation="${escaped}"} ${opMetrics.count}`);
+    }
+    lines.push('');
+
+    // Operation metrics — per-operation detail
     for (const [operation, opMetrics] of Object.entries(metrics.operationTimes)) {
       const safeOpName = operation.replace(/[^a-zA-Z0-9_]/g, '_');
-      
+
       lines.push(`# HELP originals_operation_${safeOpName}_total Total number of ${operation} operations`);
       lines.push(`# TYPE originals_operation_${safeOpName}_total counter`);
       lines.push(`originals_operation_${safeOpName}_total ${opMetrics.count}`);
       lines.push('');
-      
+
       lines.push(`# HELP originals_operation_${safeOpName}_duration_milliseconds Duration of ${operation} operations`);
       lines.push(`# TYPE originals_operation_${safeOpName}_duration_milliseconds summary`);
       lines.push(`originals_operation_${safeOpName}_duration_milliseconds{quantile="0.0"} ${opMetrics.minTime}`);
@@ -330,7 +343,7 @@ export class MetricsCollector {
       lines.push(`originals_operation_${safeOpName}_duration_milliseconds_sum ${opMetrics.totalTime}`);
       lines.push(`originals_operation_${safeOpName}_duration_milliseconds_count ${opMetrics.count}`);
       lines.push('');
-      
+
       lines.push(`# HELP originals_operation_${safeOpName}_errors_total Total number of errors in ${operation} operations`);
       lines.push(`# TYPE originals_operation_${safeOpName}_errors_total counter`);
       lines.push(`originals_operation_${safeOpName}_errors_total ${opMetrics.errorCount}`);

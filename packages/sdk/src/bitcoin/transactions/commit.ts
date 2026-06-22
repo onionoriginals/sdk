@@ -10,7 +10,7 @@
 import * as btc from '@scure/btc-signer';
 import * as ordinals from 'micro-ordinals';
 import { schnorr } from '@noble/curves/secp256k1';
-import { Utxo } from '../../types/bitcoin.js';
+import { Utxo, ResourceUtxo } from '../../types/bitcoin.js';
 import { calculateFee } from '../fee-calculation.js';
 import { selectUtxos, SimpleUtxoSelectionOptions } from '../utxo-selection.js';
 
@@ -42,10 +42,13 @@ function getScureNetwork(network: BitcoinNetwork): typeof btc.NETWORK {
 }
 
 /**
- * Validates that a UTXO has all required fields for spending
+ * Validates that a UTXO has all required fields for spending and is safe to use
+ * as a fee/funding input (not locked, not carrying an inscription, not tagged as
+ * a resource-bearing UTXO).
  *
  * @param utxo - The UTXO to validate
- * @returns true if the UTXO is valid and spendable, false otherwise
+ * @returns true if the UTXO is structurally valid, unlocked, and carries no
+ *          inscription or resource ordinal
  */
 function isValidSpendableUtxo(utxo: Utxo): boolean {
   return !!(
@@ -53,7 +56,10 @@ function isValidSpendableUtxo(utxo: Utxo): boolean {
     typeof utxo.vout === 'number' &&
     utxo.value > 0 &&
     utxo.scriptPubKey &&
-    utxo.scriptPubKey.length > 0
+    utxo.scriptPubKey.length > 0 &&
+    !utxo.locked &&
+    !(utxo.inscriptions && utxo.inscriptions.length > 0) &&
+    (utxo as ResourceUtxo).hasResource !== true
   );
 }
 
@@ -189,12 +195,36 @@ export async function createCommitTransaction(
     throw new Error(`Invalid fee rate: ${feeRate}`);
   }
 
-  // CRITICAL: Pre-filter UTXOs to ensure all have valid scriptPubKey
-  // This prevents silent failures where UTXOs are selected but can't be spent
-  const validUtxos = utxos.filter(isValidSpendableUtxo);
+  // CRITICAL: Pre-filter UTXOs in two passes so error messages clearly distinguish
+  // between structurally invalid UTXOs and those that are valid but protected from
+  // being spent (locked or carrying an inscription/resource ordinal).
+
+  // Pass 1: structural validity (txid, vout, value, scriptPubKey)
+  function isStructurallyValid(utxo: Utxo): boolean {
+    return !!(
+      utxo.txid &&
+      typeof utxo.vout === 'number' &&
+      utxo.value > 0 &&
+      utxo.scriptPubKey &&
+      utxo.scriptPubKey.length > 0
+    );
+  }
+
+  function isProtected(utxo: Utxo): boolean {
+    return !!(
+      utxo.locked ||
+      (utxo.inscriptions && utxo.inscriptions.length > 0) ||
+      (utxo as ResourceUtxo).hasResource === true
+    );
+  }
+
+  const structurallyValid = utxos.filter(isStructurallyValid);
+  const structurallyInvalidCount = utxos.length - structurallyValid.length;
+
+  const validUtxos = structurallyValid.filter(utxo => !isProtected(utxo));
+  const protectedCount = structurallyValid.length - validUtxos.length;
 
   if (validUtxos.length === 0) {
-    const invalidCount = utxos.length;
     const invalidReasons: string[] = [];
 
     utxos.forEach((utxo, idx) => {
@@ -209,17 +239,39 @@ export async function createCommitTransaction(
       }
     });
 
-    throw new Error(
-      `No valid spendable UTXOs available. ${invalidCount} UTXO(s) provided but all are invalid:\n` +
-      invalidReasons.slice(0, 5).join('\n') +
-      (invalidReasons.length > 5 ? `\n... and ${invalidReasons.length - 5} more` : '')
-    );
+    const parts: string[] = [
+      `No valid spendable UTXOs available. ${utxos.length} UTXO(s) provided but all are excluded.`
+    ];
+    if (structurallyInvalidCount > 0) {
+      parts.push(
+        `${structurallyInvalidCount} UTXO(s) are structurally invalid:\n` +
+        invalidReasons.slice(0, 5).join('\n') +
+        (invalidReasons.length > 5 ? `\n... and ${invalidReasons.length - 5} more` : '')
+      );
+    }
+    if (protectedCount > 0) {
+      parts.push(
+        `${protectedCount} UTXO(s) are excluded because they carry inscriptions or are locked ` +
+        `and cannot safely be used as fee inputs (spending them would destroy the inscription).`
+      );
+    }
+
+    throw new Error(parts.join('\n'));
   }
 
-  // Log filtered UTXOs for debugging
-  if (validUtxos.length < utxos.length) {
-    const filteredCount = utxos.length - validUtxos.length;
-    console.warn(`Filtered out ${filteredCount} invalid UTXO(s). ${validUtxos.length} valid UTXO(s) remain.`);
+  // Log filtered UTXOs for debugging so operators can act on the information
+  if (structurallyInvalidCount > 0) {
+    console.warn(
+      `Filtered out ${structurallyInvalidCount} structurally invalid UTXO(s). ` +
+      `${structurallyValid.length} structurally valid UTXO(s) remain.`
+    );
+  }
+  if (protectedCount > 0) {
+    console.warn(
+      `Excluded ${protectedCount} UTXO(s) that carry inscriptions or are locked — ` +
+      `these are protected from being spent as fee inputs. ` +
+      `${validUtxos.length} spendable UTXO(s) remain.`
+    );
   }
 
   // Step 1: Create the inscription object

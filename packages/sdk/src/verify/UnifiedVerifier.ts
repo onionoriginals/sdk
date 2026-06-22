@@ -12,6 +12,7 @@
  */
 import { Verifier } from '../vc/Verifier';
 import { verifyEventLog } from '../cel/algorithms/verifyEventLog';
+import { createDidManagerKeyResolver } from '../cel/keyResolver';
 import type { DIDManager } from '../did/DIDManager';
 import type { VerifiableCredential } from '../types';
 import type { EventLog } from '../cel/types';
@@ -61,7 +62,9 @@ export class UnifiedVerifier {
         return { kind, verified: res.verified, errors: res.errors, details: res };
       }
       case 'eventLog': {
-        const res = await verifyEventLog(document as EventLog);
+        const res = await verifyEventLog(document as EventLog, {
+          resolveKey: createDidManagerKeyResolver(this.didManager),
+        });
         return { kind, verified: res.verified, errors: res.errors, details: res };
       }
       default:

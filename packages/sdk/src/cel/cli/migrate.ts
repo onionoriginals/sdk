@@ -22,6 +22,7 @@ import { parseEventLogCbor } from '../serialization/cbor';
 import { serializeEventLogJson } from '../serialization/json';
 import { serializeEventLogCbor } from '../serialization/cbor';
 import { multikey } from '../../crypto/Multikey';
+import { canonicalizeEvent } from '../canonicalize';
 
 /**
  * Flags parsed from command line arguments
@@ -201,9 +202,8 @@ function createSigner(privateKey: string, publicKey: string): CelSigner {
     const ed25519 = await import('@noble/ed25519');
     const decoded = multikey.decodePrivateKey(privateKey);
     
-    // Serialize data for signing (deterministic JSON)
-    const dataStr = JSON.stringify(data, Object.keys(data as object).sort());
-    const dataBytes = new TextEncoder().encode(dataStr);
+    // Serialize data for signing using canonical JCS serialization
+    const dataBytes = canonicalizeEvent(data);
     
     // Sign the data
     const signature = await (ed25519 as any).signAsync(dataBytes, decoded.key);

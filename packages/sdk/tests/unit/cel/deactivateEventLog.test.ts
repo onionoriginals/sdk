@@ -3,6 +3,7 @@ import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
 import { deactivateEventLog } from '../../../src/cel/algorithms/deactivateEventLog';
 import { computeDigestMultibase } from '../../../src/cel/hash';
+import { canonicalizeEvent } from '../../../src/cel/canonicalize';
 import type { DataIntegrityProof, EventLog, CreateOptions, UpdateOptions, DeactivateOptions } from '../../../src/cel/types';
 
 /**
@@ -20,14 +21,6 @@ function createMockSigner(verificationMethod: string) {
       proofValue: 'z' + Buffer.from('mock-signature-' + JSON.stringify(data)).toString('base64'),
     };
   };
-}
-
-/**
- * Helper to serialize a LogEntry for hash comparison
- */
-function serializeEntry(entry: { type: string; data: unknown; previousEvent?: string; proof: DataIntegrityProof[] }): Uint8Array {
-  const json = JSON.stringify(entry, Object.keys(entry).sort());
-  return new TextEncoder().encode(json);
 }
 
 describe('deactivateEventLog', () => {
@@ -142,15 +135,15 @@ describe('deactivateEventLog', () => {
       
       const initialLog = await createEventLog({ name: 'Test' }, createOptions);
       const lastEvent = initialLog.events[0];
-      const expectedHash = computeDigestMultibase(serializeEntry(lastEvent));
-      
+      const expectedHash = computeDigestMultibase(canonicalizeEvent(lastEvent));
+
       const deactivateOptions: DeactivateOptions = {
         signer: createMockSigner(verificationMethod),
         verificationMethod,
       };
-      
+
       const deactivatedLog = await deactivateEventLog(initialLog, 'Retired', deactivateOptions);
-      
+
       expect(deactivatedLog.events[1].previousEvent).toBe(expectedHash);
     });
 
@@ -184,7 +177,7 @@ describe('deactivateEventLog', () => {
       expect(deactivatedLog.events).toHaveLength(4);
       
       // Deactivate event links to last update
-      const expectedHash = computeDigestMultibase(serializeEntry(log3.events[2]));
+      const expectedHash = computeDigestMultibase(canonicalizeEvent(log3.events[2]));
       expect(deactivatedLog.events[3].previousEvent).toBe(expectedHash);
     });
   });

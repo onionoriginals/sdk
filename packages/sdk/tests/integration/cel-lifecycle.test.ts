@@ -11,8 +11,8 @@
  * - Tampering detection
  */
 
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { 
+import { describe, test, expect, beforeEach, beforeAll } from 'bun:test';
+import {
   OriginalsCel,
   createEventLog,
   updateEventLog,
@@ -27,34 +27,34 @@ import {
   type CelSigner,
   type ExternalReference,
 } from '../../src';
+import { multikey } from '../../src/crypto/Multikey';
+import { canonicalizeEvent } from '../../src/cel/canonicalize';
 
 /**
- * Creates a mock signer that produces valid DataIntegrityProofs
- * for testing purposes.
+ * Creates a real Ed25519 signer so that verifyEventLog performs full
+ * cryptographic verification rather than structural-only checks.
  */
-function createMockSigner(keyId: string = 'did:key:z6MkTest#key-0'): CelSigner {
-  return async (data: unknown): Promise<DataIntegrityProof> => {
-    // Create a deterministic but unique proof value based on data
-    const dataStr = JSON.stringify(data);
-    const encoder = new TextEncoder();
-    const dataBytes = encoder.encode(dataStr);
-    
-    // Simple hash-based proof for testing (not cryptographically secure)
-    let hash = 0;
-    for (let i = 0; i < dataBytes.length; i++) {
-      hash = ((hash << 5) - hash) + dataBytes[i];
-      hash = hash & hash;
-    }
-    
+async function createRealSigner(): Promise<{ signer: CelSigner; verificationMethod: string }> {
+  const ed25519 = await import('@noble/ed25519');
+  const privateKeyBytes = ed25519.utils.randomPrivateKey();
+  const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
+  const publicKey = multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519');
+  const verificationMethod = `did:key:${publicKey}#${publicKey}`;
+
+  const signer: CelSigner = async (data: unknown): Promise<DataIntegrityProof> => {
+    const dataBytes = canonicalizeEvent(data);
+    const signature = await (ed25519 as any).signAsync(dataBytes, privateKeyBytes);
+    const proofValue = multikey.encodeMultibase(new Uint8Array(signature));
     return {
       type: 'DataIntegrityProof',
       cryptosuite: 'eddsa-jcs-2022',
-      verificationMethod: keyId,
+      verificationMethod,
       proofPurpose: 'assertionMethod',
-      proofValue: `z${Math.abs(hash).toString(36)}proof${Date.now().toString(36)}`,
+      proofValue,
       created: new Date().toISOString(),
     };
   };
+  return { signer, verificationMethod };
 }
 
 /**
@@ -67,10 +67,13 @@ function createTestResource(name: string = 'test'): ExternalReference {
 
 describe('Integration: CEL Lifecycle', () => {
   let signer: CelSigner;
+  let verificationMethod: string;
   let peerManager: PeerCelManager;
 
-  beforeEach(() => {
-    signer = createMockSigner();
+  beforeEach(async () => {
+    const result = await createRealSigner();
+    signer = result.signer;
+    verificationMethod = result.verificationMethod;
     peerManager = new PeerCelManager(signer);
   });
 
@@ -366,7 +369,7 @@ describe('Integration: CEL Lifecycle', () => {
         'Asset is being retired',
         {
           signer,
-          verificationMethod: 'did:key:z6MkTest#key-0',
+          verificationMethod,
           proofPurpose: 'assertionMethod',
         }
       );
@@ -392,7 +395,7 @@ describe('Integration: CEL Lifecycle', () => {
       await expect(
         deactivateEventLog(deactivatedLog, 'Second deactivation', {
           signer,
-          verificationMethod: 'did:key:z6MkTest#key-0',
+          verificationMethod,
         })
       ).rejects.toThrow('Event log is already deactivated');
     });
@@ -404,7 +407,7 @@ describe('Integration: CEL Lifecycle', () => {
         'Testing state reflection',
         {
           signer,
-          verificationMethod: 'did:key:z6MkTest#key-0',
+          verificationMethod,
         }
       );
       
@@ -418,7 +421,7 @@ describe('Integration: CEL Lifecycle', () => {
       const deactivatedLog = await deactivateEventLog(
         peerLog,
         'Blocking migration',
-        { signer, verificationMethod: 'did:key:z6MkTest#key-0' }
+        { signer, verificationMethod }
       );
       
       const webvhManager = new WebVHCelManager(signer, 'example.com');

@@ -15,17 +15,32 @@ import type {
 } from './WebVHManager';
 import { Ed25519Signer } from '../crypto/Signer';
 import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation';
+import { DIDCache } from './DIDCache';
+import type { MetricsCollector } from '../utils/MetricsCollector';
 import * as fs from 'fs';
 import * as path from 'path';
 
 export class DIDManager {
   private webvhManager?: WebVHManager;
+  private readonly metrics?: MetricsCollector;
+  public readonly cache: DIDCache;
 
-  constructor(private config: OriginalsConfig) {}
+  constructor(private config: OriginalsConfig, metrics?: MetricsCollector) {
+    this.metrics = metrics;
+    this.cache = new DIDCache({
+      ...(config.didCache || {}),
+      metrics,
+    });
+  }
+
+  private track<T>(op: string, fn: () => Promise<T>): Promise<T> {
+    return this.metrics ? this.metrics.track(op, fn) : fn();
+  }
 
   async createDIDPeer(resources: AssetResource[], returnKeyPair?: false): Promise<DIDDocument>;
   async createDIDPeer(resources: AssetResource[], returnKeyPair: true): Promise<{ didDocument: DIDDocument; keyPair: { privateKey: string; publicKey: string } }>;
   async createDIDPeer(resources: AssetResource[], returnKeyPair?: boolean): Promise<DIDDocument | { didDocument: DIDDocument; keyPair: { privateKey: string; publicKey: string } }> {
+    return this.track('did.createDIDPeer', async () => {
     // Generate a multikey keypair according to configured defaultKeyType
     const keyManager = new KeyManager();
     const desiredType = this.config.defaultKeyType || 'ES256K';
@@ -80,9 +95,11 @@ export class DIDManager {
       return { didDocument: resolved as unknown as DIDDocument, keyPair };
     }
     return resolved as unknown as DIDDocument;
+    }); // end track did.createDIDPeer
   }
 
   async migrateToDIDWebVH(didDoc: DIDDocument, domain?: string): Promise<DIDDocument> {
+    return this.track('did.migrateToDIDWebVH', async () => {
     // Use provided domain or get default from configured network
     const network = this.config.webvhNetwork || DEFAULT_WEBVH_NETWORK;
     const targetDomain = domain || getNetworkDomain(network);
@@ -126,9 +143,11 @@ export class DIDManager {
       id: `did:webvh:${normalized}:${slug}`
     };
     return await Promise.resolve(migrated);
+    }); // end track did.migrateToDIDWebVH
   }
 
   async migrateToDIDBTCO(didDoc: DIDDocument, satoshi: string): Promise<DIDDocument> {
+    return this.track('did.migrateToDIDBTCO', async () => {
     // Validate satoshi parameter
     const validation = validateSatoshiNumber(satoshi);
     if (!validation.valid) {
@@ -188,55 +207,90 @@ export class DIDManager {
       btcoDoc.service = didDoc.service;
     }
     return await Promise.resolve(btcoDoc);
+    }); // end track did.migrateToDIDBTCO
   }
 
-  async resolveDID(did: string): Promise<DIDDocument | null> {
-    try {
-      if (did.startsWith('did:peer:')) {
+  async resolveDID(did: string, options?: { skipCache?: boolean }): Promise<DIDDocument | null> {
+    return this.track('did.resolveDID', async () => {
+      // Check cache first (unless skipCache is set). The read is best-effort:
+      // a throwing storage adapter must not crash resolution — treat it as a miss.
+      if (!options?.skipCache) {
+        let cached: DIDDocument | null = null;
         try {
-          const mod = await import('@aviarytech/did-peer') as unknown as { resolve: (did: string) => Promise<Record<string, unknown>> };
-          const doc = await mod.resolve(did);
-          return doc as unknown as DIDDocument;
-        } catch (err) {
-          // Failed to resolve did:peer; returning minimal document
-          if (this.config.enableLogging) {
-            console.warn('Failed to resolve did:peer:', err);
-          }
+          cached = await this.cache.get(did);
+        } catch {
+          // best-effort cache read
         }
-        return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+        if (cached) {
+          return cached;
+        }
       }
-      if (did.startsWith('did:btco:') || did.startsWith('did:btco:test:') || did.startsWith('did:btco:sig:')) {
-        const rpcUrl = this.config.bitcoinRpcUrl || 'http://localhost:3000';
-        const network = this.config.network || 'mainnet';
-        const client = new OrdinalsClient(rpcUrl, network);
-        const adapter = new OrdinalsClientProviderAdapter(client, rpcUrl);
-        const resolver = new BtcoDidResolver({ provider: adapter });
-        const result = await resolver.resolve(did);
-        return result.didDocument || null;
+
+      let result: DIDDocument | null = null;
+      let resolvedSuccessfully = false;
+      try {
+        if (did.startsWith('did:peer:')) {
+          try {
+            const mod = await import('@aviarytech/did-peer') as unknown as { resolve: (did: string) => Promise<Record<string, unknown>> };
+            const doc = await mod.resolve(did);
+            result = doc as unknown as DIDDocument;
+            resolvedSuccessfully = true;
+          } catch (err) {
+            // Failed to resolve did:peer; returning minimal document
+            if (this.config.enableLogging) {
+              console.warn('Failed to resolve did:peer:', err);
+            }
+            result = { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+          }
+        } else if (did.startsWith('did:btco:') || did.startsWith('did:btco:test:') || did.startsWith('did:btco:sig:')) {
+          const rpcUrl = this.config.bitcoinRpcUrl || 'http://localhost:3000';
+          const network = this.config.network || 'mainnet';
+          const client = new OrdinalsClient(rpcUrl, network);
+          const adapter = new OrdinalsClientProviderAdapter(client, rpcUrl);
+          const resolver = new BtcoDidResolver({ provider: adapter });
+          const resolved = await resolver.resolve(did);
+          result = resolved.didDocument || null;
+          if (result) resolvedSuccessfully = true;
+        } else if (did.startsWith('did:webvh:')) {
+          try {
+            const mod = await import('didwebvh-ts') as { resolveDID?: (did: string) => Promise<{ doc?: Record<string, unknown> }> };
+            if (mod && typeof mod.resolveDID === 'function') {
+              const resolved = await mod.resolveDID(did);
+              if (resolved && resolved.doc) {
+                result = resolved.doc as unknown as DIDDocument;
+                resolvedSuccessfully = true;
+              }
+            }
+          } catch (err) {
+            // Failed to resolve did:webvh; returning minimal document
+            if (this.config.enableLogging) {
+              console.warn('Failed to resolve did:webvh:', err);
+            }
+          }
+          if (!result) result = { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+        } else {
+          result = { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+        }
+      } catch (err) {
+        // DID resolution failed
+        if (this.config.enableLogging) {
+          console.error('Failed to resolve DID:', err);
+        }
+        return null;
       }
-      if (did.startsWith('did:webvh:')) {
+
+      // Only cache genuinely-resolved documents; transient failures (e.g. network
+      // blips on did:webvh) must not poison the cache with a degraded stub.
+      if (result && resolvedSuccessfully) {
         try {
-          const mod = await import('didwebvh-ts') as { resolveDID?: (did: string) => Promise<{ doc?: Record<string, unknown> }> };
-          if (mod && typeof mod.resolveDID === 'function') {
-            const result = await mod.resolveDID(did);
-            if (result && result.doc) return result.doc as unknown as DIDDocument;
-          }
-        } catch (err) {
-          // Failed to resolve did:webvh; returning minimal document
-          if (this.config.enableLogging) {
-            console.warn('Failed to resolve did:webvh:', err);
-          }
+          await this.cache.set(did, result);
+        } catch {
+          // Cache write is best-effort; a storage failure must not discard a
+          // successfully-resolved document.
         }
-        return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
       }
-      return { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
-    } catch (err) {
-      // DID resolution failed
-      if (this.config.enableLogging) {
-        console.error('Failed to resolve DID:', err);
-      }
-      return null;
-    }
+      return result;
+    }); // end track did.resolveDID
   }
 
   validateDIDDocument(didDoc: DIDDocument): boolean {

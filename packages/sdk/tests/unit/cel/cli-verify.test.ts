@@ -1,7 +1,13 @@
 /**
  * CLI Verify Command Tests
- * 
+ *
  * Tests for the verify command implementation (US-021)
+ *
+ * After the fail-closed change (plan 020), non-did:key proofs fail unless a
+ * DIDManager-backed resolver can fetch the key.  The CLI builds a live resolver
+ * from OriginalsSDK, which will return null for fake DIDs in unit tests.
+ * Therefore, all tests that expect `verified: true` must use real Ed25519
+ * did:key signers whose keys are embedded in the identifier.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -14,26 +20,51 @@ import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
 import { serializeEventLogJson } from '../../../src/cel/serialization/json';
 import { serializeEventLogCbor } from '../../../src/cel/serialization/cbor';
 import type { DataIntegrityProof, WitnessProof, EventLog } from '../../../src/cel/types';
+import { multikey } from '../../../src/crypto/Multikey';
+import { canonicalizeEvent } from '../../../src/cel/canonicalize';
 
-// Mock signer that creates valid proofs
-function createMockSigner(verificationMethod: string = 'did:key:z6MkTest#key-1') {
-  return async (data: unknown): Promise<DataIntegrityProof> => ({
-    type: 'DataIntegrityProof',
-    cryptosuite: 'eddsa-jcs-2022',
-    created: new Date().toISOString(),
-    verificationMethod,
-    proofPurpose: 'assertionMethod',
-    proofValue: 'z3ABC123mockProofValue',
-  });
+/**
+ * Creates a real Ed25519 did:key signer — identical to the approach in
+ * proof-verification.test.ts. These proofs are verified offline without a
+ * network resolver because the key is embedded in the did:key identifier.
+ */
+async function createRealDidKeySigner(): Promise<{
+  signer: (data: unknown) => Promise<DataIntegrityProof>;
+  verificationMethod: string;
+}> {
+  const ed25519 = await import('@noble/ed25519');
+  const privateKeyBytes = ed25519.utils.randomPrivateKey();
+  const publicKeyBytes = new Uint8Array(
+    await (ed25519 as any).getPublicKeyAsync(privateKeyBytes),
+  );
+  const publicKeyMultikey = multikey.encodePublicKey(publicKeyBytes, 'Ed25519');
+  const verificationMethod = `did:key:${publicKeyMultikey}#${publicKeyMultikey}`;
+
+  const signer = async (data: unknown): Promise<DataIntegrityProof> => {
+    const dataBytes = canonicalizeEvent(data);
+    const signature = await (ed25519 as any).signAsync(dataBytes, privateKeyBytes);
+    const proofValue = multikey.encodeMultibase(new Uint8Array(signature));
+    return {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: new Date().toISOString(),
+      verificationMethod,
+      proofPurpose: 'assertionMethod',
+      proofValue,
+    };
+  };
+
+  return { signer, verificationMethod };
 }
 
-// Mock signer that creates witness proofs
+// Mock signer that creates witness proofs (did:web — will fail crypto check but
+// structural errors in chain / proof-structure tests still work as intended)
 function createMockWitnessSigner(witnessedAt: string): (data: unknown) => Promise<WitnessProof> {
-  return async (data: unknown): Promise<WitnessProof> => ({
+  return async (_data: unknown): Promise<WitnessProof> => ({
     type: 'DataIntegrityProof',
     cryptosuite: 'eddsa-jcs-2022',
     created: new Date().toISOString(),
-    verificationMethod: 'did:key:z6MkWitness#key-1',
+    verificationMethod: 'did:web:witness.example.com#key-1',
     proofPurpose: 'assertionMethod',
     proofValue: 'z3WitnessProof123',
     witnessedAt,
@@ -87,67 +118,67 @@ describe('CLI Verify Command', () => {
   
   describe('JSON format verification', () => {
     it('verifies a valid single-event log', async () => {
-      // Create a valid event log
-      const signer = createMockSigner();
+      // Create a valid event log using a real did:key signer (verified offline).
+      const { signer, verificationMethod } = await createRealDidKeySigner();
       const log = await createEventLog({ name: 'Test Asset' }, {
         signer,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod,
         proofPurpose: 'assertionMethod',
       });
-      
+
       // Save to file
       const filePath = path.join(tempDir, 'test.cel.json');
       fs.writeFileSync(filePath, serializeEventLogJson(log));
-      
+
       // Verify
       const result = await verifyCommand({ log: filePath });
-      
+
       expect(result.success).toBe(true);
       expect(result.verified).toBe(true);
       expect(result.result?.verified).toBe(true);
       expect(result.result?.events.length).toBe(1);
     });
-    
+
     it('verifies a valid multi-event log with hash chain', async () => {
-      // Create a log with multiple events
-      const signer = createMockSigner();
+      // Create a log with multiple events using a real did:key signer.
+      const { signer, verificationMethod } = await createRealDidKeySigner();
       const options = {
         signer,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod,
         proofPurpose: 'assertionMethod',
       };
-      
+
       let log = await createEventLog({ name: 'Test Asset' }, options);
       log = await updateEventLog(log, { description: 'Updated' }, options);
       log = await updateEventLog(log, { version: 2 }, options);
-      
+
       // Save to file
       const filePath = path.join(tempDir, 'multi-event.cel.json');
       fs.writeFileSync(filePath, serializeEventLogJson(log));
-      
+
       // Verify
       const result = await verifyCommand({ log: filePath });
-      
+
       expect(result.success).toBe(true);
       expect(result.verified).toBe(true);
       expect(result.result?.events.length).toBe(3);
-      
+
       // All events should pass
       for (const event of result.result!.events) {
         expect(event.proofValid).toBe(true);
         expect(event.chainValid).toBe(true);
       }
     });
-    
+
     it('returns verified: false for broken hash chain', async () => {
-      // Create a valid log
-      const signer = createMockSigner();
+      // Create a valid log using a real did:key signer.
+      const { signer, verificationMethod } = await createRealDidKeySigner();
       const options = {
         signer,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod,
         proofPurpose: 'assertionMethod',
       };
-      
+
       let log = await createEventLog({ name: 'Test Asset' }, options);
       log = await updateEventLog(log, { description: 'Updated' }, options);
       
@@ -183,7 +214,7 @@ describe('CLI Verify Command', () => {
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
             created: new Date().toISOString(),
-            verificationMethod: 'did:key:z6MkTest#key-1',
+            verificationMethod: 'did:web:example.com#key-1',
             proofPurpose: 'assertionMethod',
             proofValue: 'invalid_no_multibase_prefix', // Invalid - no z or u prefix
           }],
@@ -213,7 +244,7 @@ describe('CLI Verify Command', () => {
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
             created: new Date().toISOString(),
-            verificationMethod: 'did:key:z6MkTest#key-1',
+            verificationMethod: 'did:web:example.com#key-1',
             proofPurpose: 'assertionMethod',
             proofValue: 'z3ABC123mockProofValue',
           }],
@@ -236,65 +267,74 @@ describe('CLI Verify Command', () => {
   
   describe('CBOR format verification', () => {
     it('verifies a valid CBOR event log', async () => {
-      // Create a valid event log
-      const signer = createMockSigner();
+      // Use a real did:key signer so offline crypto verification passes.
+      const { signer, verificationMethod } = await createRealDidKeySigner();
       const log = await createEventLog({ name: 'CBOR Test Asset' }, {
         signer,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod,
         proofPurpose: 'assertionMethod',
       });
-      
+
       // Save as CBOR
       const filePath = path.join(tempDir, 'test.cel.cbor');
       fs.writeFileSync(filePath, serializeEventLogCbor(log));
-      
+
       // Verify
       const result = await verifyCommand({ log: filePath });
-      
+
       expect(result.success).toBe(true);
       expect(result.verified).toBe(true);
     });
   });
-  
+
   describe('witness attestations', () => {
-    it('shows witness proofs in output', async () => {
-      // Create a log with witness proof
-      const controllerSigner = createMockSigner();
+    it('witness non-gating: controller valid + unresolvable witness → verified: true, witness reported unverified', async () => {
+      // Controller proof uses a real did:key signer — verifies offline.
+      const { signer: controllerSigner, verificationMethod } = await createRealDidKeySigner();
       const log = await createEventLog({ name: 'Witnessed Asset' }, {
         signer: controllerSigner,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod,
         proofPurpose: 'assertionMethod',
       });
-      
-      // Add a witness proof to the event
+
+      // Add a witness proof (did:web — will fail closed; no live resolver in tests).
       const witnessedAt = '2026-01-20T12:00:00Z';
       const witnessProof: WitnessProof = {
         type: 'DataIntegrityProof',
         cryptosuite: 'eddsa-jcs-2022',
         created: new Date().toISOString(),
-        verificationMethod: 'did:key:z6MkWitness#key-1',
+        verificationMethod: 'did:web:witness.example.com#key-1',
         proofPurpose: 'assertionMethod',
         proofValue: 'z3WitnessProof123',
         witnessedAt,
       };
-      
+
       const witnessedLog: EventLog = {
         events: [{
           ...log.events[0],
           proof: [...log.events[0].proof, witnessProof],
         }],
       };
-      
+
       // Save to file
       const filePath = path.join(tempDir, 'witnessed.cel.json');
       fs.writeFileSync(filePath, serializeEventLogJson(witnessedLog));
-      
-      // Verify
+
+      // Verify — the controller proof (did:key) verifies offline, so the log is
+      // verified: true.  The witness proof (did:web) fails closed because the CLI's
+      // DIDManager can't resolve the fake witness DID, but this is NON-GATING.
       const result = await verifyCommand({ log: filePath });
-      
+
       expect(result.success).toBe(true);
+      // Controller proof passes — witness failure is non-gating.
       expect(result.verified).toBe(true);
-      expect(result.result?.events[0].proofValid).toBe(true);
+      // Chain is valid.
+      expect(result.result?.events[0].chainValid).toBe(true);
+      // The witness proof is reported but marked unverified.
+      expect(result.result?.events[0].witnessProofs).toBeDefined();
+      expect(result.result?.events[0].witnessProofs).toHaveLength(1);
+      expect(result.result?.events[0].witnessProofs![0].verificationMethod).toBe('did:web:witness.example.com#key-1');
+      expect(result.result?.events[0].witnessProofs![0].verified).toBe(false);
     });
   });
   
@@ -333,18 +373,18 @@ describe('CLI Verify Command', () => {
   
   describe('VerifyResult structure', () => {
     it('includes detailed verification result', async () => {
-      const signer = createMockSigner();
+      const { signer, verificationMethod } = await createRealDidKeySigner();
       const log = await createEventLog({ name: 'Test' }, {
         signer,
-        verificationMethod: 'did:key:z6MkTest#key-1',
+        verificationMethod,
         proofPurpose: 'assertionMethod',
       });
-      
+
       const filePath = path.join(tempDir, 'detail.cel.json');
       fs.writeFileSync(filePath, serializeEventLogJson(log));
-      
+
       const result = await verifyCommand({ log: filePath });
-      
+
       expect(result.result).toBeDefined();
       expect(result.result?.verified).toBe(true);
       expect(result.result?.events).toBeInstanceOf(Array);

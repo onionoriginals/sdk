@@ -3,6 +3,7 @@ import { TelemetryHooks } from '../utils/telemetry';
 import type { LogLevel, LogOutput } from '../utils/Logger';
 import type { EventLoggingConfig } from '../utils/EventLogger';
 import type { WebVHNetworkName } from './network';
+import type { DIDCacheConfig } from '../did/DIDCache';
 
 // Base types for the Originals protocol
 export type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';
@@ -17,6 +18,8 @@ export interface OriginalsConfig {
   webvhNetwork?: WebVHNetworkName;
   // Optional pluggable adapters
   storageAdapter?: StorageAdapter;
+  // Optional DID cache configuration
+  didCache?: DIDCacheConfig;
   feeOracle?: FeeOracleAdapter;
   ordinalsProvider?: OrdinalsProvider;
   // Optional telemetry hooks

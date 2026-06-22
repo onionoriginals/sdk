@@ -9,19 +9,7 @@
 
 import type { EventLog, LogEntry, UpdateOptions, DataIntegrityProof } from '../types';
 import { computeDigestMultibase } from '../hash';
-
-/**
- * Serializes a LogEntry to a deterministic byte representation for hashing.
- * Uses JSON with sorted keys for reproducibility.
- * 
- * @param entry - The log entry to serialize
- * @returns UTF-8 encoded bytes
- */
-function serializeEntry(entry: LogEntry): Uint8Array {
-  // Use JSON with sorted keys for deterministic serialization
-  const json = JSON.stringify(entry, Object.keys(entry).sort());
-  return new TextEncoder().encode(json);
-}
+import { canonicalizeEvent } from '../canonicalize';
 
 /**
  * Updates an event log by appending a new "update" event.
@@ -63,7 +51,7 @@ export async function updateEventLog(
   const lastEvent = log.events[log.events.length - 1];
   
   // Compute the digestMultibase of the last event
-  const previousEvent = computeDigestMultibase(serializeEntry(lastEvent));
+  const previousEvent = computeDigestMultibase(canonicalizeEvent(lastEvent));
 
   // Create the event structure without proof first
   const eventBase = {

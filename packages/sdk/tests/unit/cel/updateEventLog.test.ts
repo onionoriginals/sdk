@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
 import { computeDigestMultibase } from '../../../src/cel/hash';
+import { canonicalizeEvent } from '../../../src/cel/canonicalize';
 import type { DataIntegrityProof, EventLog, CreateOptions, UpdateOptions } from '../../../src/cel/types';
 
 /**
@@ -19,14 +20,6 @@ function createMockSigner(verificationMethod: string) {
       proofValue: 'z' + Buffer.from('mock-signature-' + JSON.stringify(data)).toString('base64'),
     };
   };
-}
-
-/**
- * Helper to serialize a LogEntry for hash comparison
- */
-function serializeEntry(entry: { type: string; data: unknown; previousEvent?: string; proof: DataIntegrityProof[] }): Uint8Array {
-  const json = JSON.stringify(entry, Object.keys(entry).sort());
-  return new TextEncoder().encode(json);
 }
 
 describe('updateEventLog', () => {
@@ -118,7 +111,7 @@ describe('updateEventLog', () => {
       
       const initialLog = await createEventLog({ name: 'Test' }, createOptions);
       const lastEvent = initialLog.events[0];
-      const expectedHash = computeDigestMultibase(serializeEntry(lastEvent));
+      const expectedHash = computeDigestMultibase(canonicalizeEvent(lastEvent));
       
       const updateOptions: UpdateOptions = {
         signer: createMockSigner(verificationMethod),
@@ -157,11 +150,11 @@ describe('updateEventLog', () => {
       expect(log3.events[0].previousEvent).toBeUndefined();
       
       // Second event links to first
-      const expectedHash1 = computeDigestMultibase(serializeEntry(log3.events[0]));
+      const expectedHash1 = computeDigestMultibase(canonicalizeEvent(log3.events[0]));
       expect(log3.events[1].previousEvent).toBe(expectedHash1);
-      
+
       // Third event links to second
-      const expectedHash2 = computeDigestMultibase(serializeEntry(log3.events[1]));
+      const expectedHash2 = computeDigestMultibase(canonicalizeEvent(log3.events[1]));
       expect(log3.events[2].previousEvent).toBe(expectedHash2);
     });
   });

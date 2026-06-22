@@ -3,6 +3,7 @@
  * Implements email-based authentication using Turnkey's OTP flow
  */
 
+import { randomBytes } from 'node:crypto';
 import { Turnkey } from '@turnkey/sdk-server';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
@@ -23,8 +24,12 @@ export interface SessionStorage {
 }
 
 /**
- * Create an in-memory session storage
- * For production, consider using Redis or a database
+ * Create an in-memory session storage.
+ *
+ * **Production warning**: This store is ephemeral — sessions are lost on
+ * process restart and are not shared across multiple instances. For
+ * production deployments, pass a persistent {@link SessionStorage}
+ * implementation backed by Redis, a database, or another shared store.
  */
 export function createInMemorySessionStorage(): SessionStorage {
   const sessions = new Map<string, EmailAuthSession>();
@@ -60,16 +65,22 @@ let defaultSessionStorage: SessionStorage | null = null;
 
 function getDefaultSessionStorage(): SessionStorage {
   if (!defaultSessionStorage) {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn(
+        '[auth] Using in-memory session storage in production: sessions are lost on restart ' +
+          'and not shared across instances. Pass a persistent SessionStorage.'
+      );
+    }
     defaultSessionStorage = createInMemorySessionStorage();
   }
   return defaultSessionStorage;
 }
 
 /**
- * Generate a random session ID
+ * Generate a cryptographically secure random session ID
  */
 function generateSessionId(): string {
-  return `session_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+  return `session_${randomBytes(24).toString('base64url')}`;
 }
 
 /**
@@ -89,13 +100,12 @@ export async function initiateEmailAuth(
     throw new Error('Invalid email format');
   }
 
-  console.log(`\n🚀 Initiating email auth for: ${email}`);
+  console.log('[email-auth] Initiating email auth');
 
   // Step 1: Get or create Turnkey sub-organization
   const subOrgId = await getOrCreateTurnkeySubOrg(email, turnkeyClient);
 
   // Step 2: Send OTP via Turnkey
-  console.log(`📨 Sending OTP to ${email} via Turnkey...`);
 
   // Generate a unique user identifier for rate limiting
   const data = new TextEncoder().encode(email);
@@ -117,7 +127,7 @@ export async function initiateEmailAuth(
     throw new Error('Failed to initiate OTP - no OTP ID returned');
   }
 
-  console.log(`✅ OTP sent! OTP ID: ${otpId}`);
+  console.log('[email-auth] OTP sent');
 
   // Create auth session
   const sessionId = generateSessionId();
@@ -128,12 +138,6 @@ export async function initiateEmailAuth(
     timestamp: Date.now(),
     verified: false,
   });
-
-  console.log('='.repeat(60));
-  console.log(`📧 Check ${email} for the verification code!`);
-  console.log(`   Session ID: ${sessionId}`);
-  console.log(`   Valid for: 15 minutes`);
-  console.log('='.repeat(60) + '\n');
 
   return {
     sessionId,
@@ -171,7 +175,12 @@ export async function verifyEmailAuth(
     throw new Error('Sub-organization ID not found');
   }
 
-  console.log(`\n🔐 Verifying OTP for session ${sessionId}...`);
+  // Reject malformed or oversized codes before hitting Turnkey
+  if (!/^[A-Za-z0-9]{4,10}$/.test(code)) {
+    throw new Error('Invalid verification code format');
+  }
+
+  console.log('[email-auth] Verifying OTP');
 
   try {
     // Verify the OTP code with Turnkey
@@ -185,7 +194,7 @@ export async function verifyEmailAuth(
       throw new Error('OTP verification failed - no verification token returned');
     }
 
-    console.log(`✅ OTP verified successfully!`);
+    console.log('[email-auth] OTP verified successfully');
 
     // Mark session as verified
     session.verified = true;

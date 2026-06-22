@@ -16,7 +16,9 @@ import { serializeEventLogJson, parseEventLogJson } from '../../src/cel/serializ
 import { serializeEventLogCbor, parseEventLogCbor } from '../../src/cel/serialization/cbor';
 import type { DataIntegrityProof, EventLog } from '../../src/cel/types';
 
-function createMockSigner(verificationMethod: string = 'did:key:z6MkTest#key-1') {
+// Uses a non-did:key VM so verification takes the structural-only path
+// and does not exercise Ed25519 crypto — keeping the benchmarks fast.
+function createMockSigner(verificationMethod: string = 'did:web:example.com#key-1') {
   return async (data: unknown): Promise<DataIntegrityProof> => ({
     type: 'DataIntegrityProof',
     cryptosuite: 'eddsa-jcs-2022',
@@ -29,7 +31,7 @@ function createMockSigner(verificationMethod: string = 'did:key:z6MkTest#key-1')
 
 const signerOpts = {
   signer: createMockSigner(),
-  verificationMethod: 'did:key:z6MkTest#key-1',
+  verificationMethod: 'did:web:example.com#key-1',
   proofPurpose: 'assertionMethod' as const,
 };
 

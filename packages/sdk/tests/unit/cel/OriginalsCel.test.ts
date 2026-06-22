@@ -5,16 +5,52 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OriginalsCel, type CelSigner, type OriginalsCelConfig } from '../../../src/cel/OriginalsCel';
 import type { DataIntegrityProof, EventLog, ExternalReference } from '../../../src/cel/types';
+import { multikey } from '../../../src/crypto/Multikey';
+import { canonicalizeEvent } from '../../../src/cel/canonicalize';
 
 /**
- * Creates a mock signer that returns valid DataIntegrityProof
+ * Creates a real Ed25519 did:key signer.  The key is embedded in the DID
+ * identifier, so `verifyEventLog` can verify it offline without a resolver.
+ *
+ * For tests that only need proof *structure* (e.g. migration tests that don't
+ * call verify), the mock signer below is still used.
+ */
+async function createRealDidKeySigner(): Promise<CelSigner> {
+  const ed25519 = await import('@noble/ed25519');
+  const privateKeyBytes = ed25519.utils.randomPrivateKey();
+  const publicKeyBytes = new Uint8Array(
+    await (ed25519 as any).getPublicKeyAsync(privateKeyBytes),
+  );
+  const publicKeyMultikey = multikey.encodePublicKey(publicKeyBytes, 'Ed25519');
+  const verificationMethod = `did:key:${publicKeyMultikey}#${publicKeyMultikey}`;
+
+  return async (data: unknown): Promise<DataIntegrityProof> => {
+    const dataBytes = canonicalizeEvent(data);
+    const signature = await (ed25519 as any).signAsync(dataBytes, privateKeyBytes);
+    const proofValue = multikey.encodeMultibase(new Uint8Array(signature));
+    return {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: new Date().toISOString(),
+      verificationMethod,
+      proofPurpose: 'assertionMethod',
+      proofValue,
+    };
+  };
+}
+
+/**
+ * Creates a mock signer that returns structurally valid DataIntegrityProofs.
+ * Uses a non-did:key verificationMethod — proofs from this signer will fail
+ * closed during verify (no resolver).  Use only for tests that do NOT call
+ * cel.verify() with an expectation of verified: true.
  */
 function createMockSigner(): CelSigner {
   return vi.fn(async () => ({
     type: 'DataIntegrityProof',
     cryptosuite: 'eddsa-jcs-2022',
     created: new Date().toISOString(),
-    verificationMethod: 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#key-0',
+    verificationMethod: 'did:web:example.com#key-0',
     proofPurpose: 'assertionMethod',
     proofValue: 'z' + 'a'.repeat(86), // Mock base58btc encoded signature
   }));
@@ -255,9 +291,11 @@ describe('OriginalsCel', () => {
 
   describe('verify', () => {
     it('verifies valid peer log', async () => {
+      // Use a real did:key signer so cryptographic verification passes offline.
+      const realSigner = await createRealDidKeySigner();
       const cel = new OriginalsCel({
         layer: 'peer',
-        signer: mockSigner,
+        signer: realSigner,
       });
 
       const log = await cel.create('Test', []);
@@ -268,9 +306,10 @@ describe('OriginalsCel', () => {
     });
 
     it('verifies valid log with updates', async () => {
+      const realSigner = await createRealDidKeySigner();
       const cel = new OriginalsCel({
         layer: 'peer',
-        signer: mockSigner,
+        signer: realSigner,
       });
 
       const log = await cel.create('Test', []);
@@ -282,9 +321,10 @@ describe('OriginalsCel', () => {
     });
 
     it('returns per-event verification details', async () => {
+      const realSigner = await createRealDidKeySigner();
       const cel = new OriginalsCel({
         layer: 'peer',
-        signer: mockSigner,
+        signer: realSigner,
       });
 
       const log = await cel.create('Test', []);
@@ -311,16 +351,17 @@ describe('OriginalsCel', () => {
     });
 
     it('fails for tampered proof', async () => {
+      const realSigner = await createRealDidKeySigner();
       const cel = new OriginalsCel({
         layer: 'peer',
-        signer: mockSigner,
+        signer: realSigner,
       });
 
       const log = await cel.create('Test', []);
-      
+
       // Tamper with the proof
-      log.events[0].proof[0].proofValue = 'invalid';
-      
+      log.events[0].proof[0].proofValue = 'zinvalid';
+
       const result = await cel.verify(log);
 
       expect(result.verified).toBe(false);
@@ -334,7 +375,7 @@ describe('OriginalsCel', () => {
 
       const log = await cel.create('Test', []);
       const customVerifier = vi.fn(async () => true);
-      
+
       const result = await cel.verify(log, { verifier: customVerifier });
 
       expect(result.verified).toBe(true);
@@ -596,9 +637,11 @@ describe('OriginalsCel', () => {
   describe('integration: full lifecycle', () => {
     it('creates, updates, migrates, and verifies', async () => {
       const mockBitcoinManager = createMockBitcoinManager();
+      // Use a real did:key signer so peer/webvh events pass offline crypto verify.
+      const realSigner = await createRealDidKeySigner();
       const cel = new OriginalsCel({
         layer: 'peer',
-        signer: mockSigner,
+        signer: realSigner,
         config: {
           webvh: {
             domain: 'example.com',

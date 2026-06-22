@@ -110,7 +110,19 @@ describe('email-auth', () => {
       const result = await initiateEmailAuth('user@example.com', client, storage);
 
       expect(result.sessionId).toMatch(/^session_/);
+      // CSPRNG session IDs: prefix + 32 chars of base64url (24 random bytes)
+      expect(result.sessionId.length).toBeGreaterThanOrEqual(32);
       expect(result.message).toContain('Verification code sent');
+    });
+
+    test('session IDs are unique across calls', async () => {
+      const client = createMockTurnkeyClient();
+      const storage2 = createInMemorySessionStorage();
+      const result1 = await initiateEmailAuth('user@example.com', client, storage);
+      const result2 = await initiateEmailAuth('user@example.com', client, storage2);
+
+      expect(result1.sessionId).not.toBe(result2.sessionId);
+      storage2.cleanup();
     });
 
     test('stores session in storage with correct data', async () => {
@@ -268,6 +280,35 @@ describe('email-auth', () => {
 
       await expect(verifyEmailAuth(sessionId, '123456', client, storage)).rejects.toThrow(
         'Invalid verification code'
+      );
+    });
+
+    test('rejects code shorter than 4 characters', async () => {
+      const client = createMockTurnkeyClient();
+      const sessionId = await setupSession(client);
+      await expect(verifyEmailAuth(sessionId, '123', client, storage)).rejects.toThrow(
+        'Invalid verification code format'
+      );
+    });
+
+    test('rejects oversized code without calling Turnkey', async () => {
+      const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token' }));
+      const client = createMockTurnkeyClient({ verifyOtp });
+      const sessionId = await setupSession(client);
+
+      const hugeCode = 'A'.repeat(5000);
+      await expect(verifyEmailAuth(sessionId, hugeCode, client, storage)).rejects.toThrow(
+        'Invalid verification code format'
+      );
+      // Turnkey must NOT have been called
+      expect(verifyOtp).not.toHaveBeenCalled();
+    });
+
+    test('rejects code with non-alphanumeric characters', async () => {
+      const client = createMockTurnkeyClient();
+      const sessionId = await setupSession(client);
+      await expect(verifyEmailAuth(sessionId, '12 456', client, storage)).rejects.toThrow(
+        'Invalid verification code format'
       );
     });
 

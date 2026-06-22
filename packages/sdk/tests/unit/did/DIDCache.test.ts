@@ -481,6 +481,24 @@ describe('DIDCache', () => {
       expect(resolved).not.toBeNull();
     });
 
+    test('failed did:webvh resolution must not populate the cache (no stub caching)', async () => {
+      // Use a did:webvh DID that cannot be fetched (unresolvable domain).
+      // The resolver will fail/throw and resolveDID will return a minimal stub
+      // document — but that stub must NOT be written into the cache.
+      const { DIDManager } = await import('../../../src/did/DIDManager');
+      const didManager = new DIDManager(
+        { network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'magby' }
+      );
+
+      const unresolvableDid = 'did:webvh:example.invalid:nonexistent';
+
+      // First call: resolution fails, returns stub (or null), must not cache.
+      await didManager.resolveDID(unresolvableDid);
+
+      // The cache must remain empty for this DID.
+      expect(didManager.cache.has(unresolvableDid)).toBe(false);
+    });
+
     test('should support pinning via DIDManager cache', async () => {
       const { DIDManager } = await import('../../../src/did/DIDManager');
       const didManager = new DIDManager(

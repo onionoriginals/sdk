@@ -43,35 +43,23 @@ export async function withTokenExpiration<T>(
 }
 
 /**
- * Initialize Turnkey server client
- * Reads from environment variables or provided config
+ * @deprecated This function reads server-grade org API secrets and must not be
+ * used in client-side code. It has been removed from the client module to
+ * enforce the server/client boundary.
+ *
+ * Use `createTurnkeyClient` from `@originals/auth/server` instead.
+ *
+ * BREAKING CHANGE: This shim throws at call time. It will be removed in a
+ * future major release.
  */
-export function initializeTurnkeyClient(config?: {
-  apiBaseUrl?: string;
-  apiPublicKey?: string;
-  apiPrivateKey?: string;
-  organizationId?: string;
-}): Turnkey {
-  const apiPublicKey = config?.apiPublicKey ?? process.env.TURNKEY_API_PUBLIC_KEY;
-  const apiPrivateKey = config?.apiPrivateKey ?? process.env.TURNKEY_API_PRIVATE_KEY;
-  const organizationId = config?.organizationId ?? process.env.TURNKEY_ORGANIZATION_ID;
-
-  if (!apiPublicKey) {
-    throw new Error('TURNKEY_API_PUBLIC_KEY is required');
-  }
-  if (!apiPrivateKey) {
-    throw new Error('TURNKEY_API_PRIVATE_KEY is required');
-  }
-  if (!organizationId) {
-    throw new Error('TURNKEY_ORGANIZATION_ID is required');
-  }
-
-  return new Turnkey({
-    apiBaseUrl: config?.apiBaseUrl ?? 'https://api.turnkey.com',
-    apiPublicKey,
-    apiPrivateKey,
-    defaultOrganizationId: organizationId,
-  });
+export function initializeTurnkeyClient(
+  _config?: Record<string, unknown>
+): never {
+  throw new Error(
+    'initializeTurnkeyClient has been removed from the client module because it reads ' +
+      'server-only org API secrets. ' +
+      'Use createTurnkeyClient from @originals/auth/server instead.'
+  );
 }
 
 /**

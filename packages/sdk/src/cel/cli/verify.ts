@@ -12,14 +12,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { EventLog, VerificationResult, DataIntegrityProof, WitnessProof } from '../types';
 import { verifyEventLog } from '../algorithms/verifyEventLog';
+import { createDidManagerKeyResolver } from '../keyResolver';
 import { parseEventLogJson } from '../serialization/json';
 import { parseEventLogCbor } from '../serialization/cbor';
+import { OriginalsSDK } from '../../core/OriginalsSDK';
+import type { BitcoinNetworkName } from '../../types/network';
 
 /**
  * Flags parsed from command line arguments
  */
 export interface VerifyFlags {
   log?: string;
+  network?: string;
   help?: boolean;
   h?: boolean;
 }
@@ -120,7 +124,7 @@ function outputResult(log: EventLog, result: VerificationResult): void {
   const chainPassed = result.events.filter(e => e.chainValid).length;
   console.log(`   Proofs Valid: ${proofsPassed}/${result.events.length}`);
   console.log(`   Chain Valid:  ${chainPassed}/${result.events.length}`);
-  
+
   // Count witness proofs
   let totalWitnessProofs = 0;
   for (const event of log.events) {
@@ -153,14 +157,24 @@ function outputResult(log: EventLog, result: VerificationResult): void {
     // Show proof details
     if (event.proof && event.proof.length > 0) {
       console.log(`\n  Proofs (${event.proof.length}):`);
-      
+
       for (let j = 0; j < event.proof.length; j++) {
         const proof = event.proof[j];
         const isWitness = isWitnessProof(proof);
         const proofLabel = isWitness ? '🔏 Witness Proof' : '🔐 Controller Proof';
-        
+
         console.log(`\n  [${j + 1}] ${proofLabel}`);
         console.log(formatProofDetails(proof, '      '));
+      }
+    }
+
+    // Show witness verification status (non-gating — separate from controller result).
+    if (eventResult.witnessProofs && eventResult.witnessProofs.length > 0) {
+      console.log(`\n  Witness Attestations (non-gating):`);
+      for (const w of eventResult.witnessProofs) {
+        const icon = w.verified ? '✅' : '⚠️ ';
+        const status = w.verified ? 'verified' : 'unverified (could not resolve)';
+        console.log(`      ${icon} witness ${w.verificationMethod}: ${status}`);
       }
     }
     
@@ -216,10 +230,29 @@ export async function verifyCommand(flags: VerifyFlags): Promise<VerifyResult> {
     };
   }
   
+  // Determine Bitcoin network from flag (default: mainnet).
+  let network: BitcoinNetworkName = 'mainnet';
+  if (flags.network) {
+    const n = flags.network.toLowerCase();
+    if (n === 'mainnet' || n === 'regtest' || n === 'signet') {
+      network = n;
+    } else {
+      return {
+        success: false,
+        message: 'Error: --network must be "mainnet", "regtest", or "signet"',
+      };
+    }
+  }
+
+  // Build a DIDManager-backed key resolver so non-did:key proofs can be
+  // cryptographically verified.  Without a resolver those proofs fail closed.
+  const sdk = OriginalsSDK.create({ network });
+  const resolveKey = createDidManagerKeyResolver(sdk.did);
+
   // Verify the event log
   let result: VerificationResult;
   try {
-    result = await verifyEventLog(eventLog);
+    result = await verifyEventLog(eventLog, { resolveKey });
   } catch (e) {
     return {
       success: false,

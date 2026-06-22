@@ -98,39 +98,18 @@ describe('client/turnkey-client', () => {
   });
 
   describe('initializeTurnkeyClient', () => {
-    test('creates client with explicit config', () => {
-      const client = initializeTurnkeyClient({
-        apiPublicKey: 'pub',
-        apiPrivateKey: 'priv',
-        organizationId: 'org',
-      });
-      expect(client).toBeDefined();
+    // This function has been removed from the client module because it reads
+    // server-only secrets (TURNKEY_API_PRIVATE_KEY). It now throws at call time
+    // to enforce the server/client boundary.
+    // Use createTurnkeyClient from @originals/auth/server instead.
+    test('throws with migration message (server-only secret enforcement)', () => {
+      expect(() =>
+        initializeTurnkeyClient({ apiPublicKey: 'pub', apiPrivateKey: 'priv', organizationId: 'org' })
+      ).toThrow('createTurnkeyClient from @originals/auth/server');
     });
 
-    test('uses env vars as fallback', () => {
-      process.env.TURNKEY_API_PUBLIC_KEY = 'env_pub';
-      process.env.TURNKEY_API_PRIVATE_KEY = 'env_priv';
-      process.env.TURNKEY_ORGANIZATION_ID = 'env_org';
-      const client = initializeTurnkeyClient();
-      expect(client).toBeDefined();
-    });
-
-    test('throws when public key missing', () => {
-      expect(() => initializeTurnkeyClient({ apiPrivateKey: 'p', organizationId: 'o' })).toThrow(
-        'TURNKEY_API_PUBLIC_KEY is required'
-      );
-    });
-
-    test('throws when private key missing', () => {
-      expect(() => initializeTurnkeyClient({ apiPublicKey: 'p', organizationId: 'o' })).toThrow(
-        'TURNKEY_API_PRIVATE_KEY is required'
-      );
-    });
-
-    test('throws when organization ID missing', () => {
-      expect(() => initializeTurnkeyClient({ apiPublicKey: 'p', apiPrivateKey: 'k' })).toThrow(
-        'TURNKEY_ORGANIZATION_ID is required'
-      );
+    test('throws without arguments', () => {
+      expect(() => initializeTurnkeyClient()).toThrow('initializeTurnkeyClient has been removed from the client module');
     });
   });
 
