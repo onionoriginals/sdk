@@ -71,6 +71,35 @@ describe('serialization utils', () => {
     expect(() => deserializeCredential('{invalid')).toThrow('Invalid Verifiable Credential JSON');
   });
 
+  test('deserializeDIDDocument rejects structurally-invalid (but JSON-valid) input', () => {
+    // Missing @context and id
+    expect(() => deserializeDIDDocument('{}')).toThrow('Invalid DID Document JSON');
+    // Invalid DID format for id
+    expect(() => deserializeDIDDocument('{"@context":["https://www.w3.org/ns/did/v1"],"id":"not-a-did"}')).toThrow('Invalid DID Document JSON');
+    // @context not an array
+    expect(() => deserializeDIDDocument('{"@context":"https://www.w3.org/ns/did/v1","id":"did:peer:abc"}')).toThrow('Invalid DID Document JSON');
+    // Malformed verification method (missing publicKeyMultibase)
+    expect(() => deserializeDIDDocument('{"@context":["https://www.w3.org/ns/did/v1"],"id":"did:peer:abc","verificationMethod":[{"id":"did:peer:abc#k","type":"Multikey","controller":"did:peer:abc"}]}')).toThrow('Invalid DID Document JSON');
+    // Non-object parse results
+    expect(() => deserializeDIDDocument('5')).toThrow('Invalid DID Document JSON');
+    expect(() => deserializeDIDDocument('null')).toThrow('Invalid DID Document JSON');
+    expect(() => deserializeDIDDocument('"a string"')).toThrow('Invalid DID Document JSON');
+  });
+
+  test('deserializeCredential rejects structurally-invalid (but JSON-valid) input', () => {
+    // Empty object: no @context/type/issuer
+    expect(() => deserializeCredential('{}')).toThrow('Invalid Verifiable Credential JSON');
+    // Invalid issuer DID
+    expect(() => deserializeCredential('{"@context":["https://www.w3.org/2018/credentials/v1"],"type":["VerifiableCredential"],"issuer":"not-a-did","issuanceDate":"2020-01-01T00:00:00Z","credentialSubject":{}}')).toThrow('Invalid Verifiable Credential JSON');
+    // Missing credentialSubject
+    expect(() => deserializeCredential('{"@context":["https://www.w3.org/2018/credentials/v1"],"type":["VerifiableCredential"],"issuer":"did:peer:abc","issuanceDate":"2020-01-01T00:00:00Z"}')).toThrow('Invalid Verifiable Credential JSON');
+    // Missing VC v1 context
+    expect(() => deserializeCredential('{"@context":["https://example.com/other"],"type":["VerifiableCredential"],"issuer":"did:peer:abc","issuanceDate":"2020-01-01T00:00:00Z","credentialSubject":{}}')).toThrow('Invalid Verifiable Credential JSON');
+    // Non-object parse results
+    expect(() => deserializeCredential('5')).toThrow('Invalid Verifiable Credential JSON');
+    expect(() => deserializeCredential('null')).toThrow('Invalid Verifiable Credential JSON');
+  });
+
   test('canonicalizeDocument with custom documentLoader', async () => {
     const customLoader = async (url: string) => {
       return {
