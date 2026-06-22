@@ -65,12 +65,22 @@ export class Issuer {
     await documentLoader(this.verificationMethod.id);
 
     const issuerId = typeof unsigned.issuer === 'string' ? unsigned.issuer : (unsigned.issuer as { id?: string })?.id;
+    // The credential's issuer must be the DID that controls the signing key.
+    // Otherwise the issuer claim is decoupled from the key that signed it,
+    // letting a holder of issuer A's key mint a credential claiming issuer B.
+    // Fail closed: refuse to sign when the stated issuer doesn't own the key.
+    const keyController = this.verificationMethod.controller || this.verificationMethod.id.split('#')[0];
+    if (issuerId && issuerId !== keyController) {
+      throw new Error(
+        `Issuer DID (${issuerId}) does not match the verification method controller (${keyController})`
+      );
+    }
     const credential: VerifiableCredential = {
       ...unsigned,
       // Preserve the issuer-supplied @context so every stated term is part of
       // the signed dataset; only default when none was provided (issue #167).
       '@context': withSecuringContext(unsigned['@context']),
-      issuer: issuerId || this.verificationMethod.controller
+      issuer: issuerId || keyController
     } as VerifiableCredential;
     delete (credential as unknown as Record<string, unknown>).proof;
 
