@@ -1,5 +1,6 @@
 import jsonld from 'jsonld';
 import { DIDDocument, VerifiableCredential } from '../types';
+import { validateDIDDocument, validateCredential } from './validation';
 
 type DocumentLoader = (url: string) => Promise<{
   documentUrl: string;
@@ -51,12 +52,22 @@ export function serializeDIDDocument(didDoc: DIDDocument): string {
 
 export function deserializeDIDDocument(data: string): DIDDocument {
   // Parse from JSON-LD
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(data);
-    return parsed as DIDDocument;
+    parsed = JSON.parse(data);
   } catch (error) {
     throw new Error('Invalid DID Document JSON');
   }
+  // Runtime structure validation: never trust a cast over untrusted
+  // network/storage data. Reject anything that isn't a well-formed DID Document.
+  if (
+    parsed === null ||
+    typeof parsed !== 'object' ||
+    !validateDIDDocument(parsed as DIDDocument)
+  ) {
+    throw new Error('Invalid DID Document JSON');
+  }
+  return parsed as DIDDocument;
 }
 
 export function serializeCredential(vc: VerifiableCredential): string {
@@ -66,12 +77,22 @@ export function serializeCredential(vc: VerifiableCredential): string {
 
 export function deserializeCredential(data: string): VerifiableCredential {
   // Parse VC from JSON-LD
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(data);
-    return parsed as VerifiableCredential;
+    parsed = JSON.parse(data);
   } catch (error) {
     throw new Error('Invalid Verifiable Credential JSON');
   }
+  // Runtime structure validation: never trust a cast over untrusted
+  // network/storage data. Reject anything that isn't a well-formed credential.
+  if (
+    parsed === null ||
+    typeof parsed !== 'object' ||
+    !validateCredential(parsed as VerifiableCredential)
+  ) {
+    throw new Error('Invalid Verifiable Credential JSON');
+  }
+  return parsed as VerifiableCredential;
 }
 
 export async function canonicalizeDocument(
