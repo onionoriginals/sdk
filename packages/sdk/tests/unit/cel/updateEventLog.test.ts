@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
 import { computeDigestMultibase } from '../../../src/cel/hash';
-import { canonicalizeEvent } from '../../../src/cel/canonicalize';
+import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
 import type { DataIntegrityProof, EventLog, CreateOptions, UpdateOptions } from '../../../src/cel/types';
 
 /**
@@ -111,7 +111,7 @@ describe('updateEventLog', () => {
       
       const initialLog = await createEventLog({ name: 'Test' }, createOptions);
       const lastEvent = initialLog.events[0];
-      const expectedHash = computeDigestMultibase(canonicalizeEvent(lastEvent));
+      const expectedHash = computeDigestMultibase(canonicalizeEntryForChain(lastEvent));
       
       const updateOptions: UpdateOptions = {
         signer: createMockSigner(verificationMethod),
@@ -150,11 +150,11 @@ describe('updateEventLog', () => {
       expect(log3.events[0].previousEvent).toBeUndefined();
       
       // Second event links to first
-      const expectedHash1 = computeDigestMultibase(canonicalizeEvent(log3.events[0]));
+      const expectedHash1 = computeDigestMultibase(canonicalizeEntryForChain(log3.events[0]));
       expect(log3.events[1].previousEvent).toBe(expectedHash1);
 
       // Third event links to second
-      const expectedHash2 = computeDigestMultibase(canonicalizeEvent(log3.events[1]));
+      const expectedHash2 = computeDigestMultibase(canonicalizeEntryForChain(log3.events[1]));
       expect(log3.events[2].previousEvent).toBe(expectedHash2);
     });
   });

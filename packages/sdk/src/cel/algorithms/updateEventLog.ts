@@ -9,7 +9,7 @@
 
 import type { EventLog, LogEntry, UpdateOptions, DataIntegrityProof } from '../types';
 import { computeDigestMultibase } from '../hash';
-import { canonicalizeEvent } from '../canonicalize';
+import { canonicalizeEntryForChain } from '../canonicalize';
 
 /**
  * Updates an event log by appending a new "update" event.
@@ -51,7 +51,7 @@ export async function updateEventLog(
   const lastEvent = log.events[log.events.length - 1];
   
   // Compute the digestMultibase of the last event
-  const previousEvent = computeDigestMultibase(canonicalizeEvent(lastEvent));
+  const previousEvent = computeDigestMultibase(canonicalizeEntryForChain(lastEvent));
 
   // Create the event structure without proof first
   const eventBase = {

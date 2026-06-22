@@ -130,25 +130,58 @@ describe('CEL hash chain tamper detection', () => {
     ).toBe(true);
   });
 
-  test('tampering proofValue inside event 0\'s proof breaks the chain at event 1', async () => {
+  test('tampering proofValue is caught by signature verification, NOT by the chain', async () => {
+    // proofValue is the signature itself: no enclosing signature commits to it,
+    // so it must NOT be part of the hash-chain preimage. Tampering it must
+    // therefore leave the chain intact but fail signature verification.
+    const realOptions: CreateOptions = {
+      signer: realSigner,
+      verificationMethod: `did:key:${realPublicKey}#${realPublicKey}`,
+    };
     const log0 = await createEventLog(
       { name: 'asset', resources: [{ id: 'r1', digestMultibase: 'uAbc' }] },
-      createOptions,
+      realOptions,
     );
-    const log1 = await updateEventLog(log0, { version: 2, note: 'first update' }, updateOptions);
-    const log2 = await updateEventLog(log1, { version: 3, note: 'second update' }, updateOptions);
+    const log1 = await updateEventLog(log0, { version: 2, note: 'first update' }, realOptions);
 
-    const tampered = JSON.parse(JSON.stringify(log2));
-
-    // Mutate the proofValue inside event 0's proof array — previously dropped
-    // by the broken array-allowlist serializer, so tampering went undetected.
+    const tampered = JSON.parse(JSON.stringify(log1));
     tampered.events[0].proof[0].proofValue = 'zTAMPEREDPROOF';
 
     const result = await verifyEventLog(tampered);
 
-    // Chain must be detected as broken at event 1
+    // Chain link covers only {type, data, previousEvent} — proof is excluded.
+    expect(result.events[1].chainValid).toBe(true);
+    // The signature no longer matches, so the proof fails verification.
+    expect(result.events[0].proofValid).toBe(false);
     expect(result.verified).toBe(false);
-    expect(result.events[1].chainValid).toBe(false);
+  });
+
+  test('tampering UNSIGNED proof metadata (created) does NOT break the chain or verification', async () => {
+    // proof.created / verificationMethod / proofPurpose are not part of the
+    // signed message, so they are excluded from the chain preimage. A mutation
+    // of `created` must change neither chainValid nor proofValid — the field
+    // was never committed to by any signature. (The OLD code hashed the whole
+    // prior entry including the proof array and broke the chain here on an
+    // unverifiable field; this is the exact regression being fixed.)
+    const realOptions: CreateOptions = {
+      signer: realSigner,
+      verificationMethod: `did:key:${realPublicKey}#${realPublicKey}`,
+    };
+    const log0 = await createEventLog(
+      { name: 'asset', resources: [{ id: 'r1', digestMultibase: 'uAbc' }] },
+      realOptions,
+    );
+    const log1 = await updateEventLog(log0, { version: 2, note: 'first update' }, realOptions);
+    const log2 = await updateEventLog(log1, { version: 3, note: 'second update' }, realOptions);
+
+    const tampered = JSON.parse(JSON.stringify(log2));
+    tampered.events[0].proof[0].created = '1999-01-01T00:00:00.000Z';
+
+    const result = await verifyEventLog(tampered);
+
+    // Chain stays intact for every event and all proofs still verify.
+    expect(result.events.every(e => e.chainValid)).toBe(true);
+    expect(result.verified).toBe(true);
   });
 
   test('tampering the top-level name field of event 0 also breaks the chain', async () => {
