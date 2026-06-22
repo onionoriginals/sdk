@@ -212,9 +212,15 @@ export class DIDManager {
 
   async resolveDID(did: string, options?: { skipCache?: boolean }): Promise<DIDDocument | null> {
     return this.track('did.resolveDID', async () => {
-      // Check cache first (unless skipCache is set)
+      // Check cache first (unless skipCache is set). The read is best-effort:
+      // a throwing storage adapter must not crash resolution — treat it as a miss.
       if (!options?.skipCache) {
-        const cached = await this.cache.get(did);
+        let cached: DIDDocument | null = null;
+        try {
+          cached = await this.cache.get(did);
+        } catch {
+          // best-effort cache read
+        }
         if (cached) {
           return cached;
         }
