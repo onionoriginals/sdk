@@ -216,10 +216,8 @@ export class DIDManager {
       if (!options?.skipCache) {
         const cached = await this.cache.get(did);
         if (cached) {
-          this.metrics?.recordCacheHit();
           return cached;
         }
-        this.metrics?.recordCacheMiss();
       }
 
       let result: DIDDocument | null = null;

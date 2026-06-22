@@ -358,7 +358,7 @@ async function verifyEvent(
     type: event.type,
     proofValid: allControllerProofsValid,
     chainValid,
-    cryptographicallyVerified: allCryptographicallyVerified,
+    ...(customVerifier ? {} : { cryptographicallyVerified: allCryptographicallyVerified }),
     errors,
   };
 
