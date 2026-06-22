@@ -83,7 +83,11 @@ export class MetricsCollector {
    * Re-throws any error after recording the failure.
    */
   async track<T>(operation: string, fn: () => Promise<T>): Promise<T> {
-    const start = Date.now();
+    // Use performance.now() (sub-millisecond resolution) rather than Date.now()
+    // so that fast operations still record a non-zero duration. With Date.now()'s
+    // 1ms granularity a quick operation completing within the same millisecond
+    // would record a duration of exactly 0, intermittently failing timing assertions.
+    const start = performance.now();
     let success = true;
     try {
       return await fn();
@@ -91,7 +95,7 @@ export class MetricsCollector {
       success = false;
       throw e;
     } finally {
-      this.recordOperation(operation, Date.now() - start, success);
+      this.recordOperation(operation, performance.now() - start, success);
     }
   }
 
