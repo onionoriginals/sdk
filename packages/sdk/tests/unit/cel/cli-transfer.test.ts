@@ -14,6 +14,8 @@ import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
 import { serializeEventLogJson } from '../../../src/cel/serialization/json';
 import { serializeEventLogCbor } from '../../../src/cel/serialization/cbor';
 import { parseEventLogJson } from '../../../src/cel/serialization/json';
+import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { canonicalizeEvent } from '../../../src/cel/canonicalize';
 import type { DataIntegrityProof, EventLog } from '../../../src/cel/types';
 import { multikey } from '../../../src/crypto/Multikey';
 
@@ -427,6 +429,96 @@ describe('CLI Transfer Command', () => {
 
       expect(result.success).toBe(false);
       expect(result.message).toContain('Failed to load event log');
+    });
+  });
+
+  describe('cryptographic verification of transferred logs (plan 014)', () => {
+    // The CLI derives the public key from the wallet's private key and signs
+    // with verificationMethod did:key:<pub>#<pub>. To make the *create* event
+    // also verify under the built-in did:key resolver, we sign it with the SAME
+    // key and matching verificationMethod, then write that key as the wallet so
+    // the transfer is signed by the same key. The resulting log must verify
+    // end-to-end: every event proofValid AND chainValid.
+    async function createRealKeyPeerLogAndWallet(dir: string): Promise<{
+      logPath: string;
+      walletPath: string;
+      did: string;
+    }> {
+      const ed25519 = await import('@noble/ed25519');
+      const privateKeyBytes = ed25519.utils.randomPrivateKey();
+      const publicKeyBytes = new Uint8Array(
+        await (ed25519 as any).getPublicKeyAsync(privateKeyBytes),
+      );
+      const publicKeyMultikey = multikey.encodePublicKey(publicKeyBytes, 'Ed25519');
+      const privateKeyMultikey = multikey.encodePrivateKey(privateKeyBytes as Uint8Array, 'Ed25519');
+      const verificationMethod = `did:key:${publicKeyMultikey}#${publicKeyMultikey}`;
+
+      const signer = async (data: unknown): Promise<DataIntegrityProof> => {
+        const dataBytes = canonicalizeEvent(data);
+        const signature = await (ed25519 as any).signAsync(dataBytes, privateKeyBytes);
+        const proofValue = multikey.encodeMultibase(new Uint8Array(signature));
+        return {
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-jcs-2022',
+          created: new Date().toISOString(),
+          verificationMethod,
+          proofPurpose: 'assertionMethod',
+          proofValue,
+        };
+      };
+
+      const did = 'did:peer:4z6MkRealKeyTransferTest';
+      const log = await createEventLog({
+        name: 'Real Key Asset',
+        did,
+        layer: 'peer',
+        createdAt: new Date().toISOString(),
+        resources: [],
+        creator: did,
+      }, {
+        signer,
+        verificationMethod,
+        proofPurpose: 'assertionMethod',
+      });
+
+      const logPath = path.join(dir, 'real-key-asset.cel.json');
+      fs.writeFileSync(logPath, serializeEventLogJson(log));
+
+      // Wallet holds the same private key the create event was signed with.
+      const walletPath = path.join(dir, 'real-key-wallet.key');
+      fs.writeFileSync(walletPath, privateKeyMultikey);
+
+      return { logPath, walletPath, did };
+    }
+
+    it('produces a transferred log that verifies cryptographically (proofValid + chainValid)', async () => {
+      const { logPath, walletPath, did } = await createRealKeyPeerLogAndWallet(tempDir);
+      const outputPath = path.join(tempDir, 'real-key-transferred.cel.json');
+
+      const result = await transferCommand({
+        log: logPath,
+        to: 'did:btco:987654',
+        wallet: walletPath,
+        output: outputPath,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.previousOwner).toBe(did);
+
+      const transferredLog = parseEventLogJson(fs.readFileSync(outputPath, 'utf-8'));
+      expect(transferredLog.events.length).toBe(2);
+
+      const verifyResult = await verifyEventLog(transferredLog);
+
+      // The whole log must verify: this is the regression guard. Before the fix,
+      // the transfer event was signed over only `transferData` while
+      // verifyEventLog reconstructs { type, data, previousEvent }, so the
+      // transfer event reported proofValid: false and verified was false.
+      expect(verifyResult.verified).toBe(true);
+
+      const transferEvent = verifyResult.events[1];
+      expect(transferEvent.proofValid).toBe(true);
+      expect(transferEvent.chainValid).toBe(true);
     });
   });
 

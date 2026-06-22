@@ -223,19 +223,29 @@ export async function transferCommand(flags: TransferFlags): Promise<TransferRes
     transferredAt: new Date().toISOString(),
   };
 
+  // Compute previous event hash first (same canonicalization as updateEventLog),
+  // then sign over the full event base so the signed payload matches what
+  // verifyEventLog reconstructs: { type, data, previousEvent }. Signing only
+  // `transferData` would produce a signature that verification cannot reproduce,
+  // yielding proofValid: false on every transferred log.
+  const lastEvent = eventLog.events[eventLog.events.length - 1];
+  const previousEvent = computeDigestMultibase(canonicalizeEvent(lastEvent));
+
+  const eventBase = {
+    type: 'update' as const,
+    data: transferData,
+    previousEvent,
+  };
+
   let proof: DataIntegrityProof;
   try {
-    proof = await signer(transferData);
+    proof = await signer(eventBase);
   } catch (e) {
     return {
       success: false,
       message: `Error: Failed to sign transfer: ${(e as Error).message}`,
     };
   }
-
-  // Compute previous event hash using the same canonicalization as updateEventLog
-  const lastEvent = eventLog.events[eventLog.events.length - 1];
-  const previousEvent = computeDigestMultibase(canonicalizeEvent(lastEvent));
 
   // Append transfer event to log
   eventLog.events.push({
