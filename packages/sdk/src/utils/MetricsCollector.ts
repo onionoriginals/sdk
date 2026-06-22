@@ -83,7 +83,7 @@ export class MetricsCollector {
    * Re-throws any error after recording the failure.
    */
   async track<T>(operation: string, fn: () => Promise<T>): Promise<T> {
-    const start = Date.now();
+    const start = performance.now();
     let success = true;
     try {
       return await fn();
@@ -91,7 +91,7 @@ export class MetricsCollector {
       success = false;
       throw e;
     } finally {
-      this.recordOperation(operation, Date.now() - start, success);
+      this.recordOperation(operation, performance.now() - start, success);
     }
   }
 
