@@ -157,21 +157,35 @@ export class BtcoDidResolver {
           inscriptionData.metadata = null;
         }
 
-        inscriptionData.isValidDid = didPattern.test(inscriptionData.content);
+        // The DID document MUST come from the on-chain inscription CONTENT,
+        // never from the off-chain ord metadata endpoint. The metadata is
+        // surfaced for diagnostics only — trusting it would let an attacker who
+        // controls/spoofs the metadata API inject forged verification methods
+        // and forge signatures on this did:btco identity.
+        const documentFromContent = this.parseDidDocumentFromContent(inscriptionData.content);
 
-        if (inscriptionData.isValidDid && inscriptionData.metadata) {
-          const didDocument = inscriptionData.metadata as unknown as DIDDocument;
-          if (this.isValidDidDocument(didDocument) && didDocument.id === expectedDid) {
-            inscriptionData.didDocument = didDocument;
-          } else {
-            inscriptionData.error = 'Invalid DID document structure or mismatched ID';
-          }
-        }
+        // A content blob "is a DID" if it either matches the human-readable
+        // pattern or parses to a DID document carrying the expected id.
+        inscriptionData.isValidDid =
+          didPattern.test(inscriptionData.content) ||
+          (documentFromContent !== null && documentFromContent.id === expectedDid);
 
         if (inscriptionData.content.includes('🔥')) {
+          // Deactivation marker: the DID is tombstoned. Do not attempt to derive
+          // a document; just record the deactivation.
           inscriptionData.didDocument = null;
           if (!inscriptionData.error) {
             inscriptionData.error = 'DID has been deactivated';
+          }
+        } else if (inscriptionData.isValidDid) {
+          if (
+            documentFromContent &&
+            this.isValidDidDocument(documentFromContent) &&
+            documentFromContent.id === expectedDid
+          ) {
+            inscriptionData.didDocument = documentFromContent;
+          } else {
+            inscriptionData.error = 'Invalid DID document structure or mismatched ID';
           }
         }
       } catch (err: unknown) {
@@ -207,6 +221,33 @@ export class BtcoDidResolver {
         network
       }
     };
+  }
+
+  /**
+   * Parses the DID document out of the raw on-chain inscription content.
+   *
+   * The content is the authoritative artifact for a did:btco. It may be either
+   * the bare DID-document JSON, or that JSON preceded by a human-readable
+   * `BTCO DID: <did>` marker line. This strips any leading non-JSON marker text
+   * and parses the JSON object portion. Returns `null` if no valid JSON object
+   * can be recovered. The caller is responsible for structural / id validation.
+   */
+  private parseDidDocumentFromContent(content: string): DIDDocument | null {
+    if (typeof content !== 'string') return null;
+    // Strip an optional leading `BTCO DID: ` marker.
+    let text = content.replace(/^\s*BTCO DID:\s*/i, '');
+    // Locate the JSON object portion (the document may be preceded by a plain
+    // `did:btco:...` marker line before the JSON body).
+    const start = text.indexOf('{');
+    if (start === -1) return null;
+    text = text.slice(start);
+    try {
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      return parsed as DIDDocument;
+    } catch {
+      return null;
+    }
   }
 
   private isValidDidDocument(doc: unknown): doc is DIDDocument {
