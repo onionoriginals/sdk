@@ -650,6 +650,19 @@ export class WebVHManager {
       publicKeyMultibase: newKeyPair.publicKey,
     };
 
+    // Pass nextKeyHashes: false (falsy, non-nullish) instead of omitting it.
+    // didwebvh-ts stores `options.nextKeyHashes ?? []` in the log entry's
+    // parameters field.  During log resolution, resolveDIDFromLog uses a
+    // truthy check — `if (parameters.nextKeyHashes)` — to decide whether
+    // pre-rotation mode is active.  An empty array [] is truthy, so omitting
+    // nextKeyHashes (which gives []) incorrectly activates pre-rotation after
+    // the first rotation entry.  In pre-rotation mode the library validates
+    // each subsequent entry against the NEW entry's proposed updateKeys
+    // (parameters.updateKeys) rather than the currently-authorized ones
+    // (meta.updateKeys), causing the 3rd and later rotations to fail with
+    // "Key … is not authorized to update."
+    // false is not nullish so `false ?? []` yields false, which stays falsy
+    // at resolution time and keeps pre-rotation correctly disabled.
     const result = await updateDID({
       log: currentLog,
       signer,
@@ -658,6 +671,7 @@ export class WebVHManager {
       verificationMethods: [newVerificationMethod],
       authentication: ['#key-0'],
       assertionMethod: ['#key-0'],
+      nextKeyHashes: false,
     });
 
     if (!this.isDIDDocument(result.doc)) {
