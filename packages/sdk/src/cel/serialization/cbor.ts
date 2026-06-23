@@ -40,13 +40,19 @@ function parseProof(proof: unknown): DataIntegrityProof | WitnessProof {
     throw new Error('Invalid proof: missing or invalid proofValue');
   }
   
-  const baseProof: DataIntegrityProof = {
+  // Preserve any extension fields (e.g. Bitcoin witness anchors
+  // txid/satoshi/inscriptionId/blockHeight, proof-chain id/previousProof) by
+  // carrying through every key on the source object. The known required fields
+  // are re-assigned after validation so their types are narrowed correctly and
+  // an `undefined` `created` is not introduced.
+  const baseProof = {
+    ...p,
     type: p.type,
     cryptosuite: p.cryptosuite,
     verificationMethod: p.verificationMethod,
     proofPurpose: p.proofPurpose,
     proofValue: p.proofValue,
-  };
+  } as DataIntegrityProof;
   if (typeof p.created === 'string') {
     baseProof.created = p.created;
   }
