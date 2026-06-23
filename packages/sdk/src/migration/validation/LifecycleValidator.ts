@@ -19,14 +19,22 @@ export class LifecycleValidator implements IValidator {
     const warnings: ValidationWarning[] = [];
 
     try {
-      // All lifecycle states are compatible with all layers
-      // This validator checks for pending operations that might interfere
-
-      // For now, lifecycle is always compatible
-      // Future enhancements could check for:
-      // - Pending operations on source DID
-      // - State machine compatibility
-      // - Event history preservation capability
+      // DEF-019: Reject migration of deactivated assets.
+      //
+      // Deactivation state is not encoded in the DIDDocument itself (DIDDocument
+      // has no `deactivated` field in this SDK's type system).  The caller
+      // signals deactivation through MigrationOptions.metadata.deactivated.
+      // Sources that set this include the CEL layer state machines
+      // (PeerCelManager / BtcoCelManager) and the OriginalsSDK verify path.
+      const deactivated = options.metadata?.['deactivated'];
+      if (deactivated === true) {
+        errors.push({
+          code: 'ASSET_DEACTIVATED',
+          message: 'Cannot migrate a deactivated asset',
+          field: 'metadata.deactivated',
+          details: { sourceDid: options.sourceDid }
+        });
+      }
 
       return {
         valid: errors.length === 0,
