@@ -87,10 +87,17 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
         throw new Error('No signature returned from Turnkey');
       }
 
-      const signature = signRawResult.r + signRawResult.s;
-
-      // Convert signature to bytes
-      const cleanSig = signature.startsWith('0x') ? signature.slice(2) : signature;
+      // Turnkey may return r and s with or without a leading '0x' prefix.
+      // Strip the prefix from each component SEPARATELY before concatenating:
+      // concatenating first and stripping a single leading '0x' would leave an
+      // embedded '0x' in the middle (e.g. 'aaaa...0xbbbb...') when both values
+      // are prefixed, corrupting Buffer.from(..., 'hex') and breaking the
+      // signature. This mirrors the client-side TurnkeyDIDSigner behaviour.
+      const r = signRawResult.r;
+      const s = signRawResult.s;
+      const cleanR = r.startsWith('0x') ? r.slice(2) : r;
+      const cleanS = s.startsWith('0x') ? s.slice(2) : s;
+      const cleanSig = cleanR + cleanS;
       const signatureBytes = Buffer.from(cleanSig, 'hex');
 
       // Ed25519 signatures must be exactly 64 bytes (32-byte r + 32-byte s).

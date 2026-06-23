@@ -1,5 +1,6 @@
 import { describe, test, expect, mock } from 'bun:test';
 import { TurnkeyWebVHSigner, createTurnkeySigner } from '../src/server/turnkey-signer';
+import { multikey } from '@originals/sdk';
 
 describe('turnkey-signer', () => {
   describe('createTurnkeySigner', () => {
@@ -157,6 +158,50 @@ describe('turnkey-signer', () => {
 
       expect(typeof result.proofValue).toBe('string');
       expect(result.proofValue.length).toBeGreaterThan(0);
+    });
+
+    test('sign handles r and s both 0x-prefixed without corrupting the signature', async () => {
+      // Regression: Turnkey may return r and s each carrying a '0x' prefix.
+      // The signer must strip the prefix from EACH component separately. The
+      // buggy implementation concatenated first and stripped only the single
+      // leading '0x', leaving an embedded '0x' in the middle of the hex string
+      // (e.g. 'aaaa...0xbbbb...') which corrupts the decoded signature bytes.
+      const rHex = 'aa'.repeat(32);
+      const sHex = 'bb'.repeat(32);
+      const mockClient = {
+        apiClient: () => ({
+          signRawPayload: mock(() =>
+            Promise.resolve({
+              activity: {
+                result: {
+                  signRawPayloadResult: { r: `0x${rHex}`, s: `0x${sHex}` },
+                },
+              },
+            })
+          ),
+        }),
+      } as unknown as import('@turnkey/sdk-server').Turnkey;
+
+      const signer = new TurnkeyWebVHSigner(
+        'sub_org_id',
+        'key_id',
+        'z6MkPubKey',
+        mockClient,
+        'did:key:z6Mk#z6Mk'
+      );
+
+      const result = await signer.sign({
+        document: { id: 'did:example:123' },
+        proof: { type: 'DataIntegrityProof' },
+      });
+
+      // Decode the multibase proofValue back to the raw 64-byte signature and
+      // confirm it is exactly the concatenation of the r and s bytes (with the
+      // 0x prefixes correctly stripped).
+      const decoded = multikey.decodeMultibase(result.proofValue);
+      const expected = Buffer.from(rHex + sHex, 'hex');
+      expect(decoded.length).toBe(64);
+      expect(Buffer.from(decoded).equals(expected)).toBe(true);
     });
 
     test('verify returns false for invalid public key length', async () => {
