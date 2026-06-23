@@ -8,6 +8,7 @@
  */
 
 import { LayerType } from '../types';
+import type { MigrationError } from '../migration/types';
 
 /**
  * Base event interface that all events extend
@@ -240,7 +241,16 @@ export interface MigrationCompletedEvent extends BaseEvent {
 export interface MigrationFailedEvent extends BaseEvent {
   type: 'migration:failed';
   migrationId: string;
-  error: Error | { message: string; code?: string };
+  /**
+   * The structured migration error emitted by MigrationManager.
+   *
+   * This is the exact `MigrationError` payload constructed in
+   * `MigrationManager.handleMigrationError` and passed to
+   * `emitEvent('migration:failed', ...)`. Subscribers receive this full
+   * structured shape (type/code/message/timestamp + optional details),
+   * not a bare `Error` instance.
+   */
+  error: MigrationError;
 }
 
 /**
@@ -330,3 +340,27 @@ export interface EventTypeMap {
   'migration:rolledback': MigrationRolledbackEvent;
   'migration:quarantine': MigrationQuarantineEvent;
 }
+
+/**
+ * Compile-time contract guard against event payload drift.
+ *
+ * `MigrationFailedEvent.error` MUST stay structurally identical to the
+ * `MigrationError` object that `MigrationManager.handleMigrationError`
+ * actually emits. If the two ever diverge, one of the `AssertEqual`
+ * checks below resolves to `never` and `tsc --noEmit` fails — surfacing
+ * the drift at build time instead of at runtime for subscribers.
+ *
+ * Regression for: plans/030-migration-failed-event-error-type-contract.md
+ */
+type AssertExtends<A, B> = A extends B ? true : never;
+type _MigrationFailedErrorIsMigrationError =
+  AssertExtends<MigrationFailedEvent['error'], MigrationError>;
+type _MigrationErrorIsMigrationFailedError =
+  AssertExtends<MigrationError, MigrationFailedEvent['error']>;
+
+// These constants force evaluation of the conditional types above.
+const _assertMigrationFailedErrorContract: [
+  _MigrationFailedErrorIsMigrationError,
+  _MigrationErrorIsMigrationFailedError
+] = [true, true];
+void _assertMigrationFailedErrorContract;

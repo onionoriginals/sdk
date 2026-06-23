@@ -22,6 +22,8 @@ import type {
   MigrationQuarantineEvent,
   OriginalsEvent,
 } from '../../../src/events/types';
+import type { MigrationError } from '../../../src/migration/types';
+import { MigrationErrorType } from '../../../src/migration/types';
 
 /**
  * Golden contract tests for event payload shapes.
@@ -348,10 +350,46 @@ describe('Event contract tests — exact payload shapes', () => {
       type: 'migration:failed' as const,
       timestamp,
       migrationId: 'mig-1',
-      error: { message: 'DID resolution failed', code: 'DID_RESOLVE_ERROR' },
+      // The emitter (MigrationManager.handleMigrationError) emits a
+      // MigrationError, so the contract must accept that exact shape.
+      error: {
+        type: MigrationErrorType.UNKNOWN_ERROR,
+        code: 'DID_RESOLVE_ERROR',
+        message: 'DID resolution failed',
+        timestamp: Date.now(),
+      } satisfies MigrationError,
     } satisfies MigrationFailedEvent;
 
     expect(sortedKeys(event)).toEqual(['error', 'migrationId', 'timestamp', 'type']);
+  });
+
+  test('MigrationFailedEvent.error accepts the full MigrationError payload emitted by MigrationManager', () => {
+    // This mirrors the object constructed at MigrationManager.ts (handleMigrationError),
+    // which is what is actually passed to emitEvent('migration:failed', ...).
+    const migrationError: MigrationError = {
+      type: MigrationErrorType.UNKNOWN_ERROR,
+      code: 'MIGRATION_FAILED',
+      message: 'boom',
+      technicalDetails: 'stack trace here',
+      suggestedRecovery: 'retry',
+      migrationId: 'mig-1',
+      sourceDid: 'did:peer:abc',
+      targetDid: 'did:webvh:example.com:abc',
+      timestamp: Date.now(),
+      stack: 'Error: boom\n  at ...',
+    };
+
+    const event = {
+      type: 'migration:failed' as const,
+      timestamp,
+      migrationId: 'mig-1',
+      error: migrationError,
+    } satisfies MigrationFailedEvent;
+
+    // The contract field must surface MigrationError-specific properties.
+    expect(event.error.type).toBe(MigrationErrorType.UNKNOWN_ERROR);
+    expect(event.error.code).toBe('MIGRATION_FAILED');
+    expect(typeof event.error.timestamp).toBe('number');
   });
 
   test('MigrationRolledbackEvent has exactly the declared fields', () => {
