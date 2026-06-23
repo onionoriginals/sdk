@@ -773,7 +773,7 @@ export class LifecycleManager {
     // checking these fields would sign with a retired (possibly compromised)
     // key, breaking the integrity of the provenance chain.
     const didDoc = await this.didManager.resolveDID(issuer);
-    const docVms = Array.isArray(didDoc?.verificationMethod) ? didDoc!.verificationMethod : [];
+    const docVms = Array.isArray(didDoc?.verificationMethod) ? didDoc.verificationMethod : [];
 
     // Normalize a VM id to its absolute form so keyStore lookups and document
     // comparisons line up regardless of whether the document stored relative
