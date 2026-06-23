@@ -13,6 +13,7 @@ import { schnorr } from '@noble/curves/secp256k1';
 import { Utxo, ResourceUtxo } from '../../types/bitcoin.js';
 import { calculateFee } from '../fee-calculation.js';
 import { selectUtxos, SimpleUtxoSelectionOptions } from '../utxo-selection.js';
+import { validateBitcoinAddress } from '../../utils/bitcoin-address.js';
 
 // Define minimum dust limit (satoshis)
 const MIN_DUST_LIMIT = 546;
@@ -187,6 +188,16 @@ export async function createCommitTransaction(
   if (!changeAddress) {
     throw new Error('Change address is required.');
   }
+
+  // Fail fast: validate the change address against the target network BEFORE any
+  // expensive UTXO selection / fee calculation runs. Without this, a wrong-network
+  // address (e.g. a testnet address on mainnet) is only rejected late inside
+  // tx.addOutputAddress() with a cryptic @scure error, after work has been wasted.
+  // Mirrors buildTransferTransaction in ../transfer.ts. validateBitcoinAddress
+  // accepts 'mainnet' | 'regtest' | 'signet'; testnet shares signet's prefix.
+  const validateNetwork: 'mainnet' | 'regtest' | 'signet' =
+    network === 'testnet' ? 'signet' : network;
+  validateBitcoinAddress(changeAddress, validateNetwork);
 
   if (feeRate <= 0) {
     throw new Error(`Invalid fee rate: ${feeRate}`);
