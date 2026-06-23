@@ -372,6 +372,37 @@ describe('createCommitTransaction', () => {
       await expect(createCommitTransaction(params)).rejects.toThrow(/Change address is required/);
     });
 
+    test('rejects a wrong-network changeAddress with a clear error', async () => {
+      // mainnet network but a testnet/signet (tb1...) change address.
+      const params = createCommitParams({
+        network: 'mainnet',
+        changeAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx'
+      });
+      await expect(createCommitTransaction(params)).rejects.toThrow(/Invalid .*address|address/i);
+    });
+
+    test('rejects a mainnet changeAddress on signet with a clear error', async () => {
+      const params = createCommitParams({
+        network: 'signet',
+        changeAddress: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'
+      });
+      await expect(createCommitTransaction(params)).rejects.toThrow(/Invalid .*address|address/i);
+    });
+
+    test('fail-fast: wrong-network changeAddress rejected before UTXO selection', async () => {
+      // Provide structurally invalid UTXOs alongside a wrong-network address.
+      // If validation is fail-fast (at entry), the address error is thrown
+      // BEFORE the UTXO-selection error — proving no expensive work ran first.
+      const params = createCommitParams({
+        network: 'mainnet',
+        changeAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
+        utxos: [createUtxo(10000, 0)]
+      });
+      // Must throw an address error, not an insufficient-funds / UTXO error.
+      await expect(createCommitTransaction(params)).rejects.toThrow(/address/i);
+      await expect(createCommitTransaction(params)).rejects.not.toThrow(/Insufficient funds|No valid spendable/);
+    });
+
     test('throws when feeRate is invalid', async () => {
       const params = createCommitParams({ feeRate: 0 });
       await expect(createCommitTransaction(params)).rejects.toThrow(/Invalid fee rate/);
