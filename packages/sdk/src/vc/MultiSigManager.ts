@@ -11,10 +11,8 @@ import type {
   CorporatePolicy,
 } from '../types';
 import type { OriginalsConfig } from '../types/common';
-import { canonicalizeDocument } from '../utils/serialization';
 import { computeCredentialDigest } from '../utils/credential-digest';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding';
-import { sha256 } from '@noble/hashes/sha2.js';
 import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer';
 
 /**
