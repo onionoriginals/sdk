@@ -406,3 +406,69 @@ describe('EdDSA verifyProof success path', () => {
     expect(res.verified).toBe(true);
   });
 });
+
+
+
+
+/** Regression: revoked / compromised verification methods must fail closed. */
+
+describe('EdDSA verifyProof rejects retired verification methods', () => {
+  const goodContext = ['https://www.w3.org/ns/credentials/v2'];
+
+  // Build a credential with a genuinely valid Ed25519 signature, then verify it
+  // through a loader that returns the SAME public key with various retired-state
+  // flags. The signature itself is always valid, so the only thing that can make
+  // verification fail is the revoked/compromised check.
+  async function makeSignedCredential() {
+    const ed = await import('@noble/ed25519');
+    const sk = ed.utils.randomPrivateKey();
+    const pk = await ed.getPublicKeyAsync(sk);
+    const pkMb = multikey.encodePublicKey(new Uint8Array(pk), 'Ed25519');
+    const skMb = multikey.encodePrivateKey(new Uint8Array(sk), 'Ed25519');
+    const vmId = 'did:ex:retired#key-0';
+    const baseLoader = async (iri: string) => {
+      if (iri.includes('#')) {
+        return { document: { '@context': goodContext, id: iri, publicKeyMultibase: pkMb }, documentUrl: iri, contextUrl: null };
+      }
+      return contextDocument(iri);
+    };
+    const doc: any = { '@context': goodContext, id: 'urn:test:retired', name: 'test' };
+    const proof = await EdDSACryptosuiteManager.createProof(doc, {
+      verificationMethod: vmId, proofPurpose: 'assertionMethod', privateKey: skMb,
+      cryptosuite: 'eddsa-rdfc-2022', documentLoader: baseLoader
+    });
+    return { doc, proof, pkMb, vmId };
+  }
+
+  const loaderWith = (pkMb: string, extra: Record<string, unknown>) =>
+    async (iri: string) => {
+      if (iri.includes('#')) {
+        return { document: { '@context': goodContext, id: iri, publicKeyMultibase: pkMb, ...extra }, documentUrl: iri, contextUrl: null };
+      }
+      return contextDocument(iri);
+    };
+
+  test('control: active VM verifies successfully (no over-rejection)', async () => {
+    const { doc, proof, pkMb } = await makeSignedCredential();
+    const res = await EdDSACryptosuiteManager.verifyProof(doc, proof as any, { documentLoader: loaderWith(pkMb, {}) });
+    expect(res.verified).toBe(true);
+  });
+
+  test('rejects VM marked revoked even with an otherwise valid signature', async () => {
+    const { doc, proof, pkMb } = await makeSignedCredential();
+    const res = await EdDSACryptosuiteManager.verifyProof(doc, proof as any, {
+      documentLoader: loaderWith(pkMb, { revoked: '2024-01-01T00:00:00Z' })
+    });
+    expect(res.verified).toBe(false);
+    expect(res.errors?.[0]).toBe('Verification method has been revoked');
+  });
+
+  test('rejects VM marked compromised even with an otherwise valid signature', async () => {
+    const { doc, proof, pkMb } = await makeSignedCredential();
+    const res = await EdDSACryptosuiteManager.verifyProof(doc, proof as any, {
+      documentLoader: loaderWith(pkMb, { compromised: '2024-02-02T00:00:00Z' })
+    });
+    expect(res.verified).toBe(false);
+    expect(res.errors?.[0]).toBe('Verification method has been marked as compromised');
+  });
+});

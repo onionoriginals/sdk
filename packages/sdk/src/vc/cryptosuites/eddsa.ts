@@ -46,6 +46,15 @@ export class EdDSACryptosuiteManager {
         options
       );
       const vmDoc = await options.documentLoader(proof.verificationMethod);
+      // Fail closed on retired keys. A verification method that has been
+      // rotated out (`revoked`) or marked `compromised` is still published in
+      // the DID document so verifiers can recognise it as no longer valid;
+      // accepting a signature from it would let an attacker holding the old
+      // private key forge credentials, defeating key rotation / compromise
+      // recovery. Mirrors the CEL key resolver (src/cel/keyResolver.ts).
+      const vm = vmDoc.document as { revoked?: unknown; compromised?: unknown };
+      if (vm?.revoked) throw new Error('Verification method has been revoked');
+      if (vm?.compromised) throw new Error('Verification method has been marked as compromised');
       const pk = vmDoc.document.publicKeyMultibase as string;
       const dec = multikey.decodePublicKey(pk);
       if (dec.type !== 'Ed25519') throw new Error('Invalid key type for EdDSA');
