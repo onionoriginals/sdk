@@ -276,9 +276,11 @@ describe('BtcoDidResolver', () => {
     const resolver = new BtcoDidResolver({ provider });
     const prefixRegtest = (resolver as any).getDidPrefix('regtest');
     const prefixSignet = (resolver as any).getDidPrefix('signet');
+    const prefixTestnet = (resolver as any).getDidPrefix('test');
     const prefixMain = (resolver as any).getDidPrefix('mainnet');
     expect(prefixRegtest).toBe('did:btco:reg');
     expect(prefixSignet).toBe('did:btco:sig');
+    expect(prefixTestnet).toBe('did:btco:test');
     expect(prefixMain).toBe('did:btco');
   });
 });
@@ -607,5 +609,35 @@ describe('BtcoDidResolver signet and error branches', () => {
     const r = new BtcoDidResolver({ provider: providerErr });
     const res = await r.resolve('did:btco:sig:3');
     expect(res.inscriptions?.[0].error).toContain('Failed to process inscription');
+  });
+});
+
+/**
+ * Regression: BtcoDidResolver must recognize the testnet prefix `did:btco:test:`.
+ * satoshi-validation, BitcoinManager, and DIDManager.resolveDID all accept/route
+ * `did:btco:test:<sat>`, but the resolver previously rejected it with
+ * `invalidDid`, making testnet DIDs unresolvable. See plans/027.
+ */
+describe('BtcoDidResolver testnet prefix (did:btco:test)', () => {
+  const originalFetch = global.fetch as any;
+  beforeEach(() => {
+    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:test:3' }));
+  });
+  afterAll(() => {
+    (global as any).fetch = originalFetch;
+  });
+
+  const providerOk: ResourceProviderLike = {
+    async getSatInfo() { return { inscription_ids: ['i1'] }; },
+    async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: 'http://c/' + id }; },
+    async getMetadata() { return { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:test:3' }; }
+  };
+
+  test('testnet DID is not rejected as invalidDid and resolves', async () => {
+    const r = new BtcoDidResolver({ provider: providerOk });
+    const res = await r.resolve('did:btco:test:3');
+    expect(res.resolutionMetadata.error).not.toBe('invalidDid');
+    expect(res.resolutionMetadata.network).toBe('test');
+    expect(res.didDocument?.id).toBe('did:btco:test:3');
   });
 });
