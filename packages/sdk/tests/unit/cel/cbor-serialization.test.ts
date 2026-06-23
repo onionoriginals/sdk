@@ -631,4 +631,58 @@ describe('CEL CBOR Serialization', () => {
       expect((parsed.events[1].data as { reason: string }).reason).toBe('No longer needed');
     });
   });
+
+  describe('optional created field (type/serialization parity)', () => {
+    // The DataIntegrityProof type marks `created` as optional, and
+    // createEventLog accepts proofs without it. A proof omitting `created`
+    // must therefore survive a CBOR round-trip rather than failing to parse.
+    test('round-trips a proof that omits created', () => {
+      const original: EventLog = {
+        events: [{
+          type: 'create',
+          data: { name: 'No Created Asset' },
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            // created intentionally omitted
+            verificationMethod: 'did:key:z6Mktest#key-1',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zMockProofValue123',
+          }],
+        }],
+      };
+
+      const cbor = serializeEventLogCbor(original);
+      const parsed = parseEventLogCbor(cbor);
+
+      expect(parsed.events.length).toBe(1);
+      const proof = parsed.events[0].proof[0] as DataIntegrityProof;
+      expect(proof.type).toBe('DataIntegrityProof');
+      expect(proof.proofValue).toBe('zMockProofValue123');
+      expect('created' in proof).toBe(false);
+      expect(proof.created).toBeUndefined();
+    });
+
+    test('still rejects a non-string created', () => {
+      // Build a malformed log and encode it directly (serializeEventLogCbor
+      // does not validate), then ensure the parser rejects it.
+      const bad = {
+        events: [{
+          type: 'create',
+          data: { name: 'Bad Created' },
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: 12345,
+            verificationMethod: 'did:key:z6Mktest#key-1',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zMockProofValue123',
+          }],
+        }],
+      } as unknown as EventLog;
+
+      const cbor = serializeEventLogCbor(bad);
+      expect(() => parseEventLogCbor(cbor)).toThrow('Invalid proof: created must be a string');
+    });
+  });
 });

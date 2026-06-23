@@ -32,8 +32,10 @@ function parseProof(proof: unknown): DataIntegrityProof | WitnessProof {
   if (typeof p.cryptosuite !== 'string') {
     throw new Error('Invalid proof: missing or invalid cryptosuite');
   }
-  if (typeof p.created !== 'string') {
-    throw new Error('Invalid proof: missing or invalid created');
+  // `created` is optional per the DataIntegrityProof type and the creation path
+  // (createEventLog does not require it). Only validate it when present.
+  if (p.created !== undefined && typeof p.created !== 'string') {
+    throw new Error('Invalid proof: created must be a string');
   }
   if (typeof p.verificationMethod !== 'string') {
     throw new Error('Invalid proof: missing or invalid verificationMethod');
@@ -48,12 +50,14 @@ function parseProof(proof: unknown): DataIntegrityProof | WitnessProof {
   const baseProof: DataIntegrityProof = {
     type: p.type,
     cryptosuite: p.cryptosuite,
-    created: p.created,
     verificationMethod: p.verificationMethod,
     proofPurpose: p.proofPurpose,
     proofValue: p.proofValue,
   };
-  
+  if (typeof p.created === 'string') {
+    baseProof.created = p.created;
+  }
+
   // Check for WitnessProof
   if ('witnessedAt' in p) {
     if (typeof p.witnessedAt !== 'string') {
