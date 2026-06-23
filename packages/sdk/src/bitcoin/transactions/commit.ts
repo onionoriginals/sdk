@@ -40,7 +40,7 @@ const REGTEST_NETWORK: typeof btc.NETWORK = {
 /**
  * Get @scure/btc-signer network configuration
  */
-function getScureNetwork(network: BitcoinNetwork): typeof btc.NETWORK {
+export function getScureNetwork(network: BitcoinNetwork): typeof btc.NETWORK {
   switch (network) {
     case 'mainnet':
       return btc.NETWORK;
@@ -49,8 +49,13 @@ function getScureNetwork(network: BitcoinNetwork): typeof btc.NETWORK {
     case 'testnet':
     case 'signet':
       return btc.TEST_NETWORK;
-    default:
-      return btc.NETWORK;
+    default: {
+      // Unknown network: fail loudly rather than silently assuming mainnet
+      // (real funds). The `never` assignment also makes any future addition to
+      // BitcoinNetwork a compile error until it is explicitly handled above.
+      const exhaustiveCheck: never = network;
+      throw new Error(`Unsupported Bitcoin network: ${String(exhaustiveCheck)}`);
+    }
   }
 }
 

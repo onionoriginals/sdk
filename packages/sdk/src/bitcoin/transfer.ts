@@ -16,7 +16,7 @@ const REGTEST_NETWORK: typeof btc.NETWORK = {
 
 type TransferNetwork = 'mainnet' | 'regtest' | 'signet' | 'testnet';
 
-function getScureNetwork(network: TransferNetwork): typeof btc.NETWORK {
+export function getScureNetwork(network: TransferNetwork): typeof btc.NETWORK {
   switch (network) {
     case 'mainnet':
       return btc.NETWORK;
@@ -25,8 +25,13 @@ function getScureNetwork(network: TransferNetwork): typeof btc.NETWORK {
     case 'signet':
     case 'testnet':
       return btc.TEST_NETWORK;
-    default:
-      return btc.NETWORK;
+    default: {
+      // Unknown network: fail loudly rather than silently assuming mainnet
+      // (real funds). The `never` assignment also makes any future addition to
+      // TransferNetwork a compile error until it is explicitly handled above.
+      const exhaustiveCheck: never = network;
+      throw new Error(`Unsupported Bitcoin network: ${String(exhaustiveCheck)}`);
+    }
   }
 }
 
