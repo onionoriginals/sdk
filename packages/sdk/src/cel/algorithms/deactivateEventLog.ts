@@ -41,7 +41,7 @@ export async function deactivateEventLog(
   reason: string,
   options: DeactivateOptions
 ): Promise<EventLog> {
-  const { signer, verificationMethod, proofPurpose = 'assertionMethod' } = options;
+  const { signer } = options;
 
   // Validate input log
   if (!log.events || log.events.length === 0) {

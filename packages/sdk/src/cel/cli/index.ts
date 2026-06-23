@@ -332,7 +332,7 @@ export function main(args: string[] = process.argv.slice(2)): void {
         return;
       }
       // Run create command asynchronously
-      runCreateCommand(flags);
+      void runCreateCommand(flags);
       return;
 
     case 'verify':
@@ -341,7 +341,7 @@ export function main(args: string[] = process.argv.slice(2)): void {
         return;
       }
       // Run verify command asynchronously
-      runVerifyCommand(flags);
+      void runVerifyCommand(flags);
       return;
 
     case 'inspect':
@@ -350,7 +350,7 @@ export function main(args: string[] = process.argv.slice(2)): void {
         return;
       }
       // Run inspect command asynchronously
-      runInspectCommand(flags);
+      void runInspectCommand(flags);
       return;
 
     case 'migrate':
@@ -359,10 +359,10 @@ export function main(args: string[] = process.argv.slice(2)): void {
         return;
       }
       // Run migrate command asynchronously
-      runMigrateCommand(flags);
+      void runMigrateCommand(flags);
       return;
 
-    case 'help':
+    case 'help': {
       // Handle "originals-cel help <command>"
       const helpTarget = args[1];
       if (helpTarget && !helpTarget.startsWith('-')) {
@@ -371,6 +371,7 @@ export function main(args: string[] = process.argv.slice(2)): void {
         print(HELP_TEXT);
       }
       break;
+    }
 
     default:
       error(`Unknown command: ${command}\n\nRun 'originals-cel --help' for usage.`);

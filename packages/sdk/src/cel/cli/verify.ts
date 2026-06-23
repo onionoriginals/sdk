@@ -42,7 +42,7 @@ export interface VerifyResult {
  * Check if a proof is a WitnessProof (has witnessedAt field)
  */
 function isWitnessProof(proof: DataIntegrityProof | WitnessProof): proof is WitnessProof {
-  return 'witnessedAt' in proof && typeof (proof as WitnessProof).witnessedAt === 'string';
+  return 'witnessedAt' in proof && typeof (proof).witnessedAt === 'string';
 }
 
 /**

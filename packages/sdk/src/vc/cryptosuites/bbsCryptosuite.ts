@@ -8,7 +8,7 @@
 import { BbsSimple, type BbsKeyPair } from './bbsSimple';
 import { BBSCryptosuiteUtils } from './bbs';
 import { multikey } from '../../crypto/Multikey';
-import { canonize, canonizeProof } from '../utils/jsonld';
+import { canonize } from '../utils/jsonld';
 import { sha256Bytes } from '../../utils/hash';
 import type { DataIntegrityProof, VerificationResult } from './eddsa';
 
@@ -113,7 +113,7 @@ export class BBSCryptosuiteManager {
       publicKey = options.publicKey;
     } else {
       // Derive public key from private key
-      const kp = BbsSimple.generateKeyPair();
+      BbsSimple.generateKeyPair();
       // Re-derive with the actual private key
       const { bls12_381 } = await import('@noble/curves/bls12-381');
       const Fr = bls12_381.fields.Fr;
@@ -129,7 +129,7 @@ export class BBSCryptosuiteManager {
     // Convert credential fields to BBS messages
     const docCopy = { ...document };
     delete docCopy.proof;
-    const { messages, fieldPaths, mandatoryIndexes } = credentialToMessages(
+    const { messages } = credentialToMessages(
       docCopy as Record<string, unknown>,
       mandatoryPointers
     );
@@ -389,7 +389,7 @@ function buildDisclosedDocument(
       let value: any = original;
       for (const part of parts) {
         if (value === undefined || value === null) break;
-        value = (value as any)[part];
+        value = (value)[part];
       }
       setPath(result, fieldPaths[i], value);
     }

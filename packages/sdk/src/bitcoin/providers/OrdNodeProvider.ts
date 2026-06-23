@@ -17,6 +17,7 @@ export class OrdNodeProvider implements ResourceProvider {
     this.network = options.network || 'mainnet';
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async resolve(resourceId: string): Promise<LinkedResource> {
     return {
       id: resourceId,
@@ -26,6 +27,7 @@ export class OrdNodeProvider implements ResourceProvider {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async resolveInscription(inscriptionId: string): Promise<Inscription> {
     return {
       id: inscriptionId,
@@ -35,6 +37,7 @@ export class OrdNodeProvider implements ResourceProvider {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async resolveInfo(resourceId: string): Promise<ResourceInfo> {
     return {
       id: resourceId,
@@ -46,32 +49,39 @@ export class OrdNodeProvider implements ResourceProvider {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async resolveCollection(did: string, _options: { type?: string; limit?: number; offset?: number } = {}): Promise<LinkedResource[]> {
     return [];
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getSatInfo(_satNumber: string): Promise<{ inscription_ids: string[] }> {
     return { inscription_ids: [] };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getMetadata(_inscriptionId: string): Promise<any> {
     return null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await, require-yield
   async *getAllResources(_options: ResourceCrawlOptions = {}): AsyncGenerator<LinkedResource[]> {
     // no-op generator yields nothing
     return;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await, require-yield
   async *getAllResourcesChronological(_options: ResourceCrawlOptions = {}): AsyncGenerator<LinkedResource[]> {
     // no-op generator yields nothing
     return;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getInscriptionLocationsByAddress(_address: string): Promise<{ id: string; location: string }[]> {
     return [];
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getInscriptionByNumber(_inscriptionNumber: number): Promise<Inscription> {
     return {
       id: '0',
@@ -81,10 +91,12 @@ export class OrdNodeProvider implements ResourceProvider {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getAddressOutputs(_address: string): Promise<string[]> {
     return [];
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getOutputDetails(_outpoint: string): Promise<{ value: number; script_pubkey: string; spent: boolean; inscriptions: string[] }> {
     return { value: 0, script_pubkey: '', spent: false, inscriptions: [] };
   }

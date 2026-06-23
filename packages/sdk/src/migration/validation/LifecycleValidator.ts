@@ -14,6 +14,7 @@ import { OriginalsConfig } from '../../types';
 export class LifecycleValidator implements IValidator {
   constructor(private config: OriginalsConfig) {}
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async validate(options: MigrationOptions): Promise<MigrationValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];

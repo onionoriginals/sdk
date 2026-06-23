@@ -4,7 +4,7 @@
  * Validates manifests for structured data collections with schema definitions.
  */
 
-import { OriginalKind, type OriginalManifest, type ValidationResult, type DatasetMetadata } from '../types';
+import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types';
 import { BaseKindValidator, ValidationUtils } from './base';
 
 /**
@@ -34,7 +34,7 @@ export class DatasetValidator extends BaseKindValidator<OriginalKind.Dataset> {
   protected validateKind(manifest: OriginalManifest<OriginalKind.Dataset>): ValidationResult {
     const errors: ValidationResult['errors'] = [];
     const warnings: ValidationResult['warnings'] = [];
-    const metadata = manifest.metadata as DatasetMetadata;
+    const metadata = manifest.metadata;
     
     // Validate metadata exists
     if (!metadata || typeof metadata !== 'object') {

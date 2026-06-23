@@ -4,7 +4,7 @@
  * Validates manifests for AI agents or autonomous systems with capabilities and model info.
  */
 
-import { OriginalKind, type OriginalManifest, type ValidationResult, type AgentMetadata } from '../types';
+import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types';
 import { BaseKindValidator, ValidationUtils } from './base';
 
 /**
@@ -30,7 +30,7 @@ export class AgentValidator extends BaseKindValidator<OriginalKind.Agent> {
   protected validateKind(manifest: OriginalManifest<OriginalKind.Agent>): ValidationResult {
     const errors: ValidationResult['errors'] = [];
     const warnings: ValidationResult['warnings'] = [];
-    const metadata = manifest.metadata as AgentMetadata;
+    const metadata = manifest.metadata;
     
     // Validate metadata exists
     if (!metadata || typeof metadata !== 'object') {

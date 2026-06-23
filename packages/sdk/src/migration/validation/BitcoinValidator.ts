@@ -18,6 +18,7 @@ export class BitcoinValidator implements IValidator {
     private bitcoinManager: BitcoinManager
   ) {}
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async validate(options: MigrationOptions): Promise<MigrationValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
@@ -41,7 +42,7 @@ export class BitcoinValidator implements IValidator {
 
       // Estimate Bitcoin network fees
       let networkFees = 0;
-      let estimatedDuration = 600000; // 10 minutes default
+      const estimatedDuration = 600000; // 10 minutes default
 
       try {
         // Estimate fee for a typical inscription (assume 1KB data)

@@ -145,7 +145,7 @@ export class RollbackManager implements IRollbackManager {
   /**
    * Clean up migration artifacts
    */
-  private async cleanupMigrationArtifacts(migrationId: string): Promise<void> {
+  private async cleanupMigrationArtifacts(_migrationId: string): Promise<void> {
     // Clean up any temporary files, partial uploads, etc.
     // This is a placeholder for actual cleanup logic
   }

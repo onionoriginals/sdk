@@ -64,7 +64,7 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
   }): Promise<{ proofValue: string }> {
     try {
       // Prepare the data for signing using the SDK's canonical approach
-      const dataToSign = await OriginalsSDK.prepareDIDDataForSigning(input.document, input.proof);
+      const dataToSign = await OriginalsSDK.prepareDIDDataForSigning(input.document, input.proof) as Uint8Array;
 
       // Convert canonical data to hex format for Turnkey's sign API
       const dataHex = `0x${bytesToHex(dataToSign)}`;

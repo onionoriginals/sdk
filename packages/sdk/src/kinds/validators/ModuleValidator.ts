@@ -4,7 +4,7 @@
  * Validates manifests for reusable code modules with exports and dependencies.
  */
 
-import { OriginalKind, type OriginalManifest, type ValidationResult, type ModuleMetadata } from '../types';
+import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types';
 import { BaseKindValidator, ValidationUtils } from './base';
 
 /**
@@ -21,7 +21,7 @@ export class ModuleValidator extends BaseKindValidator<OriginalKind.Module> {
   protected validateKind(manifest: OriginalManifest<OriginalKind.Module>): ValidationResult {
     const errors: ValidationResult['errors'] = [];
     const warnings: ValidationResult['warnings'] = [];
-    const metadata = manifest.metadata as ModuleMetadata;
+    const metadata = manifest.metadata;
     
     // Validate metadata exists
     if (!metadata || typeof metadata !== 'object') {

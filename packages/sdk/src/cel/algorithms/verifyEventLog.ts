@@ -343,7 +343,7 @@ async function verifyEvent(
   // Verify witness proofs — NON-GATING: results go into `witnessProofs` only.
   const witnessResults: { verificationMethod: string; verified: boolean }[] = [];
 
-  for (const { proof, originalIndex: _originalIndex } of witnessProofEntries) {
+  for (const { proof } of witnessProofEntries) {
     let witnessVerified = false;
     try {
       if (customVerifier) {

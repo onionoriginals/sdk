@@ -55,28 +55,6 @@ function getScureNetwork(network: BitcoinNetwork): typeof btc.NETWORK {
 }
 
 /**
- * Validates that a UTXO has all required fields for spending and is safe to use
- * as a fee/funding input (not locked, not carrying an inscription, not tagged as
- * a resource-bearing UTXO).
- *
- * @param utxo - The UTXO to validate
- * @returns true if the UTXO is structurally valid, unlocked, and carries no
- *          inscription or resource ordinal
- */
-function isValidSpendableUtxo(utxo: Utxo): boolean {
-  return !!(
-    utxo.txid &&
-    typeof utxo.vout === 'number' &&
-    utxo.value > 0 &&
-    utxo.scriptPubKey &&
-    utxo.scriptPubKey.length > 0 &&
-    !utxo.locked &&
-    !(utxo.inscriptions && utxo.inscriptions.length > 0) &&
-    (utxo as ResourceUtxo).hasResource !== true
-  );
-}
-
-/**
  * Parameters for creating a commit transaction
  */
 export interface CommitTransactionParams {
@@ -172,6 +150,7 @@ function estimateCommitTxSize(inputCount: number, outputCount: number): number {
  * @returns Complete information for the prepared commit transaction
  * @throws Error if no valid UTXOs are available or insufficient funds
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function createCommitTransaction(
   params: CommitTransactionParams
 ): Promise<CommitTransactionResult> {

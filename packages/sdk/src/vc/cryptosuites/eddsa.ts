@@ -30,7 +30,7 @@ export class EdDSACryptosuiteManager {
       throw new Error('Invalid private key format');
     }
     const proofValueBytes = await this.sign({ data: hashData, privateKey });
-    delete (proofConfig as any)['@context'];
+    delete (proofConfig)['@context'];
     // proofValue is multibase base58btc per the Data Integrity spec
     return { ...proofConfig, proofValue: `z${base58.encode(proofValueBytes)}` } as DataIntegrityProof;
   }
@@ -38,7 +38,7 @@ export class EdDSACryptosuiteManager {
   static async verifyProof(document: any, proof: DataIntegrityProof, options: any): Promise<VerificationResult> {
     try {
       const documentToVerify = { ...document };
-      delete (documentToVerify as any).proof;
+      delete (documentToVerify).proof;
       const transformedData = await this.transform(documentToVerify, options);
       const hashData = await this.hash(
         transformedData,
@@ -60,6 +60,7 @@ export class EdDSACryptosuiteManager {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   private static async createProofConfiguration(options: any, documentContext?: unknown): Promise<any> {
     // Per eddsa-rdfc-2022, the proof configuration is canonicalized with the
     // secured document's @context so create and verify hash identical data.

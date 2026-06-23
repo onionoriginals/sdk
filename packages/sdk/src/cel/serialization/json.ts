@@ -58,13 +58,6 @@ export function serializeEventLogJson(log: EventLog): string {
 }
 
 /**
- * Check if a proof object is a WitnessProof (has witnessedAt field)
- */
-function isWitnessProof(proof: DataIntegrityProof | WitnessProof): proof is WitnessProof {
-  return 'witnessedAt' in proof && typeof (proof as WitnessProof).witnessedAt === 'string';
-}
-
-/**
  * Validate and reconstruct a DataIntegrityProof or WitnessProof
  */
 function parseProof(proof: unknown): DataIntegrityProof | WitnessProof {

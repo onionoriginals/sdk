@@ -4,7 +4,7 @@
  * Validates manifests for executable applications with runtime and entrypoint.
  */
 
-import { OriginalKind, type OriginalManifest, type ValidationResult, type AppMetadata } from '../types';
+import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types';
 import { BaseKindValidator, ValidationUtils } from './base';
 
 /**
@@ -30,7 +30,7 @@ export class AppValidator extends BaseKindValidator<OriginalKind.App> {
   protected validateKind(manifest: OriginalManifest<OriginalKind.App>): ValidationResult {
     const errors: ValidationResult['errors'] = [];
     const warnings: ValidationResult['warnings'] = [];
-    const metadata = manifest.metadata as AppMetadata;
+    const metadata = manifest.metadata;
     
     // Validate metadata exists
     if (!metadata || typeof metadata !== 'object') {
@@ -155,7 +155,7 @@ export class AppValidator extends BaseKindValidator<OriginalKind.App> {
           'metadata.icons',
         ));
       } else {
-        for (const [size, resourceId] of Object.entries(metadata.icons)) {
+        for (const [size] of Object.entries(metadata.icons)) {
           if (!/^\d+x\d+$/.test(size) && !/^\d+$/.test(size)) {
             warnings.push(ValidationUtils.warning(
               'ICON_SIZE_FORMAT',

@@ -32,6 +32,7 @@ export class CredentialValidator implements IValidator {
     private config: OriginalsConfig
   ) {}
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async validate(options: MigrationOptions): Promise<MigrationValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];

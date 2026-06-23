@@ -228,15 +228,16 @@ function createMockBitcoinManager(): any {
   // For CLI use, we create a minimal mock that satisfies the interface
   // Real Bitcoin integration requires additional configuration
   return {
-    inscribeData: async (data: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/require-await
+    inscribeData: async (_data: unknown) => {
       // Generate mock Bitcoin transaction details
       const timestamp = Date.now();
       const mockTxid = `cli_mock_tx_${timestamp.toString(16)}`;
       const mockInscriptionId = `cli_mock_inscription_${timestamp.toString(16)}i0`;
-      
+
       console.error('\n⚠️  Note: Using mock Bitcoin manager for CLI migration.');
       console.error('    For real Bitcoin inscriptions, use the SDK programmatically.\n');
-      
+
       return {
         txid: mockTxid,
         inscriptionId: mockInscriptionId,
@@ -244,6 +245,7 @@ function createMockBitcoinManager(): any {
         blockHeight: 0, // Will be set when confirmed
       };
     },
+    // eslint-disable-next-line @typescript-eslint/require-await
     getInscription: async (inscriptionId: string) => {
       return { inscriptionId, confirmed: false };
     },

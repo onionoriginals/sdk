@@ -50,7 +50,8 @@ export class PeerToWebvhMigration extends BaseMigration {
   /**
    * Estimate cost for peer → webvh migration
    */
-  async estimateCost(options: MigrationOptions): Promise<CostEstimate> {
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async estimateCost(_options: MigrationOptions): Promise<CostEstimate> {
     // Web hosting is typically negligible cost
     return {
       storageCost: 0,

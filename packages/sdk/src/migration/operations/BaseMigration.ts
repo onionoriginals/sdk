@@ -4,10 +4,8 @@
 
 import {
   MigrationOptions,
-  MigrationResult,
   MigrationError,
   MigrationErrorType,
-  MigrationStateEnum,
   CostEstimate
 } from '../types';
 import { OriginalsConfig, DIDDocument } from '../../types';

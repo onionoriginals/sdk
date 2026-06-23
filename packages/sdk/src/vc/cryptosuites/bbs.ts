@@ -52,7 +52,7 @@ export class BBSCryptosuiteUtils {
     signerBlind?: Uint8Array
   ): string {
     let headerBytes: Uint8Array;
-    let components: (Uint8Array | string[] | Uint8Array)[];
+    let components: (Uint8Array | string[]  )[];
 
     switch (featureOption) {
       case 'baseline':
