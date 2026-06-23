@@ -52,7 +52,7 @@ export class BtcoDidResolver {
   }
 
   private parseBtcoDid(did: string): { satNumber: string; path?: string; network: string } | null {
-    const regex = /^did:btco(?::(reg|sig))?:([0-9]+)(?:\/(.+))?$/;
+    const regex = /^did:btco(?::(reg|sig|test))?:([0-9]+)(?:\/(.+))?$/;
     const match = did.match(regex);
     if (!match) return null;
     const [, networkSuffix, satNumber, path] = match;
@@ -68,6 +68,9 @@ export class BtcoDidResolver {
       case 'sig':
       case 'signet':
         return 'did:btco:sig';
+      case 'test':
+      case 'testnet':
+        return 'did:btco:test';
       default:
         return 'did:btco';
     }
