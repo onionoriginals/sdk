@@ -672,9 +672,7 @@ export class WebVHManager {
     // the empty-array truthy behaviour and this workaround silently reverts,
     // that test WILL FAIL — so the regression is not silent.
     //
-    // TODO(didwebvh-ts): remove this workaround once the library exposes a
-    // first-class API to disable pre-rotation (e.g. nextKeyHashes: null or a
-    // dedicated disablePreRotation option).
+    // TODO(didwebvh-ts): remove this workaround once https://github.com/decentralized-identity/didwebvh-ts/issues/125 is fixed (a first-class way to disable pre-rotation / length-based nextKeyHashes detection).
     const result = await updateDID({
       log: currentLog,
       signer,
