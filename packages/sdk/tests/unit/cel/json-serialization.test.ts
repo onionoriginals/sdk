@@ -315,6 +315,44 @@ describe('CEL JSON Serialization', () => {
 
       expect(() => parseEventLogJson(json)).toThrow('Invalid proof: missing or invalid cryptosuite');
     });
+
+    test('throws on entry missing required data field', () => {
+      const json = JSON.stringify({
+        events: [{
+          type: 'create',
+          // data field intentionally omitted
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            verificationMethod: 'did:key:z6Mktest#key-1',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zMockProofValue123',
+          }],
+        }],
+      });
+
+      expect(() => parseEventLogJson(json)).toThrow('Invalid entry: missing required data field');
+    });
+
+    test('accepts entry with falsy/null data (presence, not truthiness)', () => {
+      const json = JSON.stringify({
+        events: [{
+          type: 'create',
+          data: null,
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            verificationMethod: 'did:key:z6Mktest#key-1',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zMockProofValue123',
+          }],
+        }],
+      });
+
+      const parsed = parseEventLogJson(json);
+      expect(parsed.events.length).toBe(1);
+      expect(parsed.events[0].data).toBe(null);
+    });
   });
 
   describe('Round-trip serialization', () => {

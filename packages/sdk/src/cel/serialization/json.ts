@@ -133,7 +133,14 @@ function parseEntry(entry: unknown): LogEntry {
   if (!Array.isArray(e.proof)) {
     throw new Error('Invalid entry: proof must be an array');
   }
-  
+
+  // `data` is a required field on LogEntry. Use a presence check (not a
+  // truthiness/undefined check) so an explicit falsy or null payload is
+  // preserved while a genuinely absent key is rejected.
+  if (!('data' in e)) {
+    throw new Error('Invalid entry: missing required data field');
+  }
+
   const parsedEntry: LogEntry = {
     type: e.type,
     data: e.data,
