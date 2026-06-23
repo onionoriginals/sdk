@@ -72,6 +72,14 @@ function credentialToMessages(credential: Record<string, unknown>, mandatoryPoin
   return { messages, fieldPaths, mandatoryIndexes, selectiveIndexes };
 }
 
+/** Constant-time-ish byte comparison for public key matching. */
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
 export class BBSCryptosuiteManager {
 
   /**
@@ -176,24 +184,35 @@ export class BBSCryptosuiteManager {
         parsed.mandatoryPointers
       );
 
-      // Verify the BBS+ signature
+      // Resolve the public key from the DID document. The verification key MUST
+      // come from the resolved verification method, never from the proof itself
+      // (which is attacker-controlled). Mirrors EdDSACryptosuiteManager.
+      if (!options?.documentLoader) {
+        return { verified: false, errors: ['documentLoader is required to resolve the verification method public key'] };
+      }
+      const vmDoc = await options.documentLoader(proof.verificationMethod);
+      const publicKeyMultibase = vmDoc?.document?.publicKeyMultibase;
+      if (!publicKeyMultibase) {
+        return { verified: false, errors: ['Verification method does not contain a publicKeyMultibase'] };
+      }
+      const dec = multikey.decodePublicKey(publicKeyMultibase);
+      if (dec.type !== 'Bls12381G2') {
+        return { verified: false, errors: ['Verification method key is not Bls12381G2'] };
+      }
+
+      // The proof-embedded public key (if present) MUST match the DID-document
+      // key byte-for-byte. Reject key substitution before any signature check.
+      if (parsed.publicKey && !bytesEqual(parsed.publicKey, dec.key)) {
+        return { verified: false, errors: ['Proof public key does not match verification method'] };
+      }
+
+      // Verify the BBS+ signature against the DID-document public key.
       const valid = await BbsSimple.verify(
         messages,
         new Uint8Array([...parsed.bbsSignature, ...new Uint8Array(80 - parsed.bbsSignature.length)]).slice(0, 80),
-        parsed.publicKey,
+        dec.key,
         parsed.bbsHeader
       );
-
-      // Also verify the public key matches the verification method
-      if (options?.documentLoader) {
-        const vmDoc = await options.documentLoader(proof.verificationMethod);
-        if (vmDoc?.document?.publicKeyMultibase) {
-          const dec = multikey.decodePublicKey(vmDoc.document.publicKeyMultibase);
-          if (dec.type !== 'Bls12381G2') {
-            return { verified: false, errors: ['Verification method key is not Bls12381G2'] };
-          }
-        }
-      }
 
       return valid
         ? { verified: true }
