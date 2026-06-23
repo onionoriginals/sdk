@@ -89,6 +89,76 @@ describe('turnkey-signer', () => {
       ).rejects.toThrow('Failed to sign with Turnkey');
     });
 
+    test('sign rejects a 65-byte signature instead of silently truncating it', async () => {
+      // 32-byte r + 33-byte s = 65 bytes total. A valid Ed25519 signature is
+      // exactly 64 bytes; the server signer must reject (not truncate) this,
+      // matching the client-side TurnkeyDIDSigner behaviour.
+      const r = '00'.repeat(32);
+      const s = '11'.repeat(33);
+      const mockClient = {
+        apiClient: () => ({
+          signRawPayload: mock(() =>
+            Promise.resolve({
+              activity: {
+                result: {
+                  signRawPayloadResult: { r, s },
+                },
+              },
+            })
+          ),
+        }),
+      } as unknown as import('@turnkey/sdk-server').Turnkey;
+
+      const signer = new TurnkeyWebVHSigner(
+        'sub_org_id',
+        'key_id',
+        'z6MkPubKey',
+        mockClient,
+        'did:key:z6Mk#z6Mk'
+      );
+
+      await expect(
+        signer.sign({
+          document: { id: 'did:example:123' },
+          proof: { type: 'DataIntegrityProof' },
+        })
+      ).rejects.toThrow(/65 \(expected 64 bytes\)/);
+    });
+
+    test('sign produces a proofValue for a valid 64-byte signature', async () => {
+      const r = 'aa'.repeat(32);
+      const s = 'bb'.repeat(32);
+      const mockClient = {
+        apiClient: () => ({
+          signRawPayload: mock(() =>
+            Promise.resolve({
+              activity: {
+                result: {
+                  signRawPayloadResult: { r, s },
+                },
+              },
+            })
+          ),
+        }),
+      } as unknown as import('@turnkey/sdk-server').Turnkey;
+
+      const signer = new TurnkeyWebVHSigner(
+        'sub_org_id',
+        'key_id',
+        'z6MkPubKey',
+        mockClient,
+        'did:key:z6Mk#z6Mk'
+      );
+
+      const result = await signer.sign({
+        document: { id: 'did:example:123' },
+        proof: { type: 'DataIntegrityProof' },
+      });
+
+      expect(typeof result.proofValue).toBe('string');
+      expect(result.proofValue.length).toBeGreaterThan(0);
+    });
+
     test('verify returns false for invalid public key length', async () => {
       const mockClient = {} as unknown as import('@turnkey/sdk-server').Turnkey;
       const signer = new TurnkeyWebVHSigner(
