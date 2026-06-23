@@ -43,10 +43,24 @@ export class DocumentLoader {
       // `registerVerificationMethod` could shadow a DID's real key with an
       // attacker-controlled key and forge credential signatures.
       const vms = didDocTyped.verificationMethod;
-      const vm = vms?.find((m) => m.id === didUrl);
+      // Match the requested verification method against the DID document
+      // tolerant of fragment-id FORMAT differences: a DID document may publish
+      // a VM with a RELATIVE id (e.g. `#key-0`) while the request uses the
+      // ABSOLUTE form (`did:example:123#key-0`), or vice versa. Both are
+      // equivalent per DID Core (a relative DID URL resolves against the
+      // document's DID). Normalising before comparison prevents the loader from
+      // missing a published VM and falling back to the registry (a forgery
+      // vector) or returning a key-less stub (spurious verification failure).
+      const normalizeVmId = (id?: string): string | undefined =>
+        id && id.startsWith('#') ? `${did}${id}` : id;
+      const requestedVmId = normalizeVmId(didUrl);
+      const vm = vms?.find((m) => normalizeVmId(m.id) === requestedVmId);
       if (vm) {
         return {
-          document: { '@context': didDocTyped['@context'], ...vm },
+          // Return the VM under the requested (absolute) id so the resolved
+          // document is internally consistent with documentUrl, regardless of
+          // whether the DID document published it relatively or absolutely.
+          document: { '@context': didDocTyped['@context'], ...vm, id: didUrl },
           documentUrl: didUrl,
           contextUrl: null
         };
