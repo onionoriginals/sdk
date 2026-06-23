@@ -650,29 +650,6 @@ export class WebVHManager {
       publicKeyMultibase: newKeyPair.publicKey,
     };
 
-    // WORKAROUND (didwebvh-ts bug): pass nextKeyHashes: false (falsy,
-    // non-nullish) instead of omitting it.
-    //
-    // Root cause: didwebvh-ts stores `options.nextKeyHashes ?? []` in the log
-    // entry's parameters field.  During log resolution, resolveDIDFromLog uses
-    // a truthy check — `if (parameters.nextKeyHashes)` — to decide whether
-    // pre-rotation mode is active.  An empty array [] is truthy, so omitting
-    // nextKeyHashes (which gives []) incorrectly activates pre-rotation after
-    // the first rotation entry.  In pre-rotation mode the library validates
-    // each subsequent entry against the NEW entry's proposed updateKeys
-    // (parameters.updateKeys) rather than the currently-authorized ones
-    // (meta.updateKeys), causing the 3rd and later rotations to fail with
-    // "Key … is not authorized to update."
-    // false is not nullish so `false ?? []` yields false, which stays falsy
-    // at resolution time and keeps pre-rotation correctly disabled.
-    //
-    // Regression guard: the 10-rotation scenario in
-    // tests/unit/did/did-layer-scenarios.test.ts exercises ≥3 successive
-    // rotations without pre-rotation.  If a future didwebvh-ts release changes
-    // the empty-array truthy behaviour and this workaround silently reverts,
-    // that test WILL FAIL — so the regression is not silent.
-    //
-    // TODO(didwebvh-ts): remove this workaround once https://github.com/decentralized-identity/didwebvh-ts/issues/125 is fixed (a first-class way to disable pre-rotation / length-based nextKeyHashes detection).
     const result = await updateDID({
       log: currentLog,
       signer,
@@ -681,7 +658,6 @@ export class WebVHManager {
       verificationMethods: [newVerificationMethod],
       authentication: ['#key-0'],
       assertionMethod: ['#key-0'],
-      nextKeyHashes: false,
     });
 
     if (!this.isDIDDocument(result.doc)) {

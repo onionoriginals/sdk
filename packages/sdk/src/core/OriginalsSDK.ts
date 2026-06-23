@@ -323,8 +323,7 @@ export class OriginalsSDK {
 
     return {
       did: result.did,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      doc: result.doc,
+      doc: result.doc as unknown as DIDDocument,
       log: result.log as unknown as DIDLog,
       meta: result.meta
     };

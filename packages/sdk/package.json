@@ -111,7 +111,7 @@
     "b58": "^4.0.3",
     "bitcoinjs-lib": "^6.1.0",
     "cbor-js": "^0.1.0",
-    "didwebvh-ts": "^2.5.5",
+    "didwebvh-ts": "^2.7.5",
     "jsonld": "^8.3.3",
     "micro-ordinals": "^0.2.2",
     "multiformats": "^12.0.0",

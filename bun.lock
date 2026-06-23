@@ -18,7 +18,7 @@
     },
     "packages/auth": {
       "name": "@originals/auth",
-      "version": "1.6.0",
+      "version": "1.9.0",
       "dependencies": {
         "@noble/ed25519": "^2.0.0",
         "@noble/hashes": "^2.0.1",
@@ -48,7 +48,7 @@
     },
     "packages/sdk": {
       "name": "@originals/sdk",
-      "version": "1.7.0",
+      "version": "1.9.0",
       "bin": {
         "originals-cel": "./dist/cel/cli/index.js",
       },
@@ -65,7 +65,7 @@
         "b58": "^4.0.3",
         "bitcoinjs-lib": "^6.1.0",
         "cbor-js": "^0.1.0",
-        "didwebvh-ts": "^2.5.5",
+        "didwebvh-ts": "^2.7.5",
         "jsonld": "^8.3.3",
         "micro-ordinals": "^0.2.2",
         "multiformats": "^12.0.0",
@@ -665,7 +665,7 @@
 
     "deep-is": ["deep-is@0.1.4", "", {}, "sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ=="],
 
-    "didwebvh-ts": ["didwebvh-ts@2.7.1", "", { "dependencies": { "@noble/hashes": "^1.8.0", "cookie": "^1.1.1", "glob": "^13.0.0", "js-yaml": "^4.1.1", "json-canonicalize": "^1.0.6" }, "bin": { "didwebvh": "dist/cli/didwebvh.js" } }, "sha512-wsii4M8cQdPuIgc8wV1kg4fqWZD52pwp6asXqpUhAbYTjxE78jOUzKtmV2Xpc4NXyqyfZyGR6xDoUhj3BKmFaA=="],
+    "didwebvh-ts": ["didwebvh-ts@2.7.5", "", { "dependencies": { "@noble/hashes": "^1.8.0", "cookie": "^1.1.1", "glob": "^13.0.0", "js-yaml": "^4.1.1", "json-canonicalize": "^1.0.6" }, "bin": { "didwebvh": "dist/cli/didwebvh.js" } }, "sha512-CIki9KFTdN4x1bpXWfQyiqSDRqtvq7/VtHsQWKBbdjY/fCA4KwwpEQKlyyblHO8bVExqg1biM5EJtchqDed3HQ=="],
 
     "dir-glob": ["dir-glob@3.0.1", "", { "dependencies": { "path-type": "^4.0.0" } }, "sha512-WkrWp9GR4KXfKGYzOLmTuGVi1UWFfws377n9cc55/tb6DuqyF6pcQ5AbiHEshaDpY9v6oaSr2XCDidGmMwdzIA=="],
 
