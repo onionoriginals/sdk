@@ -37,7 +37,7 @@ export class ValidationPipeline {
     this.validators.set('did', new DIDCompatibilityValidator(this.config, this.didManager));
     this.validators.set('credential', new CredentialValidator(this.config));
     this.validators.set('storage', new StorageValidator(this.config));
-    this.validators.set('lifecycle', new LifecycleValidator(this.config));
+    this.validators.set('lifecycle', new LifecycleValidator(this.config, this.didManager));
     if (this.bitcoinManager) {
       this.validators.set('bitcoin', new BitcoinValidator(this.config, this.bitcoinManager));
     }
