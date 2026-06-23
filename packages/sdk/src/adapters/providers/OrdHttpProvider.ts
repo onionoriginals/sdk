@@ -70,20 +70,24 @@ export class OrdHttpProvider implements OrdinalsProvider {
     return ids.map((inscriptionId) => ({ inscriptionId }));
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async broadcastTransaction(_txHexOrObj: unknown): Promise<string> {
     // For example purposes only, return a placeholder
     return 'broadcast-txid';
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getTransactionStatus(_txid: string) {
     return { confirmed: false };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async estimateFee(blocks: number = 1): Promise<number> {
     // Basic fallback: some providers expose fee estimates; for example purposes, return linear estimate
     return 5 * Math.max(1, blocks);
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async createInscription(params: { data: any; contentType: string; feeRate?: number; }) {
     // Example placeholder: a real implementation would POST to a service
     // Here we return a deterministic mock-like result to avoid network coupling in code
@@ -101,6 +105,7 @@ export class OrdHttpProvider implements OrdinalsProvider {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async transferInscription(inscriptionId: string, _toAddress: string, _options?: { feeRate?: number }) {
     if (!inscriptionId) throw new Error('inscriptionId required');
     const txid = `tx-${Math.random().toString(36).slice(2)}`;

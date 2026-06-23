@@ -26,28 +26,34 @@ export class OrdMockProvider implements OrdinalsProvider {
     } as OrdMockState;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getInscriptionById(id: string) {
     const rec = this.state.inscriptionsById.get(id);
     return rec ? { ...rec } : null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getInscriptionsBySatoshi(satoshi: string) {
     const list = this.state.inscriptionsBySatoshi.get(satoshi) || [];
     return list.map((inscriptionId) => ({ inscriptionId }));
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async broadcastTransaction(_txHexOrObj: unknown): Promise<string> {
     return 'mock-broadcast-txid';
   }
 
-  async getTransactionStatus(txid: string) {
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getTransactionStatus(_txid: string) {
     return { confirmed: true, blockHeight: 1, confirmations: 1 };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async estimateFee(blocks = 1): Promise<number> {
     return Math.max(1, this.state.feeRate - (blocks - 1));
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async createInscription(params: { data: Buffer; contentType: string; feeRate?: number; }) {
     const inscriptionId = `insc-${Math.random().toString(36).slice(2)}`;
     const txid = `tx-${Math.random().toString(36).slice(2)}`;

@@ -24,6 +24,7 @@ export class StateTracker implements IStateTracker {
   /**
    * Create a new migration state
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async createMigration(options: MigrationOptions): Promise<MigrationState> {
     const migrationId = `mig_${uuidv4()}`;
     const sourceLayer = this.extractLayer(options.sourceDid);
@@ -50,6 +51,7 @@ export class StateTracker implements IStateTracker {
   /**
    * Update migration state
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async updateState(migrationId: string, updates: Partial<MigrationState>): Promise<void> {
     const currentState = this.states.get(migrationId);
     if (!currentState) {
@@ -87,6 +89,7 @@ export class StateTracker implements IStateTracker {
   /**
    * Get migration state
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getState(migrationId: string): Promise<MigrationState | null> {
     return this.states.get(migrationId) || null;
   }
@@ -94,6 +97,7 @@ export class StateTracker implements IStateTracker {
   /**
    * Query migration states by filters
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async queryStates(filters: Partial<MigrationState>): Promise<MigrationState[]> {
     const results: MigrationState[] = [];
 
@@ -127,6 +131,7 @@ export class StateTracker implements IStateTracker {
   /**
    * Clean up old completed migrations
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async cleanupOldStates(olderThanMs: number = 7 * 24 * 60 * 60 * 1000): Promise<void> {
     const cutoffTime = Date.now() - olderThanMs;
     const toDelete: string[] = [];

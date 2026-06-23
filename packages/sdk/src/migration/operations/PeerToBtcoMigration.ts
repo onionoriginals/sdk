@@ -90,6 +90,7 @@ export class PeerToBtcoMigration extends BaseMigration {
   /**
    * Estimate cost for peer → btco migration
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async estimateCost(options: MigrationOptions): Promise<CostEstimate> {
     const feeRate = options.feeRate || 10; // default 10 sat/vB
     const estimatedSize = 1024; // ~1KB for typical DID document

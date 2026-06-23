@@ -40,7 +40,7 @@ export async function updateEventLog(
   data: unknown,
   options: UpdateOptions
 ): Promise<EventLog> {
-  const { signer, verificationMethod, proofPurpose = 'assertionMethod' } = options;
+  const { signer } = options;
 
   // Validate input log
   if (!log.events || log.events.length === 0) {

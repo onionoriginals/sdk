@@ -4,7 +4,7 @@
  * Validates manifests for text documents with formatting and sections.
  */
 
-import { OriginalKind, type OriginalManifest, type ValidationResult, type DocumentMetadata } from '../types';
+import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types';
 import { BaseKindValidator, ValidationUtils } from './base';
 
 /**
@@ -26,7 +26,7 @@ export class DocumentValidator extends BaseKindValidator<OriginalKind.Document> 
   protected validateKind(manifest: OriginalManifest<OriginalKind.Document>): ValidationResult {
     const errors: ValidationResult['errors'] = [];
     const warnings: ValidationResult['warnings'] = [];
-    const metadata = manifest.metadata as DocumentMetadata;
+    const metadata = manifest.metadata;
     
     // Validate metadata exists
     if (!metadata || typeof metadata !== 'object') {

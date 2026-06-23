@@ -1,5 +1,3 @@
-import { sha256 } from '@noble/hashes/sha2.js';
-
 export type BbsKeyPair = {
   publicKey: Uint8Array;
   privateKey: Uint8Array;
@@ -8,13 +6,13 @@ export type BbsKeyPair = {
 export class BbsSimple {
   static readonly CIPHERSUITE = 'BLS12-381-SHA-256';
 
-  static async sign(messages: Uint8Array[], keypair: BbsKeyPair, header?: Uint8Array): Promise<Uint8Array> {
-    const headerBytes = header ?? new Uint8Array(sha256(new Uint8Array(0)));
+  // eslint-disable-next-line @typescript-eslint/require-await
+  static async sign(_messages: Uint8Array[], _keypair: BbsKeyPair, _header?: Uint8Array): Promise<Uint8Array> {
     throw new Error('BbsSimple.sign is not implemented');
   }
 
-  static async verify(messages: Uint8Array[], signature: Uint8Array, publicKey: Uint8Array, header?: Uint8Array): Promise<boolean> {
-    const headerBytes = header ?? new Uint8Array(sha256(new Uint8Array(0)));
+  // eslint-disable-next-line @typescript-eslint/require-await
+  static async verify(_messages: Uint8Array[], _signature: Uint8Array, _publicKey: Uint8Array, _header?: Uint8Array): Promise<boolean> {
     throw new Error('BbsSimple.verify is not implemented');
   }
 
@@ -26,6 +24,7 @@ export class BbsSimple {
     throw new Error('BbsSimple.generateKeyPair is not implemented');
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   static async createProof(_options: {
     publicKey: Uint8Array;
     signature: Uint8Array;
@@ -37,6 +36,7 @@ export class BbsSimple {
     throw new Error('BbsSimple.createProof is not implemented');
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   static async verifyProof(_options: {
     publicKey: Uint8Array;
     proof: Uint8Array;

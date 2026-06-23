@@ -35,7 +35,7 @@ export async function createEventLog(
   data: unknown,
   options: CreateOptions
 ): Promise<EventLog> {
-  const { signer, verificationMethod, proofPurpose = 'assertionMethod' } = options;
+  const { signer } = options;
 
   // Create the event structure without proof first
   const eventBase = {

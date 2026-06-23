@@ -10,7 +10,7 @@
  * @see https://identity.foundation/didwebvh/
  */
 
-import type { EventLog, ExternalReference, DataIntegrityProof, UpdateOptions, AssetState } from '../types';
+import type { EventLog, ExternalReference, UpdateOptions, AssetState } from '../types';
 import { updateEventLog } from '../algorithms/updateEventLog';
 import { witnessEvent } from '../algorithms/witnessEvent';
 import type { WitnessService } from '../witnesses/WitnessService';

@@ -4,7 +4,7 @@
  * Validates manifests for media content (image, audio, video) with format metadata.
  */
 
-import { OriginalKind, type OriginalManifest, type ValidationResult, type MediaMetadata } from '../types';
+import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types';
 import { BaseKindValidator, ValidationUtils } from './base';
 
 /**
@@ -46,7 +46,7 @@ export class MediaValidator extends BaseKindValidator<OriginalKind.Media> {
   protected validateKind(manifest: OriginalManifest<OriginalKind.Media>): ValidationResult {
     const errors: ValidationResult['errors'] = [];
     const warnings: ValidationResult['warnings'] = [];
-    const metadata = manifest.metadata as MediaMetadata;
+    const metadata = manifest.metadata;
     
     // Validate metadata exists
     if (!metadata || typeof metadata !== 'object') {

@@ -10,7 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { EventLog, LogEntry, DataIntegrityProof, WitnessProof, AssetState, ExternalReference } from '../types';
+import type { EventLog, DataIntegrityProof, WitnessProof, AssetState, ExternalReference } from '../types';
 import { parseEventLogJson } from '../serialization/json';
 import { parseEventLogCbor } from '../serialization/cbor';
 
@@ -49,7 +49,7 @@ interface MigrationData {
  * Check if a proof is a WitnessProof (has witnessedAt field)
  */
 function isWitnessProof(proof: DataIntegrityProof | WitnessProof): proof is WitnessProof {
-  return 'witnessedAt' in proof && typeof (proof as WitnessProof).witnessedAt === 'string';
+  return 'witnessedAt' in proof && typeof (proof).witnessedAt === 'string';
 }
 
 /**
@@ -260,7 +260,7 @@ function extractLayerHistory(log: EventLog): Array<{ layer: string; timestamp: s
     }
     
     if (event.type === 'update' && isMigrationEvent(event.data)) {
-      const migrationData = event.data as MigrationData;
+      const migrationData = event.data;
       history.push({
         layer: migrationData.layer ?? 'unknown',
         timestamp: migrationData.migratedAt ?? event.proof[0]?.created ?? 'unknown',
@@ -326,7 +326,7 @@ function outputInspection(log: EventLog, state: AssetState): void {
   if (state.deactivated) {
     console.log(`   Status: 🔒 DEACTIVATED`);
     if (state.metadata?.deactivationReason) {
-      console.log(`   Reason: ${state.metadata.deactivationReason}`);
+      console.log(`   Reason: ${String(state.metadata.deactivationReason)}`);
     }
   } else {
     console.log(`   Status: ✅ ACTIVE`);
@@ -390,8 +390,6 @@ function outputInspection(log: EventLog, state: AssetState): void {
       const entry = layerHistory[i];
       const isLast = i === layerHistory.length - 1;
       const prefix = isLast ? '   └─' : '   ├─';
-      const arrow = i > 0 ? ' ← ' : '';
-      
       console.log(`${prefix} ${getLayerBadge(entry.layer)}`);
       if (entry.timestamp) {
         console.log(`   ${isLast ? ' ' : '│'}     ${formatTimestamp(entry.timestamp)}`);
@@ -443,19 +441,19 @@ function outputInspection(log: EventLog, state: AssetState): void {
     
     // Event-specific details
     if (event.type === 'create') {
-      if (data.name) console.log(` ${connector}   Name: ${data.name}`);
+      if (data.name) console.log(` ${connector}   Name: ${String(data.name)}`);
       if (data.did) console.log(` ${connector}   DID: ${formatDid(data.did as string)}`);
-      if (data.layer) console.log(` ${connector}   Layer: ${data.layer}`);
+      if (data.layer) console.log(` ${connector}   Layer: ${String(data.layer)}`);
       if (data.resources && Array.isArray(data.resources)) {
         console.log(` ${connector}   Resources: ${data.resources.length} file(s)`);
       }
     } else if (event.type === 'update') {
       // Show what changed
       const changes: string[] = [];
-      if (data.name) changes.push(`name → "${data.name}"`);
+      if (data.name) changes.push(`name → "${String(data.name)}"`);
       if (data.resources) changes.push(`resources updated`);
       if (isMigrationEvent(event.data)) {
-        const migrationData = event.data as MigrationData;
+        const migrationData = event.data;
         changes.push(`migrated to ${migrationData.layer ?? 'unknown'}`);
         if (migrationData.domain) changes.push(`domain: ${migrationData.domain}`);
         if (migrationData.txid) changes.push(`txid: ${truncate(migrationData.txid, 20)}`);
@@ -471,7 +469,7 @@ function outputInspection(log: EventLog, state: AssetState): void {
         }
       }
     } else if (event.type === 'deactivate') {
-      if (data.reason) console.log(` ${connector}   Reason: ${data.reason}`);
+      if (data.reason) console.log(` ${connector}   Reason: ${String(data.reason)}`);
     }
     
     // Proof summary
@@ -499,6 +497,7 @@ function outputInspection(log: EventLog, state: AssetState): void {
 /**
  * Execute the inspect command
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function inspectCommand(flags: InspectFlags): Promise<InspectResult> {
   // Check for help flag
   if (flags.help || flags.h) {

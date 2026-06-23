@@ -27,11 +27,8 @@ jobs:
         run: bun run typecheck
 
   lint:
-    name: Lint (non-blocking)
+    name: Lint
     runs-on: ubuntu-latest
-    # TODO: drop continue-on-error once the pre-existing lint errors are fixed,
-    # making lint a required gate.
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4

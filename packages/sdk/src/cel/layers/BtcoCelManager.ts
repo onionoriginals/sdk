@@ -11,7 +11,7 @@
  * @see https://github.com/aviarytech/did-btco
  */
 
-import type { EventLog, ExternalReference, DataIntegrityProof, UpdateOptions, AssetState } from '../types';
+import type { EventLog, ExternalReference, UpdateOptions, AssetState } from '../types';
 import { updateEventLog } from '../algorithms/updateEventLog';
 import { witnessEvent } from '../algorithms/witnessEvent';
 import { BitcoinWitness } from '../witnesses/BitcoinWitness';

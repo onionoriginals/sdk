@@ -56,6 +56,7 @@ export class AuditLogger implements IAuditLogger {
   /**
    * Get migration history for a DID
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getMigrationHistory(did: string): Promise<MigrationAuditRecord[]> {
     return this.auditRecords.get(did) || [];
   }
@@ -64,6 +65,7 @@ export class AuditLogger implements IAuditLogger {
    * Get system-wide migration logs with filters
    * Fixed dedupe logic: use signature to avoid timeline collapse
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getSystemMigrationLogs(filters: Partial<MigrationAuditRecord>): Promise<MigrationAuditRecord[]> {
     const allRecords: MigrationAuditRecord[] = [];
 
@@ -95,7 +97,8 @@ export class AuditLogger implements IAuditLogger {
    * signature) used for both signing and verification.
    */
   private canonicalBytes(record: MigrationAuditRecord): Uint8Array {
-    const { signature, ...recordWithoutSig } = record as any;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { signature: _signature, ...recordWithoutSig } = record as any;
     return Buffer.from(JSON.stringify(recordWithoutSig), 'utf8');
   }
 

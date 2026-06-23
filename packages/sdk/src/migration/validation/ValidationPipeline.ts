@@ -49,7 +49,7 @@ export class ValidationPipeline {
   async validate(options: MigrationOptions): Promise<MigrationValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
-    let estimatedCost: CostEstimate = {
+    const estimatedCost: CostEstimate = {
       storageCost: 0,
       networkFees: 0,
       totalCost: 0,

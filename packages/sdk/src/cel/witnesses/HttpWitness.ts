@@ -228,7 +228,7 @@ export class HttpWitness implements WitnessService {
       verificationMethod: proof.verificationMethod as string,
       proofPurpose: proof.proofPurpose as string,
       proofValue: proof.proofValue as string,
-      witnessedAt: proof.witnessedAt as string,
+      witnessedAt: proof.witnessedAt,
     };
   }
   

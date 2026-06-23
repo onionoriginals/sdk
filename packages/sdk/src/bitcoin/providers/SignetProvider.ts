@@ -120,6 +120,7 @@ export class SignetProvider implements OrdinalsProvider {
     return Math.max(1, blocks) * 2;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async createInscription(_params: {
     data: Buffer;
     contentType: string;
@@ -138,6 +139,7 @@ export class SignetProvider implements OrdinalsProvider {
     );
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async transferInscription(
     _inscriptionId: string,
     _toAddress: string,

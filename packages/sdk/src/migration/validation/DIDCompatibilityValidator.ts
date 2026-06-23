@@ -123,7 +123,7 @@ export class DIDCompatibilityValidator implements IValidator {
     return errors;
   }
 
-  private isVerificationMethodCompatible(vm: any, targetLayer: string): boolean {
+  private isVerificationMethodCompatible(vm: any, _targetLayer: string): boolean {
     // All verification method types are compatible with all layers
     // This is a placeholder for more sophisticated compatibility checks
     if (!vm.type) return false;
