@@ -1,4 +1,4 @@
-import { VerifiableCredential, VerifiablePresentation, BitstringStatusListEntry, BitstringStatusListSubject, MultiSigPolicy } from '../types';
+import { VerifiableCredential, VerifiablePresentation, BitstringStatusListEntry, MultiSigPolicy } from '../types';
 import type { MultiSigVerificationResult } from '../types';
 import { DIDManager } from '../did/DIDManager';
 import { createDocumentLoader } from './documentLoader';
