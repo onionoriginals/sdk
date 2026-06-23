@@ -407,10 +407,19 @@ describe('CORE-MIG-EVENTS-035: LifecycleValidator', () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  test.skip('[error] lifecycle validator rejects deactivated assets — MISSING-API: deactivation detection not yet implemented in LifecycleValidator', async () => {
-    // The LifecycleValidator currently has no deactivation check.
-    // When implemented, this test should verify that:
-    //   result.valid === false && result.errors[0].code === 'ASSET_DEACTIVATED'
+  test('[error] lifecycle validator rejects deactivated assets', async () => {
+    const validator = new LifecycleValidator(baseConfig);
+
+    const result = await validator.validate({
+      sourceDid: 'did:peer:z6MkDeactivated',
+      targetLayer: 'webvh',
+      domain: 'example.com',
+      metadata: { deactivated: true },
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].code).toBe('ASSET_DEACTIVATED');
   });
 });
 

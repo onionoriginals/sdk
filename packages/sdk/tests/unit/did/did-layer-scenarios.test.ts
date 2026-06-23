@@ -333,7 +333,7 @@ describe('DID-008 — key rotation: log consistency after 10 sequential rotation
   // The existing test in WebVHManager.rotation.test.ts only tests up to 3 log
   // entries (2 rotations) which passes.
   // Reported defect: sequential rotateDIDWebVHKeys fails at rotation index 2+.
-  test.skip('10 sequential rotations grow log to 11 entries with valid proofs [DEFECT: rotateDIDWebVHKeys fails at rotation 3+ with "Key … is not authorized to update"]', async () => {
+  test('10 sequential rotations grow log to 11 entries with valid proofs', async () => {
     const manager = new WebVHManager();
 
     const created = await manager.createDIDWebVH({ domain: 'example.com' });
