@@ -722,12 +722,7 @@ describe('DID-015 — did:btco regtest prefix handling', () => {
    * document when queried with the correct regtest DID prefix.
    */
   function buildRegtestProvider(satNumber: string): ResourceProviderLike {
-    const did = `did:btco:reg:${satNumber}`;
     const inscriptionId = `regtest-inscription-${satNumber}i0`;
-    const mockDoc = {
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: did,
-    };
     const mockContentUrl = `http://localhost:8080/content/${inscriptionId}`;
 
     return {
@@ -743,7 +738,8 @@ describe('DID-015 — did:btco regtest prefix handling', () => {
         };
       },
       async getMetadata(_id: string) {
-        return mockDoc as unknown as Record<string, unknown>;
+        // Off-chain metadata is non-authoritative; the document lives in content.
+        return null;
       },
     };
   }
@@ -752,14 +748,16 @@ describe('DID-015 — did:btco regtest prefix handling', () => {
     const satNumber = '4999999999';
     const did = `did:btco:reg:${satNumber}`;
     const provider = buildRegtestProvider(satNumber);
+    const mockDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
 
-    // Mock fetch to return the expected DID content
+    // Mock fetch to return the authoritative DID document as the inscription
+    // content (the resolver must parse the document from content, not metadata).
     const originalFetch = (global as unknown as { fetch: unknown }).fetch;
     (global as unknown as { fetch: unknown }).fetch = async (_url: string) => ({
       ok: true,
       status: 200,
       statusText: 'OK',
-      text: async () => `BTCO DID: ${did}`,
+      text: async () => `BTCO DID: ${JSON.stringify(mockDoc)}`,
     });
 
     try {
