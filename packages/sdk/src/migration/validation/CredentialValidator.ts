@@ -10,7 +10,6 @@ import {
   IValidator
 } from '../types';
 import { OriginalsConfig } from '../../types';
-import { CredentialManager } from '../../vc/CredentialManager';
 
 /**
  * Required top-level fields for a structurally well-formed W3C Verifiable Credential.
@@ -30,8 +29,7 @@ import { CredentialManager } from '../../vc/CredentialManager';
  */
 export class CredentialValidator implements IValidator {
   constructor(
-    private config: OriginalsConfig,
-    private credentialManager: CredentialManager
+    private config: OriginalsConfig
   ) {}
 
   async validate(options: MigrationOptions): Promise<MigrationValidationResult> {

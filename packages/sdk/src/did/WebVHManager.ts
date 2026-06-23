@@ -650,10 +650,12 @@ export class WebVHManager {
       publicKeyMultibase: newKeyPair.publicKey,
     };
 
-    // Pass nextKeyHashes: false (falsy, non-nullish) instead of omitting it.
-    // didwebvh-ts stores `options.nextKeyHashes ?? []` in the log entry's
-    // parameters field.  During log resolution, resolveDIDFromLog uses a
-    // truthy check — `if (parameters.nextKeyHashes)` — to decide whether
+    // WORKAROUND (didwebvh-ts bug): pass nextKeyHashes: false (falsy,
+    // non-nullish) instead of omitting it.
+    //
+    // Root cause: didwebvh-ts stores `options.nextKeyHashes ?? []` in the log
+    // entry's parameters field.  During log resolution, resolveDIDFromLog uses
+    // a truthy check — `if (parameters.nextKeyHashes)` — to decide whether
     // pre-rotation mode is active.  An empty array [] is truthy, so omitting
     // nextKeyHashes (which gives []) incorrectly activates pre-rotation after
     // the first rotation entry.  In pre-rotation mode the library validates
@@ -663,6 +665,16 @@ export class WebVHManager {
     // "Key … is not authorized to update."
     // false is not nullish so `false ?? []` yields false, which stays falsy
     // at resolution time and keeps pre-rotation correctly disabled.
+    //
+    // Regression guard: the 10-rotation scenario in
+    // tests/unit/did/did-layer-scenarios.test.ts exercises ≥3 successive
+    // rotations without pre-rotation.  If a future didwebvh-ts release changes
+    // the empty-array truthy behaviour and this workaround silently reverts,
+    // that test WILL FAIL — so the regression is not silent.
+    //
+    // TODO(didwebvh-ts): remove this workaround once the library exposes a
+    // first-class API to disable pre-rotation (e.g. nextKeyHashes: null or a
+    // dedicated disablePreRotation option).
     const result = await updateDID({
       log: currentLog,
       signer,
