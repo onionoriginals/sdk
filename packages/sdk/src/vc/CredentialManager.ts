@@ -499,7 +499,22 @@ export class CredentialManager {
       const docWithVMs = didDoc as DIDDocWithVMs;
       const vms = docWithVMs?.verificationMethod;
       if (Array.isArray(vms)) {
-        const vm = vms.find((m) => m?.id === verificationMethod);
+        // Two-stage matching, mirroring the CEL key resolver
+        // (cel/keyResolver.ts): match the verification method by exact id
+        // first, then fall back to matching the fragment. DID documents may
+        // publish a verification method under a relative id (e.g. "#keys-1")
+        // while the proof references the absolute form
+        // ("did:...#keys-1") — or vice versa. Both refer to the same key, so
+        // both code paths must agree on which key authorized the signature.
+        // The issuer-binding check above already constrained `verificationMethod`
+        // to the resolved issuer DID, so the fragment fallback does not widen
+        // trust beyond this DID document.
+        const fragment = verificationMethod.split('#')[1];
+        const vm =
+          vms.find((m) => m?.id === verificationMethod) ??
+          (fragment !== undefined
+            ? vms.find((m) => typeof m?.id === 'string' && m.id.split('#')[1] === fragment)
+            : undefined);
         if (vm && typeof vm.publicKeyMultibase === 'string') {
           return vm.publicKeyMultibase;
         }
