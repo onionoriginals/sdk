@@ -242,6 +242,106 @@ describe('LifecycleManager Key Management', () => {
     });
   });
 
+  describe('Revoked / compromised verification method selection (regression for plan 030)', () => {
+    // After a key rotation/recovery, KeyManager places retired keys FIRST and
+    // the new active key LAST in the DID document. signWithKeyStore must select
+    // the active key, never blindly verificationMethod[0].
+    async function buildRotatedDoc(retireField: 'revoked' | 'compromised') {
+      const keyManager = new KeyManager();
+      const oldKeyPair = await keyManager.generateKeyPair('Ed25519');
+      const newKeyPair = await keyManager.generateKeyPair('Ed25519');
+
+      const oldVmId = `${publisherDid}#key-0`;
+      const newVmId = `${publisherDid}#key-1`;
+
+      const didDoc = {
+        '@context': ['https://www.w3.org/ns/did/v1'],
+        id: publisherDid,
+        verificationMethod: [
+          {
+            id: oldVmId,
+            type: 'Multikey',
+            controller: publisherDid,
+            publicKeyMultibase: oldKeyPair.publicKey,
+            [retireField]: '2024-01-01T00:00:00Z'
+          },
+          {
+            id: newVmId,
+            type: 'Multikey',
+            controller: publisherDid,
+            publicKeyMultibase: newKeyPair.publicKey
+          }
+        ]
+      };
+
+      // Fresh keyStore that holds BOTH keys: the retired key is still present
+      // (it was registered before rotation) alongside the new active key. The
+      // old key is inserted FIRST so a naive "first match" scan would pick it.
+      const rotatedKeyStore = new MockKeyStore();
+      await rotatedKeyStore.setPrivateKey(oldVmId, oldKeyPair.privateKey);
+      await rotatedKeyStore.setPrivateKey(newVmId, newKeyPair.privateKey);
+
+      const lm = new LifecycleManager(config, didManager, credentialManager, undefined, rotatedKeyStore);
+      // Stub resolution to return the rotated document.
+      (didManager as any).resolveDID = async () => didDoc;
+
+      return { lm, oldVmId, newVmId };
+    }
+
+    test('should NOT sign with a revoked verificationMethod[0]', async () => {
+      const { lm, oldVmId, newVmId } = await buildRotatedDoc('revoked');
+      const asset = await lm.createAsset(resources);
+      const published = await lm.publishToWeb(asset, publisherDid);
+
+      expect(published.credentials.length).toBe(1);
+      const proof = published.credentials[0].proof as any;
+      expect(proof.verificationMethod).toBe(newVmId);
+      expect(proof.verificationMethod).not.toBe(oldVmId);
+    });
+
+    test('should NOT sign with a compromised verificationMethod[0]', async () => {
+      const { lm, oldVmId, newVmId } = await buildRotatedDoc('compromised');
+      const asset = await lm.createAsset(resources);
+      const published = await lm.publishToWeb(asset, publisherDid);
+
+      expect(published.credentials.length).toBe(1);
+      const proof = published.credentials[0].proof as any;
+      expect(proof.verificationMethod).toBe(newVmId);
+      expect(proof.verificationMethod).not.toBe(oldVmId);
+    });
+
+    test('should still sign when the only verification method is active (no over-rejection)', async () => {
+      const keyManager = new KeyManager();
+      const activeKeyPair = await keyManager.generateKeyPair('Ed25519');
+      const activeVmId = `${publisherDid}#key-0`;
+
+      const didDoc = {
+        '@context': ['https://www.w3.org/ns/did/v1'],
+        id: publisherDid,
+        verificationMethod: [
+          {
+            id: activeVmId,
+            type: 'Multikey',
+            controller: publisherDid,
+            publicKeyMultibase: activeKeyPair.publicKey
+          }
+        ]
+      };
+
+      const activeKeyStore = new MockKeyStore();
+      await activeKeyStore.setPrivateKey(activeVmId, activeKeyPair.privateKey);
+      const lm = new LifecycleManager(config, didManager, credentialManager, undefined, activeKeyStore);
+      (didManager as any).resolveDID = async () => didDoc;
+
+      const asset = await lm.createAsset(resources);
+      const published = await lm.publishToWeb(asset, publisherDid);
+
+      expect(published.credentials.length).toBe(1);
+      const proof = published.credentials[0].proof as any;
+      expect(proof.verificationMethod).toBe(activeVmId);
+    });
+  });
+
   describe('Key rotation scenario', () => {
     test('should allow registering multiple keys for different verification methods', async () => {
       const keyManager = new KeyManager();

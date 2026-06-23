@@ -764,59 +764,92 @@ export class LifecycleManager {
     if (!this.keyStore) {
       throw new StructuredError('KEYSTORE_REQUIRED', 'KeyStore required for signing. Provide keyStore to LifecycleManager constructor or use an external signer.');
     }
-    
-    // Try to find a key in the keyStore for this DID
+
+    // Resolve the issuer DID document up front so we can consult the retirement
+    // status of each candidate verification method. After a key rotation or
+    // compromise recovery, KeyManager stamps the OLD verification methods with
+    // a `revoked`/`compromised` timestamp and appends the new active key LAST
+    // (document = [...retiredVMs, newActiveVM]). Selecting a VM without
+    // checking these fields would sign with a retired (possibly compromised)
+    // key, breaking the integrity of the provenance chain.
+    const didDoc = await this.didManager.resolveDID(issuer);
+    const docVms = Array.isArray(didDoc?.verificationMethod) ? didDoc!.verificationMethod : [];
+
+    // Normalize a VM id to its absolute form so keyStore lookups and document
+    // comparisons line up regardless of whether the document stored relative
+    // (`#frag`) ids.
+    const absoluteVmId = (id: string): string => (id.startsWith('#') ? `${issuer}${id}` : id);
+
+    // A candidate VM is usable unless the DID document explicitly marks it as
+    // retired. VM ids absent from the document (e.g. legacy keys only present
+    // in the keyStore) are not disqualified — only an explicit
+    // `revoked`/`compromised` timestamp retires a key.
+    const isRetiredVmId = (id: string): boolean => {
+      const abs = absoluteVmId(id);
+      const entry = docVms.find(vm => absoluteVmId(vm.id) === abs);
+      return !!entry && (!!entry.revoked || !!entry.compromised);
+    };
+
+    let privateKey: string | null = null;
+    let vmId: string | null = null;
+
+    const tryCandidate = async (candidateVmId: string): Promise<boolean> => {
+      if (isRetiredVmId(candidateVmId)) {
+        return false;
+      }
+      const key = await this.keyStore!.getPrivateKey(candidateVmId);
+      if (key) {
+        privateKey = key;
+        vmId = candidateVmId;
+        return true;
+      }
+      return false;
+    };
+
     // First try common verification method patterns: #key-0, #keys-1, etc.
     const commonVmIds = [
       `${issuer}#key-0`,
       `${issuer}#keys-1`,
       `${issuer}#authentication`,
     ];
-    
-    let privateKey: string | null = null;
-    let vmId: string | null = null;
-    
+
     for (const testVmId of commonVmIds) {
-      const key = await this.keyStore.getPrivateKey(testVmId);
-      if (key) {
-        privateKey = key;
-        vmId = testVmId;
+      if (await tryCandidate(testVmId)) {
         break;
       }
     }
-    
-    // If not found, try to find ANY key that starts with the issuer DID
+
+    // If not found, try to find ANY active key that starts with the issuer DID
     const keyStoreWithGetAll = this.keyStore as { getAllVerificationMethodIds?: () => string[] };
     if (!privateKey && typeof keyStoreWithGetAll.getAllVerificationMethodIds === 'function') {
       const allVmIds = keyStoreWithGetAll.getAllVerificationMethodIds();
       for (const testVmId of allVmIds) {
-        if (testVmId.startsWith(issuer)) {
-          const key = await this.keyStore.getPrivateKey(testVmId);
-          if (key) {
-            privateKey = key;
-            vmId = testVmId;
-            break;
-          }
+        if (testVmId.startsWith(issuer) && (await tryCandidate(testVmId))) {
+          break;
         }
       }
     }
-    
-    // If no key found in common patterns, try resolving the DID
+
+    // If no key found in common patterns / keyStore scan, fall back to the DID
+    // document. Select the first ACTIVE verification method (skipping retired
+    // ones), never blindly verificationMethod[0].
     if (!privateKey) {
-      const didDoc = await this.didManager.resolveDID(issuer);
-      if (!didDoc?.verificationMethod?.[0]) {
+      if (docVms.length === 0) {
         throw new StructuredError('INVALID_DID_DOCUMENT', 'No verification method found in publisher DID document. Ensure the DID document includes at least one verificationMethod.');
       }
-      
-      vmId = didDoc.verificationMethod[0].id;
-      if (vmId.startsWith('#')) {
-        vmId = `${issuer}${vmId}`;
+
+      const activeVm = docVms.find(vm => !vm.revoked && !vm.compromised);
+      if (!activeVm) {
+        throw new StructuredError('INVALID_DID_DOCUMENT', 'No active verification method found in publisher DID document. All verification methods have been revoked or marked compromised; rotate to a new key before signing.');
       }
-      
-      privateKey = await this.keyStore.getPrivateKey(vmId);
-      if (!privateKey) {
+
+      const candidateVmId = absoluteVmId(activeVm.id);
+      const key = await this.keyStore.getPrivateKey(candidateVmId);
+      if (!key) {
         throw new StructuredError('KEYSTORE_REQUIRED', 'Private key not found in keyStore. Register the key with lifecycle.registerKey() before signing.');
       }
+      privateKey = key;
+      vmId = candidateVmId;
     }
 
     if (!vmId) {
