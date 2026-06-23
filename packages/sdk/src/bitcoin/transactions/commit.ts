@@ -25,6 +25,18 @@ const MAX_SELECTION_ITERATIONS = 5;
  */
 type BitcoinNetwork = 'mainnet' | 'testnet' | 'regtest' | 'signet';
 
+// Regtest uses the bech32 prefix 'bcrt', which is not covered by
+// @scure/btc-signer's built-in TEST_NETWORK (which uses 'tb'). We define a
+// minimal network object so that address <-> script derivation works for
+// regtest addresses (matching packages/sdk/src/bitcoin/transfer.ts).
+// BTC_NETWORK shape is { bech32, pubKeyHash, scriptHash, wif }.
+const REGTEST_NETWORK: typeof btc.NETWORK = {
+  bech32: 'bcrt',
+  pubKeyHash: 0x6f,
+  scriptHash: 0xc4,
+  wif: 0xef,
+};
+
 /**
  * Get @scure/btc-signer network configuration
  */
@@ -32,9 +44,10 @@ function getScureNetwork(network: BitcoinNetwork): typeof btc.NETWORK {
   switch (network) {
     case 'mainnet':
       return btc.NETWORK;
+    case 'regtest':
+      return REGTEST_NETWORK;
     case 'testnet':
     case 'signet':
-    case 'regtest':
       return btc.TEST_NETWORK;
     default:
       return btc.NETWORK;
