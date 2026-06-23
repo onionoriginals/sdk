@@ -10,26 +10,7 @@
 import type { LogEntry, WitnessProof } from '../types';
 import type { WitnessService } from '../witnesses/WitnessService';
 import { computeDigestMultibase } from '../hash';
-
-/**
- * Serializes a log entry to bytes for hashing.
- * Uses deterministic JSON serialization with sorted keys.
- */
-function serializeEntry(entry: LogEntry): Uint8Array {
-  // Create a canonical representation with sorted keys
-  const canonical = JSON.stringify(entry, (key, value) => {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      return Object.keys(value)
-        .sort()
-        .reduce((sorted: Record<string, unknown>, k) => {
-          sorted[k] = value[k];
-          return sorted;
-        }, {});
-    }
-    return value;
-  });
-  return new TextEncoder().encode(canonical);
-}
+import { canonicalizeEntryForChain } from '../canonicalize';
 
 /**
  * Adds a witness proof to an event by calling a witness service.
@@ -64,8 +45,13 @@ export async function witnessEvent(
     throw new Error('Witness service is required');
   }
 
-  // Compute digest of the event
-  const eventBytes = serializeEntry(event);
+  // Compute digest over the *committed* fields only ({ type, data, previousEvent? }).
+  // The proof array is deliberately excluded: it carries unsigned, mutable metadata
+  // (created, verificationMethod, proofPurpose) and witness proofs that may be appended
+  // after the fact. A witness must attest to the immutable event content, not to proof
+  // metadata that could change later. This matches the hash-chain preimage used by
+  // updateEventLog / deactivateEventLog / verifyEventLog. See canonicalizeEntryForChain.
+  const eventBytes = canonicalizeEntryForChain(event);
   const digestMultibase = computeDigestMultibase(eventBytes);
 
   // Get witness proof

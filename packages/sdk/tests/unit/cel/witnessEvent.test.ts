@@ -3,6 +3,29 @@ import { witnessEvent } from '../../../src/cel/algorithms/witnessEvent';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import type { DataIntegrityProof, WitnessProof, LogEntry, CreateOptions } from '../../../src/cel/types';
 import type { WitnessService } from '../../../src/cel/witnesses/WitnessService';
+import { computeDigestMultibase } from '../../../src/cel/hash';
+import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
+
+/**
+ * Witness service that records the digestMultibase it was asked to attest to.
+ */
+function createDigestCapturingWitnessService(): WitnessService & { lastDigest?: string } {
+  const service: WitnessService & { lastDigest?: string } = {
+    async witness(digestMultibase: string): Promise<WitnessProof> {
+      service.lastDigest = digestMultibase;
+      return {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: new Date().toISOString(),
+        verificationMethod: 'did:key:z6MkWitness#key-1',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'z' + Buffer.from('witness-' + digestMultibase).toString('base64'),
+        witnessedAt: new Date().toISOString(),
+      };
+    },
+  };
+  return service;
+}
 
 /**
  * Mock signer that creates a valid DataIntegrityProof structure.
@@ -295,6 +318,61 @@ describe('witnessEvent', () => {
       };
 
       await expect(witnessEvent(event, failingWitness)).rejects.toThrow('Witness service unavailable');
+    });
+  });
+
+  describe('digest scope (committed fields only)', () => {
+    test('digest is computed over committed fields only, not the proof array', async () => {
+      const event = await createTestEvent();
+      const witness = createDigestCapturingWitnessService();
+
+      await witnessEvent(event, witness);
+
+      const expected = computeDigestMultibase(canonicalizeEntryForChain(event));
+      expect(witness.lastDigest).toBe(expected);
+    });
+
+    test('mutating the proof array does not change the witness digest', async () => {
+      const event = await createTestEvent();
+
+      // Same committed fields, but a different/mutated proof array.
+      const mutatedEvent: LogEntry = {
+        ...event,
+        proof: [
+          { ...event.proof[0], created: '1999-01-01T00:00:00Z', verificationMethod: 'did:key:zMutated#k' },
+          // An extra proof appended after the fact (e.g. a prior witness).
+          {
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: new Date().toISOString(),
+            verificationMethod: 'did:key:z6MkOtherWitness#key-1',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zSomeOtherProofValue',
+            witnessedAt: new Date().toISOString(),
+          } as WitnessProof,
+        ],
+      };
+
+      const witnessA = createDigestCapturingWitnessService();
+      const witnessB = createDigestCapturingWitnessService();
+
+      await witnessEvent(event, witnessA);
+      await witnessEvent(mutatedEvent, witnessB);
+
+      expect(witnessB.lastDigest).toBe(witnessA.lastDigest);
+    });
+
+    test('changing committed data does change the witness digest', async () => {
+      const event = await createTestEvent();
+      const changedEvent: LogEntry = { ...event, data: { ...((event.data as object) ?? {}), name: 'Different' } };
+
+      const witnessA = createDigestCapturingWitnessService();
+      const witnessB = createDigestCapturingWitnessService();
+
+      await witnessEvent(event, witnessA);
+      await witnessEvent(changedEvent, witnessB);
+
+      expect(witnessB.lastDigest).not.toBe(witnessA.lastDigest);
     });
   });
 
