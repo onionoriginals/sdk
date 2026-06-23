@@ -61,8 +61,13 @@ export class TurnkeyDIDSigner {
           hashFunction: 'HASH_FUNCTION_NO_OP',
         });
 
-        const r = result.r;
-        const s = result.s;
+        // Turnkey's signRawPayload nests the signature under
+        // activity.result.signRawPayloadResult.{r, s} (same shape the
+        // server-side signer reads). Reading result.r/result.s directly is
+        // always undefined and breaks every real Turnkey response.
+        const signRawResult = result.activity?.result?.signRawPayloadResult;
+        const r = signRawResult?.r;
+        const s = signRawResult?.s;
 
         if (!r || !s) {
           throw new Error('Invalid signature response from Turnkey');

@@ -602,10 +602,15 @@ describe('[AUTH-028] TurnkeyDIDSigner', () => {
       apiClient: () => ({
         signRawPayload:
           overrides?.signRawPayload ??
+          // Real Turnkey signRawPayload nests r/s under
+          // activity.result.signRawPayloadResult (matches server-signer tests).
           mock(() =>
             Promise.resolve({
-              r: VALID_R,
-              s: VALID_S,
+              activity: {
+                result: {
+                  signRawPayloadResult: { r: VALID_R, s: VALID_S },
+                },
+              },
             })
           ),
       }),
@@ -634,6 +639,59 @@ describe('[AUTH-028] TurnkeyDIDSigner', () => {
     expect(typeof result.proofValue).toBe('string');
     // Base58btc multibase starts with 'z'
     expect(result.proofValue.startsWith('z')).toBe(true);
+  });
+
+  // REGRESSION (plan 026): the real Turnkey signRawPayload response nests r/s
+  // under activity.result.signRawPayloadResult. The client signer previously
+  // read result.r / result.s at the top level, so every real response threw
+  // 'Invalid signature response from Turnkey'. These two tests pin the correct
+  // response path: the nested shape must succeed, and the legacy flat shape
+  // (which the buggy code accepted) must now be rejected.
+  test('sign reads r/s from activity.result.signRawPayloadResult (nested shape)', async () => {
+    const signRawPayload = mock(() =>
+      Promise.resolve({
+        activity: {
+          result: {
+            signRawPayloadResult: { r: VALID_R, s: VALID_S },
+          },
+        },
+      })
+    );
+    const client = makeDIDSignerClient({ signRawPayload });
+    const signer = new TurnkeyDIDSigner(
+      client,
+      'key_id_abc',
+      'sub_org_123',
+      FIXTURE_PUBKEY_MULTIBASE
+    );
+
+    const result = await signer.sign({
+      document: { id: 'did:webvh:example.com:user' },
+      proof: { type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022' },
+    });
+
+    expect(result.proofValue.startsWith('z')).toBe(true);
+    expect(signRawPayload).toHaveBeenCalled();
+  });
+
+  test('sign rejects legacy flat { r, s } response (no nested result)', async () => {
+    const signRawPayload = mock(() =>
+      Promise.resolve({ r: VALID_R, s: VALID_S })
+    );
+    const client = makeDIDSignerClient({ signRawPayload });
+    const signer = new TurnkeyDIDSigner(
+      client,
+      'key_id_abc',
+      'sub_org_123',
+      FIXTURE_PUBKEY_MULTIBASE
+    );
+
+    await expect(
+      signer.sign({
+        document: { id: 'did:webvh:example.com:user' },
+        proof: { type: 'DataIntegrityProof' },
+      })
+    ).rejects.toThrow('Invalid signature response from Turnkey');
   });
 
   test('verify → returns boolean', async () => {
@@ -728,7 +786,15 @@ describe('[AUTH-029] createDIDWithTurnkey', () => {
       apiClient: () => ({
         signRawPayload:
           signRawPayloadFn ??
-          mock(() => Promise.resolve({ r: VALID_R, s: VALID_S })),
+          mock(() =>
+            Promise.resolve({
+              activity: {
+                result: {
+                  signRawPayloadResult: { r: VALID_R, s: VALID_S },
+                },
+              },
+            })
+          ),
       }),
     } as unknown as import('@turnkey/sdk-server').Turnkey;
   }
@@ -766,7 +832,11 @@ describe('[AUTH-029] createDIDWithTurnkey', () => {
     // SKIP REASON: Same as above — didwebvh-ts verifies the proof synchronously during
     // createDIDOriginal(); a mock signature fails real Ed25519 verification before
     // this test can assert that signRawPayload was called.
-    const signRawPayload = mock(() => Promise.resolve({ r: VALID_R, s: VALID_S }));
+    const signRawPayload = mock(() =>
+      Promise.resolve({
+        activity: { result: { signRawPayloadResult: { r: VALID_R, s: VALID_S } } },
+      })
+    );
     const client = makeCreateDIDClient(signRawPayload);
 
     await createDIDWithTurnkey({
