@@ -34,10 +34,34 @@ function getScureNetwork(network: TransferNetwork): typeof btc.NETWORK {
  * Derives the scriptPubKey hex for a given address on the given network.
  * Throws if the address is invalid for that network.
  */
-function addressToScriptPubKey(address: string, network: typeof btc.NETWORK): string {
+export function addressToScriptPubKey(address: string, network: typeof btc.NETWORK): string {
   const decoded = btc.Address(network).decode(address);
   const script = btc.OutScript.encode(decoded);
   return Buffer.from(script).toString('hex');
+}
+
+/**
+ * Convenience wrapper that derives the hex-encoded scriptPubKey for an address
+ * using the SDK's configured Bitcoin network name (rather than the @scure
+ * network object). Throws if the address is invalid for that network.
+ *
+ * For `regtest` this mirrors `validateBitcoinAddress`'s leniency: regtest tooling
+ * commonly uses testnet-format (`tb1`/base58 testnet) addresses, so if decoding
+ * against the strict regtest (`bcrt`) parameters fails we fall back to the
+ * testnet parameters before giving up.
+ */
+export function scriptPubKeyForAddress(
+  address: string,
+  network: TransferNetwork = 'mainnet'
+): string {
+  try {
+    return addressToScriptPubKey(address, getScureNetwork(network));
+  } catch (error) {
+    if (network === 'regtest') {
+      return addressToScriptPubKey(address, btc.TEST_NETWORK);
+    }
+    throw error;
+  }
 }
 
 export interface BuildTransferOptions extends Omit<SelectionOptions, 'targetAmountSats' | 'feeRateSatsPerVb'> {

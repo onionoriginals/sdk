@@ -8,6 +8,7 @@ import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters';
 import { emitTelemetry, StructuredError } from '../utils/telemetry';
 import { validateBitcoinAddress } from '../utils/bitcoin-address';
 import { validateSatoshiNumber } from '../utils/satoshi-validation';
+import { scriptPubKeyForAddress } from './transfer';
 
 export class BitcoinManager {
   private readonly feeOracle?: FeeOracleAdapter;
@@ -243,7 +244,14 @@ export class BitcoinManager {
       vout:
         response.vout?.length
           ? response.vout
-          : [{ value: DUST_LIMIT_SATS, scriptPubKey: 'script', address: toAddress }],
+          : [{
+              value: DUST_LIMIT_SATS,
+              // Derive a valid hex-encoded scriptPubKey from the (already
+              // validated) destination address so the fallback output can be
+              // correctly referenced by downstream transaction construction.
+              scriptPubKey: scriptPubKeyForAddress(toAddress, this.config.network),
+              address: toAddress
+            }],
       fee: response.fee,
       blockHeight: response.blockHeight,
       confirmations: response.confirmations
