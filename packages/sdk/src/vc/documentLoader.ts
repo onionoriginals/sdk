@@ -37,20 +37,26 @@ export class DocumentLoader {
     const didDocTyped = didDoc as DIDDocWithContext;
 
     if (fragment) {
-      // If a VM was registered explicitly, prefer it
-      const cached = verificationMethodRegistry.get(didUrl);
-      if (cached) {
-        return {
-          document: { '@context': didDocTyped['@context'], ...cached },
-          documentUrl: didUrl,
-          contextUrl: null
-        };
-      }
+      // The resolved DID document is authoritative. A verification method
+      // published by the DID document MUST take precedence over the global
+      // verificationMethodRegistry — otherwise any caller of
+      // `registerVerificationMethod` could shadow a DID's real key with an
+      // attacker-controlled key and forge credential signatures.
       const vms = didDocTyped.verificationMethod;
       const vm = vms?.find((m) => m.id === didUrl);
       if (vm) {
         return {
           document: { '@context': didDocTyped['@context'], ...vm },
+          documentUrl: didUrl,
+          contextUrl: null
+        };
+      }
+      // Fallback ONLY when the DID document does not itself publish this
+      // verification method. The registry can never override the DID document.
+      const cached = verificationMethodRegistry.get(didUrl);
+      if (cached) {
+        return {
+          document: { '@context': didDocTyped['@context'], ...cached },
           documentUrl: didUrl,
           contextUrl: null
         };
