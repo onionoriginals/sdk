@@ -31,10 +31,21 @@ export class DocumentLoader {
 
     interface DIDDocWithContext {
       '@context'?: unknown;
-      verificationMethod?: Array<{ id?: string }>;
+      verificationMethod?: Array<{ id?: string; revoked?: string; compromised?: string }>;
     }
 
     const didDocTyped = didDoc as DIDDocWithContext;
+
+    // Fail closed on retired keys: a verification method that has been revoked
+    // (rotated out) or marked compromised must never resolve as a usable
+    // verification key, otherwise an attacker holding the old private key could
+    // forge credential proofs that verifyProof would accept. The VM is left in
+    // the DID document precisely so verifiers can recognise it as retired.
+    const assertNotRetired = (vm: { revoked?: string; compromised?: string }): void => {
+      if (vm.revoked || vm.compromised) {
+        throw new Error(`Verification method is retired (revoked or compromised): ${didUrl}`);
+      }
+    };
 
     if (fragment) {
       // The resolved DID document is authoritative. A verification method
@@ -56,6 +67,7 @@ export class DocumentLoader {
       const requestedVmId = normalizeVmId(didUrl);
       const vm = vms?.find((m) => normalizeVmId(m.id) === requestedVmId);
       if (vm) {
+        assertNotRetired(vm);
         return {
           // Return the VM under the requested (absolute) id so the resolved
           // document is internally consistent with documentUrl, regardless of
@@ -69,6 +81,7 @@ export class DocumentLoader {
       // verification method. The registry can never override the DID document.
       const cached = verificationMethodRegistry.get(didUrl);
       if (cached) {
+        assertNotRetired(cached as { revoked?: string; compromised?: string });
         return {
           document: { '@context': didDocTyped['@context'], ...cached },
           documentUrl: didUrl,

@@ -119,3 +119,68 @@ describe('documentLoader finds VM inside DID Document', () => {
     expect(res.document.publicKeyMultibase).toBe('zB');
   });
 });
+
+
+
+
+/** Plan 032: documentLoader must reject revoked / compromised verification methods */
+
+describe('documentLoader rejects retired verification methods', () => {
+  const activeVm = {
+    id: 'did:ex:rev#key-1',
+    type: 'Multikey',
+    controller: 'did:ex:rev',
+    publicKeyMultibase: 'zActive'
+  };
+
+  test('returns the key for an active VM (no over-rejection)', async () => {
+    const dm = new DIDManager({} as any);
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:ex:rev',
+      verificationMethod: [activeVm]
+    } as any);
+    const loader = createDocumentLoader(dm);
+    const res = await loader('did:ex:rev#key-1');
+    expect(res.document.publicKeyMultibase).toBe('zActive');
+  });
+
+  test('throws when the DID-document VM is revoked', async () => {
+    const dm = new DIDManager({} as any);
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:ex:rev',
+      verificationMethod: [{ ...activeVm, revoked: '2024-01-01T00:00:00Z' }]
+    } as any);
+    const loader = createDocumentLoader(dm);
+    await expect(loader('did:ex:rev#key-1')).rejects.toThrow('retired');
+  });
+
+  test('throws when the DID-document VM is compromised', async () => {
+    const dm = new DIDManager({} as any);
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:ex:rev',
+      verificationMethod: [{ ...activeVm, compromised: '2024-01-01T00:00:00Z' }]
+    } as any);
+    const loader = createDocumentLoader(dm);
+    await expect(loader('did:ex:rev#key-1')).rejects.toThrow('retired');
+  });
+
+  test('throws when the cached registry VM is revoked', async () => {
+    const dm = new DIDManager({} as any);
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:ex:revcache'
+    } as any);
+    const loader = createDocumentLoader(dm);
+    registerVerificationMethod({
+      id: 'did:ex:revcache#key-1',
+      type: 'Multikey',
+      controller: 'did:ex:revcache',
+      publicKeyMultibase: 'zCached',
+      revoked: '2024-01-01T00:00:00Z'
+    } as any);
+    await expect(loader('did:ex:revcache#key-1')).rejects.toThrow('retired');
+  });
+});
