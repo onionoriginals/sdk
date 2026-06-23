@@ -1,6 +1,8 @@
 import { describe, test, expect } from 'bun:test';
 import { witnessEvent } from '../../../src/cel/algorithms/witnessEvent';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
+import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
+import { computeDigestMultibase } from '../../../src/cel/hash';
 import type { DataIntegrityProof, WitnessProof, LogEntry, CreateOptions } from '../../../src/cel/types';
 import type { WitnessService } from '../../../src/cel/witnesses/WitnessService';
 import { computeDigestMultibase } from '../../../src/cel/hash';
@@ -414,6 +416,102 @@ describe('witnessEvent', () => {
       const witnessedEvent = await witnessEvent(event, witness);
 
       expect(witnessedEvent.previousEvent).toBe('uSomeHashValue');
+    });
+  });
+
+  describe('digest consistency with the hash chain (cross-tool serialization)', () => {
+    /**
+     * A witness service that records the digest it was asked to attest to.
+     */
+    function createCapturingWitness(): { service: WitnessService; captured: string[] } {
+      const captured: string[] = [];
+      const service: WitnessService = {
+        async witness(digestMultibase: string): Promise<WitnessProof> {
+          captured.push(digestMultibase);
+          return {
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: new Date().toISOString(),
+            verificationMethod: 'did:key:z6MkWitness123#key-1',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'z' + Buffer.from('witness-' + digestMultibase).toString('base64'),
+            witnessedAt: new Date().toISOString(),
+          };
+        },
+      };
+      return { service, captured };
+    }
+
+    test('witnesses the chain digest (canonicalizeEntryForChain) for a first event', async () => {
+      const event = await createTestEvent();
+      const { service, captured } = createCapturingWitness();
+
+      await witnessEvent(event, service);
+
+      const expected = computeDigestMultibase(canonicalizeEntryForChain(event));
+      expect(captured).toHaveLength(1);
+      expect(captured[0]).toBe(expected);
+    });
+
+    test('witnesses the chain digest for an event WITH previousEvent', async () => {
+      const event: LogEntry = {
+        type: 'update',
+        data: { name: 'Updated Asset', nested: { a: 1, b: [2, 3] } },
+        previousEvent: 'uSomePreviousHash',
+        proof: [{
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-jcs-2022',
+          created: new Date().toISOString(),
+          verificationMethod,
+          proofPurpose: 'assertionMethod',
+          proofValue: 'zMockSignature',
+        }],
+      };
+      const { service, captured } = createCapturingWitness();
+
+      await witnessEvent(event, service);
+
+      const expected = computeDigestMultibase(canonicalizeEntryForChain(event));
+      expect(captured[0]).toBe(expected);
+    });
+
+    test('witnessed digest is independent of the proof array', async () => {
+      // Two events that are identical in their committed fields {type, data,
+      // previousEvent} but differ in their proof contents must be witnessed over
+      // the SAME digest. This fails with a proof-inclusive serializer.
+      const committed = {
+        type: 'update',
+        data: { name: 'Same Committed Data' },
+        previousEvent: 'uSamePreviousHash',
+      };
+      const eventA: LogEntry = {
+        ...committed,
+        proof: [{
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-jcs-2022',
+          created: '2020-01-01T00:00:00Z',
+          verificationMethod: verificationMethod + '-A',
+          proofPurpose: 'assertionMethod',
+          proofValue: 'zSignatureA',
+        }],
+      };
+      const eventB: LogEntry = {
+        ...committed,
+        proof: [{
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-jcs-2022',
+          created: '2099-12-31T23:59:59Z',
+          verificationMethod: verificationMethod + '-B',
+          proofPurpose: 'assertionMethod',
+          proofValue: 'zCompletelyDifferentSignatureB',
+        }],
+      };
+
+      const { service, captured } = createCapturingWitness();
+      await witnessEvent(eventA, service);
+      await witnessEvent(eventB, service);
+
+      expect(captured[0]).toBe(captured[1]);
     });
   });
 });
