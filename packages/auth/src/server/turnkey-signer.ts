@@ -91,12 +91,15 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
 
       // Convert signature to bytes
       const cleanSig = signature.startsWith('0x') ? signature.slice(2) : signature;
-      let signatureBytes = Buffer.from(cleanSig, 'hex');
+      const signatureBytes = Buffer.from(cleanSig, 'hex');
 
-      // Ed25519 signatures should be exactly 64 bytes
-      if (signatureBytes.length === 65) {
-        signatureBytes = signatureBytes.slice(0, 64);
-      } else if (signatureBytes.length !== 64) {
+      // Ed25519 signatures must be exactly 64 bytes (32-byte r + 32-byte s).
+      // Never truncate: a 65-byte value is not a valid Ed25519 signature with a
+      // spare byte, and silently slicing it would produce an invalid signature
+      // that is accepted/stored here but fails later verification (did:webvh
+      // resolution / credential validation). Reject anything that is not 64
+      // bytes, matching the client-side TurnkeyDIDSigner contract.
+      if (signatureBytes.length !== 64) {
         throw new Error(
           `Invalid Ed25519 signature length: ${signatureBytes.length} (expected 64 bytes)`
         );
