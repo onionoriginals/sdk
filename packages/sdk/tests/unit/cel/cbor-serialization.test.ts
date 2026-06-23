@@ -478,6 +478,40 @@ describe('CEL CBOR Serialization', () => {
       expect(witnessProof.witnessedAt).toBe('2026-01-20T12:00:05Z');
     });
 
+    test('preserves Bitcoin witness proof anchor fields through round-trip', () => {
+      const original: EventLog = {
+        events: [{
+          type: 'update',
+          data: { migration: 'webvh->btco' },
+          proof: [
+            {
+              type: 'DataIntegrityProof',
+              cryptosuite: 'bitcoin-ordinals-2024',
+              created: '2026-01-20T12:00:05Z',
+              verificationMethod: 'did:btco:witness',
+              proofPurpose: 'assertionMethod',
+              proofValue: 'zabc123i0',
+              witnessedAt: '2026-01-20T12:00:05Z',
+              txid: 'abc123',
+              satoshi: '1234567890',
+              inscriptionId: 'abc123i0',
+              blockHeight: 800000,
+            } as any,
+          ],
+        }],
+      };
+
+      const cbor = serializeEventLogCbor(original);
+      const parsed = parseEventLogCbor(cbor);
+
+      const proof = parsed.events[0].proof[0] as any;
+      expect(proof.txid).toBe('abc123');
+      expect(proof.satoshi).toBe('1234567890');
+      expect(proof.inscriptionId).toBe('abc123i0');
+      expect(proof.blockHeight).toBe(800000);
+      expect(proof.witnessedAt).toBe('2026-01-20T12:00:05Z');
+    });
+
     test('double round-trip produces identical results', async () => {
       const original = await createEventLog({ name: 'Test' }, {
         signer: mockSigner,
