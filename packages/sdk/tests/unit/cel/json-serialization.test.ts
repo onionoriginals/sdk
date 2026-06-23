@@ -559,4 +559,55 @@ describe('CEL JSON Serialization', () => {
       expect((parsed.events[1].data as { reason: string }).reason).toBe('No longer needed');
     });
   });
+
+  describe('optional created field (type/serialization parity)', () => {
+    // The DataIntegrityProof type marks `created` as optional, and
+    // createEventLog accepts proofs without it. A proof omitting `created`
+    // must therefore survive a JSON round-trip rather than failing to parse.
+    test('round-trips a proof that omits created', () => {
+      const original: EventLog = {
+        events: [{
+          type: 'create',
+          data: { name: 'No Created Asset' },
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            // created intentionally omitted
+            verificationMethod: 'did:key:z6Mktest#key-1',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zMockProofValue123',
+          }],
+        }],
+      };
+
+      const json = serializeEventLogJson(original);
+      const parsed = parseEventLogJson(json);
+
+      expect(parsed.events.length).toBe(1);
+      const proof = parsed.events[0].proof[0] as DataIntegrityProof;
+      expect(proof.type).toBe('DataIntegrityProof');
+      expect(proof.proofValue).toBe('zMockProofValue123');
+      expect('created' in proof).toBe(false);
+      expect(proof.created).toBeUndefined();
+    });
+
+    test('still rejects a non-string created', () => {
+      const bad = JSON.stringify({
+        events: [{
+          type: 'create',
+          data: { name: 'Bad Created' },
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: 12345,
+            verificationMethod: 'did:key:z6Mktest#key-1',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zMockProofValue123',
+          }],
+        }],
+      });
+
+      expect(() => parseEventLogJson(bad)).toThrow('Invalid proof: created must be a string');
+    });
+  });
 });

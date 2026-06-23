@@ -15,7 +15,7 @@ const createUtxo = (value: number, index: number = 0, network: 'mainnet' | 'test
     mainnet: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4',
     testnet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
     signet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
-    regtest: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx' // Use testnet format for regtest compatibility with @scure/btc-signer
+    regtest: 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080' // Native regtest bech32 (bcrt) address
   };
 
   return {
@@ -34,7 +34,7 @@ const createCommitParams = (overrides: Partial<CommitTransactionParams> = {}): C
     mainnet: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4',
     testnet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
     signet: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
-    regtest: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx' // Use testnet format for regtest compatibility with @scure/btc-signer
+    regtest: 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080' // Native regtest bech32 (bcrt) address
   };
 
   return {
@@ -332,8 +332,22 @@ describe('createCommitTransaction', () => {
       const params = createCommitParams({ network: 'regtest' });
       const result = await createCommitTransaction(params);
 
-      // Regtest uses TEST_NETWORK which generates tb1p addresses
-      expect(result.commitAddress).toMatch(/^tb1p/);
+      // Regtest must use the 'bcrt' bech32 prefix (bcrt1p...), NOT testnet 'tb1p'.
+      // This is the regression guard for the regtest network-mapping fix.
+      expect(result.commitAddress).toMatch(/^bcrt1p[a-z0-9]{58}$/);
+    });
+
+    test('regtest commit accepts a native bcrt change address', async () => {
+      // A real regtest change address (bcrt1...) must decode against the
+      // regtest network; with the buggy TEST_NETWORK mapping this threw.
+      const params = createCommitParams({
+        network: 'regtest',
+        changeAddress: 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080'
+      });
+      const result = await createCommitTransaction(params);
+
+      expect(result.commitAddress).toMatch(/^bcrt1p/);
+      expect(result.commitPsbtBase64).toBeDefined();
     });
   });
 
