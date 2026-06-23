@@ -49,6 +49,33 @@ describe('diwings Issuer', () => {
     expect(vc['@context'][0]).toContain('/ns/credentials/v2');
     expect(vc.proof).toBeDefined();
   });
+
+  test('rejects credential whose issuer DID does not match the signing key controller', async () => {
+    // The verification method (and its private key) is controlled by `did`
+    // (issuer A). Attempting to mint a credential claiming a different issuer
+    // (issuer B) must fail closed instead of producing a credential whose
+    // issuer claim is decoupled from the key that signed it.
+    const issuer = new Issuer(didManager, vm);
+    const forged = { ...baseCredential, issuer: 'did:peer:attacker' } as any;
+    await expect(
+      issuer.issueCredential(forged, { proofPurpose: 'assertionMethod' })
+    ).rejects.toThrow(/issuer/i);
+  });
+
+  test('rejects credential whose issuer object id does not match the signing key controller', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const forged = { ...baseCredential, issuer: { id: 'did:peer:attacker' } } as any;
+    await expect(
+      issuer.issueCredential(forged, { proofPurpose: 'assertionMethod' })
+    ).rejects.toThrow(/issuer/i);
+  });
+
+  test('allows credential whose issuer object id matches the controller', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const matching = { ...baseCredential, issuer: { id: did } } as any;
+    const vc = await issuer.issueCredential(matching, { proofPurpose: 'assertionMethod' });
+    expect(vc.proof).toBeDefined();
+  });
 });
 
 /** Inlined from Issuer.more.part.ts */
