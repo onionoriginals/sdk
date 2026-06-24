@@ -167,7 +167,7 @@ describe('WebVHManager — pre-rotation key rotation chain', () => {
     expect(storedHashes![0]).toBe(expectedHash);
   }, 20000);
 
-  test('rotation to a non-pre-committed key is rejected by didwebvh-ts', async () => {
+  test('rotation with a non-pre-committed key is rejected by the SDK pre-rotation guard', async () => {
     const created = await manager.createDIDWebVH({
       domain: 'example.com',
       prerotation: true,
@@ -185,6 +185,23 @@ describe('WebVHManager — pre-rotation key rotation chain', () => {
         prerotation: true,
       })
     ).rejects.toThrow();
+  }, 20000);
+
+  test('pre-rotation on an empty DID log is rejected with a clear error', async () => {
+    const created = await manager.createDIDWebVH({
+      domain: 'example.com',
+      prerotation: true,
+    });
+    // Macroscope #212: passing an empty currentLog must not crash with a
+    // TypeError on undefined.parameters — it must throw a clear guard error.
+    await expect(
+      manager.rotateDIDWebVHKeys({
+        did: created.did,
+        currentLog: [],
+        currentKeyPair: created.nextKeyPair!,
+        prerotation: true,
+      })
+    ).rejects.toThrow('empty DID log');
   }, 20000);
 
   test('non-pre-rotation default mode still works after the pre-rotation tests', async () => {

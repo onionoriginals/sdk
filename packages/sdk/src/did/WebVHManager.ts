@@ -309,6 +309,15 @@ export class WebVHManager {
     let verificationMethods: VerificationMethod[];
     let updateKeys: string[];
 
+    // Pre-rotation is incompatible with externalSigner (which manages its own
+    // key material externally). Check this up front, before the externalSigner
+    // requirement validation below, so the clearer "not supported" error isn't
+    // masked by a "verificationMethods are required" error the caller would hit
+    // first only to then discover the combination is unsupported anyway.
+    if (prerotation && externalSigner) {
+      throw new Error('prerotation is not supported with externalSigner; manage nextKeyHashes externally');
+    }
+
     // Use external signer if provided (e.g., Turnkey integration)
     if (externalSigner) {
       if (!providedVerificationMethods || providedVerificationMethods.length === 0) {
@@ -354,9 +363,7 @@ export class WebVHManager {
     let nextKeyPairForPrerotation: KeyPair | undefined;
     let nextKeyHashes: string[] | undefined;
     if (prerotation) {
-      if (externalSigner) {
-        throw new Error('prerotation is not supported with externalSigner; manage nextKeyHashes externally');
-      }
+      // (externalSigner + prerotation already rejected up front.)
       nextKeyPairForPrerotation = await this.keyManager.generateKeyPair('Ed25519');
       const nextKeyId = `did:key:${nextKeyPairForPrerotation.publicKey}`;
       nextKeyHashes = [computeNextKeyHash(nextKeyId)];
@@ -808,6 +815,9 @@ export class WebVHManager {
     // Enforce the pre-rotation invariant at SDK level:
     // The activeKeyPair's hash must appear in the previous entry's nextKeyHashes.
     // (didwebvh-ts only checks this during log resolution, not at updateDID time.)
+    if (currentLog.length === 0) {
+      throw new Error('Cannot perform pre-rotation on an empty DID log');
+    }
     const lastEntry = currentLog[currentLog.length - 1];
     const prevNextKeyHashes = (lastEntry.parameters as { nextKeyHashes?: string[] }).nextKeyHashes ?? [];
     if (prevNextKeyHashes.length === 0) {
