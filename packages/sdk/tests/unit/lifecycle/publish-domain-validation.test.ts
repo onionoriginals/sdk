@@ -44,6 +44,25 @@ describe('LifecycleManager.publishToWeb — domain format validation', () => {
     await expect(sdk.lifecycle.publishToWeb(asset, 'example.com:abc')).rejects.toThrow('Invalid domain format');
   });
 
+  it('rejects a domain with more than one colon (extra segments not silently dropped)', async () => {
+    const { sdk, asset } = await createDraftAsset();
+    // Greptile #211: split(':') previously discarded everything after the port,
+    // so example.com:8080:path passed validation then got encoded verbatim.
+    await expect(sdk.lifecycle.publishToWeb(asset, 'example.com:8080:path')).rejects.toThrow('Invalid domain format');
+  });
+
+  it('normalizes domain (trim + lowercase) before building the DID', async () => {
+    const { sdk, asset } = await createDraftAsset();
+    // Macroscope #211: validation normalized but the original string was encoded,
+    // so whitespace/mixed-case produced a DID that didn't match the normalized form.
+    const published = await sdk.lifecycle.publishToWeb(asset, '  Example.COM  ');
+    expect(published.currentLayer).toBe('did:webvh');
+    const webvh = published.bindings?.['did:webvh'] ?? '';
+    expect(webvh).toContain('example.com');
+    expect(webvh).not.toContain('Example.COM');
+    expect(webvh).not.toContain('%20'); // no encoded leading/trailing whitespace
+  });
+
   it('accepts a valid domain (example.com)', async () => {
     const { sdk, asset } = await createDraftAsset();
     // Should not throw on domain validation (may fail later in resource publish, which is OK)

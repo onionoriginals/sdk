@@ -26,6 +26,7 @@ import {
   type BatchInscriptionOptions,
 } from './BatchOperations';
 import { BatchLifecycleOperations } from './BatchLifecycleOperations';
+import { validateAndNormalizeDomain } from './domainUtils';
 import { 
   type OriginalKind, 
   type OriginalManifest, 
@@ -598,34 +599,6 @@ export class LifecycleManager {
     }
   }
 
-  /**
-   * Validate that a domain string has a proper hostname format.
-   * Mirrors the validation used in batchPublishToWeb.
-   */
-  private validateDomain(domain: string): void {
-    if (!domain || typeof domain !== 'string') {
-      throw new StructuredError('INVALID_DOMAIN', 'Invalid domain: must be a non-empty string');
-    }
-
-    const normalized = domain.trim().toLowerCase();
-    const [domainPart, portPart] = normalized.split(':');
-
-    if (portPart && (!/^\d+$/.test(portPart) || parseInt(portPart) < 1 || parseInt(portPart) > 65535)) {
-      throw new StructuredError('INVALID_DOMAIN', `Invalid domain format: ${domain} - invalid port`);
-    }
-
-    const isLocalhost = domainPart === 'localhost';
-    const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(domainPart);
-
-    if (!isLocalhost && !isIP) {
-      const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
-      const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
-      if (!domainRegex.test(domainPart)) {
-        throw new StructuredError('INVALID_DOMAIN', `Invalid domain format: ${domain}. Must be a valid hostname (e.g., example.com) or localhost.`);
-      }
-    }
-  }
-
   private extractPublisherInfo(publisherDidOrSigner: string | ExternalSigner): {
     publisherDid: string;
     signer?: ExternalSigner;
@@ -637,11 +610,12 @@ export class LifecycleManager {
       }
 
       // Otherwise, treat it as a domain and construct a did:webvh DID.
-      // Validate domain format before encoding.
-      const domain = publisherDidOrSigner;
-      this.validateDomain(domain);
+      // Validate AND normalize before encoding so the DID is built from the
+      // same normalized form that validation checked (avoids whitespace/case
+      // drift between validation and the value actually encoded).
+      const normalizedDomain = validateAndNormalizeDomain(publisherDidOrSigner);
       // Encode the domain to handle ports (e.g., localhost:5000 -> localhost%3A5000)
-      const encodedDomain = encodeURIComponent(domain);
+      const encodedDomain = encodeURIComponent(normalizedDomain);
       const publisherDid = `did:webvh:${encodedDomain}:user`;
       return { publisherDid };
     }
