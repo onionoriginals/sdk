@@ -44,6 +44,13 @@ describe('LifecycleManager.publishToWeb — domain format validation', () => {
     await expect(sdk.lifecycle.publishToWeb(asset, 'example.com:abc')).rejects.toThrow('Invalid domain format');
   });
 
+  it('rejects a domain with a trailing colon (empty port)', async () => {
+    const { sdk, asset } = await createDraftAsset();
+    // Macroscope #211: 'example.com:' splits to portPart='' which is falsy;
+    // an empty port must be rejected, not skipped.
+    await expect(sdk.lifecycle.publishToWeb(asset, 'example.com:')).rejects.toThrow('Invalid domain format');
+  });
+
   it('rejects a domain with more than one colon (extra segments not silently dropped)', async () => {
     const { sdk, asset } = await createDraftAsset();
     // Greptile #211: split(':') previously discarded everything after the port,

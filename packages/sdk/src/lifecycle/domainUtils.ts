@@ -37,7 +37,11 @@ export function validateAndNormalizeDomain(domain: string): string {
 
   const [domainPart, portPart] = colonParts;
 
-  if (portPart && (!/^\d+$/.test(portPart) || parseInt(portPart) < 1 || parseInt(portPart) > 65535)) {
+  // `portPart !== undefined` means a colon was present, so a port is required.
+  // An empty string (trailing colon, e.g. `example.com:`) must be rejected, not
+  // skipped as falsy — otherwise it would encode to a DID like
+  // `did:webvh:example.com%3A:user`.
+  if (portPart !== undefined && (portPart === '' || !/^\d+$/.test(portPart) || parseInt(portPart) < 1 || parseInt(portPart) > 65535)) {
     throw new StructuredError('INVALID_DOMAIN', `Invalid domain format: ${domain} - invalid port`);
   }
 
