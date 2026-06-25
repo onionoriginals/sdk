@@ -108,3 +108,28 @@ jobs:
 
       - name: Verify built packages import under Node ESM
         run: node scripts/verify-esm.mjs
+
+  changeset:
+    name: Changeset present
+    # Only on PRs, and skip the bot's "Version Packages" PR (which intentionally
+    # has no changesets because it consumes them).
+    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'changeset-release/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies (bun)
+        run: bun install
+
+      # Fails if the PR adds no changeset. For PRs that genuinely need no release
+      # (docs/CI/tests only), add an empty one: `bun run changeset --empty`.
+      - name: Require a changeset
+        run: bunx changeset status --since=origin/${{ github.base_ref }}

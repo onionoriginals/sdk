@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: release-${{ github.ref }}
+
+permissions:
+  contents: write       # create tags / push the Version Packages PR branch
+  pull-requests: write  # open & update the Version Packages PR
+  id-token: write       # npm provenance
+
+jobs:
+  # Gate 1 — maintain the "Version Packages" PR. While changesets are pending on
+  # main this job opens/updates that PR (versions + CHANGELOGs). Merging the PR is
+  # the human approval that a release should happen. No publishing happens here.
+  version:
+    name: Version (open release PR)
+    runs-on: ubuntu-latest
+    outputs:
+      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Create or update the Version Packages PR
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: bun run version
+          # No publish here — publishing is the separately-gated job below.
+          publish: ""
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Gate 2 — publish. Runs only once the Version PR has merged (all changesets
+  # consumed → hasChangesets == false). The `npm-publish` Environment carries a
+  # required reviewer, so a human must approve in the GitHub UI before anything
+  # reaches npm, and we refuse to publish a build that fails the Node-ESM check.
+  publish:
+    name: Publish to npm
+    needs: version
+    if: needs.version.outputs.hasChangesets == 'false'
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build
+        run: bun run build
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.10.0"
+          registry-url: "https://registry.npmjs.org"
+
+      # Hard gate: never publish a dist npm consumers cannot import under Node ESM.
+      - name: Verify built packages import under Node ESM
+        run: node scripts/verify-esm.mjs
+
+      # `changeset publish` only publishes packages whose version is not yet on
+      # the registry, so it is a no-op if there is nothing new to release.
+      - name: Publish
+        run: bun run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
