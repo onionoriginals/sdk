@@ -83,9 +83,13 @@ jobs:
         run: node scripts/verify-esm.mjs
 
       # `changeset publish` only publishes packages whose version is not yet on
-      # the registry, so it is a no-op if there is nothing new to release.
+      # the registry, so it is a no-op if there is nothing new to release. It
+      # creates a git tag per published package locally; push them so the tags
+      # (and any tag-driven release tooling) land on the repo.
       - name: Publish
-        run: bun run release
+        run: |
+          bun run release
+          git push origin --tags
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
