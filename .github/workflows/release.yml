@@ -45,14 +45,52 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Gate 2 — publish. Runs only once the Version PR has merged (all changesets
-  # consumed → hasChangesets == false). The `npm-publish` Environment carries a
+  # Decide whether there is actually a new version to publish. `hasChangesets ==
+  # false` is true both after the Version PR merges (a real release) AND on any
+  # changeset-less push to main (docs/CI, or the first push after enabling this
+  # workflow). Without this guard the env-gated publish job below would prompt a
+  # reviewer for those no-op pushes too. We only proceed when a package's local
+  # version is not yet on the registry — i.e. a genuine pending release.
+  check-publish:
+    name: Check for unpublished versions
+    needs: version
+    if: needs.version.outputs.hasChangesets == 'false'
+    runs-on: ubuntu-latest
+    outputs:
+      shouldPublish: ${{ steps.check.outputs.should }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.10.0"
+
+      - name: Compare local versions against the registry
+        id: check
+        run: |
+          should=false
+          for dir in packages/sdk packages/auth; do
+            name=$(node -p "require('./$dir/package.json').name")
+            ver=$(node -p "require('./$dir/package.json').version")
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "$name@$ver already on registry — skip"
+            else
+              echo "$name@$ver NOT on registry — publish needed"
+              should=true
+            fi
+          done
+          echo "should=$should" >> "$GITHUB_OUTPUT"
+
+  # Gate 2 — publish. Runs only for a genuine pending release (Version PR merged
+  # and a version is not yet on npm). The `npm-publish` Environment carries a
   # required reviewer, so a human must approve in the GitHub UI before anything
   # reaches npm, and we refuse to publish a build that fails the Node-ESM check.
   publish:
     name: Publish to npm
-    needs: version
-    if: needs.version.outputs.hasChangesets == 'false'
+    needs: [version, check-publish]
+    if: needs.check-publish.outputs.shouldPublish == 'true'
     runs-on: ubuntu-latest
     environment: npm-publish
     steps:
