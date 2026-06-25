@@ -26,6 +26,7 @@ import {
   type BatchInscriptionOptions,
 } from './BatchOperations';
 import { BatchLifecycleOperations } from './BatchLifecycleOperations';
+import { validateAndNormalizeDomain } from './domainUtils';
 import { 
   type OriginalKind, 
   type OriginalManifest, 
@@ -608,11 +609,13 @@ export class LifecycleManager {
         return { publisherDid: publisherDidOrSigner };
       }
 
-      // Otherwise, treat it as a domain and construct a did:webvh DID
-      // Format: did:webvh:domain:user (use 'user' as default user path)
+      // Otherwise, treat it as a domain and construct a did:webvh DID.
+      // Validate AND normalize before encoding so the DID is built from the
+      // same normalized form that validation checked (avoids whitespace/case
+      // drift between validation and the value actually encoded).
+      const normalizedDomain = validateAndNormalizeDomain(publisherDidOrSigner);
       // Encode the domain to handle ports (e.g., localhost:5000 -> localhost%3A5000)
-      const domain = publisherDidOrSigner;
-      const encodedDomain = encodeURIComponent(domain);
+      const encodedDomain = encodeURIComponent(normalizedDomain);
       const publisherDid = `did:webvh:${encodedDomain}:user`;
       return { publisherDid };
     }

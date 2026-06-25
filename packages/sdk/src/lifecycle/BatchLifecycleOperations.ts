@@ -8,6 +8,7 @@ import { OriginalsAsset } from './OriginalsAsset';
 import { validateBitcoinAddress } from '../utils/bitcoin-address';
 import { EventEmitter } from '../events/EventEmitter';
 import { StructuredError } from '../utils/telemetry';
+import { validateAndNormalizeDomain } from './domainUtils';
 import {
   BatchOperationExecutor,
   BatchValidator,
@@ -126,33 +127,8 @@ export class BatchLifecycleOperations {
   ): Promise<BatchResult<OriginalsAsset>> {
     const batchId = this.batchExecutor.generateBatchId();
 
-    // Validate domain once
-    if (!domain || typeof domain !== 'string') {
-      throw new StructuredError('INVALID_DOMAIN', 'Invalid domain: must be a non-empty string');
-    }
-
-    const normalized = domain.trim().toLowerCase();
-
-    // Split domain and port if present
-    const [domainPart, portPart] = normalized.split(':');
-
-    // Validate port if present
-    if (portPart && (!/^\d+$/.test(portPart) || parseInt(portPart) < 1 || parseInt(portPart) > 65535)) {
-      throw new StructuredError('INVALID_DOMAIN', `Invalid domain format: ${domain} - invalid port`);
-    }
-
-    // Allow localhost and IP addresses for development
-    const isLocalhost = domainPart === 'localhost';
-    const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(domainPart);
-
-    if (!isLocalhost && !isIP) {
-      // For non-localhost domains, require proper domain format
-      const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
-      const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
-      if (!domainRegex.test(domainPart)) {
-        throw new StructuredError('INVALID_DOMAIN', `Invalid domain format: ${domain}. Must be a valid hostname (e.g., example.com) or localhost.`);
-      }
-    }
+    // Validate domain once (shared with the single-asset path in LifecycleManager).
+    validateAndNormalizeDomain(domain);
 
     // Emit batch:started event
     await this.eventEmitter.emit({
