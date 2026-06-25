@@ -9,16 +9,16 @@ import {
   ValidationWarning,
   CostEstimate,
   IValidator
-} from '../types';
-import { DIDCompatibilityValidator } from './DIDCompatibilityValidator';
-import { CredentialValidator } from './CredentialValidator';
-import { StorageValidator } from './StorageValidator';
-import { LifecycleValidator } from './LifecycleValidator';
-import { BitcoinValidator } from './BitcoinValidator';
-import { OriginalsConfig } from '../../types';
-import { DIDManager } from '../../did/DIDManager';
-import { CredentialManager } from '../../vc/CredentialManager';
-import { BitcoinManager } from '../../bitcoin/BitcoinManager';
+} from '../types.js';
+import { DIDCompatibilityValidator } from './DIDCompatibilityValidator.js';
+import { CredentialValidator } from './CredentialValidator.js';
+import { StorageValidator } from './StorageValidator.js';
+import { LifecycleValidator } from './LifecycleValidator.js';
+import { BitcoinValidator } from './BitcoinValidator.js';
+import { OriginalsConfig } from '../../types/index.js';
+import { DIDManager } from '../../did/DIDManager.js';
+import { CredentialManager } from '../../vc/CredentialManager.js';
+import { BitcoinManager } from '../../bitcoin/BitcoinManager.js';
 
 export class ValidationPipeline {
   private validators: Map<string, IValidator>;

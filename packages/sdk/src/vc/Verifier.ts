@@ -1,10 +1,10 @@
-import { VerifiableCredential, VerifiablePresentation, BitstringStatusListEntry, MultiSigPolicy } from '../types';
-import type { MultiSigVerificationResult } from '../types';
-import { DIDManager } from '../did/DIDManager';
-import { createDocumentLoader } from './documentLoader';
-import { DataIntegrityProofManager } from './proofs/data-integrity';
-import type { DataIntegrityProof } from './cryptosuites/eddsa';
-import { StatusListManager } from './StatusListManager';
+import { VerifiableCredential, VerifiablePresentation, BitstringStatusListEntry, MultiSigPolicy } from '../types/index.js';
+import type { MultiSigVerificationResult } from '../types/index.js';
+import { DIDManager } from '../did/DIDManager.js';
+import { createDocumentLoader } from './documentLoader.js';
+import { DataIntegrityProofManager } from './proofs/data-integrity.js';
+import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
+import { StatusListManager } from './StatusListManager.js';
 
 export type VerificationResult = { verified: boolean; errors: string[] };
 

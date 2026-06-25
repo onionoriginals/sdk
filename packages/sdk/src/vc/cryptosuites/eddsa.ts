@@ -1,12 +1,12 @@
 import { base58 } from '@scure/base';
 import * as ed25519 from '@noble/ed25519';
-import { canonize, canonizeProof } from '../utils/jsonld';
-import { multikey } from '../../crypto/Multikey';
-import { sha256Bytes } from '../../utils/hash';
+import { canonize, canonizeProof } from '../utils/jsonld.js';
+import { multikey } from '../../crypto/Multikey.js';
+import { sha256Bytes } from '../../utils/hash.js';
 
 // Re-export canonical DataIntegrityProof from shared types
-export type { DataIntegrityProof } from '../../types/proof';
-import type { DataIntegrityProof } from '../../types/proof';
+export type { DataIntegrityProof } from '../../types/proof.js';
+import type { DataIntegrityProof } from '../../types/proof.js';
 
 export interface VerificationResult {
   verified: boolean;

@@ -15,10 +15,10 @@ import type {
   VerificationResult,
   EventVerification,
   DataIntegrityProof
-} from '../types';
-import { computeDigestMultibase } from '../hash';
-import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize';
-import { multikey } from '../../crypto/Multikey';
+} from '../types.js';
+import { computeDigestMultibase } from '../hash.js';
+import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize.js';
+import { multikey } from '../../crypto/Multikey.js';
 
 /**
  * Validates the structural requirements of a DataIntegrityProof (field presence,

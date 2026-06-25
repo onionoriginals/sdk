@@ -1,4 +1,4 @@
-import type { ResourceProvider, LinkedResource, ResourceInfo, Inscription, ResourceCrawlOptions } from './types';
+import type { ResourceProvider, LinkedResource, ResourceInfo, Inscription, ResourceCrawlOptions } from './types.js';
 
 export interface OrdNodeProviderOptions {
   nodeUrl: string;

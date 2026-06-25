@@ -3,14 +3,14 @@ import {
   DIDDocument, 
   VerifiableCredential, 
   LayerType 
-} from '../types';
-import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation';
-import { CredentialManager } from '../vc/CredentialManager';
-import { DIDManager } from '../did/DIDManager';
-import { ProvenanceQuery, Migration, Transfer } from './ProvenanceQuery';
-import { EventEmitter } from '../events/EventEmitter';
-import type { EventHandler, EventTypeMap } from '../events/types';
-import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning';
+} from '../types/index.js';
+import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation.js';
+import { CredentialManager } from '../vc/CredentialManager.js';
+import { DIDManager } from '../did/DIDManager.js';
+import { ProvenanceQuery, Migration, Transfer } from './ProvenanceQuery.js';
+import { EventEmitter } from '../events/EventEmitter.js';
+import type { EventHandler, EventTypeMap } from '../events/types.js';
+import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning.js';
 
 export interface ProvenanceChain {
   createdAt: string;

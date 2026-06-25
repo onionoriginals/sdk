@@ -1,22 +1,22 @@
-import { DIDDocument, OriginalsConfig, AssetResource, KeyPair, ExternalSigner, ExternalVerifier } from '../types';
-import { getNetworkDomain, DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH } from '../types/network';
-import { BtcoDidResolver } from './BtcoDidResolver';
-import { OrdinalsClient } from '../bitcoin/OrdinalsClient';
-import { createBtcoDidDocument } from './createBtcoDidDocument';
-import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter';
-import { multikey } from '../crypto/Multikey';
-import { KeyManager } from './KeyManager';
-import { WebVHManager } from './WebVHManager';
+import { DIDDocument, OriginalsConfig, AssetResource, KeyPair, ExternalSigner, ExternalVerifier } from '../types/index.js';
+import { getNetworkDomain, DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH } from '../types/network.js';
+import { BtcoDidResolver } from './BtcoDidResolver.js';
+import { OrdinalsClient } from '../bitcoin/OrdinalsClient.js';
+import { createBtcoDidDocument } from './createBtcoDidDocument.js';
+import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter.js';
+import { multikey } from '../crypto/Multikey.js';
+import { KeyManager } from './KeyManager.js';
+import { WebVHManager } from './WebVHManager.js';
 import type {
   RotateWebVHKeysOptions,
   RotateWebVHKeysResult,
   RecoverWebVHOptions,
   RecoverWebVHResult,
-} from './WebVHManager';
-import { Ed25519Signer } from '../crypto/Signer';
-import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation';
-import { DIDCache } from './DIDCache';
-import type { MetricsCollector } from '../utils/MetricsCollector';
+} from './WebVHManager.js';
+import { Ed25519Signer } from '../crypto/Signer.js';
+import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
+import { DIDCache } from './DIDCache.js';
+import type { MetricsCollector } from '../utils/MetricsCollector.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -734,7 +734,7 @@ export type {
   RecoverWebVHOptions,
   RecoverWebVHResult,
   KeyRecoveryCredential,
-} from './WebVHManager';
+} from './WebVHManager.js';
 
 /**
  * Adapter to use Originals SDK signers with didwebvh-ts

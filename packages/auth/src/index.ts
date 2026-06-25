@@ -20,10 +20,10 @@
  */
 
 // Re-export types
-export * from './types';
+export * from './types.js';
 
 // Re-export server utilities (for convenience, though subpath is preferred)
-export * from './server';
+export * from './server/index.js';
 
 // Note: Client utilities should be imported from '@originals/auth/client'
 // to avoid bundling React in server environments

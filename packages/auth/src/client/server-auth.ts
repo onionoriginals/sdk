@@ -14,7 +14,7 @@
  * ```
  */
 
-import type { InitiateAuthResult, VerifyAuthResult } from '../types';
+import type { InitiateAuthResult, VerifyAuthResult } from '../types.js';
 
 /**
  * Options for server-proxied auth functions

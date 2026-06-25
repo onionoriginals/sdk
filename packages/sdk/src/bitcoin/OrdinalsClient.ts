@@ -1,6 +1,6 @@
-import { OrdinalsInscription, BitcoinTransaction } from '../types';
-import { decode as decodeCbor } from '../utils/cbor';
-import { hexToBytes } from '../utils/encoding';
+import { OrdinalsInscription, BitcoinTransaction } from '../types/index.js';
+import { decode as decodeCbor } from '../utils/cbor.js';
+import { hexToBytes } from '../utils/encoding.js';
 
 export class OrdinalsClient {
   constructor(

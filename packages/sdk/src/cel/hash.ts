@@ -8,7 +8,7 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js';
-import { multibase } from '../utils/encoding';
+import { multibase } from '../utils/encoding.js';
 
 /**
  * Computes a CEL-compliant digestMultibase from content.

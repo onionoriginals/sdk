@@ -11,20 +11,20 @@ import {
   MultiSigPolicy,
   MultiSigSignOptions,
   MultiSigVerificationResult,
-} from '../types';
-import { StatusListManager, type StatusCheckResult } from './StatusListManager';
-import { canonicalizeDocument } from '../utils/serialization';
-import { computeCredentialDigest } from '../utils/credential-digest';
-import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding';
+} from '../types/index.js';
+import { StatusListManager, type StatusCheckResult } from './StatusListManager.js';
+import { canonicalizeDocument } from '../utils/serialization.js';
+import { computeCredentialDigest } from '../utils/credential-digest.js';
+import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer';
-import { DIDManager } from '../did/DIDManager';
-import { Issuer, VerificationMethodLike } from './Issuer';
-import { createDocumentLoader } from './documentLoader';
-import { Verifier } from './Verifier';
-import { MultiSigManager } from './MultiSigManager';
-import type { MetricsCollector } from '../utils/MetricsCollector';
+import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer.js';
+import { DIDManager } from '../did/DIDManager.js';
+import { Issuer, VerificationMethodLike } from './Issuer.js';
+import { createDocumentLoader } from './documentLoader.js';
+import { Verifier } from './Verifier.js';
+import { MultiSigManager } from './MultiSigManager.js';
+import type { MetricsCollector } from '../utils/MetricsCollector.js';
 
 // ===== Credential Factory Types =====
 
@@ -954,7 +954,7 @@ export class CredentialManager {
 
     // If BBS+ key pair provided, create a real BBS+ base proof
     if (options.privateKey) {
-      const { BBSCryptosuiteManager } = await import('./cryptosuites/bbsCryptosuite');
+      const { BBSCryptosuiteManager } = await import('./cryptosuites/bbsCryptosuite.js');
       const documentLoader = this.didManager ? createDocumentLoader(this.didManager) : undefined;
 
       const bbsProof = await BBSCryptosuiteManager.createProof(credential, {
@@ -1019,7 +1019,7 @@ export class CredentialManager {
     // If the credential has a BBS+ proof, derive a real selective disclosure proof
     const proof = credential.proof as any;
     if (proof && proof.cryptosuite === 'bbs-2023') {
-      const { BBSCryptosuiteManager } = await import('./cryptosuites/bbsCryptosuite');
+      const { BBSCryptosuiteManager } = await import('./cryptosuites/bbsCryptosuite.js');
       const documentLoader = this.didManager ? createDocumentLoader(this.didManager) : undefined;
 
       const derived = await BBSCryptosuiteManager.deriveProof(

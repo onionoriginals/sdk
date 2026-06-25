@@ -1,15 +1,15 @@
-import { DIDManager } from '../did/DIDManager';
-import { CredentialManager } from '../vc/CredentialManager';
-import { LifecycleManager } from '../lifecycle/LifecycleManager';
-import { BitcoinManager } from '../bitcoin/BitcoinManager';
-import { StatusListManager } from '../vc/StatusListManager';
-import { OriginalsConfig, KeyStore, ExternalSigner, ExternalVerifier } from '../types';
-import { DIDDocument, VerificationMethod, ServiceEndpoint } from '../types/did';
-import { DEFAULT_WEBVH_NETWORK } from '../types/network';
-import { emitTelemetry, StructuredError } from '../utils/telemetry';
-import { Logger } from '../utils/Logger';
-import { MetricsCollector } from '../utils/MetricsCollector';
-import { EventLogger } from '../utils/EventLogger';
+import { DIDManager } from '../did/DIDManager.js';
+import { CredentialManager } from '../vc/CredentialManager.js';
+import { LifecycleManager } from '../lifecycle/LifecycleManager.js';
+import { BitcoinManager } from '../bitcoin/BitcoinManager.js';
+import { StatusListManager } from '../vc/StatusListManager.js';
+import { OriginalsConfig, KeyStore, ExternalSigner, ExternalVerifier } from '../types/index.js';
+import { DIDDocument, VerificationMethod, ServiceEndpoint } from '../types/did.js';
+import { DEFAULT_WEBVH_NETWORK } from '../types/network.js';
+import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
+import { Logger } from '../utils/Logger.js';
+import { MetricsCollector } from '../utils/MetricsCollector.js';
+import { EventLogger } from '../utils/EventLogger.js';
 import { createDID } from 'didwebvh-ts';
 
 // Type for DID log (from didwebvh-ts)

@@ -1,4 +1,4 @@
-import { OriginalsSDK } from '../index';
+import { OriginalsSDK } from '../index.js';
 
 async function basicExample() {
   const sdk = OriginalsSDK.create({

@@ -1,4 +1,4 @@
-import { StructuredError } from './telemetry';
+import { StructuredError } from './telemetry.js';
 
 /**
  * Maximum number of satoshis in Bitcoin's total supply (21 million BTC)

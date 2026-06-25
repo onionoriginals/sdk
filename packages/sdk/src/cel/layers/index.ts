@@ -10,18 +10,18 @@
  */
 
 // Export everything from PeerCelManager including CelSigner type
-export * from './PeerCelManager';
+export * from './PeerCelManager.js';
 
 // Export specific items from WebVHCelManager (CelSigner is imported from PeerCelManager)
 export { 
   WebVHCelManager, 
   type WebVHCelConfig, 
   type WebVHMigrationData 
-} from './WebVHCelManager';
+} from './WebVHCelManager.js';
 
 // Export specific items from BtcoCelManager (CelSigner is imported from PeerCelManager)
 export { 
   BtcoCelManager, 
   type BtcoCelConfig, 
   type BtcoMigrationData 
-} from './BtcoCelManager';
+} from './BtcoCelManager.js';

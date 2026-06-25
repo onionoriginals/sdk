@@ -5,7 +5,7 @@
  * that can be versioned through a linked hash chain.
  */
 
-import { AssetResource } from '../types/common';
+import { AssetResource } from '../types/common.js';
 
 /**
  * Supported resource types for categorization
@@ -84,7 +84,7 @@ export interface Resource extends AssetResource {
 }
 
 // Re-export canonical ResourceVersionHistory and ResourceVersion from shared types
-export type { ResourceVersionHistory, ResourceVersion } from '../types/resource-version';
+export type { ResourceVersionHistory, ResourceVersion } from '../types/resource-version.js';
 
 /**
  * Configuration for the ResourceManager

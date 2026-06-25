@@ -13,16 +13,16 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { EventLog, DataIntegrityProof } from '../types';
-import { WebVHCelManager } from '../layers/WebVHCelManager';
-import { BtcoCelManager } from '../layers/BtcoCelManager';
-import type { CelSigner } from '../layers/PeerCelManager';
-import { parseEventLogJson } from '../serialization/json';
-import { parseEventLogCbor } from '../serialization/cbor';
-import { serializeEventLogJson } from '../serialization/json';
-import { serializeEventLogCbor } from '../serialization/cbor';
-import { multikey } from '../../crypto/Multikey';
-import { canonicalizeEvent } from '../canonicalize';
+import type { EventLog, DataIntegrityProof } from '../types.js';
+import { WebVHCelManager } from '../layers/WebVHCelManager.js';
+import { BtcoCelManager } from '../layers/BtcoCelManager.js';
+import type { CelSigner } from '../layers/PeerCelManager.js';
+import { parseEventLogJson } from '../serialization/json.js';
+import { parseEventLogCbor } from '../serialization/cbor.js';
+import { serializeEventLogJson } from '../serialization/json.js';
+import { serializeEventLogCbor } from '../serialization/cbor.js';
+import { multikey } from '../../crypto/Multikey.js';
+import { canonicalizeEvent } from '../canonicalize.js';
 
 /**
  * Flags parsed from command line arguments

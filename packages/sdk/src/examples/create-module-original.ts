@@ -12,7 +12,7 @@ import {
   OrdMockProvider,
   KindRegistry,
   type OriginalManifest
-} from '../index';
+} from '../index.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 /**

@@ -8,9 +8,9 @@ import {
   MigrationState,
   MigrationStateEnum,
   IStateTracker
-} from '../types';
-import { OriginalsConfig } from '../../types';
-import { StateMachine } from './StateMachine';
+} from '../types.js';
+import { OriginalsConfig } from '../../types/index.js';
+import { StateMachine } from './StateMachine.js';
 
 export class StateTracker implements IStateTracker {
   private states: Map<string, MigrationState>;

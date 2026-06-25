@@ -3,12 +3,12 @@ import {
   OrdinalsInscription,
   BitcoinTransaction,
   DUST_LIMIT_SATS
-} from '../types';
-import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters';
-import { emitTelemetry, StructuredError } from '../utils/telemetry';
-import { validateBitcoinAddress } from '../utils/bitcoin-address';
-import { validateSatoshiNumber } from '../utils/satoshi-validation';
-import { scriptPubKeyForAddress } from './transfer';
+} from '../types/index.js';
+import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters/index.js';
+import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
+import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
+import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
+import { scriptPubKeyForAddress } from './transfer.js';
 
 export class BitcoinManager {
   private readonly feeOracle?: FeeOracleAdapter;

@@ -1,9 +1,9 @@
-import { StorageAdapter, FeeOracleAdapter, OrdinalsProvider } from '../adapters';
-import { TelemetryHooks } from '../utils/telemetry';
-import type { LogLevel, LogOutput } from '../utils/Logger';
-import type { EventLoggingConfig } from '../utils/EventLogger';
-import type { WebVHNetworkName } from './network';
-import type { DIDCacheConfig } from '../did/DIDCache';
+import { StorageAdapter, FeeOracleAdapter, OrdinalsProvider } from '../adapters/index.js';
+import { TelemetryHooks } from '../utils/telemetry.js';
+import type { LogLevel, LogOutput } from '../utils/Logger.js';
+import type { EventLoggingConfig } from '../utils/EventLogger.js';
+import type { WebVHNetworkName } from './network.js';
+import type { DIDCacheConfig } from '../did/DIDCache.js';
 
 // Base types for the Originals protocol
 export type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';

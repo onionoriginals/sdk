@@ -1,5 +1,5 @@
-import { DIDManager } from '../did/DIDManager';
-import { PRELOADED_CONTEXTS } from '../utils/serialization';
+import { DIDManager } from '../did/DIDManager.js';
+import { PRELOADED_CONTEXTS } from '../utils/serialization.js';
 
 type LoadedDocument = { document: unknown; documentUrl: string; contextUrl: string | null };
 

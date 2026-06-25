@@ -10,12 +10,12 @@
  * `Verifier` from plan 001) and CEL event logs (via `verifyEventLog`). did:btco
  * resolution is described in the design doc but not wired here.
  */
-import { Verifier } from '../vc/Verifier';
-import { verifyEventLog } from '../cel/algorithms/verifyEventLog';
-import { createDidManagerKeyResolver } from '../cel/keyResolver';
-import type { DIDManager } from '../did/DIDManager';
-import type { VerifiableCredential } from '../types';
-import type { EventLog } from '../cel/types';
+import { Verifier } from '../vc/Verifier.js';
+import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
+import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
+import type { DIDManager } from '../did/DIDManager.js';
+import type { VerifiableCredential } from '../types/index.js';
+import type { EventLog } from '../cel/types.js';
 
 export type VerifiableKind = 'credential' | 'eventLog' | 'unknown';
 

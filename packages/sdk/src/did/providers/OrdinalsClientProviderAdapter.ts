@@ -1,5 +1,5 @@
-import type { ResourceProviderLike } from '../BtcoDidResolver';
-import { OrdinalsClient } from '../../bitcoin/OrdinalsClient';
+import type { ResourceProviderLike } from '../BtcoDidResolver.js';
+import { OrdinalsClient } from '../../bitcoin/OrdinalsClient.js';
 
 export interface OrdinalsClientProviderConfig {
   baseUrl: string;

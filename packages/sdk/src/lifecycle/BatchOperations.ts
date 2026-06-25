@@ -10,8 +10,8 @@
  */
 
 import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
-import type { AssetResource } from '../types';
-import type { OriginalsAsset } from './OriginalsAsset';
+import type { AssetResource } from '../types/index.js';
+import type { OriginalsAsset } from './OriginalsAsset.js';
 
 /**
  * Result of a batch operation containing successful and failed items

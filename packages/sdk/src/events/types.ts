@@ -7,8 +7,8 @@
  * - Specific payload data relevant to the event
  */
 
-import { LayerType } from '../types';
-import type { MigrationError } from '../migration/types';
+import { LayerType } from '../types/index.js';
+import type { MigrationError } from '../migration/types.js';
 
 /**
  * Base event interface that all events extend

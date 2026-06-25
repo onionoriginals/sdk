@@ -5,12 +5,12 @@
  * BBS+ proofs with selective disclosure support. Follows the W3C Data
  * Integrity BBS Cryptosuites v1.0 specification.
  */
-import { BbsSimple, type BbsKeyPair } from './bbsSimple';
-import { BBSCryptosuiteUtils } from './bbs';
-import { multikey } from '../../crypto/Multikey';
-import { canonize } from '../utils/jsonld';
-import { sha256Bytes } from '../../utils/hash';
-import type { DataIntegrityProof, VerificationResult } from './eddsa';
+import { BbsSimple, type BbsKeyPair } from './bbsSimple.js';
+import { BBSCryptosuiteUtils } from './bbs.js';
+import { multikey } from '../../crypto/Multikey.js';
+import { canonize } from '../utils/jsonld.js';
+import { sha256Bytes } from '../../utils/hash.js';
+import type { DataIntegrityProof, VerificationResult } from './eddsa.js';
 
 export interface BBSProofOptions {
   verificationMethod: string;

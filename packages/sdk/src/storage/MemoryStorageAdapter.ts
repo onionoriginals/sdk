@@ -1,4 +1,4 @@
-import { GetObjectResult, StorageAdapter } from './StorageAdapter';
+import { GetObjectResult, StorageAdapter } from './StorageAdapter.js';
 
 type DomainPath = string;
 

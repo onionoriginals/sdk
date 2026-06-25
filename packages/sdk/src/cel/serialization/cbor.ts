@@ -5,8 +5,8 @@
  * CBOR provides ~50% size reduction compared to JSON for bandwidth-sensitive applications.
  */
 
-import type { EventLog, LogEntry, DataIntegrityProof, WitnessProof } from '../types';
-import { encode, decode } from '../../utils/cbor';
+import type { EventLog, LogEntry, DataIntegrityProof, WitnessProof } from '../types.js';
+import { encode, decode } from '../../utils/cbor.js';
 
 /**
  * Validate and reconstruct a DataIntegrityProof or WitnessProof

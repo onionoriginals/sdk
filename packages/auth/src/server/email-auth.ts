@@ -7,8 +7,8 @@ import { randomBytes } from 'node:crypto';
 import { Turnkey } from '@turnkey/sdk-server';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import type { EmailAuthSession, InitiateAuthResult, VerifyAuthResult } from '../types';
-import { getOrCreateTurnkeySubOrg } from './turnkey-client';
+import type { EmailAuthSession, InitiateAuthResult, VerifyAuthResult } from '../types.js';
+import { getOrCreateTurnkeySubOrg } from './turnkey-client.js';
 
 // Session timeout (15 minutes to match Turnkey OTP)
 const SESSION_TIMEOUT = 15 * 60 * 1000;

@@ -8,9 +8,9 @@
  * @see https://identity.foundation/peer-did-method-spec/
  */
 
-import type { EventLog, ExternalReference, DataIntegrityProof, CreateOptions, UpdateOptions, AssetState } from '../types';
-import { createEventLog } from '../algorithms/createEventLog';
-import { updateEventLog } from '../algorithms/updateEventLog';
+import type { EventLog, ExternalReference, DataIntegrityProof, CreateOptions, UpdateOptions, AssetState } from '../types.js';
+import { createEventLog } from '../algorithms/createEventLog.js';
+import { updateEventLog } from '../algorithms/updateEventLog.js';
 
 /**
  * Configuration options for PeerCelManager
@@ -212,7 +212,7 @@ export class PeerCelManager {
     const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
     
     // Import multikey encoder
-    const { multikey } = await import('../../crypto/Multikey');
+    const { multikey } = await import('../../crypto/Multikey.js');
     return multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519');
   }
 

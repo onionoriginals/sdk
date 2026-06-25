@@ -6,5 +6,5 @@
  * - CBOR: Compact binary format for bandwidth-sensitive applications
  */
 
-export * from './json';
-export * from './cbor';
+export * from './json.js';
+export * from './cbor.js';

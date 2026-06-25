@@ -2,13 +2,13 @@ import {
   OriginalsConfig,
   AssetResource,
   BitcoinTransaction,
-} from '../types';
-import { BitcoinManager } from '../bitcoin/BitcoinManager';
-import { OriginalsAsset } from './OriginalsAsset';
-import { validateBitcoinAddress } from '../utils/bitcoin-address';
-import { EventEmitter } from '../events/EventEmitter';
-import { StructuredError } from '../utils/telemetry';
-import { validateAndNormalizeDomain } from './domainUtils';
+} from '../types/index.js';
+import { BitcoinManager } from '../bitcoin/BitcoinManager.js';
+import { OriginalsAsset } from './OriginalsAsset.js';
+import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
+import { EventEmitter } from '../events/EventEmitter.js';
+import { StructuredError } from '../utils/telemetry.js';
+import { validateAndNormalizeDomain } from './domainUtils.js';
 import {
   BatchOperationExecutor,
   BatchValidator,
@@ -16,7 +16,7 @@ import {
   type BatchResult,
   type BatchOperationOptions,
   type BatchInscriptionOptions,
-} from './BatchOperations';
+} from './BatchOperations.js';
 
 /**
  * The single-asset lifecycle operations that batch operations orchestrate over.

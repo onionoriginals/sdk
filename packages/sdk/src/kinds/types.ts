@@ -5,7 +5,7 @@
  * enables kind-specific validation, metadata schemas, and behaviors.
  */
 
-import type { AssetResource } from '../types/common';
+import type { AssetResource } from '../types/common.js';
 
 /**
  * The supported Original kinds

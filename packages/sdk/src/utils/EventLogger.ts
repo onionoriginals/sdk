@@ -8,10 +8,10 @@
  * - Performance tracking
  */
 
-import type { EventEmitter } from '../events/EventEmitter';
-import type { OriginalsEvent, EventTypeMap } from '../events/types';
-import type { Logger, LogLevel } from './Logger';
-import type { MetricsCollector } from './MetricsCollector';
+import type { EventEmitter } from '../events/EventEmitter.js';
+import type { OriginalsEvent, EventTypeMap } from '../events/types.js';
+import type { Logger, LogLevel } from './Logger.js';
+import type { MetricsCollector } from './MetricsCollector.js';
 
 /**
  * Event logging configuration

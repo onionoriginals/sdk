@@ -3,7 +3,7 @@
 // @ts-nocheck
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { GetObjectResult, LocalStorageAdapterOptions, StorageAdapter } from './StorageAdapter';
+import { GetObjectResult, LocalStorageAdapterOptions, StorageAdapter } from './StorageAdapter.js';
 
 export class LocalStorageAdapter implements StorageAdapter {
   private baseDir: string;

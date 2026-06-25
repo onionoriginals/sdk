@@ -9,7 +9,7 @@ import {
   type OriginalManifest, 
   type ValidationResult, 
   type CreateTypedOriginalOptions,
-} from './types';
+} from './types.js';
 import { 
   type KindValidator,
   ValidationUtils,
@@ -19,7 +19,7 @@ import {
   DatasetValidator,
   MediaValidator,
   DocumentValidator,
-} from './validators';
+} from './validators/index.js';
 
 /**
  * Registry for Original kinds

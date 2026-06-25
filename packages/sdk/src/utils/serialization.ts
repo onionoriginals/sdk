@@ -1,6 +1,6 @@
 import jsonld from 'jsonld';
-import { DIDDocument, VerifiableCredential } from '../types';
-import { validateDIDDocument, validateCredential } from './validation';
+import { DIDDocument, VerifiableCredential } from '../types/index.js';
+import { validateDIDDocument, validateCredential } from './validation.js';
 
 type DocumentLoader = (url: string) => Promise<{
   documentUrl: string;
@@ -9,13 +9,13 @@ type DocumentLoader = (url: string) => Promise<{
 }>;
 
 // Import context documents from src/contexts
-import credentialsV1Context from '../contexts/credentials-v1.json';
-import credentialsV2Context from '../contexts/credentials-v2.json';
-import dataIntegrityV2Context from '../contexts/data-integrity-v2.json';
-import didsContext from '../contexts/dids.json';
-import ed255192020Context from '../contexts/ed255192020.json';
-import ordinalsContext from '../contexts/ordinals-plus.json';
-import originalsContext from '../contexts/originals.json';
+import credentialsV1Context from '../contexts/credentials-v1.json' with { type: 'json' };
+import credentialsV2Context from '../contexts/credentials-v2.json' with { type: 'json' };
+import dataIntegrityV2Context from '../contexts/data-integrity-v2.json' with { type: 'json' };
+import didsContext from '../contexts/dids.json' with { type: 'json' };
+import ed255192020Context from '../contexts/ed255192020.json' with { type: 'json' };
+import ordinalsContext from '../contexts/ordinals-plus.json' with { type: 'json' };
+import originalsContext from '../contexts/originals.json' with { type: 'json' };
 
 // Full context documents for proper canonicalization
 export const PRELOADED_CONTEXTS: Record<string, unknown> = {

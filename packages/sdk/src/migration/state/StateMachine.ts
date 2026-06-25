@@ -2,7 +2,7 @@
  * StateMachine - Defines valid migration state transitions
  */
 
-import { MigrationStateEnum } from '../types';
+import { MigrationStateEnum } from '../types.js';
 
 export class StateMachine {
   private transitions: Map<MigrationStateEnum, MigrationStateEnum[]>;

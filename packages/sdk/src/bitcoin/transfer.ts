@@ -1,7 +1,7 @@
 import * as btc from '@scure/btc-signer';
-import { BitcoinTransaction, TransactionInput, TransactionOutput, Utxo, DUST_LIMIT_SATS } from '../types';
+import { BitcoinTransaction, TransactionInput, TransactionOutput, Utxo, DUST_LIMIT_SATS } from '../types/index.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
-import { selectUtxos, SelectionOptions, SelectionResult } from './utxo';
+import { selectUtxos, SelectionOptions, SelectionResult } from './utxo.js';
 
 // Regtest uses a different bech32 prefix (bcrt) that is not covered by @scure/btc-signer's
 // built-in TEST_NETWORK (which uses 'tb').  We define a minimal network object so that

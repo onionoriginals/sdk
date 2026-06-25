@@ -1,5 +1,5 @@
-import type { DIDDocument } from '../types';
-import type { MetricsCollector } from '../utils/MetricsCollector';
+import type { DIDDocument } from '../types/index.js';
+import type { MetricsCollector } from '../utils/MetricsCollector.js';
 
 /**
  * Configuration for the DID cache

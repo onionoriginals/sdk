@@ -51,6 +51,11 @@ jobs:
         with:
           node-version: "22"
 
+      # Hard gate: never publish a dist that npm consumers cannot import under
+      # Node ESM. The Bun test suite above cannot catch this class of breakage.
+      - name: Verify built packages import under Node ESM
+        run: node scripts/verify-esm.mjs
+
       - name: Configure npm auth for Bun
         run: |
           echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc

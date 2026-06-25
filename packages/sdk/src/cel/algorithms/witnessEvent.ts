@@ -7,10 +7,10 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-import type { LogEntry, WitnessProof } from '../types';
-import type { WitnessService } from '../witnesses/WitnessService';
-import { computeDigestMultibase } from '../hash';
-import { canonicalizeEntryForChain } from '../canonicalize';
+import type { LogEntry, WitnessProof } from '../types.js';
+import type { WitnessService } from '../witnesses/WitnessService.js';
+import { computeDigestMultibase } from '../hash.js';
+import { canonicalizeEntryForChain } from '../canonicalize.js';
 
 /**
  * Adds a witness proof to an event by calling a witness service.

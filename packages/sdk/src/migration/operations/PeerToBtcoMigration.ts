@@ -6,13 +6,13 @@ import {
   MigrationOptions,
   CostEstimate,
   MigrationStateEnum
-} from '../types';
-import { DIDDocument, OriginalsConfig } from '../../types';
-import { BaseMigration } from './BaseMigration';
-import { BitcoinManager } from '../../bitcoin/BitcoinManager';
-import { DIDManager } from '../../did/DIDManager';
-import { CredentialManager } from '../../vc/CredentialManager';
-import { StateTracker } from '../state/StateTracker';
+} from '../types.js';
+import { DIDDocument, OriginalsConfig } from '../../types/index.js';
+import { BaseMigration } from './BaseMigration.js';
+import { BitcoinManager } from '../../bitcoin/BitcoinManager.js';
+import { DIDManager } from '../../did/DIDManager.js';
+import { CredentialManager } from '../../vc/CredentialManager.js';
+import { StateTracker } from '../state/StateTracker.js';
 
 export class PeerToBtcoMigration extends BaseMigration {
   private bitcoinManager: BitcoinManager;

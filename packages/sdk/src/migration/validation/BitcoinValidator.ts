@@ -8,9 +8,9 @@ import {
   ValidationError,
   ValidationWarning,
   IValidator
-} from '../types';
-import { OriginalsConfig } from '../../types';
-import { BitcoinManager } from '../../bitcoin/BitcoinManager';
+} from '../types.js';
+import { OriginalsConfig } from '../../types/index.js';
+import { BitcoinManager } from '../../bitcoin/BitcoinManager.js';
 
 export class BitcoinValidator implements IValidator {
   constructor(

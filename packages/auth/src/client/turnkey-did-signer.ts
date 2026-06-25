@@ -6,8 +6,8 @@
 
 import { Turnkey } from '@turnkey/sdk-server';
 import { OriginalsSDK, encoding } from '@originals/sdk';
-import type { TurnkeyWalletAccount } from '../types';
-import { TurnkeySessionExpiredError, withTokenExpiration } from './turnkey-client';
+import type { TurnkeyWalletAccount } from '../types.js';
+import { TurnkeySessionExpiredError, withTokenExpiration } from './turnkey-client.js';
 
 interface SigningInput {
   document: Record<string, unknown>;

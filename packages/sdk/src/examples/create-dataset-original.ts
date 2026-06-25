@@ -9,7 +9,7 @@ import {
   OriginalsSDK,
   OriginalKind,
   OrdMockProvider,
-} from '../index';
+} from '../index.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 function computeHash(content: string): string {

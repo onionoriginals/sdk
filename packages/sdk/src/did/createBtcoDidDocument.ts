@@ -1,6 +1,6 @@
-import { DIDDocument, VerificationMethod } from '../types/did';
-import { multikey, MultikeyType } from '../crypto/Multikey';
-import { validateSatoshiNumber } from '../utils/satoshi-validation';
+import { DIDDocument, VerificationMethod } from '../types/did.js';
+import { multikey, MultikeyType } from '../crypto/Multikey.js';
+import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
 
 export type BitcoinNetwork = 'mainnet' | 'regtest' | 'signet';
 

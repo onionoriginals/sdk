@@ -11,7 +11,7 @@ import { p256 } from '@noble/curves/p256';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
-import { multikey } from './Multikey';
+import { multikey } from './Multikey.js';
 
 export class ES256KSigner extends Signer {
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {

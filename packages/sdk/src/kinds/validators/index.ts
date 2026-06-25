@@ -2,11 +2,11 @@
  * Kind validators exports
  */
 
-export { BaseKindValidator, ValidationUtils, type KindValidator } from './base';
-export { AppValidator } from './AppValidator';
-export { AgentValidator } from './AgentValidator';
-export { ModuleValidator } from './ModuleValidator';
-export { DatasetValidator } from './DatasetValidator';
-export { MediaValidator } from './MediaValidator';
-export { DocumentValidator } from './DocumentValidator';
+export { BaseKindValidator, ValidationUtils, type KindValidator } from './base.js';
+export { AppValidator } from './AppValidator.js';
+export { AgentValidator } from './AgentValidator.js';
+export { ModuleValidator } from './ModuleValidator.js';
+export { DatasetValidator } from './DatasetValidator.js';
+export { MediaValidator } from './MediaValidator.js';
+export { DocumentValidator } from './DocumentValidator.js';
 

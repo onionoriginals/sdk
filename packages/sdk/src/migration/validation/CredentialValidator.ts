@@ -8,8 +8,8 @@ import {
   ValidationError,
   ValidationWarning,
   IValidator
-} from '../types';
-import { OriginalsConfig } from '../../types';
+} from '../types.js';
+import { OriginalsConfig } from '../../types/index.js';
 
 /**
  * Required top-level fields for a structurally well-formed W3C Verifiable Credential.

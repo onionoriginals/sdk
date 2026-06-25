@@ -8,7 +8,7 @@
  * Usage: originals-cel inscribe --log <path> --wallet <path> [options]
  */
 
-import { migrateCommand, type MigrateFlags } from './migrate';
+import { migrateCommand, type MigrateFlags } from './migrate.js';
 
 /**
  * Flags parsed from command line arguments

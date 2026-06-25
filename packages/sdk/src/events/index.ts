@@ -4,7 +4,7 @@
  * Provides a type-safe event system for tracking asset lifecycle operations
  */
 
-export { EventEmitter } from './EventEmitter';
+export { EventEmitter } from './EventEmitter.js';
 export type {
   BaseEvent,
   AssetCreatedEvent,
@@ -16,4 +16,4 @@ export type {
   OriginalsEvent,
   EventHandler,
   EventTypeMap
-} from './types';
+} from './types.js';

@@ -10,9 +10,9 @@
  *   bun run src/examples/run.ts lifecycle
  */
 
-import { basicExample, digitalArtExample } from './basic-usage';
-import { main as createModuleExample } from './create-module-original';
-import { main as fullLifecycleExample } from './full-lifecycle-flow';
+import { basicExample, digitalArtExample } from './basic-usage.js';
+import { main as createModuleExample } from './create-module-original.js';
+import { main as fullLifecycleExample } from './full-lifecycle-flow.js';
 
 async function runAll(): Promise<void> {
   console.log('Running all Originals SDK examples...\n');
