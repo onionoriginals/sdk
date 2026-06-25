@@ -235,6 +235,45 @@ describe('WebVHManager — pre-rotation key rotation chain', () => {
     ).rejects.toThrow('empty DID log');
   }, 20000);
 
+  test('rotating a pre-rotation DID without prerotation:true is rejected (no silent corruption)', async () => {
+    // Macroscope HIGH: forgetting prerotation:true on the next rotation would run
+    // the non-pre-rotation path, set an un-committed updateKey, and corrupt the log.
+    const created = await manager.createDIDWebVH({ domain: 'example.com', prerotation: true });
+    await expect(
+      manager.rotateDIDWebVHKeys({
+        did: created.did,
+        currentLog: created.log,
+        currentKeyPair: created.nextKeyPair!,
+        // prerotation omitted (defaults false)
+      })
+    ).rejects.toThrow('pre-rotation chain');
+  }, 20000);
+
+  test('updateDIDWebVH on a pre-rotation DID is rejected', async () => {
+    // Macroscope Medium: updateDIDWebVH appends a non-pre-rotation entry.
+    const created = await manager.createDIDWebVH({ domain: 'example.com', prerotation: true });
+    await expect(
+      manager.updateDIDWebVH({
+        did: created.did,
+        currentLog: created.log,
+        updates: { service: [{ id: '#svc', type: 'X', serviceEndpoint: 'https://e.example' }] } as any,
+        signer: created.nextKeyPair!,
+      })
+    ).rejects.toThrow('does not support DIDs on a pre-rotation chain');
+  }, 20000);
+
+  test('recoverDIDWebVH on a pre-rotation DID is rejected', async () => {
+    // Macroscope Medium: recoverDIDWebVH appends a non-pre-rotation key change.
+    const created = await manager.createDIDWebVH({ domain: 'example.com', prerotation: true });
+    await expect(
+      manager.recoverDIDWebVH({
+        did: created.did,
+        currentLog: created.log,
+        signingKeyPair: created.nextKeyPair!,
+      })
+    ).rejects.toThrow('does not support DIDs on a pre-rotation chain');
+  }, 20000);
+
   test('non-pre-rotation default mode still works after the pre-rotation tests', async () => {
     // Regression guard: standard rotation (no prerotation flag) still works unchanged
     const created = await manager.createDIDWebVH({ domain: 'example.com' });

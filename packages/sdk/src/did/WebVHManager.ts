@@ -554,6 +554,18 @@ export class WebVHManager {
   }): Promise<{ didDocument: DIDDocument; log: DIDLog; logPath?: string }> {
     const { did, currentLog, updates, signer: providedSigner, verifier: providedVerifier, outputDir } = options;
 
+    // updateDIDWebVH appends an ordinary (non-pre-rotation) entry. On a
+    // pre-rotation chain that would set an un-committed updateKey and break
+    // resolution, so refuse rather than silently corrupt the log. Document
+    // updates on pre-rotation DIDs must go through the pre-rotation rotation path.
+    if (this.logHasPendingPrerotation(currentLog)) {
+      throw new Error(
+        'updateDIDWebVH does not support DIDs on a pre-rotation chain (the latest log entry ' +
+        'commits nextKeyHashes). Such DIDs require rotating to the pre-committed key for every ' +
+        'new entry; use rotateDIDWebVHKeys with prerotation:true instead.'
+      );
+    }
+
     // Dynamically import didwebvh-ts
     const mod = await import('didwebvh-ts') as unknown as {
       updateDID: (options: Record<string, unknown>) => Promise<{
@@ -658,6 +670,19 @@ export class WebVHManager {
       nextKeyPairOut = freshNextKeyPair;
       rotationResult = await this.appendKeyChangePrerotation(did, currentLog, currentKeyPair, freshNextKeyPair);
     } else {
+      // Guard against silently corrupting a pre-rotation chain: if the latest
+      // entry committed nextKeyHashes, a non-pre-rotation rotation would set an
+      // un-committed updateKey and fail resolution. Require explicit opt-in
+      // rather than auto-switching, because `currentKeyPair` has different
+      // semantics in pre-rotation mode (it must be the pre-committed next key).
+      if (this.logHasPendingPrerotation(currentLog)) {
+        throw new Error(
+          'This DID is on a pre-rotation chain (the latest log entry commits nextKeyHashes). ' +
+          'Call rotateDIDWebVHKeys with prerotation:true and pass the pre-committed nextKeyPair ' +
+          '(returned by the previous create/rotate) as currentKeyPair. A non-pre-rotation ' +
+          'rotation would break verification and corrupt the DID history.'
+        );
+      }
       newKeyPair = providedNewKeyPair || await this.keyManager.generateKeyPair('Ed25519');
       rotationResult = await this.appendKeyChange(did, currentLog, currentKeyPair, newKeyPair);
     }
@@ -683,6 +708,16 @@ export class WebVHManager {
    */
   async recoverDIDWebVH(options: RecoverWebVHOptions): Promise<RecoverWebVHResult> {
     const { did, currentLog, signingKeyPair, recoveryKeyPair: providedRecoveryKeyPair, outputDir } = options;
+
+    // recoverDIDWebVH appends an ordinary key-change entry; on a pre-rotation
+    // chain that breaks the committed-key invariant and fails resolution.
+    if (this.logHasPendingPrerotation(currentLog)) {
+      throw new Error(
+        'recoverDIDWebVH does not support DIDs on a pre-rotation chain (the latest log entry ' +
+        'commits nextKeyHashes); a recovery entry would violate the pre-rotation invariant. ' +
+        'Rotate to the pre-committed key via rotateDIDWebVHKeys with prerotation:true.'
+      );
+    }
 
     const newKeyPair = providedRecoveryKeyPair || await this.keyManager.generateKeyPair('Ed25519');
 
@@ -715,6 +750,22 @@ export class WebVHManager {
     }
 
     return { log: result.log, didDocument: result.didDocument, newKeyPair, recoveryCredential, logPath };
+  }
+
+  /**
+   * True when the latest log entry commits a non-empty `nextKeyHashes`, i.e. the
+   * DID is on a pre-rotation chain. The next entry MUST be produced via the
+   * pre-rotation path (signed by, and authorizing, the pre-committed key);
+   * appending an ordinary key-change/update entry would set an un-committed
+   * updateKey, fail `newKeysAreInNextKeys` during resolution, and silently
+   * corrupt the log. Callers that would append a non-pre-rotation entry use this
+   * to fail fast with a clear error instead.
+   */
+  private logHasPendingPrerotation(currentLog: DIDLog): boolean {
+    if (currentLog.length === 0) return false;
+    const last = currentLog[currentLog.length - 1];
+    const hashes = (last.parameters as { nextKeyHashes?: string[] }).nextKeyHashes;
+    return Array.isArray(hashes) && hashes.length > 0;
   }
 
   /**
