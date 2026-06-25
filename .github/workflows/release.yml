@@ -74,11 +74,22 @@ jobs:
           for dir in packages/sdk packages/auth; do
             name=$(node -p "require('./$dir/package.json').name")
             ver=$(node -p "require('./$dir/package.json').version")
-            if npm view "$name@$ver" version >/dev/null 2>&1; then
+            set +e
+            out=$(npm view "$name@$ver" version 2>err.txt)
+            code=$?
+            set -e
+            if [ "$out" = "$ver" ]; then
               echo "$name@$ver already on registry — skip"
-            else
+            elif [ "$code" -ne 0 ] && grep -qiE "E404|code E404|not found|is not in this registry" err.txt; then
+              # Genuine "version does not exist yet" → a real pending release.
               echo "$name@$ver NOT on registry — publish needed"
               should=true
+            else
+              # Any other non-zero (network/registry/DNS/rate-limit) must NOT be
+              # mistaken for "unpublished" — fail loudly rather than over-publish.
+              echo "npm view failed for $name@$ver (exit $code) — treating as an error, not a release:"
+              cat err.txt
+              exit 1
             fi
           done
           echo "should=$should" >> "$GITHUB_OUTPUT"
@@ -120,14 +131,16 @@ jobs:
       - name: Verify built packages import under Node ESM
         run: node scripts/verify-esm.mjs
 
-      # `changeset publish` only publishes packages whose version is not yet on
-      # the registry, so it is a no-op if there is nothing new to release. It
-      # creates a git tag per published package locally; push them so the tags
-      # (and any tag-driven release tooling) land on the repo.
-      - name: Publish
-        run: |
-          bun run release
-          git push origin --tags
+      # Publish via changesets/action so npm publish, git tag creation/push, and
+      # GitHub Release creation happen as one managed step — avoiding the
+      # publish-succeeds-but-tag-push-fails gap where tags would be missing
+      # permanently (check-publish would then see the version on npm and never
+      # re-enter this job). `changeset publish` is idempotent: already-published
+      # versions are skipped.
+      - name: Publish to npm, push tags, and create GitHub releases
+        uses: changesets/action@v1
+        with:
+          publish: bun run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
