@@ -17,6 +17,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { WebVHManager, computeNextKeyHash } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
+import { Ed25519Verifier } from '../../../src/did/Ed25519Verifier';
 
 describe('computeNextKeyHash', () => {
   test('produces a non-empty base58btc string', () => {
@@ -142,6 +143,36 @@ describe('WebVHManager — pre-rotation key rotation chain', () => {
     }
 
     expect(log.length).toBe(4); // 1 create + 3 rotations
+  }, 60000);
+
+  test('independent didwebvh-ts resolution accepts the pre-rotation chain', async () => {
+    // This is the definitive cross-check that computeNextKeyHash() matches
+    // didwebvh-ts's own deriveNextKeyHash(): resolveDIDFromLog runs
+    // newKeysAreInNextKeys() during resolution, which derives the hash of each
+    // updateKey with the LIBRARY's algorithm and throws if it isn't present in
+    // the previous entry's committed nextKeyHashes. If our committed hashes were
+    // computed with a different preimage/encoding, resolution would reject the
+    // chain — so a clean resolve proves an external verifier accepts it.
+    const created = await manager.createDIDWebVH({ domain: 'example.com', prerotation: true });
+
+    let log = created.log;
+    let currentKeyPair = created.nextKeyPair!;
+    for (let i = 0; i < 2; i++) {
+      const r = await manager.rotateDIDWebVHKeys({
+        did: created.did,
+        currentLog: log,
+        currentKeyPair,
+        prerotation: true,
+      });
+      log = r.log;
+      currentKeyPair = r.nextKeyPair!;
+    }
+
+    const mod = (await import('didwebvh-ts')) as unknown as {
+      resolveDIDFromLog: (log: unknown, options: { verifier: unknown }) => Promise<{ doc: { id: string } }>;
+    };
+    const res = await mod.resolveDIDFromLog(log, { verifier: new Ed25519Verifier() });
+    expect(res.doc.id).toBe(created.did);
   }, 60000);
 
   test('each rotation entry commits the next key hash correctly', async () => {
