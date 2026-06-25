@@ -145,12 +145,17 @@ export const labelReplacementCanonicalizeNQuads = async (
       c14nToNewLabelMap.set(canonicalIdMapStripped.get(input)!, newLabel);
     }
 
-    const replacer = (_m: string, _s1: string, label: string) => '_:' + c14nToNewLabelMap.get(label);
+    // Only relabel blank nodes in term position (line start or after whitespace);
+    // this avoids rewriting "_:..."-looking text inside quoted literal values.
+    // Leave any label not in the canonical map untouched rather than emitting
+    // "_:undefined".
+    const replacer = (_m: string, pre: string, label: string) =>
+      pre + '_:' + (c14nToNewLabelMap.get(label) ?? label);
 
     const canonicalNQuads = (canonicalizedDataset as string)
       .split('\n')
       .slice(0, -1)
-      .map((e: string) => e.replace(/(_:([^\s]+))/g, replacer) + '\n')
+      .map((e: string) => e.replace(/(^|\s)_:([^\s]+)/g, replacer) + '\n')
       .sort();
 
     return {

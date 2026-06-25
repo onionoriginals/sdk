@@ -145,4 +145,87 @@ describe('BBS+ bbs-2023 selective disclosure round-trip', () => {
     const result = await BBSCryptosuiteManager.verifyProof(credential, baseProof, { documentLoader: wrongLoader });
     expect(result.verified).toBe(false);
   });
+
+  // Regression: challenge/domain on the base proof must survive derivation, or
+  // the derived proofHash diverges from the signed bbsHeader (PR #219 review).
+  test('challenge/domain on the base proof survive derivation and verify', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+
+    const baseProof = await BBSCryptosuiteManager.createProof(credential, {
+      verificationMethod: vm,
+      privateKey: secretKey,
+      publicKey,
+      documentLoader,
+      mandatoryPointers,
+      challenge: 'nonce-123',
+      domain: 'https://verifier.example'
+    });
+    expect(baseProof.challenge).toBe('nonce-123');
+    expect((await BBSCryptosuiteManager.verifyProof(credential, baseProof, { documentLoader })).verified).toBe(true);
+
+    const { document: revealed, proof: derivedProof } = await BBSCryptosuiteManager.deriveProof(
+      { ...credential, proof: baseProof },
+      baseProof,
+      { documentLoader, selectivePointers: ['/credentialSubject/name'] }
+    );
+    expect(derivedProof.challenge).toBe('nonce-123');
+    expect(derivedProof.domain).toBe('https://verifier.example');
+
+    const result = await BBSCryptosuiteManager.verifyDerivedProof({ ...revealed, proof: derivedProof }, { documentLoader });
+    expect(result.verified).toBe(true);
+  });
+
+  // Regression: deriving with no mandatory and no selective pointers must fail
+  // loudly rather than emit an unverifiable, context-less proof (PR #219 review).
+  test('deriving with no pointers throws instead of producing an unverifiable proof', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+
+    const baseProof = await BBSCryptosuiteManager.createProof(credential, {
+      verificationMethod: vm,
+      privateKey: secretKey,
+      publicKey,
+      documentLoader,
+      mandatoryPointers: [] // no mandatory pointers
+    });
+
+    await expect(
+      BBSCryptosuiteManager.deriveProof(
+        { ...credential, proof: baseProof },
+        baseProof,
+        { documentLoader, selectivePointers: [] } // ...and no selective pointers
+      )
+    ).rejects.toThrow(/at least one mandatory or selective pointer/i);
+  });
+
+  // Regression: a string value that looks like a blank node ("_:...") must not
+  // corrupt canonicalization (PR #219 review).
+  test('a credential value that looks like a blank node still round-trips', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+
+    const cred = {
+      ...credential,
+      credentialSubject: { ...credential.credentialSubject, note: '_:c14n0 looks like a bnode' }
+    };
+
+    const baseProof = await BBSCryptosuiteManager.createProof(cred, {
+      verificationMethod: vm,
+      privateKey: secretKey,
+      publicKey,
+      documentLoader,
+      mandatoryPointers
+    });
+    expect((await BBSCryptosuiteManager.verifyProof(cred, baseProof, { documentLoader })).verified).toBe(true);
+
+    const { document: revealed, proof: derivedProof } = await BBSCryptosuiteManager.deriveProof(
+      { ...cred, proof: baseProof },
+      baseProof,
+      { documentLoader, selectivePointers: ['/credentialSubject/note'] }
+    );
+    expect(revealed.credentialSubject.note).toBe('_:c14n0 looks like a bnode');
+    const result = await BBSCryptosuiteManager.verifyDerivedProof({ ...revealed, proof: derivedProof }, { documentLoader });
+    expect(result.verified).toBe(true);
+  });
 });
