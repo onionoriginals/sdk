@@ -63,7 +63,6 @@ export {
 } from './bitcoin/utxo-selection.js';
 export { calculateFee } from './bitcoin/fee-calculation.js';
 export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs.js';
-export { BbsSimple } from './vc/cryptosuites/bbsSimple.js';
 export { BBSCryptosuiteManager } from './vc/cryptosuites/bbsCryptosuite.js';
 export type { BBSProofOptions, BBSDeriveOptions } from './vc/cryptosuites/bbsCryptosuite.js';
 export type { StatusListResolver } from './vc/Verifier.js';
