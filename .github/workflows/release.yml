@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: release-${{ github.ref }}
+
+permissions:
+  contents: write       # create tags / push the Version Packages PR branch
+  pull-requests: write  # open & update the Version Packages PR
+  id-token: write       # npm provenance
+
+jobs:
+  # Gate 1 — maintain the "Version Packages" PR. While changesets are pending on
+  # main this job opens/updates that PR (versions + CHANGELOGs). Merging the PR is
+  # the human approval that a release should happen. No publishing happens here.
+  version:
+    name: Version (open release PR)
+    runs-on: ubuntu-latest
+    outputs:
+      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Create or update the Version Packages PR
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: bun run version
+          # No publish here — publishing is the separately-gated job below.
+          publish: ""
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Decide whether there is actually a new version to publish. `hasChangesets ==
+  # false` is true both after the Version PR merges (a real release) AND on any
+  # changeset-less push to main (docs/CI, or the first push after enabling this
+  # workflow). Without this guard the env-gated publish job below would prompt a
+  # reviewer for those no-op pushes too. We only proceed when a package's local
+  # version is not yet on the registry — i.e. a genuine pending release.
+  check-publish:
+    name: Check for unpublished versions
+    needs: version
+    if: needs.version.outputs.hasChangesets == 'false'
+    runs-on: ubuntu-latest
+    outputs:
+      shouldPublish: ${{ steps.check.outputs.should }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.10.0"
+
+      - name: Compare local versions against the registry
+        id: check
+        run: |
+          should=false
+          for dir in packages/sdk packages/auth; do
+            name=$(node -p "require('./$dir/package.json').name")
+            ver=$(node -p "require('./$dir/package.json').version")
+            set +e
+            out=$(npm view "$name@$ver" version 2>err.txt)
+            code=$?
+            set -e
+            if [ "$out" = "$ver" ]; then
+              echo "$name@$ver already on registry — skip"
+            elif [ "$code" -ne 0 ] && grep -qiE "E404|code E404|not found|is not in this registry" err.txt; then
+              # Genuine "version does not exist yet" → a real pending release.
+              echo "$name@$ver NOT on registry — publish needed"
+              should=true
+            else
+              # Any other non-zero (network/registry/DNS/rate-limit) must NOT be
+              # mistaken for "unpublished" — fail loudly rather than over-publish.
+              echo "npm view failed for $name@$ver (exit $code) — treating as an error, not a release:"
+              cat err.txt
+              exit 1
+            fi
+          done
+          echo "should=$should" >> "$GITHUB_OUTPUT"
+
+  # Gate 2 — publish. Runs only for a genuine pending release (Version PR merged
+  # and a version is not yet on npm). The `npm-publish` Environment carries a
+  # required reviewer, so a human must approve in the GitHub UI before anything
+  # reaches npm, and we refuse to publish a build that fails the Node-ESM check.
+  publish:
+    name: Publish to npm
+    needs: [version, check-publish]
+    if: needs.check-publish.outputs.shouldPublish == 'true'
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build
+        run: bun run build
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.10.0"
+          registry-url: "https://registry.npmjs.org"
+
+      # Hard gate: never publish a dist npm consumers cannot import under Node ESM.
+      - name: Verify built packages import under Node ESM
+        run: node scripts/verify-esm.mjs
+
+      # Publish via changesets/action so npm publish, git tag creation/push, and
+      # GitHub Release creation happen as one managed step — avoiding the
+      # publish-succeeds-but-tag-push-fails gap where tags would be missing
+      # permanently (check-publish would then see the version on npm and never
+      # re-enter this job). `changeset publish` is idempotent: already-published
+      # versions are skipped.
+      - name: Publish to npm, push tags, and create GitHub releases
+        uses: changesets/action@v1
+        with:
+          publish: bun run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
