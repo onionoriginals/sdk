@@ -111,12 +111,17 @@ jobs:
 
   changeset:
     name: Changeset present
-    # Only on PRs, and skip the bot's "Version Packages" PR (which intentionally
-    # has no changesets because it consumes them). Identify that PR by its author
-    # — the changesets action opens it as github-actions[bot] via GITHUB_TOKEN —
-    # rather than by branch name, which a contributor could spoof to bypass the
-    # changeset requirement.
-    if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'github-actions[bot]'
+    # Only on PRs, and skip the "Version Packages" PR (which intentionally has no
+    # changesets because it consumes them). Exempt it two ways so it works no
+    # matter which token opened it: by author when the changesets action uses
+    # GITHUB_TOKEN (github-actions[bot]), and by its canonical head branch when a
+    # PAT/GitHub App opens it (so the author is no longer the bot). The
+    # changeset-release/* branch is only writable by maintainers/CI, so using it
+    # as an exemption signal is acceptable.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.user.login != 'github-actions[bot]' &&
+      github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

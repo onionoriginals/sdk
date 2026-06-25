@@ -26,6 +26,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Use a PAT (or GitHub App token) when available so the Version PR's
+          # branch push is NOT made with GITHUB_TOKEN — pushes by GITHUB_TOKEN do
+          # not trigger workflows, which is why the Version PR otherwise gets no
+          # CI. Falls back to GITHUB_TOKEN if CHANGESETS_TOKEN isn't configured
+          # (PR still opens; it just won't run ci.yml until the secret is added).
+          token: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -43,7 +49,7 @@ jobs:
           # No publish here — publishing is the separately-gated job below.
           publish: ""
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
 
   # Decide whether there is actually a new version to publish. `hasChangesets ==
   # false` is true both after the Version PR merges (a real release) AND on any
