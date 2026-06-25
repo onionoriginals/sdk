@@ -2,8 +2,29 @@ import { KeyManager } from './KeyManager';
 import { multikey } from '../crypto/Multikey';
 import { Ed25519Signer } from '../crypto/Signer';
 import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier } from '../types';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { base58 } from '@scure/base';
 import * as fs from 'fs';
 import * as path from 'path';
+
+/**
+ * Compute the pre-rotation key hash for a did:key identifier.
+ * Mirrors didwebvh-ts's internal `deriveNextKeyHash`:
+ *   SHA-256(utf8(keyId)) → prepend multihash header [0x12, 0x20] → base58btc encode (no multibase prefix).
+ *
+ * @param didKeyId - The did:key identifier string, e.g. "did:key:z6Mk..."
+ * @returns Base58btc-encoded multihash string suitable for use in `nextKeyHashes`
+ */
+export function computeNextKeyHash(didKeyId: string): string {
+  const data = new TextEncoder().encode(didKeyId);
+  const digest = sha256(data);
+  // Multihash: 0x12 = sha2-256 code, 0x20 = 32 bytes (digest length)
+  const multihash = new Uint8Array(2 + digest.length);
+  multihash[0] = 0x12;
+  multihash[1] = 0x20;
+  multihash.set(digest, 2);
+  return base58.encode(multihash);
+}
 
 // Type definitions for didwebvh-ts (to avoid module resolution issues)
 interface VerificationMethod {
@@ -124,6 +145,14 @@ export interface CreateWebVHOptions {
   externalVerifier?: ExternalVerifier; // External verifier
   verificationMethods?: VerificationMethod[]; // Pre-configured verification methods
   updateKeys?: string[]; // Pre-configured update keys (e.g., ["did:key:z6Mk..."])
+  /**
+   * Enable pre-rotation mode. When true, a second "next" key pair is generated
+   * and its hash committed into `nextKeyHashes` of the initial log entry.
+   * Each subsequent rotation must be signed by the pre-committed next key.
+   * The generated `nextKeyPair` is returned in `CreateWebVHResult` and must be
+   * persisted by the caller for use in the next `rotateDIDWebVHKeys` call.
+   */
+  prerotation?: boolean;
 }
 
 export interface CreateWebVHResult {
@@ -132,16 +161,43 @@ export interface CreateWebVHResult {
   log: DIDLog;
   keyPair: KeyPair;
   logPath?: string; // Path where the DID log was saved
+  /**
+   * Present only when `prerotation: true` was passed to `createDIDWebVH`.
+   * This key pair is pre-committed (its hash stored in `nextKeyHashes`).
+   * The caller MUST persist this and pass it as `currentKeyPair` in the
+   * next `rotateDIDWebVHKeys` call to execute a valid pre-rotation.
+   */
+  nextKeyPair?: KeyPair;
 }
 
 export interface RotateWebVHKeysOptions {
   did: string;
   currentLog: DIDLog;
-  /** The current (authorized) key pair that signs the rotation entry. */
+  /**
+   * The key pair that signs the rotation entry.
+   *
+   * Non-pre-rotation mode (default): the key pair whose `did:key` is listed in
+   * the previous entry's `updateKeys`.
+   *
+   * Pre-rotation mode (`prerotation: true`): the key pair whose hash was
+   * pre-committed in the previous entry's `nextKeyHashes`. This key becomes
+   * the new `updateKey` and signs the new entry.
+   */
   currentKeyPair: KeyPair;
-  /** Optional replacement key pair; a fresh Ed25519 pair is generated if omitted. */
+  /**
+   * Non-pre-rotation mode only: optional replacement key pair; a fresh
+   * Ed25519 pair is generated if omitted.
+   * Ignored in pre-rotation mode — the next key is always freshly generated.
+   */
   newKeyPair?: KeyPair;
   outputDir?: string;
+  /**
+   * Enable pre-rotation mode. When true, `currentKeyPair` must be the
+   * pre-committed next key from the previous create/rotate result. A fresh
+   * "next-next" key is generated, its hash committed in `nextKeyHashes`,
+   * and returned as `nextKeyPair` in the result.
+   */
+  prerotation?: boolean;
 }
 
 export interface RotateWebVHKeysResult {
@@ -149,6 +205,12 @@ export interface RotateWebVHKeysResult {
   didDocument: DIDDocument;
   newKeyPair: KeyPair;
   logPath?: string;
+  /**
+   * Present only when `prerotation: true`. The freshly generated key whose
+   * hash was committed in this entry's `nextKeyHashes`. The caller MUST
+   * persist this and pass it as `currentKeyPair` in the next rotation.
+   */
+  nextKeyPair?: KeyPair;
 }
 
 export interface RecoverWebVHOptions {
@@ -200,16 +262,17 @@ export class WebVHManager {
    * @returns The created DID, document, log, and key pair (if generated)
    */
   async createDIDWebVH(options: CreateWebVHOptions): Promise<CreateWebVHResult> {
-    const { 
-      domain, 
-      keyPair: providedKeyPair, 
-      paths = [], 
-      portable = false, 
+    const {
+      domain,
+      keyPair: providedKeyPair,
+      paths = [],
+      portable = false,
       outputDir,
       externalSigner,
       externalVerifier,
       verificationMethods: providedVerificationMethods,
-      updateKeys: providedUpdateKeys
+      updateKeys: providedUpdateKeys,
+      prerotation = false,
     } = options;
 
     // Validate path segments before creating DID to prevent directory traversal
@@ -245,6 +308,15 @@ export class WebVHManager {
     let keyPair: KeyPair | undefined;
     let verificationMethods: VerificationMethod[];
     let updateKeys: string[];
+
+    // Pre-rotation is incompatible with externalSigner (which manages its own
+    // key material externally). Check this up front, before the externalSigner
+    // requirement validation below, so the clearer "not supported" error isn't
+    // masked by a "verificationMethods are required" error the caller would hit
+    // first only to then discover the combination is unsupported anyway.
+    if (prerotation && externalSigner) {
+      throw new Error('prerotation is not supported with externalSigner; manage nextKeyHashes externally');
+    }
 
     // Use external signer if provided (e.g., Turnkey integration)
     if (externalSigner) {
@@ -286,8 +358,19 @@ export class WebVHManager {
       updateKeys = [`did:key:${keyPair.publicKey}`]; // Use did:key format for authorization
     }
 
+    // Pre-rotation: generate the "next" key pair and commit its hash.
+    // Not supported with externalSigner (which manages its own keys externally).
+    let nextKeyPairForPrerotation: KeyPair | undefined;
+    let nextKeyHashes: string[] | undefined;
+    if (prerotation) {
+      // (externalSigner + prerotation already rejected up front.)
+      nextKeyPairForPrerotation = await this.keyManager.generateKeyPair('Ed25519');
+      const nextKeyId = `did:key:${nextKeyPairForPrerotation.publicKey}`;
+      nextKeyHashes = [computeNextKeyHash(nextKeyId)];
+    }
+
     // Create the DID using didwebvh-ts
-    const result = await createDID({
+    const createArgs: Record<string, unknown> = {
       domain,
       signer,
       verifier,
@@ -301,7 +384,11 @@ export class WebVHManager {
       portable,
       authentication: ['#key-0'],
       assertionMethod: ['#key-0'],
-    });
+    };
+    if (nextKeyHashes) {
+      createArgs.nextKeyHashes = nextKeyHashes;
+    }
+    const result = await createDID(createArgs);
 
     // Validate the returned DID document
     if (!this.isDIDDocument(result.doc)) {
@@ -320,6 +407,7 @@ export class WebVHManager {
       log: result.log,
       keyPair: keyPair || { publicKey: '', privateKey: '' }, // Return empty keypair if using external signer
       logPath,
+      ...(nextKeyPairForPrerotation ? { nextKeyPair: nextKeyPairForPrerotation } : {}),
     };
   }
 
@@ -466,6 +554,18 @@ export class WebVHManager {
   }): Promise<{ didDocument: DIDDocument; log: DIDLog; logPath?: string }> {
     const { did, currentLog, updates, signer: providedSigner, verifier: providedVerifier, outputDir } = options;
 
+    // updateDIDWebVH appends an ordinary (non-pre-rotation) entry. On a
+    // pre-rotation chain that would set an un-committed updateKey and break
+    // resolution, so refuse rather than silently corrupt the log. Document
+    // updates on pre-rotation DIDs must go through the pre-rotation rotation path.
+    if (this.logHasPendingPrerotation(currentLog)) {
+      throw new Error(
+        'updateDIDWebVH does not support DIDs on a pre-rotation chain (the latest log entry ' +
+        'commits nextKeyHashes). Such DIDs require rotating to the pre-committed key for every ' +
+        'new entry; use rotateDIDWebVHKeys with prerotation:true instead.'
+      );
+    }
+
     // Dynamically import didwebvh-ts
     const mod = await import('didwebvh-ts') as unknown as {
       updateDID: (options: Record<string, unknown>) => Promise<{
@@ -554,17 +654,51 @@ export class WebVHManager {
    * authorized for the next rotation.
    */
   async rotateDIDWebVHKeys(options: RotateWebVHKeysOptions): Promise<RotateWebVHKeysResult> {
-    const { did, currentLog, currentKeyPair, newKeyPair: providedNewKeyPair, outputDir } = options;
+    const { did, currentLog, currentKeyPair, newKeyPair: providedNewKeyPair, outputDir, prerotation = false } = options;
 
-    const newKeyPair = providedNewKeyPair || await this.keyManager.generateKeyPair('Ed25519');
-    const result = await this.appendKeyChange(did, currentLog, currentKeyPair, newKeyPair);
+    let rotationResult: { didDocument: DIDDocument; log: DIDLog };
+    let newKeyPair: KeyPair;
+    let nextKeyPairOut: KeyPair | undefined;
+
+    if (prerotation) {
+      // In pre-rotation mode:
+      //   - currentKeyPair IS the pre-committed next key (signs + becomes updateKey).
+      //   - A fresh "next-next" key is generated and its hash committed.
+      //   - newKeyPair = currentKeyPair (the key that is now active).
+      newKeyPair = currentKeyPair;
+      const freshNextKeyPair = await this.keyManager.generateKeyPair('Ed25519');
+      nextKeyPairOut = freshNextKeyPair;
+      rotationResult = await this.appendKeyChangePrerotation(did, currentLog, currentKeyPair, freshNextKeyPair);
+    } else {
+      // Guard against silently corrupting a pre-rotation chain: if the latest
+      // entry committed nextKeyHashes, a non-pre-rotation rotation would set an
+      // un-committed updateKey and fail resolution. Require explicit opt-in
+      // rather than auto-switching, because `currentKeyPair` has different
+      // semantics in pre-rotation mode (it must be the pre-committed next key).
+      if (this.logHasPendingPrerotation(currentLog)) {
+        throw new Error(
+          'This DID is on a pre-rotation chain (the latest log entry commits nextKeyHashes). ' +
+          'Call rotateDIDWebVHKeys with prerotation:true and pass the pre-committed nextKeyPair ' +
+          '(returned by the previous create/rotate) as currentKeyPair. A non-pre-rotation ' +
+          'rotation would break verification and corrupt the DID history.'
+        );
+      }
+      newKeyPair = providedNewKeyPair || await this.keyManager.generateKeyPair('Ed25519');
+      rotationResult = await this.appendKeyChange(did, currentLog, currentKeyPair, newKeyPair);
+    }
 
     let logPath: string | undefined;
     if (outputDir) {
-      logPath = await this.saveDIDLog(did, result.log, outputDir);
+      logPath = await this.saveDIDLog(did, rotationResult.log, outputDir);
     }
 
-    return { log: result.log, didDocument: result.didDocument, newKeyPair, logPath };
+    return {
+      log: rotationResult.log,
+      didDocument: rotationResult.didDocument,
+      newKeyPair,
+      logPath,
+      ...(nextKeyPairOut ? { nextKeyPair: nextKeyPairOut } : {}),
+    };
   }
 
   /**
@@ -574,6 +708,16 @@ export class WebVHManager {
    */
   async recoverDIDWebVH(options: RecoverWebVHOptions): Promise<RecoverWebVHResult> {
     const { did, currentLog, signingKeyPair, recoveryKeyPair: providedRecoveryKeyPair, outputDir } = options;
+
+    // recoverDIDWebVH appends an ordinary key-change entry; on a pre-rotation
+    // chain that breaks the committed-key invariant and fails resolution.
+    if (this.logHasPendingPrerotation(currentLog)) {
+      throw new Error(
+        'recoverDIDWebVH does not support DIDs on a pre-rotation chain (the latest log entry ' +
+        'commits nextKeyHashes); a recovery entry would violate the pre-rotation invariant. ' +
+        'Rotate to the pre-committed key via rotateDIDWebVHKeys with prerotation:true.'
+      );
+    }
 
     const newKeyPair = providedRecoveryKeyPair || await this.keyManager.generateKeyPair('Ed25519');
 
@@ -606,6 +750,22 @@ export class WebVHManager {
     }
 
     return { log: result.log, didDocument: result.didDocument, newKeyPair, recoveryCredential, logPath };
+  }
+
+  /**
+   * True when the latest log entry commits a non-empty `nextKeyHashes`, i.e. the
+   * DID is on a pre-rotation chain. The next entry MUST be produced via the
+   * pre-rotation path (signed by, and authorizing, the pre-committed key);
+   * appending an ordinary key-change/update entry would set an un-committed
+   * updateKey, fail `newKeysAreInNextKeys` during resolution, and silently
+   * corrupt the log. Callers that would append a non-pre-rotation entry use this
+   * to fail fast with a clear error instead.
+   */
+  private logHasPendingPrerotation(currentLog: DIDLog): boolean {
+    if (currentLog.length === 0) return false;
+    const last = currentLog[currentLog.length - 1];
+    const hashes = (last.parameters as { nextKeyHashes?: string[] }).nextKeyHashes;
+    return Array.isArray(hashes) && hashes.length > 0;
   }
 
   /**
@@ -656,6 +816,100 @@ export class WebVHManager {
       verifier: signer,
       updateKeys: [`did:key:${newKeyPair.publicKey}`],
       verificationMethods: [newVerificationMethod],
+      authentication: ['#key-0'],
+      assertionMethod: ['#key-0'],
+    });
+
+    if (!this.isDIDDocument(result.doc)) {
+      throw new Error('Invalid DID document returned from updateDID');
+    }
+
+    return { didDocument: result.doc, log: result.log };
+  }
+
+  /**
+   * Pre-rotation variant of appendKeyChange.
+   *
+   * In pre-rotation mode the key that was previously hashed into `nextKeyHashes`
+   * (`activeKeyPair`) becomes both:
+   *   - the signer of the new log entry (proving possession of the pre-committed key), and
+   *   - the new `updateKey` for future entries.
+   *
+   * A fresh `nextKeyPair` is generated and its hash committed in `nextKeyHashes`,
+   * continuing the pre-rotation chain.
+   *
+   * didwebvh-ts enforces this invariant: when the previous entry has non-empty
+   * `nextKeyHashes`, verification uses the new entry's `updateKeys` (not the
+   * previous ones) to check the proof. So the signer MUST be `activeKeyPair`.
+   */
+  private async appendKeyChangePrerotation(
+    did: string,
+    currentLog: DIDLog,
+    activeKeyPair: KeyPair,
+    nextKeyPair: KeyPair
+  ): Promise<{ didDocument: DIDDocument; log: DIDLog }> {
+    const mod = await import('didwebvh-ts') as unknown as {
+      updateDID: (options: Record<string, unknown>) => Promise<{
+        doc: Record<string, unknown>;
+        log: DIDLog;
+      }>;
+      prepareDataForSigning: (
+        document: Record<string, unknown>,
+        proof: Record<string, unknown>
+      ) => Promise<Uint8Array>;
+    };
+    const { updateDID, prepareDataForSigning } = mod;
+    if (typeof updateDID !== 'function') {
+      throw new Error('Failed to load didwebvh-ts: invalid module exports');
+    }
+
+    // Enforce the pre-rotation invariant at SDK level:
+    // The activeKeyPair's hash must appear in the previous entry's nextKeyHashes.
+    // (didwebvh-ts only checks this during log resolution, not at updateDID time.)
+    if (currentLog.length === 0) {
+      throw new Error('Cannot perform pre-rotation on an empty DID log');
+    }
+    const lastEntry = currentLog[currentLog.length - 1];
+    const prevNextKeyHashes = (lastEntry.parameters as { nextKeyHashes?: string[] }).nextKeyHashes ?? [];
+    if (prevNextKeyHashes.length === 0) {
+      throw new Error(
+        'Pre-rotation rotation requires the current log to have nextKeyHashes committed. ' +
+        'The DID was not created with prerotation:true or the chain is broken.'
+      );
+    }
+    const activeKeyId = `did:key:${activeKeyPair.publicKey}`;
+    const activeKeyHash = computeNextKeyHash(activeKeyId);
+    if (!prevNextKeyHashes.includes(activeKeyHash)) {
+      throw new Error(
+        `Pre-rotation violation: currentKeyPair hash (${activeKeyHash}) is not in the ` +
+        `previous entry's nextKeyHashes (${prevNextKeyHashes.join(', ')}). ` +
+        'Pass the nextKeyPair returned from the previous create/rotate call.'
+      );
+    }
+
+    // The active (pre-committed) key signs the entry and becomes updateKey.
+    const activeVerificationMethod: VerificationMethod = {
+      type: 'Multikey',
+      publicKeyMultibase: activeKeyPair.publicKey,
+    };
+    const signer = new OriginalsWebVHSigner(
+      activeKeyPair.privateKey,
+      activeVerificationMethod,
+      prepareDataForSigning,
+      { verificationMethod: activeVerificationMethod }
+    );
+
+    // Commit the hash of the next key to continue the pre-rotation chain.
+    const nextKeyId = `did:key:${nextKeyPair.publicKey}`;
+    const nextKeyHashes = [computeNextKeyHash(nextKeyId)];
+
+    const result = await updateDID({
+      log: currentLog,
+      signer,
+      verifier: signer,
+      updateKeys: [`did:key:${activeKeyPair.publicKey}`],
+      nextKeyHashes,
+      verificationMethods: [activeVerificationMethod],
       authentication: ['#key-0'],
       assertionMethod: ['#key-0'],
     });
