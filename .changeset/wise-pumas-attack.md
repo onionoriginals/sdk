@@ -1,6 +1,6 @@
 ---
-"@originals/sdk": minor
-"@originals/auth": patch
+"@originals/sdk": major
+"@originals/auth": major
 ---
 
 Make the published packages importable under Node's ESM resolver.
@@ -12,12 +12,9 @@ be imported by npm consumers. All relative imports now carry explicit
 packages compile under `moduleResolution: "NodeNext"` so the compiler enforces
 correct ESM specifiers going forward.
 
-`engines.node` is raised to `>=20.10.0` (required for JSON import attributes).
-This is released as a `minor` rather than `major` deliberately: the previous
-builds did not import on **any** Node version (the broken specifiers failed
-resolution everywhere), so there is no working consumer on Node 18 whose runtime
-this change could break — it documents the floor that actually works rather than
-removing functioning support.
+**Breaking:** `engines.node` is raised to `>=20.10.0` (required for JSON import
+attributes; `@originals/auth` also requires it transitively via `@originals/sdk`).
+Released as a major version to reflect the raised runtime floor.
 
 The SDK release also includes opt-in `did:webvh` pre-rotation key support
 (`createDIDWebVH`/`rotateDIDWebVHKeys` `prerotation` option, returned
