@@ -7,8 +7,8 @@
  * Usage: originals-cel resolve <did> [options]
  */
 
-import { OriginalsSDK } from '../../core/OriginalsSDK';
-import type { BitcoinNetworkName } from '../../types/network';
+import { OriginalsSDK } from '../../core/OriginalsSDK.js';
+import type { BitcoinNetworkName } from '../../types/network.js';
 
 /**
  * Flags parsed from command line arguments

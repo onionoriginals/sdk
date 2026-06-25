@@ -6,9 +6,9 @@ import {
   MigrationOptions,
   CostEstimate,
   MigrationStateEnum
-} from '../types';
-import { DIDDocument } from '../../types';
-import { BaseMigration } from './BaseMigration';
+} from '../types.js';
+import { DIDDocument } from '../../types/index.js';
+import { BaseMigration } from './BaseMigration.js';
 
 export class PeerToWebvhMigration extends BaseMigration {
   /**

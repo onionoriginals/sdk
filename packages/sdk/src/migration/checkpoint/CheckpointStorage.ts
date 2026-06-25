@@ -2,8 +2,8 @@
  * CheckpointStorage - Persists checkpoints to storage
  */
 
-import { MigrationCheckpoint } from '../types';
-import { OriginalsConfig } from '../../types';
+import { MigrationCheckpoint } from '../types.js';
+import { OriginalsConfig } from '../../types/index.js';
 
 export class CheckpointStorage {
   private checkpoints: Map<string, MigrationCheckpoint>;

@@ -8,9 +8,9 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-import type { WitnessProof } from '../types';
-import type { WitnessService } from './WitnessService';
-import type { BitcoinManager } from '../../bitcoin/BitcoinManager';
+import type { WitnessProof } from '../types.js';
+import type { WitnessService } from './WitnessService.js';
+import type { BitcoinManager } from '../../bitcoin/BitcoinManager.js';
 
 /**
  * Configuration options for BitcoinWitness

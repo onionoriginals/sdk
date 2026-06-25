@@ -1,5 +1,5 @@
-import type { Proof } from './credentials';
-import type { ExternalSigner } from './common';
+import type { Proof } from './credentials.js';
+import type { ExternalSigner } from './common.js';
 
 /**
  * Multi-signature policy defining m-of-n threshold requirements.

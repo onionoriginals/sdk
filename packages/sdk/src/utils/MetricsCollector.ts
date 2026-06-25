@@ -10,7 +10,7 @@
  * - Memory-efficient storage
  */
 
-import type { LayerType } from '../types';
+import type { LayerType } from '../types/index.js';
 
 /**
  * Operation-specific metrics

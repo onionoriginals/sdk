@@ -1,4 +1,4 @@
-import { LayerType } from './common';
+import { LayerType } from './common.js';
 
 // Verifiable Credentials types
 export interface VerifiableCredential {

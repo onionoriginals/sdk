@@ -3,7 +3,7 @@ import {
   BitstringStatusListEntry,
   BitstringStatusListSubject,
   StatusPurpose,
-} from '../types';
+} from '../types/index.js';
 import { gzipSync, gunzipSync } from 'node:zlib';
 
 /**

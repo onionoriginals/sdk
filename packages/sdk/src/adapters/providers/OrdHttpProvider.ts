@@ -1,5 +1,5 @@
 /* istanbul ignore file */
-import type { OrdinalsProvider } from '../types';
+import type { OrdinalsProvider } from '../types.js';
 
 interface HttpProviderOptions {
   baseUrl: string;
@@ -125,7 +125,7 @@ export async function createOrdinalsProviderFromEnv(): Promise<OrdinalsProvider>
     const baseUrl = ((globalThis as any).process?.env?.ORD_PROVIDER_BASE_URL) || 'https://ord.example.com/api';
     return new OrdHttpProvider({ baseUrl });
   }
-  const mod = await import('./OrdMockProvider');
+  const mod = await import('./OrdMockProvider.js');
   return new mod.OrdMockProvider();
 }
 

@@ -1,4 +1,4 @@
-import { canonicalizeDocument } from './serialization';
+import { canonicalizeDocument } from './serialization.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 /**

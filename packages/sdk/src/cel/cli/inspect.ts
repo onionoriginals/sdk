@@ -10,9 +10,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { EventLog, DataIntegrityProof, WitnessProof, AssetState, ExternalReference } from '../types';
-import { parseEventLogJson } from '../serialization/json';
-import { parseEventLogCbor } from '../serialization/cbor';
+import type { EventLog, DataIntegrityProof, WitnessProof, AssetState, ExternalReference } from '../types.js';
+import { parseEventLogJson } from '../serialization/json.js';
+import { parseEventLogCbor } from '../serialization/cbor.js';
 
 /**
  * Flags parsed from command line arguments

@@ -10,15 +10,15 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { EventLog, DataIntegrityProof } from '../types';
-import type { CelSigner } from '../layers/PeerCelManager';
-import { parseEventLogJson } from '../serialization/json';
-import { parseEventLogCbor } from '../serialization/cbor';
-import { serializeEventLogJson } from '../serialization/json';
-import { serializeEventLogCbor } from '../serialization/cbor';
-import { multikey } from '../../crypto/Multikey';
-import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize';
-import { computeDigestMultibase } from '../hash';
+import type { EventLog, DataIntegrityProof } from '../types.js';
+import type { CelSigner } from '../layers/PeerCelManager.js';
+import { parseEventLogJson } from '../serialization/json.js';
+import { parseEventLogCbor } from '../serialization/cbor.js';
+import { serializeEventLogJson } from '../serialization/json.js';
+import { serializeEventLogCbor } from '../serialization/cbor.js';
+import { multikey } from '../../crypto/Multikey.js';
+import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize.js';
+import { computeDigestMultibase } from '../hash.js';
 
 /**
  * Flags parsed from command line arguments

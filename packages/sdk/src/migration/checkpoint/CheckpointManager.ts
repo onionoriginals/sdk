@@ -7,11 +7,11 @@ import {
   MigrationOptions,
   MigrationCheckpoint,
   ICheckpointManager
-} from '../types';
-import { OriginalsConfig } from '../../types';
-import { DIDManager } from '../../did/DIDManager';
-import { CredentialManager } from '../../vc/CredentialManager';
-import { CheckpointStorage } from './CheckpointStorage';
+} from '../types.js';
+import { OriginalsConfig } from '../../types/index.js';
+import { DIDManager } from '../../did/DIDManager.js';
+import { CredentialManager } from '../../vc/CredentialManager.js';
+import { CheckpointStorage } from './CheckpointStorage.js';
 
 export class CheckpointManager implements ICheckpointManager {
   private storage: CheckpointStorage;

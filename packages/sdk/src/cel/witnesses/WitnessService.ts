@@ -8,7 +8,7 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-import type { WitnessProof } from '../types';
+import type { WitnessProof } from '../types.js';
 
 /**
  * Interface for witness services that can attest to event digests.

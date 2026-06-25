@@ -6,7 +6,7 @@
  * version via previousVersionHash. Old versions remain accessible.
  */
 
-import type { ResourceVersion, ResourceVersionHistory } from '../types/resource-version';
+import type { ResourceVersion, ResourceVersionHistory } from '../types/resource-version.js';
 export type { ResourceVersion, ResourceVersionHistory };
 
 /**

@@ -1,8 +1,8 @@
-import { VerifiableCredential, VerifiablePresentation } from '../types';
-import { multikey, MultikeyType } from '../crypto/Multikey';
-import { DIDManager } from '../did/DIDManager';
-import { createDocumentLoader } from './documentLoader';
-import { DataIntegrityProofManager } from './proofs/data-integrity';
+import { VerifiableCredential, VerifiablePresentation } from '../types/index.js';
+import { multikey, MultikeyType } from '../crypto/Multikey.js';
+import { DIDManager } from '../did/DIDManager.js';
+import { createDocumentLoader } from './documentLoader.js';
+import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 
 export interface IssueOptions {
   proofPurpose: 'assertionMethod' | 'authentication';

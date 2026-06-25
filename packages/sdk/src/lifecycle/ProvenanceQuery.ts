@@ -1,5 +1,5 @@
-import { ProvenanceChain } from './OriginalsAsset';
-import { LayerType } from '../types';
+import { ProvenanceChain } from './OriginalsAsset.js';
+import { LayerType } from '../types/index.js';
 
 export type Migration = ProvenanceChain['migrations'][number];
 export type Transfer = ProvenanceChain['transfers'][number];

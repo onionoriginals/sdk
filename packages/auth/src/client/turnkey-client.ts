@@ -4,7 +4,7 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
-import type { TurnkeyWallet, TurnkeyWalletAccount } from '../types';
+import type { TurnkeyWallet, TurnkeyWalletAccount } from '../types.js';
 
 /**
  * Session expired error for handling token expiration

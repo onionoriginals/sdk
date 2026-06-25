@@ -8,8 +8,8 @@ import {
   ValidationError,
   ValidationWarning,
   IValidator
-} from '../types';
-import { OriginalsConfig } from '../../types';
+} from '../types.js';
+import { OriginalsConfig } from '../../types/index.js';
 
 export class StorageValidator implements IValidator {
   constructor(private config: OriginalsConfig) {}

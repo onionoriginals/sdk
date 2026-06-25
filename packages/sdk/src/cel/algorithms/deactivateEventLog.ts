@@ -7,9 +7,9 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-import type { EventLog, LogEntry, DeactivateOptions, DataIntegrityProof } from '../types';
-import { computeDigestMultibase } from '../hash';
-import { canonicalizeEntryForChain } from '../canonicalize';
+import type { EventLog, LogEntry, DeactivateOptions, DataIntegrityProof } from '../types.js';
+import { computeDigestMultibase } from '../hash.js';
+import { canonicalizeEntryForChain } from '../canonicalize.js';
 
 /**
  * Deactivates an event log by appending a final "deactivate" event.

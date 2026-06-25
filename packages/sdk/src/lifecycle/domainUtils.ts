@@ -1,4 +1,4 @@
-import { StructuredError } from '../utils/telemetry';
+import { StructuredError } from '../utils/telemetry.js';
 
 /**
  * Validate a domain string and return its normalized (trimmed, lowercased) form.

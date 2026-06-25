@@ -9,8 +9,8 @@ import type {
   ValidationError, 
   ValidationWarning,
   BaseManifest,
-} from '../types';
-import type { AssetResource } from '../../types/common';
+} from '../types.js';
+import type { AssetResource } from '../../types/common.js';
 
 /**
  * Interface for kind-specific validators

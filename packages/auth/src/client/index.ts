@@ -29,8 +29,8 @@ export {
   ensureWalletWithAccounts,
   TurnkeySessionExpiredError,
   withTokenExpiration,
-} from './turnkey-client';
+} from './turnkey-client.js';
 
-export { TurnkeyDIDSigner, createDIDWithTurnkey } from './turnkey-did-signer';
+export { TurnkeyDIDSigner, createDIDWithTurnkey } from './turnkey-did-signer.js';
 
-export { sendOtp, verifyOtp, type ServerAuthOptions } from './server-auth';
+export { sendOtp, verifyOtp, type ServerAuthOptions } from './server-auth.js';

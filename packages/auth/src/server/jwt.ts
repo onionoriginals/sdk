@@ -4,7 +4,7 @@
  */
 
 import jwt from 'jsonwebtoken';
-import type { TokenPayload, AuthCookieConfig } from '../types';
+import type { TokenPayload, AuthCookieConfig } from '../types.js';
 
 // 7 days in seconds
 const DEFAULT_JWT_EXPIRES_IN = 7 * 24 * 60 * 60;

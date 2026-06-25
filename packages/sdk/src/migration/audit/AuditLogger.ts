@@ -2,11 +2,11 @@
  * AuditLogger - Creates and manages migration audit records
  */
 
-import { MigrationAuditRecord, IAuditLogger } from '../types';
-import { OriginalsConfig } from '../../types';
+import { MigrationAuditRecord, IAuditLogger } from '../types.js';
+import { OriginalsConfig } from '../../types/index.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as ed25519 from '@noble/ed25519';
-import { encodeBase64UrlMultibase, base58, MULTIBASE_BASE58BTC_HEADER } from '../../utils/encoding';
+import { encodeBase64UrlMultibase, base58, MULTIBASE_BASE58BTC_HEADER } from '../../utils/encoding.js';
 
 /**
  * Key material for signing audit records with Ed25519. When omitted, the

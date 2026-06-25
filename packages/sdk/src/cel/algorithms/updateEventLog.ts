@@ -7,9 +7,9 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-import type { EventLog, LogEntry, UpdateOptions, DataIntegrityProof } from '../types';
-import { computeDigestMultibase } from '../hash';
-import { canonicalizeEntryForChain } from '../canonicalize';
+import type { EventLog, LogEntry, UpdateOptions, DataIntegrityProof } from '../types.js';
+import { computeDigestMultibase } from '../hash.js';
+import { canonicalizeEntryForChain } from '../canonicalize.js';
 
 /**
  * Updates an event log by appending a new "update" event.

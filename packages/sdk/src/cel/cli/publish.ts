@@ -8,7 +8,7 @@
  * Usage: originals-cel publish --log <path> --domain <domain> [options]
  */
 
-import { migrateCommand, type MigrateFlags } from './migrate';
+import { migrateCommand, type MigrateFlags } from './migrate.js';
 
 /**
  * Flags parsed from command line arguments

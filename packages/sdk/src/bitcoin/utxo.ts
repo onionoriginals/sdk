@@ -1,4 +1,4 @@
-import { DUST_LIMIT_SATS, Utxo } from '../types';
+import { DUST_LIMIT_SATS, Utxo } from '../types/index.js';
 
 export interface FeeEstimateOptions {
   bytesPerInput?: number;

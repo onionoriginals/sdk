@@ -7,12 +7,12 @@ import {
   MigrationError,
   MigrationErrorType,
   CostEstimate
-} from '../types';
-import { OriginalsConfig, DIDDocument } from '../../types';
-import { DIDManager } from '../../did/DIDManager';
-import { CredentialManager } from '../../vc/CredentialManager';
-import { StateTracker } from '../state/StateTracker';
-import { EventEmitter } from '../../events/EventEmitter';
+} from '../types.js';
+import { OriginalsConfig, DIDDocument } from '../../types/index.js';
+import { DIDManager } from '../../did/DIDManager.js';
+import { CredentialManager } from '../../vc/CredentialManager.js';
+import { StateTracker } from '../state/StateTracker.js';
+import { EventEmitter } from '../../events/EventEmitter.js';
 
 export abstract class BaseMigration {
   protected eventEmitter: EventEmitter;

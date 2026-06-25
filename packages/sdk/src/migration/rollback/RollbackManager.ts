@@ -8,10 +8,10 @@ import {
   MigrationError,
   MigrationErrorType,
   IRollbackManager
-} from '../types';
-import { OriginalsConfig } from '../../types';
-import { CheckpointManager } from '../checkpoint/CheckpointManager';
-import { DIDManager } from '../../did/DIDManager';
+} from '../types.js';
+import { OriginalsConfig } from '../../types/index.js';
+import { CheckpointManager } from '../checkpoint/CheckpointManager.js';
+import { DIDManager } from '../../did/DIDManager.js';
 
 export class RollbackManager implements IRollbackManager {
   constructor(

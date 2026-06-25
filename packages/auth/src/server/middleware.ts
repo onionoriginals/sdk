@@ -4,7 +4,7 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { verifyToken } from './jwt.js';
-import type { AuthMiddlewareOptions, AuthUser, AuthenticatedRequest } from '../types';
+import type { AuthMiddlewareOptions, AuthUser, AuthenticatedRequest } from '../types.js';
 
 /**
  * Create an authentication middleware for Express

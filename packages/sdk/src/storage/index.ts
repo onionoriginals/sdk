@@ -1,3 +1,3 @@
-export * from './StorageAdapter';
-export * from './MemoryStorageAdapter';
+export * from './StorageAdapter.js';
+export * from './MemoryStorageAdapter.js';
 

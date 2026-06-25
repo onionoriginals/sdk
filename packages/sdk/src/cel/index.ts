@@ -5,14 +5,14 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-export * from './types';
-export * from './hash';
-export * from './canonicalize';
-export * from './algorithms';
-export * from './witnesses';
-export * from './serialization';
-export * from './ExternalReferenceManager';
-export * from './layers';
-export * from './OriginalsCel';
-export * from './keyResolver';
-export { main as celCli } from './cli/index';
+export * from './types.js';
+export * from './hash.js';
+export * from './canonicalize.js';
+export * from './algorithms/index.js';
+export * from './witnesses/index.js';
+export * from './serialization/index.js';
+export * from './ExternalReferenceManager.js';
+export * from './layers/index.js';
+export * from './OriginalsCel.js';
+export * from './keyResolver.js';
+export { main as celCli } from './cli/index.js';

@@ -9,7 +9,7 @@
  * - Performance optimized (<1ms overhead per event)
  */
 
-import type { OriginalsEvent, EventHandler, EventTypeMap } from './types';
+import type { OriginalsEvent, EventHandler, EventTypeMap } from './types.js';
 
 /**
  * EventEmitter class for managing event subscriptions and emissions

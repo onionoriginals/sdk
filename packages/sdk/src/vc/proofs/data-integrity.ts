@@ -1,4 +1,4 @@
-import { EdDSACryptosuiteManager, type DataIntegrityProof } from '../cryptosuites/eddsa';
+import { EdDSACryptosuiteManager, type DataIntegrityProof } from '../cryptosuites/eddsa.js';
 
 export interface VerificationResult { verified: boolean; errors?: string[] }
 

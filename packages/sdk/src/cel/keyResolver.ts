@@ -1,5 +1,5 @@
-import type { DIDManager } from '../did/DIDManager';
-import { multikey } from '../crypto/Multikey';
+import type { DIDManager } from '../did/DIDManager.js';
+import { multikey } from '../crypto/Multikey.js';
 
 /**
  * Builds a CEL key resolver from a DIDManager. Resolves the proof's

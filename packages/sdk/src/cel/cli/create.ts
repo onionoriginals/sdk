@@ -10,13 +10,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { DataIntegrityProof } from '../types';
-import { PeerCelManager, CelSigner } from '../layers/PeerCelManager';
-import { createExternalReference } from '../ExternalReferenceManager';
-import { serializeEventLogJson } from '../serialization/json';
-import { serializeEventLogCbor } from '../serialization/cbor';
-import { multikey } from '../../crypto/Multikey';
-import { canonicalizeEvent } from '../canonicalize';
+import type { DataIntegrityProof } from '../types.js';
+import { PeerCelManager, CelSigner } from '../layers/PeerCelManager.js';
+import { createExternalReference } from '../ExternalReferenceManager.js';
+import { serializeEventLogJson } from '../serialization/json.js';
+import { serializeEventLogCbor } from '../serialization/cbor.js';
+import { multikey } from '../../crypto/Multikey.js';
+import { canonicalizeEvent } from '../canonicalize.js';
 
 /**
  * Flags parsed from command line arguments

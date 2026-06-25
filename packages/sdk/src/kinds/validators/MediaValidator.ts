@@ -4,8 +4,8 @@
  * Validates manifests for media content (image, audio, video) with format metadata.
  */
 
-import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types';
-import { BaseKindValidator, ValidationUtils } from './base';
+import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types.js';
+import { BaseKindValidator, ValidationUtils } from './base.js';
 
 /**
  * Valid media types

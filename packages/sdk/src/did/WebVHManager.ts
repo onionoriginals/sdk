@@ -1,7 +1,7 @@
-import { KeyManager } from './KeyManager';
-import { multikey } from '../crypto/Multikey';
-import { Ed25519Signer } from '../crypto/Signer';
-import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier } from '../types';
+import { KeyManager } from './KeyManager.js';
+import { multikey } from '../crypto/Multikey.js';
+import { Ed25519Signer } from '../crypto/Signer.js';
+import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier } from '../types/index.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { base58 } from '@scure/base';
 import * as fs from 'fs';

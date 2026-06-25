@@ -6,33 +6,33 @@ import {
   ExternalSigner,
   VerifiableCredential,
   LayerType
-} from '../types';
-import { BitcoinManager } from '../bitcoin/BitcoinManager';
-import { DIDManager } from '../did/DIDManager';
-import { CredentialManager } from '../vc/CredentialManager';
-import { OriginalsAsset } from './OriginalsAsset';
-import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter';
-import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding';
-import { validateBitcoinAddress } from '../utils/bitcoin-address';
-import { multikey } from '../crypto/Multikey';
-import { EventEmitter } from '../events/EventEmitter';
-import type { EventHandler, EventTypeMap } from '../events/types';
-import { Logger } from '../utils/Logger';
-import { StructuredError } from '../utils/telemetry';
-import { MetricsCollector } from '../utils/MetricsCollector';
+} from '../types/index.js';
+import { BitcoinManager } from '../bitcoin/BitcoinManager.js';
+import { DIDManager } from '../did/DIDManager.js';
+import { CredentialManager } from '../vc/CredentialManager.js';
+import { OriginalsAsset } from './OriginalsAsset.js';
+import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter.js';
+import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
+import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
+import { multikey } from '../crypto/Multikey.js';
+import { EventEmitter } from '../events/EventEmitter.js';
+import type { EventHandler, EventTypeMap } from '../events/types.js';
+import { Logger } from '../utils/Logger.js';
+import { StructuredError } from '../utils/telemetry.js';
+import { MetricsCollector } from '../utils/MetricsCollector.js';
 import {
   type BatchResult,
   type BatchOperationOptions,
   type BatchInscriptionOptions,
-} from './BatchOperations';
-import { BatchLifecycleOperations } from './BatchLifecycleOperations';
-import { validateAndNormalizeDomain } from './domainUtils';
+} from './BatchOperations.js';
+import { BatchLifecycleOperations } from './BatchLifecycleOperations.js';
+import { validateAndNormalizeDomain } from './domainUtils.js';
 import { 
   type OriginalKind, 
   type OriginalManifest, 
   type CreateTypedOriginalOptions,
   KindRegistry,
-} from '../kinds';
+} from '../kinds/index.js';
 
 /**
  * Cost estimation result for migration operations

@@ -1,4 +1,4 @@
-import type { Utxo } from '../types/bitcoin';
+import type { Utxo } from '../types/bitcoin.js';
 
 export interface PsbtOutput {
   address: string;

@@ -10,13 +10,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { EventLog, VerificationResult, DataIntegrityProof, WitnessProof } from '../types';
-import { verifyEventLog } from '../algorithms/verifyEventLog';
-import { createDidManagerKeyResolver } from '../keyResolver';
-import { parseEventLogJson } from '../serialization/json';
-import { parseEventLogCbor } from '../serialization/cbor';
-import { OriginalsSDK } from '../../core/OriginalsSDK';
-import type { BitcoinNetworkName } from '../../types/network';
+import type { EventLog, VerificationResult, DataIntegrityProof, WitnessProof } from '../types.js';
+import { verifyEventLog } from '../algorithms/verifyEventLog.js';
+import { createDidManagerKeyResolver } from '../keyResolver.js';
+import { parseEventLogJson } from '../serialization/json.js';
+import { parseEventLogCbor } from '../serialization/cbor.js';
+import { OriginalsSDK } from '../../core/OriginalsSDK.js';
+import type { BitcoinNetworkName } from '../../types/network.js';
 
 /**
  * Flags parsed from command line arguments

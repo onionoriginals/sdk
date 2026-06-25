@@ -54,10 +54,10 @@ export {
   type ValidationError,
   type ValidationWarning,
   type CreateTypedOriginalOptions,
-} from './types';
+} from './types.js';
 
 // Registry export
-export { KindRegistry } from './KindRegistry';
+export { KindRegistry } from './KindRegistry.js';
 
 // Validator exports (for extension/customization)
 export {
@@ -70,5 +70,5 @@ export {
   DatasetValidator,
   MediaValidator,
   DocumentValidator,
-} from './validators';
+} from './validators/index.js';
 

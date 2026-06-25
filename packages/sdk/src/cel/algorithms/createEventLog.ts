@@ -7,7 +7,7 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-import type { EventLog, LogEntry, CreateOptions, DataIntegrityProof } from '../types';
+import type { EventLog, LogEntry, CreateOptions, DataIntegrityProof } from '../types.js';
 
 /**
  * Creates a new event log with a single "create" event.

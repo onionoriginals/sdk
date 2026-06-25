@@ -9,11 +9,11 @@ import type {
   SignatureContribution,
   EscrowPolicy,
   CorporatePolicy,
-} from '../types';
-import type { OriginalsConfig } from '../types/common';
-import { computeCredentialDigest } from '../utils/credential-digest';
-import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding';
-import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer';
+} from '../types/index.js';
+import type { OriginalsConfig } from '../types/common.js';
+import { computeCredentialDigest } from '../utils/credential-digest.js';
+import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
+import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer.js';
 
 /**
  * MultiSigManager handles m-of-n multi-signature operations for verifiable credentials.

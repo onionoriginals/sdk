@@ -12,20 +12,20 @@ import {
   BatchMigrationOptions,
   BatchMigrationResult,
   CostEstimate
-} from './types';
-import { OriginalsConfig } from '../types';
-import { DIDManager } from '../did/DIDManager';
-import { CredentialManager } from '../vc/CredentialManager';
-import { BitcoinManager } from '../bitcoin/BitcoinManager';
-import { ValidationPipeline } from './validation/ValidationPipeline';
-import { CheckpointManager } from './checkpoint/CheckpointManager';
-import { RollbackManager } from './rollback/RollbackManager';
-import { StateTracker } from './state/StateTracker';
-import { AuditLogger, AuditSignerConfig } from './audit/AuditLogger';
-import { PeerToWebvhMigration } from './operations/PeerToWebvhMigration';
-import { WebvhToBtcoMigration } from './operations/WebvhToBtcoMigration';
-import { PeerToBtcoMigration } from './operations/PeerToBtcoMigration';
-import { EventEmitter } from '../events/EventEmitter';
+} from './types.js';
+import { OriginalsConfig } from '../types/index.js';
+import { DIDManager } from '../did/DIDManager.js';
+import { CredentialManager } from '../vc/CredentialManager.js';
+import { BitcoinManager } from '../bitcoin/BitcoinManager.js';
+import { ValidationPipeline } from './validation/ValidationPipeline.js';
+import { CheckpointManager } from './checkpoint/CheckpointManager.js';
+import { RollbackManager } from './rollback/RollbackManager.js';
+import { StateTracker } from './state/StateTracker.js';
+import { AuditLogger, AuditSignerConfig } from './audit/AuditLogger.js';
+import { PeerToWebvhMigration } from './operations/PeerToWebvhMigration.js';
+import { WebvhToBtcoMigration } from './operations/WebvhToBtcoMigration.js';
+import { PeerToBtcoMigration } from './operations/PeerToBtcoMigration.js';
+import { EventEmitter } from '../events/EventEmitter.js';
 
 export class MigrationManager {
   private static instance: MigrationManager | null = null;

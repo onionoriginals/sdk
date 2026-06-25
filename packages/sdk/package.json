@@ -53,8 +53,8 @@
       "import": "./dist/storage/*.js"
     },
     "./types": {
-      "types": "./dist/types.d.ts",
-      "import": "./dist/types.js"
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
     },
     "./types/*": {
       "types": "./dist/types/*.d.ts",
@@ -131,6 +131,6 @@
     "typescript": "^5.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.10.0"
   }
 }

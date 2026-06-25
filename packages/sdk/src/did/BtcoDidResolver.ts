@@ -1,4 +1,4 @@
-import type { DIDDocument } from '../types/did';
+import type { DIDDocument } from '../types/did.js';
 
 export interface BtcoInscriptionData {
   inscriptionId: string;

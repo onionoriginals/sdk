@@ -6,10 +6,10 @@
  * Part of the Originals Protocol SDK.
  */
 
-import { createCommand, CreateFlags } from './create';
-import { verifyCommand, VerifyFlags } from './verify';
-import { inspectCommand, InspectFlags } from './inspect';
-import { migrateCommand, MigrateFlags } from './migrate';
+import { createCommand, CreateFlags } from './create.js';
+import { verifyCommand, VerifyFlags } from './verify.js';
+import { inspectCommand, InspectFlags } from './inspect.js';
+import { migrateCommand, MigrateFlags } from './migrate.js';
 
 // Version from package.json - will be replaced at build time or read dynamically
 const VERSION = '1.5.0';

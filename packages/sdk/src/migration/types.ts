@@ -3,7 +3,7 @@
  * Defines all types used across the migration infrastructure
  */
 
-import { DIDDocument, VerifiableCredential } from '../types';
+import { DIDDocument, VerifiableCredential } from '../types/index.js';
 
 /**
  * DID layer types

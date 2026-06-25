@@ -5,7 +5,7 @@
  * Uses deterministic key ordering for consistent hashes.
  */
 
-import type { EventLog, LogEntry, DataIntegrityProof, WitnessProof } from '../types';
+import type { EventLog, LogEntry, DataIntegrityProof, WitnessProof } from '../types.js';
 
 /**
  * Sort object keys recursively for deterministic JSON output.

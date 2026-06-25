@@ -4,8 +4,8 @@
  * Validates manifests for structured data collections with schema definitions.
  */
 
-import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types';
-import { BaseKindValidator, ValidationUtils } from './base';
+import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types.js';
+import { BaseKindValidator, ValidationUtils } from './base.js';
 
 /**
  * Common data formats

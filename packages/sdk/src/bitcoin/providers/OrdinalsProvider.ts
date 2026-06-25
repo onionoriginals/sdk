@@ -1,5 +1,5 @@
-import { OrdinalsClient } from '../OrdinalsClient';
-import { withRetry } from '../../utils/retry';
+import { OrdinalsClient } from '../OrdinalsClient.js';
+import { withRetry } from '../../utils/retry.js';
 
 export interface OrdinalsProvider {
   getSatInfo(satNumber: string): Promise<{ inscription_ids: string[] }>;

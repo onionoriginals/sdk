@@ -8,8 +8,8 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-import type { WitnessProof } from '../types';
-import type { WitnessService } from './WitnessService';
+import type { WitnessProof } from '../types.js';
+import type { WitnessService } from './WitnessService.js';
 
 /**
  * Configuration options for HttpWitness

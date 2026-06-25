@@ -8,8 +8,8 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-import type { ExternalReference } from './types';
-import { computeDigestMultibase, verifyDigestMultibase } from './hash';
+import type { ExternalReference } from './types.js';
+import { computeDigestMultibase, verifyDigestMultibase } from './hash.js';
 
 /**
  * Creates an external reference for content.

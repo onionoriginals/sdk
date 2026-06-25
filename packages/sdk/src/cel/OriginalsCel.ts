@@ -36,13 +36,13 @@ import type {
   VerificationResult,
   VerifyOptions,
   AssetState
-} from './types';
-import { PeerCelManager, type PeerCelConfig, type CelSigner } from './layers/PeerCelManager';
-import { WebVHCelManager, type WebVHCelConfig } from './layers/WebVHCelManager';
-import { BtcoCelManager, type BtcoCelConfig } from './layers/BtcoCelManager';
-import { verifyEventLog } from './algorithms/verifyEventLog';
-import type { WitnessService } from './witnesses/WitnessService';
-import type { BitcoinManager } from '../bitcoin/BitcoinManager';
+} from './types.js';
+import { PeerCelManager, type PeerCelConfig, type CelSigner } from './layers/PeerCelManager.js';
+import { WebVHCelManager, type WebVHCelConfig } from './layers/WebVHCelManager.js';
+import { BtcoCelManager, type BtcoCelConfig } from './layers/BtcoCelManager.js';
+import { verifyEventLog } from './algorithms/verifyEventLog.js';
+import type { WitnessService } from './witnesses/WitnessService.js';
+import type { BitcoinManager } from '../bitcoin/BitcoinManager.js';
 
 /**
  * Supported layer types

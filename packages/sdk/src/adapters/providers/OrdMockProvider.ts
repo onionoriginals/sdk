@@ -1,4 +1,4 @@
-import { OrdinalsProvider } from '../types';
+import { OrdinalsProvider } from '../types.js';
 
 export interface OrdMockState {
   inscriptionsById: Map<string, {

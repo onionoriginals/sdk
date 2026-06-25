@@ -1,4 +1,4 @@
-import { FeeOracleAdapter } from './types';
+import { FeeOracleAdapter } from './types.js';
 
 export class FeeOracleMock implements FeeOracleAdapter {
   constructor(private feeRate = 7) {}

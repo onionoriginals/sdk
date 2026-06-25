@@ -6,8 +6,8 @@
  */
 
 // Re-export canonical DataIntegrityProof from shared types
-import type { DataIntegrityProof } from '../types/proof';
-export type { DataIntegrityProof } from '../types/proof';
+import type { DataIntegrityProof } from '../types/proof.js';
+export type { DataIntegrityProof } from '../types/proof.js';
 
 /**
  * Witness Proof - extends DataIntegrityProof with witness-specific fields

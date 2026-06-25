@@ -15,7 +15,7 @@
  * ```
  */
 
-export { createTurnkeyClient, getOrCreateTurnkeySubOrg } from './turnkey-client';
+export { createTurnkeyClient, getOrCreateTurnkeySubOrg } from './turnkey-client.js';
 export {
   initiateEmailAuth,
   verifyEmailAuth,
@@ -24,15 +24,15 @@ export {
   getSession,
   type SessionStorage,
   createInMemorySessionStorage,
-} from './email-auth';
+} from './email-auth.js';
 export {
   signToken,
   verifyToken,
   getAuthCookieConfig,
   getClearAuthCookieConfig,
-} from './jwt';
-export { createAuthMiddleware } from './middleware';
-export { TurnkeyWebVHSigner, createTurnkeySigner } from './turnkey-signer';
+} from './jwt.js';
+export { createAuthMiddleware } from './middleware.js';
+export { TurnkeyWebVHSigner, createTurnkeySigner } from './turnkey-signer.js';
 
 
 

@@ -10,7 +10,7 @@
  * - Async-safe operations
  */
 
-import type { OriginalsConfig } from '../types';
+import type { OriginalsConfig } from '../types/index.js';
 
 /**
  * Log level type

@@ -10,11 +10,11 @@
  * @see https://identity.foundation/didwebvh/
  */
 
-import type { EventLog, ExternalReference, UpdateOptions, AssetState } from '../types';
-import { updateEventLog } from '../algorithms/updateEventLog';
-import { witnessEvent } from '../algorithms/witnessEvent';
-import type { WitnessService } from '../witnesses/WitnessService';
-import type { CelSigner } from './PeerCelManager';
+import type { EventLog, ExternalReference, UpdateOptions, AssetState } from '../types.js';
+import { updateEventLog } from '../algorithms/updateEventLog.js';
+import { witnessEvent } from '../algorithms/witnessEvent.js';
+import type { WitnessService } from '../witnesses/WitnessService.js';
+import type { CelSigner } from './PeerCelManager.js';
 
 /**
  * Configuration options for WebVHCelManager

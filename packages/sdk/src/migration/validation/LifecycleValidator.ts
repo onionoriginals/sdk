@@ -8,9 +8,9 @@ import {
   ValidationError,
   ValidationWarning,
   IValidator
-} from '../types';
-import { OriginalsConfig } from '../../types';
-import type { DIDManager } from '../../did/DIDManager';
+} from '../types.js';
+import { OriginalsConfig } from '../../types/index.js';
+import type { DIDManager } from '../../did/DIDManager.js';
 
 export class LifecycleValidator implements IValidator {
   constructor(

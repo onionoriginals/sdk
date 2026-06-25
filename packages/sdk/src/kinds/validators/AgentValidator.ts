@@ -4,8 +4,8 @@
  * Validates manifests for AI agents or autonomous systems with capabilities and model info.
  */
 
-import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types';
-import { BaseKindValidator, ValidationUtils } from './base';
+import { OriginalKind, type OriginalManifest, type ValidationResult } from '../types.js';
+import { BaseKindValidator, ValidationUtils } from './base.js';
 
 /**
  * Known AI model providers
