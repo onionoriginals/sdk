@@ -222,6 +222,12 @@ export class BBSCryptosuiteManager {
     const labelMapFactoryFunction = createShuffledIdLabelMapFunction(hmacFn);
 
     const combinedPointers = [...parsed.mandatoryPointers, ...selectivePointers];
+    // With no mandatory and no selective pointers, selectJsonLd() returns null
+    // and the revealed document would drop its @context, yielding a proof whose
+    // recomputed proofHash can never match. Fail loudly instead.
+    if (combinedPointers.length === 0) {
+      throw new Error('BBS+ derive requires at least one mandatory or selective pointer');
+    }
     const groupDefinitions = {
       mandatory: parsed.mandatoryPointers,
       selective: selectivePointers,
@@ -331,13 +337,18 @@ export class BBSCryptosuiteManager {
       'baseline'
     );
 
+    // Carry challenge/domain through unchanged: createVerifyData re-derives the
+    // proofHash from the derived proof's options, and it must match the base
+    // proof's options (which fed the signed bbsHeader) or verification fails.
     const derivedProof: DataIntegrityProof = {
       type: 'DataIntegrityProof',
       cryptosuite: 'bbs-2023',
       created: proof.created,
       verificationMethod: proof.verificationMethod,
       proofPurpose: proof.proofPurpose,
-      proofValue
+      proofValue,
+      ...((proof as any).challenge && { challenge: (proof as any).challenge }),
+      ...((proof as any).domain && { domain: (proof as any).domain })
     };
 
     const revealDocument = { ...disclosure.revealDocument };
@@ -469,8 +480,11 @@ export class BBSCryptosuiteManager {
       }
 
       const decoded = decodeMultibaseB64url(proof.proofValue);
-      // Base proof headers are 0xd9 0x5d <even>; derived proofs use odd third byte.
-      const isBaseProof = decoded[0] === 0xd9 && decoded[1] === 0x5d && (decoded[2] & 1) === 0;
+      // W3C vc-di-bbs CBOR headers (0xd9 0x5d <tag>): base proofs use 0x02
+      // (baseline) / 0x04 / 0x06 / 0x08; derived (disclosure) proofs use 0x03
+      // (baseline) / 0x05 / 0x07. Match the tag explicitly rather than by parity.
+      const BASE_PROOF_TAGS = [0x02, 0x04, 0x06, 0x08];
+      const isBaseProof = decoded[0] === 0xd9 && decoded[1] === 0x5d && BASE_PROOF_TAGS.includes(decoded[2]);
 
       let publicKey: Uint8Array;
       try {
