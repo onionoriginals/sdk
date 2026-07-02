@@ -244,15 +244,14 @@ export class OriginalsCel {
     switch (currentLayer) {
       case 'peer':
         return this.peerManager.update(log, data);
-      case 'webvh': {
-        // For webvh, we need to use the webvh manager
-        // Get domain from the log if possible
-        const webvhDomain = this.extractDomainFromLog(log);
-        return this.getWebVHManager(webvhDomain).migrate(log).then(
-          // webvh manager doesn't have update, use peer manager's algorithm
-          () => this.peerManager.update(log, data)
-        );
-      }
+      case 'webvh':
+        // Updates use the same signed-append algorithm at every layer. The
+        // previous code ran a full webvh MIGRATION here (appending a signed
+        // migration event and invoking every configured witness) purely as a
+        // side effect and threw the result away — double-signing, burning
+        // witness attestations, and letting a migrate() failure block a valid
+        // update. Append the update directly, matching the peer/btco branches.
+        return this.peerManager.update(log, data);
       case 'btco':
         // For btco, updates use the same underlying algorithm
         return this.peerManager.update(log, data);

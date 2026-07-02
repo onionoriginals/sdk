@@ -102,7 +102,7 @@ The SDK supports external key management for production deployments:
 ```typescript
 interface ExternalSigner {
   sign(input: { document: Record<string, unknown>; proof: Record<string, unknown> }): Promise<{ proofValue: string }>;
-  getVerificationMethodId(): Promise<string> | string;
+  getVerificationMethodId(): string;
 }
 ```
 
@@ -208,7 +208,7 @@ State machine-driven asset migration with validation:
 ### Event System (src/events/)
 
 **EventEmitter (EventEmitter.ts)** - Type-safe event dispatching
-- Lifecycle events: asset.created, asset.migrated, resource.published
+- Lifecycle events: asset:created, asset:migrated, resource:published
 - Subscribe via `lifecycle.on(eventType, handler)`
 - Event types defined in events/types.ts
 

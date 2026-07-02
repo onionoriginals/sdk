@@ -28,7 +28,7 @@ import { OriginalsSDK, OrdMockProvider } from '@originals/sdk';
 
 // For testing/development - use mock provider
 const originals = OriginalsSDK.create({
-  network: 'testnet',
+  network: 'regtest',
   enableLogging: true,
   ordinalsProvider: new OrdMockProvider()
 });
@@ -38,7 +38,7 @@ const resources = [{
   id: 'my-artwork',
   type: 'image',
   contentType: 'image/png',
-  hash: 'sha256-hash-of-content'
+  hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 }];
 
 const draft = await originals.lifecycle.createDraft(resources);
@@ -123,23 +123,8 @@ import { OrdinalsClient } from '@originals/sdk';
 
 const sdk = OriginalsSDK.create({
   network: 'mainnet',
-  ordinalsProvider: new OrdinalsClient({
-    network: 'mainnet',
-    apiUrl: 'https://your-ord-api.com',
-    walletPrivateKey: process.env.BITCOIN_PRIVATE_KEY
-  })
-});
-```
-
-**Testnet:**
-```typescript
-const sdk = OriginalsSDK.create({
-  network: 'testnet',
-  ordinalsProvider: new OrdinalsClient({
-    network: 'testnet',
-    apiUrl: 'https://testnet.ord-api.com',
-    walletPrivateKey: process.env.TESTNET_PRIVATE_KEY
-  })
+  // OrdinalsClient(ordNodeRpcUrl, network)
+  ordinalsProvider: new OrdinalsClient('https://your-ord-node.example', 'mainnet')
 });
 ```
 
@@ -147,11 +132,15 @@ const sdk = OriginalsSDK.create({
 ```typescript
 const sdk = OriginalsSDK.create({
   network: 'signet',
-  ordinalsProvider: new OrdinalsClient({
-    network: 'signet',
-    apiUrl: 'https://signet.ord-api.com',
-    walletPrivateKey: process.env.SIGNET_PRIVATE_KEY
-  })
+  ordinalsProvider: new OrdinalsClient('https://signet.ord-node.example', 'signet')
+});
+```
+
+**Regtest (local development):**
+```typescript
+const sdk = OriginalsSDK.create({
+  network: 'regtest',
+  ordinalsProvider: new OrdinalsClient('http://localhost:3000', 'regtest')
 });
 ```
 
@@ -162,7 +151,7 @@ Optionally configure a fee oracle for dynamic fee estimation:
 ```typescript
 const sdk = OriginalsSDK.create({
   network: 'mainnet',
-  ordinalsProvider: new OrdinalsClient({...}),
+  ordinalsProvider: new OrdinalsClient('https://your-ord-node.example', 'mainnet'),
   feeOracle: {
     estimateFeeRate: async (targetBlocks: number) => {
       // Fetch current fee rates from your preferred source
