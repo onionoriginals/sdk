@@ -72,6 +72,62 @@ describe('diwings Verifier', () => {
     const res = await verifier.verifyCredential(badVc);
     expect(res.verified).toBe(false);
   });
+
+  test('verifyCredentialMultiSig rejects a single proof repeated to fake the threshold', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vc = await issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'Test'],
+        issuer: did,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:peer:subject1' }
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+    const proof = Array.isArray(vc.proof) ? vc.proof[0] : vc.proof;
+    const manipulated = { ...vc, proof: [proof, proof] } as any;
+
+    const policy: any = {
+      required: 2,
+      total: 3,
+      signerVerificationMethods: [(proof as any).verificationMethod, `${did}#keys-2`, `${did}#keys-3`]
+    };
+
+    const verifier = new Verifier(didManager);
+    const result = await verifier.verifyCredentialMultiSig(manipulated, policy);
+    expect(result.validSignatures).toBe(1);
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /duplicate/i.test(e))).toBe(true);
+  });
+
+  test('verifyCredentialMultiSig counts a valid proof preceded by an invalid one from the same signer', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vc = await issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'Test'],
+        issuer: did,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:peer:subject1' }
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+    const proof: any = Array.isArray(vc.proof) ? vc.proof[0] : vc.proof;
+    // An invalid proof from the same signer must not consume the signer's
+    // slot and suppress the later valid proof.
+    const tampered = { ...proof, proofValue: proof.proofValue.slice(0, -2) + (proof.proofValue.endsWith('aa') ? 'bb' : 'aa') };
+    const withInvalidFirst = { ...vc, proof: [tampered, proof] } as any;
+
+    const policy: any = {
+      required: 1,
+      total: 1,
+      signerVerificationMethods: [proof.verificationMethod]
+    };
+
+    const verifier = new Verifier(didManager);
+    const result = await verifier.verifyCredentialMultiSig(withInvalidFirst, policy);
+    expect(result.validSignatures).toBe(1);
+    expect(result.verified).toBe(true);
+  });
 });
 
 /** Inlined from Verifier.array-context-and-proof.part.ts */

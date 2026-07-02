@@ -138,12 +138,6 @@ export class Verifier {
           continue;
         }
 
-        if (seenSigners.has(vm)) {
-          result.errors.push(`Duplicate proof from ${vm} (ignored)`);
-          continue;
-        }
-        seenSigners.add(vm);
-
         try {
           const proofResult = await DataIntegrityProofManager.verifyProof(
             vc,
@@ -151,6 +145,14 @@ export class Verifier {
             { documentLoader: loader }
           );
           if (proofResult.verified) {
+            // Dedupe only after successful verification: an invalid proof
+            // must not consume the signer's slot and suppress a later valid
+            // proof from the same signer.
+            if (seenSigners.has(vm)) {
+              result.errors.push(`Duplicate proof from ${vm} (ignored)`);
+              continue;
+            }
+            seenSigners.add(vm);
             result.validSignatures++;
             result.validSigners.push(vm);
           } else {
