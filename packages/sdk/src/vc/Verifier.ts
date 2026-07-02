@@ -9,6 +9,50 @@ import { StatusListManager } from './StatusListManager.js';
 export type VerificationResult = { verified: boolean; errors: string[] };
 
 /**
+ * Enforce a credential's validity window: expirationDate/validUntil in the past,
+ * or validFrom/issuanceDate in the future, fail. A present-but-unparseable date
+ * fails closed. Shared between the Data Integrity and legacy verification paths
+ * so both reject expired credentials identically.
+ */
+export function checkCredentialValidityPeriod(vc: VerifiableCredential): VerificationResult {
+  const now = Date.now();
+  const doc = vc as unknown as Record<string, unknown>;
+
+  const invalid: string[] = [];
+  const parse = (field: string): number | null => {
+    const value = doc[field];
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string') { invalid.push(field); return null; }
+    const t = Date.parse(value);
+    if (Number.isNaN(t)) { invalid.push(field); return null; }
+    return t;
+  };
+
+  const expiration = parse('expirationDate');
+  const validUntil = parse('validUntil');
+  const validFrom = parse('validFrom');
+  const issuanceDate = parse('issuanceDate');
+
+  if (invalid.length > 0) {
+    return { verified: false, errors: [`Credential has unparseable date field(s): ${invalid.join(', ')}`] };
+  }
+
+  for (const [field, t] of [['expirationDate', expiration], ['validUntil', validUntil]] as const) {
+    if (t !== null && t < now) {
+      return { verified: false, errors: [`Credential expired (${field}: ${String(doc[field])})`] };
+    }
+  }
+
+  const startField = validFrom !== null ? 'validFrom' : 'issuanceDate';
+  const start = validFrom !== null ? validFrom : issuanceDate;
+  if (start !== null && start > now) {
+    return { verified: false, errors: [`Credential is not yet valid (${startField}: ${String(doc[startField])})`] };
+  }
+
+  return { verified: true, errors: [] };
+}
+
+/**
  * Optional resolver for fetching status list credentials during verification.
  * Implementations should fetch the credential from the given URL and return it.
  */
@@ -120,50 +164,11 @@ export class Verifier {
   }
 
   /**
-   * Enforce the credential's validity window: expirationDate/validUntil in
-   * the past, or validFrom/issuanceDate in the future, fail verification.
+   * Enforce the credential's validity window (delegates to the shared
+   * checkCredentialValidityPeriod so the legacy verify path stays in sync).
    */
   private checkValidityPeriod(vc: VerifiableCredential): VerificationResult {
-    const now = Date.now();
-    const doc = vc as unknown as Record<string, unknown>;
-
-    // A present-but-unparseable date fails closed: a signed but malformed
-    // expirationDate/validFrom must not bypass the time-window check by
-    // being silently treated as absent.
-    const invalid: string[] = [];
-    const parse = (field: string): number | null => {
-      const value = doc[field];
-      if (value === undefined || value === null) return null;
-      if (typeof value !== 'string') { invalid.push(field); return null; }
-      const t = Date.parse(value);
-      if (Number.isNaN(t)) { invalid.push(field); return null; }
-      return t;
-    };
-
-    const expiration = parse('expirationDate');
-    const validUntil = parse('validUntil');
-    const validFrom = parse('validFrom');
-    const issuanceDate = parse('issuanceDate');
-
-    if (invalid.length > 0) {
-      return { verified: false, errors: [`Credential has unparseable date field(s): ${invalid.join(', ')}`] };
-    }
-
-    for (const [field, t] of [['expirationDate', expiration], ['validUntil', validUntil]] as const) {
-      if (t !== null && t < now) {
-        return { verified: false, errors: [`Credential expired (${field}: ${String(doc[field])})`] };
-      }
-    }
-
-    // validFrom (VCDM 2.0) takes precedence; fall back to issuanceDate
-    // (VCDM 1.1) as the validity start.
-    const startField = validFrom !== null ? 'validFrom' : 'issuanceDate';
-    const start = validFrom !== null ? validFrom : issuanceDate;
-    if (start !== null && start > now) {
-      return { verified: false, errors: [`Credential is not yet valid (${startField}: ${String(doc[startField])})`] };
-    }
-
-    return { verified: true, errors: [] };
+    return checkCredentialValidityPeriod(vc);
   }
 
   /**
