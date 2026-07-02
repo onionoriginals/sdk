@@ -42,20 +42,26 @@ export class LifecycleValidator implements IValidator {
 
       // Path 2 (auto-detect via DID resolution): If a DIDManager is available
       // and the caller has NOT already flagged deactivation, resolve the source
-      // DID and treat a null result as a deactivation signal.
-      //
-      // Rationale: BtcoDidResolver sets didDocument to null when the inscription
-      // contains a deactivation marker (🔥), so DIDManager.resolveDID() returns
-      // null for a deactivated did:btco. For did:peer / did:webvh the resolver
-      // always returns a (possibly stub) document, so a null result specifically
-      // indicates a resolution failure that is treated conservatively as
-      // deactivation to prevent migration of an unresolvable asset.
+      // DID and treat a null result as a deactivation signal — but ONLY for
+      // did:btco. BtcoDidResolver returns a null document when the newest
+      // inscription is a deactivation tombstone (🔥), so null is a meaningful
+      // (if conservative — an unreachable ord endpoint also yields null)
+      // deactivation signal there. For did:peer / did:webvh, resolveDID
+      // returns null for ordinary resolution failures (network errors,
+      // missing logs); reporting those as ASSET_DEACTIVATED would misdiagnose
+      // a transient outage, so unresolvable non-btco DIDs are left to the
+      // DIDCompatibilityValidator, which reports SOURCE_DID_NOT_FOUND.
       //
       // We skip this check when the metadata flag already fired (to avoid
       // duplicating the error) and skip it when no DIDManager is wired in
       // (preserves backward-compatibility for callers that construct the
       // validator without a resolver).
-      if (deactivated !== true && this.didManager && options.sourceDid) {
+      if (
+        deactivated !== true &&
+        this.didManager &&
+        options.sourceDid &&
+        options.sourceDid.startsWith('did:btco:')
+      ) {
         let resolvedDoc: Awaited<ReturnType<DIDManager['resolveDID']>> | undefined;
         try {
           resolvedDoc = await this.didManager.resolveDID(options.sourceDid);

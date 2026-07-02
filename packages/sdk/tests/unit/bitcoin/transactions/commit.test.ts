@@ -481,8 +481,9 @@ describe('createCommitTransaction', () => {
       const params = createCommitParams(); // 14-byte content, 10 sat/vB
       const result = await createCommitTransaction(params);
       expect(result.commitAmount).toBeGreaterThan(546);
-      // 546 postage + ceil((10.5 + 57.5 + 43 + (14 + 200) / 4)) * 10 = 2196
-      expect(result.commitAmount).toBe(2196);
+      // 546 postage + reveal fee estimated from the real leaf script
+      // (envelope with contentType + 14-byte content) and control block.
+      expect(result.commitAmount).toBe(2076);
     });
 
     test('adds dust change to fee', async () => {

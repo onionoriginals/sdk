@@ -60,17 +60,18 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
 
   // Filter UTXOs based on policy
   let candidateUtxos = utxos.slice().filter(u => typeof u.value === 'number' && u.value > 0);
-  const hasLocked = candidateUtxos.some(u => u.locked);
-  if (hasLocked && !allowLocked) {
-    // If excluding locked leaves insufficient funds, surface a specific error later; but first mark conflict
-    // We'll check after filtering
-  }
-
+  const forbidInscribed = forbidInscriptionBearingInputs !== false;
+  const isInscribed = (u: Utxo): boolean => !!(u.inscriptions && u.inscriptions.length > 0);
+  // CONFLICTING_LOCKS is only an accurate diagnosis when unlocking could
+  // actually help — i.e. a locked UTXO exists that selection would otherwise
+  // be allowed to use. A locked UTXO that is also inscription-protected
+  // would still be excluded after unlocking.
+  const hasUsefulLocked = candidateUtxos.some(u => u.locked && !(forbidInscribed && isInscribed(u)));
   if (!allowLocked) {
     candidateUtxos = candidateUtxos.filter(u => !u.locked);
   }
-  if (forbidInscriptionBearingInputs !== false) {
-    candidateUtxos = candidateUtxos.filter(u => !u.inscriptions || u.inscriptions.length === 0);
+  if (forbidInscribed) {
+    candidateUtxos = candidateUtxos.filter(u => !isInscribed(u));
   }
 
   // Greedy accumulate until amount + fee is satisfied. Start with 2 outputs (recipient + change), adjust if change is dust.
@@ -106,7 +107,7 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
   }
 
   // If we got here, insufficient funds with the given policy
-  if (hasLocked && !allowLocked) {
+  if (hasUsefulLocked && !allowLocked) {
     const err = new UtxoSelectionError('CONFLICTING_LOCKS', 'CONFLICTING_LOCKS');
     throw err;
   }

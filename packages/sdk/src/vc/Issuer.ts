@@ -65,11 +65,13 @@ export class Issuer {
     // Best-effort existence check only: the Issuer signs with its own
     // verification method, so an unresolvable DID (e.g. a key registered
     // out-of-band, or an offline did:peer) must not block issuance.
-    // Verification is where resolution failures must fail closed.
+    // A RETIRED (revoked/compromised) verification method is different —
+    // signing with it must fail closed, so that loader error propagates.
     try {
       await documentLoader(this.verificationMethod.id);
-    } catch {
-      // proceed with the self-provided verification method
+    } catch (e) {
+      if (e instanceof Error && /retired/i.test(e.message)) throw e;
+      // otherwise proceed with the self-provided verification method
     }
 
     const issuerId = typeof unsigned.issuer === 'string' ? unsigned.issuer : (unsigned.issuer as { id?: string })?.id;
@@ -115,11 +117,13 @@ export class Issuer {
     options: IssueOptions
   ): Promise<VerifiablePresentation> {
     const documentLoader = options.documentLoader || createDocumentLoader(this.didManager);
-    // Best-effort existence check only (see issueCredential).
+    // Best-effort existence check only (see issueCredential); retired-key
+    // errors still fail closed.
     try {
       await documentLoader(this.verificationMethod.id);
-    } catch {
-      // proceed with the self-provided verification method
+    } catch (e) {
+      if (e instanceof Error && /retired/i.test(e.message)) throw e;
+      // otherwise proceed with the self-provided verification method
     }
 
     if (!this.verificationMethod.secretKeyMultibase) {

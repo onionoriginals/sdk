@@ -17,7 +17,9 @@ export class MemoryStorageAdapter implements StorageAdapter {
   putObject(domain: string, objectPath: string, content: Uint8Array | string): Promise<string> {
     // Copy on write: storing the caller's array would let later caller-side
     // mutation silently corrupt the "stored" bytes.
-    const data = typeof content === 'string' ? new TextEncoder().encode(content) : content.slice();
+    // new Uint8Array(view) copies; .slice() would return a SHARED view when
+    // the caller passes a Buffer (Buffer.prototype.slice overrides it).
+    const data = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
     globalStore.set(key(domain, objectPath), data);
     return Promise.resolve(`mem://${domain}/${objectPath.replace(/^\/+/, '')}`);
   }
@@ -26,7 +28,7 @@ export class MemoryStorageAdapter implements StorageAdapter {
     const stored = globalStore.get(key(domain, objectPath));
     if (!stored) return Promise.resolve(null);
     // Copy on read for the same reason as put.
-    return Promise.resolve({ content: stored.slice() });
+    return Promise.resolve({ content: new Uint8Array(stored) });
   }
 
   exists(domain: string, objectPath: string): Promise<boolean> {

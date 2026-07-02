@@ -135,8 +135,10 @@ export class BtcoDidResolver {
           const timeoutId = setTimeout(() => controller.abort(), timeout);
 
           try {
+            // Do NOT clear the timer here: the body read below must also be
+            // covered by the timeout, or a server that stalls mid-stream
+            // hangs resolution forever. The finally clears it.
             const response = await fetchFn(inscription.content_url, { signal: controller.signal });
-            clearTimeout(timeoutId);
 
             if (!response.ok) {
               throw new Error(`HTTP ${response.status}: ${response.statusText}`);

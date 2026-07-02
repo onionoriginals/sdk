@@ -288,6 +288,19 @@ export class BitcoinManager {
     // Validate that a did:btco DID exists on Bitcoin
     const satoshi = this.extractSatoshiFromBTCODID(didId);
     if (!satoshi) return false;
+
+    // The DID's network prefix must match the configured network: the
+    // satoshi lookup below runs against this.config.network's provider, so
+    // validating e.g. a did:btco:reg DID against mainnet would report a
+    // regtest DID as "existing" whenever the bare number happens to carry a
+    // mainnet inscription.
+    const prefix = didId.split(':')[2];
+    const expectedPrefix =
+      this.config.network === 'regtest' ? 'reg'
+        : this.config.network === 'signet' ? 'sig'
+          : null; // mainnet DIDs have no network prefix (did:btco:<sat>)
+    const actualPrefix = prefix === 'reg' || prefix === 'sig' || prefix === 'test' ? prefix : null;
+    if (actualPrefix !== expectedPrefix) return false;
     
     // Validate the extracted satoshi number
     const validation = validateSatoshiNumber(satoshi);

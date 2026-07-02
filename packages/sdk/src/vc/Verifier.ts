@@ -43,8 +43,12 @@ export class Verifier {
         return validityResult;
       }
 
-      // Check credential status (revocation/suspension) if requested
-      if (options.checkStatus !== false && vc.credentialStatus) {
+      // Check credential status (revocation/suspension) if requested. Only
+      // BitstringStatusListEntry is evaluable by this verifier; unknown
+      // status types are ignored (checkCredentialStatus treats them as
+      // no-ops), so they must not trip the fail-closed resolver check.
+      const statusType = (vc.credentialStatus as BitstringStatusListEntry | undefined)?.type;
+      if (options.checkStatus !== false && statusType === 'BitstringStatusListEntry') {
         if (!this.statusListResolver) {
           // Fail closed: the credential declares a status entry but this
           // verifier has no way to check it. Silently returning verified
@@ -92,9 +96,13 @@ export class Verifier {
       }
     }
 
+    // validFrom (VCDM 2.0) takes precedence; fall back to issuanceDate
+    // (VCDM 1.1) as the validity start.
     const validFrom = parse('validFrom');
-    if (validFrom !== null && validFrom > now) {
-      return { verified: false, errors: [`Credential is not yet valid (validFrom: ${String(doc.validFrom)})`] };
+    const startField = validFrom !== null ? 'validFrom' : 'issuanceDate';
+    const start = validFrom !== null ? validFrom : parse('issuanceDate');
+    if (start !== null && start > now) {
+      return { verified: false, errors: [`Credential is not yet valid (${startField}: ${String(doc[startField])})`] };
     }
 
     return { verified: true, errors: [] };

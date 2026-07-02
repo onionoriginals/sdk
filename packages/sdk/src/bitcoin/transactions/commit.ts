@@ -138,20 +138,22 @@ function estimateCommitTxSize(inputCount: number, outputCount: number): number {
 
 /**
  * Estimates the size of the reveal transaction that will spend the commit
- * output: one taproot script-path input carrying the inscription envelope
- * (script including the content, plus signature and control block, all
- * witness-discounted 4x) and one P2TR output for the inscribed satoshi.
+ * output: one taproot script-path input whose witness carries the actual
+ * inscription envelope script (content, contentType, metadata, pointer),
+ * the schnorr signature and the control block (all witness-discounted 4x),
+ * and one P2TR output for the inscribed satoshi.
  *
- * @param contentLength - Inscription content length in bytes
+ * @param scriptLength - Serialized inscription leaf script length in bytes
+ * @param controlBlockLength - Control block length in bytes
  * @returns Estimated reveal transaction size in virtual bytes
  */
-function estimateRevealTxSize(contentLength: number): number {
+function estimateRevealTxSize(scriptLength: number, controlBlockLength: number): number {
   const overhead = 10.5;
   const inputBase = 57.5; // taproot input without witness
   const outputSize = 43; // P2TR output
-  // Envelope script overhead (~100 bytes) + schnorr signature (~65 bytes) +
-  // control block (~33 bytes), all in the witness alongside the content.
-  const witnessBytes = contentLength + 200;
+  // Witness: schnorr signature (~65 bytes incl. length prefixes) + the real
+  // envelope script + control block.
+  const witnessBytes = 65 + scriptLength + controlBlockLength;
   return Math.ceil(overhead + inputBase + outputSize + witnessBytes / 4);
 }
 
@@ -371,7 +373,10 @@ export async function createCommitTransaction(
   // bare-dust commit output could never be revealed. Default to
   // postage + estimated reveal fee; an explicit minimumCommitAmount can
   // raise (but not lower) that floor.
-  const revealFee = Number(calculateFee(estimateRevealTxSize(content.length), feeRate));
+  // Estimate from the real serialized leaf script (which embeds content,
+  // contentType, metadata and pointer tags) so large metadata or MIME types
+  // cannot silently underfund the reveal.
+  const revealFee = Number(calculateFee(estimateRevealTxSize(leaf.script.length, controlBlock.length), feeRate));
   const requiredForReveal = MIN_DUST_LIMIT + revealFee;
   const commitOutputValue = Math.max(minimumCommitAmount, requiredForReveal);
 
