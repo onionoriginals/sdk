@@ -11,11 +11,11 @@
     },
     "packages/auth": {
       "name": "@originals/auth",
-      "version": "1.9.0",
+      "version": "2.0.0",
       "dependencies": {
         "@noble/ed25519": "^2.0.0",
         "@noble/hashes": "^2.0.1",
-        "@originals/sdk": "^1.4.4",
+        "@originals/sdk": "^2.0.0",
         "@turnkey/sdk-server": "^5.0.0",
         "jsonwebtoken": "^9.0.2",
       },
@@ -41,7 +41,7 @@
     },
     "packages/sdk": {
       "name": "@originals/sdk",
-      "version": "1.9.0",
+      "version": "2.0.0",
       "bin": {
         "originals-cel": "./dist/cel/cli/index.js",
       },
@@ -78,6 +78,9 @@
         "typescript": "^5.0.0",
       },
     },
+  },
+  "overrides": {
+    "human-id": "4.1.1",
   },
   "packages": {
     "@adraffy/ens-normalize": ["@adraffy/ens-normalize@1.11.1", "", {}, "sha512-nhCBV3quEgesuf7c7KYfperqSS14T8bYuvJ8PcLJp6znkZpFc0AuW4qBtr8eKVyPPe/8RSr7sglCWPU5eaxwKQ=="],
@@ -690,7 +693,7 @@
 
     "hasown": ["hasown@2.0.2", "", { "dependencies": { "function-bind": "^1.1.2" } }, "sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ=="],
 
-    "human-id": ["human-id@4.2.0", "", { "bin": { "human-id": "dist/cli.js" } }, "sha512-K3GbkIWqyvvlpfhBPlbEvD97TtqBpAYA4kt+cn2lD2x2HuohzZCibcA2nOlnJT6exqvJLggoB5nv2dNf192nEA=="],
+    "human-id": ["human-id@4.1.1", "", { "bin": { "human-id": "dist/cli.js" } }, "sha512-3gKm/gCSUipeLsRYZbbdA1BD83lBoWUkZ7G9VFrhWPAU76KwYo5KR8V28bpoPm/ygy0x5/GCbpRQdY7VLYCoIg=="],
 
     "iconv-lite": ["iconv-lite@0.7.2", "", { "dependencies": { "safer-buffer": ">= 2.1.2 < 3.0.0" } }, "sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw=="],
 
