@@ -417,12 +417,14 @@ describe('verifyEventLog', () => {
   });
 
   describe('multiple proofs per event', () => {
-    test('verifies event with multiple valid proofs (all did:key, resolved offline)', async () => {
-      // Both proofs must pass; use real did:key signers for both controller and witness.
-      const { signer: s1, verificationMethod: vm1 } = await makeRealSigner();
-      const { signer: s2, verificationMethod: vm2 } = await makeRealSigner();
+    test('rejects a create event carrying more than one controller proof (ambiguous authority)', async () => {
+      // The create event's proof array is not signed, so a second controller
+      // proof cannot be trusted to establish authority — it is exactly how an
+      // attacker would inject a co-signer. Such a create event is rejected even
+      // when both proofs are individually valid.
+      const { signer: s1 } = await makeRealSigner();
+      const { signer: s2 } = await makeRealSigner();
 
-      // Build the event data manually — two proofs sign the same canonical payload.
       const eventData = { name: 'Test' };
       const proof1 = await s1({ type: 'create', data: eventData });
       const proof2 = await s2({ type: 'create', data: eventData });
@@ -437,8 +439,8 @@ describe('verifyEventLog', () => {
 
       const result = await verifyEventLog(log);
 
-      expect(result.verified).toBe(true);
-      expect(result.events[0].proofValid).toBe(true);
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /exactly one controller proof/.test(e))).toBe(true);
     });
 
     test('verifies event with one valid and one non-did:key proof (second fails closed)', async () => {

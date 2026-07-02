@@ -503,18 +503,31 @@ export async function verifyEventLog(
     };
   }
 
-  // Establish the authorized controller key set from the create event
-  // (event 0). Its controller proofs — the non-witness proofs — define the
-  // keys (by resolved public-key material) allowed to sign every subsequent
-  // event in the log (trust-on-first-use root of authority). The current CEL
-  // data model has no in-log key-rotation mechanism, so this set is fixed by
-  // the create event.
+  // Establish the authorized controller key from the create event (event 0):
+  // the trust-on-first-use root of authority. The current CEL data model has
+  // no in-log key-rotation mechanism, so this key is fixed by the create event.
+  //
+  // SECURITY: the hash chain and the controller signature cover only
+  // { type, data, previousEvent } — NOT the proof array. So an attacker can
+  // append their own valid controller proof to the create event without
+  // breaking the chain or the owner's signature. If we seeded the authorized
+  // set from ALL of the create event's controller proofs, that injected key
+  // would become authorized and could sign forged later events. To close this,
+  // the create event must carry EXACTLY ONE controller proof; more than one is
+  // treated as tampering (its unsigned proof array cannot disambiguate the
+  // real root from an injected co-signer) and fails the whole log.
   const createEvent = log.events[0];
+  const createControllerProofs = (createEvent.proof ?? []).filter(p => !isWitnessProof(p));
   const authorizedKeyIds = new Set<string>();
-  for (const p of createEvent.proof ?? []) {
-    if (isWitnessProof(p)) continue;
-    const keyHex = await resolveControllerKeyHex(p.verificationMethod, options?.resolveKey);
-    if (keyHex) authorizedKeyIds.add(keyHex);
+  let authorityError: string | undefined;
+  if (createControllerProofs.length !== 1) {
+    authorityError =
+      `Create event must have exactly one controller proof to establish authority (found ` +
+      `${createControllerProofs.length}); the create event's proof array is not signed, so ` +
+      `additional controller proofs cannot be trusted.`;
+  } else {
+    const rootKeyHex = await resolveControllerKeyHex(createControllerProofs[0].verificationMethod, options?.resolveKey);
+    if (rootKeyHex) authorizedKeyIds.add(rootKeyHex);
   }
 
   // Verify each event's proofs and hash chain
@@ -529,12 +542,17 @@ export async function verifyEventLog(
     }
   }
 
-  // Determine overall verification status (both proofs AND chain must be valid)
+  // Determine overall verification status (both proofs AND chain must be valid,
+  // and the create event must establish a single unambiguous authority key).
   const allProofsValid = eventVerifications.every(ev => ev.proofValid);
   const allChainsValid = eventVerifications.every(ev => ev.chainValid);
 
+  if (authorityError) {
+    errors.unshift(authorityError);
+  }
+
   return {
-    verified: allProofsValid && allChainsValid,
+    verified: allProofsValid && allChainsValid && !authorityError,
     errors,
     events: eventVerifications,
   };

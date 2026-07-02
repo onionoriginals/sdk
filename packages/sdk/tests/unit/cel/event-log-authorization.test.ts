@@ -89,6 +89,30 @@ describe('CEL event-log authorization and btco verifiability', () => {
     expect(result.errors.some(e => /not authorized by the log's create event/.test(e))).toBe(true);
   });
 
+  it('rejects a co-signer proof appended to the create event', async () => {
+    // The create event's signature and the hash chain cover only
+    // {type,data,previousEvent}, not the proof array — so an attacker can
+    // append their own valid controller proof to event 0 (keeping the owner's)
+    // and, without this guard, become an authorized signer for later events.
+    const owner = makeSigner();
+    const log = await new PeerCelManager(owner as any).create('Owner Asset', []);
+
+    const attacker = makeSigner();
+    const ev0 = log.events[0];
+    const attackerProof = await (attacker as any)({ type: ev0.type, data: ev0.data });
+    (ev0.proof as any[]).push(attackerProof);
+
+    // Attacker appends a forged update signed with their now-"authorized" key.
+    const forged = await updateEventLog(log, { name: 'Hijacked' }, {
+      signer: attacker as any,
+      verificationMethod: 'ignored',
+    });
+
+    const result = await verifyEventLog(forged);
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /exactly one controller proof/.test(e))).toBe(true);
+  });
+
   it('accepts an update signed by the same controller key', async () => {
     const owner = makeSigner();
     const peer = new PeerCelManager(owner as any);
