@@ -107,26 +107,29 @@ describe('CEL-CORE-012/happy – webvh→btco migration via BtcoCelManager', () 
     expect(typeof data.sourceDid).toBe('string');
     expect((data.sourceDid as string).startsWith('did:webvh:')).toBe(true);
 
-    // Target DID must be a valid btco DID.
-    expect(typeof data.targetDid).toBe('string');
-    expect((data.targetDid as string).startsWith('did:btco:')).toBe(true);
+    // targetDid is NOT in the signed data — the resolvable did:btco:<satoshi>
+    // is derived from the bitcoin witness proof's satoshi (only known after
+    // inscription).
+    expect(data.targetDid).toBeUndefined();
+    const bpCore = (finalEvent.proof as any[]).find(p => p.cryptosuite === 'bitcoin-ordinals-2024');
+    expect(String(bpCore.satoshi).length).toBeGreaterThan(0);
   });
 
   it('migration data contains Bitcoin transaction references (txid and inscriptionId)', () => {
     const finalEvent = btcoLog.events[btcoLog.events.length - 1];
-    const data = finalEvent.data as Record<string, unknown>;
+    // txid/inscriptionId are carried in the bitcoin witness proof (not the
+    // signed data, which can't know them before inscription).
+    const bp = (finalEvent.proof as any[]).find(p => p.cryptosuite === 'bitcoin-ordinals-2024') as Record<string, unknown>;
+    expect(bp).toBeDefined();
 
-    // txid must be a non-empty string.
-    expect(typeof data.txid).toBe('string');
-    expect((data.txid as string).length).toBeGreaterThan(0);
-
-    // inscriptionId must be a non-empty string.
-    expect(typeof data.inscriptionId).toBe('string');
-    expect((data.inscriptionId as string).length).toBeGreaterThan(0);
+    expect(typeof bp.txid).toBe('string');
+    expect((bp.txid as string).length).toBeGreaterThan(0);
+    expect(typeof bp.inscriptionId).toBe('string');
+    expect((bp.inscriptionId as string).length).toBeGreaterThan(0);
 
     // Confirm the values match what BitcoinManager returned.
-    expect(data.txid).toBe('deadbeef01020304');
-    expect(data.inscriptionId).toBe('deadbeef01020304i0');
+    expect(bp.txid).toBe('deadbeef01020304');
+    expect(bp.inscriptionId).toBe('deadbeef01020304i0');
   });
 });
 

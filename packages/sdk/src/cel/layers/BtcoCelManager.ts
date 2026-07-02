@@ -36,8 +36,13 @@ export interface BtcoCelConfig {
 export interface BtcoMigrationData {
   /** The source DID from the previous layer */
   sourceDid: string;
-  /** The new did:btco DID */
-  targetDid: string;
+  /**
+   * The resolvable did:btco:<satoshi> DID. Optional in the signed event data:
+   * the satoshi is only known after inscription, so it is carried in the
+   * bitcoin witness proof and the DID is derived from there during state
+   * derivation rather than being embedded in (and signed as part of) the data.
+   */
+  targetDid?: string;
   /** The target layer */
   layer: 'btco';
   /** The Bitcoin transaction ID anchoring the migration */
@@ -173,10 +178,19 @@ export class BtcoCelManager {
       throw new Error('Cannot migrate a deactivated event log');
     }
 
-    // Prepare initial migration data (will be updated with Bitcoin details after witnessing)
+    // Finalize the migration data BEFORE signing. The controller signature and
+    // the witness digest both commit to {type, data, previousEvent}; mutating
+    // `data` after signing (as this code previously did to splice in
+    // txid/inscriptionId) invalidates both, so every btco log failed
+    // verification. The Bitcoin details cannot be known before the inscription
+    // (chicken-and-egg): txid, inscriptionId AND the satoshi that forms the
+    // canonical did:btco:<sat> identifier all come from the inscription. They
+    // are therefore NOT part of the signed data — they live in the bitcoin
+    // witness proof (added after signing, excluded from the chain digest) and
+    // the resolvable targetDid is derived from the proof's satoshi at
+    // state-derivation time.
     const migrationData: BtcoMigrationData = {
       sourceDid: currentDid,
-      targetDid: '', // Will be set after inscription
       layer: 'btco',
       migratedAt: new Date().toISOString(),
     };
@@ -188,109 +202,22 @@ export class BtcoCelManager {
       proofPurpose: this.config.proofPurpose,
     };
 
-    // Create the update event with migration data
-    let updatedLog = await updateEventLog(webvhLog, migrationData, updateOptions);
+    // Create the (final, signed) update event with the migration data.
+    const updatedLog = await updateEventLog(webvhLog, migrationData, updateOptions);
 
-    // Add Bitcoin witness proof (REQUIRED at btco layer)
+    // Add the Bitcoin witness proof (REQUIRED at btco layer). This attests the
+    // already-signed event content and appends the txid/inscriptionId; it does
+    // not — and must not — alter the signed `data`.
     const lastEventIndex = updatedLog.events.length - 1;
-    let witnessedEvent = updatedLog.events[lastEventIndex];
-    
-    // Witness the event on Bitcoin
-    witnessedEvent = await witnessEvent(witnessedEvent, this.bitcoinWitness);
+    const witnessedEvent = await witnessEvent(updatedLog.events[lastEventIndex], this.bitcoinWitness);
 
-    // Extract Bitcoin details from the witness proof
-    const bitcoinProof = witnessedEvent.proof.find(
-      p => p.cryptosuite === 'bitcoin-ordinals-2024'
-    ) as Record<string, unknown> | undefined;
-
-    // Generate did:btco DID using inscription ID
-    let targetDid: string;
-    let txid: string | undefined;
-    let inscriptionId: string | undefined;
-
-    if (bitcoinProof) {
-      txid = bitcoinProof.txid as string;
-      inscriptionId = bitcoinProof.inscriptionId as string;
-      
-      // did:btco format uses the inscription ID for identification
-      if (inscriptionId) {
-        // Sanitize inscription ID for DID (remove special chars)
-        const sanitizedId = inscriptionId.replace(/[^a-zA-Z0-9]/g, '');
-        targetDid = `did:btco:${sanitizedId}`;
-      } else if (txid) {
-        targetDid = `did:btco:${txid}`;
-      } else {
-        // Fallback: derive from source DID
-        targetDid = this.generateBtcoDid(currentDid);
-      }
-    } else {
-      // Fallback: derive from source DID (shouldn't happen since witness is required)
-      targetDid = this.generateBtcoDid(currentDid);
-    }
-
-    // Update migration data with Bitcoin details
-    const updatedMigrationData: BtcoMigrationData = {
-      ...migrationData,
-      targetDid,
-      txid,
-      inscriptionId,
-    };
-
-    // Replace the event data with updated migration data
-    witnessedEvent = {
-      ...witnessedEvent,
-      data: updatedMigrationData,
-    };
-
-    // Replace the last event with the witnessed version
-    updatedLog = {
+    return {
       ...updatedLog,
       events: [
         ...updatedLog.events.slice(0, lastEventIndex),
         witnessedEvent,
       ],
     };
-
-    return updatedLog;
-  }
-
-  /**
-   * Generates a did:btco DID fallback from source DID
-   * 
-   * @param sourceDid - The source DID to derive from
-   * @returns A did:btco string
-   */
-  private generateBtcoDid(sourceDid: string): string {
-    // Extract identifier portion from source DID
-    let idPart: string;
-    
-    if (sourceDid.startsWith('did:webvh:')) {
-      // For webvh DIDs, extract the identifier after domain
-      const parts = sourceDid.split(':');
-      idPart = parts.length > 3 ? parts.slice(3).join('') : this.hashIdentifier(sourceDid);
-    } else {
-      // For other DIDs, create a hash-based identifier
-      idPart = this.hashIdentifier(sourceDid);
-    }
-
-    // Sanitize for DID (alphanumeric only)
-    idPart = idPart.replace(/[^a-zA-Z0-9]/g, '').substring(0, 64);
-
-    return `did:btco:${idPart}`;
-  }
-
-  /**
-   * Creates a URL-safe hash-based identifier from a string
-   */
-  private hashIdentifier(input: string): string {
-    // Simple hash for identifier generation (not cryptographic)
-    let hash = 0;
-    for (let i = 0; i < input.length; i++) {
-      const char = input.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
-    }
-    return Math.abs(hash).toString(36);
   }
 
   /**
@@ -334,27 +261,47 @@ export class BtcoCelManager {
       if (event.type === 'update') {
         const updateData = event.data as Record<string, unknown>;
         
-        // Check if this is a migration event
-        if (updateData.targetDid && updateData.layer) {
+        // Check if this is a migration event. Migration events carry a
+        // sourceDid + layer; regular updates don't. (btco migrations no longer
+        // carry targetDid in the signed data — see below.)
+        if (updateData.sourceDid && updateData.layer) {
           // Migration event - update DID and layer
-          state.did = updateData.targetDid as string;
           state.layer = updateData.layer as 'peer' | 'webvh' | 'btco';
           state.updatedAt = updateData.migratedAt as string;
-          
+
           // Store migration info in metadata
           state.metadata = state.metadata || {};
           state.metadata.sourceDid = updateData.sourceDid;
-          
-          // Store Bitcoin-specific metadata for btco layer
+
+          // For btco, the Bitcoin details (txid, inscriptionId, satoshi) are
+          // NOT in the signed data — they can't be known before inscription.
+          // They are read from the bitcoin witness proof, and the resolvable
+          // did:btco:<satoshi> DID is derived from the proof's satoshi.
           if (updateData.layer === 'btco') {
-            if (updateData.txid) {
-              state.metadata.txid = updateData.txid;
+            const bitcoinProof = (event.proof as ReadonlyArray<unknown> | undefined)?.find(
+              (p): p is Record<string, unknown> =>
+                !!p && typeof p === 'object' && (p as Record<string, unknown>).cryptosuite === 'bitcoin-ordinals-2024'
+            );
+            if (bitcoinProof?.txid) {
+              state.metadata.txid = bitcoinProof.txid;
             }
-            if (updateData.inscriptionId) {
-              state.metadata.inscriptionId = updateData.inscriptionId;
+            if (bitcoinProof?.inscriptionId) {
+              state.metadata.inscriptionId = bitcoinProof.inscriptionId;
             }
-          } else if (updateData.domain) {
-            state.metadata.domain = updateData.domain;
+            if (bitcoinProof?.satoshi) {
+              state.metadata.satoshi = bitcoinProof.satoshi;
+              // Canonical, resolvable did:btco identifier (numeric satoshi).
+              state.did = `did:btco:${bitcoinProof.satoshi as string}`;
+            }
+          } else {
+            // Non-btco (webvh) migrations carry their targetDid in the data
+            // (domain-derived, known at signing time).
+            if (updateData.targetDid) {
+              state.did = updateData.targetDid as string;
+            }
+            if (updateData.domain) {
+              state.metadata.domain = updateData.domain;
+            }
           }
         } else {
           // Regular update event

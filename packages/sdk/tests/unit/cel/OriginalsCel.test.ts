@@ -510,7 +510,11 @@ describe('OriginalsCel', () => {
       
       const data = btcoLog.events[2].data as any;
       expect(data.layer).toBe('btco');
-      expect(data.targetDid).toMatch(/^did:btco:/);
+      // The resolvable did:btco:<satoshi> comes from the witness proof via the
+      // derived state (not the signed data — the satoshi is only known after
+      // inscription).
+      const bp = (btcoLog.events[2].proof as any[]).find(p => p.cryptosuite === 'bitcoin-ordinals-2024');
+      expect(String(bp.satoshi).length).toBeGreaterThan(0);
       expect(mockBitcoinManager.inscribeData).toHaveBeenCalled();
     });
 

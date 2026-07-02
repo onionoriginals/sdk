@@ -263,6 +263,22 @@ describe('BitcoinWitness', () => {
         .rejects.toThrow('did not return a transaction ID');
     });
 
+    it('throws error when inscription returns no satoshi', async () => {
+      // Without a satoshi there is no canonical did:btco:<sat> identifier, so
+      // the witness must fail closed rather than emit a log that derives an
+      // inconsistent (webvh) DID at the btco layer.
+      const badManager = createMockBitcoinManager({
+        inscribeData: vi.fn().mockResolvedValue({
+          ...mockInscription,
+          satoshi: '',
+        }),
+      });
+      const witness = new BitcoinWitness(badManager);
+
+      await expect(witness.witness(testDigest))
+        .rejects.toThrow('did not return a satoshi ordinal');
+    });
+
     it('wraps non-Error throws', async () => {
       const errorManager = createMockBitcoinManager({
         inscribeData: vi.fn().mockRejectedValue('String error'),

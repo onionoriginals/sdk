@@ -417,12 +417,14 @@ describe('verifyEventLog', () => {
   });
 
   describe('multiple proofs per event', () => {
-    test('verifies event with multiple valid proofs (all did:key, resolved offline)', async () => {
-      // Both proofs must pass; use real did:key signers for both controller and witness.
-      const { signer: s1, verificationMethod: vm1 } = await makeRealSigner();
-      const { signer: s2, verificationMethod: vm2 } = await makeRealSigner();
+    test('rejects a create event carrying more than one controller proof (ambiguous authority)', async () => {
+      // The create event's proof array is not signed, so a second controller
+      // proof cannot be trusted to establish authority — it is exactly how an
+      // attacker would inject a co-signer. Such a create event is rejected even
+      // when both proofs are individually valid.
+      const { signer: s1 } = await makeRealSigner();
+      const { signer: s2 } = await makeRealSigner();
 
-      // Build the event data manually — two proofs sign the same canonical payload.
       const eventData = { name: 'Test' };
       const proof1 = await s1({ type: 'create', data: eventData });
       const proof2 = await s2({ type: 'create', data: eventData });
@@ -437,8 +439,71 @@ describe('verifyEventLog', () => {
 
       const result = await verifyEventLog(log);
 
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /exactly one controller proof/.test(e))).toBe(true);
+    });
+
+    test('fails with a distinct authority error when the create key is unresolvable', async () => {
+      // A non-did:key create proof whose resolver returns null (e.g. a transient
+      // resolver failure) must produce a clear authority error, not silently
+      // leave the authorized set empty and reject every event as "not authorized".
+      const eventData = { name: 'Test' };
+      const log: EventLog = {
+        events: [{
+          type: 'create',
+          data: eventData,
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: '2020-01-01T00:00:00Z',
+            verificationMethod: 'did:webvh:example.com:alice#key-0',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zSomeSignature',
+          }],
+        }],
+      };
+
+      const result = await verifyEventLog(log, { resolveKey: async () => null });
+
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /could not be .*resolved to establish authority/.test(e))).toBe(true);
+    });
+
+    test('rejects a create event with a non-array proof without crashing', async () => {
+      // A truthy-but-non-array proof (e.g. a bare object) must yield a
+      // structured failure, not a TypeError from calling .filter on it.
+      const log = {
+        events: [{
+          type: 'create',
+          data: { name: 'Test' },
+          proof: { type: 'DataIntegrityProof', proofValue: 'z...' },
+        }],
+      } as unknown as EventLog;
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /exactly one controller proof/.test(e))).toBe(true);
+    });
+
+    test('a custom verifier bypasses the single-controller-proof authority check', async () => {
+      // With a custom verifier, the caller owns proof semantics/authorization,
+      // so a legitimately multi-proof create event must not be rejected by the
+      // default authority check before the verifier runs.
+      const { signer: s1 } = await makeRealSigner();
+      const { signer: s2 } = await makeRealSigner();
+      const eventData = { name: 'Test' };
+      const proof1 = await s1({ type: 'create', data: eventData });
+      const proof2 = await s2({ type: 'create', data: eventData });
+
+      const log: EventLog = {
+        events: [{ type: 'create', data: eventData, proof: [proof1, proof2] }],
+      };
+
+      const result = await verifyEventLog(log, { verifier: async () => true });
+
       expect(result.verified).toBe(true);
-      expect(result.events[0].proofValid).toBe(true);
+      expect(result.errors.some(e => /exactly one controller proof/.test(e))).toBe(false);
     });
 
     test('verifies event with one valid and one non-did:key proof (second fails closed)', async () => {

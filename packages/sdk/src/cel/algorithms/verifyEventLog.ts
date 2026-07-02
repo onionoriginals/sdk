@@ -231,6 +231,39 @@ function isWitnessProof(p: DataIntegrityProof): boolean {
 }
 
 /**
+ * Resolves a proof's controller PUBLIC KEY, which is the correct unit of
+ * authorization: two verification methods identify the same signer iff they
+ * resolve to the same key material.
+ *
+ * Comparing raw verification-method URIs is wrong in both directions:
+ * - too loose if the fragment is stripped (`#key-0` vs `#key-1` in one DID doc
+ *   are DISTINCT keys), and
+ * - too strict if compared verbatim (the same key spelled with a different but
+ *   equivalent VM id — which the key resolver already treats as equal — would
+ *   be rejected).
+ *
+ * did:key proofs carry the key in the identifier (resolved offline); other
+ * methods use the same `resolveKey` resolver as `dispatchVerify`. Returns a hex
+ * string so keys can be compared/stored in a Set, or null if unresolvable.
+ */
+async function resolveControllerKeyHex(
+  verificationMethod: string,
+  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>
+): Promise<string | null> {
+  let key: Uint8Array | null = null;
+  if (verificationMethod.startsWith('did:key:')) {
+    key = extractEd25519FromDidKey(verificationMethod);
+  } else if (resolveKey) {
+    try {
+      key = await resolveKey(verificationMethod);
+    } catch {
+      key = null;
+    }
+  }
+  return key ? Buffer.from(key).toString('hex') : null;
+}
+
+/**
  * Verifies a single event's proofs.
  *
  * Controller proofs (those without `witnessedAt`) gate the overall
@@ -255,7 +288,8 @@ async function verifyEvent(
   index: number,
   customVerifier: ((proof: DataIntegrityProof, data: unknown) => Promise<boolean>) | undefined,
   previousEvent: LogEntry | undefined,
-  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>
+  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>,
+  authorizedKeyIds?: Set<string>
 ): Promise<EventVerification> {
   const errors: string[] = [];
 
@@ -306,6 +340,33 @@ async function verifyEvent(
       chainValid,
       errors,
     };
+  }
+
+  // Controller binding: on the default (dispatch) path, every controller proof
+  // must be signed by a key authorized by the log's create event. Without this,
+  // any key can append/rename/migrate/deactivate someone else's log and it
+  // verifies (confirmed forgeable). Authorization compares the resolved PUBLIC
+  // KEY (not the VM URI string), so it is neither fooled by two distinct keys
+  // in one DID document nor tripped up by the same key under an equivalent VM
+  // id. A custom verifier takes full responsibility for authorization, so this
+  // check is skipped there.
+  if (!customVerifier && authorizedKeyIds && index > 0) {
+    for (const { proof, originalIndex } of controllerProofs) {
+      const keyHex = await resolveControllerKeyHex(proof.verificationMethod, resolveKey);
+      if (keyHex === null || !authorizedKeyIds.has(keyHex)) {
+        errors.push(
+          `Event ${index}, Proof ${originalIndex}: signer ${proof.verificationMethod} is not authorized by the log's create event`
+        );
+        return {
+          index,
+          type: event.type,
+          proofValid: false,
+          chainValid,
+          cryptographicallyVerified: false,
+          errors,
+        };
+      }
+    }
   }
 
   // Verify controller proofs — these gate `proofValid` and `cryptographicallyVerified`.
@@ -442,11 +503,59 @@ export async function verifyEventLog(
     };
   }
 
+  // Establish the authorized controller key from the create event (event 0):
+  // the trust-on-first-use root of authority. The current CEL data model has
+  // no in-log key-rotation mechanism, so this key is fixed by the create event.
+  //
+  // SECURITY: the hash chain and the controller signature cover only
+  // { type, data, previousEvent } — NOT the proof array. So an attacker can
+  // append their own valid controller proof to the create event without
+  // breaking the chain or the owner's signature. If we seeded the authorized
+  // set from ALL of the create event's controller proofs, that injected key
+  // would become authorized and could sign forged later events. To close this,
+  // the create event must carry EXACTLY ONE controller proof; more than one is
+  // treated as tampering (its unsigned proof array cannot disambiguate the
+  // real root from an injected co-signer) and fails the whole log.
+  //
+  // When a custom verifier is supplied, the caller owns proof semantics and
+  // authorization (verifyEvent skips the controller-key binding on that path),
+  // so this default authority check is skipped too — consistently.
+  const createEvent = log.events[0];
+  const authorizedKeyIds = new Set<string>();
+  let authorityError: string | undefined;
+  if (!options?.verifier) {
+    // A non-array proof (missing, object, string, …) yields zero controller
+    // proofs → authorityError below, rather than throwing on .filter.
+    const createControllerProofs = Array.isArray(createEvent.proof)
+      ? createEvent.proof.filter(p => !isWitnessProof(p))
+      : [];
+    if (createControllerProofs.length !== 1) {
+      authorityError =
+        `Create event must have exactly one controller proof to establish authority (found ` +
+        `${createControllerProofs.length}); the create event's proof array is not signed, so ` +
+        `additional controller proofs cannot be trusted.`;
+    } else {
+      const rootKeyHex = await resolveControllerKeyHex(createControllerProofs[0].verificationMethod, options?.resolveKey);
+      if (rootKeyHex) {
+        authorizedKeyIds.add(rootKeyHex);
+      } else {
+        // The create event's key could not be resolved (e.g. a transient
+        // resolver failure or an unsupported key type). Fail closed with a
+        // distinct authority error rather than leaving authorizedKeyIds empty,
+        // which would silently reject every subsequent event as "not
+        // authorized" and turn a valid log into a false negative.
+        authorityError =
+          `Create event controller key (${createControllerProofs[0].verificationMethod}) could not be ` +
+          `resolved to establish authority; cannot safely authorize subsequent events.`;
+      }
+    }
+  }
+
   // Verify each event's proofs and hash chain
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
-    const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey);
+    const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds);
     eventVerifications.push(eventResult);
 
     if (!eventResult.proofValid || !eventResult.chainValid) {
@@ -454,12 +563,17 @@ export async function verifyEventLog(
     }
   }
 
-  // Determine overall verification status (both proofs AND chain must be valid)
+  // Determine overall verification status (both proofs AND chain must be valid,
+  // and the create event must establish a single unambiguous authority key).
   const allProofsValid = eventVerifications.every(ev => ev.proofValid);
   const allChainsValid = eventVerifications.every(ev => ev.chainValid);
 
+  if (authorityError) {
+    errors.unshift(authorityError);
+  }
+
   return {
-    verified: allProofsValid && allChainsValid,
+    verified: allProofsValid && allChainsValid && !authorityError,
     errors,
     events: eventVerifications,
   };
