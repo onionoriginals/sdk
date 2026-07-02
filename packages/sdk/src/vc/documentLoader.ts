@@ -28,9 +28,14 @@ export class DocumentLoader {
     if (!didDoc) {
       // The DID itself did not resolve. For fragment (verification method)
       // lookups, fall back to keys explicitly registered out-of-band via
-      // registerVerificationMethod — the registry can supplement a missing
-      // document but never overrides a resolved one (see below).
-      if (fragment) {
+      // registerVerificationMethod — but ONLY for self-certifying methods
+      // (did:key, did:peer) whose key material is bound into the identifier
+      // and which have no hosted, revocable authoritative state. For hosted
+      // methods (did:webvh) or on-chain methods (did:btco), an unreachable
+      // document must fail closed: trusting a registry entry would bypass
+      // deactivation and key rotation published by the authoritative source.
+      const isSelfCertifying = did.startsWith('did:key:') || did.startsWith('did:peer:');
+      if (fragment && isSelfCertifying) {
         const cached = verificationMethodRegistry.get(didUrl);
         if (cached) {
           if ((cached as { revoked?: string; compromised?: string }).revoked ||
