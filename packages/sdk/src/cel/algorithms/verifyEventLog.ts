@@ -536,7 +536,18 @@ export async function verifyEventLog(
         `additional controller proofs cannot be trusted.`;
     } else {
       const rootKeyHex = await resolveControllerKeyHex(createControllerProofs[0].verificationMethod, options?.resolveKey);
-      if (rootKeyHex) authorizedKeyIds.add(rootKeyHex);
+      if (rootKeyHex) {
+        authorizedKeyIds.add(rootKeyHex);
+      } else {
+        // The create event's key could not be resolved (e.g. a transient
+        // resolver failure or an unsupported key type). Fail closed with a
+        // distinct authority error rather than leaving authorizedKeyIds empty,
+        // which would silently reject every subsequent event as "not
+        // authorized" and turn a valid log into a false negative.
+        authorityError =
+          `Create event controller key (${createControllerProofs[0].verificationMethod}) could not be ` +
+          `resolved to establish authority; cannot safely authorize subsequent events.`;
+      }
     }
   }
 

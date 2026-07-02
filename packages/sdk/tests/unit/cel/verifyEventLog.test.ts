@@ -443,6 +443,32 @@ describe('verifyEventLog', () => {
       expect(result.errors.some(e => /exactly one controller proof/.test(e))).toBe(true);
     });
 
+    test('fails with a distinct authority error when the create key is unresolvable', async () => {
+      // A non-did:key create proof whose resolver returns null (e.g. a transient
+      // resolver failure) must produce a clear authority error, not silently
+      // leave the authorized set empty and reject every event as "not authorized".
+      const eventData = { name: 'Test' };
+      const log: EventLog = {
+        events: [{
+          type: 'create',
+          data: eventData,
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: '2020-01-01T00:00:00Z',
+            verificationMethod: 'did:webvh:example.com:alice#key-0',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zSomeSignature',
+          }],
+        }],
+      };
+
+      const result = await verifyEventLog(log, { resolveKey: async () => null });
+
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /could not be .*resolved to establish authority/.test(e))).toBe(true);
+    });
+
     test('rejects a create event with a non-array proof without crashing', async () => {
       // A truthy-but-non-array proof (e.g. a bare object) must yield a
       // structured failure, not a TypeError from calling .filter on it.
