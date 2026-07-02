@@ -158,6 +158,7 @@ export type { EventLoggingConfig } from './utils/EventLogger.js';
 
 // Utility exports
 export * from './utils/validation.js';
+export * from './utils/bitcoin-address.js';
 export * from './utils/satoshi-validation.js';
 export * from './utils/serialization.js';
 export * from './utils/retry.js';

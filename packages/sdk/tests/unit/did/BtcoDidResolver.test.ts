@@ -607,12 +607,24 @@ describe('BtcoDidResolver branches', () => {
     expect(res.resolutionMetadata.network).toBe('reg');
   });
 
-  test('deactivated content with flame emoji', async () => {
-    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => '🔥' }));
+  test('deactivated content with flame emoji on a DID tombstone', async () => {
+    // A real tombstone carries the human-readable DID marker; a bare 🔥 with
+    // no DID reference must NOT deactivate (it could be unrelated content).
+    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:1 🔥' }));
     const provider = makeProvider();
     const r = new BtcoDidResolver({ provider });
     const res = await r.resolve('did:btco:1');
     expect(res.inscriptions?.[0].error).toContain('deactivated');
+    expect(res.didDocumentMetadata.deactivated).toBe(true);
+  });
+
+  test('bare flame emoji with no DID reference does not deactivate', async () => {
+    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'just some 🔥 text' }));
+    const provider = makeProvider();
+    const r = new BtcoDidResolver({ provider });
+    const res = await r.resolve('did:btco:1');
+    expect(res.inscriptions?.[0].deactivated).toBeUndefined();
+    expect(res.didDocumentMetadata.deactivated).toBeUndefined();
   });
 });
 

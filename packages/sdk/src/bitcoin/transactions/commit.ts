@@ -151,9 +151,16 @@ function estimateRevealTxSize(scriptLength: number, controlBlockLength: number):
   const overhead = 10.5;
   const inputBase = 57.5; // taproot input without witness
   const outputSize = 43; // P2TR output
-  // Witness: schnorr signature (~65 bytes incl. length prefixes) + the real
-  // envelope script + control block.
-  const witnessBytes = 65 + scriptLength + controlBlockLength;
+  const compactSize = (n: number): number => (n < 0xfd ? 1 : n <= 0xffff ? 3 : 5);
+  // Witness stack (3 items): schnorr signature, envelope script, control
+  // block — each prefixed by a CompactSize length, plus a CompactSize stack
+  // item count. Omitting these underfunds the reveal once a script exceeds
+  // 252 bytes (its length prefix grows to 3).
+  const witnessBytes =
+    1 + // stack item count (3 fits in 1 byte)
+    1 + 64 + // signature length prefix + 64-byte schnorr signature
+    compactSize(scriptLength) + scriptLength +
+    compactSize(controlBlockLength) + controlBlockLength;
   return Math.ceil(overhead + inputBase + outputSize + witnessBytes / 4);
 }
 

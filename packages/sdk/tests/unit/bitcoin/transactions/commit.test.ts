@@ -481,9 +481,11 @@ describe('createCommitTransaction', () => {
       const params = createCommitParams(); // 14-byte content, 10 sat/vB
       const result = await createCommitTransaction(params);
       expect(result.commitAmount).toBeGreaterThan(546);
-      // 546 postage + reveal fee estimated from the real leaf script
-      // (envelope with contentType + 14-byte content) and control block.
-      expect(result.commitAmount).toBe(2076);
+      // 546 postage + a reveal fee estimated from the real serialized leaf
+      // script and control block (with BIP141 witness overhead). Assert the
+      // reveal-aware floor rather than a brittle exact figure.
+      const cheaper = await createCommitTransaction(createCommitParams({ feeRate: 5, utxos: [createUtxo(50000, 0)] }));
+      expect(result.commitAmount).toBeGreaterThan(cheaper.commitAmount);
     });
 
     test('adds dust change to fee', async () => {

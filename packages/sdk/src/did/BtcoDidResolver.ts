@@ -173,9 +173,11 @@ export class BtcoDidResolver {
           didPattern.test(inscriptionData.content) ||
           (documentFromContent !== null && documentFromContent.id === expectedDid);
 
-        if (inscriptionData.content.includes('🔥')) {
-          // Deactivation marker: the DID is tombstoned. Do not attempt to derive
-          // a document; just record the deactivation.
+        if (inscriptionData.isValidDid && inscriptionData.content.includes('🔥')) {
+          // Deactivation marker on an inscription that actually carries THIS
+          // DID: the DID is tombstoned. An unrelated later inscription on the
+          // same sat that merely contains the emoji must NOT deactivate a live
+          // DID, so this is gated behind isValidDid.
           inscriptionData.didDocument = null;
           inscriptionData.deactivated = true;
           if (!inscriptionData.error) {

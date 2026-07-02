@@ -211,7 +211,11 @@ export class OriginalsSDK {
       enableLogging: false,
       webvhNetwork: DEFAULT_WEBVH_NETWORK, // Default to 'pichu' (production)
     };
-    return new OriginalsSDK({ ...defaultConfig, ...configOptions }, keyStore);
+    // Honor a keyStore supplied on the config object too (config.keyStore),
+    // not only the dedicated options.keyStore — otherwise it is silently
+    // dropped and signing later fails with KEYSTORE_REQUIRED.
+    const merged = { ...defaultConfig, ...configOptions };
+    return new OriginalsSDK(merged, keyStore ?? merged.keyStore);
   }
 
   /**

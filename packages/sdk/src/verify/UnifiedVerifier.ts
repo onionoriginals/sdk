@@ -58,7 +58,9 @@ export class UnifiedVerifier {
     switch (kind) {
       case 'credential': {
         const verifier = new Verifier(this.didManager);
-        const res = await verifier.verifyCredential(document as VerifiableCredential);
+        // Proof-only: no status resolver is wired here, so skip revocation
+        // rather than fail closed on every revocable credential.
+        const res = await verifier.verifyCredential(document as VerifiableCredential, { checkStatus: false });
         return { kind, verified: res.verified, errors: res.errors, details: res };
       }
       case 'eventLog': {

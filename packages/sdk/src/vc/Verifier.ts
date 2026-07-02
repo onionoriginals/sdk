@@ -82,15 +82,29 @@ export class Verifier {
     const now = Date.now();
     const doc = vc as unknown as Record<string, unknown>;
 
+    // A present-but-unparseable date fails closed: a signed but malformed
+    // expirationDate/validFrom must not bypass the time-window check by
+    // being silently treated as absent.
+    const invalid: string[] = [];
     const parse = (field: string): number | null => {
       const value = doc[field];
-      if (typeof value !== 'string') return null;
+      if (value === undefined || value === null) return null;
+      if (typeof value !== 'string') { invalid.push(field); return null; }
       const t = Date.parse(value);
-      return Number.isNaN(t) ? null : t;
+      if (Number.isNaN(t)) { invalid.push(field); return null; }
+      return t;
     };
 
-    for (const field of ['expirationDate', 'validUntil']) {
-      const t = parse(field);
+    const expiration = parse('expirationDate');
+    const validUntil = parse('validUntil');
+    const validFrom = parse('validFrom');
+    const issuanceDate = parse('issuanceDate');
+
+    if (invalid.length > 0) {
+      return { verified: false, errors: [`Credential has unparseable date field(s): ${invalid.join(', ')}`] };
+    }
+
+    for (const [field, t] of [['expirationDate', expiration], ['validUntil', validUntil]] as const) {
       if (t !== null && t < now) {
         return { verified: false, errors: [`Credential expired (${field}: ${String(doc[field])})`] };
       }
@@ -98,9 +112,8 @@ export class Verifier {
 
     // validFrom (VCDM 2.0) takes precedence; fall back to issuanceDate
     // (VCDM 1.1) as the validity start.
-    const validFrom = parse('validFrom');
     const startField = validFrom !== null ? 'validFrom' : 'issuanceDate';
-    const start = validFrom !== null ? validFrom : parse('issuanceDate');
+    const start = validFrom !== null ? validFrom : issuanceDate;
     if (start !== null && start > now) {
       return { verified: false, errors: [`Credential is not yet valid (${startField}: ${String(doc[startField])})`] };
     }
