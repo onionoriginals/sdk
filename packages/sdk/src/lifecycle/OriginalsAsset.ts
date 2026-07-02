@@ -271,7 +271,11 @@ export class OriginalsAsset {
         if (!res || typeof res.id !== 'string' || typeof res.type !== 'string' || typeof res.contentType !== 'string') {
           return false;
         }
-        if (typeof res.hash !== 'string' || !/[0-9a-f]+/i.test(res.hash)) {
+        // Anchored: the hash must be entirely hex. An unanchored test would
+        // accept any string merely containing a hex character (e.g.
+        // "not-a-real-hash"), which for URL-only resources with no fetch
+        // provided is the only integrity check performed.
+        if (typeof res.hash !== 'string' || !/^[0-9a-f]+$/i.test(res.hash)) {
           return false;
         }
 

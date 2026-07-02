@@ -68,6 +68,23 @@ describe('OriginalsAsset', () => {
     await expect(asset.verify({ fetch: mockFetch })).resolves.toBe(true);
   });
 
+  test('verify rejects a URL-only resource whose hash is not entirely hex', async () => {
+    // Regression: the structural hash check was unanchored (/[0-9a-f]+/i), so a
+    // garbage hash like "not-a-real-hash" passed on its stray hex characters.
+    // For a URL-only resource with no fetch provided, this is the only integrity
+    // gate, so it must reject a non-hex hash.
+    const resWithUrl: AssetResource = {
+      id: 'r-badhash',
+      type: 'text',
+      url: 'https://example.com/x',
+      contentType: 'text/plain',
+      hash: 'not-a-real-hash'
+    };
+    const asset = new OriginalsAsset([resWithUrl], buildDid('did:peer:abc'), emptyCreds);
+    // No fetch provided → structural check is the only gate.
+    await expect(asset.verify()).resolves.toBe(false);
+  });
+
   test('verify validates attached credentials structure and returns false on bad', async () => {
     const badVc: any = { '@context': ['https://example.com'], type: ['VerifiableCredential'], issuer: 'did:peer:x', issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), [badVc]);

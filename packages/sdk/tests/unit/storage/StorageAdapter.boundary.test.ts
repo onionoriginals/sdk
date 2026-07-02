@@ -226,6 +226,27 @@ describe('LocalStorageAdapter - large file content [CRYPTO-STORAGE-009]', () => 
     const result = await adapter.getObject('large-test.example.com', '/this-does-not-exist.bin');
     expect(result).toBeNull();
   });
+
+  test('baseUrl URL uses the same sanitized domain the file is stored under', async () => {
+    // Regression: toUrl interpolated the raw domain while resolvePath sanitized
+    // it, so for a domain with sanitizable characters the returned URL pointed
+    // at a path that does not exist on disk.
+    const adapterWithUrl = new LocalStorageAdapter({
+      baseDir: tempDir,
+      baseUrl: 'https://cdn.example.com',
+    });
+
+    const content = new Uint8Array([1, 2, 3, 4]);
+    // Colon is sanitized to '_' by resolvePath (domain -> "my_asset_v2").
+    const url = await adapterWithUrl.putObject('my:asset:v2', '/a.bin', content);
+    expect(url).toBe('https://cdn.example.com/my_asset_v2/a.bin');
+
+    // The object is retrievable under the same domain, confirming the URL's
+    // domain segment matches the physical storage location.
+    const result = await adapterWithUrl.getObject('my:asset:v2', '/a.bin');
+    expect(result).not.toBeNull();
+    expect(Array.from(result!.content)).toEqual([1, 2, 3, 4]);
+  });
 });
 
 describe('LocalStorageAdapter path containment', () => {

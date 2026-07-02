@@ -215,6 +215,16 @@ export class OriginalsSDK {
     // not only the dedicated options.keyStore — otherwise it is silently
     // dropped and signing later fails with KEYSTORE_REQUIRED.
     const merged = { ...defaultConfig, ...configOptions };
+    // When the caller selects a webvhNetwork tier but does not explicitly set a
+    // Bitcoin network, derive the network from the tier's fixed mapping
+    // (magby→regtest, cleffa→signet, pichu→mainnet). Otherwise `network` would
+    // silently stay 'mainnet' and every Bitcoin op (inscribe/transfer) plus
+    // did:btco resolution would run against mainnet while did:btco *creation*
+    // used the tier's network — a real fund-loss footgun. An explicit,
+    // contradicting `network` is preserved (and still warned about below).
+    if (configOptions.webvhNetwork && configOptions.network === undefined) {
+      merged.network = getBitcoinNetworkForWebVH(configOptions.webvhNetwork);
+    }
     return new OriginalsSDK(merged, keyStore ?? merged.keyStore);
   }
 

@@ -17,6 +17,24 @@ describe('OriginalsSDK', () => {
     expect(sdk).toBeInstanceOf(OriginalsSDK);
   });
 
+  test('create() derives the Bitcoin network from webvhNetwork when network is not explicit', () => {
+    // Regression: choosing a webvhNetwork tier but leaving network unset left
+    // network defaulting to 'mainnet', so Bitcoin ops ran on mainnet while
+    // did:btco creation used the tier's network — a fund-loss footgun.
+    const magby = OriginalsSDK.create({ webvhNetwork: 'magby' });
+    expect((magby as any).config.network).toBe('regtest');
+
+    const cleffa = OriginalsSDK.create({ webvhNetwork: 'cleffa' });
+    expect((cleffa as any).config.network).toBe('signet');
+
+    const pichu = OriginalsSDK.create({ webvhNetwork: 'pichu' });
+    expect((pichu as any).config.network).toBe('mainnet');
+
+    // An explicit network is preserved (not overridden by the tier mapping).
+    const explicit = OriginalsSDK.create({ network: 'signet', webvhNetwork: 'magby' });
+    expect((explicit as any).config.network).toBe('signet');
+  });
+
   test('constructor throws error when config is null', () => {
     expect(() => new OriginalsSDK(null as any)).toThrow('Configuration object is required');
   });
