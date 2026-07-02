@@ -443,6 +443,26 @@ describe('verifyEventLog', () => {
       expect(result.errors.some(e => /exactly one controller proof/.test(e))).toBe(true);
     });
 
+    test('a custom verifier bypasses the single-controller-proof authority check', async () => {
+      // With a custom verifier, the caller owns proof semantics/authorization,
+      // so a legitimately multi-proof create event must not be rejected by the
+      // default authority check before the verifier runs.
+      const { signer: s1 } = await makeRealSigner();
+      const { signer: s2 } = await makeRealSigner();
+      const eventData = { name: 'Test' };
+      const proof1 = await s1({ type: 'create', data: eventData });
+      const proof2 = await s2({ type: 'create', data: eventData });
+
+      const log: EventLog = {
+        events: [{ type: 'create', data: eventData, proof: [proof1, proof2] }],
+      };
+
+      const result = await verifyEventLog(log, { verifier: async () => true });
+
+      expect(result.verified).toBe(true);
+      expect(result.errors.some(e => /exactly one controller proof/.test(e))).toBe(false);
+    });
+
     test('verifies event with one valid and one non-did:key proof (second fails closed)', async () => {
       // Without a resolver, the did:web proof fails closed.
       const { signer: s1, verificationMethod: vm1 } = await makeRealSigner();

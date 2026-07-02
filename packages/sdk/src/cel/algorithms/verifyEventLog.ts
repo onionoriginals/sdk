@@ -516,18 +516,24 @@ export async function verifyEventLog(
   // the create event must carry EXACTLY ONE controller proof; more than one is
   // treated as tampering (its unsigned proof array cannot disambiguate the
   // real root from an injected co-signer) and fails the whole log.
+  //
+  // When a custom verifier is supplied, the caller owns proof semantics and
+  // authorization (verifyEvent skips the controller-key binding on that path),
+  // so this default authority check is skipped too — consistently.
   const createEvent = log.events[0];
-  const createControllerProofs = (createEvent.proof ?? []).filter(p => !isWitnessProof(p));
   const authorizedKeyIds = new Set<string>();
   let authorityError: string | undefined;
-  if (createControllerProofs.length !== 1) {
-    authorityError =
-      `Create event must have exactly one controller proof to establish authority (found ` +
-      `${createControllerProofs.length}); the create event's proof array is not signed, so ` +
-      `additional controller proofs cannot be trusted.`;
-  } else {
-    const rootKeyHex = await resolveControllerKeyHex(createControllerProofs[0].verificationMethod, options?.resolveKey);
-    if (rootKeyHex) authorizedKeyIds.add(rootKeyHex);
+  if (!options?.verifier) {
+    const createControllerProofs = (createEvent.proof ?? []).filter(p => !isWitnessProof(p));
+    if (createControllerProofs.length !== 1) {
+      authorityError =
+        `Create event must have exactly one controller proof to establish authority (found ` +
+        `${createControllerProofs.length}); the create event's proof array is not signed, so ` +
+        `additional controller proofs cannot be trusted.`;
+    } else {
+      const rootKeyHex = await resolveControllerKeyHex(createControllerProofs[0].verificationMethod, options?.resolveKey);
+      if (rootKeyHex) authorizedKeyIds.add(rootKeyHex);
+    }
   }
 
   // Verify each event's proofs and hash chain
