@@ -1165,9 +1165,37 @@ describe('MigrationManager: audit failures and rollback state consistency', () =
 
     expect(result.success).toBe(true);
     expect(result.state).toBe(MigrationStateEnum.COMPLETED);
+    // The audit-write failure is surfaced on the result so the caller can
+    // detect the lost audit trail and retry, rather than only being logged.
+    expect(result.auditPersisted).toBe(false);
+    expect(result.auditError).toContain('audit signer boom');
 
     const status = await manager.getMigrationStatus(result.migrationId);
     expect(status.state).toBe(MigrationStateEnum.COMPLETED);
+  });
+
+  it('reports auditPersisted:true on a normal successful migration', async () => {
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const result = await manager.migrate({
+      sourceDid: peerDid.id,
+      targetLayer: 'webvh',
+      domain: 'example.com',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.auditPersisted).toBe(true);
+    expect(result.auditError).toBeUndefined();
+    // And the record is actually retrievable from history.
+    const history = await manager.getMigrationHistory(peerDid.id);
+    expect(history.length).toBeGreaterThan(0);
   });
 
   it('getMigrationStatus agrees with the result state after a failed migration is rolled back', async () => {

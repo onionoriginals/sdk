@@ -214,10 +214,16 @@ export class MigrationManager {
       // already completed and its side effects are committed, so a failure to
       // write the audit record must NOT re-enter the failure/rollback path
       // (which would roll back a successful migration and report it as failed,
-      // risking a double-inscription on retry). Swallow audit errors here.
+      // risking a double-inscription on retry). Instead, surface the failure on
+      // the result (auditPersisted/auditError) so callers can detect the lost
+      // audit trail and retry the write, rather than only logging to console.
+      let auditPersisted = true;
+      let auditErrorMessage: string | undefined;
       try {
         await this.auditLogger.logMigration(auditRecord as any);
       } catch (auditError) {
+        auditPersisted = false;
+        auditErrorMessage = auditError instanceof Error ? auditError.message : String(auditError);
         console.error('Failed to record audit for completed migration:', auditError);
       }
 
@@ -242,7 +248,9 @@ export class MigrationManager {
         state: MigrationStateEnum.COMPLETED,
         duration,
         cost: validationResult.estimatedCost,
-        auditRecord
+        auditRecord,
+        auditPersisted,
+        ...(auditErrorMessage ? { auditError: auditErrorMessage } : {})
       };
     } catch (error) {
       // Handle migration failure
@@ -499,10 +507,15 @@ export class MigrationManager {
 
     // Record a signed audit entry for the failed/rolled-back migration. A
     // logging failure here must not throw out of the failure handler (which
-    // would make migrate() reject instead of returning a MigrationResult).
+    // would make migrate() reject instead of returning a MigrationResult); it
+    // is surfaced on the result instead.
+    let auditPersisted = true;
+    let auditErrorMessage: string | undefined;
     try {
       await this.auditLogger.logMigration(auditRecord as any);
     } catch (auditError) {
+      auditPersisted = false;
+      auditErrorMessage = auditError instanceof Error ? auditError.message : String(auditError);
       console.error('Failed to record audit for failed migration:', auditError);
     }
 
@@ -516,7 +529,9 @@ export class MigrationManager {
       duration,
       cost: { storageCost: 0, networkFees: 0, totalCost: 0, currency: 'sats' },
       auditRecord,
-      error: migrationError
+      error: migrationError,
+      auditPersisted,
+      ...(auditErrorMessage ? { auditError: auditErrorMessage } : {})
     };
   }
 

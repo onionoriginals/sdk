@@ -213,6 +213,17 @@ export interface MigrationResult {
   cost: CostEstimate;
   auditRecord?: MigrationAuditRecord;  // Optional - undefined when AuditLogger disabled (v1.0)
   error?: MigrationError;
+  /**
+   * Whether the audit record was successfully persisted to the audit log.
+   * A migration can succeed (`success: true`) while audit persistence fails
+   * (e.g. a misconfigured audit signer): the migration's side effects are
+   * committed but `getMigrationHistory()` will not contain this record. When
+   * `false`, `auditError` carries the reason so callers can detect the lost
+   * audit trail and retry the write.
+   */
+  auditPersisted?: boolean;
+  /** Failure reason when `auditPersisted` is false. */
+  auditError?: string;
 }
 
 /**
