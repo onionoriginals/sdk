@@ -32,20 +32,27 @@ describe('[CRYPTO-STORAGE-011] Noble crypto init is idempotent', () => {
     expect(() => initNobleCrypto()).not.toThrow();
   });
 
-  test('secp256k1.utils.hmacSha256Sync is still a function after repeated init', () => {
+  // NOTE: @noble/secp256k1 v3.x and @noble/ed25519 v3.x moved sync hash
+  // configuration from the (now frozen) `utils` / `etc` objects to a
+  // dedicated, writable `hashes` object. noble-init.ts still best-effort
+  // mirrors the legacy `utils.hmacSha256Sync` / `etc.sha512Sync` locations
+  // for backward compatibility, but those objects are frozen by the
+  // libraries themselves as of v3, so injection into them is a no-op.
+  // These tests assert against the real v3 configuration surface.
+  test('secp256k1.hashes.hmacSha256 is still a function after repeated init', () => {
     initNobleCrypto();
     initNobleCrypto();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
     const sAny = secp256k1 as any;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    expect(typeof sAny.utils?.hmacSha256Sync).toBe('function');
+    expect(typeof sAny.hashes?.hmacSha256).toBe('function');
   });
 
-  test('secp256k1.utils.hmacSha256Sync remains callable after repeated init', () => {
+  test('secp256k1.hashes.hmacSha256 remains callable after repeated init', () => {
     initNobleCrypto();
     initNobleCrypto();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
-    const result = (secp256k1 as any).utils.hmacSha256Sync(
+    const result = (secp256k1 as any).hashes.hmacSha256(
       new Uint8Array(32).fill(1),
       new Uint8Array(16).fill(2),
     ) as Uint8Array;
@@ -53,39 +60,25 @@ describe('[CRYPTO-STORAGE-011] Noble crypto init is idempotent', () => {
     expect(result.length).toBe(32); // HMAC-SHA256 is always 32 bytes
   });
 
-  test('ed25519 sha512Sync (etc or utils) is still a function after repeated init', () => {
+  test('ed25519.hashes.sha512 is still a function after repeated init', () => {
     initNobleCrypto();
     initNobleCrypto();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const eAny = ed25519 as any;
-    // At least one of etc.sha512Sync or utils.sha512Sync must be a function
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const etcOk = typeof eAny?.etc?.sha512Sync === 'function';
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const utilsOk = typeof eAny?.utils?.sha512Sync === 'function';
-    expect(etcOk || utilsOk).toBe(true);
+    expect(typeof eAny?.hashes?.sha512).toBe('function');
   });
 
-  test('ed25519 sha512Sync remains callable and returns 64 bytes after repeated init', () => {
+  test('ed25519.hashes.sha512 remains callable and returns 64 bytes after repeated init', () => {
     initNobleCrypto();
     initNobleCrypto();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const eAny = ed25519 as any;
-    // Pick whichever binding is available
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const fn: ((...msgs: Uint8Array[]) => Uint8Array) | undefined =
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      typeof eAny?.etc?.sha512Sync === 'function'
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-        ? (eAny.etc.sha512Sync as (...msgs: Uint8Array[]) => Uint8Array)
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-        : typeof eAny?.utils?.sha512Sync === 'function'
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-          ? (eAny.utils.sha512Sync as (...msgs: Uint8Array[]) => Uint8Array)
-          : undefined;
+    const fn = eAny.hashes.sha512 as (msg: Uint8Array) => Uint8Array;
 
     expect(fn).toBeDefined();
-    const result = fn!(new Uint8Array(16).fill(5));
+    const result = fn(new Uint8Array(16).fill(5));
     expect(result).toBeInstanceOf(Uint8Array);
     expect(result.length).toBe(64); // SHA-512 is always 64 bytes
   });
@@ -94,13 +87,13 @@ describe('[CRYPTO-STORAGE-011] Noble crypto init is idempotent', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sAny = secp256k1 as any;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const hmacBefore = sAny.utils?.hmacSha256Sync as unknown;
+    const hmacBefore = sAny.hashes?.hmacSha256 as unknown;
 
     initNobleCrypto();
     initNobleCrypto();
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const hmacAfter = sAny.utils?.hmacSha256Sync as unknown;
+    const hmacAfter = sAny.hashes?.hmacSha256 as unknown;
 
     // The function reference should not have been replaced (idempotent guard).
     expect(hmacAfter).toBe(hmacBefore);

@@ -379,7 +379,7 @@ export async function migrateCommand(flags: MigrateFlags): Promise<MigrateResult
   } else {
     // Generate temporary key for signing (for webvh migration without wallet)
     const ed25519 = await import('@noble/ed25519');
-    const privateKeyBytes = ed25519.utils.randomPrivateKey();
+    const privateKeyBytes = ed25519.utils.randomSecretKey();
     const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
     privateKey = multikey.encodePrivateKey(privateKeyBytes as Uint8Array, 'Ed25519');
     publicKey = multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519');

@@ -40,10 +40,8 @@ describe('AuditLogger', () => {
   let signerConfig: AuditSignerConfig;
 
   beforeAll(async () => {
-    const privateKey = ed25519.utils.randomPrivateKey();
-    const publicKey = await ed25519.getPublicKeyAsync(
-      Buffer.from(privateKey).toString('hex')
-    );
+    const privateKey = ed25519.utils.randomSecretKey();
+    const publicKey = await ed25519.getPublicKeyAsync(privateKey);
     signerConfig = {
       privateKey,
       publicKey,
@@ -133,10 +131,8 @@ describe('AuditLogger', () => {
       await logger.logMigration(record);
 
       // Create a different logger with a different key pair
-      const otherPrivateKey = ed25519.utils.randomPrivateKey();
-      const otherPublicKey = await ed25519.getPublicKeyAsync(
-        Buffer.from(otherPrivateKey).toString('hex')
-      );
+      const otherPrivateKey = ed25519.utils.randomSecretKey();
+      const otherPublicKey = await ed25519.getPublicKeyAsync(otherPrivateKey);
       const otherLogger = new AuditLogger(makeConfig(), {
         privateKey: otherPrivateKey,
         publicKey: otherPublicKey,

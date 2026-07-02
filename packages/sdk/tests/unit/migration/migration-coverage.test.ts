@@ -540,8 +540,8 @@ describe('CORE-MIG-EVENTS-017/happy: audit logging records migration with verifi
   let signerConfig: AuditSignerConfig;
 
   beforeAll(async () => {
-    const privateKey = ed25519.utils.randomPrivateKey();
-    const publicKey = await ed25519.getPublicKeyAsync(Buffer.from(privateKey).toString('hex'));
+    const privateKey = ed25519.utils.randomSecretKey();
+    const publicKey = await ed25519.getPublicKeyAsync(privateKey);
     signerConfig = {
       privateKey,
       publicKey,
@@ -602,8 +602,8 @@ describe('CORE-MIG-EVENTS-017/security: audit log tamper detection', () => {
   let signerConfig: AuditSignerConfig;
 
   beforeAll(async () => {
-    const privateKey = ed25519.utils.randomPrivateKey();
-    const publicKey = await ed25519.getPublicKeyAsync(Buffer.from(privateKey).toString('hex'));
+    const privateKey = ed25519.utils.randomSecretKey();
+    const publicKey = await ed25519.getPublicKeyAsync(privateKey);
     signerConfig = { privateKey, publicKey, verificationMethod: 'did:key:z6MkTamper#z6MkTamper' };
   });
 
@@ -724,8 +724,8 @@ describe('CORE-MIG-EVENTS-018/security: migration history verification', () => {
   let signerConfig: AuditSignerConfig;
 
   beforeAll(async () => {
-    const privateKey = ed25519.utils.randomPrivateKey();
-    const publicKey = await ed25519.getPublicKeyAsync(Buffer.from(privateKey).toString('hex'));
+    const privateKey = ed25519.utils.randomSecretKey();
+    const publicKey = await ed25519.getPublicKeyAsync(privateKey);
     signerConfig = { privateKey, publicKey, verificationMethod: 'did:key:z6MkHist#z6MkHist' };
   });
 

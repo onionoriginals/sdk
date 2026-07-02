@@ -7,7 +7,7 @@
 
 import { describe, test, expect, beforeEach } from 'bun:test';
 import * as ed25519 from '@noble/ed25519';
-import { bls12_381 as bls } from '@noble/curves/bls12-381';
+import { bls12_381 as bls } from '@noble/curves/bls12-381.js';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { MultiSigManager } from '../../../src/vc/MultiSigManager';
 import { Verifier } from '../../../src/vc/Verifier';
@@ -607,8 +607,8 @@ describe('VC-013/happy – BBSCryptosuiteManager.createProof (selective-disclosu
   // error handling for missing private key.
 
   test('createProof with Uint8Array BLS12-381 key pair throws "not implemented" (BbsSimple stub)', async () => {
-    const sk = bls.utils.randomPrivateKey();
-    const pk = bls.getPublicKey(sk);
+    const sk = bls.utils.randomSecretKey();
+    const pk = bls.shortSignatures.getPublicKey(sk).toBytes();
 
     await expect(
       BBSCryptosuiteManager.createProof(
