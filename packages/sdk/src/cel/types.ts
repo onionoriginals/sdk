@@ -120,12 +120,12 @@ export interface CreateOptions {
 /**
  * Options for updating an event log
  */
-export interface UpdateOptions extends CreateOptions {}
+export type UpdateOptions = CreateOptions;
 
 /**
  * Options for deactivating an event log
  */
-export interface DeactivateOptions extends CreateOptions {}
+export type DeactivateOptions = CreateOptions;
 
 /**
  * Options for verifying an event log

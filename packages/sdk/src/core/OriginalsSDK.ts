@@ -328,7 +328,7 @@ export class OriginalsSDK {
     // ed25519.verifyAsync accepts Uint8Array directly
     try {
       return await ed25519Mod.verifyAsync(signature, message, ed25519PublicKey);
-    } catch (error) {
+    } catch (_error) {
       // Verification failed or error occurred
       return false;
     }

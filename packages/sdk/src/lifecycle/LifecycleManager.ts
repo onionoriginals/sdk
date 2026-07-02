@@ -189,7 +189,7 @@ export class LifecycleManager {
     // Validate that it's a valid multibase-encoded private key
     try {
       multikey.decodePrivateKey(privateKey);
-    } catch (err) {
+    } catch (_err) {
       throw new StructuredError('INVALID_KEY', 'Invalid privateKey format: must be a valid multibase-encoded private key');
     }
     

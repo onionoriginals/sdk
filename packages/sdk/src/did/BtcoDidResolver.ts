@@ -159,7 +159,7 @@ export class BtcoDidResolver {
 
         try {
           inscriptionData.metadata = await provider.getMetadata(inscriptionId);
-        } catch (err) {
+        } catch (_err) {
           inscriptionData.metadata = null;
         }
 

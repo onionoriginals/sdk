@@ -133,7 +133,7 @@ export class KeyManager {
 				const firstKey = didDoc.verificationMethod[0];
 				const decoded = multikey.decodePublicKey(firstKey.publicKeyMultibase);
 				keyType = fromMultikeyType(decoded.type);
-			} catch (e) {
+			} catch (_e) {
 				// If decoding fails, use default Ed25519
 			}
 		}
