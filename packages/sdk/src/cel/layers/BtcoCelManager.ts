@@ -156,10 +156,15 @@ export class BtcoCelManager {
       if (event.type === 'create') {
         currentDid = eventData.did as string;
         currentLayer = eventData.layer as string || 'peer';
-      } else if (event.type === 'update' && eventData.targetDid && eventData.layer) {
-        // This is a migration event
-        currentDid = eventData.targetDid as string;
+      } else if (event.type === 'update' && eventData.sourceDid && eventData.layer) {
+        // This is a migration event. Detect via sourceDid (present on both
+        // webvh and btco migrations) rather than targetDid (webvh-only), so a
+        // log already migrated to btco is recognised as such and the terminal
+        // guard below correctly rejects a second btco migration. webvh
+        // migrations carry the resolvable targetDid; btco migrations don't, but
+        // migrate() only proceeds from the webvh layer anyway.
         currentLayer = eventData.layer as string;
+        currentDid = (eventData.targetDid as string) ?? (eventData.sourceDid as string);
       }
     }
 
