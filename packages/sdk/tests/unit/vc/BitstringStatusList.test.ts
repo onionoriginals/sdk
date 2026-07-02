@@ -217,3 +217,37 @@ describe('BitstringStatusList', () => {
     });
   });
 });
+
+describe('W3C encoding interop', () => {
+  test('encode() output is readable by StatusListManager.decodeBitstring', async () => {
+    const { StatusListManager } = await import('../../../src/vc/StatusListManager');
+    const list = new BitstringStatusList();
+    list.set(42);
+    const encoded = list.encode();
+    expect(encoded.startsWith('u')).toBe(true);
+
+    const bits = StatusListManager.decodeBitstring(encoded);
+    // Bit 42: byte 5, MSB-first bit 5
+    expect((bits[5] & (1 << (7 - (42 % 8)))) !== 0).toBe(true);
+  });
+
+  test('round-trips through its own decode', () => {
+    const list = new BitstringStatusList();
+    list.set(0);
+    list.set(131071);
+    const decoded = BitstringStatusList.decode(list.encode());
+    expect(decoded.get(0)).toBe(true);
+    expect(decoded.get(131071)).toBe(true);
+    expect(decoded.get(1)).toBe(false);
+  });
+
+  test('still decodes legacy bare-base64url DEFLATE values', async () => {
+    const { deflateSync } = await import('node:zlib');
+    const bits = new Uint8Array(16384);
+    bits[0] = 0b10000000; // bit 0 set
+    const legacy = Buffer.from(deflateSync(bits)).toString('base64url');
+    const decoded = BitstringStatusList.decode(legacy);
+    expect(decoded.get(0)).toBe(true);
+    expect(decoded.get(1)).toBe(false);
+  });
+});

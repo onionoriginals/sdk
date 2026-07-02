@@ -73,6 +73,91 @@ describe('diwings Verifier', () => {
     expect(res.verified).toBe(false);
   });
 
+  test('rejects an expired credential even with a valid proof', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vc = await issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'Test'],
+        issuer: did,
+        issuanceDate: new Date(Date.now() - 60_000).toISOString(),
+        expirationDate: new Date(Date.now() - 1_000).toISOString(),
+        credentialSubject: { id: 'did:peer:subject1' }
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+    const verifier = new Verifier(didManager);
+    const res = await verifier.verifyCredential(vc);
+    expect(res.verified).toBe(false);
+    expect(res.errors.some(e => /expired/i.test(e))).toBe(true);
+  });
+
+  test('rejects a not-yet-valid credential (validFrom in the future)', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vc = await issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'Test'],
+        issuer: did,
+        validFrom: new Date(Date.now() + 3600_000).toISOString(),
+        credentialSubject: { id: 'did:peer:subject1' }
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+    const verifier = new Verifier(didManager);
+    const res = await verifier.verifyCredential(vc);
+    expect(res.verified).toBe(false);
+    expect(res.errors.some(e => /not yet valid/i.test(e))).toBe(true);
+  });
+
+  test('fails closed when credentialStatus is present but no resolver is configured', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vc = await issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'Test'],
+        issuer: did,
+        credentialStatus: {
+          id: 'https://example.com/status/1#0',
+          type: 'BitstringStatusListEntry',
+          statusPurpose: 'revocation',
+          statusListIndex: '0',
+          statusListCredential: 'https://example.com/status/1'
+        },
+        credentialSubject: { id: 'did:peer:subject1' }
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+    const verifier = new Verifier(didManager);
+    const res = await verifier.verifyCredential(vc);
+    expect(res.verified).toBe(false);
+    expect(res.errors.some(e => /statusListResolver/.test(e))).toBe(true);
+
+    // Explicit opt-out still verifies
+    const skipped = await verifier.verifyCredential(vc, { checkStatus: false });
+    expect(skipped.verified).toBe(true);
+  });
+
+  test('verifyPresentation validates expectedChallenge and expectedDomain', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vp = await issuer.issuePresentation(
+      {
+        type: ['VerifiablePresentation'],
+        holder: did
+      } as any,
+      { proofPurpose: 'authentication', challenge: 'nonce-A', domain: 'verifier.example' }
+    );
+    const verifier = new Verifier(didManager);
+
+    const ok = await verifier.verifyPresentation(vp, { expectedChallenge: 'nonce-A', expectedDomain: 'verifier.example' });
+    expect(ok.verified).toBe(true);
+
+    const replay = await verifier.verifyPresentation(vp, { expectedChallenge: 'nonce-B' });
+    expect(replay.verified).toBe(false);
+    expect(replay.errors.some(e => /challenge/i.test(e))).toBe(true);
+
+    const wrongDomain = await verifier.verifyPresentation(vp, { expectedDomain: 'other.example' });
+    expect(wrongDomain.verified).toBe(false);
+    expect(wrongDomain.errors.some(e => /domain/i.test(e))).toBe(true);
+  });
+
   test('verifyCredentialMultiSig rejects a single proof repeated to fake the threshold', async () => {
     const issuer = new Issuer(didManager, vm);
     const vc = await issuer.issueCredential(
