@@ -388,34 +388,17 @@ export class LifecycleManager {
         configurable: false,
       });
       
-      // Emit typed:created event
-      queueMicrotask(() => {
-        const event = {
-          type: 'asset:created' as const,
-          timestamp: new Date().toISOString(),
-          asset: {
-            id: asset.id,
-            layer: asset.currentLayer,
-            resourceCount: manifest.resources.length,
-            createdAt: asset.getProvenance().createdAt,
-            kind: kind,
-            name: manifest.name,
-            version: manifest.version,
-          }
-        };
+      // createAsset already emitted asset:created and recorded the metric for
+      // this asset; emitting/recording again here made every typed Original
+      // double-fire the event and double-count in metrics.
 
-        // Emit from LifecycleManager
-        void this.eventEmitter.emit(event);
-      });
-      
       stopTimer();
-      this.logger.info('Typed Original created successfully', { 
+      this.logger.info('Typed Original created successfully', {
         assetId: asset.id,
         kind,
         name: manifest.name,
         version: manifest.version,
       });
-      this.metrics.recordAssetCreated();
       
       return asset;
     } catch (error) {
@@ -656,11 +639,19 @@ export class LifecycleManager {
       const multibase = encodeBase64UrlMultibase(hashBytes);
       const resourceUrl = `${publisherDid}/resources/${multibase}`;
       const relativePath = `${userPath}/resources/${multibase}`;
-      
-      // Store resource content
-      const data = resource.content
-        ? Buffer.from(resource.content)
-        : Buffer.from(resource.hash);
+
+      // Hash-only resources (content hosted elsewhere) cannot be published:
+      // writing the hash string as the body would serve bytes that fail the
+      // resource's own integrity check. Skip them instead of corrupting.
+      if (resource.content === undefined || resource.content === null) {
+        this.logger.warn('Skipping publish of hash-only resource (no content available)', {
+          resourceId: resource.id,
+          hash: resource.hash
+        });
+        continue;
+      }
+
+      const data = Buffer.from(resource.content);
 
       const storageWithPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<void> };
       const storageWithPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<void> };
@@ -668,12 +659,11 @@ export class LifecycleManager {
       if (typeof storageWithPut.put === 'function') {
         await storageWithPut.put(`${domain}/${relativePath}`, data, { contentType: resource.contentType });
       } else if (typeof storageWithPutObject.putObject === 'function') {
-        const encoded = new TextEncoder().encode(resource.content || resource.hash);
-        await storageWithPutObject.putObject(domain, relativePath, encoded);
+        await storageWithPutObject.putObject(domain, relativePath, new TextEncoder().encode(resource.content));
       }
 
       (resource as { url?: string }).url = resourceUrl;
-      
+
       await this.emitResourcePublishedEvent(asset, resource, resourceUrl, publisherDid, domain);
     }
   }
@@ -756,7 +746,18 @@ export class LifecycleManager {
       await this.eventEmitter.emit(event);
       await (asset as unknown as { eventEmitter: EventEmitter }).eventEmitter.emit(event);
     } catch (err) {
+      // Non-fatal by design: publish succeeds without a publication
+      // credential (e.g. keyStore-less setups). Surface the reason via a
+      // credential:skipped event so callers can detect it programmatically
+      // instead of only via logs.
       this.logger.error('Failed to issue credential during publish', err as Error);
+      await this.eventEmitter.emit({
+        type: 'credential:skipped',
+        timestamp: new Date().toISOString(),
+        asset: { id: asset.id },
+        reason: err instanceof StructuredError ? err.code : 'CREDENTIAL_ISSUANCE_FAILED',
+        message: (err as Error)?.message ?? String(err)
+      });
     }
   }
 
@@ -989,7 +990,15 @@ export class LifecycleManager {
     } as const;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     const tx = await bm.transferInscription(inscription as never, newOwner);
-    await asset.recordTransfer(asset.id, newOwner, tx.txid);
+    // Record the actual chain of custody: the current owner (the last
+    // transfer's recipient) hands off to newOwner. Recording the asset DID
+    // as `from` on every transfer broke getTransfersFrom and produced a
+    // provenance chain where nobody ever transferred to anybody.
+    const priorTransfers = provenance.transfers;
+    const currentOwner = priorTransfers.length > 0
+      ? priorTransfers[priorTransfers.length - 1].to
+      : asset.id;
+    await asset.recordTransfer(currentOwner, newOwner, tx.txid);
     
     stopTimer();
     this.logger.info('Asset ownership transferred successfully', { 

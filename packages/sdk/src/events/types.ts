@@ -103,6 +103,20 @@ export interface CredentialIssuedEvent extends BaseEvent {
 }
 
 /**
+ * Emitted when credential issuance was skipped or failed during a publish.
+ * The publish itself still succeeds; this event lets callers detect that the
+ * asset carries no publication credential and why.
+ */
+export interface CredentialSkippedEvent extends BaseEvent {
+  type: 'credential:skipped';
+  asset: {
+    id: string;
+  };
+  reason: string;
+  message: string;
+}
+
+/**
  * Emitted when a new resource version is created
  */
 export interface ResourceVersionCreatedEvent extends BaseEvent {
@@ -294,6 +308,7 @@ export type OriginalsEvent =
   | AssetTransferredEvent
   | ResourcePublishedEvent
   | CredentialIssuedEvent
+  | CredentialSkippedEvent
   | VerificationCompletedEvent
   | BatchStartedEvent
   | BatchCompletedEvent
@@ -324,6 +339,7 @@ export interface EventTypeMap {
   'asset:transferred': AssetTransferredEvent;
   'resource:published': ResourcePublishedEvent;
   'credential:issued': CredentialIssuedEvent;
+  'credential:skipped': CredentialSkippedEvent;
   'verification:completed': VerificationCompletedEvent;
   'batch:started': BatchStartedEvent;
   'batch:completed': BatchCompletedEvent;

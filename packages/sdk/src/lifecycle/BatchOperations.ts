@@ -14,6 +14,18 @@ import type { AssetResource } from '../types/index.js';
 import type { OriginalsAsset } from './OriginalsAsset.js';
 
 /**
+ * Raised when a batch item exceeds its timeout. Distinct from operation
+ * failures because the underlying operation cannot be cancelled and may
+ * still complete — callers must treat the outcome as unknown.
+ */
+export class BatchTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BatchTimeoutError';
+  }
+}
+
+/**
  * Result of a batch operation containing successful and failed items
  */
 export interface BatchResult<T> {
@@ -140,13 +152,27 @@ export class BatchOperationExecutor {
             () => operation(item, index),
             timeoutMs
           );
-          
+
           const duration = Date.now() - itemStartTime;
           successful.push({ index, result, duration });
           return;
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error));
-          
+
+          // A timeout does NOT mean the operation failed — Promise.race
+          // cannot cancel it, so it may still complete (e.g. broadcast a
+          // Bitcoin transaction, migrate the asset). Retrying would execute
+          // a possibly-succeeded, non-idempotent operation a second time
+          // (double inscription fees, duplicate transfers). Fail the item
+          // with an outcome-unknown error instead.
+          if (error instanceof BatchTimeoutError) {
+            lastError = new Error(
+              `Operation timeout after ${timeoutMs}ms; outcome unknown — ` +
+              'not retried because the operation may still complete'
+            );
+            break;
+          }
+
           // If not last attempt, wait with exponential backoff
           if (attempt < retryCount) {
             const delay = this.calculateRetryDelay(attempt, retryDelay);
@@ -235,12 +261,17 @@ export class BatchOperationExecutor {
     operation: () => Promise<R>,
     timeoutMs: number
   ): Promise<R> {
-    return Promise.race([
-      operation(),
-      new Promise<R>((_, reject) =>
-        setTimeout(() => reject(new Error(`Operation timeout after ${timeoutMs}ms`)), timeoutMs)
-      )
-    ]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation(),
+        new Promise<R>((_, reject) => {
+          timer = setTimeout(() => reject(new BatchTimeoutError(`Operation timeout after ${timeoutMs}ms`)), timeoutMs);
+        })
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
   
   /**
