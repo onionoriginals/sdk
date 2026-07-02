@@ -42,8 +42,8 @@ export const MULTICODEC_X25519_PUB_HEADER = new Uint8Array([0xec, 0x01]);
 export const MULTICODEC_X25519_PRIV_HEADER = new Uint8Array([0x82, 0x26]);
 // multicode secp256k1-pub header as varint
 export const MULTICODEC_SECP256K1_PUB_HEADER = new Uint8Array([0xe7, 0x01]);
-// multicode secp256k1-priv header as varint
-export const MULTICODEC_SECP256K1_PRIV_HEADER = new Uint8Array([0x13, 0x01]);
+// multicode secp256k1-priv header as varint (registry code 0x1301)
+export const MULTICODEC_SECP256K1_PRIV_HEADER = new Uint8Array([0x81, 0x26]);
 // multicodec bls12381g2-pub header as varint
 export const MULTICODEC_BLS12381_G2_PUB_HEADER = new Uint8Array([0xeb, 0x01]);
 // multicodec bls12381g2-priv header as varint
@@ -54,7 +54,10 @@ export const base64 = {
 		return Buffer.from(unencoded || '').toString('base64');
 	},
 	decode: (encoded: string): Uint8Array => {
-		return new Uint8Array(Buffer.from(encoded || '', 'base64').buffer);
+		// Copy instead of wrapping `.buffer`: on Node, small Buffers are views
+		// into a shared pool, so wrapping the backing ArrayBuffer without
+		// byteOffset/byteLength returns unrelated pool memory.
+		return Uint8Array.from(Buffer.from(encoded || '', 'base64'));
 	}
 };
 

@@ -114,14 +114,13 @@ describe('CLI Resolve Command', () => {
       expect(result.success === true || result.message.includes('resolve')).toBe(true);
     });
 
-    it('resolves unknown DID method with minimal document', async () => {
-      // The SDK creates a minimal DID document for any DID format
+    it('fails for unknown DID methods instead of fabricating a minimal document', async () => {
       const result = await resolveCommand({
         did: 'did:unknown:method:12345',
       });
 
-      expect(result.success).toBe(true);
-      expect(result.didDocument).toBeDefined();
+      expect(result.success).toBe(false);
+      expect(result.didDocument).toBeUndefined();
     });
   });
 

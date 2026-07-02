@@ -8,6 +8,7 @@ export interface BtcoInscriptionData {
   contentType?: string;
   isValidDid?: boolean;
   didDocument?: DIDDocument | null;
+  deactivated?: boolean;
   error?: string;
 }
 
@@ -40,7 +41,7 @@ export interface ResourceProviderLike {
 
 export interface BtcoDidResolutionOptions {
   provider?: ResourceProviderLike;
-  fetchFn?: (url: string) => Promise<Response>;
+  fetchFn?: (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
   timeout?: number;
 }
 
@@ -134,8 +135,10 @@ export class BtcoDidResolver {
           const timeoutId = setTimeout(() => controller.abort(), timeout);
 
           try {
-            const response = await fetchFn(inscription.content_url);
-            clearTimeout(timeoutId);
+            // Do NOT clear the timer here: the body read below must also be
+            // covered by the timeout, or a server that stalls mid-stream
+            // hangs resolution forever. The finally clears it.
+            const response = await fetchFn(inscription.content_url, { signal: controller.signal });
 
             if (!response.ok) {
               throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -170,10 +173,13 @@ export class BtcoDidResolver {
           didPattern.test(inscriptionData.content) ||
           (documentFromContent !== null && documentFromContent.id === expectedDid);
 
-        if (inscriptionData.content.includes('🔥')) {
-          // Deactivation marker: the DID is tombstoned. Do not attempt to derive
-          // a document; just record the deactivation.
+        if (inscriptionData.isValidDid && inscriptionData.content.includes('🔥')) {
+          // Deactivation marker on an inscription that actually carries THIS
+          // DID: the DID is tombstoned. An unrelated later inscription on the
+          // same sat that merely contains the emoji must NOT deactivate a live
+          // DID, so this is gated behind isValidDid.
           inscriptionData.didDocument = null;
+          inscriptionData.deactivated = true;
           if (!inscriptionData.error) {
             inscriptionData.error = 'DID has been deactivated';
           }
@@ -196,10 +202,20 @@ export class BtcoDidResolver {
       inscriptionDataList.push(inscriptionData);
     }
 
+    // Walk backwards from the newest inscription: the most recent
+    // lifecycle-relevant inscription (a tombstone or a valid DID document)
+    // decides the outcome. A tombstone MUST NOT fall through to an older
+    // document — that would resurrect a deactivated DID.
     let latestValidDidDocument: DIDDocument | null = null;
     let latestInscriptionId: string | undefined;
+    let deactivated = false;
     for (let i = inscriptionDataList.length - 1; i >= 0; i--) {
       const data = inscriptionDataList[i];
+      if (data.deactivated) {
+        deactivated = true;
+        latestInscriptionId = data.inscriptionId;
+        break;
+      }
       if (data.didDocument && !data.error) {
         latestValidDidDocument = data.didDocument;
         latestInscriptionId = data.inscriptionId;
@@ -214,11 +230,13 @@ export class BtcoDidResolver {
         inscriptionId: latestInscriptionId,
         satNumber,
         network,
-        totalInscriptions: inscriptionDataList.length
+        totalInscriptions: inscriptionDataList.length,
+        ...(deactivated ? { message: 'DID has been deactivated' } : {})
       },
       didDocumentMetadata: {
         inscriptionId: latestInscriptionId,
-        network
+        network,
+        ...(deactivated ? { deactivated: true } : {})
       }
     };
   }

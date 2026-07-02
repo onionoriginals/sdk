@@ -223,15 +223,16 @@ export class MultiSigManager {
         continue;
       }
 
-      // Reject duplicate proofs from the same signer
-      if (seenSigners.has(vm)) {
-        result.errors.push(`Duplicate proof from ${vm} (ignored)`);
-        continue;
-      }
-      seenSigners.add(vm);
-
       const valid = await this.verifyProof(credential, proof, signer);
       if (valid) {
+        // Reject duplicate proofs from the same signer. Dedupe only after
+        // successful verification so an invalid proof cannot consume the
+        // signer's slot and suppress a later valid proof from the same signer.
+        if (seenSigners.has(vm)) {
+          result.errors.push(`Duplicate proof from ${vm} (ignored)`);
+          continue;
+        }
+        seenSigners.add(vm);
         result.validSignatures++;
         result.validSigners.push(vm);
       } else {

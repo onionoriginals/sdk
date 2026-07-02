@@ -187,13 +187,22 @@ describe('CORE-MIG-EVENTS-032: DIDCompatibilityValidator', () => {
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
     const webvhDid = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
 
-    const result = await validator.validate({
-      sourceDid: webvhDid.id,
-      targetLayer: 'btco',
-    });
+    // The synthetic did:webvh has no hosted log; inject its resolution
+    // (resolveDID no longer fabricates stub documents for unresolvable DIDs).
+    const originalResolve = sdk.did.resolveDID.bind(sdk.did);
+    (sdk.did as any).resolveDID = async (did: string) =>
+      did === webvhDid.id ? webvhDid : originalResolve(did);
+    try {
+      const result = await validator.validate({
+        sourceDid: webvhDid.id,
+        targetLayer: 'btco',
+      });
 
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    } finally {
+      (sdk.did as any).resolveDID = originalResolve;
+    }
   });
 
   test('[error] rejects btco → webvh downgrade (invalid migration path)', async () => {

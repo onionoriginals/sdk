@@ -17,10 +17,11 @@ const MIN_RELAY_FEE_RATE = 1.1;
  * @returns The calculated fee in satoshis (bigint).
  */
 export const calculateFee = (vbytes: number, feeRate: number): bigint => {
-    // Ensure inputs are valid numbers
-    if (isNaN(vbytes) || vbytes <= 0 || isNaN(feeRate) || feeRate <= 0) {
-        console.warn(`[calculateFee] Invalid input: vbytes=${vbytes}, feeRate=${feeRate}. Returning 0.`);
-        return 0n;
+    // Reject invalid inputs loudly: returning 0 here would build zero-fee
+    // transactions that no node relays. NaN slips past callers' `<= 0`
+    // guards, so it must be caught here.
+    if (!Number.isFinite(vbytes) || vbytes <= 0 || !Number.isFinite(feeRate) || feeRate <= 0) {
+        throw new Error(`[calculateFee] Invalid input: vbytes=${vbytes}, feeRate=${feeRate}`);
     }
 
     // Calculate fee based on the desired fee rate

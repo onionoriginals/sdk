@@ -86,22 +86,17 @@ describe('CheckpointManager', () => {
       expect(checkpoint.metadata).toEqual({});
     });
 
-    it('should create a checkpoint even for a syntactically valid but unknown peer DID (resolver returns minimal doc)', async () => {
-      // NOTE: The did:peer resolver returns a minimal DID document for any did:peer: prefixed
-      // string rather than returning null. So createCheckpoint succeeds even for "unknown" DIDs.
-      // This is REAL code behavior — the source DID format is valid so the resolver returns a doc.
+    it('should reject a syntactically valid but unresolvable peer DID', async () => {
+      // resolveDID no longer fabricates minimal documents for unresolvable
+      // DIDs, so checkpoint creation fails loudly instead of snapshotting a
+      // stub that could never be rolled back to.
       const { checkpointManager } = makeManagers();
 
-      const checkpoint = await checkpointManager.createCheckpoint('mig_unknown_peer', {
+      await expect(checkpointManager.createCheckpoint('mig_unknown_peer', {
         sourceDid: 'did:peer:nonexistent_zXXX',
         targetLayer: 'webvh',
         domain: 'example.com'
-      });
-
-      expect(checkpoint).toBeDefined();
-      expect(checkpoint.sourceDid).toBe('did:peer:nonexistent_zXXX');
-      // The didDocument will be a minimal object returned by the resolver
-      expect(checkpoint.didDocument).toBeDefined();
+      })).rejects.toThrow('Could not resolve source DID');
     });
   });
 
@@ -236,5 +231,43 @@ describe('CheckpointManager', () => {
       expect(retrieved!.checkpointId).toBe('chk_from_storage');
       expect(retrieved!.migrationId).toBe('mig_from_storage');
     });
+  });
+});
+
+describe('CheckpointStorage persistence round-trip', () => {
+  it('reads back a checkpoint persisted through a StorageAdapter after memory loss', async () => {
+    const { CheckpointStorage } = await import('../../../src/migration/checkpoint/CheckpointStorage');
+
+    // Minimal adapters-style StorageAdapter: get returns { content, contentType }
+    const objects = new Map<string, Buffer>();
+    const adapter = {
+      async put(key: string, data: Buffer | string) {
+        objects.set(key, Buffer.from(data));
+        return key;
+      },
+      async get(key: string) {
+        const content = objects.get(key);
+        return content ? { content, contentType: 'application/json' } : null;
+      }
+    };
+
+    const config: any = { network: 'regtest', defaultKeyType: 'Ed25519', storageAdapter: adapter };
+    const storageA = new CheckpointStorage(config);
+    const checkpoint: any = {
+      checkpointId: 'chk_roundtrip',
+      migrationId: 'mig_roundtrip',
+      timestamp: 12345,
+      sourceDid: 'did:peer:abc',
+      sourceLayer: 'peer',
+      didDocument: { id: 'did:peer:abc' }
+    };
+    await storageA.save(checkpoint);
+
+    // Fresh instance = empty in-memory map: must read from the adapter.
+    const storageB = new CheckpointStorage(config);
+    const loaded = await storageB.get('chk_roundtrip');
+    expect(loaded).not.toBeNull();
+    expect(loaded!.checkpointId).toBe('chk_roundtrip');
+    expect(loaded!.sourceDid).toBe('did:peer:abc');
   });
 });

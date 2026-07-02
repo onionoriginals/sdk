@@ -53,9 +53,14 @@ describe('BITCOIN-006: did:btco DID string parsing', () => {
     expect(() => parseSatoshiIdentifier('did:btco:net:extra:123')).toThrow();
   });
 
-  test('rejects unsupported network prefix (did:btco:reg:123)', () => {
-    // Only "test" and "sig" are allowed; "reg" is not
-    expect(() => parseSatoshiIdentifier('did:btco:reg:123')).toThrow();
+  test('rejects unsupported network prefix (did:btco:foo:123)', () => {
+    // Only "test", "sig" and "reg" are allowed
+    expect(() => parseSatoshiIdentifier('did:btco:foo:123')).toThrow();
+  });
+
+  test('accepts valid regtest DID (did:btco:reg:123456)', () => {
+    // The SDK itself generates did:btco:reg: DIDs for regtest
+    expect(parseSatoshiIdentifier('did:btco:reg:123456')).toBe(123456);
   });
 
   test('accepts valid mainnet DID (did:btco:123456)', () => {
@@ -155,12 +160,12 @@ describe('BITCOIN-014: fee calculation for unconfirmed / priority scenarios', ()
     expect(typeof calculateFee(100, 0.5)).toBe('bigint');
   });
 
-  test('returns 0 for invalid (zero) vbytes', () => {
-    expect(calculateFee(0, 10)).toBe(0n);
+  test('throws for invalid (zero) vbytes', () => {
+    expect(() => calculateFee(0, 10)).toThrow(/Invalid input/);
   });
 
-  test('returns 0 for invalid (NaN) fee rate', () => {
-    expect(calculateFee(100, NaN)).toBe(0n);
+  test('throws for invalid (NaN) fee rate', () => {
+    expect(() => calculateFee(100, NaN)).toThrow(/Invalid input/);
   });
 });
 

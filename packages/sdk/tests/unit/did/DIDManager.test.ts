@@ -52,9 +52,16 @@ describe('DIDManager', () => {
     expect(btcoDoc.id.startsWith('did:btco:')).toBe(true);
   });
 
-  test('resolveDID resolves documents (expected to fail until implemented)', async () => {
-    const doc = await sdk.did.resolveDID('did:peer:abc');
+  test('resolveDID resolves a real did:peer document', async () => {
+    const created = await sdk.did.createDIDPeer();
+    const doc = await sdk.did.resolveDID(created.id);
     expect(doc).not.toBeNull();
+    expect(doc?.id).toBe(created.id);
+  });
+
+  test('resolveDID returns null for an unresolvable did:peer instead of a stub', async () => {
+    const doc = await sdk.did.resolveDID('did:peer:abc');
+    expect(doc).toBeNull();
   });
 
   test('validateDIDDocument returns true for valid doc (expected to fail until implemented)', () => {

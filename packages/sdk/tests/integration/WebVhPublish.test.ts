@@ -28,8 +28,10 @@ describe('WebVH publish end-to-end', () => {
     expect(typeof webBinding).toBe('string');
     expect(webBinding).toBe(publisherDid);
 
+    // The synthetic publisher DID has no hosted did:webvh log, so honest
+    // resolution returns null (resolveDID no longer fabricates stub docs).
     const resolved = await sdk.did.resolveDID(webBinding!);
-    expect(resolved?.id).toBe(webBinding);
+    expect(resolved).toBeNull();
 
     // Resources have DID-based URLs (not .well-known)
     expect(Array.isArray(published.resources)).toBe(true);

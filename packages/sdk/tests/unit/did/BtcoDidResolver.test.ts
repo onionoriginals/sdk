@@ -211,6 +211,67 @@ describe('BtcoDidResolver', () => {
     expect(res.didDocument).toBeNull();
   });
 
+  test('tombstone after a valid document deactivates the DID (no fallback to older document)', async () => {
+    const docContent = JSON.stringify({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:btco:128',
+      verificationMethod: [{
+        id: 'did:btco:128#key-0',
+        type: 'Multikey',
+        controller: 'did:btco:128',
+        publicKeyMultibase: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
+      }]
+    });
+    provider.getSatInfo.mockResolvedValue({ inscription_ids: ['insc-doc', 'insc-tombstone'] });
+    provider.resolveInscription.mockImplementation(async (id: string) => ({
+      id,
+      sat: 128,
+      content_type: 'text/plain',
+      content_url: `http://local/content/${id}`
+    }));
+    provider.getMetadata.mockResolvedValue(null);
+    (global as any).fetch.mockImplementation(async (url: string) => ({
+      ok: true,
+      text: async () => url.includes('insc-doc') ? docContent : 'BTCO DID: did:btco:128 🔥'
+    }));
+
+    const resolver = new BtcoDidResolver({ provider });
+    const res = await resolver.resolve('did:btco:128');
+    expect(res.didDocument).toBeNull();
+    expect(res.didDocumentMetadata.deactivated).toBe(true);
+    expect(res.resolutionMetadata.message).toBe('DID has been deactivated');
+  });
+
+  test('a newer valid document after an old tombstone still resolves', async () => {
+    const docContent = JSON.stringify({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:btco:128',
+      verificationMethod: [{
+        id: 'did:btco:128#key-0',
+        type: 'Multikey',
+        controller: 'did:btco:128',
+        publicKeyMultibase: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
+      }]
+    });
+    provider.getSatInfo.mockResolvedValue({ inscription_ids: ['insc-tombstone', 'insc-doc'] });
+    provider.resolveInscription.mockImplementation(async (id: string) => ({
+      id,
+      sat: 128,
+      content_type: 'text/plain',
+      content_url: `http://local/content/${id}`
+    }));
+    provider.getMetadata.mockResolvedValue(null);
+    (global as any).fetch.mockImplementation(async (url: string) => ({
+      ok: true,
+      text: async () => url.includes('insc-doc') ? docContent : 'BTCO DID: did:btco:128 🔥'
+    }));
+
+    const resolver = new BtcoDidResolver({ provider });
+    const res = await resolver.resolve('did:btco:128');
+    expect(res.didDocument?.id).toBe('did:btco:128');
+    expect(res.didDocumentMetadata.deactivated).toBeUndefined();
+  });
+
   test('provider.resolveInscription failure path triggers outer catch', async () => {
     const inscriptionId = 'insc8';
     provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
@@ -546,12 +607,24 @@ describe('BtcoDidResolver branches', () => {
     expect(res.resolutionMetadata.network).toBe('reg');
   });
 
-  test('deactivated content with flame emoji', async () => {
-    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => '🔥' }));
+  test('deactivated content with flame emoji on a DID tombstone', async () => {
+    // A real tombstone carries the human-readable DID marker; a bare 🔥 with
+    // no DID reference must NOT deactivate (it could be unrelated content).
+    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:1 🔥' }));
     const provider = makeProvider();
     const r = new BtcoDidResolver({ provider });
     const res = await r.resolve('did:btco:1');
     expect(res.inscriptions?.[0].error).toContain('deactivated');
+    expect(res.didDocumentMetadata.deactivated).toBe(true);
+  });
+
+  test('bare flame emoji with no DID reference does not deactivate', async () => {
+    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'just some 🔥 text' }));
+    const provider = makeProvider();
+    const r = new BtcoDidResolver({ provider });
+    const res = await r.resolve('did:btco:1');
+    expect(res.inscriptions?.[0].deactivated).toBeUndefined();
+    expect(res.didDocumentMetadata.deactivated).toBeUndefined();
   });
 });
 

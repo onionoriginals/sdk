@@ -93,64 +93,30 @@ describe('calculateFee', () => {
   });
 
   describe('Edge Cases', () => {
-    test('handles zero fee rate (returns 0)', () => {
-      const vbytes = 100;
-      const feeRate = 0;
-      
-      const fee = calculateFee(vbytes, feeRate);
-      
-      // Invalid input, returns 0
-      expect(fee).toBe(0n);
+    test('throws on zero fee rate', () => {
+      expect(() => calculateFee(100, 0)).toThrow(/Invalid input/);
     });
 
-    test('handles negative fee rate (returns 0)', () => {
-      const vbytes = 100;
-      const feeRate = -5;
-      
-      const fee = calculateFee(vbytes, feeRate);
-      
-      // Invalid input, returns 0
-      expect(fee).toBe(0n);
+    test('throws on negative fee rate', () => {
+      expect(() => calculateFee(100, -5)).toThrow(/Invalid input/);
     });
 
-    test('handles zero vbytes (returns 0)', () => {
-      const vbytes = 0;
-      const feeRate = 10;
-      
-      const fee = calculateFee(vbytes, feeRate);
-      
-      // Invalid input, returns 0
-      expect(fee).toBe(0n);
+    test('throws on zero vbytes', () => {
+      expect(() => calculateFee(0, 10)).toThrow(/Invalid input/);
     });
 
-    test('handles negative vbytes (returns 0)', () => {
-      const vbytes = -100;
-      const feeRate = 10;
-      
-      const fee = calculateFee(vbytes, feeRate);
-      
-      // Invalid input, returns 0
-      expect(fee).toBe(0n);
+    test('throws on negative vbytes', () => {
+      expect(() => calculateFee(-100, 10)).toThrow(/Invalid input/);
     });
 
-    test('handles NaN vbytes (returns 0)', () => {
-      const vbytes = NaN;
-      const feeRate = 10;
-      
-      const fee = calculateFee(vbytes, feeRate);
-      
-      // Invalid input, returns 0
-      expect(fee).toBe(0n);
+    test('throws on NaN vbytes', () => {
+      expect(() => calculateFee(NaN, 10)).toThrow(/Invalid input/);
     });
 
-    test('handles NaN fee rate (returns 0)', () => {
-      const vbytes = 100;
-      const feeRate = NaN;
-      
-      const fee = calculateFee(vbytes, feeRate);
-      
-      // Invalid input, returns 0
-      expect(fee).toBe(0n);
+    test('throws on NaN fee rate', () => {
+      // NaN slips past `<= 0` guards in callers, so it must throw here
+      // rather than silently producing a zero-fee transaction.
+      expect(() => calculateFee(100, NaN)).toThrow(/Invalid input/);
     });
   });
 

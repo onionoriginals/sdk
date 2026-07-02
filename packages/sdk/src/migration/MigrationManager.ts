@@ -213,11 +213,14 @@ export class MigrationManager {
       // Record a signed audit entry for the migration.
       await this.auditLogger.logMigration(auditRecord as any);
 
-      // Clean up checkpoint after successful migration
-      setTimeout(() => {
+      // Clean up checkpoint after successful migration. unref() the timer so
+      // a successful migration does not pin the process alive for 24 hours
+      // (CLI scripts and tests would otherwise hang until the timer fired).
+      const cleanupTimer = setTimeout(() => {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-floating-promises
         this.checkpointManager.deleteCheckpoint(checkpoint.checkpointId);
       }, 24 * 60 * 60 * 1000); // Delete after 24 hours
+      cleanupTimer.unref?.();
 
       return {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment

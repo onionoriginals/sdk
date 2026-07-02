@@ -232,8 +232,8 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(btcoProvenance.migrations[1].satoshi).toBeDefined();
       expect(btcoProvenance.migrations[1].revealTxId).toBeDefined();
       
-      // Verify fee oracle was used (should be 7 from oracle, not 5 from request)
-      expect(btcoProvenance.migrations[1].feeRate).toBe(7); // Fee oracle value takes precedence
+      // An explicitly requested fee rate wins over the oracle
+      expect(btcoProvenance.migrations[1].feeRate).toBe(5);
       expect(typeof btcoProvenance.migrations[1].feeRate).toBe('number');
 
       // Verify the inscription exists in the ordinals provider
@@ -312,7 +312,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(provenance.migrations).toHaveLength(1);
       expect(provenance.migrations[0].from).toBe('did:peer');
       expect(provenance.migrations[0].to).toBe('did:btco');
-      expect(provenance.migrations[0].feeRate).toBe(7); // Fee oracle takes precedence
+      expect(provenance.migrations[0].feeRate).toBe(10); // Explicit rate wins over the oracle
 
       // Verify can transfer after direct migration
       const transferResult = await sdk.lifecycle.transferOwnership(
@@ -693,7 +693,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(btcoMigration.inscriptionId).toBeDefined();
       expect(btcoMigration.satoshi).toBeDefined();
       expect(btcoMigration.revealTxId).toBeDefined();
-      expect(btcoMigration.feeRate).toBe(7); // Fee oracle overrides requested rate
+      expect(btcoMigration.feeRate).toBe(8); // Explicitly requested rate wins over the oracle
 
       // Verify transfer metadata
       expect(provenance.transfers).toHaveLength(1);

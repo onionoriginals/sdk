@@ -50,14 +50,28 @@ describe('PSBTBuilder', () => {
   test('adds dust to fee when change < dust', () => {
     const b = new PSBTBuilder();
     const res = b.build({
-      utxos: [utxo('a', 0, 700)],
+      utxos: [utxo('a', 0, 1_000)],
       outputs: [{ address: 'to', value: 600 }],
       changeAddress: 'change',
       feeRate: 1,
       network: 'regtest'
     });
     expect(res.changeOutput).toBeUndefined();
-    expect(res.fee).toBe(100);
+    // 1 input, 1 output → 109 vbytes at 1 sat/vB; the sub-dust remainder is
+    // folded into the fee: 1000 - 600 = 400.
+    expect(res.fee).toBe(400);
+  });
+
+  test('throws when inputs cover outputs but not the fee', () => {
+    const b = new PSBTBuilder();
+    // 700 covers the 600 output but not 600 + 109 fee at 1 sat/vB.
+    expect(() => b.build({
+      utxos: [utxo('a', 0, 700)],
+      outputs: [{ address: 'to', value: 600 }],
+      changeAddress: 'change',
+      feeRate: 1,
+      network: 'regtest'
+    })).toThrow('Insufficient funds');
   });
 
   test('falls back when Buffer/btoa not available', () => {

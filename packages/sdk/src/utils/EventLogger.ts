@@ -22,6 +22,7 @@ export interface EventLoggingConfig {
   'asset:transferred'?: LogLevel | false;
   'resource:published'?: LogLevel | false;
   'credential:issued'?: LogLevel | false;
+  'credential:skipped'?: LogLevel | false;
   'resource:version:created'?: LogLevel | false;
   'verification:completed'?: LogLevel | false;
   'batch:started'?: LogLevel | false;
@@ -48,6 +49,7 @@ const DEFAULT_EVENT_CONFIG: EventLoggingConfig = {
   'asset:transferred': 'info',
   'resource:published': 'info',
   'credential:issued': 'info',
+  'credential:skipped': 'warn',
   'resource:version:created': 'info',
   'verification:completed': 'info',
   'batch:started': 'info',
@@ -90,6 +92,7 @@ export class EventLogger {
       'asset:transferred',
       'resource:published',
       'credential:issued',
+      'credential:skipped',
       'resource:version:created',
       'verification:completed',
       'batch:started',
@@ -198,6 +201,15 @@ export class EventLogger {
           assetId: event.asset.id,
           credentialType: event.credential.type,
           issuer: event.credential.issuer
+        };
+        break;
+
+      case 'credential:skipped':
+        message = 'Credential issuance skipped';
+        data = {
+          assetId: event.asset.id,
+          reason: event.reason,
+          detail: event.message
         };
         break;
         

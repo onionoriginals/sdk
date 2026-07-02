@@ -211,19 +211,21 @@ describe('BitcoinManager integration with providers', () => {
     const provider = createMockProvider();
     const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
     await sdk.bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
-    await expect(sdk.bitcoin.validateBTCODID('did:btco:123456789')).resolves.toBe(true);
-    await expect(sdk.bitcoin.validateBTCODID('did:btco:999999999')).resolves.toBe(false);
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:reg:123456789')).resolves.toBe(true);
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:reg:999999999')).resolves.toBe(false);
   });
 
-  test('validateBTCODID rejects invalid network prefixes', async () => {
+  test('validateBTCODID rejects network prefixes that do not match the configured network', async () => {
     const provider = createMockProvider();
     const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
     await sdk.bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
-    
-    // Valid networks should work
-    await expect(sdk.bitcoin.validateBTCODID('did:btco:test:123456789')).resolves.toBe(true);
-    await expect(sdk.bitcoin.validateBTCODID('did:btco:sig:123456789')).resolves.toBe(true);
-    
+
+    // The satoshi lookup runs against the configured network's provider, so a
+    // DID from another network must not validate against it.
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:123456789')).resolves.toBe(false); // mainnet DID
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:test:123456789')).resolves.toBe(false);
+    await expect(sdk.bitcoin.validateBTCODID('did:btco:sig:123456789')).resolves.toBe(false);
+
     // Invalid network prefix should be rejected
     await expect(sdk.bitcoin.validateBTCODID('did:btco:invalid:123456789')).resolves.toBe(false);
     await expect(sdk.bitcoin.validateBTCODID('did:btco:mainnet:123456789')).resolves.toBe(false);
@@ -239,7 +241,7 @@ describe('BitcoinManager integration with providers', () => {
     expect(canProceed).toBe(false);
   });
 
-  test('resolveFeeRate prefers feeOracle over provider and provided value', async () => {
+  test('resolveFeeRate honors an explicitly provided fee rate over estimators', async () => {
     const provider = createMockProvider();
     const sdk = OriginalsSDK.create({
       network: 'regtest',
@@ -247,6 +249,17 @@ describe('BitcoinManager integration with providers', () => {
       feeOracle: { estimateFeeRate: async () => 9 }
     } as any);
     const res: any = await sdk.bitcoin.inscribeData(Buffer.from('hello'), 'text/plain', 2);
+    expect(res.feeRate).toBe(2);
+  });
+
+  test('resolveFeeRate falls back to feeOracle when no explicit rate is given', async () => {
+    const provider = createMockProvider();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      ordinalsProvider: provider,
+      feeOracle: { estimateFeeRate: async () => 9 }
+    } as any);
+    const res: any = await sdk.bitcoin.inscribeData(Buffer.from('hello'), 'text/plain');
     expect(res.feeRate).toBe(9);
   });
 

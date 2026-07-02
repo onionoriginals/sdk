@@ -7,6 +7,7 @@ import { OriginalsConfig } from '../../types/index.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as ed25519 from '@noble/ed25519';
 import { encodeBase64UrlMultibase, base58, MULTIBASE_BASE58BTC_HEADER } from '../../utils/encoding.js';
+import { storedDataToString } from '../checkpoint/CheckpointStorage.js';
 
 /**
  * Key material for signing audit records with Ed25519. When omitted, the
@@ -190,7 +191,9 @@ export class AuditLogger implements IAuditLogger {
         try {
           const data = await storageAdapter.get(file);
           if (data) {
-            const record: MigrationAuditRecord = JSON.parse(data.toString());
+            // StorageAdapter.get returns { content, contentType }; data.toString()
+            // was "[object Object]" and silently skipped every persisted record.
+            const record: MigrationAuditRecord = JSON.parse(storedDataToString(data));
 
             // Add to in-memory store if it matches the DID
             if (record.sourceDid === did || record.targetDid === did) {

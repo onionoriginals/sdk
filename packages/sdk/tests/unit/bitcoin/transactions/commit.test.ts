@@ -153,8 +153,10 @@ describe('createCommitTransaction', () => {
     });
 
     test('fee scales with fee rate', async () => {
-      const params1 = createCommitParams({ feeRate: 5 });
-      const params2 = createCommitParams({ feeRate: 50 });
+      // Large UTXO: at 50 sat/vB the reveal-aware commit output plus the
+      // commit fee exceed the 10k default funding.
+      const params1 = createCommitParams({ feeRate: 5, utxos: [createUtxo(50000, 0)] });
+      const params2 = createCommitParams({ feeRate: 50, utxos: [createUtxo(50000, 0)] });
 
       const result1 = await createCommitTransaction(params1);
       const result2 = await createCommitTransaction(params2);
@@ -216,7 +218,9 @@ describe('createCommitTransaction', () => {
 
     test('PSBT omits change when below dust limit', async () => {
       const params = createCommitParams({
-        utxos: [createUtxo(2500, 0)], // Enough for commit + fees with minimal change below dust
+        // Commit output (546 postage + ~1650 reveal fee = 2196) + ~1530
+        // commit fee = 3726; remainder 274 is below dust and folded into fee.
+        utxos: [createUtxo(4000, 0)],
         minimumCommitAmount: 546,
         feeRate: 10
       });
@@ -471,10 +475,24 @@ describe('createCommitTransaction', () => {
       expect(result.commitAmount).toBe(10000);
     });
 
+    test('default commit output funds the reveal (postage + reveal fee)', async () => {
+      // A bare-dust (546) commit output could never be revealed: the reveal
+      // tx must pay its own fee and still leave >= dust postage.
+      const params = createCommitParams(); // 14-byte content, 10 sat/vB
+      const result = await createCommitTransaction(params);
+      expect(result.commitAmount).toBeGreaterThan(546);
+      // 546 postage + a reveal fee estimated from the real serialized leaf
+      // script and control block (with BIP141 witness overhead). Assert the
+      // reveal-aware floor rather than a brittle exact figure.
+      const cheaper = await createCommitTransaction(createCommitParams({ feeRate: 5, utxos: [createUtxo(50000, 0)] }));
+      expect(result.commitAmount).toBeGreaterThan(cheaper.commitAmount);
+    });
+
     test('adds dust change to fee', async () => {
-      // Create scenario where change would be < 546 sats
+      // Create scenario where change would be < 546 sats:
+      // commit output (546 + ~825 reveal fee = 1371) + ~765 commit fee = 2136.
       const params = createCommitParams({
-        utxos: [createUtxo(1500, 0)],
+        utxos: [createUtxo(2400, 0)],
         minimumCommitAmount: 546,
         feeRate: 5
       });

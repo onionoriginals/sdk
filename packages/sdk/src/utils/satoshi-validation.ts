@@ -139,13 +139,14 @@ export function parseSatoshiIdentifier(identifier: string): number {
     // did:btco:123456 (mainnet)
     // did:btco:test:123456 (testnet)
     // did:btco:sig:123456 (signet)
+    // did:btco:reg:123456 (regtest)
     if (parts.length === 3) {
       // Mainnet format: did:btco:satoshi
       satoshiStr = parts[2];
     } else if (parts.length === 4) {
       // Network-specific format: did:btco:network:satoshi
       const network = parts[2];
-      if (network !== 'test' && network !== 'sig') {
+      if (network !== 'test' && network !== 'sig' && network !== 'reg') {
         throw new StructuredError(
           'INVALID_SATOSHI_IDENTIFIER',
           `Invalid did:btco DID format: unsupported network "${network}"`

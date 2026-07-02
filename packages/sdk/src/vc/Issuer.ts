@@ -62,7 +62,17 @@ export class Issuer {
     options: IssueOptions
   ): Promise<VerifiableCredential> {
     const documentLoader = options.documentLoader || createDocumentLoader(this.didManager);
-    await documentLoader(this.verificationMethod.id);
+    // Best-effort existence check only: the Issuer signs with its own
+    // verification method, so an unresolvable DID (e.g. a key registered
+    // out-of-band, or an offline did:peer) must not block issuance.
+    // A RETIRED (revoked/compromised) verification method is different —
+    // signing with it must fail closed, so that loader error propagates.
+    try {
+      await documentLoader(this.verificationMethod.id);
+    } catch (e) {
+      if (e instanceof Error && /retired/i.test(e.message)) throw e;
+      // otherwise proceed with the self-provided verification method
+    }
 
     const issuerId = typeof unsigned.issuer === 'string' ? unsigned.issuer : (unsigned.issuer as { id?: string })?.id;
     // The credential's issuer must be the DID that controls the signing key.
@@ -107,7 +117,14 @@ export class Issuer {
     options: IssueOptions
   ): Promise<VerifiablePresentation> {
     const documentLoader = options.documentLoader || createDocumentLoader(this.didManager);
-    await documentLoader(this.verificationMethod.id);
+    // Best-effort existence check only (see issueCredential); retired-key
+    // errors still fail closed.
+    try {
+      await documentLoader(this.verificationMethod.id);
+    } catch (e) {
+      if (e instanceof Error && /retired/i.test(e.message)) throw e;
+      // otherwise proceed with the self-provided verification method
+    }
 
     if (!this.verificationMethod.secretKeyMultibase) {
       throw new Error('Missing secretKeyMultibase for issuance');

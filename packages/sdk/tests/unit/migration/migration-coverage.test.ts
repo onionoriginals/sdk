@@ -140,14 +140,15 @@ describe('CORE-MIG-EVENTS-003/happy: DID update adds new service endpoint', () =
     expect(Array.isArray(webvhDoc.verificationMethod)).toBe(true);
   });
 
-  it('resolved did:webvh document is retrievable via resolveDID', async () => {
+  it('resolveDID returns null for a migrated did:webvh with no hosted log', async () => {
     const sdk = makeSdk();
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
     const webvhDoc = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
 
+    // migrateToDIDWebVH only rewrites the identifier; nothing is hosted at
+    // example.com, so honest resolution returns null (no fabricated stubs).
     const resolved = await sdk.did.resolveDID(webvhDoc.id);
-    expect(resolved).not.toBeNull();
-    expect(resolved!.id).toBe(webvhDoc.id);
+    expect(resolved).toBeNull();
   });
 });
 

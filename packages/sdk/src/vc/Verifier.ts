@@ -36,8 +36,31 @@ export class Verifier {
         return { verified: false, errors: result.errors ?? ['Verification failed'] };
       }
 
-      // Check credential status (revocation/suspension) if requested
-      if (options.checkStatus !== false && vc.credentialStatus && this.statusListResolver) {
+      // Enforce the credential's validity period. A cryptographically valid
+      // proof over an expired credential must not verify.
+      const validityResult = this.checkValidityPeriod(vc);
+      if (!validityResult.verified) {
+        return validityResult;
+      }
+
+      // Check credential status (revocation/suspension) if requested. Only
+      // BitstringStatusListEntry is evaluable by this verifier; unknown
+      // status types are ignored (checkCredentialStatus treats them as
+      // no-ops), so they must not trip the fail-closed resolver check.
+      const statusType = (vc.credentialStatus as BitstringStatusListEntry | undefined)?.type;
+      if (options.checkStatus !== false && statusType === 'BitstringStatusListEntry') {
+        if (!this.statusListResolver) {
+          // Fail closed: the credential declares a status entry but this
+          // verifier has no way to check it. Silently returning verified
+          // would accept revoked credentials.
+          return {
+            verified: false,
+            errors: [
+              'Credential declares credentialStatus but no statusListResolver is configured. ' +
+              'Provide a statusListResolver, or pass checkStatus: false to explicitly skip revocation checking.'
+            ]
+          };
+        }
         const statusResult = await this.checkCredentialStatus(vc);
         if (!statusResult.verified) {
           return statusResult;
@@ -49,6 +72,53 @@ export class Verifier {
       const error = e as Error;
       return { verified: false, errors: [error?.message ?? 'Unknown error in verifyCredential'] };
     }
+  }
+
+  /**
+   * Enforce the credential's validity window: expirationDate/validUntil in
+   * the past, or validFrom/issuanceDate in the future, fail verification.
+   */
+  private checkValidityPeriod(vc: VerifiableCredential): VerificationResult {
+    const now = Date.now();
+    const doc = vc as unknown as Record<string, unknown>;
+
+    // A present-but-unparseable date fails closed: a signed but malformed
+    // expirationDate/validFrom must not bypass the time-window check by
+    // being silently treated as absent.
+    const invalid: string[] = [];
+    const parse = (field: string): number | null => {
+      const value = doc[field];
+      if (value === undefined || value === null) return null;
+      if (typeof value !== 'string') { invalid.push(field); return null; }
+      const t = Date.parse(value);
+      if (Number.isNaN(t)) { invalid.push(field); return null; }
+      return t;
+    };
+
+    const expiration = parse('expirationDate');
+    const validUntil = parse('validUntil');
+    const validFrom = parse('validFrom');
+    const issuanceDate = parse('issuanceDate');
+
+    if (invalid.length > 0) {
+      return { verified: false, errors: [`Credential has unparseable date field(s): ${invalid.join(', ')}`] };
+    }
+
+    for (const [field, t] of [['expirationDate', expiration], ['validUntil', validUntil]] as const) {
+      if (t !== null && t < now) {
+        return { verified: false, errors: [`Credential expired (${field}: ${String(doc[field])})`] };
+      }
+    }
+
+    // validFrom (VCDM 2.0) takes precedence; fall back to issuanceDate
+    // (VCDM 1.1) as the validity start.
+    const startField = validFrom !== null ? 'validFrom' : 'issuanceDate';
+    const start = validFrom !== null ? validFrom : issuanceDate;
+    if (start !== null && start > now) {
+      return { verified: false, errors: [`Credential is not yet valid (${startField}: ${String(doc[startField])})`] };
+    }
+
+    return { verified: true, errors: [] };
   }
 
   /**
@@ -127,7 +197,9 @@ export class Verifier {
         : [String(vcContext)];
       for (const c of ctxs) await loader(c);
 
-      // Verify each proof
+      // Verify each proof, counting each authorized signer at most once so a
+      // replicated proof cannot satisfy the threshold on its own.
+      const seenSigners = new Set<string>();
       for (const proof of proofs) {
         const vm = proof.verificationMethod;
         if (!policy.signerVerificationMethods.includes(vm)) {
@@ -143,6 +215,14 @@ export class Verifier {
             { documentLoader: loader }
           );
           if (proofResult.verified) {
+            // Dedupe only after successful verification: an invalid proof
+            // must not consume the signer's slot and suppress a later valid
+            // proof from the same signer.
+            if (seenSigners.has(vm)) {
+              result.errors.push(`Duplicate proof from ${vm} (ignored)`);
+              continue;
+            }
+            seenSigners.add(vm);
             result.validSignatures++;
             result.validSigners.push(vm);
           } else {
@@ -185,7 +265,16 @@ export class Verifier {
     return result;
   }
 
-  async verifyPresentation(vp: VerifiablePresentation, options: { documentLoader?: (iri: string) => Promise<unknown> } = {}): Promise<VerificationResult> {
+  async verifyPresentation(
+    vp: VerifiablePresentation,
+    options: {
+      documentLoader?: (iri: string) => Promise<unknown>;
+      /** When set, the presentation proof's challenge must match exactly (anti-replay). */
+      expectedChallenge?: string;
+      /** When set, the presentation proof's domain must match exactly. */
+      expectedDomain?: string;
+    } = {}
+  ): Promise<VerificationResult> {
     try {
       if (!vp || !vp['@context'] || !vp.type) throw new Error('Invalid presentation');
       if (!vp.proof) throw new Error('Presentation has no proof');
@@ -201,6 +290,18 @@ export class Verifier {
       }
       const proofValue = vp.proof;
       const proof = Array.isArray(proofValue) ? proofValue[0] : proofValue;
+
+      // Validate challenge/domain BEFORE signature verification so a replayed
+      // presentation with a stale challenge is rejected even when its proof
+      // is cryptographically valid.
+      const proofRecord = proof as unknown as { challenge?: string; domain?: string };
+      if (options.expectedChallenge !== undefined && proofRecord.challenge !== options.expectedChallenge) {
+        return { verified: false, errors: ['Presentation challenge mismatch (possible replay)'] };
+      }
+      if (options.expectedDomain !== undefined && proofRecord.domain !== options.expectedDomain) {
+        return { verified: false, errors: ['Presentation domain mismatch'] };
+      }
+
       const result = await DataIntegrityProofManager.verifyProof(vp, proof as unknown as DataIntegrityProof, { documentLoader: loader });
       return result.verified ? { verified: true, errors: [] } : { verified: false, errors: result.errors ?? ['Verification failed'] };
     } catch (e) {

@@ -1,5 +1,6 @@
 import { verifyAsync } from '@noble/ed25519';
 import type { ExternalVerifier } from '../types/common.js';
+import { multikey } from '../crypto/Multikey.js';
 
 /**
  * Ed25519Verifier - A simple Ed25519 verifier for DID operations
@@ -56,13 +57,16 @@ export class Ed25519Verifier implements ExternalVerifier {
   }
 
   /**
-   * Get the public key in multibase format (base64url with 'z' prefix)
+   * Get the public key as a spec-compliant Ed25519 Multikey
+   * (base58btc multibase with the ed25519-pub multicodec header).
    */
   getPublicKeyMultibase(): string | undefined {
     if (!this.publicKey) {
       return undefined;
     }
-    return `z${Buffer.from(this.publicKey).toString('base64')}`;
+    // A 33-byte key carries a version-byte prefix (see verify()).
+    const key = this.publicKey.length === 33 ? this.publicKey.slice(1) : this.publicKey;
+    return multikey.encodePublicKey(key, 'Ed25519');
   }
 }
 

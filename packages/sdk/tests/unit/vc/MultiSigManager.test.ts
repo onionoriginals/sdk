@@ -854,6 +854,55 @@ describe('MultiSigManager', () => {
       expect(result.validSignatures).toBe(2);
     });
 
+    test('verifyCredentialMultiSig rejects a single proof repeated to fake the threshold', async () => {
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const policy: MultiSigPolicy = {
+        required: 2,
+        total: 3,
+        signerVerificationMethods: [vms[0], vms[1], vms[2]],
+      };
+
+      // Sign with only one authorized key...
+      const signed = await sdk.credentials.signCredentialMultiSig(baseVC, {
+        policy: { required: 1, total: 1, signerVerificationMethods: [vms[0]] },
+        privateKeys: new Map([[vms[0], keys[0].privateKey]]),
+      });
+
+      // ...then replicate that proof to claim two signatures
+      const proofs = signed.proof as any[];
+      const manipulated = { ...signed, proof: [proofs[0], proofs[0]] };
+
+      const result = await sdk.credentials.verifyCredentialMultiSig(manipulated, policy);
+      expect(result.verified).toBe(false);
+      expect(result.validSignatures).toBe(1);
+      expect(result.errors.some(e => /duplicate/i.test(e))).toBe(true);
+    });
+
+    test('verifyCredentialMultiSig counts a valid proof even when preceded by an invalid one from the same signer', async () => {
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const policy: MultiSigPolicy = {
+        required: 1,
+        total: 1,
+        signerVerificationMethods: [vms[0]],
+      };
+
+      const signed = await sdk.credentials.signCredentialMultiSig(baseVC, {
+        policy,
+        privateKeys: new Map([[vms[0], keys[0].privateKey]]),
+      });
+
+      const validProof = (signed.proof as any[])[0];
+      // An invalid proof from the same signer must not consume the signer's
+      // slot and suppress the later valid proof.
+      const tamperedProof = { ...validProof, proofValue: 'z3' + String(validProof.proofValue).slice(2) };
+      const withInvalidFirst = { ...signed, proof: [tamperedProof, validProof] };
+
+      const result = await sdk.credentials.verifyCredentialMultiSig(withInvalidFirst, policy);
+      expect(result.verified).toBe(true);
+      expect(result.validSignatures).toBe(1);
+    });
+
+
     test('multiSig() returns a MultiSigManager instance', () => {
       const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
       const msm = sdk.credentials.multiSig();

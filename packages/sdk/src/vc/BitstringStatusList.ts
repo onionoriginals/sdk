@@ -1,4 +1,4 @@
-import { deflateSync, inflateSync } from 'node:zlib';
+import { gzipSync, gunzipSync, inflateSync } from 'node:zlib';
 
 const MINIMUM_LIST_SIZE = 131072; // 16KB = 131072 bits per W3C spec recommendation
 
@@ -60,20 +60,29 @@ export class BitstringStatusList {
   }
 
   /**
-   * Encode the bitstring as a base64url-encoded GZIP-compressed string
-   * per W3C Bitstring Status List specification.
+   * Encode the bitstring per the W3C Bitstring Status List specification:
+   * multibase base64url ('u' prefix) of the GZIP-compressed bitstring.
+   * Matches StatusListManager.encodeBitstring, so lists produced here are
+   * readable by any spec-compliant consumer.
    */
   encode(): string {
-    const compressed = deflateSync(this.bits);
-    return base64urlEncode(compressed);
+    const compressed = gzipSync(Buffer.from(this.bits));
+    return 'u' + base64urlEncode(compressed);
   }
 
   /**
-   * Decode a base64url-encoded GZIP-compressed bitstring
+   * Decode a W3C encoded bitstring ('u'-multibase base64url + GZIP).
+   * Legacy values produced by earlier SDK versions (bare base64url of
+   * DEFLATE data) are still accepted.
    */
   static decode(encoded: string, length?: number): BitstringStatusList {
-    const compressed = base64urlDecode(encoded);
-    const decompressed = inflateSync(compressed);
+    let decompressed: Uint8Array;
+    if (encoded.startsWith('u')) {
+      decompressed = new Uint8Array(gunzipSync(base64urlDecode(encoded.slice(1))));
+    } else {
+      // Legacy pre-spec encoding: bare base64url, raw DEFLATE stream.
+      decompressed = new Uint8Array(inflateSync(base64urlDecode(encoded)));
+    }
     const bitLength = length ?? decompressed.length * 8;
     const list = new BitstringStatusList(
       Math.max(bitLength, MINIMUM_LIST_SIZE)

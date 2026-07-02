@@ -10,6 +10,12 @@ export interface SelectionOptions {
   feeRateSatsPerVb: number; // sats/vbyte
   targetAmountSats: number; // includes recipient output value
   allowLocked?: boolean;
+  /**
+   * Whether inscription-bearing UTXOs are excluded from selection.
+   * Defaults to true: spending an inscribed UTXO as a plain payment input
+   * transfers or burns the ordinal it carries. Pass false explicitly to
+   * opt in to spending inscribed UTXOs.
+   */
   forbidInscriptionBearingInputs?: boolean;
   changeAddress?: string;
   feeEstimate?: FeeEstimateOptions;
@@ -54,17 +60,18 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
 
   // Filter UTXOs based on policy
   let candidateUtxos = utxos.slice().filter(u => typeof u.value === 'number' && u.value > 0);
-  const hasLocked = candidateUtxos.some(u => u.locked);
-  if (hasLocked && !allowLocked) {
-    // If excluding locked leaves insufficient funds, surface a specific error later; but first mark conflict
-    // We'll check after filtering
-  }
-
+  const forbidInscribed = forbidInscriptionBearingInputs !== false;
+  const isInscribed = (u: Utxo): boolean => !!(u.inscriptions && u.inscriptions.length > 0);
+  // CONFLICTING_LOCKS is only an accurate diagnosis when unlocking could
+  // actually help — i.e. a locked UTXO exists that selection would otherwise
+  // be allowed to use. A locked UTXO that is also inscription-protected
+  // would still be excluded after unlocking.
+  const hasUsefulLocked = candidateUtxos.some(u => u.locked && !(forbidInscribed && isInscribed(u)));
   if (!allowLocked) {
     candidateUtxos = candidateUtxos.filter(u => !u.locked);
   }
-  if (forbidInscriptionBearingInputs) {
-    candidateUtxos = candidateUtxos.filter(u => !u.inscriptions || u.inscriptions.length === 0);
+  if (forbidInscribed) {
+    candidateUtxos = candidateUtxos.filter(u => !isInscribed(u));
   }
 
   // Greedy accumulate until amount + fee is satisfied. Start with 2 outputs (recipient + change), adjust if change is dust.
@@ -80,30 +87,27 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
     accumulated += utxo.value;
 
     // Assume two outputs initially
-    let fee = estimateFeeSats(selected.length, 2, feeRateSatsPerVb, feeEstimate);
-    let required = targetAmountSats + fee;
+    const fee = estimateFeeSats(selected.length, 2, feeRateSatsPerVb, feeEstimate);
+    const required = targetAmountSats + fee;
 
     if (accumulated >= required) {
-      // Compute change and dust policy
       let change = accumulated - required;
+      let feeSats = fee;
       if (change > 0 && change < DUST_LIMIT_SATS) {
-        // If change would be dust, try recomputing fee for single output (recipient only)
-        fee = estimateFeeSats(selected.length, 1, feeRateSatsPerVb, feeEstimate);
-        required = targetAmountSats + fee;
-        change = accumulated - required;
-        if (change > 0 && change < DUST_LIMIT_SATS) {
-          // Force add to fee (better than creating dust)
-          change = 0;
-        }
+        // A dust change output is not worth creating. Drop it and fold the
+        // remainder into the fee so the reported feeSats matches what the
+        // transaction actually pays (overpay is bounded by the dust limit).
+        // Re-pricing with a 1-output fee and keeping the change would
+        // underpay the requested fee rate once the change output is added.
+        feeSats = accumulated - targetAmountSats;
+        change = 0;
       }
-      if (accumulated >= targetAmountSats + fee) {
-        return { selected, feeSats: fee, changeSats: Math.max(0, change) };
-      }
+      return { selected, feeSats, changeSats: change };
     }
   }
 
   // If we got here, insufficient funds with the given policy
-  if (hasLocked && !allowLocked) {
+  if (hasUsefulLocked && !allowLocked) {
     const err = new UtxoSelectionError('CONFLICTING_LOCKS', 'CONFLICTING_LOCKS');
     throw err;
   }

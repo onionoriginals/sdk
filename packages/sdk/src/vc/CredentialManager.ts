@@ -305,7 +305,12 @@ export class CredentialManager {
         // stripped DI proof simply fails to verify rather than being forgeable.
         if (hasCryptosuite) {
           const verifier = new Verifier(this.didManager);
-          const res = await verifier.verifyCredential(credential);
+          // Proof-only entry point: revocation/suspension is checked by the
+          // dedicated verifyCredentialWithStatus (which supplies the status
+          // list). Pass checkStatus:false so a valid, non-revoked credential
+          // that merely declares a credentialStatus is not rejected here for
+          // lack of a resolver.
+          const res = await verifier.verifyCredential(credential, { checkStatus: false });
           return res.verified;
         }
       }

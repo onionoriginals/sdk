@@ -71,6 +71,12 @@ export class PSBTBuilder {
 
     let changeOutput: PsbtOutput | undefined;
     if (!includeChange) {
+      // Inputs must still cover the outputs plus the required fee; otherwise
+      // this would silently build a transaction paying below the requested
+      // fee rate (possibly zero).
+      if (total < targetValue + fee) {
+        throw new Error('Insufficient funds');
+      }
       // Add dust to fee
       fee = total - targetValue;
     } else {

@@ -226,23 +226,23 @@ export class DIDManager {
         }
       }
 
+      // Resolution failures and unsupported methods return null — never a
+      // fabricated stub document. A stub would pass validateDIDDocument and
+      // make "does this DID exist?" checks succeed for DIDs that failed to
+      // resolve, pushing the error far downstream.
       let result: DIDDocument | null = null;
-      let resolvedSuccessfully = false;
       try {
         if (did.startsWith('did:peer:')) {
           try {
             const mod = await import('@aviarytech/did-peer') as unknown as { resolve: (did: string) => Promise<Record<string, unknown>> };
             const doc = await mod.resolve(did);
             result = doc as unknown as DIDDocument;
-            resolvedSuccessfully = true;
           } catch (err) {
-            // Failed to resolve did:peer; returning minimal document
             if (this.config.enableLogging) {
               console.warn('Failed to resolve did:peer:', err);
             }
-            result = { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
           }
-        } else if (did.startsWith('did:btco:') || did.startsWith('did:btco:test:') || did.startsWith('did:btco:sig:')) {
+        } else if (did.startsWith('did:btco:')) {
           const rpcUrl = this.config.bitcoinRpcUrl || 'http://localhost:3000';
           const network = this.config.network || 'mainnet';
           const client = new OrdinalsClient(rpcUrl, network);
@@ -250,7 +250,6 @@ export class DIDManager {
           const resolver = new BtcoDidResolver({ provider: adapter });
           const resolved = await resolver.resolve(did);
           result = resolved.didDocument || null;
-          if (result) resolvedSuccessfully = true;
         } else if (did.startsWith('did:webvh:')) {
           try {
             const mod = await import('didwebvh-ts') as { resolveDID?: (did: string) => Promise<{ doc?: Record<string, unknown> }> };
@@ -258,18 +257,15 @@ export class DIDManager {
               const resolved = await mod.resolveDID(did);
               if (resolved && resolved.doc) {
                 result = resolved.doc as unknown as DIDDocument;
-                resolvedSuccessfully = true;
               }
             }
           } catch (err) {
-            // Failed to resolve did:webvh; returning minimal document
             if (this.config.enableLogging) {
               console.warn('Failed to resolve did:webvh:', err);
             }
           }
-          if (!result) result = { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
-        } else {
-          result = { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
+        } else if (this.config.enableLogging) {
+          console.warn(`Unsupported DID method for resolution: ${did}`);
         }
       } catch (err) {
         // DID resolution failed
@@ -281,7 +277,7 @@ export class DIDManager {
 
       // Only cache genuinely-resolved documents; transient failures (e.g. network
       // blips on did:webvh) must not poison the cache with a degraded stub.
-      if (result && resolvedSuccessfully) {
+      if (result) {
         try {
           await this.cache.set(did, result);
         } catch {
@@ -373,7 +369,18 @@ export class DIDManager {
       }
 
       signer = externalSigner;
-      verifier = externalVerifier || (externalSigner as unknown as ExternalVerifier); // Use signer as verifier if not provided
+      // An ExternalSigner has no verify(); silently casting it to a verifier
+      // makes didwebvh-ts fail deep inside with "verifier.verify is not a
+      // function". Accept the signer only if it actually implements verify().
+      if (externalVerifier) {
+        verifier = externalVerifier;
+      } else if (typeof (externalSigner as unknown as { verify?: unknown }).verify === 'function') {
+        verifier = externalSigner as unknown as ExternalVerifier;
+      } else {
+        throw new Error(
+          'externalVerifier is required when the provided externalSigner does not implement verify()'
+        );
+      }
       verificationMethods = providedVerificationMethods;
       updateKeys = providedUpdateKeys;
       keyPair = undefined; // No key pair when using external signer
@@ -441,7 +448,9 @@ export class DIDManager {
   }
 
   /**
-   * Updates a DID:WebVH document
+   * Updates a DID:WebVH document. Delegates to WebVHManager, which refuses to
+   * append an ordinary entry on a pre-rotation chain (that would set an
+   * un-committed updateKey and break resolution for every resolver).
    * @param options - Update options
    * @returns Updated DID document and log
    */
@@ -453,87 +462,7 @@ export class DIDManager {
     verifier?: ExternalVerifier;
     outputDir?: string;
   }): Promise<{ didDocument: DIDDocument; log: DIDLog; logPath?: string }> {
-    const { did, currentLog, updates, signer: providedSigner, verifier: providedVerifier, outputDir } = options;
-
-    // Dynamically import didwebvh-ts
-    const mod = await import('didwebvh-ts') as unknown as {
-      updateDID: (options: Record<string, unknown>) => Promise<{
-        doc: Record<string, unknown>;
-        log: DIDLog;
-      }>;
-      prepareDataForSigning: (
-        document: Record<string, unknown>,
-        proof: Record<string, unknown>
-      ) => Promise<Uint8Array>;
-    };
-    const { updateDID, prepareDataForSigning } = mod;
-
-    if (typeof updateDID !== 'function') {
-      throw new Error('Failed to load didwebvh-ts: invalid module exports');
-    }
-
-    let signer: Signer | ExternalSigner;
-    let verifier: Verifier | ExternalVerifier | undefined;
-
-    // Check if using external signer or internal keypair
-    if ('sign' in providedSigner && 'getVerificationMethodId' in providedSigner) {
-      // External signer
-      signer = providedSigner;
-      verifier = providedVerifier;
-    } else {
-      // Internal signer with keypair
-      const keyPair = providedSigner;
-      const verificationMethod: WebVHVerificationMethod = {
-        type: 'Multikey',
-        publicKeyMultibase: keyPair.publicKey,
-      };
-      
-      const internalSigner = new OriginalsWebVHSigner(
-        keyPair.privateKey,
-        verificationMethod,
-        prepareDataForSigning,
-        { verificationMethod }
-      );
-      
-      signer = internalSigner;
-      verifier = internalSigner;
-    }
-
-    // Get the current document from the log
-    const currentEntry = currentLog[currentLog.length - 1];
-    const currentDoc = currentEntry.state as unknown as DIDDocument;
-
-    // Merge updates with current document
-    const updatedDoc = {
-      ...currentDoc,
-      ...updates,
-      id: did, // Ensure ID doesn't change
-    };
-
-    // Update the DID using didwebvh-ts
-    const result = await updateDID({
-      log: currentLog,
-      doc: updatedDoc,
-      signer,
-      verifier,
-    });
-
-    // Validate the returned DID document
-    if (!this.validateDIDDocument(result.doc as unknown as DIDDocument)) {
-      throw new Error('Invalid DID document returned from updateDID');
-    }
-
-    // Save the updated log if output directory is provided
-    let logPath: string | undefined;
-    if (outputDir) {
-      logPath = await this.saveDIDLog(did, result.log, outputDir);
-    }
-
-    return {
-      didDocument: result.doc as unknown as DIDDocument,
-      log: result.log,
-      logPath,
-    };
+    return this.getWebVHManager().updateDIDWebVH(options);
   }
 
   /**
