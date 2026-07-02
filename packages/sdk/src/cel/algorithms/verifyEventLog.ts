@@ -231,15 +231,36 @@ function isWitnessProof(p: DataIntegrityProof): boolean {
 }
 
 /**
- * Identifies the controller key authorized by a proof. This is the FULL
- * verification method URI, including the `#fragment`: within one DID document
- * `did:webvh:...#key-0` and `#key-1` are DISTINCT keys, so stripping the
- * fragment would let a log created with `#key-0` accept later events signed by
- * `#key-1`. All legitimate events in a log are signed with the same
- * verification method, so full-URI comparison does not reject valid chains.
+ * Resolves a proof's controller PUBLIC KEY, which is the correct unit of
+ * authorization: two verification methods identify the same signer iff they
+ * resolve to the same key material.
+ *
+ * Comparing raw verification-method URIs is wrong in both directions:
+ * - too loose if the fragment is stripped (`#key-0` vs `#key-1` in one DID doc
+ *   are DISTINCT keys), and
+ * - too strict if compared verbatim (the same key spelled with a different but
+ *   equivalent VM id — which the key resolver already treats as equal — would
+ *   be rejected).
+ *
+ * did:key proofs carry the key in the identifier (resolved offline); other
+ * methods use the same `resolveKey` resolver as `dispatchVerify`. Returns a hex
+ * string so keys can be compared/stored in a Set, or null if unresolvable.
  */
-function controllerKeyId(verificationMethod: string): string {
-  return verificationMethod;
+async function resolveControllerKeyHex(
+  verificationMethod: string,
+  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>
+): Promise<string | null> {
+  let key: Uint8Array | null = null;
+  if (verificationMethod.startsWith('did:key:')) {
+    key = extractEd25519FromDidKey(verificationMethod);
+  } else if (resolveKey) {
+    try {
+      key = await resolveKey(verificationMethod);
+    } catch {
+      key = null;
+    }
+  }
+  return key ? Buffer.from(key).toString('hex') : null;
 }
 
 /**
@@ -324,11 +345,15 @@ async function verifyEvent(
   // Controller binding: on the default (dispatch) path, every controller proof
   // must be signed by a key authorized by the log's create event. Without this,
   // any key can append/rename/migrate/deactivate someone else's log and it
-  // verifies (confirmed forgeable). A custom verifier takes full responsibility
-  // for authorization, so this check is skipped there.
+  // verifies (confirmed forgeable). Authorization compares the resolved PUBLIC
+  // KEY (not the VM URI string), so it is neither fooled by two distinct keys
+  // in one DID document nor tripped up by the same key under an equivalent VM
+  // id. A custom verifier takes full responsibility for authorization, so this
+  // check is skipped there.
   if (!customVerifier && authorizedKeyIds && index > 0) {
     for (const { proof, originalIndex } of controllerProofs) {
-      if (!authorizedKeyIds.has(controllerKeyId(proof.verificationMethod))) {
+      const keyHex = await resolveControllerKeyHex(proof.verificationMethod, resolveKey);
+      if (keyHex === null || !authorizedKeyIds.has(keyHex)) {
         errors.push(
           `Event ${index}, Proof ${originalIndex}: signer ${proof.verificationMethod} is not authorized by the log's create event`
         );
@@ -480,16 +505,17 @@ export async function verifyEventLog(
 
   // Establish the authorized controller key set from the create event
   // (event 0). Its controller proofs — the non-witness proofs — define the
-  // keys allowed to sign every subsequent event in the log (trust-on-first-use
-  // root of authority). The current CEL data model has no in-log key-rotation
-  // mechanism, so this set is fixed by the create event.
+  // keys (by resolved public-key material) allowed to sign every subsequent
+  // event in the log (trust-on-first-use root of authority). The current CEL
+  // data model has no in-log key-rotation mechanism, so this set is fixed by
+  // the create event.
   const createEvent = log.events[0];
-  const authorizedKeyIds = new Set<string>(
-    (createEvent.proof ?? [])
-      .filter(p => !isWitnessProof(p))
-      .map(p => controllerKeyId(p.verificationMethod))
-      .filter((id): id is string => typeof id === 'string' && id.length > 0)
-  );
+  const authorizedKeyIds = new Set<string>();
+  for (const p of createEvent.proof ?? []) {
+    if (isWitnessProof(p)) continue;
+    const keyHex = await resolveControllerKeyHex(p.verificationMethod, options?.resolveKey);
+    if (keyHex) authorizedKeyIds.add(keyHex);
+  }
 
   // Verify each event's proofs and hash chain
   for (let i = 0; i < log.events.length; i++) {

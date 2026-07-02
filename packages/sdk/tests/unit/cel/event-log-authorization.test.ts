@@ -99,4 +99,57 @@ describe('CEL event-log authorization and btco verifiability', () => {
     expect(result.verified).toBe(true);
     expect(result.errors).toEqual([]);
   });
+
+  // Authorization is by resolved public KEY, not the VM URI string. These two
+  // cases pin both axes for non-did:key (resolver-backed) controllers.
+  describe('key-based authorization (resolver-backed VMs)', () => {
+    // A signer that signs with `priv` but stamps an arbitrary verificationMethod.
+    function vmSigner(priv: Uint8Array, verificationMethod: string) {
+      return async (data: unknown) => {
+        const sig = await ed25519.signAsync(canonicalizeEvent(data), priv);
+        return {
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-jcs-2022',
+          created: '2020-01-01T00:00:00Z',
+          verificationMethod,
+          proofPurpose: 'assertionMethod',
+          proofValue: multikey.encodeMultibase(new Uint8Array(sig)),
+        };
+      };
+    }
+
+    it('accepts the same key under a different equivalent VM id', async () => {
+      const priv = crypto.getRandomValues(new Uint8Array(32));
+      const pub = await ed25519.getPublicKeyAsync(priv);
+      // resolveKey maps BOTH VM ids to the same public key.
+      const resolveKey = async (_vm: string) => pub;
+
+      const create = new PeerCelManager(vmSigner(priv, 'did:webvh:example.com:alice#key-0') as any);
+      let log = await create.create('Asset', []);
+      log = await new PeerCelManager(vmSigner(priv, 'did:webvh:example.com:alice#key-alias') as any)
+        .update(log, { name: 'v2' });
+
+      const result = await verifyEventLog(log, { resolveKey });
+      expect(result.verified).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('rejects a different key even under the same DID document', async () => {
+      const privA = crypto.getRandomValues(new Uint8Array(32));
+      const privB = crypto.getRandomValues(new Uint8Array(32));
+      const pubA = await ed25519.getPublicKeyAsync(privA);
+      const pubB = await ed25519.getPublicKeyAsync(privB);
+      // #key-0 → A, #key-1 → B (distinct keys in the same DID document).
+      const resolveKey = async (vm: string) => (vm.endsWith('#key-1') ? pubB : pubA);
+
+      const create = new PeerCelManager(vmSigner(privA, 'did:webvh:example.com:alice#key-0') as any);
+      let log = await create.create('Asset', []);
+      log = await new PeerCelManager(vmSigner(privB, 'did:webvh:example.com:alice#key-1') as any)
+        .update(log, { name: 'hijacked' });
+
+      const result = await verifyEventLog(log, { resolveKey });
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /not authorized by the log's create event/.test(e))).toBe(true);
+    });
+  });
 });
