@@ -11,6 +11,7 @@ import { Logger } from '../utils/Logger.js';
 import { MetricsCollector } from '../utils/MetricsCollector.js';
 import { EventLogger } from '../utils/EventLogger.js';
 import { createDID } from 'didwebvh-ts';
+import { normalizeUpdateKey } from '../did/WebVHManager.js';
 
 // Type for DID log (from didwebvh-ts)
 interface DIDLogEntry {
@@ -345,7 +346,9 @@ export class OriginalsSDK {
       signer: options.signer,
       verifier: options.verifier,
       paths: options.paths,
-      updateKeys: options.updateKeys,
+      // didwebvh-ts >= 2.8 requires bare multikey updateKeys (did:webvh spec);
+      // accept legacy "did:key:..." input and normalize.
+      updateKeys: options.updateKeys.map(normalizeUpdateKey),
       verificationMethods: options.verificationMethods,
       context: options.context || [
         'https://www.w3.org/ns/did/v1',
@@ -416,7 +419,7 @@ export class OriginalsSDK {
     };
 
     // Add optional parameters
-    if (options.updateKeys !== undefined) updateOptions.updateKeys = options.updateKeys;
+    if (options.updateKeys !== undefined) updateOptions.updateKeys = options.updateKeys.map(normalizeUpdateKey);
     if (options.verificationMethods !== undefined) updateOptions.verificationMethods = options.verificationMethods;
     if (options.services !== undefined) updateOptions.services = options.services;
     if (options.controller !== undefined) updateOptions.controller = options.controller;

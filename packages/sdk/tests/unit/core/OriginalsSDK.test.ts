@@ -152,6 +152,50 @@ describe('OriginalsSDK', () => {
       await expect(OriginalsSDK.createOriginal(options))
         .rejects.toThrow('Unsupported Original type: invalid');
     });
+
+    test('createDIDOriginal accepts legacy did:key-prefixed updateKeys (didwebvh-ts 2.8 requires bare multikeys)', async () => {
+      // Regression: didwebvh-ts 2.8.0 authorizes update proofs against bare
+      // multikey updateKeys ("z6Mk..."). External-signer integrations (e.g. the
+      // auth package's Turnkey signer) pass signer.getVerificationMethodId()
+      // ("did:key:z6Mk...") as an updateKey; without normalization createDID
+      // fails with "Key did:key:... is not authorized to update."
+      const { KeyManager } = await import('../../../src/did/KeyManager');
+      const { Ed25519Signer } = await import('../../../src/crypto/Signer');
+      const { multikey } = await import('../../../src/crypto/Multikey');
+      const { prepareDataForSigning } = await import('didwebvh-ts');
+
+      const keyPair = await new KeyManager().generateKeyPair('Ed25519');
+      const internalSigner = new Ed25519Signer();
+      const vmId = `did:key:${keyPair.publicKey}`;
+
+      const signer = {
+        getVerificationMethodId: () => vmId,
+        async sign(input: { document: Record<string, unknown>; proof: Record<string, unknown> }) {
+          const dataToSign = await prepareDataForSigning(input.document, input.proof);
+          const sig: Buffer = await internalSigner.sign(Buffer.from(dataToSign), keyPair.privateKey);
+          return { proofValue: multikey.encodeMultibase(sig) };
+        },
+        async verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array) {
+          const pubMultibase = multikey.encodePublicKey(publicKey, 'Ed25519');
+          return internalSigner.verify(Buffer.from(message), Buffer.from(signature), pubMultibase);
+        },
+      };
+
+      const result = await OriginalsSDK.createDIDOriginal({
+        type: 'did',
+        domain: 'example.com',
+        signer: signer as any,
+        verifier: signer as any,
+        updateKeys: [vmId], // legacy prefixed form, as the auth package passes
+        verificationMethods: [
+          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+        ],
+      });
+
+      expect(result.did).toMatch(/^did:webvh:/);
+      // The log's updateKeys must be stored in the bare multikey (spec) form.
+      expect(result.meta.updateKeys).toEqual([keyPair.publicKey]);
+    }, 20000);
   });
 
   describe('updateOriginal', () => {

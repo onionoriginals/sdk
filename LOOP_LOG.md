@@ -136,3 +136,29 @@ Branch: `claude/originals-sdk-correctness-ws3gte` (continuation after #230 merge
 ### Result
 - Full suite: **3209 pass / 0 fail / 71 skip** across 171 files (post-build).
 - Typecheck clean; lint 0 errors.
+
+## Iteration 2 — 2026-07-02 (CI feedback on PR #231)
+
+### Ground truth
+- PR #231 opened; CI on 6f0128b: Typecheck/Lint/ESM green, two failures:
+  - `Changeset present` — repo requires a changeset for SDK changes.
+  - `Tests pass` — `@originals/auth#test` failed: 2 failures in
+    `turnkey-did-creation.integration.test.ts` with the same 2.8.0
+    "Key did:key:... is not authorized to update." error. Root cause: a third
+    didwebvh-ts entry point missed in iteration 1 — `OriginalsSDK.createDIDOriginal`
+    / `updateDIDOriginal` pass caller `updateKeys` straight through, and the auth
+    package passes `signer.getVerificationMethodId()` (`did:key:z6Mk...`).
+
+### Work items
+1. Normalize caller-provided `updateKeys` via `normalizeUpdateKey` in
+   `OriginalsSDK.createDIDOriginal` and `updateDIDOriginal` (matches the
+   WebVHManager/DIDManager external-signer paths). Regression test added in
+   `tests/unit/core/OriginalsSDK.test.ts` reproducing the auth package's usage
+   (external signer + `did:key:`-prefixed updateKey) and asserting the log's
+   `meta.updateKeys` stores the bare-multikey spec form.
+2. Added changeset `.changeset/didwebvh-ts-2-8-updatekeys.md` (patch,
+   @originals/sdk) for the `Changeset present` check.
+
+### Result
+- `@originals/auth`: 190 pass / 0 fail. Full turbo suite: 4/4 tasks green.
+- Typecheck clean; lint 0 errors.
