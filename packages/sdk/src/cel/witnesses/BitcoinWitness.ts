@@ -144,12 +144,20 @@ export class BitcoinWitness implements WitnessService {
       // The satoshi ordinal is the canonical did:btco:<sat> identifier and is
       // required — without it, state derivation cannot produce a resolvable
       // did:btco and would leave the asset's DID disagreeing with its btco
-      // layer. Fail closed here rather than emitting a log that can never
-      // yield a valid btco identifier. (did:btco requires a NUMERIC satoshi;
-      // inscriptionId/txid are not valid substitutes.)
-      if (!inscription.satoshi) {
+      // layer. Some providers (e.g. OrdHttpProvider) don't return the satoshi
+      // from createInscription, so make a best-effort recovery by looking it
+      // up from the inscription id before failing.
+      let satoshi = inscription.satoshi;
+      if (!satoshi) {
+        satoshi = (await this.bitcoinManager.getSatoshiFromInscription(inscription.inscriptionId)) ?? '';
+      }
+      // Fail closed if it's still unavailable rather than emitting a log that
+      // can never yield a valid btco identifier. (did:btco requires a NUMERIC
+      // satoshi; inscriptionId/txid are not valid substitutes.)
+      if (!satoshi) {
         throw new BitcoinWitnessError(
-          'Bitcoin inscription did not return a satoshi ordinal (required for the did:btco identifier)',
+          'Bitcoin inscription did not return a satoshi ordinal, and it could not be ' +
+            'resolved from the inscription id (required for the did:btco identifier)',
           digestMultibase
         );
       }
@@ -167,7 +175,7 @@ export class BitcoinWitness implements WitnessService {
         witnessedAt: now,
         txid: inscription.txid,
         blockHeight: inscription.blockHeight,
-        satoshi: inscription.satoshi,
+        satoshi,
         inscriptionId: inscription.inscriptionId,
       };
       

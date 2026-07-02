@@ -29,10 +29,14 @@ describe('BitcoinWitness', () => {
   const createMockBitcoinManager = (
     overrides: Partial<{
       inscribeData: typeof mockBitcoinManager.inscribeData;
+      getSatoshiFromInscription: typeof mockBitcoinManager.getSatoshiFromInscription;
     }> = {}
   ) => {
     const mockBitcoinManager = {
       inscribeData: vi.fn().mockResolvedValue(mockInscription),
+      // Default: no satoshi recoverable from the inscription id (providers that
+      // do supply satoshi never hit this path).
+      getSatoshiFromInscription: vi.fn().mockResolvedValue(null),
       ...overrides,
     } as unknown as BitcoinManager;
     return mockBitcoinManager;
@@ -263,7 +267,7 @@ describe('BitcoinWitness', () => {
         .rejects.toThrow('did not return a transaction ID');
     });
 
-    it('throws error when inscription returns no satoshi', async () => {
+    it('throws when inscription has no satoshi and it cannot be recovered', async () => {
       // Without a satoshi there is no canonical did:btco:<sat> identifier, so
       // the witness must fail closed rather than emit a log that derives an
       // inconsistent (webvh) DID at the btco layer.
@@ -272,11 +276,29 @@ describe('BitcoinWitness', () => {
           ...mockInscription,
           satoshi: '',
         }),
+        getSatoshiFromInscription: vi.fn().mockResolvedValue(null),
       });
       const witness = new BitcoinWitness(badManager);
 
       await expect(witness.witness(testDigest))
         .rejects.toThrow('did not return a satoshi ordinal');
+    });
+
+    it('recovers the satoshi from the inscription id when inscribeData omits it', async () => {
+      // Providers like OrdHttpProvider don't return satoshi from
+      // createInscription; the witness looks it up before failing.
+      const manager = createMockBitcoinManager({
+        inscribeData: vi.fn().mockResolvedValue({
+          ...mockInscription,
+          satoshi: '',
+        }),
+        getSatoshiFromInscription: vi.fn().mockResolvedValue('9876543210'),
+      });
+      const witness = new BitcoinWitness(manager);
+
+      const proof = await witness.witness(testDigest);
+      expect(proof.satoshi).toBe('9876543210');
+      expect(manager.getSatoshiFromInscription).toHaveBeenCalledWith('abc123i0');
     });
 
     it('wraps non-Error throws', async () => {
