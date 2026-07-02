@@ -420,8 +420,11 @@ export class OriginalsCel {
       
       if (event.type === 'create') {
         currentLayer = (eventData.layer as CelLayer) || 'peer';
-      } else if (event.type === 'update' && eventData.targetDid && eventData.layer) {
-        // This is a migration event
+      } else if (event.type === 'update' && eventData.sourceDid && eventData.layer) {
+        // This is a migration event. Both webvh and btco migrations carry
+        // {sourceDid, layer}; only webvh additionally carries targetDid, so
+        // keying off targetDid silently skipped btco migrations (added in the
+        // #228 refactor) and left the log detected as still at webvh.
         currentLayer = eventData.layer as CelLayer;
       }
     }

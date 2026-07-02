@@ -19,6 +19,27 @@ describe('EdDSA additional branches', () => {
     } as any)).rejects.toThrow('Invalid private key format');
   });
 
+  test('sign accepts a 64-byte secret key (seed||pub) using the seed half', async () => {
+    // Regression: a 64-byte Ed25519 secret key is seed(32)||publicKey(32) and
+    // the seed noble signs from is the FIRST half. The old code sliced the
+    // public-key half, so signatures from 64-byte keys never verified.
+    const ed25519 = await import('@noble/ed25519');
+    const seed = new Uint8Array(32).map((_, i) => (i * 7 + 3) & 0xff);
+    const pub = await ed25519.getPublicKeyAsync(seed);
+    const sk64 = new Uint8Array(64);
+    sk64.set(seed, 0);
+    sk64.set(pub, 32);
+
+    const data = new Uint8Array([1, 2, 3, 4, 5]);
+    const sig = await EdDSACryptosuiteManager.sign({ data, privateKey: sk64 });
+    // Signature must verify against the corresponding public key.
+    const ok = await EdDSACryptosuiteManager.verify({ data, signature: sig, publicKey: pub });
+    expect(ok).toBe(true);
+    // And it must equal the signature produced from the 32-byte seed alone.
+    const sig32 = await EdDSACryptosuiteManager.sign({ data, privateKey: seed });
+    expect(Buffer.from(sig).toString('hex')).toBe(Buffer.from(sig32).toString('hex'));
+  });
+
   test('verifyProof returns error for non-Ed25519 VM', async () => {
     const pkMb = multikey.encodePublicKey(new Uint8Array(33).fill(1), 'Secp256k1');
     const res = await EdDSACryptosuiteManager.verifyProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' }, {

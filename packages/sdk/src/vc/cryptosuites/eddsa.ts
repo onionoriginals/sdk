@@ -98,7 +98,10 @@ export class EdDSACryptosuiteManager {
 
   static async sign({ data, privateKey }: { data: Uint8Array; privateKey: Uint8Array }): Promise<Uint8Array> {
     if (privateKey.length !== 32) {
-      if (privateKey.length === 64) privateKey = privateKey.slice(32);
+      // A 64-byte Ed25519 secret key is seed(32) || publicKey(32); noble signs
+      // from the 32-byte seed, which is the FIRST half. slice(32) took the
+      // public-key half, producing signatures that never verify.
+      if (privateKey.length === 64) privateKey = privateKey.slice(0, 32);
       else throw new Error('Invalid private key length');
     }
     const signature = await ed25519.signAsync(Buffer.from(data).toString('hex'), Buffer.from(privateKey).toString('hex'));

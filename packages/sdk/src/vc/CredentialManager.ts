@@ -22,7 +22,7 @@ import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Sign
 import { DIDManager } from '../did/DIDManager.js';
 import { Issuer, VerificationMethodLike } from './Issuer.js';
 import { createDocumentLoader } from './documentLoader.js';
-import { Verifier } from './Verifier.js';
+import { Verifier, checkCredentialValidityPeriod } from './Verifier.js';
 import { MultiSigManager } from './MultiSigManager.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
 
@@ -323,6 +323,13 @@ export class CredentialManager {
 
     const { proofValue, verificationMethod } = proof;
     if (!proofValue || !verificationMethod) return false;
+
+    // Enforce the validity window on the legacy (non-cryptosuite) path too. The
+    // Data Integrity path checks this via Verifier; without the same check here
+    // a legacy-signed but expired credential would verify.
+    if (!checkCredentialValidityPeriod(credential).verified) {
+      return false;
+    }
 
     const signature = this.decodeMultibase(proofValue);
     if (!signature) return false;

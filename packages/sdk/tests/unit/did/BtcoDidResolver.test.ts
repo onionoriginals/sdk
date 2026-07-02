@@ -211,6 +211,29 @@ describe('BtcoDidResolver', () => {
     expect(res.didDocument).toBeNull();
   });
 
+  test('a tombstone for a longer sat number does not deactivate a prefix DID', async () => {
+    // Regression: the DID marker pattern was start-anchored but not
+    // digit-bounded, so resolving did:btco:128 prefix-matched a
+    // `did:btco:1280 🔥` inscription and wrongly reported deactivation.
+    const inscriptionId = 'insc-prefix';
+    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
+    provider.resolveInscription.mockResolvedValue({
+      id: inscriptionId,
+      sat: 128,
+      content_type: 'text/plain',
+      content_url: 'http://local/content-prefix'
+    });
+    (global as any).fetch.mockResolvedValue({ ok: true, text: async () => 'BTCO DID: did:btco:1280 🔥' });
+    provider.getMetadata.mockResolvedValue(null);
+
+    const resolver = new BtcoDidResolver({ provider });
+    const res = await resolver.resolve('did:btco:128');
+    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
+    expect(entry.isValidDid).toBe(false);
+    expect(entry.deactivated).toBeUndefined();
+    expect(res.didDocumentMetadata.deactivated).toBeUndefined();
+  });
+
   test('tombstone after a valid document deactivates the DID (no fallback to older document)', async () => {
     const docContent = JSON.stringify({
       '@context': ['https://www.w3.org/ns/did/v1'],

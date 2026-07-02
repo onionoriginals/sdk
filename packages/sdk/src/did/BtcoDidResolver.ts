@@ -103,7 +103,10 @@ export class BtcoDidResolver {
     }
 
     const expectedDid = `${this.getDidPrefix(network)}:${satNumber}`;
-    const didPattern = new RegExp(`^(?:BTCO DID: )?(${expectedDid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'i');
+    // Anchor with a trailing non-digit boundary so did:btco:1 does not
+    // prefix-match did:btco:1000 (which would let an inscription for a
+    // different sat mis-fire the tombstone/valid-DID path for this sat).
+    const didPattern = new RegExp(`^(?:BTCO DID: )?(${expectedDid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?![0-9])`, 'i');
 
     const inscriptionDataList: BtcoInscriptionData[] = [];
 

@@ -9,6 +9,50 @@ import { StatusListManager } from './StatusListManager.js';
 export type VerificationResult = { verified: boolean; errors: string[] };
 
 /**
+ * Enforce a credential's validity window: expirationDate/validUntil in the past,
+ * or validFrom/issuanceDate in the future, fail. A present-but-unparseable date
+ * fails closed. Shared between the Data Integrity and legacy verification paths
+ * so both reject expired credentials identically.
+ */
+export function checkCredentialValidityPeriod(vc: VerifiableCredential): VerificationResult {
+  const now = Date.now();
+  const doc = vc as unknown as Record<string, unknown>;
+
+  const invalid: string[] = [];
+  const parse = (field: string): number | null => {
+    const value = doc[field];
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string') { invalid.push(field); return null; }
+    const t = Date.parse(value);
+    if (Number.isNaN(t)) { invalid.push(field); return null; }
+    return t;
+  };
+
+  const expiration = parse('expirationDate');
+  const validUntil = parse('validUntil');
+  const validFrom = parse('validFrom');
+  const issuanceDate = parse('issuanceDate');
+
+  if (invalid.length > 0) {
+    return { verified: false, errors: [`Credential has unparseable date field(s): ${invalid.join(', ')}`] };
+  }
+
+  for (const [field, t] of [['expirationDate', expiration], ['validUntil', validUntil]] as const) {
+    if (t !== null && t < now) {
+      return { verified: false, errors: [`Credential expired (${field}: ${String(doc[field])})`] };
+    }
+  }
+
+  const startField = validFrom !== null ? 'validFrom' : 'issuanceDate';
+  const start = validFrom !== null ? validFrom : issuanceDate;
+  if (start !== null && start > now) {
+    return { verified: false, errors: [`Credential is not yet valid (${startField}: ${String(doc[startField])})`] };
+  }
+
+  return { verified: true, errors: [] };
+}
+
+/**
  * Optional resolver for fetching status list credentials during verification.
  * Implementations should fetch the credential from the given URL and return it.
  */
@@ -31,6 +75,23 @@ export class Verifier {
       for (const c of ctxs) await loader(c);
       const proofValue = vc.proof;
       const proof = Array.isArray(proofValue) ? proofValue[0] : proofValue;
+
+      // Bind the signing key to the credential issuer. The proof is verified
+      // against whatever key `proof.verificationMethod` resolves to, so without
+      // this check an attacker can sign a credential that names a trusted
+      // `issuer` with their own key (setting verificationMethod to their own
+      // DID) and have it verify — full issuer impersonation. The signing side
+      // (Issuer) and the legacy verify path both enforce this binding; the Data
+      // Integrity path must too. Mirrors CredentialManager.resolveVerificationMethodMultibase.
+      const issuerBinding = this.checkVerificationMethodController(
+        (proof as { verificationMethod?: unknown })?.verificationMethod,
+        typeof vc.issuer === 'string' ? vc.issuer : (vc.issuer as { id?: string } | undefined)?.id,
+        'issuer'
+      );
+      if (!issuerBinding.verified) {
+        return issuerBinding;
+      }
+
       const result = await DataIntegrityProofManager.verifyProof(vc, proof as unknown as DataIntegrityProof, { documentLoader: loader });
       if (!result.verified) {
         return { verified: false, errors: result.errors ?? ['Verification failed'] };
@@ -75,50 +136,39 @@ export class Verifier {
   }
 
   /**
-   * Enforce the credential's validity window: expirationDate/validUntil in
-   * the past, or validFrom/issuanceDate in the future, fail verification.
+   * Enforce that a proof's verification method is controlled by the expected
+   * DID subject (the credential `issuer` or the presentation `holder`). The DID
+   * that owns the verification method is the portion of the VM id before the
+   * fragment. When the expected subject is absent we cannot bind, so we fail
+   * closed rather than accept a signature from an arbitrary key.
+   */
+  private checkVerificationMethodController(
+    verificationMethod: unknown,
+    expectedSubject: string | undefined,
+    subjectLabel: 'issuer' | 'holder'
+  ): VerificationResult {
+    if (typeof verificationMethod !== 'string' || verificationMethod.length === 0) {
+      return { verified: false, errors: ['Proof is missing a verificationMethod'] };
+    }
+    if (!expectedSubject) {
+      return { verified: false, errors: [`Credential is missing an ${subjectLabel} to bind the proof to`] };
+    }
+    const vmDid = verificationMethod.split('#')[0];
+    if (vmDid !== expectedSubject) {
+      return {
+        verified: false,
+        errors: [`Proof verificationMethod (${vmDid}) does not match credential ${subjectLabel} (${expectedSubject})`]
+      };
+    }
+    return { verified: true, errors: [] };
+  }
+
+  /**
+   * Enforce the credential's validity window (delegates to the shared
+   * checkCredentialValidityPeriod so the legacy verify path stays in sync).
    */
   private checkValidityPeriod(vc: VerifiableCredential): VerificationResult {
-    const now = Date.now();
-    const doc = vc as unknown as Record<string, unknown>;
-
-    // A present-but-unparseable date fails closed: a signed but malformed
-    // expirationDate/validFrom must not bypass the time-window check by
-    // being silently treated as absent.
-    const invalid: string[] = [];
-    const parse = (field: string): number | null => {
-      const value = doc[field];
-      if (value === undefined || value === null) return null;
-      if (typeof value !== 'string') { invalid.push(field); return null; }
-      const t = Date.parse(value);
-      if (Number.isNaN(t)) { invalid.push(field); return null; }
-      return t;
-    };
-
-    const expiration = parse('expirationDate');
-    const validUntil = parse('validUntil');
-    const validFrom = parse('validFrom');
-    const issuanceDate = parse('issuanceDate');
-
-    if (invalid.length > 0) {
-      return { verified: false, errors: [`Credential has unparseable date field(s): ${invalid.join(', ')}`] };
-    }
-
-    for (const [field, t] of [['expirationDate', expiration], ['validUntil', validUntil]] as const) {
-      if (t !== null && t < now) {
-        return { verified: false, errors: [`Credential expired (${field}: ${String(doc[field])})`] };
-      }
-    }
-
-    // validFrom (VCDM 2.0) takes precedence; fall back to issuanceDate
-    // (VCDM 1.1) as the validity start.
-    const startField = validFrom !== null ? 'validFrom' : 'issuanceDate';
-    const start = validFrom !== null ? validFrom : issuanceDate;
-    if (start !== null && start > now) {
-      return { verified: false, errors: [`Credential is not yet valid (${startField}: ${String(doc[startField])})`] };
-    }
-
-    return { verified: true, errors: [] };
+    return checkCredentialValidityPeriod(vc);
   }
 
   /**
@@ -290,6 +340,18 @@ export class Verifier {
       }
       const proofValue = vp.proof;
       const proof = Array.isArray(proofValue) ? proofValue[0] : proofValue;
+
+      // Bind the presentation proof to the holder: the key that signs the
+      // presentation must be controlled by the DID named as `holder`. Without
+      // this an attacker can present a self-signed VP claiming any holder.
+      const holderBinding = this.checkVerificationMethodController(
+        (proof as { verificationMethod?: unknown })?.verificationMethod,
+        typeof vp.holder === 'string' ? vp.holder : (vp.holder as { id?: string } | undefined)?.id,
+        'holder'
+      );
+      if (!holderBinding.verified) {
+        return holderBinding;
+      }
 
       // Validate challenge/domain BEFORE signature verification so a replayed
       // presentation with a stale challenge is rejected even when its proof

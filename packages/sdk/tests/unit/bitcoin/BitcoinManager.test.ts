@@ -263,6 +263,20 @@ describe('BitcoinManager integration with providers', () => {
     expect(res.feeRate).toBe(9);
   });
 
+  test('resolveFeeRate rejects an absurd feeOracle estimate and falls back to the provider', async () => {
+    // Regression: only caller-provided fee rates were bounded; a fee oracle
+    // returning e.g. 1e9 sat/vB was used directly and could drain funds.
+    const provider = createMockProvider(); // provider.estimateFee => 5 sat/vB
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      ordinalsProvider: provider,
+      feeOracle: { estimateFeeRate: async () => 1_000_000_000 }
+    } as any);
+    const res: any = await sdk.bitcoin.inscribeData(Buffer.from('hello'), 'text/plain');
+    // The absurd oracle value is skipped; the bounded provider estimate is used.
+    expect(res.feeRate).toBe(5);
+  });
+
   test('inscribeData throws ORD_PROVIDER_REQUIRED when provider not configured', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest' });
     try {

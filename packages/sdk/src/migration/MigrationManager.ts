@@ -210,8 +210,16 @@ export class MigrationManager {
         metadata: options.metadata || {}
       };
 
-      // Record a signed audit entry for the migration.
-      await this.auditLogger.logMigration(auditRecord as any);
+      // Record a signed audit entry for the migration. The migration has
+      // already completed and its side effects are committed, so a failure to
+      // write the audit record must NOT re-enter the failure/rollback path
+      // (which would roll back a successful migration and report it as failed,
+      // risking a double-inscription on retry). Swallow audit errors here.
+      try {
+        await this.auditLogger.logMigration(auditRecord as any);
+      } catch (auditError) {
+        console.error('Failed to record audit for completed migration:', auditError);
+      }
 
       // Clean up checkpoint after successful migration. unref() the timer so
       // a successful migration does not pin the process alive for 24 hours
@@ -284,6 +292,15 @@ export class MigrationManager {
 
     const rollbackResult = await this.rollbackManager.rollback(migrationId, state.checkpointId);
 
+    // Reflect the rollback outcome in the tracked state so getMigrationStatus
+    // agrees with the returned result. Guarded: the current state may be
+    // terminal (e.g. COMPLETED), in which case the transition is rejected.
+    try {
+      await this.stateTracker.updateState(migrationId, { state: rollbackResult.restoredState });
+    } catch (stateError) {
+      console.error('Failed to update migration state after rollback:', stateError);
+    }
+
     await this.emitEvent('migration:rolledback', { migrationId, rollbackResult });
 
     return rollbackResult;
@@ -302,7 +319,8 @@ export class MigrationManager {
    * Batch migration
    */
   async migrateBatch(dids: string[], targetLayer: string, options?: BatchMigrationOptions): Promise<BatchMigrationResult> {
-    const batchId = `batch_${Date.now()}`;
+    const startTime = Date.now();
+    const batchId = `batch_${startTime}`;
     const results = new Map<string, MigrationResult>();
     const errors: MigrationError[] = [];
 
@@ -351,7 +369,7 @@ export class MigrationManager {
       inProgress: 0,
       results,
       overallProgress: (completed + failed) / total * 100,
-      startTime: Date.now(),
+      startTime,
       errors
     };
   }
@@ -411,6 +429,17 @@ export class MigrationManager {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         rollbackSuccess = rollbackResult.success;
 
+        // Advance the tracked state to reflect the rollback outcome
+        // (FAILED -> ROLLED_BACK | QUARANTINED, both valid transitions), so
+        // getMigrationStatus agrees with the audit record and cleanup can
+        // reclaim the entry. Guarded: the current state may already be terminal.
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument
+          await this.stateTracker.updateState(migrationId, { state: rollbackResult.restoredState });
+        } catch (stateError) {
+          console.error('Failed to update migration state after rollback:', stateError);
+        }
+
         if (!rollbackSuccess) {
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
           await this.emitEvent('migration:quarantine', {
@@ -459,8 +488,14 @@ export class MigrationManager {
       metadata: options.metadata || {}
     };
 
-    // Record a signed audit entry for the failed/rolled-back migration.
-    await this.auditLogger.logMigration(auditRecord as any);
+    // Record a signed audit entry for the failed/rolled-back migration. A
+    // logging failure here must not throw out of the failure handler (which
+    // would make migrate() reject instead of returning a MigrationResult).
+    try {
+      await this.auditLogger.logMigration(auditRecord as any);
+    } catch (auditError) {
+      console.error('Failed to record audit for failed migration:', auditError);
+    }
 
     return {
       migrationId,

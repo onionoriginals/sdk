@@ -518,6 +518,51 @@ describe('OriginalsCel', () => {
       expect(mockBitcoinManager.inscribeData).toHaveBeenCalled();
     });
 
+    it('getCurrentState(btcoLog) resolves the canonical did:btco:<satoshi>, not the webvh DID', async () => {
+      // Regression for the #228 targetDid/sourceDid detector mismatch: btco
+      // migration events carry sourceDid (not targetDid), so a detector keyed on
+      // targetDid mis-routed btco logs through the webvh manager and left the
+      // state DID as the old webvh DID instead of did:btco:<satoshi>.
+      const cel = new OriginalsCel({
+        layer: 'peer',
+        signer: mockSigner,
+        config: {
+          webvh: { domain: 'example.com' },
+          btco: { bitcoinManager: createMockBitcoinManager() },
+        },
+      });
+
+      const peerLog = await cel.create('Test', []);
+      const webvhLog = await cel.migrate(peerLog, 'webvh');
+      const btcoLog = await cel.migrate(webvhLog, 'btco');
+
+      const state = cel.getCurrentState(btcoLog);
+      expect(state.layer).toBe('btco');
+      // Mock inscribes at satoshi 1000.
+      expect(state.did).toBe('did:btco:1000');
+      expect(state.did.startsWith('did:webvh:')).toBe(false);
+    });
+
+    it('rejects a second migration to btco (btco is the terminal layer)', async () => {
+      // Regression: the terminal-layer guard depends on detecting that the log
+      // is already at btco; the targetDid-keyed detector reported it as webvh
+      // and let a second inscription through.
+      const cel = new OriginalsCel({
+        layer: 'peer',
+        signer: mockSigner,
+        config: {
+          webvh: { domain: 'example.com' },
+          btco: { bitcoinManager: createMockBitcoinManager() },
+        },
+      });
+
+      const peerLog = await cel.create('Test', []);
+      const webvhLog = await cel.migrate(peerLog, 'webvh');
+      const btcoLog = await cel.migrate(webvhLog, 'btco');
+
+      await expect(cel.migrate(btcoLog, 'btco')).rejects.toThrow(/btco/i);
+    });
+
     it('throws error when bitcoinManager not configured for btco', async () => {
       const cel = new OriginalsCel({
         layer: 'peer',

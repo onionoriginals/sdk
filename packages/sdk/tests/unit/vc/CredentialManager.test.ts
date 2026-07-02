@@ -54,6 +54,32 @@ describe('CredentialManager', () => {
     await expect(sdk.credentials.verifyCredential(baseVC)).resolves.toBe(false);
   });
 
+  test('legacy (non-cryptosuite) verifyCredential rejects an expired credential', async () => {
+    // Regression: the legacy verify path validated the signature but skipped the
+    // validity window, so an expired legacy-signed credential verified as true.
+    const sdkES256K = OriginalsSDK.create({ defaultKeyType: 'ES256K' });
+    const sk = secp256k1.utils.randomPrivateKey();
+    const pk = secp256k1.getPublicKey(sk, true);
+    const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
+    const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
+    const vc = {
+      ...baseVC,
+      issuer: `did:key:${pkMb}`,
+      issuanceDate: new Date(Date.now() - 60_000).toISOString(),
+      expirationDate: new Date(Date.now() - 1_000).toISOString()
+    };
+    const signed = await sdkES256K.credentials.signCredential(vc, skMb, `did:key:${pkMb}`);
+    // Sanity: the proof is a legacy (no cryptosuite) proof.
+    expect((signed.proof as any).cryptosuite).toBeUndefined();
+    // Expired -> must not verify, even though the signature itself is valid.
+    await expect(sdkES256K.credentials.verifyCredential(signed)).resolves.toBe(false);
+
+    // A non-expired credential signed the same way still verifies.
+    const freshVc = { ...vc, expirationDate: new Date(Date.now() + 3_600_000).toISOString() };
+    const freshSigned = await sdkES256K.credentials.signCredential(freshVc, skMb, `did:key:${pkMb}`);
+    await expect(sdkES256K.credentials.verifyCredential(freshSigned)).resolves.toBe(true);
+  });
+
   test('createPresentation bundles VCs (expected to fail until implemented)', async () => {
     const pres = await sdk.credentials.createPresentation([baseVC], 'did:peer:holder');
     expect(pres.verifiableCredential.length).toBeGreaterThan(0);

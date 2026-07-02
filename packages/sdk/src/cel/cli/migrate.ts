@@ -92,8 +92,11 @@ function detectCurrentLayer(log: EventLog): 'peer' | 'webvh' | 'btco' {
     
     if (event.type === 'create' && data.layer) {
       currentLayer = data.layer as 'peer' | 'webvh' | 'btco';
-    } else if (event.type === 'update' && data.layer && data.targetDid) {
-      // This is a migration event
+    } else if (event.type === 'update' && data.layer && data.sourceDid) {
+      // This is a migration event. Detect via sourceDid (present on both webvh
+      // and btco migrations); btco migrations don't carry targetDid, so keying
+      // off targetDid left btco logs mis-detected as webvh and bypassed the
+      // "cannot migrate from btco" guard.
       currentLayer = data.layer as 'peer' | 'webvh' | 'btco';
     }
   }
@@ -116,9 +119,12 @@ function getCurrentDid(log: EventLog): string {
     
     if (event.type === 'create' && data.did) {
       currentDid = data.did as string;
-    } else if (event.type === 'update' && data.targetDid) {
-      // This is a migration event
-      currentDid = data.targetDid as string;
+    } else if (event.type === 'update' && data.sourceDid && data.layer) {
+      // Migration event. webvh migrations carry the resolvable targetDid; btco
+      // migrations derive did:btco:<satoshi> from the bitcoin witness proof
+      // (the satoshi is only known after inscription, so it isn't in the
+      // signed data).
+      currentDid = resolveMigrationDid(event, data) ?? currentDid;
     }
   }
 
@@ -127,6 +133,24 @@ function getCurrentDid(log: EventLog): string {
   }
 
   return currentDid;
+}
+
+/**
+ * Derives the resolvable DID for a migration event: the targetDid for webvh,
+ * or did:btco:<satoshi> (from the bitcoin-ordinals-2024 witness proof) for btco.
+ */
+function resolveMigrationDid(event: EventLog['events'][number], data: Record<string, unknown>): string | undefined {
+  if (data.layer === 'btco') {
+    const proof = (event.proof as ReadonlyArray<unknown> | undefined)?.find(
+      (p): p is Record<string, unknown> =>
+        !!p && typeof p === 'object' && (p as Record<string, unknown>).cryptosuite === 'bitcoin-ordinals-2024'
+    );
+    const satoshi = proof?.satoshi;
+    if (satoshi !== undefined && satoshi !== null) {
+      return `did:btco:${satoshi as string | number}`;
+    }
+  }
+  return data.targetDid as string | undefined;
 }
 
 /**
