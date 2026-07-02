@@ -7,6 +7,7 @@ import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProvide
 import { multikey } from '../crypto/Multikey.js';
 import { KeyManager } from './KeyManager.js';
 import { WebVHManager } from './WebVHManager.js';
+import { Ed25519Verifier } from './Ed25519Verifier.js';
 import type {
   RotateWebVHKeysOptions,
   RotateWebVHKeysResult,
@@ -252,9 +253,16 @@ export class DIDManager {
           result = resolved.didDocument || null;
         } else if (did.startsWith('did:webvh:')) {
           try {
-            const mod = await import('didwebvh-ts') as { resolveDID?: (did: string) => Promise<{ doc?: Record<string, unknown> }> };
+            const mod = await import('didwebvh-ts') as {
+              resolveDID?: (did: string, options?: { verifier?: ExternalVerifier }) => Promise<{ doc?: Record<string, unknown> }>;
+            };
             if (mod && typeof mod.resolveDID === 'function') {
-              const resolved = await mod.resolveDID(did);
+              // didwebvh-ts requires a verifier to validate the DID log's
+              // signatures during resolution; the first log entry is always
+              // verified, so omitting it makes resolveDID throw internally and
+              // every valid did:webvh resolve to null. Ed25519Verifier is the
+              // SDK's spec-compliant verifier for these logs.
+              const resolved = await mod.resolveDID(did, { verifier: new Ed25519Verifier() });
               if (resolved && resolved.doc) {
                 result = resolved.doc as unknown as DIDDocument;
               }
