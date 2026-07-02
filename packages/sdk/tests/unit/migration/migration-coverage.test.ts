@@ -1251,6 +1251,49 @@ describe('MigrationManager: audit failures and rollback state consistency', () =
     expect(status.state).toBe(MigrationStateEnum.COMPLETED);
   });
 
+  it('a failed rollback reports QUARANTINED consistently across status, result, and audit', async () => {
+    // Regression: when a post-checkpoint migration fails and rollback also
+    // fails, the tracked state advanced to QUARANTINED but the returned state
+    // and audit finalState were recomputed from rollbackSuccess as FAILED —
+    // a contradiction that hid quarantined migrations from callers.
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    // Fail the migration after the checkpoint is created so the rollback path
+    // runs with a checkpoint present.
+    (manager as any).peerToWebvh.executeMigration = async () => {
+      throw new Error('execute boom');
+    };
+    // Force the rollback to fail (returns QUARANTINED).
+    (manager as any).rollbackManager.rollback = async (migrationId: string) => ({
+      success: false,
+      migrationId,
+      checkpointId: 'chk',
+      restoredState: MigrationStateEnum.QUARANTINED,
+      duration: 0,
+      errors: [{ code: 'ROLLBACK_FAILED' }],
+    });
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const result = await manager.migrate({
+      sourceDid: peerDid.id,
+      targetLayer: 'webvh',
+      domain: 'example.com',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.state).toBe(MigrationStateEnum.QUARANTINED);
+    expect(result.auditRecord?.finalState).toBe(MigrationStateEnum.QUARANTINED);
+
+    const status = await manager.getMigrationStatus(result.migrationId);
+    expect(status.state).toBe(MigrationStateEnum.QUARANTINED);
+  });
+
   it('migrateBatch startTime is the batch start, consistent with batchId', async () => {
     // Regression: startTime was Date.now() evaluated at return (batch end) and
     // differed from the timestamp baked into batchId.

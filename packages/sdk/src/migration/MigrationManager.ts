@@ -437,22 +437,28 @@ export class MigrationManager {
 
     await this.emitEvent('migration:failed', { migrationId, error: migrationError });
 
-    // Attempt rollback if checkpoint exists
+    // Attempt rollback if checkpoint exists. `finalState` is the single source
+    // of truth for the tracked state, the returned MigrationResult.state, and
+    // the audit record's finalState, so all three agree. It defaults to FAILED
+    // (no checkpoint → nothing was rolled back) and is advanced to the
+    // rollback's restoredState (ROLLED_BACK on success, QUARANTINED on failure).
     let rollbackSuccess = false;
+    let finalState: MigrationStateEnum = MigrationStateEnum.FAILED;
     if (checkpoint) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
         const rollbackResult = await this.rollbackManager.rollback(migrationId, checkpoint.checkpointId);
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         rollbackSuccess = rollbackResult.success;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        finalState = rollbackResult.restoredState;
 
         // Advance the tracked state to reflect the rollback outcome
         // (FAILED -> ROLLED_BACK | QUARANTINED, both valid transitions), so
         // getMigrationStatus agrees with the audit record and cleanup can
         // reclaim the entry. Guarded: the current state may already be terminal.
         try {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument
-          await this.stateTracker.updateState(migrationId, { state: rollbackResult.restoredState });
+          await this.stateTracker.updateState(migrationId, { state: finalState });
         } catch (stateError) {
           console.error('Failed to update migration state after rollback:', stateError);
         }
@@ -468,6 +474,15 @@ export class MigrationManager {
         }
       } catch (rollbackError) {
         console.error('Rollback failed:', rollbackError);
+        // The rollback itself threw: the migration needs manual intervention.
+        // Mark it QUARANTINED consistently across tracked state, result, and
+        // audit (matching the migration:quarantine event emitted below).
+        finalState = MigrationStateEnum.QUARANTINED;
+        try {
+          await this.stateTracker.updateState(migrationId, { state: finalState });
+        } catch (stateError) {
+          console.error('Failed to update migration state after rollback failure:', stateError);
+        }
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         await this.emitEvent('migration:quarantine', {
           migrationId,
@@ -489,7 +504,7 @@ export class MigrationManager {
       sourceLayer: this.extractLayer(options.sourceDid),
       targetDid: null,
       targetLayer: options.targetLayer,
-      finalState: rollbackSuccess ? MigrationStateEnum.ROLLED_BACK : MigrationStateEnum.FAILED,
+      finalState,
       validationResults: {
         valid: false,
         errors: [],
@@ -525,7 +540,7 @@ export class MigrationManager {
       sourceDid: options.sourceDid,
       sourceLayer: this.extractLayer(options.sourceDid),
       targetLayer: options.targetLayer,
-      state: rollbackSuccess ? MigrationStateEnum.ROLLED_BACK : MigrationStateEnum.FAILED,
+      state: finalState,
       duration,
       cost: { storageCost: 0, networkFees: 0, totalCost: 0, currency: 'sats' },
       auditRecord,
