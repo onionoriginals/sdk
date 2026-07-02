@@ -5,6 +5,19 @@
 import { MigrationCheckpoint } from '../types.js';
 import { OriginalsConfig } from '../../types/index.js';
 
+/**
+ * Normalize the possible shapes a storage adapter may return
+ * (StorageGetResult, Buffer/Uint8Array, or a raw string) to utf8 text.
+ */
+export function storedDataToString(data: unknown): string {
+  if (typeof data === 'string') return data;
+  if (data instanceof Uint8Array) return Buffer.from(data).toString('utf8');
+  const content = (data as { content?: Buffer | Uint8Array | string }).content;
+  if (typeof content === 'string') return content;
+  if (content instanceof Uint8Array) return Buffer.from(content).toString('utf8');
+  throw new Error('Unsupported storage adapter result shape');
+}
+
 export class CheckpointStorage {
   private checkpoints: Map<string, MigrationCheckpoint>;
 
@@ -52,7 +65,10 @@ export class CheckpointStorage {
         const key = `checkpoints/${checkpointId}.json`;
         const data = await storageAdapter.get(key);
         if (data) {
-          const checkpoint = JSON.parse(data.toString());
+          // StorageAdapter.get returns { content, contentType }; calling
+          // toString() on that object yielded "[object Object]" and made
+          // every persisted checkpoint unreadable after a restart.
+          const checkpoint = JSON.parse(storedDataToString(data));
           this.checkpoints.set(checkpointId, checkpoint);
           return checkpoint;
         }

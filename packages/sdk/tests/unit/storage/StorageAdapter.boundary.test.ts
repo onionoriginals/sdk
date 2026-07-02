@@ -227,3 +227,43 @@ describe('LocalStorageAdapter - large file content [CRYPTO-STORAGE-009]', () => 
     expect(result).toBeNull();
   });
 });
+
+describe('LocalStorageAdapter path containment', () => {
+  test('rejects object paths that escape the storage directory', async () => {
+    const os = await import('os');
+    const path = await import('path');
+    const fs = await import('fs');
+    const { LocalStorageAdapter } = await import('../../../src/storage/LocalStorageAdapter');
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'originals-lsa-'));
+    const adapter = new LocalStorageAdapter({ baseDir });
+
+    await expect(
+      adapter.putObject('example.com', '../../../escape.txt', 'x')
+    ).rejects.toThrow(/outside the storage directory/);
+    await expect(
+      adapter.getObject('example.com', '..%2F..'.replace(/%2F/g, '/') + '/escape.txt')
+    ).rejects.toThrow(/outside the storage directory/);
+
+    // Normal nested paths still work
+    const url = await adapter.putObject('example.com', 'a/b/c.txt', 'hello');
+    expect(url).toContain('a/b/c.txt');
+    const got = await adapter.getObject('example.com', 'a/b/c.txt');
+    expect(new TextDecoder().decode(got!.content)).toBe('hello');
+
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  });
+});
+
+describe('MemoryStorageAdapter copy semantics', () => {
+  test('mutating the input after put does not corrupt stored data', async () => {
+    const { MemoryStorageAdapter } = await import('../../../src/storage/MemoryStorageAdapter');
+    const adapter = new MemoryStorageAdapter();
+    const buf = new Uint8Array([1, 2, 3]);
+    await adapter.putObject('d', 'p', buf);
+    buf[0] = 99;
+    const got = await adapter.getObject('d', 'p');
+    expect(Array.from(got!.content)).toEqual([1, 2, 3]);
+    MemoryStorageAdapter.clear();
+    expect(await adapter.exists('d', 'p')).toBe(false);
+  });
+});

@@ -17,7 +17,16 @@ export class LocalStorageAdapter implements StorageAdapter {
   private resolvePath(domain: string, objectPath: string): string {
     const safeDomain = domain.replace(/[^a-zA-Z0-9.-]/g, '_');
     const cleanPath = objectPath.replace(/^\/+/, '');
-    return path.join(this.baseDir, safeDomain, cleanPath);
+    const base = path.resolve(this.baseDir, safeDomain);
+    const fullPath = path.resolve(base, cleanPath);
+    // Contain object paths inside the domain directory: '..' segments in a
+    // path (which can derive from external data) must not become a read/write
+    // primitive outside baseDir.
+    const relative = path.relative(base, fullPath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error(`Invalid object path: resolves outside the storage directory: ${objectPath}`);
+    }
+    return fullPath;
   }
 
   private toUrl(domain: string, objectPath: string): string {

@@ -233,3 +233,41 @@ describe('CheckpointManager', () => {
     });
   });
 });
+
+describe('CheckpointStorage persistence round-trip', () => {
+  it('reads back a checkpoint persisted through a StorageAdapter after memory loss', async () => {
+    const { CheckpointStorage } = await import('../../../src/migration/checkpoint/CheckpointStorage');
+
+    // Minimal adapters-style StorageAdapter: get returns { content, contentType }
+    const objects = new Map<string, Buffer>();
+    const adapter = {
+      async put(key: string, data: Buffer | string) {
+        objects.set(key, Buffer.from(data));
+        return key;
+      },
+      async get(key: string) {
+        const content = objects.get(key);
+        return content ? { content, contentType: 'application/json' } : null;
+      }
+    };
+
+    const config: any = { network: 'regtest', defaultKeyType: 'Ed25519', storageAdapter: adapter };
+    const storageA = new CheckpointStorage(config);
+    const checkpoint: any = {
+      checkpointId: 'chk_roundtrip',
+      migrationId: 'mig_roundtrip',
+      timestamp: 12345,
+      sourceDid: 'did:peer:abc',
+      sourceLayer: 'peer',
+      didDocument: { id: 'did:peer:abc' }
+    };
+    await storageA.save(checkpoint);
+
+    // Fresh instance = empty in-memory map: must read from the adapter.
+    const storageB = new CheckpointStorage(config);
+    const loaded = await storageB.get('chk_roundtrip');
+    expect(loaded).not.toBeNull();
+    expect(loaded!.checkpointId).toBe('chk_roundtrip');
+    expect(loaded!.sourceDid).toBe('did:peer:abc');
+  });
+});

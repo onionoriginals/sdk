@@ -5,7 +5,7 @@ import { BitcoinManager } from '../bitcoin/BitcoinManager.js';
 import { StatusListManager } from '../vc/StatusListManager.js';
 import { OriginalsConfig, KeyStore, ExternalSigner, ExternalVerifier } from '../types/index.js';
 import { DIDDocument, VerificationMethod, ServiceEndpoint } from '../types/did.js';
-import { DEFAULT_WEBVH_NETWORK } from '../types/network.js';
+import { DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH } from '../types/network.js';
 import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
 import { Logger } from '../utils/Logger.js';
 import { MetricsCollector } from '../utils/MetricsCollector.js';
@@ -122,9 +122,12 @@ export class OriginalsSDK {
     if (!config.defaultKeyType || !['ES256K', 'Ed25519', 'ES256'].includes(config.defaultKeyType)) {
       throw new Error('Invalid defaultKeyType: must be ES256K, Ed25519, or ES256');
     }
-    
+    if (config.webvhNetwork !== undefined && !['pichu', 'cleffa', 'magby'].includes(config.webvhNetwork)) {
+      throw new Error('Invalid webvhNetwork: must be pichu, cleffa, or magby');
+    }
+
     this.config = config;
-    
+
     // Initialize logger and metrics
     this.logger = new Logger('SDK', config);
     this.metrics = new MetricsCollector();
@@ -133,10 +136,25 @@ export class OriginalsSDK {
     this.eventLogger = new EventLogger(this.logger.child('Events'), new MetricsCollector());
     
     // Log SDK initialization
-    this.logger.info('Initializing Originals SDK', { 
+    this.logger.info('Initializing Originals SDK', {
       network: config.network,
-      keyType: config.defaultKeyType 
+      keyType: config.defaultKeyType
     });
+
+    // The WebVH network tiers map to fixed Bitcoin networks (magby→regtest,
+    // cleffa→signet, pichu→mainnet). A contradictory explicit `network` is
+    // almost always a misconfiguration — surface it instead of failing far
+    // from the cause during a did:btco migration.
+    if (config.webvhNetwork) {
+      const mappedNetwork = getBitcoinNetworkForWebVH(config.webvhNetwork);
+      if (config.network && config.network !== mappedNetwork) {
+        this.logger.warn('Configured network contradicts webvhNetwork mapping', {
+          network: config.network,
+          webvhNetwork: config.webvhNetwork,
+          expectedNetwork: mappedNetwork
+        });
+      }
+    }
     
     emitTelemetry(config.telemetry, { name: 'sdk.init', attributes: { network: config.network } });
     
