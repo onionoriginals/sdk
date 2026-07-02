@@ -59,7 +59,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@turnkey/sdk-server": "^5.0.0",
+    "@turnkey/sdk-server": "^6.1.1",
     "@originals/sdk": "^2.0.0",
     "jsonwebtoken": "^9.0.2",
     "@noble/hashes": "^2.0.1",
