@@ -93,3 +93,46 @@ provenance). Fixed the confirmed correctness bugs, each with a regression test:
 
 ### Result
 - Suites run per fix all green; typecheck clean. Full-suite + lint re-run pending push.
+
+---
+
+Branch: `claude/originals-sdk-correctness-ws3gte` (continuation after #230 merged)
+
+## Iteration 1 — 2026-07-02
+
+### Ground truth
+- Requested first: upgrade `didwebvh-ts` 2.7.5 → 2.8.0.
+- After the upgrade, `bun test`: 3130 pass / 79 fail.
+  - 63 failures: every did:webvh create/update/rotate/recover path threw
+    `Key did:key:z6Mk... is not authorized to update.` inside didwebvh-ts.
+  - 16 failures: CEL-CLI subprocess tests — environment-only (`packages/sdk/dist`
+    missing in the fresh clone); green after `bun run build`, no code change.
+- `bun run typecheck`: clean. `bun run lint`: 0 errors (87 warnings, pre-existing).
+- No open PR for this branch yet; branch tip == origin/main (709c908).
+
+### Work items
+1. **didwebvh-ts 2.8.0 breaking change — `updateKeys` format.** 2.8.0's
+   `isKeyAuthorized` compares each `updateKeys` entry against the *bare multikey*
+   parsed from the proof's `did:key:` verification method (matching the did:webvh
+   spec), where 2.7.5 stripped a `did:key:` prefix from `updateKeys` itself. The SDK
+   passed `did:key:z6Mk...`-prefixed updateKeys everywhere, so every log entry
+   failed authorization. Since `deriveNextKeyHash` hashes the updateKey string
+   verbatim, pre-rotation `nextKeyHashes` had to move to the bare format too.
+   - `WebVHManager`/`DIDManager`: pass bare `keyPair.publicKey` as updateKeys in
+     create/appendKeyChange/appendKeyChangePrerotation; compute `nextKeyHashes`
+     and the SDK-level pre-rotation guard hash over the bare key.
+   - Added exported `normalizeUpdateKey()` and applied it to caller-provided
+     `updateKeys` (external-signer paths), so the documented legacy
+     `"did:key:z6Mk..."` input keeps working. Direct unit tests added
+     (`tests/unit/did/webvh-prerotation.test.ts`), and existing external-signer
+     tests that pass `did:key:`-prefixed updateKeys now cover the normalization
+     end-to-end through didwebvh-ts resolution.
+   - Updated 2 test assertions that asserted the old `did:key:`-prefixed
+     nextKeyHash input (intentional behavior change tracking the spec).
+2. Deferred: logs created/published under ≤2.7.5 store `did:key:`-prefixed
+   updateKeys inside signed entries and will not verify under 2.8.0's stricter
+   check — added to FOLLOWUP.md (item 11).
+
+### Result
+- Full suite: **3209 pass / 0 fail / 71 skip** across 171 files (post-build).
+- Typecheck clean; lint 0 errors.

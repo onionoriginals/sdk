@@ -112,3 +112,18 @@ behavior today), require a product/design decision, or would exceed the
   that throw, and `DataIntegrityProofManager` only dispatches `eddsa-rdfc-2022`,
   so `bbs-2023` is never reachable. This would be a real correctness bug only
   once BBS+ is actually wired up; flagged for that work.
+
+## 11. did:webvh logs created under didwebvh-ts ≤2.7.5 will not verify under 2.8.0 (data compatibility)
+
+- **Where:** any persisted/published `did.jsonl` produced by SDK versions that
+  pinned `didwebvh-ts` ≤2.7.5 (updateKeys were written as `did:key:z6Mk...`).
+- **What:** didwebvh-ts 2.8.0's `isKeyAuthorized` requires `updateKeys` entries
+  to be bare multikeys (`z6Mk...`, per the did:webvh spec) and compares them to
+  the multikey parsed from each proof's `did:key:` verification method. Old logs
+  store the prefixed form *inside signed log entries*, so resolution of those
+  logs now fails with "Key did:key:... is not authorized to update." The entries
+  are signed; they cannot be rewritten without breaking the hash/proof chain.
+- **Why deferred:** this is a data-migration/product decision, not an SDK code
+  fix: options include re-creating affected DIDs, or upstream didwebvh-ts
+  accepting the legacy prefixed form during verification for backward
+  compatibility. New logs created by the SDK now use the spec format.

@@ -6,7 +6,7 @@ import { createBtcoDidDocument } from './createBtcoDidDocument.js';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter.js';
 import { multikey } from '../crypto/Multikey.js';
 import { KeyManager } from './KeyManager.js';
-import { WebVHManager } from './WebVHManager.js';
+import { WebVHManager, normalizeUpdateKey } from './WebVHManager.js';
 import { Ed25519Verifier } from './Ed25519Verifier.js';
 import type {
   RotateWebVHKeysOptions,
@@ -390,7 +390,7 @@ export class DIDManager {
         );
       }
       verificationMethods = providedVerificationMethods;
-      updateKeys = providedUpdateKeys;
+      updateKeys = providedUpdateKeys.map(normalizeUpdateKey);
       keyPair = undefined; // No key pair when using external signer
     } else {
       // Generate or use provided key pair (Ed25519 for did:webvh)
@@ -415,7 +415,8 @@ export class DIDManager {
 
       signer = internalSigner;
       verifier = internalSigner; // Use the same signer as verifier
-      updateKeys = [`did:key:${keyPair.publicKey}`]; // Use did:key format for authorization
+      // Bare multikey format per the did:webvh spec (didwebvh-ts >= 2.8)
+      updateKeys = [keyPair.publicKey];
     }
 
     // Create the DID using didwebvh-ts
