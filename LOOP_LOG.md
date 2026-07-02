@@ -162,3 +162,33 @@ Branch: `claude/originals-sdk-correctness-ws3gte` (continuation after #230 merge
 ### Result
 - `@originals/auth`: 190 pass / 0 fail. Full turbo suite: 4/4 tasks green.
 - Typecheck clean; lint 0 errors.
+
+## Iteration 3 — 2026-07-02 (Macroscope review on PR #231)
+
+### Review comments triaged
+1. 🟠 High (OriginalsSDK.ts, updateDIDOriginal): normalizing `updateKeys` while
+   forwarding caller-computed `nextKeyHashes` unchanged can silently break a
+   pre-rotation chain — hashes commit to the exact updateKey string and cannot
+   be normalized after hashing. **Actionable — fixed.**
+2. 🟡 Medium (.changeset): patch bump documents a breaking change (old persisted
+   logs no longer verify under 2.8.0). **Actionable — fixed** (patch → major).
+
+### Work items
+1. Added `assertBareUpdateKeysForPrerotation` guard to both
+   `createDIDOriginal` and `updateDIDOriginal`: combining legacy
+   `did:key:`-form updateKeys with `nextKeyHashes` now fails fast with a
+   descriptive error instead of committing hashes that can never match a
+   future normalized updateKey. Documented the format contract on both
+   option interfaces; exported `computeNextKeyHash` and `normalizeUpdateKey`
+   from the package index so callers can compute spec-form hashes.
+2. Found while fixing: `createDIDOriginal` silently dropped declared options
+   (`nextKeyHashes`, `portable`, `controller`, `alsoKnownAs`, `authentication`,
+   `assertionMethod`, `keyAgreement`, `services`) — pre-rotation requested at
+   create time was ignored entirely. Now forwarded.
+3. Changeset bumped to major with an explicit BREAKING section.
+4. Regression tests: full pre-rotation chain through the wrappers
+   (create with nextKeyHashes → rotate to pre-committed key), guard rejection
+   on both create and update paths.
+
+### Result
+- Full turbo suite green (0 fail), typecheck clean, lint 0 errors.

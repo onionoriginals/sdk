@@ -57,6 +57,13 @@ export interface CreateDIDOriginalOptions {
   domain: string;
   signer: ExternalSigner;
   verifier?: ExternalVerifier;
+  /**
+   * Update keys as bare multikeys (e.g. "z6Mk...", the did:webvh spec format
+   * required by didwebvh-ts >= 2.8). Legacy "did:key:z6Mk..." values are
+   * normalized automatically — except when `nextKeyHashes` is also provided:
+   * pre-rotation hashes commit to the exact updateKey string, so combining
+   * legacy-form updateKeys with pre-rotation is rejected (see nextKeyHashes).
+   */
   updateKeys: string[];
   verificationMethods: VerificationMethod[];
   paths?: string[];
@@ -64,6 +71,13 @@ export interface CreateDIDOriginalOptions {
   context?: string | string[] | object | object[];
   alsoKnownAs?: string[];
   portable?: boolean;
+  /**
+   * Pre-rotation commitments. Each hash MUST be computed over the bare
+   * multikey form of the future updateKey (e.g. `computeNextKeyHash('z6Mk...')`
+   * from `@originals/sdk`), because didwebvh-ts hashes updateKeys verbatim
+   * when validating the next entry. Hashes are opaque and cannot be
+   * normalized after the fact.
+   */
   nextKeyHashes?: string[];
   authentication?: string[];
   assertionMethod?: string[];
@@ -77,6 +91,7 @@ export interface UpdateDIDOriginalOptions {
   log: DIDLog;
   signer: ExternalSigner;
   verifier?: ExternalVerifier;
+  /** Same format rules as {@link CreateDIDOriginalOptions.updateKeys}. */
   updateKeys?: string[];
   verificationMethods?: VerificationMethod[];
   services?: ServiceEndpoint[];
@@ -84,6 +99,7 @@ export interface UpdateDIDOriginalOptions {
   context?: string | string[] | object | object[];
   alsoKnownAs?: string[];
   portable?: boolean;
+  /** Same format rules as {@link CreateDIDOriginalOptions.nextKeyHashes}. */
   nextKeyHashes?: string[];
   authentication?: string[];
   assertionMethod?: string[];
@@ -99,6 +115,31 @@ export type UpdateOriginalOptions = UpdateDIDOriginalOptions;
 
 export interface OriginalsSDKOptions extends Partial<OriginalsConfig> {
   keyStore?: KeyStore;
+}
+
+/**
+ * Guard for the pre-rotation footgun: `nextKeyHashes` commit to the exact
+ * updateKey string didwebvh-ts will later hash, and the SDK normalizes
+ * updateKeys to bare multikeys. A caller still using the legacy
+ * "did:key:..." form for updateKeys has almost certainly computed its
+ * nextKeyHashes over that same legacy form — the update would be accepted
+ * but the committed hashes could never match a future (normalized) updateKey,
+ * breaking the chain at the *next* rotation. Fail fast instead.
+ */
+function assertBareUpdateKeysForPrerotation(
+  updateKeys: string[] | undefined,
+  nextKeyHashes: string[] | undefined
+): void {
+  if (!nextKeyHashes || nextKeyHashes.length === 0 || !updateKeys) return;
+  const legacy = updateKeys.filter(k => k !== normalizeUpdateKey(k));
+  if (legacy.length > 0) {
+    throw new Error(
+      'Pre-rotation (nextKeyHashes) requires updateKeys in bare multikey form ("z6Mk..."), ' +
+      `but got legacy did:key form: ${legacy.join(', ')}. nextKeyHashes commit to the exact ` +
+      'updateKey string and cannot be normalized after hashing — pass bare multikeys and ' +
+      'compute each hash as computeNextKeyHash(<bare multikey>).'
+    );
+  }
 }
 
 export class OriginalsSDK {
@@ -340,8 +381,10 @@ export class OriginalsSDK {
       throw new Error('Failed to load didwebvh-ts: createDID is not a function');
     }
 
+    assertBareUpdateKeysForPrerotation(options.updateKeys, options.nextKeyHashes);
+
     // Create the DID using didwebvh-ts
-    const result = await createDID({
+    const createOptions: Record<string, unknown> = {
       domain: options.domain,
       signer: options.signer,
       verifier: options.verifier,
@@ -354,7 +397,16 @@ export class OriginalsSDK {
         'https://www.w3.org/ns/did/v1',
         'https://w3id.org/security/multikey/v1'
       ],
-    });
+    };
+    if (options.controller !== undefined) createOptions.controller = options.controller;
+    if (options.alsoKnownAs !== undefined) createOptions.alsoKnownAs = options.alsoKnownAs;
+    if (options.portable !== undefined) createOptions.portable = options.portable;
+    if (options.nextKeyHashes !== undefined) createOptions.nextKeyHashes = options.nextKeyHashes;
+    if (options.authentication !== undefined) createOptions.authentication = options.authentication;
+    if (options.assertionMethod !== undefined) createOptions.assertionMethod = options.assertionMethod;
+    if (options.keyAgreement !== undefined) createOptions.keyAgreement = options.keyAgreement;
+    if (options.services !== undefined) createOptions.services = options.services;
+    const result = await createDID(createOptions as Parameters<typeof createDID>[0]);
 
     return {
       did: result.did,
@@ -410,6 +462,8 @@ export class OriginalsSDK {
     if (typeof updateDID !== 'function') {
       throw new Error('Failed to load didwebvh-ts: updateDID is not a function');
     }
+
+    assertBareUpdateKeysForPrerotation(options.updateKeys, options.nextKeyHashes);
 
     // Prepare options for updateDID
     const updateOptions: Record<string, unknown> = {
