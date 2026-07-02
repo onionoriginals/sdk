@@ -281,7 +281,16 @@ export class MigrationManager {
   }
 
   /**
-   * Rollback a migration
+   * Rollback a migration.
+   *
+   * Note: rolling back a migration that has already reached the terminal
+   * COMPLETED state is NOT reflected in `getMigrationStatus()` — the state
+   * machine treats COMPLETED as terminal (COMPLETED → ROLLED_BACK is not a
+   * valid transition), and the layer-specific rollback is currently a
+   * best-effort check rather than a true undo of published/inscribed
+   * resources. `getMigrationStatus()` therefore continues to report COMPLETED;
+   * consult the returned RollbackResult for the outcome of the rollback
+   * itself. Rollback of a non-terminal (e.g. FAILED) migration IS reflected.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async rollback(migrationId: string): Promise<any> {
@@ -292,13 +301,13 @@ export class MigrationManager {
 
     const rollbackResult = await this.rollbackManager.rollback(migrationId, state.checkpointId);
 
-    // Reflect the rollback outcome in the tracked state so getMigrationStatus
-    // agrees with the returned result. Guarded: the current state may be
-    // terminal (e.g. COMPLETED), in which case the transition is rejected.
-    try {
+    // Reflect the rollback outcome in the tracked state when the transition is
+    // permitted (e.g. FAILED → ROLLED_BACK). For a terminal COMPLETED migration
+    // the transition is intentionally rejected by the state machine; that is an
+    // expected, documented no-op (see the method doc), so it is not logged as
+    // an error.
+    if (this.stateTracker.canTransitionTo(state.state, rollbackResult.restoredState)) {
       await this.stateTracker.updateState(migrationId, { state: rollbackResult.restoredState });
-    } catch (stateError) {
-      console.error('Failed to update migration state after rollback:', stateError);
     }
 
     await this.emitEvent('migration:rolledback', { migrationId, rollbackResult });

@@ -1194,6 +1194,35 @@ describe('MigrationManager: audit failures and rollback state consistency', () =
     expect(status.state).toBe(result.state);
   });
 
+  it('manual rollback of a COMPLETED migration does not throw and leaves status COMPLETED', async () => {
+    // COMPLETED is terminal (COMPLETED -> ROLLED_BACK is not a valid
+    // transition), and the layer-specific rollback is a best-effort check, not
+    // a true undo. rollback() must therefore complete without throwing and
+    // must not spuriously flip getMigrationStatus away from COMPLETED.
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const result = await manager.migrate({
+      sourceDid: peerDid.id,
+      targetLayer: 'webvh',
+      domain: 'example.com',
+    });
+    expect(result.state).toBe(MigrationStateEnum.COMPLETED);
+
+    // Manual rollback of the completed migration.
+    await expect(manager.rollback(result.migrationId)).resolves.toBeDefined();
+
+    // Status is unchanged (documented behavior for terminal migrations).
+    const status = await manager.getMigrationStatus(result.migrationId);
+    expect(status.state).toBe(MigrationStateEnum.COMPLETED);
+  });
+
   it('migrateBatch startTime is the batch start, consistent with batchId', async () => {
     // Regression: startTime was Date.now() evaluated at return (batch end) and
     // differed from the timestamp baked into batchId.

@@ -236,7 +236,30 @@ export class OriginalsCel {
    * });
    * ```
    */
+  /**
+   * Fields that identify a migration event in the log. A regular metadata
+   * update must not carry these, or getCurrentLayer/migration detection would
+   * misclassify it as a layer transition (e.g. a user update
+   * `{ sourceDid, layer }` would be read as a migration). Reserved so the
+   * distinction between migrations and updates stays unambiguous.
+   */
+  private static readonly RESERVED_MIGRATION_FIELDS = ['sourceDid', 'targetDid', 'layer', 'migratedAt'] as const;
+
   async update(log: EventLog, data: unknown): Promise<EventLog> {
+    // Reject reserved migration-control fields in caller-supplied update data
+    // so a regular update can never be mistaken for a migration event.
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      const reserved = OriginalsCel.RESERVED_MIGRATION_FIELDS.filter(
+        (f) => Object.prototype.hasOwnProperty.call(data, f)
+      );
+      if (reserved.length > 0) {
+        throw new Error(
+          `update() data must not contain reserved migration field(s): ${reserved.join(', ')}. ` +
+          `These identify migration events; use migrate() to change layers.`
+        );
+      }
+    }
+
     // Determine the current layer of the log
     const currentLayer = this.getCurrentLayer(log);
     
