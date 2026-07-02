@@ -11,7 +11,7 @@
     },
     "packages/auth": {
       "name": "@originals/auth",
-      "version": "1.9.0",
+      "version": "2.0.0",
       "dependencies": {
         "@noble/ed25519": "^2.0.0",
         "@noble/hashes": "^2.0.1",
@@ -41,7 +41,7 @@
     },
     "packages/sdk": {
       "name": "@originals/sdk",
-      "version": "1.9.0",
+      "version": "2.0.0",
       "bin": {
         "originals-cel": "./dist/cel/cli/index.js",
       },
@@ -62,7 +62,7 @@
         "jsonld": "^8.3.3",
         "micro-ordinals": "^0.2.2",
         "multiformats": "^12.0.0",
-        "uuid": "^13.0.0",
+        "uuid": "^14.0.1",
       },
       "devDependencies": {
         "@babel/core": "^7.28.4",
@@ -994,7 +994,7 @@
 
     "uri-js": ["uri-js@4.4.1", "", { "dependencies": { "punycode": "^2.1.0" } }, "sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg=="],
 
-    "uuid": ["uuid@13.0.0", "", { "bin": { "uuid": "dist-node/bin/uuid" } }, "sha512-XQegIaBTVUjSHliKqcnFqYypAd4S+WCYt5NIeRs6w/UAry7z8Y9j5ZwRRL4kzq9U3sD6v+85er9FvkEaBpji2w=="],
+    "uuid": ["uuid@14.0.1", "", { "bin": { "uuid": "dist-node/bin/uuid" } }, "sha512-6ZxzVpzDXDa3bJWaHilVayA+BH/1zmxCJoVgvmqJnid/gPoKHxUrS/aC/T6LGQtNHT+XHG9fXPJB4d+IrU30Ew=="],
 
     "varuint-bitcoin": ["varuint-bitcoin@1.1.2", "", { "dependencies": { "safe-buffer": "^5.1.1" } }, "sha512-4EVb+w4rx+YfVM32HQX42AbbT7/1f5zwAYhIujKXKk8NQK+JfRVl3pqT3hjNn/L+RstigmGGKVwHA/P0wgITZw=="],
 
