@@ -184,11 +184,18 @@ export async function verifyEmailAuth(
 
   try {
     // Verify the OTP code with Turnkey
+    // TODO(@turnkey-sdk-server-6): @turnkey/sdk-server v6 replaced the plaintext
+    // `otpCode` field on verifyOtp with a required `encryptedOtpBundle` (produced via
+    // `encryptOtpCodeToBundle` from `@turnkey/crypto`, encrypted to the
+    // `otpEncryptionTargetBundle` returned by initOtp). This cast preserves the
+    // pre-v6 plaintext call shape (and existing test expectations) to unblock the
+    // dependency bump, but the OTP verification flow will not work against the real
+    // Turnkey v6 API until it is migrated to the encrypted-bundle flow.
     const verifyResult = await turnkeyClient.apiClient().verifyOtp({
       otpId: session.otpId,
       otpCode: code,
       expirationSeconds: '900', // 15 minutes
-    });
+    } as unknown as Parameters<ReturnType<Turnkey['apiClient']>['verifyOtp']>[0]);
 
     if (!verifyResult.verificationToken) {
       throw new Error('OTP verification failed - no verification token returned');
