@@ -1,14 +1,21 @@
 import { base58 } from '@scure/base';
 
-// Multicodec headers (varints) for supported key types
+// Multicodec headers (varint encodings of the registry codes) for supported
+// key types. Private-key codes: ed25519-priv 0x1300, secp256k1-priv 0x1301,
+// p256-priv 0x1306, bls12_381-g2-priv 0x130a.
 export const MULTICODEC_ED25519_PUB_HEADER = new Uint8Array([0xed, 0x01]);
 export const MULTICODEC_ED25519_PRIV_HEADER = new Uint8Array([0x80, 0x26]);
 export const MULTICODEC_SECP256K1_PUB_HEADER = new Uint8Array([0xe7, 0x01]);
-export const MULTICODEC_SECP256K1_PRIV_HEADER = new Uint8Array([0x13, 0x01]);
+export const MULTICODEC_SECP256K1_PRIV_HEADER = new Uint8Array([0x81, 0x26]);
 export const MULTICODEC_BLS12381_G2_PUB_HEADER = new Uint8Array([0xeb, 0x01]);
-export const MULTICODEC_BLS12381_G2_PRIV_HEADER = new Uint8Array([0x82, 0x26]);
+export const MULTICODEC_BLS12381_G2_PRIV_HEADER = new Uint8Array([0x8a, 0x26]);
 export const MULTICODEC_P256_PUB_HEADER = new Uint8Array([0x80, 0x24]);
-export const MULTICODEC_P256_PRIV_HEADER = new Uint8Array([0x81, 0x26]);
+export const MULTICODEC_P256_PRIV_HEADER = new Uint8Array([0x86, 0x26]);
+
+// Header this SDK previously (incorrectly) used for secp256k1 private keys:
+// the raw code bytes of 0x1301 instead of its varint. No registry codec uses
+// this byte pair, so it is still accepted on decode for persisted keys.
+export const LEGACY_SECP256K1_PRIV_HEADER = new Uint8Array([0x13, 0x01]);
 
 export type MultikeyType = 'Ed25519' | 'Secp256k1' | 'Bls12381G2' | 'P256';
 
@@ -69,8 +76,14 @@ export function validateMultikeyFormat(
         };
 
     const expectedHeader = expectedHeaders[expectedType];
-    
-    if (header[0] !== expectedHeader[0] || header[1] !== expectedHeader[1]) {
+
+    const isLegacySecp256k1Priv =
+      isPrivate &&
+      expectedType === 'Secp256k1' &&
+      header[0] === LEGACY_SECP256K1_PRIV_HEADER[0] &&
+      header[1] === LEGACY_SECP256K1_PRIV_HEADER[1];
+
+    if (!isLegacySecp256k1Priv && (header[0] !== expectedHeader[0] || header[1] !== expectedHeader[1])) {
       throw new Error(
         `Invalid multibase key format. Expected ${expectedType} ${
           isPrivate ? 'private' : 'public'
@@ -187,6 +200,9 @@ export const multikey = {
       return { key, type: 'Ed25519' };
     }
     if (header[0] === MULTICODEC_SECP256K1_PRIV_HEADER[0] && header[1] === MULTICODEC_SECP256K1_PRIV_HEADER[1]) {
+      return { key, type: 'Secp256k1' };
+    }
+    if (header[0] === LEGACY_SECP256K1_PRIV_HEADER[0] && header[1] === LEGACY_SECP256K1_PRIV_HEADER[1]) {
       return { key, type: 'Secp256k1' };
     }
     if (header[0] === MULTICODEC_BLS12381_G2_PRIV_HEADER[0] && header[1] === MULTICODEC_BLS12381_G2_PRIV_HEADER[1]) {

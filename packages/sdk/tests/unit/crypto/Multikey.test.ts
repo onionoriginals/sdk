@@ -204,3 +204,41 @@ describe('validateMultikeyFormat', () => {
   });
 });
 
+
+describe('Multicodec private-key headers match the multicodec registry', () => {
+  // varint encodings of the registry codes:
+  // secp256k1-priv 0x1301, p256-priv 0x1306, bls12_381-g2-priv 0x130a
+  test('spec varint header values', () => {
+    expect(Array.from(MULTICODEC_SECP256K1_PRIV_HEADER)).toEqual([0x81, 0x26]);
+    expect(Array.from(MULTICODEC_P256_PRIV_HEADER)).toEqual([0x86, 0x26]);
+    expect(Array.from(MULTICODEC_BLS12381_G2_PRIV_HEADER)).toEqual([0x8a, 0x26]);
+    expect(Array.from(MULTICODEC_ED25519_PRIV_HEADER)).toEqual([0x80, 0x26]);
+  });
+
+  test('spec-encoded secp256k1 private key decodes as Secp256k1, not P256', () => {
+    const priv = new Uint8Array(32).fill(9);
+    const encoded = 'z' + base58.encode(concatBytes(new Uint8Array([0x81, 0x26]), priv));
+    const dec = multikey.decodePrivateKey(encoded);
+    expect(dec.type).toBe('Secp256k1');
+    expect(Array.from(dec.key)).toEqual(Array.from(priv));
+  });
+
+  test('legacy [0x13,0x01] secp256k1 private keys still decode and validate', () => {
+    const priv = new Uint8Array(32).fill(5);
+    const legacy = 'z' + base58.encode(concatBytes(new Uint8Array([0x13, 0x01]), priv));
+    const dec = multikey.decodePrivateKey(legacy);
+    expect(dec.type).toBe('Secp256k1');
+    expect(Array.from(dec.key)).toEqual(Array.from(priv));
+    expect(() => validateMultikeyFormat(legacy, 'Secp256k1', true)).not.toThrow();
+  });
+
+  test('round-trip for all private key types with spec headers', () => {
+    const priv = new Uint8Array(32).fill(7);
+    for (const type of ['Secp256k1', 'P256', 'Bls12381G2'] as const) {
+      const encoded = multikey.encodePrivateKey(priv, type);
+      const dec = multikey.decodePrivateKey(encoded);
+      expect(dec.type).toBe(type);
+      expect(() => validateMultikeyFormat(encoded, type, true)).not.toThrow();
+    }
+  });
+});
