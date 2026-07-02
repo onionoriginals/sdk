@@ -26,6 +26,24 @@ export class DocumentLoader {
     const [did, fragment] = didUrl.split('#');
     const didDoc = await this.didManager.resolveDID(did);
     if (!didDoc) {
+      // The DID itself did not resolve. For fragment (verification method)
+      // lookups, fall back to keys explicitly registered out-of-band via
+      // registerVerificationMethod — the registry can supplement a missing
+      // document but never overrides a resolved one (see below).
+      if (fragment) {
+        const cached = verificationMethodRegistry.get(didUrl);
+        if (cached) {
+          if ((cached as { revoked?: string; compromised?: string }).revoked ||
+              (cached as { revoked?: string; compromised?: string }).compromised) {
+            throw new Error(`Verification method is retired (revoked or compromised): ${didUrl}`);
+          }
+          return {
+            document: { '@context': ['https://www.w3.org/ns/did/v1'], ...cached },
+            documentUrl: didUrl,
+            contextUrl: null
+          };
+        }
+      }
       throw new Error(`DID not resolved: ${did}`);
     }
 

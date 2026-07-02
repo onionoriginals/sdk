@@ -329,7 +329,18 @@ export class WebVHManager {
 
 
       signer = externalSigner;
-      verifier = externalVerifier || (externalSigner as unknown as ExternalVerifier); // Use signer as verifier if not provided
+      // An ExternalSigner has no verify(); silently casting it to a verifier
+      // makes didwebvh-ts fail deep inside with "verifier.verify is not a
+      // function". Accept the signer only if it actually implements verify().
+      if (externalVerifier) {
+        verifier = externalVerifier;
+      } else if (typeof (externalSigner as unknown as { verify?: unknown }).verify === 'function') {
+        verifier = externalSigner as unknown as ExternalVerifier;
+      } else {
+        throw new Error(
+          'externalVerifier is required when the provided externalSigner does not implement verify()'
+        );
+      }
       verificationMethods = providedVerificationMethods;
       updateKeys = providedUpdateKeys;
       keyPair = undefined; // No key pair when using external signer

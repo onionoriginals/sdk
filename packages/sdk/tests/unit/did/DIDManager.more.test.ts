@@ -17,16 +17,22 @@ describe('DIDManager additional branches', () => {
     expect(doc.service?.length).toBe(1);
   });
 
-  test('resolveDID returns passthrough doc for non-webvh, non-btco methods', async () => {
+  test('resolveDID returns null for an unresolvable did:peer instead of a stub', async () => {
     const dm = new DIDManager({} as any);
     const doc = await dm.resolveDID('did:peer:abc');
-    expect(doc?.id).toBe('did:peer:abc');
+    expect(doc).toBeNull();
   });
 
-  test('resolveDID returns minimal doc for did:webvh when resolver fails', async () => {
+  test('resolveDID returns null for did:webvh when resolver fails', async () => {
     const dm = new DIDManager({} as any);
     const doc = await dm.resolveDID('did:webvh:example.com:abc');
-    expect(doc?.id).toBe('did:webvh:example.com:abc');
+    expect(doc).toBeNull();
+  });
+
+  test('resolveDID returns null for unsupported DID methods', async () => {
+    const dm = new DIDManager({} as any);
+    const doc = await dm.resolveDID('did:example:123');
+    expect(doc).toBeNull();
   });
 
   test('migrateToDIDBTCO uses first VM when present', async () => {

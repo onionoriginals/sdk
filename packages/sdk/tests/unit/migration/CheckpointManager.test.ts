@@ -86,22 +86,17 @@ describe('CheckpointManager', () => {
       expect(checkpoint.metadata).toEqual({});
     });
 
-    it('should create a checkpoint even for a syntactically valid but unknown peer DID (resolver returns minimal doc)', async () => {
-      // NOTE: The did:peer resolver returns a minimal DID document for any did:peer: prefixed
-      // string rather than returning null. So createCheckpoint succeeds even for "unknown" DIDs.
-      // This is REAL code behavior — the source DID format is valid so the resolver returns a doc.
+    it('should reject a syntactically valid but unresolvable peer DID', async () => {
+      // resolveDID no longer fabricates minimal documents for unresolvable
+      // DIDs, so checkpoint creation fails loudly instead of snapshotting a
+      // stub that could never be rolled back to.
       const { checkpointManager } = makeManagers();
 
-      const checkpoint = await checkpointManager.createCheckpoint('mig_unknown_peer', {
+      await expect(checkpointManager.createCheckpoint('mig_unknown_peer', {
         sourceDid: 'did:peer:nonexistent_zXXX',
         targetLayer: 'webvh',
         domain: 'example.com'
-      });
-
-      expect(checkpoint).toBeDefined();
-      expect(checkpoint.sourceDid).toBe('did:peer:nonexistent_zXXX');
-      // The didDocument will be a minimal object returned by the resolver
-      expect(checkpoint.didDocument).toBeDefined();
+      })).rejects.toThrow('Could not resolve source DID');
     });
   });
 

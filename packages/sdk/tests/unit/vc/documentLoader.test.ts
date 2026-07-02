@@ -13,12 +13,28 @@ describe('diwings documentLoader', () => {
 
   test('resolves DID and fragment', async () => {
     const did = 'did:peer:123';
-    const doc = await didManager.resolveDID(did);
-    (doc as any).verificationMethod = [
-      { id: `${did}#key-1`, type: 'Multikey', controller: did, publicKeyMultibase: 'z123' }
-    ];
-    const res = await loader(`${did}#key-1`);
+    const dm = new DIDManager({} as any);
+    spyOn(dm, 'resolveDID').mockResolvedValue({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: did,
+      verificationMethod: [
+        { id: `${did}#key-1`, type: 'Multikey', controller: did, publicKeyMultibase: 'z123' }
+      ]
+    } as any);
+    const fragLoader = createDocumentLoader(dm);
+    const res = await fragLoader(`${did}#key-1`);
     expect(res.document.id).toBe(`${did}#key-1`);
+  });
+
+  test('falls back to registered VM when the DID itself does not resolve', async () => {
+    const did = 'did:peer:unresolvable-1';
+    registerVerificationMethod({ id: `${did}#key-1`, type: 'Multikey', controller: did, publicKeyMultibase: 'zReg' });
+    const res = await loader(`${did}#key-1`);
+    expect(res.document.publicKeyMultibase).toBe('zReg');
+  });
+
+  test('throws for an unresolvable bare DID', async () => {
+    await expect(loader('did:peer:unresolvable-2')).rejects.toThrow('DID not resolved');
   });
 
   test('throws on unknown IRI', async () => {

@@ -666,9 +666,13 @@ describe('CEL-CLI-012/error: file write permission error', () => {
 
     const outPath = path.join(roDir, 'output.json');
 
-    // Use a DID that the SDK's fallback resolver accepts so we reach the write path.
+    // Use a real did:peer (resolvable offline) so we reach the write path —
+    // unknown DID methods no longer resolve to fabricated stub documents.
+    const { OriginalsSDK } = await import('../../../src');
+    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const peerDoc = await sdk.did.createDIDPeer([]);
     const result = await resolveCommand({
-      did: 'did:unknown:example',
+      did: peerDoc.id,
       output: outPath,
     });
 

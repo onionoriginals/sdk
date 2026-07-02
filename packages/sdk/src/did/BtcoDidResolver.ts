@@ -41,7 +41,7 @@ export interface ResourceProviderLike {
 
 export interface BtcoDidResolutionOptions {
   provider?: ResourceProviderLike;
-  fetchFn?: (url: string) => Promise<Response>;
+  fetchFn?: (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
   timeout?: number;
 }
 
@@ -135,7 +135,7 @@ export class BtcoDidResolver {
           const timeoutId = setTimeout(() => controller.abort(), timeout);
 
           try {
-            const response = await fetchFn(inscription.content_url);
+            const response = await fetchFn(inscription.content_url, { signal: controller.signal });
             clearTimeout(timeoutId);
 
             if (!response.ok) {

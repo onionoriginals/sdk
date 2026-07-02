@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll } from 'bun:test';
 import { Ed25519Verifier } from '../../../src/did/Ed25519Verifier';
+import { multikey } from '../../../src/crypto/Multikey';
 import { signAsync, getPublicKeyAsync } from '@noble/ed25519';
 
 describe('Ed25519Verifier', () => {
@@ -134,17 +135,16 @@ describe('Ed25519Verifier', () => {
   });
 
   describe('getPublicKeyMultibase()', () => {
-    test('returns multibase encoded publicKey when set', () => {
+    test('returns a spec-compliant Ed25519 Multikey when set', () => {
       const verifier = new Ed25519Verifier(verificationMethodId, publicKey32Bytes);
-      const multibase = verifier.getPublicKeyMultibase();
-      expect(multibase).toBeDefined();
-      expect(multibase?.startsWith('z')).toBe(true);
+      const encoded = verifier.getPublicKeyMultibase();
+      expect(encoded).toBeDefined();
+      expect(encoded?.startsWith('z')).toBe(true);
 
-      // Verify it's a valid base64 encoding
-      const base64Part = multibase?.slice(1);
-      expect(base64Part).toBeDefined();
-      const decoded = Buffer.from(base64Part!, 'base64');
-      expect(new Uint8Array(decoded)).toEqual(publicKey32Bytes);
+      // Round-trips through the Multikey decoder (multicodec header + base58btc)
+      const decoded = multikey.decodePublicKey(encoded!);
+      expect(decoded.type).toBe('Ed25519');
+      expect(decoded.key).toEqual(publicKey32Bytes);
     });
 
     test('returns undefined when publicKey not set', () => {
