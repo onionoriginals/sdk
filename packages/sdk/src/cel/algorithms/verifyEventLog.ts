@@ -524,7 +524,11 @@ export async function verifyEventLog(
   const authorizedKeyIds = new Set<string>();
   let authorityError: string | undefined;
   if (!options?.verifier) {
-    const createControllerProofs = (createEvent.proof ?? []).filter(p => !isWitnessProof(p));
+    // A non-array proof (missing, object, string, …) yields zero controller
+    // proofs → authorityError below, rather than throwing on .filter.
+    const createControllerProofs = Array.isArray(createEvent.proof)
+      ? createEvent.proof.filter(p => !isWitnessProof(p))
+      : [];
     if (createControllerProofs.length !== 1) {
       authorityError =
         `Create event must have exactly one controller proof to establish authority (found ` +

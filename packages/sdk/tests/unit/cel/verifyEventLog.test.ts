@@ -443,6 +443,23 @@ describe('verifyEventLog', () => {
       expect(result.errors.some(e => /exactly one controller proof/.test(e))).toBe(true);
     });
 
+    test('rejects a create event with a non-array proof without crashing', async () => {
+      // A truthy-but-non-array proof (e.g. a bare object) must yield a
+      // structured failure, not a TypeError from calling .filter on it.
+      const log = {
+        events: [{
+          type: 'create',
+          data: { name: 'Test' },
+          proof: { type: 'DataIntegrityProof', proofValue: 'z...' },
+        }],
+      } as unknown as EventLog;
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /exactly one controller proof/.test(e))).toBe(true);
+    });
+
     test('a custom verifier bypasses the single-controller-proof authority check', async () => {
       // With a custom verifier, the caller owns proof semantics/authorization,
       // so a legitimately multi-proof create event must not be rejected by the
