@@ -54,7 +54,10 @@ export const base64 = {
 		return Buffer.from(unencoded || '').toString('base64');
 	},
 	decode: (encoded: string): Uint8Array => {
-		return new Uint8Array(Buffer.from(encoded || '', 'base64').buffer);
+		// Copy instead of wrapping `.buffer`: on Node, small Buffers are views
+		// into a shared pool, so wrapping the backing ArrayBuffer without
+		// byteOffset/byteLength returns unrelated pool memory.
+		return Uint8Array.from(Buffer.from(encoded || '', 'base64'));
 	}
 };
 

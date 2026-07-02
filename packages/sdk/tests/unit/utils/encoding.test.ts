@@ -69,6 +69,17 @@ describe('utils/encoding', () => {
       const decoded = base64.decode('');
       expect(decoded).toEqual(new Uint8Array([]));
     });
+
+    test('decode returns exactly the decoded bytes, not the backing buffer', () => {
+      // Regression: on Node, small Buffers are views into a shared 8KB pool.
+      // Wrapping buffer.buffer without byteOffset/byteLength returned ~8192
+      // bytes of unrelated pool memory instead of the decoded payload.
+      const decoded = base64.decode('aGVsbG8gd29ybGQ='); // "hello world"
+      expect(decoded.length).toBe(11);
+      expect(decoded.byteOffset).toBe(0);
+      expect(decoded.buffer.byteLength).toBe(11);
+      expect(new TextDecoder().decode(decoded)).toBe('hello world');
+    });
   });
 
   describe('utf8', () => {
