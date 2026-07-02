@@ -10,6 +10,12 @@ export interface SelectionOptions {
   feeRateSatsPerVb: number; // sats/vbyte
   targetAmountSats: number; // includes recipient output value
   allowLocked?: boolean;
+  /**
+   * Whether inscription-bearing UTXOs are excluded from selection.
+   * Defaults to true: spending an inscribed UTXO as a plain payment input
+   * transfers or burns the ordinal it carries. Pass false explicitly to
+   * opt in to spending inscribed UTXOs.
+   */
   forbidInscriptionBearingInputs?: boolean;
   changeAddress?: string;
   feeEstimate?: FeeEstimateOptions;
@@ -63,7 +69,7 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
   if (!allowLocked) {
     candidateUtxos = candidateUtxos.filter(u => !u.locked);
   }
-  if (forbidInscriptionBearingInputs) {
+  if (forbidInscriptionBearingInputs !== false) {
     candidateUtxos = candidateUtxos.filter(u => !u.inscriptions || u.inscriptions.length === 0);
   }
 

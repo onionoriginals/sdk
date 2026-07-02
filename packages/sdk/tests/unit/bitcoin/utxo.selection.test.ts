@@ -28,6 +28,24 @@ describe('UTXO selection', () => {
     expect(() => selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 2, forbidInscriptionBearingInputs: true })).toThrow(new UtxoSelectionError('INSUFFICIENT_FUNDS'));
   });
 
+  test('inscription safety: inscription-bearing inputs are excluded by default', () => {
+    const utxos = [U(100000, { inscriptions: ['i1'] })];
+    expect(() => selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 2 })).toThrow(new UtxoSelectionError('INSUFFICIENT_FUNDS'));
+  });
+
+  test('inscription safety: prefers clean UTXOs over a larger inscribed one by default', () => {
+    const inscribed = U(100000, { inscriptions: ['i1'] });
+    const clean = U(20000);
+    const res = selectUtxos([inscribed, clean], { targetAmountSats: 1000, feeRateSatsPerVb: 2 });
+    expect(res.selected).toEqual([clean]);
+  });
+
+  test('inscription safety: explicit opt-out still allows spending inscribed UTXOs', () => {
+    const utxos = [U(100000, { inscriptions: ['i1'] })];
+    const res = selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 2, forbidInscriptionBearingInputs: false });
+    expect(res.selected.length).toBe(1);
+  });
+
   test('returns selection with change suppressed if dust', () => {
     const utxos = [U(10000)];
     const res = selectUtxos(utxos, { targetAmountSats: DUST_LIMIT_SATS, feeRateSatsPerVb: 1 });
