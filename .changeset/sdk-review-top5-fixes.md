@@ -1,5 +1,5 @@
 ---
-"@originals/sdk": patch
+"@originals/sdk": minor
 ---
 
 Fix five serious correctness and security issues found in a full SDK review:
