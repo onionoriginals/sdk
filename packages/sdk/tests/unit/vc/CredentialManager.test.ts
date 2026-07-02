@@ -58,7 +58,7 @@ describe('CredentialManager', () => {
     // Regression: the legacy verify path validated the signature but skipped the
     // validity window, so an expired legacy-signed credential verified as true.
     const sdkES256K = OriginalsSDK.create({ defaultKeyType: 'ES256K' });
-    const sk = secp256k1.utils.randomPrivateKey();
+    const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
@@ -66,7 +66,10 @@ describe('CredentialManager', () => {
       ...baseVC,
       issuer: `did:key:${pkMb}`,
       issuanceDate: new Date(Date.now() - 60_000).toISOString(),
-      expirationDate: new Date(Date.now() - 1_000).toISOString()
+      // Well in the past (not just barely) so a slow/loaded CI runner can't
+      // race this into a false pass — expirationDate only needs to precede
+      // "now" at verify time, so the margin is free to be generous.
+      expirationDate: new Date(Date.now() - 30_000).toISOString()
     };
     const signed = await sdkES256K.credentials.signCredential(vc, skMb, `did:key:${pkMb}`);
     // Sanity: the proof is a legacy (no cryptosuite) proof.
