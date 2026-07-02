@@ -8,6 +8,7 @@ export interface BtcoInscriptionData {
   contentType?: string;
   isValidDid?: boolean;
   didDocument?: DIDDocument | null;
+  deactivated?: boolean;
   error?: string;
 }
 
@@ -174,6 +175,7 @@ export class BtcoDidResolver {
           // Deactivation marker: the DID is tombstoned. Do not attempt to derive
           // a document; just record the deactivation.
           inscriptionData.didDocument = null;
+          inscriptionData.deactivated = true;
           if (!inscriptionData.error) {
             inscriptionData.error = 'DID has been deactivated';
           }
@@ -196,10 +198,20 @@ export class BtcoDidResolver {
       inscriptionDataList.push(inscriptionData);
     }
 
+    // Walk backwards from the newest inscription: the most recent
+    // lifecycle-relevant inscription (a tombstone or a valid DID document)
+    // decides the outcome. A tombstone MUST NOT fall through to an older
+    // document — that would resurrect a deactivated DID.
     let latestValidDidDocument: DIDDocument | null = null;
     let latestInscriptionId: string | undefined;
+    let deactivated = false;
     for (let i = inscriptionDataList.length - 1; i >= 0; i--) {
       const data = inscriptionDataList[i];
+      if (data.deactivated) {
+        deactivated = true;
+        latestInscriptionId = data.inscriptionId;
+        break;
+      }
       if (data.didDocument && !data.error) {
         latestValidDidDocument = data.didDocument;
         latestInscriptionId = data.inscriptionId;
@@ -214,11 +226,13 @@ export class BtcoDidResolver {
         inscriptionId: latestInscriptionId,
         satNumber,
         network,
-        totalInscriptions: inscriptionDataList.length
+        totalInscriptions: inscriptionDataList.length,
+        ...(deactivated ? { message: 'DID has been deactivated' } : {})
       },
       didDocumentMetadata: {
         inscriptionId: latestInscriptionId,
-        network
+        network,
+        ...(deactivated ? { deactivated: true } : {})
       }
     };
   }
