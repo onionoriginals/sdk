@@ -14,8 +14,12 @@ export class LocalStorageAdapter implements StorageAdapter {
     this.baseUrl = options.baseUrl;
   }
 
+  private sanitizeDomain(domain: string): string {
+    return domain.replace(/[^a-zA-Z0-9.-]/g, '_');
+  }
+
   private resolvePath(domain: string, objectPath: string): string {
-    const safeDomain = domain.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const safeDomain = this.sanitizeDomain(domain);
     const cleanPath = objectPath.replace(/^\/+/, '');
     const base = path.resolve(this.baseDir, safeDomain);
     const fullPath = path.resolve(base, cleanPath);
@@ -33,7 +37,10 @@ export class LocalStorageAdapter implements StorageAdapter {
     const cleanPath = objectPath.replace(/^\/+/, '');
     if (this.baseUrl) {
       const trimmed = this.baseUrl.replace(/\/$/, '');
-      return `${trimmed}/${domain}/${cleanPath}`;
+      // Use the same sanitized domain the file is physically stored under, so
+      // the returned URL maps back to the actual object rather than a path the
+      // server can't resolve.
+      return `${trimmed}/${this.sanitizeDomain(domain)}/${cleanPath}`;
     }
     return `file://${this.resolvePath(domain, cleanPath)}`;
   }

@@ -210,8 +210,22 @@ export class MigrationManager {
         metadata: options.metadata || {}
       };
 
-      // Record a signed audit entry for the migration.
-      await this.auditLogger.logMigration(auditRecord as any);
+      // Record a signed audit entry for the migration. The migration has
+      // already completed and its side effects are committed, so a failure to
+      // write the audit record must NOT re-enter the failure/rollback path
+      // (which would roll back a successful migration and report it as failed,
+      // risking a double-inscription on retry). Instead, surface the failure on
+      // the result (auditPersisted/auditError) so callers can detect the lost
+      // audit trail and retry the write, rather than only logging to console.
+      let auditPersisted = true;
+      let auditErrorMessage: string | undefined;
+      try {
+        await this.auditLogger.logMigration(auditRecord as any);
+      } catch (auditError) {
+        auditPersisted = false;
+        auditErrorMessage = auditError instanceof Error ? auditError.message : String(auditError);
+        console.error('Failed to record audit for completed migration:', auditError);
+      }
 
       // Clean up checkpoint after successful migration. unref() the timer so
       // a successful migration does not pin the process alive for 24 hours
@@ -234,7 +248,9 @@ export class MigrationManager {
         state: MigrationStateEnum.COMPLETED,
         duration,
         cost: validationResult.estimatedCost,
-        auditRecord
+        auditRecord,
+        auditPersisted,
+        ...(auditErrorMessage ? { auditError: auditErrorMessage } : {})
       };
     } catch (error) {
       // Handle migration failure
@@ -273,7 +289,16 @@ export class MigrationManager {
   }
 
   /**
-   * Rollback a migration
+   * Rollback a migration.
+   *
+   * Note: rolling back a migration that has already reached the terminal
+   * COMPLETED state is NOT reflected in `getMigrationStatus()` — the state
+   * machine treats COMPLETED as terminal (COMPLETED → ROLLED_BACK is not a
+   * valid transition), and the layer-specific rollback is currently a
+   * best-effort check rather than a true undo of published/inscribed
+   * resources. `getMigrationStatus()` therefore continues to report COMPLETED;
+   * consult the returned RollbackResult for the outcome of the rollback
+   * itself. Rollback of a non-terminal (e.g. FAILED) migration IS reflected.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async rollback(migrationId: string): Promise<any> {
@@ -283,6 +308,15 @@ export class MigrationManager {
     }
 
     const rollbackResult = await this.rollbackManager.rollback(migrationId, state.checkpointId);
+
+    // Reflect the rollback outcome in the tracked state when the transition is
+    // permitted (e.g. FAILED → ROLLED_BACK). For a terminal COMPLETED migration
+    // the transition is intentionally rejected by the state machine; that is an
+    // expected, documented no-op (see the method doc), so it is not logged as
+    // an error.
+    if (this.stateTracker.canTransitionTo(state.state, rollbackResult.restoredState)) {
+      await this.stateTracker.updateState(migrationId, { state: rollbackResult.restoredState });
+    }
 
     await this.emitEvent('migration:rolledback', { migrationId, rollbackResult });
 
@@ -302,7 +336,8 @@ export class MigrationManager {
    * Batch migration
    */
   async migrateBatch(dids: string[], targetLayer: string, options?: BatchMigrationOptions): Promise<BatchMigrationResult> {
-    const batchId = `batch_${Date.now()}`;
+    const startTime = Date.now();
+    const batchId = `batch_${startTime}`;
     const results = new Map<string, MigrationResult>();
     const errors: MigrationError[] = [];
 
@@ -351,7 +386,7 @@ export class MigrationManager {
       inProgress: 0,
       results,
       overallProgress: (completed + failed) / total * 100,
-      startTime: Date.now(),
+      startTime,
       errors
     };
   }
@@ -402,14 +437,31 @@ export class MigrationManager {
 
     await this.emitEvent('migration:failed', { migrationId, error: migrationError });
 
-    // Attempt rollback if checkpoint exists
+    // Attempt rollback if checkpoint exists. `finalState` is the single source
+    // of truth for the tracked state, the returned MigrationResult.state, and
+    // the audit record's finalState, so all three agree. It defaults to FAILED
+    // (no checkpoint → nothing was rolled back) and is advanced to the
+    // rollback's restoredState (ROLLED_BACK on success, QUARANTINED on failure).
     let rollbackSuccess = false;
+    let finalState: MigrationStateEnum = MigrationStateEnum.FAILED;
     if (checkpoint) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
         const rollbackResult = await this.rollbackManager.rollback(migrationId, checkpoint.checkpointId);
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         rollbackSuccess = rollbackResult.success;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        finalState = rollbackResult.restoredState;
+
+        // Advance the tracked state to reflect the rollback outcome
+        // (FAILED -> ROLLED_BACK | QUARANTINED, both valid transitions), so
+        // getMigrationStatus agrees with the audit record and cleanup can
+        // reclaim the entry. Guarded: the current state may already be terminal.
+        try {
+          await this.stateTracker.updateState(migrationId, { state: finalState });
+        } catch (stateError) {
+          console.error('Failed to update migration state after rollback:', stateError);
+        }
 
         if (!rollbackSuccess) {
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -422,6 +474,15 @@ export class MigrationManager {
         }
       } catch (rollbackError) {
         console.error('Rollback failed:', rollbackError);
+        // The rollback itself threw: the migration needs manual intervention.
+        // Mark it QUARANTINED consistently across tracked state, result, and
+        // audit (matching the migration:quarantine event emitted below).
+        finalState = MigrationStateEnum.QUARANTINED;
+        try {
+          await this.stateTracker.updateState(migrationId, { state: finalState });
+        } catch (stateError) {
+          console.error('Failed to update migration state after rollback failure:', stateError);
+        }
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         await this.emitEvent('migration:quarantine', {
           migrationId,
@@ -443,7 +504,7 @@ export class MigrationManager {
       sourceLayer: this.extractLayer(options.sourceDid),
       targetDid: null,
       targetLayer: options.targetLayer,
-      finalState: rollbackSuccess ? MigrationStateEnum.ROLLED_BACK : MigrationStateEnum.FAILED,
+      finalState,
       validationResults: {
         valid: false,
         errors: [],
@@ -459,8 +520,19 @@ export class MigrationManager {
       metadata: options.metadata || {}
     };
 
-    // Record a signed audit entry for the failed/rolled-back migration.
-    await this.auditLogger.logMigration(auditRecord as any);
+    // Record a signed audit entry for the failed/rolled-back migration. A
+    // logging failure here must not throw out of the failure handler (which
+    // would make migrate() reject instead of returning a MigrationResult); it
+    // is surfaced on the result instead.
+    let auditPersisted = true;
+    let auditErrorMessage: string | undefined;
+    try {
+      await this.auditLogger.logMigration(auditRecord as any);
+    } catch (auditError) {
+      auditPersisted = false;
+      auditErrorMessage = auditError instanceof Error ? auditError.message : String(auditError);
+      console.error('Failed to record audit for failed migration:', auditError);
+    }
 
     return {
       migrationId,
@@ -468,11 +540,13 @@ export class MigrationManager {
       sourceDid: options.sourceDid,
       sourceLayer: this.extractLayer(options.sourceDid),
       targetLayer: options.targetLayer,
-      state: rollbackSuccess ? MigrationStateEnum.ROLLED_BACK : MigrationStateEnum.FAILED,
+      state: finalState,
       duration,
       cost: { storageCost: 0, networkFees: 0, totalCost: 0, currency: 'sats' },
       auditRecord,
-      error: migrationError
+      error: migrationError,
+      auditPersisted,
+      ...(auditErrorMessage ? { auditError: auditErrorMessage } : {})
     };
   }
 

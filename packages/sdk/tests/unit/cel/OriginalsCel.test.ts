@@ -262,6 +262,30 @@ describe('OriginalsCel', () => {
       expect(updated.events[1].previousEvent).toMatch(/^u/); // multibase prefix
     });
 
+    it('rejects reserved migration fields in update data (would be misclassified as a migration)', async () => {
+      // Regression: getCurrentLayer treats an update carrying sourceDid+layer as
+      // a migration. A regular update must not be able to smuggle those fields.
+      const cel = new OriginalsCel({
+        layer: 'peer',
+        signer: mockSigner,
+      });
+      const log = await cel.create('Test', []);
+
+      for (const badData of [
+        { sourceDid: 'did:peer:x', layer: 'peer' },
+        { layer: 'webvh' },
+        { targetDid: 'did:webvh:example.com:x' },
+        { migratedAt: new Date().toISOString() },
+      ]) {
+        await expect(cel.update(log, badData as any)).rejects.toThrow(/reserved migration field/i);
+      }
+
+      // A normal metadata update with the same layer count still works.
+      const ok = await cel.update(log, { description: 'fine' });
+      expect(ok.events).toHaveLength(2);
+      expect(cel.getCurrentState(ok).layer).toBe('peer');
+    });
+
     it('preserves original event in updated log', async () => {
       const cel = new OriginalsCel({
         layer: 'peer',
@@ -516,6 +540,51 @@ describe('OriginalsCel', () => {
       const bp = (btcoLog.events[2].proof as any[]).find(p => p.cryptosuite === 'bitcoin-ordinals-2024');
       expect(String(bp.satoshi).length).toBeGreaterThan(0);
       expect(mockBitcoinManager.inscribeData).toHaveBeenCalled();
+    });
+
+    it('getCurrentState(btcoLog) resolves the canonical did:btco:<satoshi>, not the webvh DID', async () => {
+      // Regression for the #228 targetDid/sourceDid detector mismatch: btco
+      // migration events carry sourceDid (not targetDid), so a detector keyed on
+      // targetDid mis-routed btco logs through the webvh manager and left the
+      // state DID as the old webvh DID instead of did:btco:<satoshi>.
+      const cel = new OriginalsCel({
+        layer: 'peer',
+        signer: mockSigner,
+        config: {
+          webvh: { domain: 'example.com' },
+          btco: { bitcoinManager: createMockBitcoinManager() },
+        },
+      });
+
+      const peerLog = await cel.create('Test', []);
+      const webvhLog = await cel.migrate(peerLog, 'webvh');
+      const btcoLog = await cel.migrate(webvhLog, 'btco');
+
+      const state = cel.getCurrentState(btcoLog);
+      expect(state.layer).toBe('btco');
+      // Mock inscribes at satoshi 1000.
+      expect(state.did).toBe('did:btco:1000');
+      expect(state.did.startsWith('did:webvh:')).toBe(false);
+    });
+
+    it('rejects a second migration to btco (btco is the terminal layer)', async () => {
+      // Regression: the terminal-layer guard depends on detecting that the log
+      // is already at btco; the targetDid-keyed detector reported it as webvh
+      // and let a second inscription through.
+      const cel = new OriginalsCel({
+        layer: 'peer',
+        signer: mockSigner,
+        config: {
+          webvh: { domain: 'example.com' },
+          btco: { bitcoinManager: createMockBitcoinManager() },
+        },
+      });
+
+      const peerLog = await cel.create('Test', []);
+      const webvhLog = await cel.migrate(peerLog, 'webvh');
+      const btcoLog = await cel.migrate(webvhLog, 'btco');
+
+      await expect(cel.migrate(btcoLog, 'btco')).rejects.toThrow(/btco/i);
     });
 
     it('throws error when bitcoinManager not configured for btco', async () => {

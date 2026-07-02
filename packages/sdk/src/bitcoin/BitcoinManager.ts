@@ -10,6 +10,13 @@ import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
 import { scriptPubKeyForAddress } from './transfer.js';
 
+/**
+ * Upper bound on any fee rate the SDK will use, whether caller-provided or
+ * returned by a fee oracle / ordinals provider. Guards against a misbehaving or
+ * compromised estimator draining funds via an absurd sat/vB value.
+ */
+const MAX_REASONABLE_FEE_RATE = 10_000; // sat/vB
+
 export class BitcoinManager {
   private readonly feeOracle?: FeeOracleAdapter;
   private readonly ord?: OrdinalsProvider;
@@ -31,11 +38,20 @@ export class BitcoinManager {
       try {
         const estimated = await this.feeOracle.estimateFeeRate(targetBlocks);
         if (typeof estimated === 'number' && Number.isFinite(estimated) && estimated > 0) {
-          emitTelemetry(this.config.telemetry, {
-            name: 'bitcoin.fee.estimated',
-            attributes: { feeRate: estimated, source: 'feeOracle' }
-          });
-          return estimated;
+          if (estimated > MAX_REASONABLE_FEE_RATE) {
+            // Do not silently use an absurd estimate; skip this source.
+            emitTelemetry(this.config.telemetry, {
+              name: 'bitcoin.fee.error',
+              level: 'warn',
+              attributes: { error: `Estimated fee rate ${estimated} exceeds maximum ${MAX_REASONABLE_FEE_RATE} sat/vB`, source: 'feeOracle' }
+            });
+          } else {
+            emitTelemetry(this.config.telemetry, {
+              name: 'bitcoin.fee.estimated',
+              attributes: { feeRate: estimated, source: 'feeOracle' }
+            });
+            return estimated;
+          }
         }
       } catch (error) {
         emitTelemetry(this.config.telemetry, {
@@ -51,11 +67,19 @@ export class BitcoinManager {
       try {
         const estimated = await this.ord.estimateFee(targetBlocks);
         if (typeof estimated === 'number' && Number.isFinite(estimated) && estimated > 0) {
-          emitTelemetry(this.config.telemetry, {
-            name: 'bitcoin.fee.estimated',
-            attributes: { feeRate: estimated, source: 'ordinalsProvider' }
-          });
-          return estimated;
+          if (estimated > MAX_REASONABLE_FEE_RATE) {
+            emitTelemetry(this.config.telemetry, {
+              name: 'bitcoin.fee.error',
+              level: 'warn',
+              attributes: { error: `Estimated fee rate ${estimated} exceeds maximum ${MAX_REASONABLE_FEE_RATE} sat/vB`, source: 'ordinalsProvider' }
+            });
+          } else {
+            emitTelemetry(this.config.telemetry, {
+              name: 'bitcoin.fee.estimated',
+              attributes: { feeRate: estimated, source: 'ordinalsProvider' }
+            });
+            return estimated;
+          }
         }
       } catch (error) {
         emitTelemetry(this.config.telemetry, {
@@ -89,7 +113,6 @@ export class BitcoinManager {
       throw new StructuredError('INVALID_INPUT', 'Fee rate must be a positive number');
     }
     // Security: Reject extremely high fee rates to prevent accidental fund drainage
-    const MAX_REASONABLE_FEE_RATE = 10_000; // sat/vB
     if (feeRate !== undefined && feeRate > MAX_REASONABLE_FEE_RATE) {
       throw new StructuredError('INVALID_INPUT', `Fee rate ${feeRate} exceeds maximum reasonable fee rate of ${MAX_REASONABLE_FEE_RATE} sat/vB`);
     }

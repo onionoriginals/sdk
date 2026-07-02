@@ -39,3 +39,41 @@ describe('Integration: DIDManager btco resolve via OrdinalsClient adapter', () =
     fetchMock.mockRestore();
   });
 });
+
+describe('Integration: DIDManager did:webvh resolve requires a verifier', () => {
+  const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+
+  test('resolves a real did:webvh log (regression: verifier must be passed to didwebvh-ts)', async () => {
+    // Build a genuine did:webvh with its signed log.
+    const { did, log } = await sdk.did.createDIDWebVH({
+      domain: 'example.com',
+      paths: ['user', 'alice']
+    });
+    expect(did.startsWith('did:webvh:')).toBe(true);
+
+    // Serve the JSONL log for whatever did.jsonl URL didwebvh-ts requests.
+    const jsonl = log.map((entry: unknown) => JSON.stringify(entry)).join('\n');
+    const fetchMock = spyOn(global as any, 'fetch').mockImplementation(async (url: any) => {
+      const u = String(url);
+      // Only the log is hosted; the optional witness file is absent (404) so
+      // the resolver treats the DID as un-witnessed rather than mis-parsing it.
+      if (u.includes('did-witness')) {
+        return new Response('', { status: 404 });
+      }
+      if (u.includes('did.jsonl')) {
+        return new Response(jsonl, { status: 200 });
+      }
+      return new Response('', { status: 404 });
+    });
+
+    try {
+      const resolved = await sdk.did.resolveDID(did);
+      // Before the fix, resolveDID passed no verifier, didwebvh-ts threw
+      // "Verifier implementation is required" internally, and this returned null.
+      expect(resolved).not.toBeNull();
+      expect(resolved?.id).toBe(did);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+});

@@ -1128,3 +1128,190 @@ describe('CORE-MIG-EVENTS-024/error: migration error recovery with exponential b
     expect(final!.progress).toBe(100);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: audit-logging failures and post-rollback state consistency
+// ---------------------------------------------------------------------------
+
+describe('MigrationManager: audit failures and rollback state consistency', () => {
+  afterEach(() => {
+    MigrationManager.resetInstance();
+  });
+
+  it('a completed migration stays COMPLETED even if the audit log write throws', async () => {
+    // Regression: the audit call ran inside the main try after the migration
+    // had already completed. A throw there re-entered the failure path, rolled
+    // back a successful migration, and reported success:false / ROLLED_BACK —
+    // which could drive a caller to retry and double-inscribe.
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    // Force the audit write to fail after the migration completes.
+    (manager as any).auditLogger.logMigration = async () => {
+      throw new Error('audit signer boom');
+    };
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const result = await manager.migrate({
+      sourceDid: peerDid.id,
+      targetLayer: 'webvh',
+      domain: 'example.com',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.state).toBe(MigrationStateEnum.COMPLETED);
+    // The audit-write failure is surfaced on the result so the caller can
+    // detect the lost audit trail and retry, rather than only being logged.
+    expect(result.auditPersisted).toBe(false);
+    expect(result.auditError).toContain('audit signer boom');
+
+    const status = await manager.getMigrationStatus(result.migrationId);
+    expect(status.state).toBe(MigrationStateEnum.COMPLETED);
+  });
+
+  it('reports auditPersisted:true on a normal successful migration', async () => {
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const result = await manager.migrate({
+      sourceDid: peerDid.id,
+      targetLayer: 'webvh',
+      domain: 'example.com',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.auditPersisted).toBe(true);
+    expect(result.auditError).toBeUndefined();
+    // And the record is actually retrievable from history.
+    const history = await manager.getMigrationHistory(peerDid.id);
+    expect(history.length).toBeGreaterThan(0);
+  });
+
+  it('getMigrationStatus agrees with the result state after a failed migration is rolled back', async () => {
+    // Regression: the tracker was left at FAILED after a successful rollback,
+    // so getMigrationStatus disagreed with the returned/audited ROLLED_BACK.
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    // Missing domain for webvh → validation failure → failure/rollback path.
+    const result = await manager.migrate({
+      sourceDid: peerDid.id,
+      targetLayer: 'webvh',
+    });
+
+    expect(result.success).toBe(false);
+    const status = await manager.getMigrationStatus(result.migrationId);
+    // The tracked state must match the state reported in the result.
+    expect(status.state).toBe(result.state);
+  });
+
+  it('manual rollback of a COMPLETED migration does not throw and leaves status COMPLETED', async () => {
+    // COMPLETED is terminal (COMPLETED -> ROLLED_BACK is not a valid
+    // transition), and the layer-specific rollback is a best-effort check, not
+    // a true undo. rollback() must therefore complete without throwing and
+    // must not spuriously flip getMigrationStatus away from COMPLETED.
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const result = await manager.migrate({
+      sourceDid: peerDid.id,
+      targetLayer: 'webvh',
+      domain: 'example.com',
+    });
+    expect(result.state).toBe(MigrationStateEnum.COMPLETED);
+
+    // Manual rollback of the completed migration.
+    await expect(manager.rollback(result.migrationId)).resolves.toBeDefined();
+
+    // Status is unchanged (documented behavior for terminal migrations).
+    const status = await manager.getMigrationStatus(result.migrationId);
+    expect(status.state).toBe(MigrationStateEnum.COMPLETED);
+  });
+
+  it('a failed rollback reports QUARANTINED consistently across status, result, and audit', async () => {
+    // Regression: when a post-checkpoint migration fails and rollback also
+    // fails, the tracked state advanced to QUARANTINED but the returned state
+    // and audit finalState were recomputed from rollbackSuccess as FAILED —
+    // a contradiction that hid quarantined migrations from callers.
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    // Fail the migration after the checkpoint is created so the rollback path
+    // runs with a checkpoint present.
+    (manager as any).peerToWebvh.executeMigration = async () => {
+      throw new Error('execute boom');
+    };
+    // Force the rollback to fail (returns QUARANTINED).
+    (manager as any).rollbackManager.rollback = async (migrationId: string) => ({
+      success: false,
+      migrationId,
+      checkpointId: 'chk',
+      restoredState: MigrationStateEnum.QUARANTINED,
+      duration: 0,
+      errors: [{ code: 'ROLLBACK_FAILED' }],
+    });
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const result = await manager.migrate({
+      sourceDid: peerDid.id,
+      targetLayer: 'webvh',
+      domain: 'example.com',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.state).toBe(MigrationStateEnum.QUARANTINED);
+    expect(result.auditRecord?.finalState).toBe(MigrationStateEnum.QUARANTINED);
+
+    const status = await manager.getMigrationStatus(result.migrationId);
+    expect(status.state).toBe(MigrationStateEnum.QUARANTINED);
+  });
+
+  it('migrateBatch startTime is the batch start, consistent with batchId', async () => {
+    // Regression: startTime was Date.now() evaluated at return (batch end) and
+    // differed from the timestamp baked into batchId.
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const before = Date.now();
+    const batch = await manager.migrateBatch(['did:peer:z6MkBatchA'], 'webvh', { continueOnError: true });
+    const after = Date.now();
+
+    expect(batch.startTime).toBeGreaterThanOrEqual(before);
+    expect(batch.startTime).toBeLessThanOrEqual(after);
+    // batchId is derived from the same start timestamp.
+    expect(batch.batchId).toBe(`batch_${batch.startTime}`);
+  });
+});

@@ -87,6 +87,17 @@ export class StateTracker implements IStateTracker {
   }
 
   /**
+   * Whether a transition from `fromState` to `toState` is permitted by the
+   * state machine. Callers use this to avoid attempting (and having to catch)
+   * an invalid transition — e.g. a manual rollback of a terminal COMPLETED
+   * migration, which is intentionally not reflected in the tracked state.
+   */
+  canTransitionTo(fromState: MigrationStateEnum, toState: MigrationStateEnum): boolean {
+    if (fromState === toState) return true;
+    return this.stateMachine.canTransition(fromState, toState);
+  }
+
+  /**
    * Get migration state
    */
   // eslint-disable-next-line @typescript-eslint/require-await
