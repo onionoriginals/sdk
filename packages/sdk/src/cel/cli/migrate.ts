@@ -359,15 +359,20 @@ export async function migrateCommand(flags: MigrateFlags): Promise<MigrateResult
     const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
     privateKey = multikey.encodePrivateKey(privateKeyBytes as Uint8Array, 'Ed25519');
     publicKey = multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519');
-    
+
     // Never print the private key to a shared stream (stderr lands in shell
     // history, terminal transcripts, and CI logs). Write it to an owner-only
     // file and report the path instead.
     const keyBase = flags.output || flags.wallet || 'cel-migrate';
     const keyPath = `${keyBase}.key`;
     fs.writeFileSync(keyPath, JSON.stringify({ privateKey, publicKey }, null, 2), { mode: 0o600 });
-    console.error('\n⚠️  Generated temporary signing key for migration.');
-    console.error(`Private key written to ${keyPath} (mode 0600 — keep it secret).`);
+    console.error('\n⚠️  Generated a temporary signing key for this migration.');
+    console.error(
+      'This key is NOT the log\'s controller key, so verifyEventLog will reject the resulting ' +
+      "log (controller binding). To produce a verifiable log, re-run with --wallet pointing at the " +
+      'key that created the log.'
+    );
+    console.error(`Temporary private key written to ${keyPath} (mode 0600 — keep it secret).`);
     console.error(`Public Key:  ${publicKey}`);
     console.error(`To reuse this key, run with --wallet ${keyPath}\n`);
   }

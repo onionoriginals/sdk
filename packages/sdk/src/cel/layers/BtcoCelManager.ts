@@ -173,10 +173,18 @@ export class BtcoCelManager {
       throw new Error('Cannot migrate a deactivated event log');
     }
 
-    // Prepare initial migration data (will be updated with Bitcoin details after witnessing)
+    // Finalize the migration data BEFORE signing. The controller signature and
+    // the witness digest both commit to {type, data, previousEvent}; mutating
+    // `data` after signing (as this code previously did to splice in
+    // txid/inscriptionId) invalidates both, so every btco log failed
+    // verification. The Bitcoin txid/inscriptionId cannot be known before the
+    // inscription anyway (chicken-and-egg), so they are NOT part of the signed
+    // data — they live in the bitcoin witness proof, which is added after
+    // signing and excluded from the chain digest. targetDid is derived
+    // deterministically from the source DID so it is known at signing time.
     const migrationData: BtcoMigrationData = {
       sourceDid: currentDid,
-      targetDid: '', // Will be set after inscription
+      targetDid: this.generateBtcoDid(currentDid),
       layer: 'btco',
       migratedAt: new Date().toISOString(),
     };
@@ -188,70 +196,22 @@ export class BtcoCelManager {
       proofPurpose: this.config.proofPurpose,
     };
 
-    // Create the update event with migration data
-    let updatedLog = await updateEventLog(webvhLog, migrationData, updateOptions);
+    // Create the (final, signed) update event with the migration data.
+    const updatedLog = await updateEventLog(webvhLog, migrationData, updateOptions);
 
-    // Add Bitcoin witness proof (REQUIRED at btco layer)
+    // Add the Bitcoin witness proof (REQUIRED at btco layer). This attests the
+    // already-signed event content and appends the txid/inscriptionId; it does
+    // not — and must not — alter the signed `data`.
     const lastEventIndex = updatedLog.events.length - 1;
-    let witnessedEvent = updatedLog.events[lastEventIndex];
-    
-    // Witness the event on Bitcoin
-    witnessedEvent = await witnessEvent(witnessedEvent, this.bitcoinWitness);
+    const witnessedEvent = await witnessEvent(updatedLog.events[lastEventIndex], this.bitcoinWitness);
 
-    // Extract Bitcoin details from the witness proof
-    const bitcoinProof = witnessedEvent.proof.find(
-      p => p.cryptosuite === 'bitcoin-ordinals-2024'
-    ) as Record<string, unknown> | undefined;
-
-    // Generate did:btco DID using inscription ID
-    let targetDid: string;
-    let txid: string | undefined;
-    let inscriptionId: string | undefined;
-
-    if (bitcoinProof) {
-      txid = bitcoinProof.txid as string;
-      inscriptionId = bitcoinProof.inscriptionId as string;
-      
-      // did:btco format uses the inscription ID for identification
-      if (inscriptionId) {
-        // Sanitize inscription ID for DID (remove special chars)
-        const sanitizedId = inscriptionId.replace(/[^a-zA-Z0-9]/g, '');
-        targetDid = `did:btco:${sanitizedId}`;
-      } else if (txid) {
-        targetDid = `did:btco:${txid}`;
-      } else {
-        // Fallback: derive from source DID
-        targetDid = this.generateBtcoDid(currentDid);
-      }
-    } else {
-      // Fallback: derive from source DID (shouldn't happen since witness is required)
-      targetDid = this.generateBtcoDid(currentDid);
-    }
-
-    // Update migration data with Bitcoin details
-    const updatedMigrationData: BtcoMigrationData = {
-      ...migrationData,
-      targetDid,
-      txid,
-      inscriptionId,
-    };
-
-    // Replace the event data with updated migration data
-    witnessedEvent = {
-      ...witnessedEvent,
-      data: updatedMigrationData,
-    };
-
-    // Replace the last event with the witnessed version
-    updatedLog = {
+    return {
       ...updatedLog,
       events: [
         ...updatedLog.events.slice(0, lastEventIndex),
         witnessedEvent,
       ],
     };
-
-    return updatedLog;
   }
 
   /**
@@ -345,13 +305,19 @@ export class BtcoCelManager {
           state.metadata = state.metadata || {};
           state.metadata.sourceDid = updateData.sourceDid;
           
-          // Store Bitcoin-specific metadata for btco layer
+          // Store Bitcoin-specific metadata for btco layer. txid/inscriptionId
+          // are NOT part of the signed event data (they can't be known before
+          // inscription); they are read from the bitcoin witness proof.
           if (updateData.layer === 'btco') {
-            if (updateData.txid) {
-              state.metadata.txid = updateData.txid;
+            const bitcoinProof = (event.proof as ReadonlyArray<unknown> | undefined)?.find(
+              (p): p is Record<string, unknown> =>
+                !!p && typeof p === 'object' && (p as Record<string, unknown>).cryptosuite === 'bitcoin-ordinals-2024'
+            );
+            if (bitcoinProof?.txid) {
+              state.metadata.txid = bitcoinProof.txid;
             }
-            if (updateData.inscriptionId) {
-              state.metadata.inscriptionId = updateData.inscriptionId;
+            if (bitcoinProof?.inscriptionId) {
+              state.metadata.inscriptionId = bitcoinProof.inscriptionId;
             }
           } else if (updateData.domain) {
             state.metadata.domain = updateData.domain;

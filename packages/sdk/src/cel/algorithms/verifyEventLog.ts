@@ -231,6 +231,16 @@ function isWitnessProof(p: DataIntegrityProof): boolean {
 }
 
 /**
+ * Normalize a verification method URI to the controller key it identifies.
+ * For did:key the key is the identifier itself (drop the #fragment); other
+ * methods are compared by their full DID (drop the fragment) since the key
+ * lives in that DID's document.
+ */
+function controllerKeyId(verificationMethod: string): string {
+  return verificationMethod.split('#')[0];
+}
+
+/**
  * Verifies a single event's proofs.
  *
  * Controller proofs (those without `witnessedAt`) gate the overall
@@ -255,7 +265,8 @@ async function verifyEvent(
   index: number,
   customVerifier: ((proof: DataIntegrityProof, data: unknown) => Promise<boolean>) | undefined,
   previousEvent: LogEntry | undefined,
-  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>
+  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>,
+  authorizedKeyIds?: Set<string>
 ): Promise<EventVerification> {
   const errors: string[] = [];
 
@@ -306,6 +317,29 @@ async function verifyEvent(
       chainValid,
       errors,
     };
+  }
+
+  // Controller binding: on the default (dispatch) path, every controller proof
+  // must be signed by a key authorized by the log's create event. Without this,
+  // any key can append/rename/migrate/deactivate someone else's log and it
+  // verifies (confirmed forgeable). A custom verifier takes full responsibility
+  // for authorization, so this check is skipped there.
+  if (!customVerifier && authorizedKeyIds && index > 0) {
+    for (const { proof, originalIndex } of controllerProofs) {
+      if (!authorizedKeyIds.has(controllerKeyId(proof.verificationMethod))) {
+        errors.push(
+          `Event ${index}, Proof ${originalIndex}: signer ${proof.verificationMethod} is not authorized by the log's create event`
+        );
+        return {
+          index,
+          type: event.type,
+          proofValid: false,
+          chainValid,
+          cryptographicallyVerified: false,
+          errors,
+        };
+      }
+    }
   }
 
   // Verify controller proofs — these gate `proofValid` and `cryptographicallyVerified`.
@@ -442,11 +476,24 @@ export async function verifyEventLog(
     };
   }
 
+  // Establish the authorized controller key set from the create event
+  // (event 0). Its controller proofs — the non-witness proofs — define the
+  // keys allowed to sign every subsequent event in the log (trust-on-first-use
+  // root of authority). The current CEL data model has no in-log key-rotation
+  // mechanism, so this set is fixed by the create event.
+  const createEvent = log.events[0];
+  const authorizedKeyIds = new Set<string>(
+    (createEvent.proof ?? [])
+      .filter(p => !isWitnessProof(p))
+      .map(p => controllerKeyId(p.verificationMethod))
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+  );
+
   // Verify each event's proofs and hash chain
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
-    const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey);
+    const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds);
     eventVerifications.push(eventResult);
 
     if (!eventResult.proofValid || !eventResult.chainValid) {
