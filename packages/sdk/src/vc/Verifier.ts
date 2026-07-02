@@ -31,6 +31,23 @@ export class Verifier {
       for (const c of ctxs) await loader(c);
       const proofValue = vc.proof;
       const proof = Array.isArray(proofValue) ? proofValue[0] : proofValue;
+
+      // Bind the signing key to the credential issuer. The proof is verified
+      // against whatever key `proof.verificationMethod` resolves to, so without
+      // this check an attacker can sign a credential that names a trusted
+      // `issuer` with their own key (setting verificationMethod to their own
+      // DID) and have it verify — full issuer impersonation. The signing side
+      // (Issuer) and the legacy verify path both enforce this binding; the Data
+      // Integrity path must too. Mirrors CredentialManager.resolveVerificationMethodMultibase.
+      const issuerBinding = this.checkVerificationMethodController(
+        (proof as { verificationMethod?: unknown })?.verificationMethod,
+        typeof vc.issuer === 'string' ? vc.issuer : (vc.issuer as { id?: string } | undefined)?.id,
+        'issuer'
+      );
+      if (!issuerBinding.verified) {
+        return issuerBinding;
+      }
+
       const result = await DataIntegrityProofManager.verifyProof(vc, proof as unknown as DataIntegrityProof, { documentLoader: loader });
       if (!result.verified) {
         return { verified: false, errors: result.errors ?? ['Verification failed'] };
@@ -72,6 +89,34 @@ export class Verifier {
       const error = e as Error;
       return { verified: false, errors: [error?.message ?? 'Unknown error in verifyCredential'] };
     }
+  }
+
+  /**
+   * Enforce that a proof's verification method is controlled by the expected
+   * DID subject (the credential `issuer` or the presentation `holder`). The DID
+   * that owns the verification method is the portion of the VM id before the
+   * fragment. When the expected subject is absent we cannot bind, so we fail
+   * closed rather than accept a signature from an arbitrary key.
+   */
+  private checkVerificationMethodController(
+    verificationMethod: unknown,
+    expectedSubject: string | undefined,
+    subjectLabel: 'issuer' | 'holder'
+  ): VerificationResult {
+    if (typeof verificationMethod !== 'string' || verificationMethod.length === 0) {
+      return { verified: false, errors: ['Proof is missing a verificationMethod'] };
+    }
+    if (!expectedSubject) {
+      return { verified: false, errors: [`Credential is missing an ${subjectLabel} to bind the proof to`] };
+    }
+    const vmDid = verificationMethod.split('#')[0];
+    if (vmDid !== expectedSubject) {
+      return {
+        verified: false,
+        errors: [`Proof verificationMethod (${vmDid}) does not match credential ${subjectLabel} (${expectedSubject})`]
+      };
+    }
+    return { verified: true, errors: [] };
   }
 
   /**
@@ -290,6 +335,18 @@ export class Verifier {
       }
       const proofValue = vp.proof;
       const proof = Array.isArray(proofValue) ? proofValue[0] : proofValue;
+
+      // Bind the presentation proof to the holder: the key that signs the
+      // presentation must be controlled by the DID named as `holder`. Without
+      // this an attacker can present a self-signed VP claiming any holder.
+      const holderBinding = this.checkVerificationMethodController(
+        (proof as { verificationMethod?: unknown })?.verificationMethod,
+        typeof vp.holder === 'string' ? vp.holder : (vp.holder as { id?: string } | undefined)?.id,
+        'holder'
+      );
+      if (!holderBinding.verified) {
+        return holderBinding;
+      }
 
       // Validate challenge/domain BEFORE signature verification so a replayed
       // presentation with a stale challenge is rejected even when its proof
