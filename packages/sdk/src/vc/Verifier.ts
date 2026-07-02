@@ -127,7 +127,9 @@ export class Verifier {
         : [String(vcContext)];
       for (const c of ctxs) await loader(c);
 
-      // Verify each proof
+      // Verify each proof, counting each authorized signer at most once so a
+      // replicated proof cannot satisfy the threshold on its own.
+      const seenSigners = new Set<string>();
       for (const proof of proofs) {
         const vm = proof.verificationMethod;
         if (!policy.signerVerificationMethods.includes(vm)) {
@@ -135,6 +137,12 @@ export class Verifier {
           result.errors.push(`Signer ${vm} is not authorized by the policy`);
           continue;
         }
+
+        if (seenSigners.has(vm)) {
+          result.errors.push(`Duplicate proof from ${vm} (ignored)`);
+          continue;
+        }
+        seenSigners.add(vm);
 
         try {
           const proofResult = await DataIntegrityProofManager.verifyProof(
