@@ -140,7 +140,20 @@ export class BitcoinWitness implements WitnessService {
           digestMultibase
         );
       }
-      
+
+      // The satoshi ordinal is the canonical did:btco:<sat> identifier and is
+      // required — without it, state derivation cannot produce a resolvable
+      // did:btco and would leave the asset's DID disagreeing with its btco
+      // layer. Fail closed here rather than emitting a log that can never
+      // yield a valid btco identifier. (did:btco requires a NUMERIC satoshi;
+      // inscriptionId/txid are not valid substitutes.)
+      if (!inscription.satoshi) {
+        throw new BitcoinWitnessError(
+          'Bitcoin inscription did not return a satoshi ordinal (required for the did:btco identifier)',
+          digestMultibase
+        );
+      }
+
       const now = new Date().toISOString();
       
       // Build the WitnessProof with Bitcoin-specific extensions
