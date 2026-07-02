@@ -400,12 +400,12 @@ export async function migrateCommand(flags: MigrateFlags): Promise<MigrateResult
       const bitcoinManager = createMockBitcoinManager();
       const manager = new BtcoCelManager(signer, bitcoinManager);
       migratedLog = await manager.migrate(eventLog);
-      
-      // Extract target DID from migration event
-      const migrationEvent = migratedLog.events[migratedLog.events.length - 1];
-      const migrationData = migrationEvent.data as Record<string, unknown>;
-      targetDid = migrationData.targetDid as string;
-      
+
+      // The resolvable did:btco:<satoshi> is derived from the bitcoin witness
+      // proof (the satoshi is only known after inscription), surfaced via
+      // the derived state — not from the signed event data.
+      targetDid = manager.getCurrentState(migratedLog).did;
+
     } else {
       return {
         success: false,

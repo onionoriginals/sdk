@@ -231,13 +231,15 @@ function isWitnessProof(p: DataIntegrityProof): boolean {
 }
 
 /**
- * Normalize a verification method URI to the controller key it identifies.
- * For did:key the key is the identifier itself (drop the #fragment); other
- * methods are compared by their full DID (drop the fragment) since the key
- * lives in that DID's document.
+ * Identifies the controller key authorized by a proof. This is the FULL
+ * verification method URI, including the `#fragment`: within one DID document
+ * `did:webvh:...#key-0` and `#key-1` are DISTINCT keys, so stripping the
+ * fragment would let a log created with `#key-0` accept later events signed by
+ * `#key-1`. All legitimate events in a log are signed with the same
+ * verification method, so full-URI comparison does not reject valid chains.
  */
 function controllerKeyId(verificationMethod: string): string {
-  return verificationMethod.split('#')[0];
+  return verificationMethod;
 }
 
 /**

@@ -107,9 +107,12 @@ describe('CEL-CORE-012/happy – webvh→btco migration via BtcoCelManager', () 
     expect(typeof data.sourceDid).toBe('string');
     expect((data.sourceDid as string).startsWith('did:webvh:')).toBe(true);
 
-    // Target DID must be a valid btco DID.
-    expect(typeof data.targetDid).toBe('string');
-    expect((data.targetDid as string).startsWith('did:btco:')).toBe(true);
+    // targetDid is NOT in the signed data — the resolvable did:btco:<satoshi>
+    // is derived from the bitcoin witness proof's satoshi (only known after
+    // inscription).
+    expect(data.targetDid).toBeUndefined();
+    const bpCore = (finalEvent.proof as any[]).find(p => p.cryptosuite === 'bitcoin-ordinals-2024');
+    expect(String(bpCore.satoshi).length).toBeGreaterThan(0);
   });
 
   it('migration data contains Bitcoin transaction references (txid and inscriptionId)', () => {

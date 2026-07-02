@@ -128,14 +128,18 @@ describe('BtcoCelManager', () => {
       expect((migrationData.sourceDid as string).startsWith('did:webvh:')).toBe(true);
     });
 
-    it('should include targetDid with btco format', async () => {
+    it('derives a resolvable did:btco:<satoshi> in the migrated state', async () => {
       const webvhLog = await createWebvhLog();
       const btcoLog = await manager.migrate(webvhLog);
 
+      // targetDid is NOT in the signed data (the satoshi is only known after
+      // inscription); it is derived from the bitcoin witness proof's satoshi.
       const migrationData = btcoLog.events[2].data as Record<string, unknown>;
-      expect(migrationData.targetDid).toBeDefined();
-      expect(typeof migrationData.targetDid).toBe('string');
-      expect((migrationData.targetDid as string).startsWith('did:btco:')).toBe(true);
+      expect(migrationData.targetDid).toBeUndefined();
+
+      const state = manager.getCurrentState(btcoLog);
+      expect(state.did).toBe('did:btco:1234567890');
+      expect(/^did:btco:[0-9]+$/.test(state.did)).toBe(true);
     });
 
     it('should include layer: btco in migration data', async () => {
@@ -478,13 +482,10 @@ describe('BtcoCelManager', () => {
       const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
       const btcoLog = await btcoManager.migrate(webvhLog);
 
-      const migrationData = btcoLog.events[2].data as Record<string, unknown>;
-      const targetDid = migrationData.targetDid as string;
-
-      // targetDid is derived deterministically from the source DID at signing
-      // time (the on-chain inscription id lives in the witness proof, since it
-      // can't be known before inscription).
-      expect(targetDid.startsWith('did:btco:')).toBe(true);
+      // The resolvable did:btco identifier is the numeric satoshi from the
+      // witness proof, surfaced via derived state.
+      const state = btcoManager.getCurrentState(btcoLog);
+      expect(state.did).toBe('did:btco:1234567890');
       const bp = bitcoinProofOf(btcoLog.events[2]);
       expect(bp?.inscriptionId).toBe('abc123def456i0');
     });

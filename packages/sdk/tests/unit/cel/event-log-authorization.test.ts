@@ -67,6 +67,10 @@ describe('CEL event-log authorization and btco verifiability', () => {
     const bp = (last.proof as any[]).find(p => p.cryptosuite === 'bitcoin-ordinals-2024');
     expect(bp.txid).toBe('abc123def456');
     expect((last.data as any).txid).toBeUndefined();
+    // targetDid is derived from the satoshi and is a resolvable numeric did:btco.
+    expect((last.data as any).targetDid).toBeUndefined();
+    const state = new BtcoCelManager(makeSigner() as any, mockBitcoin()).getCurrentState(btcoLog);
+    expect(/^did:btco:[0-9]+$/.test(state.did)).toBe(true);
   });
 
   it('rejects an event appended by a key not authorized by the create event', async () => {
