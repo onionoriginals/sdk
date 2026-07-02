@@ -71,7 +71,39 @@ behavior today), require a product/design decision, or would exceed the
   constant — a broader change to the transaction-building path that warrants its
   own PR and dedicated tests across input types.
 
-## 5. Derived-proof message indexing in the (unimplemented) BBS+ path (latent)
+## Iteration 2 deferrals
+
+## 6. `encodeBase64UrlMultibase` uses multibase prefix `z` for base64url payloads (spec/interop — breaking to change)
+
+- **Where:** `packages/sdk/src/utils/encoding.ts` (`encodeBase64UrlMultibase` / `decodeBase64UrlMultibase`), consumed by `CredentialManager` legacy proofs and `AuditLogger`'s keyless fallback.
+- **What:** The helper emits `z` + base64url, but per multibase `z` is base58btc and `u` is base64url (the same file's `multibase` object correctly uses `u`). It round-trips internally, but a spec-compliant external verifier would decode a `z…` proofValue as base58btc and get garbage; the keyless audit fallback is also indistinguishable by prefix from a real base58btc Ed25519 signature.
+- **Why deferred:** Correcting the prefix to `u` is a **wire-format change** — it would break verification of already-issued credentials and already-persisted audit records that carry the current `z`-prefixed base64url values. This needs a migration/compatibility plan (accept both prefixes during a transition, version the format) and coordination, not a silent in-place fix. No internal test currently fails because the SDK is symmetric with itself.
+
+## 7. `ResourceManager.createResource` with a reused explicit `id` discards version history (medium — API-behavior decision)
+
+- **Where:** `packages/sdk/src/resources/ResourceManager.ts` (`createResource`, the `this.resources.set(id, [resource])` line).
+- **What:** Passing `options.id` for an id that already has multiple versions replaces the whole history with a single v1, silently. `importResource` merges instead, suggesting this is an oversight.
+- **Why deferred:** The fix (throw, or return the existing current version) changes the public behavior of a method with ~47 call sites in the test suite, some of which may rely on overwrite semantics. Whether `createResource` on an existing id should throw, overwrite, or no-op is an API-design decision for the maintainers.
+
+## 8. `MemoryStorageAdapter` composite key can collide across domain/path (latent, low)
+
+- **Where:** `packages/sdk/src/storage/MemoryStorageAdapter.ts` (key = `` `${domain}::${cleanPath}` ``).
+- **What:** `::` is unescaped, so `key('a::b','c') === key('a','b::c')`. did:webvh domains with ports/colon-escapes raise the odds slightly. One entry could overwrite another.
+- **Why deferred:** Low severity and not currently triggered by any real caller; a clean fix (nested map or an unambiguous delimiter/encoding) is a small refactor best batched with the LocalStorageAdapter domain handling.
+
+## 9. `MetricsCollector` Prometheus export can merge metric families on name sanitization collisions (latent, low)
+
+- **Where:** `packages/sdk/src/utils/MetricsCollector.ts` (`safeOpName = operation.replace(/[^a-zA-Z0-9_]/g, '_')` used in metric *names*).
+- **What:** Two operation names differing only in non-alphanumerics (`did.create` vs `did:create`) collapse to the same metric family, producing duplicate `# HELP`/`# TYPE` lines (a Prometheus parse error). In-repo callers use consistent dotted names, so latent.
+- **Why deferred:** Not triggered by current callers; the fix (label-only form, or collision guard) is a small metrics-format change worth doing alongside a metrics review.
+
+## 10. `EventLogger` default config advertises levels for events it never subscribes to (informational)
+
+- **Where:** `packages/sdk/src/utils/EventLogger.ts` (`DEFAULT_EVENT_CONFIG` lists `migration:*` and `batch:progress`, but `subscribeToEvents`/`logEvent` handle neither).
+- **What:** Those configured levels are dead code; migration/batch-progress events are not logged via EventLogger (they're handled in MigrationManager). Likely intentional, but the config table is misleading.
+- **Why deferred:** Not a correctness bug; needs a maintainer decision to either trim the config or add the missing subscriptions.
+
+## 11. Derived-proof message indexing in the (unimplemented) BBS+ path (latent)
 
 - **Where:** `packages/sdk/src/vc/cryptosuites/bbsCryptosuite.ts:317-361`.
 - **What:** The derived-proof verify reconstructs `disclosedMessages` in

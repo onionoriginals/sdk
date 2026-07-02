@@ -56,3 +56,40 @@ Fixed the confirmed correctness bugs, each with a regression test:
 
 ### Open items
 - Push branch; monitor for CI/review comments.
+
+## Iteration 2 — 2026-07-02
+
+Opened PR #230; added a changeset (`bb00df8`) to satisfy the "Changeset present"
+CI check (all other checks were already green). Subscribed to PR activity and
+armed an hourly self check-in.
+
+Ran three more subsystem audits over the areas iteration 1 didn't cover
+(migration/validation/rollback, storage/events/resources, core/config/serialization/
+provenance). Fixed the confirmed correctness bugs, each with a regression test:
+
+1. **HIGH — migration audit-failure spuriously rolls back a completed migration**
+   (`8ad4362`): the post-completion audit write lived inside the main try; a throw
+   re-entered the failure path and rolled back a successful migration (success:false/
+   ROLLED_BACK), risking a double-inscription on retry. Also: tracked state never
+   advanced to ROLLED_BACK after rollback (getMigrationStatus disagreed with the
+   result); `migrateBatch.startTime` recorded the batch end. Guarded both audit
+   writes, advanced tracker state on rollback (auto + public `rollback()`), captured
+   batch start time. Regression tests for all three.
+2. **HIGH — network/webvhNetwork config footgun** (`17fc035`): `create({ webvhNetwork })`
+   without an explicit network left network defaulting to mainnet, so Bitcoin ops +
+   did:btco resolution ran on mainnet while did:btco creation used the tier network.
+   Derive network from the tier when network isn't explicitly set. Regression test.
+3. **MED/LOW — storage URL + asset hash** (`17fc035`): `LocalStorageAdapter.toUrl`
+   used the raw domain while files were stored under a sanitized domain (URL pointed
+   nowhere); `OriginalsAsset.verify` used an unanchored hex regex accepting non-hex
+   hashes for URL-only resources. Fixed both with regression tests.
+
+### Iteration 2 deferred (added to FOLLOWUP.md, items 6–10)
+- base64url multibase `z` prefix (breaking wire-format change — needs migration plan).
+- `ResourceManager.createResource` history overwrite on reused id (API-behavior decision, ~47 call sites).
+- `MemoryStorageAdapter` `::` key collision (latent, low).
+- `MetricsCollector` Prometheus name collision (latent, low).
+- `EventLogger` dead default-config entries (informational).
+
+### Result
+- Suites run per fix all green; typecheck clean. Full-suite + lint re-run pending push.
