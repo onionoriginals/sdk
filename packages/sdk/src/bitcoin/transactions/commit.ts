@@ -137,6 +137,25 @@ function estimateCommitTxSize(inputCount: number, outputCount: number): number {
 }
 
 /**
+ * Estimates the size of the reveal transaction that will spend the commit
+ * output: one taproot script-path input carrying the inscription envelope
+ * (script including the content, plus signature and control block, all
+ * witness-discounted 4x) and one P2TR output for the inscribed satoshi.
+ *
+ * @param contentLength - Inscription content length in bytes
+ * @returns Estimated reveal transaction size in virtual bytes
+ */
+function estimateRevealTxSize(contentLength: number): number {
+  const overhead = 10.5;
+  const inputBase = 57.5; // taproot input without witness
+  const outputSize = 43; // P2TR output
+  // Envelope script overhead (~100 bytes) + schnorr signature (~65 bytes) +
+  // control block (~33 bytes), all in the witness alongside the content.
+  const witnessBytes = contentLength + 200;
+  return Math.ceil(overhead + inputBase + outputSize + witnessBytes / 4);
+}
+
+/**
  * Creates a commit transaction for an ordinals inscription
  *
  * This function:
@@ -292,9 +311,10 @@ export async function createCommitTransaction(
     tags.metadata = metadata;
   }
 
-  // Add pointer if provided
+  // Add pointer if provided. micro-ordinals encodes the pointer tag as an
+  // 8-byte bigint; passing a number makes p2tr_ord_reveal throw.
   if (typeof pointer !== 'undefined') {
-    (tags as any).pointer = pointer;
+    tags.pointer = BigInt(pointer);
   }
 
   const inscription: ordinals.Inscription = {
@@ -345,8 +365,15 @@ export async function createCommitTransaction(
     merklePath: leaf.path
   });
 
-  // Step 5: Calculate minimum amount needed for the commit output
-  const commitOutputValue = Math.max(minimumCommitAmount, MIN_DUST_LIMIT);
+  // Step 5: Calculate minimum amount needed for the commit output.
+  // The reveal transaction spends this output, pays its own fee, and must
+  // still leave a >= dust postage output for the inscribed satoshi — so a
+  // bare-dust commit output could never be revealed. Default to
+  // postage + estimated reveal fee; an explicit minimumCommitAmount can
+  // raise (but not lower) that floor.
+  const revealFee = Number(calculateFee(estimateRevealTxSize(content.length), feeRate));
+  const requiredForReveal = MIN_DUST_LIMIT + revealFee;
+  const commitOutputValue = Math.max(minimumCommitAmount, requiredForReveal);
 
   // Step 6: Iterative UTXO selection with fee recalculation
   // This ensures that after we know the actual input count, we have enough funds

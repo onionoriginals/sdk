@@ -239,7 +239,7 @@ describe('BitcoinManager integration with providers', () => {
     expect(canProceed).toBe(false);
   });
 
-  test('resolveFeeRate prefers feeOracle over provider and provided value', async () => {
+  test('resolveFeeRate honors an explicitly provided fee rate over estimators', async () => {
     const provider = createMockProvider();
     const sdk = OriginalsSDK.create({
       network: 'regtest',
@@ -247,6 +247,17 @@ describe('BitcoinManager integration with providers', () => {
       feeOracle: { estimateFeeRate: async () => 9 }
     } as any);
     const res: any = await sdk.bitcoin.inscribeData(Buffer.from('hello'), 'text/plain', 2);
+    expect(res.feeRate).toBe(2);
+  });
+
+  test('resolveFeeRate falls back to feeOracle when no explicit rate is given', async () => {
+    const provider = createMockProvider();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      ordinalsProvider: provider,
+      feeOracle: { estimateFeeRate: async () => 9 }
+    } as any);
+    const res: any = await sdk.bitcoin.inscribeData(Buffer.from('hello'), 'text/plain');
     expect(res.feeRate).toBe(9);
   });
 

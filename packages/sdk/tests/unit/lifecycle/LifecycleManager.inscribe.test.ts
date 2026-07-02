@@ -82,14 +82,24 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
     expect(result.currentLayer).toBe('did:btco');
   });
 
-  test('uses feeOracle when configured', async () => {
+  test('uses feeOracle when configured and no explicit feeRate is given', async () => {
+    const sdk = createSDK({ feeOracle: { estimateFeeRate: async () => 42 } });
+    const asset = createAssetAtLayer('did:webvh');
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+
+    const prov = asset.getProvenance();
+    const migration = prov.migrations[prov.migrations.length - 1];
+    expect(migration.feeRate).toBe(42);
+  });
+
+  test('an explicit feeRate wins over the feeOracle', async () => {
     const sdk = createSDK({ feeOracle: { estimateFeeRate: async () => 42 } });
     const asset = createAssetAtLayer('did:webvh');
     await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
 
     const prov = asset.getProvenance();
     const migration = prov.migrations[prov.migrations.length - 1];
-    expect(migration.feeRate).toBe(42);
+    expect(migration.feeRate).toBe(5);
   });
 
   test('preserves existing resources after inscription', async () => {

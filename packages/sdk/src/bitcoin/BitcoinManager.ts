@@ -20,7 +20,13 @@ export class BitcoinManager {
   }
 
   private async resolveFeeRate(targetBlocks = 1, provided?: number): Promise<number | undefined> {
-    // 1) Prefer external fee oracle
+    // 1) An explicitly provided fee rate always wins: estimators must not
+    // silently override what the caller asked to pay.
+    if (typeof provided === 'number' && Number.isFinite(provided) && provided > 0) {
+      return provided;
+    }
+
+    // 2) Prefer external fee oracle
     if (this.feeOracle) {
       try {
         const estimated = await this.feeOracle.estimateFeeRate(targetBlocks);
@@ -40,7 +46,7 @@ export class BitcoinManager {
       }
     }
 
-    // 2) Fallback to ordinals provider if present
+    // 3) Fallback to ordinals provider if present
     if (this.ord) {
       try {
         const estimated = await this.ord.estimateFee(targetBlocks);
@@ -58,11 +64,6 @@ export class BitcoinManager {
           attributes: { error: String(error), source: 'ordinalsProvider' }
         });
       }
-    }
-
-    // 3) If caller provided a valid non-zero fee rate, use it as last resort
-    if (typeof provided === 'number' && Number.isFinite(provided) && provided > 0) {
-      return provided;
     }
 
     return undefined;
@@ -136,14 +137,10 @@ export class BitcoinManager {
       }
     }
 
-    let recordedFeeRate: number | undefined;
-    if (this.feeOracle) {
-      recordedFeeRate = effectiveFeeRate;
-    } else if (typeof feeRate === 'number' && Number.isFinite(feeRate) && feeRate > 0) {
-      recordedFeeRate = feeRate;
-    } else {
-      recordedFeeRate = creation.feeRate ?? effectiveFeeRate;
-    }
+    // Record the rate that was actually used for the inscription: the
+    // resolved effective rate, or whatever the provider reports when no
+    // rate could be resolved beforehand.
+    const recordedFeeRate: number | undefined = effectiveFeeRate ?? creation.feeRate;
 
     const inscription: OrdinalsInscription & {
       revealTxId?: string;
@@ -310,13 +307,13 @@ export class BitcoinManager {
     
     // Handle different network prefixes:
     // did:btco:123456 (mainnet) - 3 parts
-    // did:btco:test:123456 or did:btco:sig:123456 - 4 parts
+    // did:btco:test:123456, did:btco:sig:123456 or did:btco:reg:123456 - 4 parts
     if (parts.length === 3) {
       satoshi = parts[2];
     } else if (parts.length === 4) {
-      // Validate network prefix - only 'test' and 'sig' are allowed
+      // Validate network prefix - only 'test', 'sig' and 'reg' are allowed
       const network = parts[2];
-      if (network !== 'test' && network !== 'sig') {
+      if (network !== 'test' && network !== 'sig' && network !== 'reg') {
         return null;
       }
       satoshi = parts[3];

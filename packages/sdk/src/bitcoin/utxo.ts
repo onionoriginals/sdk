@@ -86,25 +86,22 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
     accumulated += utxo.value;
 
     // Assume two outputs initially
-    let fee = estimateFeeSats(selected.length, 2, feeRateSatsPerVb, feeEstimate);
-    let required = targetAmountSats + fee;
+    const fee = estimateFeeSats(selected.length, 2, feeRateSatsPerVb, feeEstimate);
+    const required = targetAmountSats + fee;
 
     if (accumulated >= required) {
-      // Compute change and dust policy
       let change = accumulated - required;
+      let feeSats = fee;
       if (change > 0 && change < DUST_LIMIT_SATS) {
-        // If change would be dust, try recomputing fee for single output (recipient only)
-        fee = estimateFeeSats(selected.length, 1, feeRateSatsPerVb, feeEstimate);
-        required = targetAmountSats + fee;
-        change = accumulated - required;
-        if (change > 0 && change < DUST_LIMIT_SATS) {
-          // Force add to fee (better than creating dust)
-          change = 0;
-        }
+        // A dust change output is not worth creating. Drop it and fold the
+        // remainder into the fee so the reported feeSats matches what the
+        // transaction actually pays (overpay is bounded by the dust limit).
+        // Re-pricing with a 1-output fee and keeping the change would
+        // underpay the requested fee rate once the change output is added.
+        feeSats = accumulated - targetAmountSats;
+        change = 0;
       }
-      if (accumulated >= targetAmountSats + fee) {
-        return { selected, feeSats: fee, changeSats: Math.max(0, change) };
-      }
+      return { selected, feeSats, changeSats: change };
     }
   }
 

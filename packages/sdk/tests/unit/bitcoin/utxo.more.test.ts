@@ -17,12 +17,23 @@ describe('UTXO selection additional branches', () => {
     expect(res.selected.length).toBeGreaterThan(0);
   });
 
-  test('recompute change path yields non-dust change after single-output fee', () => {
-    // fee(2 outs,1 input,fr=1)=226; fee(1 out)=192; choose initial change 530 (<546), after recompute becomes 564 (>=546)
+  test('dust change is dropped and folded into the reported fee', () => {
+    // fee(2 outs,1 input,fr=1)=226; change would be 530 (<546 dust limit),
+    // so no change output is created and the full remainder is fee.
     const target = 10_000;
     const utxos = [U(target + 226 + 530)];
     const res = selectUtxos(utxos, { targetAmountSats: target, feeRateSatsPerVb: 1 });
-    expect(res.changeSats).toBeGreaterThanOrEqual(DUST_LIMIT_SATS);
+    expect(res.changeSats).toBe(0);
+    // Reported fee matches what the transaction actually pays.
+    expect(res.feeSats).toBe(226 + 530);
+  });
+
+  test('non-dust change is priced with the two-output fee', () => {
+    const target = 10_000;
+    const utxos = [U(target + 226 + 1000)];
+    const res = selectUtxos(utxos, { targetAmountSats: target, feeRateSatsPerVb: 1 });
+    expect(res.feeSats).toBe(226);
+    expect(res.changeSats).toBe(1000);
   });
 
   test('estimateFeeSats honors overrides', () => {
