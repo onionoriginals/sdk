@@ -367,9 +367,16 @@ export class BtcoCelManager {
           }
         }
         
-        // Store other fields in metadata
+        // Store other fields in metadata. `network` is consumed (and stored)
+        // explicitly only for btco migration events, so exclude it here for
+        // those events alone — for an ordinary update, an application-defined
+        // `network` field must still flow through to metadata.
+        const excludedKeys = ['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt', 'txid', 'inscriptionId'];
+        if (updateData.sourceDid && updateData.layer === 'btco') {
+          excludedKeys.push('network');
+        }
         for (const [key, value] of Object.entries(updateData)) {
-          if (!['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt', 'txid', 'inscriptionId', 'network'].includes(key)) {
+          if (!excludedKeys.includes(key)) {
             state.metadata = state.metadata || {};
             state.metadata[key] = value;
           }

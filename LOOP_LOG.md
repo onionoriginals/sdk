@@ -305,3 +305,12 @@ regression tests (each verified to fail against the iteration-1 commit):
 ### Result
 - Full suite: **3224 pass / 0 fail / 71 skip**. Typecheck clean; lint 0 errors.
 - Replied to all three review threads with the fixing commit SHA.
+
+### Iteration 2 follow-up (2nd Macroscope round)
+Macroscope flagged one more Medium: iteration-2's fix added `network` to the
+GLOBAL metadata-exclusion list, so an ordinary (non-migration) update event
+carrying an application-defined `network` field had it silently dropped from
+`state.metadata`. Scoped the exclusion to btco migration events only (where
+`network` is consumed explicitly). Regression test: a regular update with a
+custom `network` field now preserves it. Full suite 3225 pass / 0 fail;
+typecheck clean; lint 0 errors.

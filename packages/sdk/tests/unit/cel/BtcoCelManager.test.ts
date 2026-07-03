@@ -422,6 +422,24 @@ describe('BtcoCelManager', () => {
       expect(state.updatedAt).toBeDefined();
     });
 
+    it('preserves an application-defined `network` field on an ordinary update', async () => {
+      // Regression: `network` was added to the global metadata exclusion list, so
+      // an ordinary (non-migration) update event carrying an application-defined
+      // `network` field had it silently dropped from state.metadata. The
+      // exclusion must apply only to btco migration events, where `network` is
+      // consumed explicitly.
+      const log = {
+        events: [
+          { type: 'create', data: { did: 'did:peer:abc', name: 'A', layer: 'peer', resources: [] } },
+          { type: 'update', data: { name: 'B', network: 'my-app-network', updatedAt: '2020-01-01T00:00:00.000Z' } },
+        ],
+      } as unknown as EventLog;
+
+      const state = manager.getCurrentState(log);
+      expect(state.metadata?.network).toBe('my-app-network');
+      expect(state.name).toBe('B');
+    });
+
     it('should not be deactivated after migration', async () => {
       const webvhLog = await createWebvhLog();
       const btcoLog = await manager.migrate(webvhLog);
