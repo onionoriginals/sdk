@@ -63,5 +63,26 @@ describe('createBtcoDidDocument', () => {
 			createBtcoDidDocument('1', 'testnet', { publicKey: pub, keyType: 'Ed25519' })
 		).toThrow('Unsupported Bitcoin network: testnet');
 	});
+
+	it('canonicalizes a satoshi string with surrounding whitespace into a resolvable id', () => {
+		// Regression: validateSatoshiNumber trims before validating, so ' 42 ' passes,
+		// but the emitted id must not contain the raw whitespace (which would be
+		// unresolvable). Previously produced "did:btco: 42 ".
+		const pub = rangeBytes(32, 1);
+		const doc = createBtcoDidDocument(' 42 ', 'mainnet', { publicKey: pub, keyType: 'Ed25519' });
+		expect(doc.id).toBe('did:btco:42');
+		expect(doc.verificationMethod![0].id).toBe('did:btco:42#0');
+		expect(doc.verificationMethod![0].controller).toBe('did:btco:42');
+		expect(doc.authentication).toEqual(['did:btco:42#0']);
+	});
+
+	it('strips non-canonical leading zeros so the id matches the inscribed form', () => {
+		// Regression: '007' passed validation but produced "did:btco:007", which
+		// never equals the canonically-inscribed "did:btco:7".
+		const pub = rangeBytes(32, 2);
+		const doc = createBtcoDidDocument('007', 'regtest', { publicKey: pub, keyType: 'Ed25519' });
+		expect(doc.id).toBe('did:btco:reg:7');
+		expect(doc.verificationMethod![0].id).toBe('did:btco:reg:7#0');
+	});
 });
 

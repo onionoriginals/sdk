@@ -1,6 +1,20 @@
 import { describe, test, expect } from 'bun:test';
-import { StatusListManager } from '../../../src/vc/StatusListManager';
+import { StatusListManager, parseStatusListIndex } from '../../../src/vc/StatusListManager';
 import type { BitstringStatusListEntry, BitstringStatusListSubject } from '../../../src/types';
+
+describe('parseStatusListIndex', () => {
+  test('parses canonical non-negative integer strings', () => {
+    expect(parseStatusListIndex('0')).toBe(0);
+    expect(parseStatusListIndex('42')).toBe(42);
+    expect(parseStatusListIndex(' 7 ')).toBe(7);
+  });
+
+  test('fails closed on partially-numeric or non-numeric input (parseInt leniency)', () => {
+    for (const bad of ['5abc', 'not-a-number', '', '-1', '1.5', '0x10', 'aa1z']) {
+      expect(() => parseStatusListIndex(bad)).toThrow(/Invalid statusListIndex/);
+    }
+  });
+});
 
 describe('StatusListManager', () => {
   const manager = new StatusListManager();
@@ -284,6 +298,26 @@ describe('StatusListManager', () => {
         type: 'BitstringStatusListEntry',
         statusPurpose: 'revocation',
         statusListIndex: 'not-a-number',
+        statusListCredential: 'https://example.com/status/1',
+      };
+
+      expect(() => manager.checkStatus(entry, vc)).toThrow(/Invalid statusListIndex/);
+    });
+
+    test('rejects a partially-numeric statusListIndex instead of silently targeting a prefix bit', () => {
+      // Regression: parseInt('5abc', 10) === 5, so checkStatus would silently
+      // read bit 5 for a malformed index. It must fail closed.
+      const vc = manager.createStatusListCredential({
+        id: 'https://example.com/status/1',
+        issuer: 'did:example:issuer',
+        statusPurpose: 'revocation',
+      });
+
+      const entry: BitstringStatusListEntry = {
+        id: 'https://example.com/status/1#bad',
+        type: 'BitstringStatusListEntry',
+        statusPurpose: 'revocation',
+        statusListIndex: '5abc',
         statusListCredential: 'https://example.com/status/1',
       };
 

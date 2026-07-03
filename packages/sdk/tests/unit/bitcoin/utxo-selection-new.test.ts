@@ -248,6 +248,73 @@ describe('selectResourceUtxos - Resource-Aware Selection', () => {
       expect(result.selectedUtxos[0].value).toBe(50000);
     });
 
+    test('NEVER selects UTXOs with inscriptions[] set even when hasResource is unset', () => {
+      // Regression: ord indexers populate `inscriptions`, not the SDK-specific
+      // `hasResource` flag. Selecting such a UTXO as a payment input would burn
+      // the ordinal it carries.
+      const inscribed: ResourceUtxo = {
+        txid: 'inscribed-tx',
+        vout: 0,
+        value: 100000,
+        inscriptions: ['abc123i0']
+        // note: hasResource intentionally left unset
+      };
+      const clean: ResourceUtxo = { txid: 'clean-tx', vout: 0, value: 50000 };
+
+      const result = selectResourceUtxos([inscribed, clean], {
+        requiredAmount: 5000,
+        feeRate: 1,
+        allowResourceUtxos: false
+      });
+
+      expect(result.selectedUtxos.length).toBe(1);
+      expect(result.selectedUtxos[0].txid).toBe('clean-tx');
+    });
+
+    test('throws helpful error when every UTXO is inscription-bearing via inscriptions[]', () => {
+      const utxos: ResourceUtxo[] = [
+        { txid: 'a', vout: 0, value: 10000, inscriptions: ['x-i0'] },
+        { txid: 'b', vout: 0, value: 20000, inscriptions: ['y-i0'] }
+      ];
+
+      expect(() => {
+        selectResourceUtxos(utxos, { requiredAmount: 5000, feeRate: 1 });
+      }).toThrow('All available UTXOs contain resources');
+    });
+
+    test('NEVER selects locked UTXOs (native lock handling, no avoidUtxoIds workaround)', () => {
+      const locked: ResourceUtxo = { txid: 'locked-tx', vout: 0, value: 100000, locked: true };
+      const clean: ResourceUtxo = { txid: 'clean-tx', vout: 0, value: 50000 };
+
+      const result = selectResourceUtxos([locked, clean], {
+        requiredAmount: 5000,
+        feeRate: 1
+      });
+
+      expect(result.selectedUtxos.length).toBe(1);
+      expect(result.selectedUtxos[0].txid).toBe('clean-tx');
+    });
+
+    test('selectUtxosForPayment excludes inscription-bearing UTXOs identified only by inscriptions[]', () => {
+      const inscribed: ResourceUtxo = { txid: 'inscribed', vout: 0, value: 100000, inscriptions: ['id-i0'] };
+      const clean: ResourceUtxo = { txid: 'clean', vout: 0, value: 50000 };
+
+      const result = selectUtxosForPayment([inscribed, clean], 5000, 1);
+      expect(result.selectedUtxos.every(u => u.txid === 'clean')).toBe(true);
+    });
+
+    test('allowResourceUtxos=true still permits inscription-bearing UTXOs identified by inscriptions[]', () => {
+      const inscribed: ResourceUtxo = { txid: 'inscribed', vout: 0, value: 100000, inscriptions: ['id-i0'] };
+
+      const result = selectResourceUtxos([inscribed], {
+        requiredAmount: 5000,
+        feeRate: 1,
+        allowResourceUtxos: true
+      });
+      expect(result.selectedUtxos.length).toBe(1);
+      expect(result.selectedUtxos[0].txid).toBe('inscribed');
+    });
+
     test('can use resource UTXOs when explicitly allowed', () => {
       const utxos: ResourceUtxo[] = [
         createResourceUtxo(10000, true)

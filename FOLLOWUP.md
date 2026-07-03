@@ -202,3 +202,77 @@ behavior today), require a product/design decision, or would exceed the
   threaded into the inspect/migrate/transfer CLI commands — a small CLI-plumbing
   change best batched with a CLI network-config pass, and not coverable by a
   meaningful regression test until that config exists.
+
+## Iteration (branch asdkdz) deferrals
+
+## 16. `OriginalsCel.getCurrentState` on a btco log requires a `BitcoinManager` it doesn't actually need (design)
+
+- **Where:** `packages/sdk/src/cel/OriginalsCel.ts` (`btcoManager` getter, ~167-182;
+  used by `getCurrentState` at ~420) vs. `packages/sdk/src/cel/layers/BtcoCelManager.ts`
+  (`getCurrentState`, ~337).
+- **What:** The btco branch of `getCurrentState` goes through the `btcoManager`
+  getter, which throws `'BTCO operations require a BitcoinManager'` when
+  `config.btco.bitcoinManager` is absent. But `BtcoCelManager.getCurrentState`
+  is a pure read: it derives `did:btco:<sat>` from the bitcoin witness proof
+  plus the network recorded in the *signed* migration data, and only reads
+  `bitcoinManager.network` as a legacy fallback. So replaying a persisted
+  peer→webvh→btco log in a fresh SDK without a configured BitcoinManager throws,
+  even though no Bitcoin access is needed — contradicting the manager's stated
+  deterministic-replay intent.
+- **Why deferred:** It fails closed with a clear error (no wrong output), and a
+  clean fix means making `BtcoCelManager`'s read path usable without a
+  `BitcoinManager` dependency (the constructor currently requires one) — a
+  dependency-structure change to the CEL layer managers, not a minimal fix, and
+  it needs a decision on how the network fallback behaves when no manager is
+  present.
+
+## 17. `WebVHCelManager.getCurrentState` still keys migration detection off `targetDid` (latent, unreachable)
+
+- **Where:** `packages/sdk/src/cel/layers/WebVHCelManager.ts:295`
+  (`if (updateData.targetDid && updateData.layer)`).
+- **What:** Same stale pattern that was migrated to `sourceDid` in
+  `OriginalsCel.getCurrentLayer`/`BtcoCelManager` (FOLLOWUP-era fix #3 family).
+  A btco migration event carries `sourceDid`, not `targetDid`, so this manager
+  would misclassify a btco migration as a regular update.
+- **Why deferred:** Unreachable via the public API — `OriginalsCel.getCurrentState`
+  routes any log that has reached btco to `BtcoCelManager` (via `getCurrentLayer`),
+  so `WebVHCelManager.getCurrentState` only ever runs on logs whose current layer
+  is webvh (no btco migration event present). It would only bite a caller using
+  `WebVHCelManager` directly on a btco log. Because there is no public path to it,
+  a meaningful regression test cannot be written today; flagged for the next CEL
+  layer-manager consolidation.
+
+## 18. `WebvhToBtcoMigration` satoshi fallback derives a txid, not a satoshi (latent, fallback-only)
+
+- **Where:** `packages/sdk/src/migration/operations/WebvhToBtcoMigration.ts:68`
+  (`const satoshiId = inscription.satoshi || inscription.inscriptionId.split('i')[0]`).
+- **What:** When `inscription.satoshi` is absent, the fallback splits the
+  `inscriptionId` (`<txid>i<index>`) and uses the 64-hex `txid` as the satoshi,
+  which is passed to `migrateToDIDBTCO`. That is not a valid satoshi ordinal;
+  it will produce a wrong/invalid DID or throw in `validateSatoshiNumber`.
+- **Why deferred:** Fallback-only — every real/ mock ordinals provider returns a
+  `satoshi` from `inscribeData`, so this branch is effectively dead defensive
+  code today. The correct behavior (throw a clear "provider did not return a
+  satoshi" error rather than fabricating one from the txid) is a small change,
+  but it cannot be exercised without a provider that omits `satoshi`, so no
+  meaningful regression test is possible until such a provider path exists.
+
+## 19. Data Integrity `proofPurpose` is not validated at verification time (spec conformance)
+
+- **Where:** `packages/sdk/src/vc/cryptosuites/eddsa.ts` (`verifyProof`) and
+  `packages/sdk/src/vc/Verifier.ts` (`verifyCredential`/`verifyPresentation`).
+- **What:** Verification never checks that `proof.proofPurpose` matches the
+  contextually-required purpose (`assertionMethod` for credentials,
+  `authentication` for presentations), nor that the verification method is listed
+  under the corresponding relationship in the DID document. A credential signed
+  with `proofPurpose: 'authentication'` (or any string) verifies as a valid
+  assertion.
+- **Why deferred:** Exploitability is limited — `proofPurpose` is bound into the
+  signed proof-config hash (it cannot be flipped after signing), and
+  `DIDManager.resolveDID` auto-populates `assertionMethod = authentication =
+  [firstKey]`, so keys end up authorized for both purposes anyway. A correct fix
+  changes verification semantics for both credentials and presentations (which
+  legitimately use different purposes) and must thread the expected purpose
+  through both paths without breaking presentation verification — a
+  verification-contract change that warrants its own focused PR and conformance
+  tests, not a minimal in-place edit.
