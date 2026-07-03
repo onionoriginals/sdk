@@ -192,3 +192,22 @@ Branch: `claude/originals-sdk-correctness-ws3gte` (continuation after #230 merge
 
 ### Result
 - Full turbo suite green (0 fail), typecheck clean, lint 0 errors.
+
+---
+
+Branch: `claude/originals-sdk-correctness-n08sq0` (fresh off main @ 738dec2, includes merged #230 + #231)
+
+## Iteration 1 — 2026-07-03
+
+### Ground truth
+- Fresh clone; `bun install`, then `bun run build` (dist was missing → 16 CEL-CLI
+  subprocess tests fail without it; environment-only, no code issue).
+- Full suite after build: **3216 pass / 0 fail / 71 skip** across 171 files.
+- `bun run typecheck`: clean. `bun run lint`: 0 errors (87 pre-existing warnings).
+- No open PR for this branch; branch tip == origin/main (738dec2).
+
+### Work
+- Baseline green. Launched 4 parallel subsystem correctness audits
+  (vc/crypto, did, cel/anchoring, lifecycle/migration/storage) instructed to
+  skip everything already in FOLLOWUP.md and to report only concrete,
+  reachable, reproducible bugs. Triage of results pending.
