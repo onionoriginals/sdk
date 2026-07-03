@@ -72,20 +72,30 @@ describe('UTXO selection additional branches', () => {
   });
 
   test('dust change is dropped and folded into the reported fee', () => {
-    // fee(2 outs,1 input,fr=1)=146 (10 base + 68/segwit input + 2*34/output);
-    // change would be 530 (<546 dust limit), so no change output is created
+    // An input with no scriptPubKey is unclassified and priced conservatively
+    // at legacy width: fee(2 outs, 1 input, fr=1) = 10 + 148 + 2*34 = 226.
+    // Change would be 530 (<546 dust limit), so no change output is created
     // and the full remainder is fee.
     const target = 10_000;
-    const utxos = [U(target + 146 + 530)];
+    const utxos = [U(target + 226 + 530)];
     const res = selectUtxos(utxos, { targetAmountSats: target, feeRateSatsPerVb: 1 });
     expect(res.changeSats).toBe(0);
     // Reported fee matches what the transaction actually pays.
-    expect(res.feeSats).toBe(146 + 530);
+    expect(res.feeSats).toBe(226 + 530);
   });
 
-  test('non-dust change is priced with the two-output fee', () => {
+  test('non-dust change is priced with the two-output fee (unclassified input at legacy width)', () => {
     const target = 10_000;
-    const utxos = [U(target + 146 + 1000)];
+    const utxos = [U(target + 226 + 1000)];
+    const res = selectUtxos(utxos, { targetAmountSats: target, feeRateSatsPerVb: 1 });
+    expect(res.feeSats).toBe(226);
+    expect(res.changeSats).toBe(1000);
+  });
+
+  test('a verified segwit input is priced at witness width (68 vB)', () => {
+    // fee(2 outs, 1 segwit input, fr=1) = 10 + 68 + 2*34 = 146.
+    const target = 10_000;
+    const utxos = [U(target + 146 + 1000, { scriptPubKey: P2WPKH })];
     const res = selectUtxos(utxos, { targetAmountSats: target, feeRateSatsPerVb: 1 });
     expect(res.feeSats).toBe(146);
     expect(res.changeSats).toBe(1000);

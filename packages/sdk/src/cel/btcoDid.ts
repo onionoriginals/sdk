@@ -12,8 +12,15 @@ export function btcoDidPrefix(network: string | undefined): string {
       return 'did:btco:sig';
     case 'regtest':
       return 'did:btco:reg';
-    default:
+    case 'mainnet':
+    case undefined:
+      // undefined = legacy log with no recorded network; mainnet is the only
+      // network the unprefixed did:btco form can mean.
       return 'did:btco';
+    default:
+      // An unrecognized network must not silently become a mainnet DID —
+      // that would point the identifier at the wrong chain.
+      throw new Error(`Unsupported Bitcoin network for did:btco: ${network}`);
   }
 }
 

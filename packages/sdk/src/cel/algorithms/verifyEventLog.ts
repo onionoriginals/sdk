@@ -313,6 +313,23 @@ async function verifyBitcoinWitnessProof(
   event: LogEntry,
   ordinalsProvider: OrdinalsLookup | undefined
 ): Promise<string | null> {
+  // Structural validity first (the generic structuralCheck does not apply —
+  // its cryptosuite whitelist is for signature proofs): a proof missing its
+  // basic Data Integrity fields must not be accepted just because an
+  // inscription happens to match.
+  if (proof.type !== 'DataIntegrityProof') {
+    return `bitcoin witness proof has invalid type (${String(proof.type)})`;
+  }
+  if (!proof.proofValue || typeof proof.proofValue !== 'string') {
+    return `bitcoin witness proof is missing proofValue`;
+  }
+  if (!proof.verificationMethod || typeof proof.verificationMethod !== 'string') {
+    return `bitcoin witness proof is missing verificationMethod`;
+  }
+  if (!proof.proofPurpose || typeof proof.proofPurpose !== 'string') {
+    return `bitcoin witness proof is missing proofPurpose`;
+  }
+
   if (!ordinalsProvider) {
     return `bitcoin witness proof cannot be verified without an ordinalsProvider (required for btco anchoring)`;
   }
@@ -562,7 +579,10 @@ async function verifyEvent(
         const anchorError = await verifyBitcoinWitnessProof(proof, event, ordinalsProvider);
         witnessVerified = anchorError === null;
         if (anchorError !== null) {
+          // A failed btco anchor gates BOTH signals: the event is not valid
+          // and must not be reported as cryptographically verified either.
           allControllerProofsValid = false;
+          allCryptographicallyVerified = false;
           errors.push(`Event ${index}, Proof ${originalIndex}: ${anchorError}`);
         }
       } else {

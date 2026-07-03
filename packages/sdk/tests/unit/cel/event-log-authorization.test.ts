@@ -138,6 +138,28 @@ describe('CEL event-log authorization and btco verifiability', () => {
     expect(state.layer).toBe('btco');
   });
 
+  it('does not misclassify a regular update carrying sourceDid/layer fields as a migration', async () => {
+    // A migration event always carries migratedAt (and OriginalsCel.update
+    // reserves it). A direct updateEventLog append with application-level
+    // sourceDid/layer fields but no migratedAt must replay as a regular
+    // update: the name change applies and the layer does not flip.
+    const signer = makeSigner();
+    let log = await new PeerCelManager(signer as any).create('Asset', []);
+    const webvhManager = new WebVHCelManager(signer as any, 'example.com');
+    log = await webvhManager.migrate(log);
+    log = await updateEventLog(log, { sourceDid: 'did:example:app-field', layer: 'btco', name: 'renamed' }, {
+      signer: signer as any,
+      verificationMethod: 'ignored',
+    });
+
+    const state = webvhManager.getCurrentState(log);
+    // Under the old sourceDid+layer predicate this event was replayed as a
+    // migration and the name change was silently dropped. (The regular-update
+    // branch still applies an explicit `layer` field — longstanding update
+    // semantics — so only the name is the misclassification discriminator.)
+    expect(state.name).toBe('renamed');
+  });
+
   it('rejects an event appended by a key not authorized by the create event', async () => {
     const owner = makeSigner();
     const log = await new PeerCelManager(owner as any).create('Owner Asset', []);

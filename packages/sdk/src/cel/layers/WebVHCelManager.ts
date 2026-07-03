@@ -296,7 +296,7 @@ export class WebVHCelManager {
         // (webvh-only): keying off targetDid would misclassify a btco
         // migration as a regular update. Mirrors OriginalsCel.getCurrentLayer
         // and BtcoCelManager.getCurrentState.
-        if (updateData.sourceDid && updateData.layer) {
+        if (updateData.sourceDid && updateData.layer && updateData.migratedAt) {
           // Migration event - update DID and layer
           if (updateData.targetDid) {
             state.did = updateData.targetDid as string;

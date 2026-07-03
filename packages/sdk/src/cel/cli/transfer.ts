@@ -73,7 +73,7 @@ function getCurrentDid(log: EventLog): string {
     const data = event.data as Record<string, unknown>;
     if (event.type === 'create' && data.did) {
       currentDid = data.did as string;
-    } else if (event.type === 'update' && data.sourceDid && data.layer) {
+    } else if (event.type === 'update' && data.sourceDid && data.layer && data.migratedAt) {
       // Migration event. webvh migrations carry the resolvable targetDid; btco
       // migrations derive did:btco:<satoshi> from the bitcoin witness proof.
       // Transfers happen at the btco layer, so getting this right matters for

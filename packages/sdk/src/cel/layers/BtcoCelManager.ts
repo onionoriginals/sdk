@@ -29,6 +29,13 @@ export interface BtcoCelConfig {
   proofPurpose?: string;
   /** Fee rate in sat/vB for Bitcoin transactions (optional - BitcoinManager will estimate if not provided) */
   feeRate?: number;
+  /**
+   * Bitcoin network fallback for replaying LEGACY btco logs whose signed
+   * migration data predates the recorded `network` field, when no
+   * BitcoinManager is configured (read-only replay). New logs record the
+   * network in the signed data, so this is never consulted for them.
+   */
+  network?: 'mainnet' | 'regtest' | 'signet';
 }
 
 /**
@@ -109,6 +116,20 @@ export class BtcoCelManager {
     if (typeof signer !== 'function') {
       throw new Error('BtcoCelManager requires a signer function');
     }
+    // Guard the optional middle parameter: passing a config object where the
+    // BitcoinManager belongs (`new BtcoCelManager(signer, { feeRate: 5 })`)
+    // would otherwise be silently accepted and only blow up deep inside
+    // migrate(). Duck-type on the one method every manager (and test mock)
+    // provides.
+    if (
+      bitcoinManager !== undefined &&
+      typeof (bitcoinManager as unknown as { inscribeData?: unknown }).inscribeData !== 'function'
+    ) {
+      throw new Error(
+        'BtcoCelManager second argument must be a BitcoinManager (or undefined for read-only replay); ' +
+        'pass configuration as the third argument.'
+      );
+    }
 
     this.signer = signer;
     this.bitcoinManager = bitcoinManager;
@@ -183,7 +204,7 @@ export class BtcoCelManager {
       if (event.type === 'create') {
         currentDid = eventData.did as string;
         currentLayer = eventData.layer as string || 'peer';
-      } else if (event.type === 'update' && eventData.sourceDid && eventData.layer) {
+      } else if (event.type === 'update' && eventData.sourceDid && eventData.layer && eventData.migratedAt) {
         // This is a migration event. Detect via sourceDid (present on both
         // webvh and btco migrations) rather than targetDid (webvh-only), so a
         // log already migrated to btco is recognised as such and the terminal
@@ -311,7 +332,7 @@ export class BtcoCelManager {
         // Check if this is a migration event. Migration events carry a
         // sourceDid + layer; regular updates don't. (btco migrations no longer
         // carry targetDid in the signed data — see below.)
-        if (updateData.sourceDid && updateData.layer) {
+        if (updateData.sourceDid && updateData.layer && updateData.migratedAt) {
           // Migration event - update DID and layer
           state.layer = updateData.layer as 'peer' | 'webvh' | 'btco';
           state.updatedAt = updateData.migratedAt as string;
@@ -347,11 +368,14 @@ export class BtcoCelManager {
               // network only for legacy logs written before the network was
               // recorded; without either source, deriving a DID would just be
               // guessing the network, so fail closed with a clear error.
-              const network = (updateData.network as string | undefined) ?? this.bitcoinManager?.network;
-              if (updateData.network === undefined && !this.bitcoinManager) {
+              const network = (updateData.network as string | undefined)
+                ?? this.bitcoinManager?.network
+                ?? this.config.network;
+              if (updateData.network === undefined && !this.bitcoinManager && this.config.network === undefined) {
                 throw new Error(
                   'Legacy btco log does not record its Bitcoin network in the signed migration data; ' +
-                  'configure a BitcoinManager (config.btco.bitcoinManager) so the network can be supplied.'
+                  'configure a BitcoinManager (config.btco.bitcoinManager) or a fallback network ' +
+                  '(BtcoCelConfig.network) so the network can be supplied.'
                 );
               }
               state.metadata.network = network;
@@ -391,7 +415,7 @@ export class BtcoCelManager {
         // those events alone — for an ordinary update, an application-defined
         // `network` field must still flow through to metadata.
         const excludedKeys = ['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt', 'txid', 'inscriptionId'];
-        if (updateData.sourceDid && updateData.layer === 'btco') {
+        if (updateData.sourceDid && updateData.layer === 'btco' && updateData.migratedAt) {
           excludedKeys.push('network');
         }
         for (const [key, value] of Object.entries(updateData)) {

@@ -22,11 +22,20 @@ export interface BuildPsbtResult {
   changeOutput?: PsbtOutput;
 }
 
-function estimateVBytes(inputs: number, outputs: number): number {
-  const overhead = 10; // base tx overhead
-  const inSize = 68;   // rough P2WPKH/any-segwit input size
-  const outSize = 31;  // P2WPKH output size
-  return Math.ceil(overhead + inputs * inSize + outputs * outSize);
+function estimateVBytes(inputs: Utxo[], outputs: number): number {
+  const overhead = 10;       // base tx overhead
+  const segwitInSize = 68;   // rough P2WPKH/any-segwit input size
+  const legacyInSize = 148;  // conservative sizing for unclassified inputs
+  const outSize = 31;        // P2WPKH output size
+  // Inputs with a verified segwit scriptPubKey get witness sizing; inputs
+  // without a scriptPubKey cannot be classified (known non-segwit ones are
+  // rejected in build()), so size them conservatively rather than quoting a
+  // fee that underpays if they turn out to be legacy.
+  const inputSize = inputs.reduce(
+    (sum, u) => sum + (u.scriptPubKey && isSegwitScriptPubKey(u.scriptPubKey) ? segwitInSize : legacyInSize),
+    0
+  );
+  return Math.ceil(overhead + inputSize + outputs * outSize);
 }
 
 export class PSBTBuilder {
@@ -62,7 +71,7 @@ export class PSBTBuilder {
       for (const u of sorted) {
         selected.push(u);
         total += u.value;
-        const vbytes = estimateVBytes(selected.length, outputs.length + 1); // +1 potential change
+        const vbytes = estimateVBytes(selected, outputs.length + 1); // +1 potential change
         const fee = Math.ceil(vbytes * feeRate);
         if (total >= targetValue + fee) break;
       }
@@ -70,13 +79,13 @@ export class PSBTBuilder {
     };
 
     pick();
-    const initialVBytes = estimateVBytes(selected.length, outputs.length + 1);
+    const initialVBytes = estimateVBytes(selected, outputs.length + 1);
     let fee = Math.ceil(initialVBytes * feeRate);
     let change = total - targetValue - fee;
     let includeChange = change >= this.dustLimit;
 
     // Re-estimate once we know whether change is included
-    const finalVBytes = estimateVBytes(selected.length, outputs.length + (includeChange ? 1 : 0));
+    const finalVBytes = estimateVBytes(selected, outputs.length + (includeChange ? 1 : 0));
     fee = Math.ceil(finalVBytes * feeRate);
     change = total - targetValue - fee;
     includeChange = change >= this.dustLimit;

@@ -42,6 +42,13 @@ export const DEFAULT_FEE_ESTIMATE: Required<FeeEstimateOptions> = {
 };
 
 /**
+ * Conservative sizing for inputs whose scriptPubKey is unknown and therefore
+ * cannot be verified as segwit: assume legacy P2PKH (~148 vB) so the fee
+ * quote never underpays if the input turns out not to be a witness input.
+ */
+export const UNCLASSIFIED_INPUT_VBYTES = 148;
+
+/**
  * True when a scriptPubKey hex string is a segwit witness program
  * (v0 P2WPKH/P2WSH, v1 P2TR, or any future v2–v16 program): a version opcode
  * (OP_0 or OP_1..OP_16) followed by a single direct push of 2–40 bytes.
@@ -88,8 +95,10 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
   // Filter UTXOs based on policy. UTXOs with a known non-segwit scriptPubKey
   // are excluded: the fee estimate assumes witness inputs and the signing
   // paths only supply witnessUtxo data, so selecting one would produce an
-  // under-fee'd, unsignable transaction. (UTXOs without a scriptPubKey cannot
-  // be classified here and pass through.)
+  // under-fee'd, unsignable transaction. UTXOs without a scriptPubKey cannot
+  // be classified here; they pass through but are fee-sized conservatively
+  // at legacy width (UNCLASSIFIED_INPUT_VBYTES) below so the quote never
+  // underpays.
   let candidateUtxos = utxos.slice().filter(u =>
     typeof u.value === 'number' && u.value > 0 &&
     (!u.scriptPubKey || isSegwitScriptPubKey(u.scriptPubKey))
@@ -115,13 +124,30 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
   // Sort largest first to reduce change outputs and input count
   candidateUtxos.sort((a, b) => b.value - a.value);
 
+  // Per-input sizing: verified segwit inputs use the (possibly overridden)
+  // bytesPerInput; unclassified inputs (no scriptPubKey) are priced at
+  // conservative legacy width unless the caller explicitly overrode
+  // bytesPerInput (an explicit override applies to every input).
+  const est = { ...DEFAULT_FEE_ESTIMATE, ...feeEstimate };
+  const perInputOverridden = feeEstimate?.bytesPerInput !== undefined;
+  const inputVBytes = (u: Utxo): number =>
+    perInputOverridden || (u.scriptPubKey && isSegwitScriptPubKey(u.scriptPubKey))
+      ? est.bytesPerInput
+      : UNCLASSIFIED_INPUT_VBYTES;
+  const feeForSelection = (numOutputs: number): number => {
+    const bytes = est.baseTxBytes
+      + selected.reduce((sum, u) => sum + inputVBytes(u), 0)
+      + numOutputs * est.bytesPerOutput;
+    return Math.ceil(bytes * feeRateSatsPerVb);
+  };
+
   // We'll iteratively include inputs and recompute fee until covered
   for (const utxo of candidateUtxos) {
     selected.push(utxo);
     accumulated += utxo.value;
 
     // Assume two outputs initially
-    const fee = estimateFeeSats(selected.length, 2, feeRateSatsPerVb, feeEstimate);
+    const fee = feeForSelection(2);
     const required = targetAmountSats + fee;
 
     if (accumulated >= required) {

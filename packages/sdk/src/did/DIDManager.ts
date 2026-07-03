@@ -6,7 +6,7 @@ import { createBtcoDidDocument } from './createBtcoDidDocument.js';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter.js';
 import { multikey } from '../crypto/Multikey.js';
 import { KeyManager } from './KeyManager.js';
-import { WebVHManager, normalizeUpdateKey, assertEd25519WebVHKeys } from './WebVHManager.js';
+import { WebVHManager, normalizeUpdateKey, assertEd25519WebVHUpdateKeys } from './WebVHManager.js';
 import { Ed25519Verifier } from './Ed25519Verifier.js';
 import type {
   RotateWebVHKeysOptions,
@@ -158,6 +158,24 @@ export class DIDManager {
       ...didDoc,
       id: newDid
     };
+    const docController = (didDoc as unknown as { controller?: unknown }).controller;
+    if (typeof docController === 'string') {
+      (migrated as unknown as Record<string, unknown>).controller = rewriteRef(docController);
+    } else if (Array.isArray(docController)) {
+      (migrated as unknown as Record<string, unknown>).controller = docController.map((c) =>
+        typeof c === 'string' ? rewriteRef(c) : c
+      );
+    }
+    if (Array.isArray(didDoc.service)) {
+      migrated.service = didDoc.service.map((svc) =>
+        svc && typeof svc === 'object'
+          ? {
+              ...svc,
+              ...(typeof svc.id === 'string' ? { id: rewriteRef(svc.id) } : {})
+            }
+          : svc
+      );
+    }
     if (Array.isArray(didDoc.verificationMethod)) {
       migrated.verificationMethod = didDoc.verificationMethod.map((vm) => ({
         ...vm,
@@ -442,7 +460,7 @@ export class DIDManager {
       }
       verificationMethods = providedVerificationMethods;
       updateKeys = providedUpdateKeys.map(normalizeUpdateKey);
-      assertEd25519WebVHKeys(verificationMethods, updateKeys);
+      assertEd25519WebVHUpdateKeys(updateKeys);
       keyPair = undefined; // No key pair when using external signer
     } else {
       // Generate or use provided key pair (Ed25519 for did:webvh)

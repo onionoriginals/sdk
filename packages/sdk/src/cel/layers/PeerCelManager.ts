@@ -217,18 +217,20 @@ export class PeerCelManager {
   /**
    * Discovers the signer's public multikey by asking it to sign a probe
    * payload and reading the `did:key:` verificationMethod it reports on the
-   * resulting proof. The probe signature is discarded. Returns null when the
-   * signer fails or does not use a did:key verification method.
+   * resulting proof. The probe signature is discarded.
+   *
+   * Returns null only when the signer does not use a did:key verification
+   * method (its create proofs then aren't subject to the self-certifying
+   * binding check either). A signing FAILURE propagates: swallowing it would
+   * fall back to a random embedded key, and a did:key signer's create event
+   * would later fail verifyEventLog's binding check — a silently
+   * unverifiable asset instead of a clear error at creation time.
    */
   private async discoverSignerPublicKey(): Promise<string | null> {
-    try {
-      const probeProof = await this.signer({ type: 'originals-vm-discovery-probe' });
-      const vm = probeProof?.verificationMethod;
-      const keyMatch = typeof vm === 'string' ? vm.match(/^did:key:(z[a-zA-Z0-9]+)/) : null;
-      return keyMatch ? keyMatch[1] : null;
-    } catch {
-      return null;
-    }
+    const probeProof = await this.signer({ type: 'originals-vm-discovery-probe' });
+    const vm = probeProof?.verificationMethod;
+    const keyMatch = typeof vm === 'string' ? vm.match(/^did:key:(z[a-zA-Z0-9]+)/) : null;
+    return keyMatch ? keyMatch[1] : null;
   }
 
   /**
