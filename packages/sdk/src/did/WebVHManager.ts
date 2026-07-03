@@ -8,15 +8,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 /**
- * Compute the pre-rotation key hash for a did:key identifier.
+ * Compute the pre-rotation key hash for an update key.
  * Mirrors didwebvh-ts's internal `deriveNextKeyHash`:
- *   SHA-256(utf8(keyId)) → prepend multihash header [0x12, 0x20] → base58btc encode (no multibase prefix).
+ *   SHA-256(utf8(updateKey)) → prepend multihash header [0x12, 0x20] → base58btc encode (no multibase prefix).
  *
- * @param didKeyId - The did:key identifier string, e.g. "did:key:z6Mk..."
+ * @param updateKey - The update key exactly as it will appear in `updateKeys`,
+ *   i.e. a bare multikey string such as "z6Mk..." (didwebvh-ts >= 2.8 / did:webvh spec format)
  * @returns Base58btc-encoded multihash string suitable for use in `nextKeyHashes`
  */
-export function computeNextKeyHash(didKeyId: string): string {
-  const data = new TextEncoder().encode(didKeyId);
+export function computeNextKeyHash(updateKey: string): string {
+  const data = new TextEncoder().encode(updateKey);
   const digest = sha256(data);
   // Multihash: 0x12 = sha2-256 code, 0x20 = 32 bytes (digest length)
   const multihash = new Uint8Array(2 + digest.length);
@@ -24,6 +25,19 @@ export function computeNextKeyHash(didKeyId: string): string {
   multihash[1] = 0x20;
   multihash.set(digest, 2);
   return base58.encode(multihash);
+}
+
+/**
+ * Normalize an update key to the bare multikey form required by
+ * didwebvh-ts >= 2.8 (and the did:webvh spec): "z6Mk...".
+ * Accepts legacy "did:key:z6Mk..." / "did:key:z6Mk...#z6Mk..." input and
+ * strips the prefix and fragment.
+ */
+export function normalizeUpdateKey(key: string): string {
+  if (key.startsWith('did:key:')) {
+    return key.slice('did:key:'.length).split('#')[0];
+  }
+  return key;
 }
 
 // Type definitions for didwebvh-ts (to avoid module resolution issues)
@@ -144,7 +158,7 @@ export interface CreateWebVHOptions {
   externalSigner?: ExternalSigner; // External signer (e.g., Turnkey integration)
   externalVerifier?: ExternalVerifier; // External verifier
   verificationMethods?: VerificationMethod[]; // Pre-configured verification methods
-  updateKeys?: string[]; // Pre-configured update keys (e.g., ["did:key:z6Mk..."])
+  updateKeys?: string[]; // Pre-configured update keys as bare multikeys (e.g., ["z6Mk..."]); legacy "did:key:z6Mk..." values are normalized
   /**
    * Enable pre-rotation mode. When true, a second "next" key pair is generated
    * and its hash committed into `nextKeyHashes` of the initial log entry.
@@ -342,7 +356,7 @@ export class WebVHManager {
         );
       }
       verificationMethods = providedVerificationMethods;
-      updateKeys = providedUpdateKeys;
+      updateKeys = providedUpdateKeys.map(normalizeUpdateKey);
       keyPair = undefined; // No key pair when using external signer
     } else {
       // Generate or use provided key pair (Ed25519 for did:webvh)
@@ -366,7 +380,8 @@ export class WebVHManager {
 
       signer = internalSigner;
       verifier = internalSigner; // Use the same signer as verifier
-      updateKeys = [`did:key:${keyPair.publicKey}`]; // Use did:key format for authorization
+      // Bare multikey format per the did:webvh spec (didwebvh-ts >= 2.8)
+      updateKeys = [keyPair.publicKey];
     }
 
     // Pre-rotation: generate the "next" key pair and commit its hash.
@@ -376,8 +391,7 @@ export class WebVHManager {
     if (prerotation) {
       // (externalSigner + prerotation already rejected up front.)
       nextKeyPairForPrerotation = await this.keyManager.generateKeyPair('Ed25519');
-      const nextKeyId = `did:key:${nextKeyPairForPrerotation.publicKey}`;
-      nextKeyHashes = [computeNextKeyHash(nextKeyId)];
+      nextKeyHashes = [computeNextKeyHash(nextKeyPairForPrerotation.publicKey)];
     }
 
     // Create the DID using didwebvh-ts
@@ -825,7 +839,7 @@ export class WebVHManager {
       log: currentLog,
       signer,
       verifier: signer,
-      updateKeys: [`did:key:${newKeyPair.publicKey}`],
+      updateKeys: [newKeyPair.publicKey],
       verificationMethods: [newVerificationMethod],
       authentication: ['#key-0'],
       assertionMethod: ['#key-0'],
@@ -888,8 +902,7 @@ export class WebVHManager {
         'The DID was not created with prerotation:true or the chain is broken.'
       );
     }
-    const activeKeyId = `did:key:${activeKeyPair.publicKey}`;
-    const activeKeyHash = computeNextKeyHash(activeKeyId);
+    const activeKeyHash = computeNextKeyHash(activeKeyPair.publicKey);
     if (!prevNextKeyHashes.includes(activeKeyHash)) {
       throw new Error(
         `Pre-rotation violation: currentKeyPair hash (${activeKeyHash}) is not in the ` +
@@ -911,14 +924,13 @@ export class WebVHManager {
     );
 
     // Commit the hash of the next key to continue the pre-rotation chain.
-    const nextKeyId = `did:key:${nextKeyPair.publicKey}`;
-    const nextKeyHashes = [computeNextKeyHash(nextKeyId)];
+    const nextKeyHashes = [computeNextKeyHash(nextKeyPair.publicKey)];
 
     const result = await updateDID({
       log: currentLog,
       signer,
       verifier: signer,
-      updateKeys: [`did:key:${activeKeyPair.publicKey}`],
+      updateKeys: [activeKeyPair.publicKey],
       nextKeyHashes,
       verificationMethods: [activeVerificationMethod],
       authentication: ['#key-0'],

@@ -2,6 +2,41 @@ import { describe, test, expect, mock, beforeEach } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import { signAsync, getPublicKeyAsync } from '@noble/ed25519';
 
+/**
+ * Build a factory for external signers backed by real Ed25519 keys, so
+ * didwebvh-ts's cryptographic validation passes. Mirrors how the auth
+ * package's Turnkey signer integrates (sign + verify + getVerificationMethodId).
+ */
+async function makeSignerFactory() {
+  const { KeyManager } = await import('../../../src/did/KeyManager');
+  const { Ed25519Signer } = await import('../../../src/crypto/Signer');
+  const { multikey } = await import('../../../src/crypto/Multikey');
+  const { prepareDataForSigning } = await import('didwebvh-ts');
+
+  const keyManager = new KeyManager();
+  const internalSigner = new Ed25519Signer();
+
+  async function makeSigner() {
+    const keyPair = await keyManager.generateKeyPair('Ed25519');
+    const vmId = `did:key:${keyPair.publicKey}`;
+    const signer = {
+      getVerificationMethodId: () => vmId,
+      async sign(input: { document: Record<string, unknown>; proof: Record<string, unknown> }) {
+        const dataToSign = await prepareDataForSigning(input.document, input.proof);
+        const sig: Buffer = await internalSigner.sign(Buffer.from(dataToSign), keyPair.privateKey);
+        return { proofValue: multikey.encodeMultibase(sig) };
+      },
+      async verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array) {
+        const pubMultibase = multikey.encodePublicKey(publicKey, 'Ed25519');
+        return internalSigner.verify(Buffer.from(message), Buffer.from(signature), pubMultibase);
+      },
+    };
+    return { signer, keyPair, vmId };
+  }
+
+  return { makeSigner };
+}
+
 describe('OriginalsSDK', () => {
   test('create() returns instance with managers and defaults', () => {
     const sdk = OriginalsSDK.create();
@@ -152,6 +187,121 @@ describe('OriginalsSDK', () => {
       await expect(OriginalsSDK.createOriginal(options))
         .rejects.toThrow('Unsupported Original type: invalid');
     });
+
+    test('createDIDOriginal accepts legacy did:key-prefixed updateKeys (didwebvh-ts 2.8 requires bare multikeys)', async () => {
+      // Regression: didwebvh-ts 2.8.0 authorizes update proofs against bare
+      // multikey updateKeys ("z6Mk..."). External-signer integrations (e.g. the
+      // auth package's Turnkey signer) pass signer.getVerificationMethodId()
+      // ("did:key:z6Mk...") as an updateKey; without normalization createDID
+      // fails with "Key did:key:... is not authorized to update."
+      const { makeSigner } = await makeSignerFactory();
+      const { signer, keyPair, vmId } = await makeSigner();
+
+      const result = await OriginalsSDK.createDIDOriginal({
+        type: 'did',
+        domain: 'example.com',
+        signer: signer as any,
+        verifier: signer as any,
+        updateKeys: [vmId], // legacy prefixed form, as the auth package passes
+        verificationMethods: [
+          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+        ],
+      });
+
+      expect(result.did).toMatch(/^did:webvh:/);
+      // The log's updateKeys must be stored in the bare multikey (spec) form.
+      expect(result.meta.updateKeys).toEqual([keyPair.publicKey]);
+    }, 20000);
+
+    test('createDIDOriginal forwards nextKeyHashes and supports a full pre-rotation chain', async () => {
+      // Regression: createDIDOriginal silently dropped nextKeyHashes (and other
+      // declared options), so callers requesting pre-rotation got none.
+      const { computeNextKeyHash } = await import('../../../src/did/WebVHManager');
+      const { makeSigner } = await makeSignerFactory();
+
+      const active = await makeSigner();
+      const next = await makeSigner();
+      const nextKeyHashes = [computeNextKeyHash(next.keyPair.publicKey)];
+
+      const created = await OriginalsSDK.createDIDOriginal({
+        type: 'did',
+        domain: 'example.com',
+        signer: active.signer as any,
+        verifier: active.signer as any,
+        updateKeys: [active.keyPair.publicKey],
+        nextKeyHashes,
+        portable: true,
+        verificationMethods: [
+          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: active.keyPair.publicKey },
+        ],
+      });
+
+      expect(created.meta.nextKeyHashes).toEqual(nextKeyHashes);
+      expect(created.meta.prerotation).toBe(true);
+      expect(created.meta.portable).toBe(true);
+
+      // The committed hash must actually authorize the next rotation:
+      // rotate to the pre-committed key (signed by it, per didwebvh-ts).
+      const updated = await OriginalsSDK.updateDIDOriginal({
+        type: 'did',
+        log: created.log,
+        signer: next.signer as any,
+        verifier: next.signer as any,
+        updateKeys: [next.keyPair.publicKey],
+        nextKeyHashes: [],
+        verificationMethods: [
+          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: next.keyPair.publicKey },
+        ],
+      });
+
+      expect(updated.log.length).toBe(created.log.length + 1);
+      expect(updated.meta.updateKeys).toEqual([next.keyPair.publicKey]);
+    }, 20000);
+
+    test('createDIDOriginal rejects legacy did:key updateKeys combined with nextKeyHashes', async () => {
+      // nextKeyHashes commit to the exact updateKey string; normalizing the
+      // updateKeys while keeping caller-computed hashes would corrupt the
+      // pre-rotation chain at the NEXT rotation. Fail fast instead.
+      const { makeSigner } = await makeSignerFactory();
+      const active = await makeSigner();
+
+      await expect(OriginalsSDK.createDIDOriginal({
+        type: 'did',
+        domain: 'example.com',
+        signer: active.signer as any,
+        verifier: active.signer as any,
+        updateKeys: [`did:key:${active.keyPair.publicKey}`],
+        nextKeyHashes: ['QmSomeCommittedHash'],
+        verificationMethods: [
+          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: active.keyPair.publicKey },
+        ],
+      })).rejects.toThrow(/bare multikey form/);
+    });
+
+    test('updateDIDOriginal rejects legacy did:key updateKeys combined with nextKeyHashes', async () => {
+      const { makeSigner } = await makeSignerFactory();
+      const active = await makeSigner();
+
+      const created = await OriginalsSDK.createDIDOriginal({
+        type: 'did',
+        domain: 'example.com',
+        signer: active.signer as any,
+        verifier: active.signer as any,
+        updateKeys: [active.keyPair.publicKey],
+        verificationMethods: [
+          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: active.keyPair.publicKey },
+        ],
+      });
+
+      await expect(OriginalsSDK.updateDIDOriginal({
+        type: 'did',
+        log: created.log,
+        signer: active.signer as any,
+        verifier: active.signer as any,
+        updateKeys: [`did:key:${active.keyPair.publicKey}`],
+        nextKeyHashes: ['QmSomeCommittedHash'],
+      })).rejects.toThrow(/bare multikey form/);
+    }, 20000);
   });
 
   describe('updateOriginal', () => {

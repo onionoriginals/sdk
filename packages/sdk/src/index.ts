@@ -22,6 +22,7 @@ export * from './types/index.js';
 
 // Manager exports
 export { DIDManager, type CreateWebVHOptions, type CreateWebVHResult } from './did/DIDManager.js';
+export { computeNextKeyHash, normalizeUpdateKey } from './did/WebVHManager.js';
 export { DIDCache, type DIDCacheConfig, type DIDCacheStorage, type DIDCacheEntry } from './did/DIDCache.js';
 export { KeyManager } from './did/KeyManager.js';
 export { Ed25519Verifier } from './did/Ed25519Verifier.js';

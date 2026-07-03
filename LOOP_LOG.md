@@ -93,3 +93,102 @@ provenance). Fixed the confirmed correctness bugs, each with a regression test:
 
 ### Result
 - Suites run per fix all green; typecheck clean. Full-suite + lint re-run pending push.
+
+---
+
+Branch: `claude/originals-sdk-correctness-ws3gte` (continuation after #230 merged)
+
+## Iteration 1 — 2026-07-02
+
+### Ground truth
+- Requested first: upgrade `didwebvh-ts` 2.7.5 → 2.8.0.
+- After the upgrade, `bun test`: 3130 pass / 79 fail.
+  - 63 failures: every did:webvh create/update/rotate/recover path threw
+    `Key did:key:z6Mk... is not authorized to update.` inside didwebvh-ts.
+  - 16 failures: CEL-CLI subprocess tests — environment-only (`packages/sdk/dist`
+    missing in the fresh clone); green after `bun run build`, no code change.
+- `bun run typecheck`: clean. `bun run lint`: 0 errors (87 warnings, pre-existing).
+- No open PR for this branch yet; branch tip == origin/main (709c908).
+
+### Work items
+1. **didwebvh-ts 2.8.0 breaking change — `updateKeys` format.** 2.8.0's
+   `isKeyAuthorized` compares each `updateKeys` entry against the *bare multikey*
+   parsed from the proof's `did:key:` verification method (matching the did:webvh
+   spec), where 2.7.5 stripped a `did:key:` prefix from `updateKeys` itself. The SDK
+   passed `did:key:z6Mk...`-prefixed updateKeys everywhere, so every log entry
+   failed authorization. Since `deriveNextKeyHash` hashes the updateKey string
+   verbatim, pre-rotation `nextKeyHashes` had to move to the bare format too.
+   - `WebVHManager`/`DIDManager`: pass bare `keyPair.publicKey` as updateKeys in
+     create/appendKeyChange/appendKeyChangePrerotation; compute `nextKeyHashes`
+     and the SDK-level pre-rotation guard hash over the bare key.
+   - Added exported `normalizeUpdateKey()` and applied it to caller-provided
+     `updateKeys` (external-signer paths), so the documented legacy
+     `"did:key:z6Mk..."` input keeps working. Direct unit tests added
+     (`tests/unit/did/webvh-prerotation.test.ts`), and existing external-signer
+     tests that pass `did:key:`-prefixed updateKeys now cover the normalization
+     end-to-end through didwebvh-ts resolution.
+   - Updated 2 test assertions that asserted the old `did:key:`-prefixed
+     nextKeyHash input (intentional behavior change tracking the spec).
+2. Deferred: logs created/published under ≤2.7.5 store `did:key:`-prefixed
+   updateKeys inside signed entries and will not verify under 2.8.0's stricter
+   check — added to FOLLOWUP.md (item 11).
+
+### Result
+- Full suite: **3209 pass / 0 fail / 71 skip** across 171 files (post-build).
+- Typecheck clean; lint 0 errors.
+
+## Iteration 2 — 2026-07-02 (CI feedback on PR #231)
+
+### Ground truth
+- PR #231 opened; CI on 6f0128b: Typecheck/Lint/ESM green, two failures:
+  - `Changeset present` — repo requires a changeset for SDK changes.
+  - `Tests pass` — `@originals/auth#test` failed: 2 failures in
+    `turnkey-did-creation.integration.test.ts` with the same 2.8.0
+    "Key did:key:... is not authorized to update." error. Root cause: a third
+    didwebvh-ts entry point missed in iteration 1 — `OriginalsSDK.createDIDOriginal`
+    / `updateDIDOriginal` pass caller `updateKeys` straight through, and the auth
+    package passes `signer.getVerificationMethodId()` (`did:key:z6Mk...`).
+
+### Work items
+1. Normalize caller-provided `updateKeys` via `normalizeUpdateKey` in
+   `OriginalsSDK.createDIDOriginal` and `updateDIDOriginal` (matches the
+   WebVHManager/DIDManager external-signer paths). Regression test added in
+   `tests/unit/core/OriginalsSDK.test.ts` reproducing the auth package's usage
+   (external signer + `did:key:`-prefixed updateKey) and asserting the log's
+   `meta.updateKeys` stores the bare-multikey spec form.
+2. Added changeset `.changeset/didwebvh-ts-2-8-updatekeys.md` (patch,
+   @originals/sdk) for the `Changeset present` check.
+
+### Result
+- `@originals/auth`: 190 pass / 0 fail. Full turbo suite: 4/4 tasks green.
+- Typecheck clean; lint 0 errors.
+
+## Iteration 3 — 2026-07-02 (Macroscope review on PR #231)
+
+### Review comments triaged
+1. 🟠 High (OriginalsSDK.ts, updateDIDOriginal): normalizing `updateKeys` while
+   forwarding caller-computed `nextKeyHashes` unchanged can silently break a
+   pre-rotation chain — hashes commit to the exact updateKey string and cannot
+   be normalized after hashing. **Actionable — fixed.**
+2. 🟡 Medium (.changeset): patch bump documents a breaking change (old persisted
+   logs no longer verify under 2.8.0). **Actionable — fixed** (patch → major).
+
+### Work items
+1. Added `assertBareUpdateKeysForPrerotation` guard to both
+   `createDIDOriginal` and `updateDIDOriginal`: combining legacy
+   `did:key:`-form updateKeys with `nextKeyHashes` now fails fast with a
+   descriptive error instead of committing hashes that can never match a
+   future normalized updateKey. Documented the format contract on both
+   option interfaces; exported `computeNextKeyHash` and `normalizeUpdateKey`
+   from the package index so callers can compute spec-form hashes.
+2. Found while fixing: `createDIDOriginal` silently dropped declared options
+   (`nextKeyHashes`, `portable`, `controller`, `alsoKnownAs`, `authentication`,
+   `assertionMethod`, `keyAgreement`, `services`) — pre-rotation requested at
+   create time was ignored entirely. Now forwarded.
+3. Changeset bumped to major with an explicit BREAKING section.
+4. Regression tests: full pre-rotation chain through the wrappers
+   (create with nextKeyHashes → rotate to pre-committed key), guard rejection
+   on both create and update paths.
+
+### Result
+- Full turbo suite green (0 fail), typecheck clean, lint 0 errors.

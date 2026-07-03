@@ -15,9 +15,25 @@
  */
 
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { WebVHManager, computeNextKeyHash } from '../../../src/did/WebVHManager';
+import { WebVHManager, computeNextKeyHash, normalizeUpdateKey } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { Ed25519Verifier } from '../../../src/did/Ed25519Verifier';
+
+describe('normalizeUpdateKey', () => {
+  const multikey = 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+
+  test('leaves bare multikey strings unchanged', () => {
+    expect(normalizeUpdateKey(multikey)).toBe(multikey);
+  });
+
+  test('strips legacy did:key: prefix', () => {
+    expect(normalizeUpdateKey(`did:key:${multikey}`)).toBe(multikey);
+  });
+
+  test('strips did:key: prefix and fragment', () => {
+    expect(normalizeUpdateKey(`did:key:${multikey}#${multikey}`)).toBe(multikey);
+  });
+});
 
 describe('computeNextKeyHash', () => {
   test('produces a non-empty base58btc string', () => {
@@ -72,7 +88,7 @@ describe('WebVHManager — pre-rotation creation', () => {
     expect(storedHashes!.length).toBe(1);
 
     // Verify it matches computeNextKeyHash of the returned nextKeyPair
-    const expectedHash = computeNextKeyHash(`did:key:${result.nextKeyPair!.publicKey}`);
+    const expectedHash = computeNextKeyHash(result.nextKeyPair!.publicKey);
     expect(storedHashes![0]).toBe(expectedHash);
   }, 15000);
 
@@ -194,7 +210,7 @@ describe('WebVHManager — pre-rotation key rotation chain', () => {
     expect(Array.isArray(storedHashes)).toBe(true);
     expect(storedHashes!.length).toBe(1);
 
-    const expectedHash = computeNextKeyHash(`did:key:${r1.nextKeyPair!.publicKey}`);
+    const expectedHash = computeNextKeyHash(r1.nextKeyPair!.publicKey);
     expect(storedHashes![0]).toBe(expectedHash);
   }, 20000);
 
