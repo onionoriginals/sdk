@@ -223,18 +223,15 @@ describe('Batch Operations Performance', () => {
         }
       });
 
-      await sdk.lifecycle.batchInscribeOnBitcoin(assets, {
-        singleTransaction: true,
-        feeRate: 10
-      });
-
-      expect(costSavings).toBeDefined();
-      expect(costSavings.percentage).toBeGreaterThanOrEqual(30);
-
-      console.log('\nCost Savings Analysis:');
-      console.log(`Batch Fee: ${costSavings.amount} sats`);
-      console.log(`Individual Fees Total: ${costSavings.amount + costSavings.amount} sats`);
-      console.log(`Savings: ${costSavings.amount} sats (${costSavings.percentage.toFixed(2)}%)`);
+      // singleTransaction (shared-satoshi) batching is rejected: each asset
+      // must be tied to its own sat, so no cost-savings event is emitted.
+      await expect(
+        sdk.lifecycle.batchInscribeOnBitcoin(assets, {
+          singleTransaction: true,
+          feeRate: 10
+        })
+      ).rejects.toThrow('singleTransaction batch inscription is not supported');
+      expect(costSavings).toBeNull();
     });
 
     test.skip('cost savings should increase with batch size', async () => {
@@ -382,7 +379,7 @@ describe('Batch Operations Performance', () => {
       const inscribeStart = Date.now();
       const inscribeResult = await sdk.lifecycle.batchInscribeOnBitcoin(
         publishResult.successful.map(s => s.result),
-        { singleTransaction: true, feeRate: 10 }
+        { feeRate: 10 }
       );
       const inscribeTime = Date.now() - inscribeStart;
       

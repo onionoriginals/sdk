@@ -6,7 +6,7 @@ import { createBtcoDidDocument } from './createBtcoDidDocument.js';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter.js';
 import { multikey } from '../crypto/Multikey.js';
 import { KeyManager } from './KeyManager.js';
-import { WebVHManager, normalizeUpdateKey } from './WebVHManager.js';
+import { WebVHManager, normalizeUpdateKey, assertEd25519WebVHUpdateKeys } from './WebVHManager.js';
 import { Ed25519Verifier } from './Ed25519Verifier.js';
 import type {
   RotateWebVHKeysOptions,
@@ -145,10 +145,63 @@ export class DIDManager {
     // splits the DID on ':' — including this SDK's own saveDIDLog, which does
     // decodeURIComponent(didParts[2]) and expects the port to be encoded there.
     const authority = portPart ? `${domainPart}%3A${portPart}` : normalized;
+    const oldDid = didDoc.id;
+    const newDid = `did:webvh:${authority}:${slug}`;
+
+    // Rewrite a reference from the old DID to the new one. Relative
+    // references ('#key-0') and references to foreign DIDs are preserved.
+    const rewriteRef = (ref: string): string =>
+      ref === oldDid ? newDid : ref.startsWith(`${oldDid}#`) ? newDid + ref.slice(oldDid.length) : ref;
+
+    // The migrated document must be internally consistent: verification
+    // method ids/controllers, relationship references, top-level controller
+    // and service ids must all point at the new did:webvh subject, not the
+    // retired did:peer.
     const migrated: DIDDocument = {
       ...didDoc,
-      id: `did:webvh:${authority}:${slug}`
+      id: newDid
     };
+    const docController = (didDoc as unknown as { controller?: unknown }).controller;
+    if (typeof docController === 'string') {
+      (migrated as unknown as Record<string, unknown>).controller = rewriteRef(docController);
+    } else if (Array.isArray(docController)) {
+      (migrated as unknown as Record<string, unknown>).controller = docController.map((c) =>
+        typeof c === 'string' ? rewriteRef(c) : c
+      );
+    }
+    if (Array.isArray(didDoc.service)) {
+      migrated.service = didDoc.service.map((svc) =>
+        svc && typeof svc === 'object'
+          ? {
+              ...svc,
+              ...(typeof svc.id === 'string' ? { id: rewriteRef(svc.id) } : {})
+            }
+          : svc
+      );
+    }
+    if (Array.isArray(didDoc.verificationMethod)) {
+      migrated.verificationMethod = didDoc.verificationMethod.map((vm) => ({
+        ...vm,
+        ...(typeof vm.id === 'string' ? { id: rewriteRef(vm.id) } : {}),
+        ...(typeof vm.controller === 'string' ? { controller: rewriteRef(vm.controller) } : {})
+      }));
+    }
+    for (const rel of ['authentication', 'assertionMethod', 'keyAgreement', 'capabilityInvocation', 'capabilityDelegation'] as const) {
+      const entries = (didDoc as unknown as Record<string, unknown>)[rel];
+      if (Array.isArray(entries)) {
+        (migrated as unknown as Record<string, unknown>)[rel] = entries.map((entry) =>
+          typeof entry === 'string'
+            ? rewriteRef(entry)
+            : entry && typeof entry === 'object'
+              ? {
+                  ...(entry as Record<string, unknown>),
+                  ...(typeof (entry as { id?: unknown }).id === 'string' ? { id: rewriteRef((entry as { id: string }).id) } : {}),
+                  ...(typeof (entry as { controller?: unknown }).controller === 'string' ? { controller: rewriteRef((entry as { controller: string }).controller) } : {})
+                }
+              : entry
+        );
+      }
+    }
     return await Promise.resolve(migrated);
     }); // end track did.migrateToDIDWebVH
   }
@@ -251,7 +304,20 @@ export class DIDManager {
           }
         } else if (did.startsWith('did:btco:')) {
           const rpcUrl = this.config.bitcoinRpcUrl || 'http://localhost:3000';
-          const network = this.config.network || 'mainnet';
+          // The network is encoded in the DID itself (did:btco:reg:/did:btco:sig:,
+          // unprefixed = mainnet), so resolution must follow the DID, not the
+          // SDK-wide config — a signet DID handed to a mainnet-configured SDK
+          // must still be treated as a signet identifier.
+          const btcoPrefix = did.match(/^did:btco:(reg|sig|test):/)?.[1];
+          const network: 'mainnet' | 'regtest' | 'signet' =
+            btcoPrefix === 'reg' ? 'regtest'
+            : btcoPrefix === 'sig' ? 'signet'
+            : btcoPrefix === 'test'
+              // OrdinalsClient has no testnet variant; fall back to the
+              // configured network (BtcoDidResolver still validates the DID
+              // against its own testnet prefix).
+              ? (this.config.network || 'mainnet')
+              : 'mainnet';
           const client = new OrdinalsClient(rpcUrl, network);
           const adapter = new OrdinalsClientProviderAdapter(client, rpcUrl);
           const resolver = new BtcoDidResolver({ provider: adapter });
@@ -397,6 +463,7 @@ export class DIDManager {
       }
       verificationMethods = providedVerificationMethods;
       updateKeys = providedUpdateKeys.map(normalizeUpdateKey);
+      assertEd25519WebVHUpdateKeys(updateKeys);
       keyPair = undefined; // No key pair when using external signer
     } else {
       // Generate or use provided key pair (Ed25519 for did:webvh)

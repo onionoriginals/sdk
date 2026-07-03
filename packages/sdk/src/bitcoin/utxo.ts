@@ -27,11 +27,45 @@ export interface SelectionResult {
   changeSats: number;
 }
 
+/**
+ * Default per-component vsize estimates. The SDK's transaction paths accept
+ * only segwit funding UTXOs (see isSegwitScriptPubKey), so the per-input
+ * constant is the P2WPKH ~68 vB used by every other estimator
+ * (utxo-selection.ts, PSBTBuilder, commit.ts) — a legacy P2PKH input would be
+ * ~148 vB, which is exactly why legacy inputs are rejected rather than
+ * silently under-fee'd.
+ */
 export const DEFAULT_FEE_ESTIMATE: Required<FeeEstimateOptions> = {
-  bytesPerInput: 148,
+  bytesPerInput: 68,
   bytesPerOutput: 34,
   baseTxBytes: 10
 };
+
+/**
+ * Conservative sizing for inputs whose scriptPubKey is unknown and therefore
+ * cannot be verified as segwit: assume legacy P2PKH (~148 vB) so the fee
+ * quote never underpays if the input turns out not to be a witness input.
+ */
+export const UNCLASSIFIED_INPUT_VBYTES = 148;
+
+/**
+ * True when a scriptPubKey hex string is a segwit witness program
+ * (v0 P2WPKH/P2WSH, v1 P2TR, or any future v2–v16 program): a version opcode
+ * (OP_0 or OP_1..OP_16) followed by a single direct push of 2–40 bytes.
+ *
+ * The SDK's fee estimators assume witness inputs (~68 vB) and its signers
+ * provide only `witnessUtxo` data, so a legacy (P2PKH/P2SH) funding UTXO
+ * would be fee-under-estimated AND unsignable — callers must reject them.
+ */
+export function isSegwitScriptPubKey(scriptPubKeyHex: string): boolean {
+  const hex = scriptPubKeyHex.toLowerCase();
+  if (!/^[0-9a-f]+$/.test(hex) || hex.length % 2 !== 0) return false;
+  const totalBytes = hex.length / 2;
+  const versionByte = parseInt(hex.slice(0, 2), 16);
+  const pushLength = parseInt(hex.slice(2, 4), 16);
+  const isVersionOpcode = versionByte === 0x00 || (versionByte >= 0x51 && versionByte <= 0x60);
+  return isVersionOpcode && pushLength >= 2 && pushLength <= 40 && totalBytes === 2 + pushLength;
+}
 
 export function estimateFeeSats(numInputs: number, numOutputs: number, feeRateSatsPerVb: number, feeEstimate: FeeEstimateOptions = {}): number {
   const est = { ...DEFAULT_FEE_ESTIMATE, ...feeEstimate };
@@ -40,7 +74,7 @@ export function estimateFeeSats(numInputs: number, numOutputs: number, feeRateSa
 }
 
 export class UtxoSelectionError extends Error {
-  code: 'INSUFFICIENT_FUNDS' | 'TOO_LOW_FEE' | 'DUST_OUTPUT' | 'CONFLICTING_LOCKS' | 'SAT_SAFETY';
+  code: 'INSUFFICIENT_FUNDS' | 'TOO_LOW_FEE' | 'DUST_OUTPUT' | 'CONFLICTING_LOCKS' | 'SAT_SAFETY' | 'UNSUPPORTED_INPUT';
   constructor(code: UtxoSelectionError['code'], message?: string) {
     super(message || code);
     this.code = code;
@@ -58,8 +92,24 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
     throw err;
   }
 
-  // Filter UTXOs based on policy
-  let candidateUtxos = utxos.slice().filter(u => typeof u.value === 'number' && u.value > 0);
+  // Filter UTXOs based on policy. UTXOs with a known non-segwit scriptPubKey
+  // are excluded: the fee estimate assumes witness inputs and the signing
+  // paths only supply witnessUtxo data, so selecting one would produce an
+  // under-fee'd, unsignable transaction. UTXOs without a scriptPubKey cannot
+  // be classified here; they pass through but are fee-sized conservatively
+  // at legacy width (UNCLASSIFIED_INPUT_VBYTES) below so the quote never
+  // underpays.
+  const isNonSegwit = (u: Utxo): boolean =>
+    !!u.scriptPubKey && !isSegwitScriptPubKey(u.scriptPubKey);
+  // Track excluded non-segwit UTXOs so a wallet whose funds sit in legacy
+  // outputs gets an UNSUPPORTED_INPUT diagnosis instead of a misleading
+  // INSUFFICIENT_FUNDS ("add more funds" would not help).
+  const hasExcludedNonSegwit = utxos.some(u =>
+    typeof u.value === 'number' && u.value > 0 && isNonSegwit(u)
+  );
+  let candidateUtxos = utxos.slice().filter(u =>
+    typeof u.value === 'number' && u.value > 0 && !isNonSegwit(u)
+  );
   const forbidInscribed = forbidInscriptionBearingInputs !== false;
   // A UTXO carries an ordinal either because an inscription id is recorded on it
   // OR because it is flagged with the first-class `hasResource` marker
@@ -89,13 +139,30 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
   // Sort largest first to reduce change outputs and input count
   candidateUtxos.sort((a, b) => b.value - a.value);
 
+  // Per-input sizing: verified segwit inputs use the (possibly overridden)
+  // bytesPerInput; unclassified inputs (no scriptPubKey) are priced at
+  // conservative legacy width unless the caller explicitly overrode
+  // bytesPerInput (an explicit override applies to every input).
+  const est = { ...DEFAULT_FEE_ESTIMATE, ...feeEstimate };
+  const perInputOverridden = feeEstimate?.bytesPerInput !== undefined;
+  const inputVBytes = (u: Utxo): number =>
+    perInputOverridden || (u.scriptPubKey && isSegwitScriptPubKey(u.scriptPubKey))
+      ? est.bytesPerInput
+      : UNCLASSIFIED_INPUT_VBYTES;
+  const feeForSelection = (numOutputs: number): number => {
+    const bytes = est.baseTxBytes
+      + selected.reduce((sum, u) => sum + inputVBytes(u), 0)
+      + numOutputs * est.bytesPerOutput;
+    return Math.ceil(bytes * feeRateSatsPerVb);
+  };
+
   // We'll iteratively include inputs and recompute fee until covered
   for (const utxo of candidateUtxos) {
     selected.push(utxo);
     accumulated += utxo.value;
 
     // Assume two outputs initially
-    const fee = estimateFeeSats(selected.length, 2, feeRateSatsPerVb, feeEstimate);
+    const fee = feeForSelection(2);
     const required = targetAmountSats + fee;
 
     if (accumulated >= required) {
@@ -118,6 +185,13 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
   if (hasUsefulLocked && !allowLocked) {
     const err = new UtxoSelectionError('CONFLICTING_LOCKS', 'CONFLICTING_LOCKS');
     throw err;
+  }
+  if (hasExcludedNonSegwit) {
+    throw new UtxoSelectionError(
+      'UNSUPPORTED_INPUT',
+      'Selection failed and non-segwit (legacy P2PKH/P2SH) UTXOs were excluded: the SDK signs only ' +
+      'witness inputs, so those funds cannot be spent here. Fund the wallet with segwit UTXOs.'
+    );
   }
   const err = new UtxoSelectionError('INSUFFICIENT_FUNDS', 'INSUFFICIENT_FUNDS');
   throw err;

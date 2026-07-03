@@ -125,8 +125,17 @@ export class ResourceManager {
     // Generate hash
     const hash = this.hashContent(contentBuffer);
 
-    // Generate or use provided ID
+    // Generate or use provided ID. An explicit id that already exists must
+    // not silently replace that id's version history with a fresh v1 —
+    // creating is not overwriting. Use updateResource to append a version,
+    // or importResource to merge an externally-produced version.
     const id = options.id || uuidv4();
+    if (options.id && this.resources.has(id)) {
+      throw new Error(
+        `Resource with id "${id}" already exists; createResource does not overwrite. ` +
+        `Use updateResource to add a new version or importResource to merge.`
+      );
+    }
 
     // Create resource object
     const resource: Resource = {

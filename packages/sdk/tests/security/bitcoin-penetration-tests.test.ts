@@ -37,7 +37,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
         txid: 'abc123',
         vout: 0,
         value: 100000,
-        scriptPubKey: 'script',
+        scriptPubKey: '0014' + 'ab'.repeat(20),
         address: 'tb1qtest',
         inscriptions: []
       };
@@ -78,7 +78,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
         txid: 'locked123',
         vout: 0,
         value: 100000,
-        scriptPubKey: 'script',
+        scriptPubKey: '0014' + 'ab'.repeat(20),
         address: 'tb1qtest',
         inscriptions: [],
         hasResource: false,
@@ -89,7 +89,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
         txid: 'unlocked456',
         vout: 0,
         value: 100000,
-        scriptPubKey: 'script',
+        scriptPubKey: '0014' + 'ab'.repeat(20),
         address: 'tb1qtest',
         inscriptions: [],
         hasResource: false
@@ -331,8 +331,8 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
   describe('6. UTXO Selection Edge Cases', () => {
     it('should handle insufficient funds gracefully', () => {
       const utxos: Utxo[] = [
-        { txid: 'tx1', vout: 0, value: 1000, scriptPubKey: 'script', address: 'tb1q', inscriptions: [] },
-        { txid: 'tx2', vout: 0, value: 2000, scriptPubKey: 'script', address: 'tb1q', inscriptions: [] },
+        { txid: 'tx1', vout: 0, value: 1000, scriptPubKey: '0014' + 'ab'.repeat(20), address: 'tb1q', inscriptions: [] },
+        { txid: 'tx2', vout: 0, value: 2000, scriptPubKey: '0014' + 'ab'.repeat(20), address: 'tb1q', inscriptions: [] },
       ];
 
       expect(() => {
@@ -354,7 +354,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
 
     it('should handle dust limit correctly', () => {
       const utxos: ResourceUtxo[] = [
-        { txid: 'tx1', vout: 0, value: 101000, scriptPubKey: 'script', address: 'tb1q', inscriptions: [], hasResource: false },
+        { txid: 'tx1', vout: 0, value: 101000, scriptPubKey: '0014' + 'ab'.repeat(20), address: 'tb1q', inscriptions: [], hasResource: false },
       ];
 
       // Request amount that would leave dust change (< 546 dust limit)
@@ -377,7 +377,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
         txid: 'tx1',
         vout: 0,
         value: 100000,
-        scriptPubKey: 'script',
+        scriptPubKey: '0014' + 'ab'.repeat(20),
         address: 'tb1q',
         inscriptions: ['inscription-id-123'],
         hasResource: true
@@ -387,7 +387,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
         txid: 'tx2',
         vout: 0,
         value: 100000,
-        scriptPubKey: 'script',
+        scriptPubKey: '0014' + 'ab'.repeat(20),
         address: 'tb1q',
         inscriptions: [],
         hasResource: false
@@ -414,7 +414,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
         txid: 'large-tx',
         vout: 0,
         value: Number.MAX_SAFE_INTEGER - 1000,
-        scriptPubKey: 'script',
+        scriptPubKey: '0014' + 'ab'.repeat(20),
         address: 'tb1q',
         inscriptions: []
       };
@@ -446,7 +446,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
         txid: 'shared-tx',
         vout: 0,
         value: 100000,
-        scriptPubKey: 'script',
+        scriptPubKey: '0014' + 'ab'.repeat(20),
         address: 'tb1q',
         inscriptions: []
       };
@@ -511,7 +511,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
         txid: 'min-tx',
         vout: 0,
         value: 546, // Minimum dust limit
-        scriptPubKey: 'script',
+        scriptPubKey: '0014' + 'ab'.repeat(20),
         address: 'tb1q',
         inscriptions: []
       };
@@ -577,7 +577,7 @@ describe('Performance and Resource Exhaustion Tests', () => {
         txid: `tx-${i}`,
         vout: 0,
         value: 10000,
-        scriptPubKey: 'script',
+        scriptPubKey: '0014' + 'ab'.repeat(20),
         address: 'tb1q',
         inscriptions: []
       }));

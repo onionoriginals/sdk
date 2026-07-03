@@ -324,6 +324,13 @@ export class CredentialManager {
     const { proofValue, verificationMethod } = proof;
     if (!proofValue || !verificationMethod) return false;
 
+    // Credential proofs must be assertions (mirrors Verifier.checkProofPurpose
+    // on the Data Integrity path). Legacy signing always emits
+    // `assertionMethod`, so any other purpose is not a valid credential proof.
+    if (proof.proofPurpose !== 'assertionMethod') {
+      return false;
+    }
+
     // Enforce the validity window on the legacy (non-cryptosuite) path too. The
     // Data Integrity path checks this via Verifier; without the same check here
     // a legacy-signed but expired credential would verify.

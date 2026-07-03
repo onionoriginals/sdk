@@ -63,6 +63,38 @@ describe('diwings Verifier', () => {
     expect(res.verified).toBe(true);
   });
 
+  test('rejects a credential whose proof was created for authentication', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vc = await issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'WrongPurpose'],
+        issuer: did,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:peer:subject1' }
+      } as any,
+      { proofPurpose: 'authentication' }
+    );
+    const verifier = new Verifier(didManager);
+    const res = await verifier.verifyCredential(vc);
+    expect(res.verified).toBe(false);
+    expect(res.errors[0]).toContain('proofPurpose');
+  });
+
+  test('rejects a presentation whose proof was created for assertionMethod', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vp = await issuer.issuePresentation(
+      {
+        type: ['VerifiablePresentation'],
+        holder: did
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+    const verifier = new Verifier(didManager);
+    const res = await verifier.verifyPresentation(vp);
+    expect(res.verified).toBe(false);
+    expect(res.errors[0]).toContain('proofPurpose');
+  });
+
   test('fails when proof missing', async () => {
     const verifier = new Verifier(didManager);
     const badVc: any = {
@@ -416,7 +448,7 @@ describe('Verifier with default document loader (no options)', () => {
       '@context': ['https://www.w3.org/ns/credentials/v2', 'https://w3id.org/security/data-integrity/v2'],
       type: ['VerifiableCredential'],
       issuer: 'did:example:issuer',
-      proof: { cryptosuite: 'data-integrity', verificationMethod: 'did:example:issuer#k' }
+      proof: { cryptosuite: 'data-integrity', verificationMethod: 'did:example:issuer#k', proofPurpose: 'assertionMethod' }
     };
     const mod = require('../../../src/vc/proofs/data-integrity');
     const orig = mod.DataIntegrityProofManager.verifyProof;
@@ -432,7 +464,7 @@ describe('Verifier with default document loader (no options)', () => {
       '@context': ['https://www.w3.org/ns/credentials/v2', 'https://w3id.org/security/data-integrity/v2'],
       type: ['VerifiablePresentation'],
       holder: 'did:example:holder',
-      proof: { cryptosuite: 'data-integrity', verificationMethod: 'did:example:holder#k' }
+      proof: { cryptosuite: 'data-integrity', verificationMethod: 'did:example:holder#k', proofPurpose: 'authentication' }
     };
     const mod = require('../../../src/vc/proofs/data-integrity');
     const orig = mod.DataIntegrityProofManager.verifyProof;
@@ -457,7 +489,7 @@ describe('Verifier with mocked DataIntegrityProofManager', () => {
     const { Verifier } = await import('../../../src/vc/Verifier');
     const { DIDManager } = await import('../../../src/did/DIDManager');
     const verifier = new Verifier(new DIDManager({} as any));
-    const res = await verifier.verifyCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:example:issuer', proof: { verificationMethod: 'did:example:issuer#k' } } as any, {
+    const res = await verifier.verifyCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:example:issuer', proof: { verificationMethod: 'did:example:issuer#k', proofPurpose: 'assertionMethod' } } as any, {
       documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null })
     });
     expect(res.verified).toBe(true);
@@ -471,7 +503,7 @@ describe('Verifier with mocked DataIntegrityProofManager', () => {
     const { Verifier } = await import('../../../src/vc/Verifier');
     const { DIDManager } = await import('../../../src/did/DIDManager');
     const verifier = new Verifier(new DIDManager({} as any));
-    const res = await verifier.verifyPresentation({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiablePresentation'], holder: 'did:example:holder', proof: { verificationMethod: 'did:example:holder#k' } } as any, {
+    const res = await verifier.verifyPresentation({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiablePresentation'], holder: 'did:example:holder', proof: { verificationMethod: 'did:example:holder#k', proofPurpose: 'authentication' } } as any, {
       documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null })
     });
     expect(res.verified).toBe(false);
@@ -537,7 +569,7 @@ describe('Verifier error branches', () => {
     const { Verifier } = await import('../../../src/vc/Verifier');
     const { DIDManager } = await import('../../../src/did/DIDManager');
     const localVerifier = new Verifier(new DIDManager({} as any));
-    const res = await localVerifier.verifyCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:example:issuer', proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:issuer#k' } } as any, { documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null }) });
+    const res = await localVerifier.verifyCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:example:issuer', proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:issuer#k', proofPurpose: 'assertionMethod' } } as any, { documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null }) });
     expect(res.verified).toBe(false);
     expect(res.errors[0]).toBe('Verification failed');
     mod.DataIntegrityProofManager.verifyProof = orig;
@@ -680,7 +712,7 @@ describe('Verifier success branches', () => {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential'],
       issuer: 'did:example:issuer',
-      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:issuer#k' }
+      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:issuer#k', proofPurpose: 'assertionMethod' }
     };
     const mod = require('../../../src/vc/proofs/data-integrity');
     const orig = mod.DataIntegrityProofManager.verifyProof;
@@ -706,7 +738,7 @@ describe('Verifier success branches', () => {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiablePresentation'],
       holder: 'did:example:holder',
-      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:holder#k' }
+      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:holder#k', proofPurpose: 'authentication' }
     };
     const { Verifier } = await import('../../../src/vc/Verifier');
     const { DIDManager } = await import('../../../src/did/DIDManager');
@@ -722,9 +754,9 @@ describe('Verifier success branches', () => {
       type: ['VerifiablePresentation'],
       holder: 'did:example:holder',
       verifiableCredential: [
-        { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:example:issuer', proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:issuer#k' } }
+        { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:example:issuer', proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:issuer#k', proofPurpose: 'assertionMethod' } }
       ],
-      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:holder#k' }
+      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:holder#k', proofPurpose: 'authentication' }
     };
     const res2 = await localVerifier.verifyPresentation(vp2, {
       documentLoader: async (iri: string) => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null })

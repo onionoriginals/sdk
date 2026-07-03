@@ -1,8 +1,85 @@
 import { describe, test, expect } from 'bun:test';
-import { estimateFeeSats, selectUtxos } from '../../../src/bitcoin/utxo';
+import { estimateFeeSats, selectUtxos, isSegwitScriptPubKey } from '../../../src/bitcoin/utxo';
+import { PSBTBuilder } from '../../../src/bitcoin/PSBTBuilder';
 import { DUST_LIMIT_SATS, Utxo } from '../../../src/types';
 
 const U = (v: number, opts: Partial<Utxo> = {}): Utxo => ({ txid: 't', vout: 0, value: v, ...opts });
+
+// Representative scriptPubKeys
+const P2WPKH = '0014' + 'ab'.repeat(20);
+const P2WSH = '0020' + 'ab'.repeat(32);
+const P2TR = '5120' + 'ab'.repeat(32);
+const P2PKH = '76a914' + 'ab'.repeat(20) + '88ac';
+const P2SH = 'a914' + 'ab'.repeat(20) + '87';
+
+describe('isSegwitScriptPubKey', () => {
+  test('accepts witness programs (P2WPKH/P2WSH/P2TR)', () => {
+    expect(isSegwitScriptPubKey(P2WPKH)).toBe(true);
+    expect(isSegwitScriptPubKey(P2WSH)).toBe(true);
+    expect(isSegwitScriptPubKey(P2TR)).toBe(true);
+  });
+
+  test('rejects legacy scripts and malformed hex', () => {
+    expect(isSegwitScriptPubKey(P2PKH)).toBe(false);
+    expect(isSegwitScriptPubKey(P2SH)).toBe(false);
+    expect(isSegwitScriptPubKey('')).toBe(false);
+    expect(isSegwitScriptPubKey('0014zz')).toBe(false);
+    // version opcode with wrong program length
+    expect(isSegwitScriptPubKey('0014' + 'ab'.repeat(19))).toBe(false);
+  });
+});
+
+describe('non-segwit funding UTXO rejection', () => {
+  test('selectUtxos excludes UTXOs with legacy scriptPubKeys', () => {
+    const utxos = [
+      U(100000, { scriptPubKey: P2PKH }),
+      U(100000, { scriptPubKey: P2WPKH, txid: 't2' })
+    ];
+    const res = selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 1 });
+    expect(res.selected).toHaveLength(1);
+    expect(res.selected[0].txid).toBe('t2');
+  });
+
+  test('selectUtxos with only legacy UTXOs fails with UNSUPPORTED_INPUT (not INSUFFICIENT_FUNDS)', () => {
+    // The wallet has funds — they just sit in outputs the SDK's segwit-only
+    // signing cannot spend. "Add more funds" would be the wrong diagnosis.
+    const utxos = [U(100000, { scriptPubKey: P2PKH })];
+    let thrown: unknown;
+    try {
+      selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 1 });
+    } catch (e) {
+      thrown = e;
+    }
+    expect((thrown as { code?: string })?.code).toBe('UNSUPPORTED_INPUT');
+  });
+
+  test('PSBTBuilder assumes segwit sizing for inputs without a scriptPubKey', () => {
+    // A single 10,120 sat UTXO funds a 10,000 sat output at 1 sat/vB:
+    // segwit sizing (10 + 68 + 1*31 = 109 vB) covers it; legacy sizing would
+    // spuriously report insufficient funds.
+    const builder = new PSBTBuilder();
+    const result = builder.build({
+      utxos: [U(10_120)],
+      outputs: [{ address: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', value: 10_000 }],
+      changeAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
+      feeRate: 1,
+      network: 'regtest'
+    });
+    expect(result.selectedUtxos).toHaveLength(1);
+    expect(result.fee).toBe(120); // change below dust folds into the fee
+  });
+
+  test('PSBTBuilder rejects legacy funding UTXOs with a clear error', () => {
+    const builder = new PSBTBuilder();
+    expect(() => builder.build({
+      utxos: [U(100000, { scriptPubKey: P2PKH })],
+      outputs: [{ address: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', value: 1000 }],
+      changeAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
+      feeRate: 1,
+      network: 'regtest'
+    })).toThrow('Non-segwit (legacy) funding UTXOs are not supported');
+  });
+});
 
 describe('UTXO selection additional branches', () => {
   test('uses locked inputs when allowLocked=true', () => {
@@ -18,8 +95,10 @@ describe('UTXO selection additional branches', () => {
   });
 
   test('dust change is dropped and folded into the reported fee', () => {
-    // fee(2 outs,1 input,fr=1)=226; change would be 530 (<546 dust limit),
-    // so no change output is created and the full remainder is fee.
+    // An input with no scriptPubKey is unclassified and priced conservatively
+    // at legacy width: fee(2 outs, 1 input, fr=1) = 10 + 148 + 2*34 = 226.
+    // Change would be 530 (<546 dust limit), so no change output is created
+    // and the full remainder is fee.
     const target = 10_000;
     const utxos = [U(target + 226 + 530)];
     const res = selectUtxos(utxos, { targetAmountSats: target, feeRateSatsPerVb: 1 });
@@ -28,11 +107,20 @@ describe('UTXO selection additional branches', () => {
     expect(res.feeSats).toBe(226 + 530);
   });
 
-  test('non-dust change is priced with the two-output fee', () => {
+  test('non-dust change is priced with the two-output fee (unclassified input at legacy width)', () => {
     const target = 10_000;
     const utxos = [U(target + 226 + 1000)];
     const res = selectUtxos(utxos, { targetAmountSats: target, feeRateSatsPerVb: 1 });
     expect(res.feeSats).toBe(226);
+    expect(res.changeSats).toBe(1000);
+  });
+
+  test('a verified segwit input is priced at witness width (68 vB)', () => {
+    // fee(2 outs, 1 segwit input, fr=1) = 10 + 68 + 2*34 = 146.
+    const target = 10_000;
+    const utxos = [U(target + 146 + 1000, { scriptPubKey: P2WPKH })];
+    const res = selectUtxos(utxos, { targetAmountSats: target, feeRateSatsPerVb: 1 });
+    expect(res.feeSats).toBe(146);
     expect(res.changeSats).toBe(1000);
   });
 

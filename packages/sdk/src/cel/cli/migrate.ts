@@ -23,6 +23,7 @@ import { serializeEventLogJson } from '../serialization/json.js';
 import { serializeEventLogCbor } from '../serialization/cbor.js';
 import { multikey } from '../../crypto/Multikey.js';
 import { canonicalizeEvent } from '../canonicalize.js';
+import { btcoDidFromSatoshi } from '../btcoDid.js';
 
 /**
  * Flags parsed from command line arguments
@@ -92,11 +93,13 @@ function detectCurrentLayer(log: EventLog): 'peer' | 'webvh' | 'btco' {
     
     if (event.type === 'create' && data.layer) {
       currentLayer = data.layer as 'peer' | 'webvh' | 'btco';
-    } else if (event.type === 'update' && data.layer && data.sourceDid) {
-      // This is a migration event. Detect via sourceDid (present on both webvh
-      // and btco migrations); btco migrations don't carry targetDid, so keying
-      // off targetDid left btco logs mis-detected as webvh and bypassed the
-      // "cannot migrate from btco" guard.
+    } else if (event.type === 'update' && data.layer && data.sourceDid && data.migratedAt) {
+      // This is a migration event. Detect via sourceDid + migratedAt (present
+      // on both webvh and btco migrations, and reserved from regular updates);
+      // btco migrations don't carry targetDid, so keying off targetDid left
+      // btco logs mis-detected as webvh and bypassed the "cannot migrate from
+      // btco" guard, while requiring migratedAt keeps regular updates carrying
+      // application-level sourceDid/layer fields from being misclassified.
       currentLayer = data.layer as 'peer' | 'webvh' | 'btco';
     }
   }
@@ -119,7 +122,7 @@ function getCurrentDid(log: EventLog): string {
     
     if (event.type === 'create' && data.did) {
       currentDid = data.did as string;
-    } else if (event.type === 'update' && data.sourceDid && data.layer) {
+    } else if (event.type === 'update' && data.sourceDid && data.layer && data.migratedAt) {
       // Migration event. webvh migrations carry the resolvable targetDid; btco
       // migrations derive did:btco:<satoshi> from the bitcoin witness proof
       // (the satoshi is only known after inscription, so it isn't in the
@@ -147,7 +150,11 @@ function resolveMigrationDid(event: EventLog['events'][number], data: Record<str
     );
     const satoshi = proof?.satoshi;
     if (satoshi !== undefined && satoshi !== null) {
-      return `did:btco:${satoshi as string | number}`;
+      // Network-scoped identifier: the network is recorded in the SIGNED
+      // migration data (BtcoMigrationData.network), so the CLI derives the
+      // same sig/reg-prefixed DID as state derivation. Legacy logs without a
+      // recorded network default to the bare mainnet form.
+      return btcoDidFromSatoshi(satoshi as string | number, data.network as string | undefined);
     }
   }
   return data.targetDid as string | undefined;

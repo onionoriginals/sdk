@@ -77,10 +77,20 @@ describe('BtcoCelManager', () => {
       );
     });
 
-    it('should throw error for missing BitcoinManager', () => {
-      expect(() => new BtcoCelManager(createMockSigner(), null as any)).toThrow(
-        'BtcoCelManager requires a BitcoinManager instance'
+    it('rejects a config object passed in the BitcoinManager position', () => {
+      expect(() => new BtcoCelManager(createMockSigner(), { feeRate: 5 } as any)).toThrow(
+        'second argument must be a BitcoinManager'
       );
+    });
+
+    it('constructs without a BitcoinManager (read-only replay), but migrate() requires one', async () => {
+      // Pure reads (getCurrentState) replay the persisted log and need no
+      // Bitcoin access; only the inscribing write path requires the manager.
+      const manager = new BtcoCelManager(createMockSigner(), undefined);
+      expect(manager).toBeDefined();
+      await expect(
+        manager.migrate({ events: [] } as any)
+      ).rejects.toThrow('BTCO operations require a BitcoinManager');
     });
 
     it('should accept custom config', () => {

@@ -326,9 +326,39 @@ export class MetricsCollector {
     }
     lines.push('');
 
-    // Operation metrics — per-operation detail
+    // Operation metrics — per-operation detail.
+    // Name sanitization can collide (e.g. 'did.create' and 'did:create' both
+    // become 'did_create'), which would emit duplicate # HELP/# TYPE lines for
+    // one metric family — a Prometheus parse error. Detect collisions up
+    // front and disambiguate every colliding operation with a short, stable
+    // hash of its raw name so family names stay unique and deterministic.
+    const shortHash = (s: string): string => {
+      let h = 5381;
+      for (let i = 0; i < s.length; i++) {
+        h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+      }
+      return h.toString(16);
+    };
+    const sanitizedGroups = new Map<string, string[]>();
+    for (const operation of Object.keys(metrics.operationTimes)) {
+      const sanitized = operation.replace(/[^a-zA-Z0-9_]/g, '_');
+      const group = sanitizedGroups.get(sanitized);
+      if (group) group.push(operation);
+      else sanitizedGroups.set(sanitized, [operation]);
+    }
+    const safeNameFor = new Map<string, string>();
+    for (const [sanitized, operations] of sanitizedGroups) {
+      if (operations.length === 1) {
+        safeNameFor.set(operations[0], sanitized);
+      } else {
+        for (const operation of operations) {
+          safeNameFor.set(operation, `${sanitized}_${shortHash(operation)}`);
+        }
+      }
+    }
+
     for (const [operation, opMetrics] of Object.entries(metrics.operationTimes)) {
-      const safeOpName = operation.replace(/[^a-zA-Z0-9_]/g, '_');
+      const safeOpName = safeNameFor.get(operation)!;
 
       lines.push(`# HELP originals_operation_${safeOpName}_total Total number of ${operation} operations`);
       lines.push(`# TYPE originals_operation_${safeOpName}_total counter`);

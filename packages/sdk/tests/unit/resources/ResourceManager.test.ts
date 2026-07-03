@@ -15,6 +15,28 @@ describe('ResourceManager', () => {
   });
 
   describe('createResource', () => {
+    it('throws when an explicit id already exists instead of discarding its history', () => {
+      const first = manager.createResource('v1 content', {
+        type: 'text',
+        contentType: 'text/plain',
+        id: 'my-resource',
+      });
+      manager.updateResource(first, 'v2 content');
+
+      expect(() =>
+        manager.createResource('unrelated content', {
+          type: 'text',
+          contentType: 'text/plain',
+          id: 'my-resource',
+        })
+      ).toThrow('already exists');
+
+      // The existing version history is untouched.
+      const history = manager.getResourceHistory('my-resource');
+      expect(history).toHaveLength(2);
+      expect(history![1].version).toBe(2);
+    });
+
     it('should create a text resource from string content', () => {
       const content = 'Hello, World!';
       const resource = manager.createResource(content, {

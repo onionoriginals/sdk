@@ -17,6 +17,7 @@ import { witnessEvent } from '../algorithms/witnessEvent.js';
 import { BitcoinWitness } from '../witnesses/BitcoinWitness.js';
 import type { BitcoinManager } from '../../bitcoin/BitcoinManager.js';
 import type { CelSigner } from './PeerCelManager.js';
+import { btcoDidPrefix } from '../btcoDid.js';
 
 /**
  * Configuration options for BtcoCelManager
@@ -28,6 +29,13 @@ export interface BtcoCelConfig {
   proofPurpose?: string;
   /** Fee rate in sat/vB for Bitcoin transactions (optional - BitcoinManager will estimate if not provided) */
   feeRate?: number;
+  /**
+   * Bitcoin network fallback for replaying LEGACY btco logs whose signed
+   * migration data predates the recorded `network` field, when no
+   * BitcoinManager is configured (read-only replay). New logs record the
+   * network in the signed data, so this is never consulted for them.
+   */
+  network?: 'mainnet' | 'regtest' | 'signet';
 }
 
 /**
@@ -86,41 +94,68 @@ export interface BtcoMigrationData {
  */
 export class BtcoCelManager {
   private signer: CelSigner;
-  private bitcoinManager: BitcoinManager;
-  private bitcoinWitness: BitcoinWitness;
+  private bitcoinManager?: BitcoinManager;
+  private _bitcoinWitness?: BitcoinWitness;
   private config: BtcoCelConfig;
 
   /**
    * Creates a new BtcoCelManager instance
-   * 
+   *
    * @param signer - Function that signs data and returns a DataIntegrityProof
-   * @param bitcoinManager - BitcoinManager instance for ordinals inscriptions
+   * @param bitcoinManager - BitcoinManager instance for ordinals inscriptions.
+   *   Optional: only WRITE operations (migrate — it inscribes) need it; pure
+   *   reads like getCurrentState replay the persisted log deterministically
+   *   and work without one.
    * @param config - Optional configuration options
    */
   constructor(
     signer: CelSigner,
-    bitcoinManager: BitcoinManager,
+    bitcoinManager?: BitcoinManager,
     config: BtcoCelConfig = {}
   ) {
     if (typeof signer !== 'function') {
       throw new Error('BtcoCelManager requires a signer function');
     }
-    if (!bitcoinManager) {
-      throw new Error('BtcoCelManager requires a BitcoinManager instance');
+    // Guard the optional middle parameter: passing a config object where the
+    // BitcoinManager belongs (`new BtcoCelManager(signer, { feeRate: 5 })`)
+    // would otherwise be silently accepted and only blow up deep inside
+    // migrate(). Duck-type on the one method every manager (and test mock)
+    // provides.
+    if (
+      bitcoinManager !== undefined &&
+      typeof (bitcoinManager as unknown as { inscribeData?: unknown }).inscribeData !== 'function'
+    ) {
+      throw new Error(
+        'BtcoCelManager second argument must be a BitcoinManager (or undefined for read-only replay); ' +
+        'pass configuration as the third argument.'
+      );
     }
-    
+
     this.signer = signer;
     this.bitcoinManager = bitcoinManager;
     this.config = {
       proofPurpose: 'assertionMethod',
       ...config,
     };
-    
-    // Create Bitcoin witness service with optional fee rate
-    this.bitcoinWitness = new BitcoinWitness(bitcoinManager, {
-      feeRate: config.feeRate,
-      verificationMethod: config.verificationMethod,
-    });
+  }
+
+  /** The BitcoinManager, or a clear error for write paths that need one. */
+  private requireBitcoinManager(): BitcoinManager {
+    if (!this.bitcoinManager) {
+      throw new Error('BTCO operations require a BitcoinManager. Provide it in config.btco.bitcoinManager');
+    }
+    return this.bitcoinManager;
+  }
+
+  /** Lazily-created Bitcoin witness service (requires a BitcoinManager). */
+  private get bitcoinWitness(): BitcoinWitness {
+    if (!this._bitcoinWitness) {
+      this._bitcoinWitness = new BitcoinWitness(this.requireBitcoinManager(), {
+        feeRate: this.config.feeRate,
+        verificationMethod: this.config.verificationMethod,
+      });
+    }
+    return this._bitcoinWitness;
   }
 
   /**
@@ -143,6 +178,10 @@ export class BtcoCelManager {
    * @throws Error if Bitcoin inscription fails
    */
   async migrate(webvhLog: EventLog): Promise<EventLog> {
+    // Migration inscribes on Bitcoin — it is the write path that genuinely
+    // needs a BitcoinManager. Fail up front with a clear error.
+    const bitcoinManager = this.requireBitcoinManager();
+
     // Validate input log
     if (!webvhLog || !webvhLog.events || webvhLog.events.length === 0) {
       throw new Error('Cannot migrate an empty event log');
@@ -165,7 +204,7 @@ export class BtcoCelManager {
       if (event.type === 'create') {
         currentDid = eventData.did as string;
         currentLayer = eventData.layer as string || 'peer';
-      } else if (event.type === 'update' && eventData.sourceDid && eventData.layer) {
+      } else if (event.type === 'update' && eventData.sourceDid && eventData.layer && eventData.migratedAt) {
         // This is a migration event. Detect via sourceDid (present on both
         // webvh and btco migrations) rather than targetDid (webvh-only), so a
         // log already migrated to btco is recognised as such and the terminal
@@ -211,7 +250,7 @@ export class BtcoCelManager {
       // is known now — recording it here keeps state derivation deterministic:
       // replaying the log yields the same network-scoped did:btco identifier
       // regardless of the SDK's configured network.
-      network: this.bitcoinManager.network,
+      network: bitcoinManager.network,
       migratedAt: new Date().toISOString(),
     };
 
@@ -242,18 +281,11 @@ export class BtcoCelManager {
 
   /**
    * The network-scoped did:btco prefix for the configured Bitcoin network.
-   * Mainnet is bare (`did:btco`); signet/regtest carry `sig`/`reg` segments.
-   * Mirrors DIDManager / createBtcoDidDocument so all btco identifiers agree.
+   * Delegates to the shared helper so all btco identifiers the SDK emits
+   * (state derivation, CLI display) agree on the prefix.
    */
   private btcoDidPrefix(network: string | undefined): string {
-    switch (network) {
-      case 'signet':
-        return 'did:btco:sig';
-      case 'regtest':
-        return 'did:btco:reg';
-      default:
-        return 'did:btco';
-    }
+    return btcoDidPrefix(network);
   }
 
   /**
@@ -300,7 +332,7 @@ export class BtcoCelManager {
         // Check if this is a migration event. Migration events carry a
         // sourceDid + layer; regular updates don't. (btco migrations no longer
         // carry targetDid in the signed data — see below.)
-        if (updateData.sourceDid && updateData.layer) {
+        if (updateData.sourceDid && updateData.layer && updateData.migratedAt) {
           // Migration event - update DID and layer
           state.layer = updateData.layer as 'peer' | 'webvh' | 'btco';
           state.updatedAt = updateData.migratedAt as string;
@@ -332,9 +364,20 @@ export class BtcoCelManager {
               // matching DIDManager/createBtcoDidDocument. The network is read
               // from the SIGNED migration data so replaying a persisted log is
               // deterministic — the DID does not change with the replaying SDK's
-              // configured network. Fall back to the inscribing manager's network
-              // only for legacy logs written before the network was recorded.
-              const network = (updateData.network as string | undefined) ?? this.bitcoinManager.network;
+              // configured network. Fall back to a configured BitcoinManager's
+              // network only for legacy logs written before the network was
+              // recorded; without either source, deriving a DID would just be
+              // guessing the network, so fail closed with a clear error.
+              const network = (updateData.network as string | undefined)
+                ?? this.bitcoinManager?.network
+                ?? this.config.network;
+              if (updateData.network === undefined && !this.bitcoinManager && this.config.network === undefined) {
+                throw new Error(
+                  'Legacy btco log does not record its Bitcoin network in the signed migration data; ' +
+                  'configure a BitcoinManager (config.btco.bitcoinManager) or a fallback network ' +
+                  '(BtcoCelConfig.network) so the network can be supplied.'
+                );
+              }
               state.metadata.network = network;
               state.did = `${this.btcoDidPrefix(network)}:${bitcoinProof.satoshi as string}`;
             }
@@ -372,7 +415,7 @@ export class BtcoCelManager {
         // those events alone — for an ordinary update, an application-defined
         // `network` field must still flow through to metadata.
         const excludedKeys = ['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt', 'txid', 'inscriptionId'];
-        if (updateData.sourceDid && updateData.layer === 'btco') {
+        if (updateData.sourceDid && updateData.layer === 'btco' && updateData.migratedAt) {
           excludedKeys.push('network');
         }
         for (const [key, value] of Object.entries(updateData)) {
@@ -399,9 +442,10 @@ export class BtcoCelManager {
   }
 
   /**
-   * Gets the BitcoinManager instance used by this manager
+   * Gets the BitcoinManager instance used by this manager (undefined when the
+   * manager was constructed for read-only replay without one)
    */
-  get bitcoin(): BitcoinManager {
+  get bitcoin(): BitcoinManager | undefined {
     return this.bitcoinManager;
   }
 }

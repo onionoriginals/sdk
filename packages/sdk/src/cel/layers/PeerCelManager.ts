@@ -172,25 +172,39 @@ export class PeerCelManager {
     // We'll use a simple verification method structure
     let publicKeyMultibase: string;
     
-    // If verificationMethod is provided and contains a key reference, extract it
+    // The did:peer:4 identifier is SELF-CERTIFYING: it embeds its DID
+    // document, so verification (verifyEventLog) requires the create event's
+    // signing key to be one of the embedded keys. The embedded key must
+    // therefore be the CONTROLLER's key, not a random one:
+    // 1. a did:key verificationMethod in config carries the key directly;
+    // 2. otherwise, discover the signer's key with a probe signature (the
+    //    signer reports its verificationMethod in every proof it produces);
+    // 3. only fall back to a random key when neither reveals a did:key —
+    //    such logs cannot pass the self-certifying binding check.
     if (this.config.verificationMethod && this.config.verificationMethod.includes('did:key:')) {
       // Extract the public key from did:key format
       const keyMatch = this.config.verificationMethod.match(/did:key:(z[a-zA-Z0-9]+)/);
       publicKeyMultibase = keyMatch ? keyMatch[1] : await this.generateRandomPublicKey();
-    } else if (this.config.verificationMethod && this.config.verificationMethod.includes('#')) {
-      // If it's a fragment reference, we need to generate a key
-      publicKeyMultibase = await this.generateRandomPublicKey();
     } else {
-      // Generate a random public key for the DID
-      publicKeyMultibase = await this.generateRandomPublicKey();
+      publicKeyMultibase =
+        (await this.discoverSignerPublicKey()) ?? (await this.generateRandomPublicKey());
     }
 
-    // Create did:peer using numalgo 4
+    // Create did:peer using numalgo 4. did:peer:4 is deterministic over the
+    // embedded document, so a document containing only the (reused) controller
+    // key would produce the SAME DID for every asset created with that key.
+    // A second, per-asset random verification method keeps each asset's DID
+    // unique while the controller key stays embedded for the self-certifying
+    // binding check.
     const did: string = await didPeerMod.createNumAlgo4(
       [
         {
           type: 'Multikey',
           publicKeyMultibase,
+        },
+        {
+          type: 'Multikey',
+          publicKeyMultibase: await this.generateRandomPublicKey(),
         }
       ],
       undefined, // services
@@ -201,8 +215,27 @@ export class PeerCelManager {
   }
 
   /**
+   * Discovers the signer's public multikey by asking it to sign a probe
+   * payload and reading the `did:key:` verificationMethod it reports on the
+   * resulting proof. The probe signature is discarded.
+   *
+   * Returns null only when the signer does not use a did:key verification
+   * method (its create proofs then aren't subject to the self-certifying
+   * binding check either). A signing FAILURE propagates: swallowing it would
+   * fall back to a random embedded key, and a did:key signer's create event
+   * would later fail verifyEventLog's binding check — a silently
+   * unverifiable asset instead of a clear error at creation time.
+   */
+  private async discoverSignerPublicKey(): Promise<string | null> {
+    const probeProof = await this.signer({ type: 'originals-vm-discovery-probe' });
+    const vm = probeProof?.verificationMethod;
+    const keyMatch = typeof vm === 'string' ? vm.match(/^did:key:(z[a-zA-Z0-9]+)/) : null;
+    return keyMatch ? keyMatch[1] : null;
+  }
+
+  /**
    * Generates a random Ed25519 public key for DID creation
-   * 
+   *
    * @returns Promise resolving to a multibase-encoded public key
    */
   private async generateRandomPublicKey(): Promise<string> {

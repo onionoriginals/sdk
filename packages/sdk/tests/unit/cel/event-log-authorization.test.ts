@@ -41,14 +41,38 @@ function makeSigner() {
   };
 }
 
-const mockBitcoin = (): BitcoinManager => ({
-  inscribeData: async () => ({
-    txid: 'abc123def456',
-    inscriptionId: 'abc123def456i0',
-    satoshi: '1234567890',
-    blockHeight: 800000,
-  }),
-} as unknown as BitcoinManager);
+// Mock BitcoinManager that records what it inscribes and exposes a matching
+// ordinals lookup, so the (gating) bitcoin witness verification can confirm
+// the inscription exists, sits on the claimed satoshi, and commits to the
+// event digest.
+const mockBitcoin = (): { manager: BitcoinManager; ordinalsProvider: any } => {
+  let lastPayload: unknown;
+  const manager = {
+    network: 'mainnet',
+    inscribeData: async (data: unknown) => {
+      lastPayload = data;
+      return {
+        txid: 'abc123def456',
+        inscriptionId: 'abc123def456i0',
+        satoshi: '1234567890',
+        blockHeight: 800000,
+      };
+    },
+  } as unknown as BitcoinManager;
+  const ordinalsProvider = {
+    getInscriptionById: async (id: string) =>
+      id === 'abc123def456i0'
+        ? {
+            inscriptionId: id,
+            content: Buffer.from(JSON.stringify(lastPayload)),
+            contentType: 'application/json',
+            txid: 'abc123def456',
+            satoshi: '1234567890',
+          }
+        : null,
+  };
+  return { manager, ordinalsProvider };
+};
 
 describe('CEL event-log authorization and btco verifiability', () => {
   it('a real webvh→btco migration produces a verifiable log', async () => {
@@ -56,9 +80,15 @@ describe('CEL event-log authorization and btco verifiability', () => {
     const peer = new PeerCelManager(signer as any);
     let log = await peer.create('Asset', [{ digestMultibase: 'uHash', mediaType: 'image/png' }]);
     log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
-    const btcoLog = await new BtcoCelManager(signer as any, mockBitcoin()).migrate(log);
+    const { manager, ordinalsProvider } = mockBitcoin();
+    const btcoLog = await new BtcoCelManager(signer as any, manager).migrate(log);
 
-    const result = await verifyEventLog(btcoLog);
+    // btco anchoring is gating: without an ordinalsProvider the log must NOT verify.
+    const unanchored = await verifyEventLog(btcoLog);
+    expect(unanchored.verified).toBe(false);
+    expect(unanchored.errors.some(e => /ordinalsProvider/.test(e))).toBe(true);
+
+    const result = await verifyEventLog(btcoLog, { ordinalsProvider });
     expect(result.verified).toBe(true);
     expect(result.errors).toEqual([]);
 
@@ -69,8 +99,65 @@ describe('CEL event-log authorization and btco verifiability', () => {
     expect((last.data as any).txid).toBeUndefined();
     // targetDid is derived from the satoshi and is a resolvable numeric did:btco.
     expect((last.data as any).targetDid).toBeUndefined();
-    const state = new BtcoCelManager(makeSigner() as any, mockBitcoin()).getCurrentState(btcoLog);
+    const state = new BtcoCelManager(makeSigner() as any, mockBitcoin().manager).getCurrentState(btcoLog);
     expect(/^did:btco:[0-9]+$/.test(state.did)).toBe(true);
+  });
+
+  it('rejects a create event re-signed by a different key than the one embedded in the did:peer', async () => {
+    // Attack: copy a victim's create event `data` verbatim (including the
+    // victim's self-certifying did:peer:4) and re-sign event 0 with the
+    // attacker's own did:key. The log is internally consistent, but the
+    // create key is not embedded in the DID — verification must fail.
+    const victim = makeSigner();
+    const log = await new PeerCelManager(victim as any).create('Victim Asset', []);
+
+    const attacker = makeSigner();
+    const createEvent = log.events[0];
+    const attackerProof = await attacker({ type: createEvent.type, data: createEvent.data });
+    const forged = {
+      ...log,
+      events: [{ ...createEvent, proof: [attackerProof] }],
+    };
+
+    const result = await verifyEventLog(forged as any);
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /not a key embedded in the self-certifying DID/.test(e))).toBe(true);
+  });
+
+  it('derives btco state without a BitcoinManager (network read from signed data)', async () => {
+    const signer = makeSigner();
+    let log = await new PeerCelManager(signer as any).create('Asset', []);
+    log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
+    const btcoLog = await new BtcoCelManager(signer as any, mockBitcoin().manager).migrate(log);
+
+    // Replaying a persisted log in a fresh SDK without Bitcoin access is a
+    // pure read and must work — the network lives in the signed migration data.
+    const readOnly = new BtcoCelManager(makeSigner() as any, undefined);
+    const state = readOnly.getCurrentState(btcoLog);
+    expect(/^did:btco:[0-9]+$/.test(state.did)).toBe(true);
+    expect(state.layer).toBe('btco');
+  });
+
+  it('does not misclassify a regular update carrying sourceDid/layer fields as a migration', async () => {
+    // A migration event always carries migratedAt (and OriginalsCel.update
+    // reserves it). A direct updateEventLog append with application-level
+    // sourceDid/layer fields but no migratedAt must replay as a regular
+    // update: the name change applies and the layer does not flip.
+    const signer = makeSigner();
+    let log = await new PeerCelManager(signer as any).create('Asset', []);
+    const webvhManager = new WebVHCelManager(signer as any, 'example.com');
+    log = await webvhManager.migrate(log);
+    log = await updateEventLog(log, { sourceDid: 'did:example:app-field', layer: 'btco', name: 'renamed' }, {
+      signer: signer as any,
+      verificationMethod: 'ignored',
+    });
+
+    const state = webvhManager.getCurrentState(log);
+    // Under the old sourceDid+layer predicate this event was replayed as a
+    // migration and the name change was silently dropped. (The regular-update
+    // branch still applies an explicit `layer` field — longstanding update
+    // semantics — so only the name is the misclassification discriminator.)
+    expect(state.name).toBe('renamed');
   });
 
   it('rejects an event appended by a key not authorized by the create event', async () => {
