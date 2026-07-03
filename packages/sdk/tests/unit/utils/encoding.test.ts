@@ -32,6 +32,14 @@ describe('utils/encoding', () => {
     test('throws on invalid characters', () => {
       expect(() => hexToBytes('zz')).toThrow('Invalid hex string');
     });
+
+    test('rejects partial-nibble garbage instead of silently parsing a prefix', () => {
+      // Regression: parseInt('1g', 16) === 1, so a per-byte NaN check accepted
+      // '1g' as [0x01] and 'aa1z' as [0xaa, 0x01]. These must throw.
+      expect(() => hexToBytes('1g')).toThrow('Invalid hex string');
+      expect(() => hexToBytes('aa1z')).toThrow('Invalid hex string');
+      expect(() => hexToBytes('0xdeadbeeg')).toThrow('Invalid hex string');
+    });
   });
 
   describe('base64', () => {

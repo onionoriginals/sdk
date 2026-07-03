@@ -14,6 +14,7 @@ import { OriginalsAsset } from './OriginalsAsset.js';
 import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter.js';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
+import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 import { multikey } from '../crypto/Multikey.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
@@ -979,7 +980,18 @@ export class LifecycleManager {
     const bm = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const provenance = asset.getProvenance();
     const latestMigration = provenance.migrations[provenance.migrations.length - 1];
-    const satoshi = latestMigration?.satoshi ?? (asset.id.startsWith('did:btco:') ? asset.id.split(':')[2] : '');
+    // Fall back to the satoshi encoded in the DID when no migration record is
+    // present. A plain `split(':')[2]` is network-blind — for a regtest/signet
+    // DID (`did:btco:reg:<sat>` / `did:btco:sig:<sat>`) index 2 is the network
+    // tag, not the satoshi. parseSatoshiIdentifier handles every network prefix.
+    let satoshi = latestMigration?.satoshi ?? '';
+    if (!satoshi && asset.id.startsWith('did:btco:')) {
+      try {
+        satoshi = String(parseSatoshiIdentifier(asset.id));
+      } catch {
+        satoshi = '';
+      }
+    }
     const inscription = {
       satoshi,
       inscriptionId: latestMigration?.inscriptionId ?? `insc-${satoshi || 'unknown'}`,

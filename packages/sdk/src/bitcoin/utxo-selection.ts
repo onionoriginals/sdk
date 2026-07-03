@@ -195,24 +195,37 @@ export function selectResourceUtxos(
   // Convert requiredAmount to bigint for compatibility with fee calculations
   const requiredAmountBigInt = BigInt(requiredAmount);
 
-  // Filter out UTXOs to avoid and those with resources if not allowed
+  // A UTXO carries an ordinal if the SDK-specific `hasResource` flag is set OR
+  // it has one or more inscriptions recorded on the outpoint. Indexers (ord)
+  // populate `inscriptions`, not `hasResource`, so both must be checked —
+  // spending an inscribed sat as a plain payment input burns/transfers the
+  // ordinal it carries.
+  const carriesResource = (utxo: ResourceUtxo): boolean =>
+    utxo.hasResource === true || (Array.isArray(utxo.inscriptions) && utxo.inscriptions.length > 0);
+
+  // Filter out UTXOs to avoid, locked UTXOs, and those with resources if not allowed
   const eligibleUtxos = availableUtxos.filter(utxo => {
     const utxoId = `${utxo.txid}:${utxo.vout}`;
     const shouldAvoid = avoidUtxoIds.includes(utxoId);
-    const containsResource = utxo.hasResource === true;
-    
+
     // Skip this UTXO if it's in the avoid list
     if (shouldAvoid) return false;
-    
+
+    // Never spend a locked UTXO — a wallet lock means it must not be used.
+    if (utxo.locked === true) return false;
+
     // Skip this UTXO if it contains a resource and we're not allowed to use resource UTXOs
-    if (containsResource && !allowResourceUtxos) return false;
-    
+    if (carriesResource(utxo) && !allowResourceUtxos) return false;
+
     return true;
   });
 
   if (eligibleUtxos.length === 0) {
-    // Special error message if we have UTXOs but they all contain resources
-    if (availableUtxos.length > 0 && availableUtxos.every(u => u.hasResource)) {
+    // Special error message only when resources are actually the disqualifier:
+    // resources are not allowed AND every available UTXO carries one. When the
+    // caller passed `allowResourceUtxos: true`, resources are not why everything
+    // was excluded (a lock or the avoid-list is), so the generic message applies.
+    if (!allowResourceUtxos && availableUtxos.length > 0 && availableUtxos.every(u => carriesResource(u))) {
       throw new Error('All available UTXOs contain resources and cannot be used for fees/payments. Please add non-resource UTXOs to your wallet.');
     }
     throw new Error('No eligible UTXOs available for selection');

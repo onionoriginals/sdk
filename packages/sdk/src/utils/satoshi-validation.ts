@@ -95,6 +95,31 @@ export function validateSatoshiNumber(satoshi: string | number): SatoshiValidati
 }
 
 /**
+ * Validates a satoshi identifier and returns its canonical decimal string form.
+ *
+ * A did:btco identifier embeds the satoshi number verbatim, so the string that
+ * gets baked into the DID must be canonical: no surrounding whitespace and no
+ * leading zeros. `validateSatoshiNumber` accepts `' 42 '` and `'007'` (it
+ * trims/parses before checking), but building a DID from the raw argument would
+ * yield an unresolvable id like `did:btco: 42 ` or a non-canonical `did:btco:007`
+ * that never matches the canonically-inscribed `did:btco:42`/`did:btco:7`.
+ *
+ * @param satoshi - The satoshi identifier to canonicalize (string or number)
+ * @returns The canonical decimal string (e.g. '42')
+ * @throws {StructuredError} If the satoshi is invalid
+ */
+export function canonicalizeSatoshi(satoshi: string | number): string {
+  const result = validateSatoshiNumber(satoshi);
+  if (!result.valid) {
+    throw new StructuredError('INVALID_SATOSHI', result.error || 'Invalid satoshi identifier');
+  }
+  // Safe: validateSatoshiNumber guarantees an all-digits string within
+  // MAX_SATOSHI_SUPPLY (2.1e15), which is below Number.MAX_SAFE_INTEGER, so the
+  // round-trip through Number is exact and simply strips whitespace/leading zeros.
+  return String(Number(String(satoshi).trim()));
+}
+
+/**
  * Parses a satoshi identifier from various formats and validates it.
  * 
  * Supported formats:

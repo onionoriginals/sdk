@@ -12,7 +12,7 @@ import {
   MultiSigSignOptions,
   MultiSigVerificationResult,
 } from '../types/index.js';
-import { StatusListManager, type StatusCheckResult } from './StatusListManager.js';
+import { StatusListManager, parseStatusListIndex, type StatusCheckResult } from './StatusListManager.js';
 import { canonicalizeDocument } from '../utils/serialization.js';
 import { computeCredentialDigest } from '../utils/credential-digest.js';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
@@ -1158,7 +1158,7 @@ export class CredentialManager {
       );
     }
     const manager = new StatusListManager();
-    const index = parseInt(entry.statusListIndex, 10);
+    const index = parseStatusListIndex(entry.statusListIndex);
     return manager.setStatus(statusListCredential, index, true);
   }
 
@@ -1183,7 +1183,7 @@ export class CredentialManager {
       );
     }
     const manager = new StatusListManager();
-    const index = parseInt(entry.statusListIndex, 10);
+    const index = parseStatusListIndex(entry.statusListIndex);
     return manager.setStatus(statusListCredential, index, true);
   }
 
@@ -1208,7 +1208,7 @@ export class CredentialManager {
       );
     }
     const manager = new StatusListManager();
-    const index = parseInt(entry.statusListIndex, 10);
+    const index = parseStatusListIndex(entry.statusListIndex);
     return manager.setStatus(statusListCredential, index, false);
   }
 

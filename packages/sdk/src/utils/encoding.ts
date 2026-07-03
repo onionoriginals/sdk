@@ -16,14 +16,16 @@ export function hexToBytes(hex: string): Uint8Array {
   if (clean.length % 2 !== 0) {
     throw new Error('Invalid hex string length');
   }
+  // Reject any non-hex character up front. parseInt is lenient — parseInt('1g', 16)
+  // returns 1 (it stops at the first invalid nibble), so a per-byte NaN check would
+  // silently accept malformed input like '1g' or 'aa1z' and produce wrong bytes.
+  if (!/^[0-9a-fA-F]*$/.test(clean)) {
+    throw new Error('Invalid hex string');
+  }
   const out = new Uint8Array(clean.length / 2);
   for (let i = 0; i < clean.length; i += 2) {
     const byteStr = clean.substring(i, i + 2);
-    const value = parseInt(byteStr, 16);
-    if (Number.isNaN(value)) {
-      throw new Error('Invalid hex string');
-    }
-    out[i / 2] = value;
+    out[i / 2] = parseInt(byteStr, 16);
   }
   return out;
 }

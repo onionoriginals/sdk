@@ -15,7 +15,7 @@ import type {
   RecoverWebVHResult,
 } from './WebVHManager.js';
 import { Ed25519Signer } from '../crypto/Signer.js';
-import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
+import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
 import * as fs from 'fs';
@@ -199,7 +199,7 @@ export class DIDManager {
       const prefix = network === 'mainnet' ? 'did:btco:' : network === 'regtest' ? 'did:btco:reg:' : 'did:btco:sig:';
       btcoDoc = {
         '@context': ['https://www.w3.org/ns/did/v1'],
-        id: prefix + String(satoshi)
+        id: prefix + canonicalizeSatoshi(satoshi)
       };
     }
 

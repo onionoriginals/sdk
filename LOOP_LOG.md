@@ -314,3 +314,58 @@ carrying an application-defined `network` field had it silently dropped from
 `network` is consumed explicitly). Regression test: a regular update with a
 custom `network` field now preserves it. Full suite 3225 pass / 0 fail;
 typecheck clean; lint 0 errors.
+
+---
+
+# Correctness Loop Log (branch `claude/originals-sdk-correctness-asdkdz`)
+
+## Iteration 1 — 2026-07-03
+
+### Ground truth
+- Fresh branch at `origin/main` (561664d); prior correctness passes (#230, #232) already merged. No open PR for this branch, so the eval signal this iteration is the test suite + spec/protocol consistency (no PR review comments yet).
+- After `bun install` + `bun run build`: full suite **3415 pass / 0 fail / 74 skip** (182 files). `bun run typecheck` clean. `bun run lint` clean (88 warnings, 0 errors).
+
+### Audit
+Ran four parallel subsystem audits (vc/crypto, did, bitcoin, cel/lifecycle), each told to exclude the items already logged in FOLLOWUP.md. Fixed every confirmed correctness bug with a regression test that fails before / passes after.
+
+### Fixes (this iteration)
+1. **HIGH — ordinal-loss in payment UTXO selection** (`utxo-selection.ts`):
+   `selectResourceUtxos`/`selectUtxosForPayment` only excluded UTXOs flagged
+   `hasResource === true`, never the first-class `inscriptions[]` array (what ord
+   indexers actually populate) nor `locked`. A wallet UTXO carrying an inscription
+   but no `hasResource` flag would be selected as a plain payment input, burning
+   the ordinal. Now excludes inscription-bearing (via `inscriptions.length > 0`)
+   and locked UTXOs, matching the sibling `utxo.ts` selector. Regression tests in
+   `tests/unit/bitcoin/utxo-selection-new.test.ts`.
+2. **MED — non-canonical `did:btco` identifiers** (`satoshi-validation.ts`,
+   `createBtcoDidDocument.ts`, `DIDManager.ts`): `validateSatoshiNumber` trims/parses
+   before validating, so `' 42 '` and `'007'` passed, but the DID was built from the
+   raw argument → `did:btco: 42 ` (unresolvable) / `did:btco:007` (never matches the
+   inscribed `did:btco:7`). Added `canonicalizeSatoshi()` and used it in both DID-
+   building paths. Regression tests in `createBtcoDidDocument.test.ts` and
+   `DIDManager.more.test.ts`.
+3. **MED — network-blind satoshi extraction in transfer** (`LifecycleManager.ts`):
+   `transferOwnership` fell back to `asset.id.split(':')[2]`, which returns the
+   network tag `'reg'`/`'sig'` for `did:btco:reg:<sat>` / `did:btco:sig:<sat>` instead
+   of the satoshi, so a regtest/signet transfer without a migration record looked up
+   the wrong ordinal. Switched to the network-aware `parseSatoshiIdentifier`.
+   Regression test in `LifecycleManager.transfer.unit.test.ts`.
+4. **LOW — `hexToBytes` silently accepted malformed hex** (`utils/encoding.ts`):
+   the per-byte `parseInt` NaN check let `'1g'`→`[0x01]`, `'aa1z'`→`[0xaa,0x01]`
+   through. Added a strict `^[0-9a-fA-F]*$` guard. Regression tests in
+   `encoding.test.ts`.
+5. **LOW — lenient `statusListIndex` parsing** (`vc/StatusListManager.ts`,
+   `vc/CredentialManager.ts`): `parseInt('5abc', 10) === 5` silently targeted the
+   wrong revocation bit in `checkStatus`/`revoke`/`suspend`/`unsuspend`. Added a
+   strict `parseStatusListIndex()` used at all four sites. Regression tests in
+   `StatusListManager.test.ts`.
+
+### Verify
+- Full suite **3428 pass / 0 fail / 74 skip**; typecheck clean; lint clean.
+- One flaky timing-based perf guard (`did:peer creation should not regress beyond 2x baseline`) failed once under full-suite CPU contention and passed in isolation (6/6) and on re-run; unrelated to these changes (no did:peer creation code touched).
+
+### Deferred (added to FOLLOWUP.md, items 16–19)
+- 16. `OriginalsCel.getCurrentState` on a btco log requires a BitcoinManager it doesn't need (design/dependency-structure).
+- 17. `WebVHCelManager.getCurrentState` stale `targetDid` migration detection (latent, unreachable via public API).
+- 18. `WebvhToBtcoMigration` satoshi fallback derives a txid, not a satoshi (fallback-only dead path).
+- 19. Data Integrity `proofPurpose` not validated at verification time (spec conformance; needs a focused semantics change).
