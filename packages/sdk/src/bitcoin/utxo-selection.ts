@@ -221,8 +221,11 @@ export function selectResourceUtxos(
   });
 
   if (eligibleUtxos.length === 0) {
-    // Special error message if we have UTXOs but they all contain resources
-    if (availableUtxos.length > 0 && availableUtxos.every(u => carriesResource(u))) {
+    // Special error message only when resources are actually the disqualifier:
+    // resources are not allowed AND every available UTXO carries one. When the
+    // caller passed `allowResourceUtxos: true`, resources are not why everything
+    // was excluded (a lock or the avoid-list is), so the generic message applies.
+    if (!allowResourceUtxos && availableUtxos.length > 0 && availableUtxos.every(u => carriesResource(u))) {
       throw new Error('All available UTXOs contain resources and cannot be used for fees/payments. Please add non-resource UTXOs to your wallet.');
     }
     throw new Error('No eligible UTXOs available for selection');

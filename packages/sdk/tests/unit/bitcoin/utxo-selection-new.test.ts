@@ -282,6 +282,22 @@ describe('selectResourceUtxos - Resource-Aware Selection', () => {
       }).toThrow('All available UTXOs contain resources');
     });
 
+    test('does not blame resources when locks are the disqualifier and resources are allowed', () => {
+      // Regression: with allowResourceUtxos=true, resources are not why a
+      // locked+inscribed UTXO is excluded — the lock is. The error must not
+      // advise "add non-resource UTXOs".
+      const lockedInscribed: ResourceUtxo = {
+        txid: 'li', vout: 0, value: 100000, locked: true, inscriptions: ['x-i0']
+      };
+      expect(() => {
+        selectResourceUtxos([lockedInscribed], {
+          requiredAmount: 5000,
+          feeRate: 1,
+          allowResourceUtxos: true
+        });
+      }).toThrow('No eligible UTXOs available for selection');
+    });
+
     test('NEVER selects locked UTXOs (native lock handling, no avoidUtxoIds workaround)', () => {
       const locked: ResourceUtxo = { txid: 'locked-tx', vout: 0, value: 100000, locked: true };
       const clean: ResourceUtxo = { txid: 'clean-tx', vout: 0, value: 50000 };
