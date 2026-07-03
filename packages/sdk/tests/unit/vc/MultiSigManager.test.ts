@@ -357,6 +357,95 @@ describe('MultiSigManager', () => {
       expect(result.errors.length).toBe(0);
     });
 
+    test('rejects an expired credential even with a valid threshold proof set', async () => {
+      // A cryptographically valid m-of-n proof set over an expired credential
+      // must not verify — the single-sig path enforces the same validity window.
+      const policy: MultiSigPolicy = {
+        required: 2,
+        total: 3,
+        signerVerificationMethods: [vms[0], vms[1], vms[2]],
+      };
+
+      const expiredVC: VerifiableCredential = {
+        ...baseVC,
+        expirationDate: '2020-01-01T00:00:00Z',
+      };
+
+      const signed = await manager.signCredentialMultiSig(expiredVC, {
+        policy,
+        privateKeys: new Map([
+          [vms[0], keys[0].privateKey],
+          [vms[1], keys[1].privateKey],
+        ]),
+      });
+
+      const result = await manager.verifyMultiSig(signed, policy);
+      expect(result.verified).toBe(false);
+      // Signatures themselves are still valid; it's the expiry that fails it.
+      expect(result.validSignatures).toBe(2);
+      expect(result.errors.some(e => e.includes('expired'))).toBe(true);
+    });
+
+    test('rejects a not-yet-valid credential even with a valid threshold proof set', async () => {
+      const policy: MultiSigPolicy = {
+        required: 2,
+        total: 3,
+        signerVerificationMethods: [vms[0], vms[1], vms[2]],
+      };
+
+      const futureVC: VerifiableCredential = {
+        ...baseVC,
+        validFrom: '2999-01-01T00:00:00Z',
+      };
+
+      const signed = await manager.signCredentialMultiSig(futureVC, {
+        policy,
+        privateKeys: new Map([
+          [vms[0], keys[0].privateKey],
+          [vms[1], keys[1].privateKey],
+        ]),
+      });
+
+      const result = await manager.verifyMultiSig(signed, policy);
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => e.includes('not yet valid'))).toBe(true);
+    });
+
+    test('fails closed on a declared BitstringStatusListEntry it cannot check', async () => {
+      // The multi-sig path has no status-list resolver. A credential that
+      // declares a revocable status must not be silently accepted (which would
+      // let a revoked credential verify); it fails closed instead.
+      const policy: MultiSigPolicy = {
+        required: 2,
+        total: 3,
+        signerVerificationMethods: [vms[0], vms[1], vms[2]],
+      };
+
+      const statusVC: VerifiableCredential = {
+        ...baseVC,
+        credentialStatus: {
+          id: 'https://example.com/status/1#0',
+          type: 'BitstringStatusListEntry',
+          statusPurpose: 'revocation',
+          statusListIndex: '0',
+          statusListCredential: 'https://example.com/status/1',
+        },
+      } as unknown as VerifiableCredential;
+
+      const signed = await manager.signCredentialMultiSig(statusVC, {
+        policy,
+        privateKeys: new Map([
+          [vms[0], keys[0].privateKey],
+          [vms[1], keys[1].privateKey],
+        ]),
+      });
+
+      const result = await manager.verifyMultiSig(signed, policy);
+      expect(result.verified).toBe(false);
+      expect(result.validSignatures).toBe(2);
+      expect(result.errors.some(e => e.includes('BitstringStatusListEntry'))).toBe(true);
+    });
+
     test('rejects when threshold not met', async () => {
       const policy: MultiSigPolicy = {
         required: 3,

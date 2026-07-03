@@ -14,6 +14,7 @@ import type { OriginalsConfig } from '../types/common.js';
 import { computeCredentialDigest } from '../utils/credential-digest.js';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
 import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer.js';
+import { checkCredentialValidityPeriod } from './Verifier.js';
 
 /**
  * MultiSigManager handles m-of-n multi-signature operations for verifiable credentials.
@@ -246,6 +247,31 @@ export class MultiSigManager {
     if (!result.verified) {
       result.errors.push(
         `Threshold not met: ${result.validSignatures}/${policy.required} valid signatures`
+      );
+    }
+
+    // Enforce the credential's validity window. A valid m-of-n proof set over an
+    // expired (or not-yet-valid) credential must not verify — the single-sig path
+    // (Verifier.verifyCredential) enforces the same window, and skipping it here
+    // let multi-sig credentials bypass expiration entirely. Applies to all
+    // multi-sig entry points (verifyMultiSig / verifyEscrow / verifyCorporate).
+    const validity = checkCredentialValidityPeriod(credential);
+    if (!validity.verified) {
+      result.verified = false;
+      result.errors.push(...(validity.errors ?? []));
+    }
+
+    // Fail closed on revocation. Single-sig verification refuses to accept a
+    // credential that declares a BitstringStatusListEntry status it cannot check;
+    // the multi-sig path has no status-list resolver, so silently ignoring a
+    // declared status would let a revoked m-of-n credential verify. Refuse
+    // instead and direct the caller to a resolver-backed status check.
+    const credentialStatus = (credential as { credentialStatus?: { type?: unknown } }).credentialStatus;
+    if (credentialStatus && credentialStatus.type === 'BitstringStatusListEntry') {
+      result.verified = false;
+      result.errors.push(
+        'Credential declares a BitstringStatusListEntry status that the multi-sig verifier cannot check. ' +
+        'Verify revocation via CredentialManager.verifyCredential with a configured statusListResolver.'
       );
     }
 
