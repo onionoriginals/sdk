@@ -104,7 +104,7 @@ export class DocumentLoader {
       // verification method. The registry can never override the DID document.
       const cached = verificationMethodRegistry.get(didUrl);
       if (cached) {
-        assertNotRetired(cached as { revoked?: string; compromised?: string });
+        assertNotRetired(cached);
         return {
           document: { '@context': didDocTyped['@context'], ...cached },
           documentUrl: didUrl,

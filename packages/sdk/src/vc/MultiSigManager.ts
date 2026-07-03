@@ -326,7 +326,7 @@ export class MultiSigManager {
     const session: MultiSigSession = {
       id: this.generateSessionId(),
       policy,
-      document: { ...credential } as unknown as Record<string, unknown>,
+      document: { ...credential },
       contributions: [],
       createdAt: now.toISOString(),
       expiresAt,

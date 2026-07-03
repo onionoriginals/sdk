@@ -98,7 +98,7 @@ export class StatusListManager {
         type: 'BitstringStatusList',
         statusPurpose: options.statusPurpose,
         encodedList,
-      } as BitstringStatusListSubject,
+      },
     };
 
     return credential;

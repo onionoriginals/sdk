@@ -54,7 +54,7 @@ export function validateCredential(vc: VerifiableCredential): boolean {
   const issuerIsValidDid = (iss: unknown): boolean => {
     if (typeof iss === 'string') return validateDID(iss);
     if (iss && typeof iss === 'object' && 'id' in iss) {
-      const issObj = iss as { id: unknown };
+      const issObj = iss;
       if (typeof issObj.id === 'string') return validateDID(issObj.id);
     }
     return false;
