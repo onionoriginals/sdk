@@ -167,13 +167,30 @@ export class BitcoinManager {
       satoshi = (await this.getSatoshiFromInscription(creation.inscriptionId)) ?? '';
     }
 
+    // The satoshi is the identity of a did:btco asset. If it is unknown after
+    // both the creation response and the indexer lookup, fail loudly with the
+    // inscription details rather than returning an empty satoshi that callers
+    // would paper over with a txid/inscription-id (neither is a satoshi and
+    // both produce permanently unresolvable DIDs). The inscription itself has
+    // already been committed and paid for, so the error carries everything
+    // needed to recover it once the indexer catches up. (issue #256)
+    if (!satoshi) {
+      throw new StructuredError(
+        'ORD_SATOSHI_UNKNOWN',
+        'Inscription was created but its satoshi could not be determined from the provider or indexer. ' +
+        'The inscription exists on-chain; retry resolution later using the inscription id.',
+        { inscriptionId: creation.inscriptionId, txid, commitTxId: creation.commitTxId, revealTxId: creation.revealTxId }
+      );
+    }
+
     // Validate satoshi before using it
-    if (satoshi) {
+    {
       const validation = validateSatoshiNumber(satoshi);
       if (!validation.valid) {
         throw new StructuredError(
           'INVALID_SATOSHI',
-          `Ordinals provider returned invalid satoshi identifier: ${validation.error}`
+          `Ordinals provider returned invalid satoshi identifier: ${validation.error}`,
+          { inscriptionId: creation.inscriptionId, txid }
         );
       }
     }

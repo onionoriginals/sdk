@@ -67,6 +67,12 @@ export interface SimpleUtxoSelectionOptions {
   maxNumUtxos?: number;
   /** Optional preference for UTXO selection strategy */
   strategy?: 'minimize_change' | 'minimize_inputs' | 'optimize_size';
+  /**
+   * Opt in to spending UTXOs that carry inscriptions/resources or are locked.
+   * Defaults to false: selecting an inscription-bearing UTXO as a plain
+   * payment input transfers/burns the ordinal it carries.
+   */
+  allowOrdinalUtxos?: boolean;
 }
 
 /**
@@ -103,21 +109,43 @@ export function selectUtxos(
     ? undefined 
     : options.maxNumUtxos;
   
-  const strategy = typeof options === 'number' 
-    ? 'minimize_inputs' 
+  const strategy = typeof options === 'number'
+    ? 'minimize_inputs'
     : options.strategy || 'minimize_inputs';
-  
+
+  const allowOrdinalUtxos = typeof options === 'number'
+    ? false
+    : options.allowOrdinalUtxos === true;
+
   // Validate inputs
   if (!utxos || utxos.length === 0) {
     throw new Error('No UTXOs provided for selection.');
   }
-  
+
   if (targetAmount <= 0) {
     throw new Error(`Invalid target amount: ${targetAmount}`);
   }
-  
+
+  // Ordinal safety (issue #249): this selector is exported at the package
+  // root as a general-purpose selector, so it must apply the same exclusion
+  // predicate as selectResourceUtxos/utxo.ts — spending an inscribed or
+  // locked UTXO as a plain payment input destroys/transfers the ordinal.
+  const isProtected = (utxo: Utxo): boolean =>
+    utxo.locked === true ||
+    (Array.isArray(utxo.inscriptions) && utxo.inscriptions.length > 0) ||
+    (utxo as ResourceUtxo).hasResource === true;
+
+  const eligibleUtxos = allowOrdinalUtxos ? utxos : utxos.filter(u => !isProtected(u));
+
+  if (eligibleUtxos.length === 0) {
+    throw new Error(
+      'All available UTXOs carry inscriptions/resources or are locked and cannot be used for fees/payments. ' +
+      'Add non-resource UTXOs to your wallet, or pass allowOrdinalUtxos: true to override (dangerous).'
+    );
+  }
+
   // Sort UTXOs based on selected strategy
-  const sortedUtxos = [...utxos];
+  const sortedUtxos = [...eligibleUtxos];
   
   if (strategy === 'minimize_inputs') {
     // Sort by value descending to use fewest inputs

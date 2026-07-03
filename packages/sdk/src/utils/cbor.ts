@@ -1,31 +1,59 @@
-import * as cbor from 'cbor-js';
+import { encode as cborgEncode, decode as cborgDecode } from 'cborg';
 
-interface CborModule {
-  encode: (input: unknown) => ArrayBuffer;
-  decode: (buffer: ArrayBuffer) => unknown;
+/**
+ * CBOR encode/decode built on `cborg`.
+ *
+ * The previously bundled `cbor-js@0.1.0` encoder silently corrupted any string
+ * containing BMP code points in U+E000–U+FFFF (fullwidth forms, CJK
+ * compatibility ideographs, private-use area, ...) by misclassifying them as
+ * UTF-16 high surrogates. `cborg` encodes UTF-8 correctly and rejects
+ * malformed input.
+ *
+ * Decoding goes through `useMaps` and an explicit Map→object conversion so a
+ * `__proto__` map key becomes an ordinary own property instead of reassigning
+ * the decoded object's prototype (prototype pollution).
+ */
+export function encode(input: unknown): Uint8Array {
+  return cborgEncode(input);
 }
 
-export function encode(input: unknown): Uint8Array {
-  const cborTyped = cbor as unknown as CborModule;
-  const encoded = cborTyped.encode(input);
-  return new Uint8Array(encoded);
+function mapsToObjects(value: unknown): unknown {
+  if (value instanceof Map) {
+    const obj: Record<string, unknown> = {};
+    for (const [k, v] of value.entries()) {
+      if (typeof k !== 'string') {
+        throw new Error('CBOR decode error: non-string map keys are not supported');
+      }
+      Object.defineProperty(obj, k, {
+        value: mapsToObjects(v),
+        writable: true,
+        enumerable: true,
+        configurable: true
+      });
+    }
+    return obj;
+  }
+  if (Array.isArray(value)) {
+    return value.map(mapsToObjects);
+  }
+  return value;
 }
 
 export function decode<T = unknown>(bytes: Uint8Array | ArrayBuffer | Buffer): T {
-  const cborTyped = cbor as unknown as CborModule;
-  let arrayBuffer: ArrayBuffer;
+  let u8: Uint8Array;
   if (bytes instanceof ArrayBuffer) {
-    arrayBuffer = bytes;
-  } else if (bytes instanceof Uint8Array) {
-    arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    u8 = new Uint8Array(bytes);
   } else {
-    // Buffer - explicitly handle Buffer type
-    const bufferInstance = bytes as Buffer;
-    arrayBuffer = bufferInstance.buffer.slice(
-      bufferInstance.byteOffset,
-      bufferInstance.byteOffset + bufferInstance.byteLength
-    ) as ArrayBuffer;
+    // Uint8Array and Buffer both expose buffer/byteOffset/byteLength
+    u8 = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
-  return cborTyped.decode(arrayBuffer) as T;
+  const decoded = cborgDecode(u8, {
+    useMaps: true,
+    allowIndefinite: true,
+    allowUndefined: true,
+    allowNaN: true,
+    allowInfinity: true,
+    allowBigInt: true
+  });
+  return mapsToObjects(decoded) as T;
 }
-

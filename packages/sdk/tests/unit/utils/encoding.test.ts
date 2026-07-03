@@ -27,6 +27,15 @@ describe('utils/encoding', () => {
       const legacy = 'z' + Buffer.from([1, 2, 3]).toString('base64url');
       expect(() => decodeBase64UrlMultibase(legacy)).toThrow('Invalid Multibase encoding');
     });
+
+    test('rejects payloads with characters outside the base64url alphabet (issue #250)', () => {
+      const valid = encodeBase64UrlMultibase(new Uint8Array([1, 2, 3, 250]));
+      // Buffer.from(..., 'base64url') silently drops these — distinct strings
+      // must not decode to the same bytes (signature malleability).
+      for (const corrupted of [valid + '!', valid + '+', valid + '/', valid + '=', 'u' + 'ab cd', 'u' + 'ab\ncd']) {
+        expect(() => decodeBase64UrlMultibase(corrupted)).toThrow('Invalid Multibase encoding');
+      }
+    });
   });
 
   describe('hexToBytes', () => {

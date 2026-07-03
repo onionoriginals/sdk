@@ -41,7 +41,8 @@ describe('LifecycleManager', () => {
     expect(latest.satoshi).toBe('123');
     expect(latest.transactionId).toBe('tx-reveal-mock');
     expect(latest.feeRate).toBe(9);
-    expect(btco.bindings?.['did:btco']).toBe('did:btco:123');
+    // Network-prefixed binding: the SDK is configured for regtest (issue #247)
+    expect(btco.bindings?.['did:btco']).toBe('did:btco:reg:123');
   });
 
   test('inscribeOnBitcoin without provider throws error', async () => {

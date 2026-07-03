@@ -15,6 +15,7 @@ import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter.js';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
+import { btcoDidPrefix } from '../cel/btcoDid.js';
 import { multikey } from '../crypto/Multikey.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
@@ -911,6 +912,18 @@ export class LifecycleManager {
     const commitTxId = inscription.commitTxId;
     const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : feeRate;
 
+    // did:btco identity is satoshi-scoped. inscribeData now guarantees a
+    // non-empty, validated satoshi (issue #256); check before migrating so a
+    // missing satoshi cannot leave the asset half-migrated. An inscription id
+    // is never a valid did:btco identifier, so there is no fallback.
+    if (!inscription.satoshi) {
+      throw new StructuredError(
+        'ORD_SATOSHI_UNKNOWN',
+        'Inscription completed but no satoshi was returned; cannot derive a did:btco binding.',
+        { inscriptionId: inscription.inscriptionId, txid: revealTxId }
+      );
+    }
+
     // Capture the layer before migration for accurate metrics
     const fromLayer = asset.currentLayer;
 
@@ -923,9 +936,10 @@ export class LifecycleManager {
       feeRate: usedFeeRate
     });
 
-    const bindingValue = inscription.satoshi
-      ? `did:btco:${inscription.satoshi}`
-      : `did:btco:${inscription.inscriptionId}`;
+    // The binding must be network-prefixed: a regtest/signet satoshi recorded
+    // in bare mainnet form would collide with (and resolve to) whoever owns
+    // that satoshi on mainnet (issue #247).
+    const bindingValue = `${btcoDidPrefix(this.config.network || 'mainnet')}:${inscription.satoshi}`;
     asset.bindings = Object.assign({}, asset.bindings || {}, { 'did:btco': bindingValue });
     
     stopTimer();

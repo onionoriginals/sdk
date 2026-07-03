@@ -8,7 +8,14 @@ export function decodeBase64UrlMultibase(s: string): Uint8Array {
   if (!s || s[0] !== 'u') {
     throw new Error('Invalid Multibase encoding');
   }
-  return Buffer.from(s.slice(1), 'base64url');
+  const payload = s.slice(1);
+  // Buffer.from(..., 'base64url') silently skips characters outside the
+  // alphabet, so distinct proofValue strings would decode to the same bytes
+  // (signature malleability). Validate strictly instead.
+  if (!/^[A-Za-z0-9_-]*$/.test(payload)) {
+    throw new Error('Invalid Multibase encoding: not base64url');
+  }
+  return Uint8Array.from(Buffer.from(payload, 'base64url'));
 }
 
 export function hexToBytes(hex: string): Uint8Array {

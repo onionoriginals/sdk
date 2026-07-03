@@ -1,6 +1,7 @@
 import { OrdinalsInscription, BitcoinTransaction } from '../types/index.js';
 import { decode as decodeCbor } from '../utils/cbor.js';
 import { hexToBytes } from '../utils/encoding.js';
+import { StructuredError } from '../utils/telemetry.js';
 
 export class OrdinalsClient {
   constructor(
@@ -20,8 +21,18 @@ export class OrdinalsClient {
     return inscriptions.filter((x): x is OrdinalsInscription => x !== null);
   }
 
-  broadcastTransaction(tx: BitcoinTransaction): Promise<string> {
-    return Promise.resolve(tx.txid || 'txid');
+  // Transaction submission and fee estimation are NOT implemented against a
+  // real node yet. These methods used to return fabricated success values
+  // (a fake txid, a hardcoded fee), which silently corrupted provenance for
+  // anyone using this class as the "production" client. They now fail loudly.
+  // Use a provider with real broadcast support (e.g. SignetProvider) or an
+  // OrdinalsProvider implementation backed by your own infrastructure.
+
+  broadcastTransaction(_tx: BitcoinTransaction): Promise<string> {
+    return Promise.reject(new StructuredError(
+      'ORD_BROADCAST_NOT_IMPLEMENTED',
+      'OrdinalsClient.broadcastTransaction is not implemented: no transaction was broadcast. Configure an OrdinalsProvider with real broadcast support.'
+    ));
   }
 
   getTransactionStatus(_txid: string): Promise<{
@@ -29,15 +40,20 @@ export class OrdinalsClient {
     blockHeight?: number;
     confirmations?: number;
   }> {
-    return Promise.resolve({ confirmed: false });
+    return Promise.reject(new StructuredError(
+      'ORD_TX_STATUS_NOT_IMPLEMENTED',
+      'OrdinalsClient.getTransactionStatus is not implemented: transaction status cannot be determined. Configure an OrdinalsProvider with real status support.'
+    ));
   }
 
-  estimateFee(blocks: number = 1): Promise<number> {
-    return Promise.resolve(Math.max(1, blocks) * 10);
+  estimateFee(_blocks: number = 1): Promise<number> {
+    return Promise.reject(new StructuredError(
+      'ORD_FEE_ESTIMATE_NOT_IMPLEMENTED',
+      'OrdinalsClient.estimateFee is not implemented: refusing to return a hardcoded fee rate. Configure a FeeOracleAdapter or an OrdinalsProvider with real fee estimation.'
+    ));
   }
 
   // Added provider-like helper methods commonly expected by higher-level resolvers
-  // Minimal placeholder implementations suitable for unit testing
 
   async getSatInfo(satoshi: string): Promise<{ inscription_ids: string[] }> {
     const data = await this.fetchJson<any>(`/sat/${satoshi}`);

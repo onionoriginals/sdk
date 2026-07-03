@@ -237,10 +237,14 @@ describe('DID-003 — migrateToDIDBTCO on regtest produces did:btco:reg prefix',
   });
 
   test('webvhNetwork=cleffa (signet) → did:btco:sig:<sat>', async () => {
+    // No explicit `network`: an explicitly configured Bitcoin network takes
+    // precedence over the webvhNetwork mapping (issue #247), so the mapping
+    // only applies when `network` is absent.
     const manager = new DIDManager({
-      ...baseConfig,
+      defaultKeyType: 'Ed25519',
+      enableLogging: false,
       webvhNetwork: 'cleffa',
-    });
+    } as OriginalsConfig);
 
     const peerDoc = {
       '@context': ['https://www.w3.org/ns/did/v1'],

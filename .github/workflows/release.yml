@@ -151,3 +151,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # `--provenance` is not a valid `changeset publish` flag; npm provenance
+          # is enabled via this env var instead (id-token: write is already set).
+          NPM_CONFIG_PROVENANCE: "true"

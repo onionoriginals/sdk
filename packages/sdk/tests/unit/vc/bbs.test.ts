@@ -39,7 +39,7 @@ describe('BbsSimple e2e', () => {
 
 /** Inlined from bbs.utils.part.ts */
 import { BBSCryptosuiteUtils } from '../../../src';
-import * as cbor from 'cbor-js';
+import * as cbor from '../../../src/utils/cbor';
 
 function u8(len: number, start: number = 0): Uint8Array {
   const a = new Uint8Array(len);

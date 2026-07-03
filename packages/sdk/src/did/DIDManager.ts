@@ -223,14 +223,20 @@ export class DIDManager {
       throw new Error(`Satoshi identifier must be within Bitcoin's total supply (0 to ${MAX_SATOSHI_SUPPLY.toLocaleString()})`);
     }
 
-    // Determine Bitcoin network from WebVH network configuration if available
-    // This ensures consistent environment mapping: magby→regtest, cleffa→signet, pichu→mainnet
+    // Determine the Bitcoin network. An explicitly configured `network` wins:
+    // OriginalsSDK.create() always injects a default webvhNetwork ('pichu'),
+    // so deriving from webvhNetwork first would silently override an explicit
+    // `network: 'regtest'` and mint mainnet-form identifiers for regtest
+    // inscriptions (issue #247). The WebVH mapping (magby→regtest,
+    // cleffa→signet, pichu→mainnet) applies only when no explicit Bitcoin
+    // network was configured.
     let network: 'mainnet' | 'regtest' | 'signet';
-    if (this.config.webvhNetwork) {
+    if (this.config.network) {
+      network = this.config.network;
+    } else if (this.config.webvhNetwork) {
       network = getBitcoinNetworkForWebVH(this.config.webvhNetwork);
     } else {
-      // Fall back to explicit network config
-      network = this.config.network || 'mainnet';
+      network = 'mainnet';
     }
 
     // Try to carry over the first multikey VM if present

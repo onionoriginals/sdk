@@ -247,24 +247,23 @@ describe('OrdinalsClient (real HTTP behavior with mocked fetch)', () => {
     expect(list).toEqual([]);
   });
 
-  test('broadcastTransaction returns txid (still a thin wrapper)', async () => {
-    await expect(client.broadcastTransaction({ txid: 't', vin: [], vout: [], fee: 0 })).resolves.toEqual('t');
-  });
-
-  test('broadcastTransaction falls back when txid missing', async () => {
+  // Issue #248: these methods used to fabricate success (fake txid, hardcoded
+  // fee, always-unconfirmed status). They must now fail loudly instead.
+  test('broadcastTransaction throws NOT_IMPLEMENTED instead of fabricating a txid', async () => {
+    await expect(client.broadcastTransaction({ txid: 't', vin: [], vout: [], fee: 0 }))
+      .rejects.toThrow(/not implemented/i);
     // @ts-ignore
-    await expect(client.broadcastTransaction({ vin: [], vout: [], fee: 0 })).resolves.toEqual('txid');
+    await expect(client.broadcastTransaction({ vin: [], vout: [], fee: 0 }))
+      .rejects.toThrow(/not implemented/i);
   });
 
-  test('getTransactionStatus returns status (placeholder)', async () => {
-    const status = await client.getTransactionStatus('txid');
-    expect(status.confirmed).toBeDefined();
+  test('getTransactionStatus throws NOT_IMPLEMENTED instead of reporting unconfirmed', async () => {
+    await expect(client.getTransactionStatus('txid')).rejects.toThrow(/not implemented/i);
   });
 
-  test('estimateFee returns a number and clamps floor', async () => {
-    await expect(client.estimateFee(1)).resolves.toEqual(expect.any(Number));
-    await expect(client.estimateFee()).resolves.toEqual(expect.any(Number));
-    await expect(client.estimateFee(0)).resolves.toBeGreaterThanOrEqual(10);
+  test('estimateFee throws NOT_IMPLEMENTED instead of returning a hardcoded rate', async () => {
+    await expect(client.estimateFee(1)).rejects.toThrow(/not implemented/i);
+    await expect(client.estimateFee()).rejects.toThrow(/not implemented/i);
   });
 
   test('getSatInfo returns ids when available and empty on 404', async () => {
