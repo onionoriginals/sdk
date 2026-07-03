@@ -139,12 +139,14 @@ export class DIDManager {
       .replace(/[^a-zA-Z0-9._-]/g, '-')
       .toLowerCase();
 
-    // Percent-encode the domain so a development port (localhost:8080) does
-    // not introduce an extra ':' segment — matching how the rest of the SDK
-    // encodes did:webvh domains (see parseWebVHDomain's decodeURIComponent).
-    const encodedDomain = encodeURIComponent(normalized);
+    // Percent-encode the port colon so the domain+port stays a single DID
+    // authority segment. A literal colon (e.g. `localhost:8080`) would be parsed
+    // as `authority=localhost` + `path segment=8080` by every consumer that
+    // splits the DID on ':' — including this SDK's own saveDIDLog, which does
+    // decodeURIComponent(didParts[2]) and expects the port to be encoded there.
+    const authority = portPart ? `${domainPart}%3A${portPart}` : normalized;
     const oldDid = didDoc.id;
-    const newDid = `did:webvh:${encodedDomain}:${slug}`;
+    const newDid = `did:webvh:${authority}:${slug}`;
 
     // Rewrite a reference from the old DID to the new one. Relative
     // references ('#key-0') and references to foreign DIDs are preserved.
@@ -152,8 +154,9 @@ export class DIDManager {
       ref === oldDid ? newDid : ref.startsWith(`${oldDid}#`) ? newDid + ref.slice(oldDid.length) : ref;
 
     // The migrated document must be internally consistent: verification
-    // method ids/controllers and the relationship references must all point
-    // at the new did:webvh subject, not the retired did:peer.
+    // method ids/controllers, relationship references, top-level controller
+    // and service ids must all point at the new did:webvh subject, not the
+    // retired did:peer.
     const migrated: DIDDocument = {
       ...didDoc,
       id: newDid

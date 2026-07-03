@@ -46,6 +46,27 @@ describe('UTXO selection', () => {
     expect(res.selected.length).toBe(1);
   });
 
+  test('ordinal safety: hasResource-flagged inputs are excluded by default (no inscriptions[])', () => {
+    // A ResourceUtxo can carry an ordinal via the `hasResource` marker without
+    // an `inscriptions` array. Spending it as a fee/payment input would transfer
+    // or burn the ordinal, so it must be excluded like an inscription-bearing UTXO.
+    const utxos = [{ ...U(100000), hasResource: true } as Utxo];
+    expect(() => selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 2 })).toThrow(new UtxoSelectionError('INSUFFICIENT_FUNDS'));
+  });
+
+  test('ordinal safety: prefers a clean UTXO over a larger hasResource-flagged one', () => {
+    const resource = { ...U(100000), hasResource: true } as Utxo;
+    const clean = U(20000);
+    const res = selectUtxos([resource, clean], { targetAmountSats: 1000, feeRateSatsPerVb: 2 });
+    expect(res.selected).toEqual([clean]);
+  });
+
+  test('ordinal safety: explicit opt-out still allows spending hasResource-flagged UTXOs', () => {
+    const utxos = [{ ...U(100000), hasResource: true } as Utxo];
+    const res = selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 2, forbidInscriptionBearingInputs: false });
+    expect(res.selected.length).toBe(1);
+  });
+
   test('returns selection with change suppressed if dust', () => {
     const utxos = [U(10000)];
     const res = selectUtxos(utxos, { targetAmountSats: DUST_LIMIT_SATS, feeRateSatsPerVb: 1 });

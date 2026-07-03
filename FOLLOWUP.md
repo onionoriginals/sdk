@@ -1,8 +1,8 @@
 # Follow-up items
 
-Status update: all items below were triaged and addressed in the follow-up
-pass on branch `claude/follow-up-items-kjoaqi`. Each entry records the decision
-taken and what (if anything) remains open.
+Status update: items 1–19 were triaged and addressed in the follow-up pass on
+branch `claude/follow-up-items-kjoaqi`; each entry records the decision taken.
+Items 20–21 (surfaced by the later #234 correctness pass) remain open.
 
 ## 1. `did:btco` resolution ignores the network encoded in the DID — RESOLVED
 
@@ -149,3 +149,48 @@ clear "did not return a satoshi ordinal" error instead of an invalid DID.
 verification method's DID document resolves, the method must also be listed
 under the corresponding relationship. The legacy `CredentialManager` verify
 path enforces the same purpose check.
+
+## Open items (from the #234 correctness pass — not yet addressed)
+
+## 20. `MAX_SATOSHI_SUPPLY` is the theoretical cap, not the real issued supply (LOW)
+
+- **Where:** `packages/sdk/src/utils/satoshi-validation.ts:7`
+  (`MAX_SATOSHI_SUPPLY = 2_100_000_000_000_000`).
+- **What:** The bound is 21e6 × 1e8 (theoretical 21M BTC), ignoring halving
+  rounding. The real total ever issued is `2_099_999_997_690_000` sats, so the
+  highest valid ordinal is `2_099_999_997_689_999`. `validateSatoshiNumber`
+  therefore accepts ~2.31M non-existent satoshi numbers in
+  `[2_099_999_997_690_000, 2_100_000_000_000_000]`.
+- **Why deferred:** Low severity (resolution simply fails later for a
+  non-existent sat). Tightening the bound flips security/penetration tests that
+  deliberately encode `2100000000000000` as "max valid satoshi"
+  (`tests/security/bitcoin-penetration-tests.test.ts:274,526`,
+  `tests/unit/utils/utils-coverage.test.ts:178`) from valid→invalid, so it is a
+  tested-contract change plus a theoretical-vs-actual-cap decision, not a
+  one-line minimal fix. Needs its own PR that also updates those expectations.
+
+## 21. `did:btco` lifecycle binding is constructed network-blind (MEDIUM, spec ambiguity)
+
+- **Where:** `packages/sdk/src/lifecycle/LifecycleManager.ts` (inscribeOnBitcoin
+  binding) and `packages/sdk/src/lifecycle/BatchLifecycleOperations.ts` (batch
+  binding). Both build `did:btco:${satoshi}` (bare mainnet form) regardless of
+  network.
+- **What:** For a regtest/signet inscription the recorded
+  `asset.bindings['did:btco']` is the mainnet form, not `did:btco:reg:<sat>` /
+  `did:btco:sig:<sat>`. The rest of the SDK (`createBtcoDidDocument`,
+  `BtcoDidResolver`) is network-aware.
+- **Why deferred:** Requires resolving a genuine network-authority ambiguity, so
+  it is not a clearly-correct minimal fix:
+  - `webvhNetwork` always defaults to `'pichu'` (mapped → mainnet) while an
+    explicit `network` is preserved-but-warned, so the two can contradict.
+  - The inscription itself runs on `config.network` (via `BitcoinManager`), which
+    argues the binding should use `config.network`.
+  - But `DIDManager.migrateToDIDBTCO` — the canonical btco-DID builder — prefers
+    the `webvhNetwork` mapping, which yields a *different* answer (mainnet) for
+    the common `network:'regtest'` + default-pichu config.
+  - An existing test (`tests/unit/lifecycle/LifecycleManager.test.ts:44`)
+    explicitly asserts `did:btco:123` (mainnet) for a `network:'regtest'` SDK,
+    so any fix changes a tested contract.
+  Fixing this well means deciding which network is authoritative for the binding
+  and aligning `migrateToDIDBTCO`, the binding, and the test together — a design
+  decision, surfaced here rather than chosen arbitrarily.

@@ -70,10 +70,19 @@ describe('DIDManager', () => {
     expect(web2.authentication).toEqual(['#0', 'did:example:other#1']);
   });
 
-  test('migrateToDIDWebVH percent-encodes a development domain port', async () => {
+  test('migrateToDIDWebVH percent-encodes a domain port so it stays one authority segment', async () => {
     const peer: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:abc123' };
     const web = await sdk.did.migrateToDIDWebVH(peer, 'localhost:8080');
+    // The port colon must be percent-encoded (%3A), otherwise splitting the DID
+    // on ':' would parse `8080` as a path segment and `localhost` as the domain.
     expect(web.id).toBe('did:webvh:localhost%3A8080:abc123');
+    const parts = web.id.split(':');
+    // did / webvh / <authority> / <slug> — exactly one authority segment.
+    expect(parts.length).toBe(4);
+    expect(decodeURIComponent(parts[2])).toBe('localhost:8080');
+    // saveDIDLog decodes didParts[2] as the authority; the slug (not the port)
+    // must be the only path segment.
+    expect(parts.slice(3)).toEqual(['abc123']);
   });
 
   test('migrateToDIDBTCO converts to did:btco (expected to fail until implemented)', async () => {

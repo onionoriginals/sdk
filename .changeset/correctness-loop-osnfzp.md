@@ -1,0 +1,9 @@
+---
+"@originals/sdk": patch
+---
+
+Fix three correctness bugs surfaced by a fresh subsystem audit, each with regression coverage:
+
+- **Ordinal-safe transfer UTXO selection (fund/ordinal loss).** `selectUtxos` (used by the public `buildTransferTransaction`) now excludes UTXOs flagged with the first-class `hasResource` marker, not just those with a populated `inscriptions` array. Previously a `ResourceUtxo` carrying an ordinal via `hasResource: true` (no `inscriptions[]`) could be picked as a fee/payment input, transferring or burning the ordinal it carries. This matches the two sibling selectors (`utxo-selection.ts` `carriesResource`, `transactions/commit.ts` `isProtected`) that already checked both markers.
+- **Multi-sig verification enforces validity window and fails closed on revocable status.** `MultiSigManager.verifyMultiSig` (and its `verifyEscrow` / `verifyCorporate` wrappers, reached via `CredentialManager.verifyCredentialMultiSig`) now rejects an expired or not-yet-valid credential even when the m-of-n threshold is met, and fails closed when the credential declares a `BitstringStatusListEntry` status it cannot check. Previously the multi-sig path only verified signatures, threshold, and timelock, so an expired or issuer-revoked m-of-n credential (governance/escrow/corporate) verified as valid — a revocation/expiry bypass relative to the single-sig path, which already enforces both.
+- **`migrateToDIDWebVH` percent-encodes a domain port.** A ported domain (e.g. `localhost:8080`) is now emitted as a single DID authority segment (`did:webvh:localhost%3A8080:slug`) instead of a literal colon. The literal colon made every consumer that splits the DID on `:` — including this SDK's own `saveDIDLog`, which does `decodeURIComponent(didParts[2])` — parse the port as a path segment, producing a malformed, non-resolvable DID.
