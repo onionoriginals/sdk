@@ -1,11 +1,11 @@
 import b58 from 'b58';
 
 export function encodeBase64UrlMultibase(bytes: Uint8Array): string {
-  return 'z' + Buffer.from(bytes).toString('base64url');
+  return 'u' + Buffer.from(bytes).toString('base64url');
 }
 
 export function decodeBase64UrlMultibase(s: string): Uint8Array {
-  if (!s || s[0] !== 'z') {
+  if (!s || s[0] !== 'u') {
     throw new Error('Invalid Multibase encoding');
   }
   return Buffer.from(s.slice(1), 'base64url');

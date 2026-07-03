@@ -23,6 +23,7 @@ import { serializeEventLogJson } from '../serialization/json.js';
 import { serializeEventLogCbor } from '../serialization/cbor.js';
 import { multikey } from '../../crypto/Multikey.js';
 import { canonicalizeEvent } from '../canonicalize.js';
+import { btcoDidFromSatoshi } from '../btcoDid.js';
 
 /**
  * Flags parsed from command line arguments
@@ -147,7 +148,11 @@ function resolveMigrationDid(event: EventLog['events'][number], data: Record<str
     );
     const satoshi = proof?.satoshi;
     if (satoshi !== undefined && satoshi !== null) {
-      return `did:btco:${satoshi as string | number}`;
+      // Network-scoped identifier: the network is recorded in the SIGNED
+      // migration data (BtcoMigrationData.network), so the CLI derives the
+      // same sig/reg-prefixed DID as state derivation. Legacy logs without a
+      // recorded network default to the bare mainnet form.
+      return btcoDidFromSatoshi(satoshi as string | number, data.network as string | undefined);
     }
   }
   return data.targetDid as string | undefined;

@@ -160,7 +160,7 @@ describe('CredentialManager', () => {
       created: new Date().toISOString(),
       verificationMethod: multikey.encodePublicKey(new Uint8Array(33).fill(4), 'Secp256k1'),
       proofPurpose: 'assertionMethod',
-      proofValue: 'z' + Buffer.from('sig').toString('base64url')
+      proofValue: 'u' + Buffer.from('sig').toString('base64url')
     } } as any;
     const cm: any = sdk.credentials as any;
     const original = cm.getSigner;
@@ -276,7 +276,7 @@ describe('CredentialManager verify with didManager present but legacy path', () 
       issuer: 'did:ex',
       issuanceDate: new Date().toISOString(),
       credentialSubject: {},
-      proof: { type: 'DataIntegrityProof', created: new Date().toISOString(), verificationMethod: multikey.encodePublicKey(new Uint8Array(33).fill(5), 'Secp256k1'), proofPurpose: 'assertionMethod', proofValue: 'z' + Buffer.from('bad').toString('base64url') }
+      proof: { type: 'DataIntegrityProof', created: new Date().toISOString(), verificationMethod: multikey.encodePublicKey(new Uint8Array(33).fill(5), 'Secp256k1'), proofPurpose: 'assertionMethod', proofValue: 'u' + Buffer.from('bad').toString('base64url') }
     };
     const ok = await cm.verifyCredential(vc);
     expect(ok).toBe(false);

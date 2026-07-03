@@ -17,6 +17,7 @@ import { witnessEvent } from '../algorithms/witnessEvent.js';
 import { BitcoinWitness } from '../witnesses/BitcoinWitness.js';
 import type { BitcoinManager } from '../../bitcoin/BitcoinManager.js';
 import type { CelSigner } from './PeerCelManager.js';
+import { btcoDidPrefix } from '../btcoDid.js';
 
 /**
  * Configuration options for BtcoCelManager
@@ -86,41 +87,54 @@ export interface BtcoMigrationData {
  */
 export class BtcoCelManager {
   private signer: CelSigner;
-  private bitcoinManager: BitcoinManager;
-  private bitcoinWitness: BitcoinWitness;
+  private bitcoinManager?: BitcoinManager;
+  private _bitcoinWitness?: BitcoinWitness;
   private config: BtcoCelConfig;
 
   /**
    * Creates a new BtcoCelManager instance
-   * 
+   *
    * @param signer - Function that signs data and returns a DataIntegrityProof
-   * @param bitcoinManager - BitcoinManager instance for ordinals inscriptions
+   * @param bitcoinManager - BitcoinManager instance for ordinals inscriptions.
+   *   Optional: only WRITE operations (migrate — it inscribes) need it; pure
+   *   reads like getCurrentState replay the persisted log deterministically
+   *   and work without one.
    * @param config - Optional configuration options
    */
   constructor(
     signer: CelSigner,
-    bitcoinManager: BitcoinManager,
+    bitcoinManager?: BitcoinManager,
     config: BtcoCelConfig = {}
   ) {
     if (typeof signer !== 'function') {
       throw new Error('BtcoCelManager requires a signer function');
     }
-    if (!bitcoinManager) {
-      throw new Error('BtcoCelManager requires a BitcoinManager instance');
-    }
-    
+
     this.signer = signer;
     this.bitcoinManager = bitcoinManager;
     this.config = {
       proofPurpose: 'assertionMethod',
       ...config,
     };
-    
-    // Create Bitcoin witness service with optional fee rate
-    this.bitcoinWitness = new BitcoinWitness(bitcoinManager, {
-      feeRate: config.feeRate,
-      verificationMethod: config.verificationMethod,
-    });
+  }
+
+  /** The BitcoinManager, or a clear error for write paths that need one. */
+  private requireBitcoinManager(): BitcoinManager {
+    if (!this.bitcoinManager) {
+      throw new Error('BTCO operations require a BitcoinManager. Provide it in config.btco.bitcoinManager');
+    }
+    return this.bitcoinManager;
+  }
+
+  /** Lazily-created Bitcoin witness service (requires a BitcoinManager). */
+  private get bitcoinWitness(): BitcoinWitness {
+    if (!this._bitcoinWitness) {
+      this._bitcoinWitness = new BitcoinWitness(this.requireBitcoinManager(), {
+        feeRate: this.config.feeRate,
+        verificationMethod: this.config.verificationMethod,
+      });
+    }
+    return this._bitcoinWitness;
   }
 
   /**
@@ -143,6 +157,10 @@ export class BtcoCelManager {
    * @throws Error if Bitcoin inscription fails
    */
   async migrate(webvhLog: EventLog): Promise<EventLog> {
+    // Migration inscribes on Bitcoin — it is the write path that genuinely
+    // needs a BitcoinManager. Fail up front with a clear error.
+    const bitcoinManager = this.requireBitcoinManager();
+
     // Validate input log
     if (!webvhLog || !webvhLog.events || webvhLog.events.length === 0) {
       throw new Error('Cannot migrate an empty event log');
@@ -211,7 +229,7 @@ export class BtcoCelManager {
       // is known now — recording it here keeps state derivation deterministic:
       // replaying the log yields the same network-scoped did:btco identifier
       // regardless of the SDK's configured network.
-      network: this.bitcoinManager.network,
+      network: bitcoinManager.network,
       migratedAt: new Date().toISOString(),
     };
 
@@ -242,18 +260,11 @@ export class BtcoCelManager {
 
   /**
    * The network-scoped did:btco prefix for the configured Bitcoin network.
-   * Mainnet is bare (`did:btco`); signet/regtest carry `sig`/`reg` segments.
-   * Mirrors DIDManager / createBtcoDidDocument so all btco identifiers agree.
+   * Delegates to the shared helper so all btco identifiers the SDK emits
+   * (state derivation, CLI display) agree on the prefix.
    */
   private btcoDidPrefix(network: string | undefined): string {
-    switch (network) {
-      case 'signet':
-        return 'did:btco:sig';
-      case 'regtest':
-        return 'did:btco:reg';
-      default:
-        return 'did:btco';
-    }
+    return btcoDidPrefix(network);
   }
 
   /**
@@ -332,9 +343,17 @@ export class BtcoCelManager {
               // matching DIDManager/createBtcoDidDocument. The network is read
               // from the SIGNED migration data so replaying a persisted log is
               // deterministic — the DID does not change with the replaying SDK's
-              // configured network. Fall back to the inscribing manager's network
-              // only for legacy logs written before the network was recorded.
-              const network = (updateData.network as string | undefined) ?? this.bitcoinManager.network;
+              // configured network. Fall back to a configured BitcoinManager's
+              // network only for legacy logs written before the network was
+              // recorded; without either source, deriving a DID would just be
+              // guessing the network, so fail closed with a clear error.
+              const network = (updateData.network as string | undefined) ?? this.bitcoinManager?.network;
+              if (updateData.network === undefined && !this.bitcoinManager) {
+                throw new Error(
+                  'Legacy btco log does not record its Bitcoin network in the signed migration data; ' +
+                  'configure a BitcoinManager (config.btco.bitcoinManager) so the network can be supplied.'
+                );
+              }
               state.metadata.network = network;
               state.did = `${this.btcoDidPrefix(network)}:${bitcoinProof.satoshi as string}`;
             }
@@ -399,9 +418,10 @@ export class BtcoCelManager {
   }
 
   /**
-   * Gets the BitcoinManager instance used by this manager
+   * Gets the BitcoinManager instance used by this manager (undefined when the
+   * manager was constructed for read-only replay without one)
    */
-  get bitcoin(): BitcoinManager {
+  get bitcoin(): BitcoinManager | undefined {
     return this.bitcoinManager;
   }
 }

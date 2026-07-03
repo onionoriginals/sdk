@@ -27,11 +27,38 @@ export interface SelectionResult {
   changeSats: number;
 }
 
+/**
+ * Default per-component vsize estimates. The SDK's transaction paths accept
+ * only segwit funding UTXOs (see isSegwitScriptPubKey), so the per-input
+ * constant is the P2WPKH ~68 vB used by every other estimator
+ * (utxo-selection.ts, PSBTBuilder, commit.ts) — a legacy P2PKH input would be
+ * ~148 vB, which is exactly why legacy inputs are rejected rather than
+ * silently under-fee'd.
+ */
 export const DEFAULT_FEE_ESTIMATE: Required<FeeEstimateOptions> = {
-  bytesPerInput: 148,
+  bytesPerInput: 68,
   bytesPerOutput: 34,
   baseTxBytes: 10
 };
+
+/**
+ * True when a scriptPubKey hex string is a segwit witness program
+ * (v0 P2WPKH/P2WSH, v1 P2TR, or any future v2–v16 program): a version opcode
+ * (OP_0 or OP_1..OP_16) followed by a single direct push of 2–40 bytes.
+ *
+ * The SDK's fee estimators assume witness inputs (~68 vB) and its signers
+ * provide only `witnessUtxo` data, so a legacy (P2PKH/P2SH) funding UTXO
+ * would be fee-under-estimated AND unsignable — callers must reject them.
+ */
+export function isSegwitScriptPubKey(scriptPubKeyHex: string): boolean {
+  const hex = scriptPubKeyHex.toLowerCase();
+  if (!/^[0-9a-f]+$/.test(hex) || hex.length % 2 !== 0) return false;
+  const totalBytes = hex.length / 2;
+  const versionByte = parseInt(hex.slice(0, 2), 16);
+  const pushLength = parseInt(hex.slice(2, 4), 16);
+  const isVersionOpcode = versionByte === 0x00 || (versionByte >= 0x51 && versionByte <= 0x60);
+  return isVersionOpcode && pushLength >= 2 && pushLength <= 40 && totalBytes === 2 + pushLength;
+}
 
 export function estimateFeeSats(numInputs: number, numOutputs: number, feeRateSatsPerVb: number, feeEstimate: FeeEstimateOptions = {}): number {
   const est = { ...DEFAULT_FEE_ESTIMATE, ...feeEstimate };
@@ -58,8 +85,15 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
     throw err;
   }
 
-  // Filter UTXOs based on policy
-  let candidateUtxos = utxos.slice().filter(u => typeof u.value === 'number' && u.value > 0);
+  // Filter UTXOs based on policy. UTXOs with a known non-segwit scriptPubKey
+  // are excluded: the fee estimate assumes witness inputs and the signing
+  // paths only supply witnessUtxo data, so selecting one would produce an
+  // under-fee'd, unsignable transaction. (UTXOs without a scriptPubKey cannot
+  // be classified here and pass through.)
+  let candidateUtxos = utxos.slice().filter(u =>
+    typeof u.value === 'number' && u.value > 0 &&
+    (!u.scriptPubKey || isSegwitScriptPubKey(u.scriptPubKey))
+  );
   const forbidInscribed = forbidInscriptionBearingInputs !== false;
   const isInscribed = (u: Utxo): boolean => !!(u.inscriptions && u.inscriptions.length > 0);
   // CONFLICTING_LOCKS is only an accurate diagnosis when unlocking could

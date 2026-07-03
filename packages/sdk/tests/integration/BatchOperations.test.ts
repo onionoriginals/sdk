@@ -259,102 +259,8 @@ describe('Batch Operations Integration', () => {
     });
   });
 
-  describe('batchInscribeOnBitcoin - Single Transaction (Cost Savings)', () => {
-    test('should inscribe multiple assets in single transaction', async () => {
-      const assets: OriginalsAsset[] = [];
-      for (let i = 0; i < 5; i++) {
-        const asset = await sdk.lifecycle.createAsset([
-          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
-        ]);
-        assets.push(asset);
-      }
-
-      const result = await sdk.lifecycle.batchInscribeOnBitcoin(assets, {
-        singleTransaction: true,
-        feeRate: 10
-      });
-
-      expect(result.successful).toHaveLength(5);
-      expect(result.failed).toHaveLength(0);
-
-      // Verify all assets share the same batch transaction
-      const batchIds = new Set<string>();
-      const transactionIds = new Set<string>();
-      
-      for (const item of result.successful) {
-        expect(item.result.currentLayer).toBe('did:btco');
-        const provenance = item.result.getProvenance();
-        const latestMigration = provenance.migrations[provenance.migrations.length - 1];
-        
-        expect((latestMigration as any).batchId).toBeDefined();
-        expect((latestMigration as any).batchInscription).toBe(true);
-        expect((latestMigration as any).feePaid).toBeDefined();
-        
-        batchIds.add((latestMigration as any).batchId);
-        transactionIds.add(latestMigration.transactionId!);
-      }
-
-      // All assets should share the same batch ID and transaction ID
-      expect(batchIds.size).toBe(1);
-      expect(transactionIds.size).toBe(1);
-    });
-
-    test('should calculate cost savings correctly', async () => {
-      const assets: OriginalsAsset[] = [];
-      for (let i = 0; i < 10; i++) {
-        const asset = await sdk.lifecycle.createAsset([
-          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
-        ]);
-        assets.push(asset);
-      }
-
-      // Track batch events to capture cost savings
-      let costSavings: any = null;
-      sdk.lifecycle.on('batch:completed', (event) => {
-        if (event.results.costSavings) {
-          costSavings = event.results.costSavings;
-        }
-      });
-
-      await sdk.lifecycle.batchInscribeOnBitcoin(assets, {
-        singleTransaction: true,
-        feeRate: 10
-      });
-
-      expect(costSavings).toBeDefined();
-      expect(costSavings.amount).toBeGreaterThan(0);
-      expect(costSavings.percentage).toBeGreaterThan(0);
-      // Should save at least 30% as per requirements
-      expect(costSavings.percentage).toBeGreaterThanOrEqual(30);
-    });
-
-    test('should split fees proportionally by data size', async () => {
-      // Create assets of different sizes
-      const assets: OriginalsAsset[] = [];
-      
-      // Small asset
-      assets.push(await sdk.lifecycle.createAsset([
-        { id: 'small', type: 'text', contentType: 'text/plain', hash: makeHash('small'), content: 'x' }
-      ]));
-      
-      // Large asset
-      assets.push(await sdk.lifecycle.createAsset([
-        { id: 'large', type: 'text', contentType: 'text/plain', hash: makeHash('large'), content: 'x'.repeat(1000) }
-      ]));
-
-      const result = await sdk.lifecycle.batchInscribeOnBitcoin(assets, {
-        singleTransaction: true,
-        feeRate: 10
-      });
-
-      const smallAssetFee = (result.successful[0].result.getProvenance().migrations[0] as any).feePaid;
-      const largeAssetFee = (result.successful[1].result.getProvenance().migrations[0] as any).feePaid;
-
-      // Large asset should pay more fees
-      expect(largeAssetFee).toBeGreaterThan(smallAssetFee);
-    });
-
-    test('should handle atomic failure in single transaction mode', async () => {
+  describe('batchInscribeOnBitcoin - singleTransaction rejection', () => {
+    test('rejects singleTransaction: assets must not share one satoshi identity', async () => {
       const assets: OriginalsAsset[] = [];
       for (let i = 0; i < 3; i++) {
         const asset = await sdk.lifecycle.createAsset([
@@ -363,20 +269,22 @@ describe('Batch Operations Integration', () => {
         assets.push(asset);
       }
 
-      // Mock a failure scenario by using an invalid configuration
-      // In single transaction mode, if the transaction fails, ALL assets should fail
-      try {
-        const result = await sdk.lifecycle.batchInscribeOnBitcoin(assets, {
-          singleTransaction: true,
-          feeRate: 10
-        });
-        
-        // If it succeeds, all should succeed
-        expect(result.failed).toHaveLength(0);
-      } catch (error) {
-        // If it fails, it should be a BatchError
-        expect(error).toBeDefined();
-      }
+      // A did:btco identity is satoshi-scoped; batching N assets onto one
+      // inscription/satoshi would give them all the same on-chain identity.
+      await expect(
+        sdk.lifecycle.batchInscribeOnBitcoin(assets, { singleTransaction: true, feeRate: 10 })
+      ).rejects.toThrow('singleTransaction batch inscription is not supported');
+
+      // The default per-asset mode assigns each asset its own inscription.
+      const result = await sdk.lifecycle.batchInscribeOnBitcoin(assets, { feeRate: 10 });
+      expect(result.successful).toHaveLength(3);
+      const inscriptionIds = new Set(
+        result.successful.map(item => {
+          const provenance = item.result.getProvenance();
+          return provenance.migrations[provenance.migrations.length - 1].inscriptionId;
+        })
+      );
+      expect(inscriptionIds.size).toBe(3);
     });
   });
 
@@ -460,7 +368,6 @@ describe('Batch Operations Integration', () => {
 
       // Phase 3: Batch inscribe with cost savings
       const inscribeResult = await sdk.lifecycle.batchInscribeOnBitcoin(publishedAssets, {
-        singleTransaction: true,
         feeRate: 10
       });
       expect(inscribeResult.successful).toHaveLength(5);
@@ -519,13 +426,12 @@ describe('Batch Operations Integration', () => {
 
       const startTime = Date.now();
       const result = await sdk.lifecycle.batchInscribeOnBitcoin(assets, {
-        singleTransaction: true,
         feeRate: 10
       });
       const duration = Date.now() - startTime;
 
       expect(result.successful).toHaveLength(20);
-      expect(duration).toBeLessThan(10000); // Should be fast with single transaction
+      expect(duration).toBeLessThan(10000);
     });
   });
 });

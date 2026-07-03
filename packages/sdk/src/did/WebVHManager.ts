@@ -40,6 +40,39 @@ export function normalizeUpdateKey(key: string): string {
   return key;
 }
 
+/**
+ * did:webvh in this SDK is Ed25519-only: resolution verifies log proofs with
+ * Ed25519Verifier (see DIDManager.resolveDID), so a DID created or updated
+ * with any other key type would sign successfully yet resolve to null
+ * everywhere. Reject non-Ed25519 keys up front instead.
+ */
+export function assertEd25519WebVHKeys(
+  verificationMethods: ReadonlyArray<{ publicKeyMultibase?: string }> | undefined,
+  updateKeys: readonly string[] | undefined
+): void {
+  const check = (key: string, what: string): void => {
+    let type: string;
+    try {
+      type = multikey.decodePublicKey(key).type;
+    } catch {
+      throw new Error(`did:webvh ${what} is not a valid public multikey: ${key}`);
+    }
+    if (type !== 'Ed25519') {
+      throw new Error(
+        `did:webvh only supports Ed25519 keys (resolution verifies DID logs with Ed25519); ${what} uses ${type}`
+      );
+    }
+  };
+  for (const vm of verificationMethods ?? []) {
+    if (vm && typeof vm.publicKeyMultibase === 'string') {
+      check(vm.publicKeyMultibase, 'verificationMethod');
+    }
+  }
+  for (const key of updateKeys ?? []) {
+    check(key, 'updateKey');
+  }
+}
+
 // Type definitions for didwebvh-ts (to avoid module resolution issues)
 interface VerificationMethod {
   id?: string;
@@ -357,6 +390,7 @@ export class WebVHManager {
       }
       verificationMethods = providedVerificationMethods;
       updateKeys = providedUpdateKeys.map(normalizeUpdateKey);
+      assertEd25519WebVHKeys(verificationMethods, updateKeys);
       keyPair = undefined; // No key pair when using external signer
     } else {
       // Generate or use provided key pair (Ed25519 for did:webvh)
@@ -633,6 +667,12 @@ export class WebVHManager {
       
       signer = internalSigner;
       verifier = internalSigner;
+    }
+
+    // Reject non-Ed25519 verification methods before appending: the update
+    // would sign fine but leave the DID unresolvable (Ed25519-only resolution).
+    if (Array.isArray(updates.verificationMethod)) {
+      assertEd25519WebVHKeys(updates.verificationMethod, undefined);
     }
 
     // Get the current document from the log

@@ -14,7 +14,8 @@ import type {
   VerifyOptions,
   VerificationResult,
   EventVerification,
-  DataIntegrityProof
+  DataIntegrityProof,
+  OrdinalsLookup
 } from '../types.js';
 import { computeDigestMultibase } from '../hash.js';
 import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize.js';
@@ -171,6 +172,65 @@ async function dispatchVerify(
 }
 
 /**
+ * Extracts the Ed25519 public key(s) embedded in a SELF-CERTIFYING DID
+ * (did:key, or long-form did:peer numalgo-4 which embeds its DID document).
+ *
+ * Returns:
+ * - a Set of hex-encoded keys when the DID is self-certifying and its key
+ *   material could be extracted (possibly empty — meaning no Ed25519 key is
+ *   embedded, so no Ed25519 controller proof can legitimately bind to it);
+ * - null when the DID is not self-certifying or cannot be checked offline
+ *   (short-form did:peer:4, other DID methods, resolution failure) — the
+ *   caller then falls back to trust-on-first-use.
+ */
+async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null> {
+  if (typeof did !== 'string') return null;
+
+  if (did.startsWith('did:key:')) {
+    // Pure local decode — a did:key IS its key, so a decode failure or a
+    // non-Ed25519 key means no Ed25519 proof can be bound to it (empty set →
+    // fail closed at the caller).
+    const key = extractEd25519FromDidKey(did);
+    return new Set(key ? [Buffer.from(key).toString('hex')] : []);
+  }
+
+  if (did.startsWith('did:peer:4')) {
+    // Only the LONG form (did:peer:4<hash>:<encodedDoc>) embeds the document
+    // and is checkable offline; the short form carries only a hash.
+    if (did.split(':').length < 4) return null;
+    try {
+      const mod = await import('@aviarytech/did-peer') as unknown as {
+        resolve: (did: string) => Promise<Record<string, unknown>>;
+      };
+      const doc = await mod.resolve(did);
+      const keys = new Set<string>();
+      const vms = (doc as { verificationMethod?: Array<{ publicKeyMultibase?: unknown }> }).verificationMethod;
+      if (Array.isArray(vms)) {
+        for (const vm of vms) {
+          if (vm && typeof vm.publicKeyMultibase === 'string') {
+            try {
+              const dec = multikey.decodePublicKey(vm.publicKeyMultibase);
+              if (dec.type === 'Ed25519') keys.add(Buffer.from(dec.key).toString('hex'));
+            } catch {
+              // skip non-decodable verification methods
+            }
+          }
+        }
+      }
+      return keys;
+    } catch {
+      // Resolution failure: cannot check offline — fall back to TOFU rather
+      // than turning a library quirk into a false negative. (The attack this
+      // check blocks — re-signing a copied create event — requires the
+      // victim's DID, which does resolve.)
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Verifies the hash chain for a single event.
  * 
  * @param event - The current event to verify
@@ -228,6 +288,89 @@ function verifyChain(
  */
 function isWitnessProof(p: DataIntegrityProof): boolean {
   return 'witnessedAt' in p && typeof (p as { witnessedAt?: unknown }).witnessedAt === 'string';
+}
+
+/** Cryptosuite identifier of Bitcoin ordinals witness proofs. */
+const BITCOIN_WITNESS_CRYPTOSUITE = 'bitcoin-ordinals-2024';
+
+/**
+ * Verifies a `bitcoin-ordinals-2024` witness proof against the Bitcoin chain.
+ *
+ * Unlike other witness proofs, the bitcoin witness is what makes a btco log's
+ * on-chain identity (`did:btco:<satoshi>`) resolvable — its satoshi/txid/
+ * inscriptionId fields are excluded from the controller signature and the
+ * hash chain, so they are attacker-editable unless independently verified.
+ * Verification checks that:
+ *  1. the claimed inscription exists,
+ *  2. it is carried by the claimed satoshi, and
+ *  3. its content commits to the event's digest (the same digest the witness
+ *     inscribed — see witnessEvent/BitcoinWitness).
+ *
+ * Returns an error string on failure, or null when the proof is anchored.
+ */
+async function verifyBitcoinWitnessProof(
+  proof: DataIntegrityProof,
+  event: LogEntry,
+  ordinalsProvider: OrdinalsLookup | undefined
+): Promise<string | null> {
+  if (!ordinalsProvider) {
+    return `bitcoin witness proof cannot be verified without an ordinalsProvider (required for btco anchoring)`;
+  }
+
+  const record = proof as unknown as { satoshi?: unknown; inscriptionId?: unknown; txid?: unknown };
+  const satoshi = record.satoshi;
+  const inscriptionId = record.inscriptionId;
+  if (typeof satoshi !== 'string' || satoshi.length === 0 || typeof inscriptionId !== 'string' || inscriptionId.length === 0) {
+    return `bitcoin witness proof is missing satoshi/inscriptionId`;
+  }
+
+  let inscription: Awaited<ReturnType<OrdinalsLookup['getInscriptionById']>>;
+  try {
+    inscription = await ordinalsProvider.getInscriptionById(inscriptionId);
+  } catch (e) {
+    return `failed to look up bitcoin witness inscription ${inscriptionId}: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  if (!inscription) {
+    return `bitcoin witness inscription ${inscriptionId} not found on chain`;
+  }
+
+  // The inscription must be carried by the claimed satoshi — otherwise the
+  // proof re-binds the asset to a different did:btco identity.
+  if (typeof inscription.satoshi === 'string' && inscription.satoshi.length > 0) {
+    if (inscription.satoshi !== satoshi) {
+      return `bitcoin witness inscription ${inscriptionId} is carried by satoshi ${inscription.satoshi}, not the claimed ${satoshi}`;
+    }
+  } else if (typeof ordinalsProvider.getInscriptionsBySatoshi === 'function') {
+    try {
+      const onSat = await ordinalsProvider.getInscriptionsBySatoshi(satoshi);
+      if (!onSat.some((i) => i.inscriptionId === inscriptionId)) {
+        return `bitcoin witness inscription ${inscriptionId} is not carried by the claimed satoshi ${satoshi}`;
+      }
+    } catch (e) {
+      return `failed to verify satoshi ${satoshi} for bitcoin witness inscription: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  } else {
+    return `ordinals provider cannot confirm which satoshi carries inscription ${inscriptionId}; failing closed`;
+  }
+
+  if (typeof record.txid === 'string' && typeof inscription.txid === 'string' && inscription.txid.length > 0 && record.txid !== inscription.txid) {
+    return `bitcoin witness proof txid (${record.txid}) does not match the inscription's txid (${inscription.txid})`;
+  }
+
+  // The inscription content must commit to the event's digest — the exact
+  // digest witnessEvent computed over the committed fields.
+  const expectedDigest = computeDigestMultibase(canonicalizeEntryForChain(event));
+  let content: { digestMultibase?: unknown };
+  try {
+    content = JSON.parse(inscription.content.toString('utf8')) as { digestMultibase?: unknown };
+  } catch {
+    return `bitcoin witness inscription ${inscriptionId} content is not valid JSON`;
+  }
+  if (content?.digestMultibase !== expectedDigest) {
+    return `bitcoin witness inscription ${inscriptionId} does not commit to this event's digest`;
+  }
+
+  return null;
 }
 
 /**
@@ -289,7 +432,8 @@ async function verifyEvent(
   customVerifier: ((proof: DataIntegrityProof, data: unknown) => Promise<boolean>) | undefined,
   previousEvent: LogEntry | undefined,
   resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>,
-  authorizedKeyIds?: Set<string>
+  authorizedKeyIds?: Set<string>,
+  ordinalsProvider?: OrdinalsLookup
 ): Promise<EventVerification> {
   const errors: string[] = [];
 
@@ -401,14 +545,26 @@ async function verifyEvent(
     }
   }
 
-  // Verify witness proofs — NON-GATING: results go into `witnessProofs` only.
+  // Verify witness proofs. Ordinary (signature-based) witness proofs are
+  // NON-GATING: results go into `witnessProofs` only. Bitcoin ordinals witness
+  // proofs are the exception — they define the asset's resolvable did:btco
+  // identity, so on the default path they are verified against the chain and
+  // GATE the result (see verifyBitcoinWitnessProof). A custom verifier owns
+  // proof semantics entirely, so bitcoin gating is skipped on that path.
   const witnessResults: { verificationMethod: string; verified: boolean }[] = [];
 
-  for (const { proof } of witnessProofEntries) {
+  for (const { proof, originalIndex } of witnessProofEntries) {
     let witnessVerified = false;
     try {
       if (customVerifier) {
         witnessVerified = await customVerifier(proof, eventData);
+      } else if (proof.cryptosuite === BITCOIN_WITNESS_CRYPTOSUITE) {
+        const anchorError = await verifyBitcoinWitnessProof(proof, event, ordinalsProvider);
+        witnessVerified = anchorError === null;
+        if (anchorError !== null) {
+          allControllerProofsValid = false;
+          errors.push(`Event ${index}, Proof ${originalIndex}: ${anchorError}`);
+        }
       } else {
         const { verified } = await dispatchVerify(proof, eventData, resolveKey);
         witnessVerified = verified;
@@ -537,7 +693,33 @@ export async function verifyEventLog(
     } else {
       const rootKeyHex = await resolveControllerKeyHex(createControllerProofs[0].verificationMethod, options?.resolveKey);
       if (rootKeyHex) {
-        authorizedKeyIds.add(rootKeyHex);
+        // Self-certifying binding: when the create event's `data.did` is a
+        // did:key or long-form did:peer:4, the identifier itself embeds the
+        // controller's key material, so the create-event signing key can be
+        // checked against it offline. Without this, an attacker can copy a
+        // victim's create event `data` verbatim, re-sign event 0 with their
+        // own did:key, and produce a "valid" provenance log for the victim's
+        // DID under the attacker's key.
+        //
+        // The check applies only when the create proof's verificationMethod
+        // is itself a did:key: that is the offline-checkable pattern the SDK
+        // emits (PeerCelManager embeds the signer's key in the generated
+        // did:peer). Resolver-backed verification methods (did:webvh, …)
+        // cannot embed their key in the asset DID at create time, so they
+        // keep trust-on-first-use — their authority is whatever the
+        // verifier's resolveKey vouches for. Non-self-certifying `data.did`
+        // methods also keep trust-on-first-use.
+        const dataDid = (createEvent.data as Record<string, unknown> | null | undefined)?.did;
+        const embeddedKeys = createControllerProofs[0].verificationMethod.startsWith('did:key:')
+          ? await selfCertifyingKeyHexes(dataDid)
+          : null;
+        if (embeddedKeys !== null && !embeddedKeys.has(rootKeyHex)) {
+          authorityError =
+            `Create event controller key (${createControllerProofs[0].verificationMethod}) is not a key ` +
+            `embedded in the self-certifying DID ${String(dataDid)}; the log was not created by that DID's controller.`;
+        } else {
+          authorizedKeyIds.add(rootKeyHex);
+        }
       } else {
         // The create event's key could not be resolved (e.g. a transient
         // resolver failure or an unsupported key type). Fail closed with a
@@ -555,7 +737,7 @@ export async function verifyEventLog(
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
-    const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds);
+    const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds, options?.ordinalsProvider);
     eventVerifications.push(eventResult);
 
     if (!eventResult.proofValid || !eventResult.chainValid) {

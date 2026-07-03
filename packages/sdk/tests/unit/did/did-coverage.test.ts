@@ -326,6 +326,40 @@ describe('DID-006 — createDIDWebVH with external signer', () => {
       })
     ).rejects.toThrow('updateKeys are required when using externalSigner');
   }, 10000);
+
+  test('external signer with non-Ed25519 verification method → throws (did:webvh is Ed25519-only)', async () => {
+    const km = new KeyManager();
+    const { signer, verifier, keyPair } = await buildMockExternalSigner(km);
+    const secpKP = await km.generateKeyPair('ES256K');
+
+    const manager = new WebVHManager();
+    await expect(
+      manager.createDIDWebVH({
+        domain: 'example.com',
+        externalSigner: signer,
+        externalVerifier: verifier,
+        verificationMethods: [{ type: 'Multikey', publicKeyMultibase: secpKP.publicKey }],
+        updateKeys: [`did:key:${keyPair.publicKey}`],
+      })
+    ).rejects.toThrow('did:webvh only supports Ed25519 keys');
+  }, 10000);
+
+  test('external signer with non-Ed25519 updateKey → throws (did:webvh is Ed25519-only)', async () => {
+    const km = new KeyManager();
+    const { signer, verifier, keyPair } = await buildMockExternalSigner(km);
+    const secpKP = await km.generateKeyPair('ES256K');
+
+    const manager = new WebVHManager();
+    await expect(
+      manager.createDIDWebVH({
+        domain: 'example.com',
+        externalSigner: signer,
+        externalVerifier: verifier,
+        verificationMethods: [{ type: 'Multikey', publicKeyMultibase: keyPair.publicKey }],
+        updateKeys: [secpKP.publicKey],
+      })
+    ).rejects.toThrow('did:webvh only supports Ed25519 keys');
+  }, 10000);
 });
 
 // ---------------------------------------------------------------------------

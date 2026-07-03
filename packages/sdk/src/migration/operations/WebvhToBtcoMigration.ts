@@ -64,8 +64,16 @@ export class WebvhToBtcoMigration extends BaseMigration {
       options.feeRate
     );
 
-    // Use satoshi identifier or inscription ID
-    const satoshiId = inscription.satoshi || inscription.inscriptionId.split('i')[0];
+    // The satoshi ordinal is the did:btco identifier — a txid derived from the
+    // inscription id is NOT a valid substitute (it would fabricate a DID for a
+    // sat the asset does not sit on). Fail clearly when the provider omits it.
+    const satoshiId = inscription.satoshi;
+    if (!satoshiId) {
+      throw new Error(
+        'Ordinals provider did not return a satoshi ordinal for the inscription; ' +
+        'a did:btco identifier cannot be derived without it.'
+      );
+    }
 
     await this.updateStateWithRetry(migrationId, {
       currentOperation: 'Creating btco DID document',

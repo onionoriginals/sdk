@@ -160,21 +160,18 @@ export class OriginalsCel {
   }
 
   /**
-   * Gets or creates the BtcoCelManager instance
-   * 
-   * @throws Error if BitcoinManager is not configured for btco operations
+   * Gets or creates the BtcoCelManager instance.
+   *
+   * A BitcoinManager is only needed for WRITE operations (migrate — it
+   * inscribes); pure reads like getCurrentState replay the persisted log and
+   * must work without one, so the manager is constructed either way and
+   * write paths enforce the BitcoinManager requirement themselves.
    */
   private get btcoManager(): BtcoCelManager {
     if (!this._btcoManager) {
-      const bitcoinManager = this.config.btco?.bitcoinManager;
-      
-      if (!bitcoinManager) {
-        throw new Error('BTCO operations require a BitcoinManager. Provide it in config.btco.bitcoinManager');
-      }
-      
       this._btcoManager = new BtcoCelManager(
         this.signer,
-        bitcoinManager,
+        this.config.btco?.bitcoinManager,
         this.config.btco
       );
     }
@@ -309,7 +306,12 @@ export class OriginalsCel {
    * ```
    */
   async verify(log: EventLog, options?: VerifyOptions): Promise<VerificationResult> {
-    return verifyEventLog(log, options);
+    // Bitcoin witness proofs are gating and need chain access to verify.
+    // Default to the configured BitcoinManager's ordinals provider so btco
+    // logs verify end-to-end without callers re-plumbing the provider.
+    const ordinalsProvider = options?.ordinalsProvider
+      ?? this.config.btco?.bitcoinManager?.ordinalsProvider;
+    return verifyEventLog(log, ordinalsProvider ? { ...options, ordinalsProvider } : options);
   }
 
   /**

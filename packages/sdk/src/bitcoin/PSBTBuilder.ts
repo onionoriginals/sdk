@@ -1,4 +1,5 @@
 import type { Utxo } from '../types/bitcoin.js';
+import { isSegwitScriptPubKey } from './utxo.js';
 
 export interface PsbtOutput {
   address: string;
@@ -35,6 +36,17 @@ export class PSBTBuilder {
     const { utxos, outputs, changeAddress, feeRate } = params;
     if (!utxos || utxos.length === 0) throw new Error('No UTXOs');
     if (!outputs || outputs.length === 0) throw new Error('No outputs');
+
+    // The size estimate assumes ~68 vB witness inputs; a legacy input would
+    // silently underpay the requested fee rate. Reject rather than under-fee.
+    const legacy = utxos.filter(u => u.scriptPubKey && !isSegwitScriptPubKey(u.scriptPubKey));
+    if (legacy.length > 0) {
+      throw new Error(
+        `Non-segwit (legacy) funding UTXOs are not supported: ` +
+        legacy.map(u => `${u.txid}:${u.vout}`).join(', ') +
+        `. Only segwit UTXOs (P2WPKH/P2WSH/P2TR) can be used.`
+      );
+    }
 
     // Sort UTXOs ascending by value for simple greedy selection
     const sorted = [...utxos].sort((a, b) => a.value - b.value);

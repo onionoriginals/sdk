@@ -46,6 +46,36 @@ describe('DIDManager', () => {
     expect(web.service?.[0].id).toBe('#svc');
   });
 
+  test('migrateToDIDWebVH rewrites verification method ids, controllers and relationship refs to the new DID', async () => {
+    const peer: DIDDocument = {
+      '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'],
+      id: 'did:peer:abc123',
+      verificationMethod: [{ id: 'did:peer:abc123#0', type: 'Multikey', controller: 'did:peer:abc123', publicKeyMultibase: multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519') }],
+      authentication: ['did:peer:abc123#0'],
+      assertionMethod: ['did:peer:abc123#0']
+    };
+    const web = await sdk.did.migrateToDIDWebVH(peer, 'example.com');
+    expect(web.id).toBe('did:webvh:example.com:abc123');
+    expect(web.verificationMethod?.[0].id).toBe('did:webvh:example.com:abc123#0');
+    expect(web.verificationMethod?.[0].controller).toBe('did:webvh:example.com:abc123');
+    expect(web.authentication).toEqual(['did:webvh:example.com:abc123#0']);
+    expect(web.assertionMethod).toEqual(['did:webvh:example.com:abc123#0']);
+    // Relative and foreign refs are preserved untouched
+    const peer2: DIDDocument = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:peer:abc123',
+      authentication: ['#0', 'did:example:other#1']
+    };
+    const web2 = await sdk.did.migrateToDIDWebVH(peer2, 'example.com');
+    expect(web2.authentication).toEqual(['#0', 'did:example:other#1']);
+  });
+
+  test('migrateToDIDWebVH percent-encodes a development domain port', async () => {
+    const peer: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:abc123' };
+    const web = await sdk.did.migrateToDIDWebVH(peer, 'localhost:8080');
+    expect(web.id).toBe('did:webvh:localhost%3A8080:abc123');
+  });
+
   test('migrateToDIDBTCO converts to did:btco (expected to fail until implemented)', async () => {
     const didDoc: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:webvh:example.com:xyz' };
     const btcoDoc = await sdk.did.migrateToDIDBTCO(didDoc, '123');

@@ -13,6 +13,7 @@ import { schnorr } from '@noble/curves/secp256k1';
 import { Utxo, ResourceUtxo } from '../../types/bitcoin.js';
 import { calculateFee } from '../fee-calculation.js';
 import { selectUtxos, SimpleUtxoSelectionOptions } from '../utxo-selection.js';
+import { isSegwitScriptPubKey } from '../utxo.js';
 import { validateBitcoinAddress } from '../../utils/bitcoin-address.js';
 
 // Define minimum dust limit (satoshis)
@@ -257,8 +258,15 @@ export async function createCommitTransaction(
   const structurallyValid = utxos.filter(isStructurallyValid);
   const structurallyInvalidCount = utxos.length - structurallyValid.length;
 
-  const validUtxos = structurallyValid.filter(utxo => !isProtected(utxo));
-  const protectedCount = structurallyValid.length - validUtxos.length;
+  const unprotectedUtxos = structurallyValid.filter(utxo => !isProtected(utxo));
+  const protectedCount = structurallyValid.length - unprotectedUtxos.length;
+
+  // Pass 3: only segwit funding inputs are supported. The fee estimator
+  // assumes ~68 vB witness inputs and signing supplies only witnessUtxo data,
+  // so a legacy (P2PKH/P2SH) input would be under-fee'd (stuck tx) and
+  // unsignable by @scure/btc-signer without nonWitnessUtxo.
+  const validUtxos = unprotectedUtxos.filter(utxo => isSegwitScriptPubKey(utxo.scriptPubKey!));
+  const legacyCount = unprotectedUtxos.length - validUtxos.length;
 
   if (validUtxos.length === 0) {
     const invalidReasons: string[] = [];
@@ -291,6 +299,12 @@ export async function createCommitTransaction(
         `and cannot safely be used as fee inputs (spending them would destroy the inscription).`
       );
     }
+    if (legacyCount > 0) {
+      parts.push(
+        `${legacyCount} UTXO(s) are excluded because they have non-segwit (legacy) scriptPubKeys. ` +
+        `Only segwit funding UTXOs (P2WPKH/P2WSH/P2TR) are supported; fund the wallet with segwit UTXOs.`
+      );
+    }
 
     throw new Error(parts.join('\n'));
   }
@@ -307,6 +321,12 @@ export async function createCommitTransaction(
       `Excluded ${protectedCount} UTXO(s) that carry inscriptions or are locked — ` +
       `these are protected from being spent as fee inputs. ` +
       `${validUtxos.length} spendable UTXO(s) remain.`
+    );
+  }
+  if (legacyCount > 0) {
+    console.warn(
+      `Excluded ${legacyCount} UTXO(s) with non-segwit (legacy) scriptPubKeys — ` +
+      `only segwit funding inputs are supported. ${validUtxos.length} spendable UTXO(s) remain.`
     );
   }
 
@@ -471,6 +491,14 @@ export async function createCommitTransaction(
       throw new Error(
         `CRITICAL ERROR: Selected UTXO ${utxo.txid}:${utxo.vout} is missing scriptPubKey. ` +
         `This should never happen due to pre-filtering. Please report this bug.`
+      );
+    }
+    // Defense-in-depth: a non-segwit input added with only witnessUtxo data
+    // cannot be validly signed and its fee was estimated at segwit size.
+    if (!isSegwitScriptPubKey(utxo.scriptPubKey)) {
+      throw new Error(
+        `Selected UTXO ${utxo.txid}:${utxo.vout} has a non-segwit (legacy) scriptPubKey. ` +
+        `Only segwit funding UTXOs (P2WPKH/P2WSH/P2TR) are supported.`
       );
     }
 

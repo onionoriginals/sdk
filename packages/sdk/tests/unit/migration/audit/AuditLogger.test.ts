@@ -61,8 +61,8 @@ describe('AuditLogger', () => {
       const history = await logger.getMigrationHistory(record.sourceDid);
       expect(history).toHaveLength(1);
       expect(history[0].signature).toBeDefined();
-      // SHA256 hash → 32 bytes → base58 encoded with 'z' prefix
-      expect(history[0].signature!.startsWith('z')).toBe(true);
+      // SHA256 hash → 32 bytes → base64url encoded with 'u' multibase prefix
+      expect(history[0].signature!.startsWith('u')).toBe(true);
     });
 
     it('should verify SHA256 integrity hash', async () => {
