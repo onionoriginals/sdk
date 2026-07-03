@@ -40,10 +40,33 @@ describe('non-segwit funding UTXO rejection', () => {
     expect(res.selected[0].txid).toBe('t2');
   });
 
-  test('selectUtxos with only legacy UTXOs fails with INSUFFICIENT_FUNDS', () => {
+  test('selectUtxos with only legacy UTXOs fails with UNSUPPORTED_INPUT (not INSUFFICIENT_FUNDS)', () => {
+    // The wallet has funds — they just sit in outputs the SDK's segwit-only
+    // signing cannot spend. "Add more funds" would be the wrong diagnosis.
     const utxos = [U(100000, { scriptPubKey: P2PKH })];
-    expect(() => selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 1 }))
-      .toThrow('INSUFFICIENT_FUNDS');
+    let thrown: unknown;
+    try {
+      selectUtxos(utxos, { targetAmountSats: 1000, feeRateSatsPerVb: 1 });
+    } catch (e) {
+      thrown = e;
+    }
+    expect((thrown as { code?: string })?.code).toBe('UNSUPPORTED_INPUT');
+  });
+
+  test('PSBTBuilder assumes segwit sizing for inputs without a scriptPubKey', () => {
+    // A single 10,120 sat UTXO funds a 10,000 sat output at 1 sat/vB:
+    // segwit sizing (10 + 68 + 1*31 = 109 vB) covers it; legacy sizing would
+    // spuriously report insufficient funds.
+    const builder = new PSBTBuilder();
+    const result = builder.build({
+      utxos: [U(10_120)],
+      outputs: [{ address: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', value: 10_000 }],
+      changeAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
+      feeRate: 1,
+      network: 'regtest'
+    });
+    expect(result.selectedUtxos).toHaveLength(1);
+    expect(result.fee).toBe(120); // change below dust folds into the fee
   });
 
   test('PSBTBuilder rejects legacy funding UTXOs with a clear error', () => {

@@ -25,14 +25,15 @@ export interface BuildPsbtResult {
 function estimateVBytes(inputs: Utxo[], outputs: number): number {
   const overhead = 10;       // base tx overhead
   const segwitInSize = 68;   // rough P2WPKH/any-segwit input size
-  const legacyInSize = 148;  // conservative sizing for unclassified inputs
+  const legacyInSize = 148;  // legacy P2PKH sizing
   const outSize = 31;        // P2WPKH output size
-  // Inputs with a verified segwit scriptPubKey get witness sizing; inputs
-  // without a scriptPubKey cannot be classified (known non-segwit ones are
-  // rejected in build()), so size them conservatively rather than quoting a
-  // fee that underpays if they turn out to be legacy.
+  // build() rejects UTXOs with a KNOWN non-segwit scriptPubKey up front, so
+  // an input without a scriptPubKey is assumed segwit here — charging it at
+  // legacy width would over-estimate fees and spuriously fail (or over-fund)
+  // selections made from valid segwit UTXOs that simply omit the field. The
+  // legacy size is only applied defensively if a non-segwit script slips in.
   const inputSize = inputs.reduce(
-    (sum, u) => sum + (u.scriptPubKey && isSegwitScriptPubKey(u.scriptPubKey) ? segwitInSize : legacyInSize),
+    (sum, u) => sum + (!u.scriptPubKey || isSegwitScriptPubKey(u.scriptPubKey) ? segwitInSize : legacyInSize),
     0
   );
   return Math.ceil(overhead + inputSize + outputs * outSize);

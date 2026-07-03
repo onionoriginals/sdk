@@ -74,7 +74,7 @@ export function estimateFeeSats(numInputs: number, numOutputs: number, feeRateSa
 }
 
 export class UtxoSelectionError extends Error {
-  code: 'INSUFFICIENT_FUNDS' | 'TOO_LOW_FEE' | 'DUST_OUTPUT' | 'CONFLICTING_LOCKS' | 'SAT_SAFETY';
+  code: 'INSUFFICIENT_FUNDS' | 'TOO_LOW_FEE' | 'DUST_OUTPUT' | 'CONFLICTING_LOCKS' | 'SAT_SAFETY' | 'UNSUPPORTED_INPUT';
   constructor(code: UtxoSelectionError['code'], message?: string) {
     super(message || code);
     this.code = code;
@@ -99,9 +99,16 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
   // be classified here; they pass through but are fee-sized conservatively
   // at legacy width (UNCLASSIFIED_INPUT_VBYTES) below so the quote never
   // underpays.
+  const isNonSegwit = (u: Utxo): boolean =>
+    !!u.scriptPubKey && !isSegwitScriptPubKey(u.scriptPubKey);
+  // Track excluded non-segwit UTXOs so a wallet whose funds sit in legacy
+  // outputs gets an UNSUPPORTED_INPUT diagnosis instead of a misleading
+  // INSUFFICIENT_FUNDS ("add more funds" would not help).
+  const hasExcludedNonSegwit = utxos.some(u =>
+    typeof u.value === 'number' && u.value > 0 && isNonSegwit(u)
+  );
   let candidateUtxos = utxos.slice().filter(u =>
-    typeof u.value === 'number' && u.value > 0 &&
-    (!u.scriptPubKey || isSegwitScriptPubKey(u.scriptPubKey))
+    typeof u.value === 'number' && u.value > 0 && !isNonSegwit(u)
   );
   const forbidInscribed = forbidInscriptionBearingInputs !== false;
   // A UTXO carries an ordinal either because an inscription id is recorded on it
@@ -178,6 +185,13 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
   if (hasUsefulLocked && !allowLocked) {
     const err = new UtxoSelectionError('CONFLICTING_LOCKS', 'CONFLICTING_LOCKS');
     throw err;
+  }
+  if (hasExcludedNonSegwit) {
+    throw new UtxoSelectionError(
+      'UNSUPPORTED_INPUT',
+      'Selection failed and non-segwit (legacy P2PKH/P2SH) UTXOs were excluded: the SDK signs only ' +
+      'witness inputs, so those funds cannot be spent here. Fund the wallet with segwit UTXOs.'
+    );
   }
   const err = new UtxoSelectionError('INSUFFICIENT_FUNDS', 'INSUFFICIENT_FUNDS');
   throw err;
