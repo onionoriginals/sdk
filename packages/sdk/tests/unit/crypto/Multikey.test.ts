@@ -74,6 +74,24 @@ describe('Multikey encode/decode', () => {
     expect(() => multikey.decodePrivateKey(mb)).toThrow('Unsupported key type');
   });
 
+  test('decodeMultibase accepts both z-base58btc and u-base64url', () => {
+    // Regression: decodeMultibase only accepted the 'z' (base58btc) prefix and
+    // threw for 'u' (base64url), even though the CEL structural check accepts a
+    // 'u' proofValue. A spec-valid base64url signature therefore passed the
+    // structural gate but failed to decode and was rejected as unverifiable.
+    const raw = new Uint8Array([0x00, 0x11, 0x22, 0x33, 0xff, 0xaa, 0x55]);
+
+    const zEncoded = multikey.encodeMultibase(raw); // 'z' + base58btc
+    expect(zEncoded[0]).toBe('z');
+    expect(Array.from(multikey.decodeMultibase(zEncoded))).toEqual(Array.from(raw));
+
+    const uEncoded = 'u' + Buffer.from(raw).toString('base64url');
+    expect(Array.from(multikey.decodeMultibase(uEncoded))).toEqual(Array.from(raw));
+
+    // An unsupported multibase prefix still fails closed.
+    expect(() => multikey.decodeMultibase('x' + Buffer.from(raw).toString('hex'))).toThrow();
+  });
+
   test('encode/decode Bls12381G2', () => {
     const blsPub = new Uint8Array(96).map((_, i) => (i + 5) & 0xff);
     const blsPriv = new Uint8Array(32).map((_, i) => (i + 6) & 0xff);

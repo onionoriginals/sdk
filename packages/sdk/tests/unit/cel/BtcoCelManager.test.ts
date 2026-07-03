@@ -142,6 +142,30 @@ describe('BtcoCelManager', () => {
       expect(/^did:btco:[0-9]+$/.test(state.did)).toBe(true);
     });
 
+    it('derives a network-scoped did:btco identifier for non-mainnet networks', async () => {
+      // Regression: getCurrentState hardcoded the mainnet form `did:btco:<sat>`.
+      // On regtest/signet the identifier must carry the network segment
+      // (`did:btco:reg:` / `did:btco:sig:`), matching DIDManager and
+      // createBtcoDidDocument — otherwise a regtest/signet asset resolves
+      // against the mainnet ordinals namespace.
+      const regtestBitcoin = {
+        inscribeData: vi.fn().mockResolvedValue({
+          txid: 'abc123def456',
+          inscriptionId: 'abc123def456i0',
+          satoshi: '1234567890',
+          blockHeight: 800000,
+        }),
+        network: 'regtest',
+      } as unknown as BitcoinManager;
+      const regtestManager = new BtcoCelManager(createMockSigner(), regtestBitcoin);
+
+      const webvhLog = await createWebvhLog();
+      const btcoLog = await regtestManager.migrate(webvhLog);
+
+      const state = regtestManager.getCurrentState(btcoLog);
+      expect(state.did).toBe('did:btco:reg:1234567890');
+    });
+
     it('should include layer: btco in migration data', async () => {
       const webvhLog = await createWebvhLog();
       const btcoLog = await manager.migrate(webvhLog);

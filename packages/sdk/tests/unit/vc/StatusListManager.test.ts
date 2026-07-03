@@ -719,6 +719,74 @@ describe('StatusListManager', () => {
       expect(result.errors.some(e => e.includes('no status list credential was provided'))).toBe(true);
     });
 
+    test('verifyCredentialWithStatus fails closed when a declared status cannot be evaluated', async () => {
+      // Regression: when a credential declared a BitstringStatusListEntry that
+      // could not be evaluated (no status list supplied, or checkStatus threw),
+      // verifyCredentialWithStatus left `verified: true` / `revoked: false` and
+      // reported only an error string. A caller gating on `verified`/`revoked`
+      // would treat a possibly-revoked credential as valid. It must fail closed,
+      // mirroring the Data Integrity path (Verifier.verifyCredential).
+      const { OriginalsSDK } = await import('../../../src');
+      const { multikey } = await import('../../../src/crypto/Multikey');
+      const ed = await import('@noble/ed25519');
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+
+      const sk = ed.utils.randomPrivateKey();
+      const pk = await ed.getPublicKeyAsync(sk);
+      const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
+      const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
+      const issuer = `did:key:${pkMb}`;
+
+      const statusListVC = sdk.statusList.createStatusListCredential({
+        id: 'https://example.com/status/failclosed/1',
+        issuer,
+        statusPurpose: 'revocation',
+      });
+      const entry = sdk.statusList.allocateStatusEntry(
+        'https://example.com/status/failclosed/1',
+        7,
+        'revocation'
+      );
+
+      const unsignedVc = {
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
+        type: ['VerifiableCredential'],
+        issuer,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:example:subject' },
+        credentialStatus: entry,
+      };
+      const signed = await sdk.credentials.signCredential(unsignedVc as any, skMb, issuer);
+
+      // Baseline: with the correct (unrevoked) status list, it verifies.
+      const ok = await sdk.credentials.verifyCredentialWithStatus(signed, statusListVC);
+      expect(ok.verified).toBe(true);
+      expect(ok.revoked).toBe(false);
+
+      // Fail closed #1: status declared but no status list supplied.
+      const noList = await sdk.credentials.verifyCredentialWithStatus(signed);
+      expect(noList.verified).toBe(false);
+      expect(noList.errors.some(e => e.includes('no status list credential was provided'))).toBe(true);
+
+      // Fail closed #2: an unevaluable status (purpose mismatch -> checkStatus
+      // throws) must not be treated as "not revoked".
+      const suspensionList = sdk.statusList.createStatusListCredential({
+        id: 'https://example.com/status/failclosed/suspension',
+        issuer,
+        statusPurpose: 'suspension',
+      });
+      const mismatch = await sdk.credentials.verifyCredentialWithStatus(signed, suspensionList);
+      expect(mismatch.verified).toBe(false);
+      expect(mismatch.errors.some(e => e.includes('Status check error'))).toBe(true);
+
+      // Determinable revocation still leaves the signature valid: `revoked`
+      // carries the status, `verified` stays true (the signature is genuine).
+      const revokedList = sdk.statusList.setStatus(statusListVC, 7, true);
+      const revoked = await sdk.credentials.verifyCredentialWithStatus(signed, revokedList);
+      expect(revoked.revoked).toBe(true);
+      expect(revoked.verified).toBe(true);
+    });
+
     test('SDK exposes statusList on top-level instance', async () => {
       const { OriginalsSDK, StatusListManager } = await import('../../../src');
       const sdk = OriginalsSDK.create();

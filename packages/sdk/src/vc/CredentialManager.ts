@@ -391,6 +391,14 @@ export class CredentialManager {
     const status = credential.credentialStatus as BitstringStatusListEntry | undefined;
     if (status?.type === 'BitstringStatusListEntry') {
       if (!statusListCredential) {
+        // Fail closed: the credential declares a status entry but no status
+        // list was supplied to evaluate it. Leaving `verified: true` here would
+        // report an unknown revocation state as "valid", so a caller gating on
+        // `verified`/`revoked` would accept a possibly-revoked credential. This
+        // mirrors the fail-closed policy of the Data Integrity path
+        // (Verifier.verifyCredential), which rejects a credential whose declared
+        // status cannot be checked.
+        verified = false;
         errors.push('Credential has a BitstringStatusListEntry but no status list credential was provided');
       } else {
         try {
@@ -405,6 +413,11 @@ export class CredentialManager {
             }
           }
         } catch (err) {
+          // Fail closed: a status entry that cannot be evaluated (purpose
+          // mismatch, out-of-range index, corrupt encodedList) must not be
+          // treated as "not revoked". Determinable states (revoked/suspended)
+          // are reported via their own flags and leave `verified` untouched.
+          verified = false;
           errors.push(`Status check error: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
@@ -461,6 +474,16 @@ export class CredentialManager {
     const issuerDid = typeof issuer === 'string' ? issuer : issuer?.id;
 
     if (typeof verificationMethod !== 'string') {
+      return null;
+    }
+
+    // Fail closed when there is no issuer to bind the key to. Without a named
+    // issuer we cannot confirm the signing key is authorized for the
+    // credential, so returning any key here (e.g. a self-certifying did:key)
+    // would accept an unbindable self-signed credential. The Data Integrity
+    // path rejects this same case — see Verifier.checkVerificationMethodController,
+    // which fails when the credential is missing an issuer.
+    if (!issuerDid) {
       return null;
     }
 

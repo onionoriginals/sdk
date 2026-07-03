@@ -170,17 +170,31 @@ export class BtcoDidResolver {
         // and forge signatures on this did:btco identity.
         const documentFromContent = this.parseDidDocumentFromContent(inscriptionData.content);
 
+        // A content blob carries THIS DID as a full DID document when it parses
+        // to a document whose id equals the expected DID.
+        const isDidDocumentForThisDid =
+          documentFromContent !== null && documentFromContent.id === expectedDid;
+
         // A content blob "is a DID" if it either matches the human-readable
         // pattern or parses to a DID document carrying the expected id.
         inscriptionData.isValidDid =
-          didPattern.test(inscriptionData.content) ||
-          (documentFromContent !== null && documentFromContent.id === expectedDid);
+          didPattern.test(inscriptionData.content) || isDidDocumentForThisDid;
 
-        if (inscriptionData.isValidDid && inscriptionData.content.includes('🔥')) {
-          // Deactivation marker on an inscription that actually carries THIS
-          // DID: the DID is tombstoned. An unrelated later inscription on the
-          // same sat that merely contains the emoji must NOT deactivate a live
-          // DID, so this is gated behind isValidDid.
+        if (
+          inscriptionData.isValidDid &&
+          !isDidDocumentForThisDid &&
+          inscriptionData.content.includes('🔥')
+        ) {
+          // Deactivation tombstone: the human-readable marker form for THIS DID
+          // carrying the 🔥 codepoint (e.g. "BTCO DID: did:btco:<sat> 🔥").
+          //
+          // Two guards matter here:
+          //  - `isValidDid`: an unrelated later inscription on the same sat that
+          //    merely contains the emoji must NOT deactivate a live DID.
+          //  - `!isDidDocumentForThisDid`: a full DID *document* that happens to
+          //    contain 🔥 somewhere in a field (a service description, name,
+          //    alsoKnownAs, …) is an update, not a tombstone. Only the marker
+          //    form deactivates; a valid document is handled as an update below.
           inscriptionData.didDocument = null;
           inscriptionData.deactivated = true;
           if (!inscriptionData.error) {

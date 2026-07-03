@@ -226,8 +226,24 @@ export class BtcoCelManager {
   }
 
   /**
+   * The network-scoped did:btco prefix for the configured Bitcoin network.
+   * Mainnet is bare (`did:btco`); signet/regtest carry `sig`/`reg` segments.
+   * Mirrors DIDManager / createBtcoDidDocument so all btco identifiers agree.
+   */
+  private btcoDidPrefix(): string {
+    switch (this.bitcoinManager.network) {
+      case 'signet':
+        return 'did:btco:sig';
+      case 'regtest':
+        return 'did:btco:reg';
+      default:
+        return 'did:btco';
+    }
+  }
+
+  /**
    * Derives the current asset state by replaying all events in the log.
-   * 
+   *
    * @param log - The event log to derive state from
    * @returns The current AssetState derived from replaying events
    */
@@ -295,8 +311,13 @@ export class BtcoCelManager {
             }
             if (bitcoinProof?.satoshi) {
               state.metadata.satoshi = bitcoinProof.satoshi;
-              // Canonical, resolvable did:btco identifier (numeric satoshi).
-              state.did = `did:btco:${bitcoinProof.satoshi as string}`;
+              // Canonical, resolvable did:btco identifier. The identifier is
+              // network-scoped: only mainnet is bare (`did:btco:<sat>`), while
+              // signet/regtest carry a prefix (`did:btco:sig:` / `did:btco:reg:`),
+              // matching DIDManager/createBtcoDidDocument. Deriving the network
+              // from the inscribing BitcoinManager avoids pointing a regtest/
+              // signet asset at the mainnet ordinals namespace.
+              state.did = `${this.btcoDidPrefix()}:${bitcoinProof.satoshi as string}`;
             }
           } else {
             // Non-btco (webvh) migrations carry their targetDid in the data

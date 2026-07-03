@@ -211,3 +211,64 @@ Branch: `claude/originals-sdk-correctness-n08sq0` (fresh off main @ 738dec2, inc
   (vc/crypto, did, cel/anchoring, lifecycle/migration/storage) instructed to
   skip everything already in FOLLOWUP.md and to report only concrete,
   reachable, reproducible bugs. Triage of results pending.
+
+### Audit + fixes (iteration 1)
+Four parallel subsystem audits (vc/crypto, did, cel/anchoring, lifecycle/
+migration/storage) instructed to skip FOLLOWUP.md items and report only
+concrete, reachable, reproducible bugs. Fixed six confirmed correctness bugs,
+each with a regression test that fails before the fix and passes after
+(verified by stashing the src changes and re-running):
+
+1. **MED (revocation bypass) — `verifyCredentialWithStatus` failed OPEN**
+   (`src/vc/CredentialManager.ts`): when a credential declared a
+   `BitstringStatusListEntry` that could not be evaluated (no status list
+   supplied, or `checkStatus` threw on purpose-mismatch / out-of-range index /
+   corrupt list), it left `verified: true` / `revoked: false` and returned only
+   an error string — a caller gating on `verified`/`revoked` would accept a
+   possibly-revoked credential. Now fails closed (`verified = false`),
+   mirroring the Data Integrity path. Determinable revoked/suspended still
+   leave `verified` true. Test: StatusListManager.test.ts.
+2. **LOW (binding inconsistency) — legacy `verifyCredential` accepted an
+   issuer-less self-signed did:key credential** (`resolveVerificationMethodMultibase`):
+   the issuer-binding guards were gated on a truthy `issuerDid`, so a credential
+   with no issuer + a self-certifying did:key VM verified unconditionally, while
+   the DI path fails closed. Added an explicit fail-closed guard on missing
+   issuer. Test: CredentialManager.test.ts.
+3. **LOW-MED (version-history correctness) — `ResourceManager.getResourceVersion`
+   indexed positionally** (`versions[version-1]`): `importResource` inserts by
+   version number and permits gaps, so importing v1 then v3 made
+   `getResourceVersion(id,2)` return v3 and `(id,3)` return null. Now matches by
+   stored version number. Test: ResourceManager.test.ts.
+4. **LOW (spec-fidelity) — `BtcoDidResolver` misclassified a DID document
+   containing 🔥 as a deactivation tombstone**: deactivation was gated on a raw
+   `content.includes('🔥')`, so a valid DID document carrying the emoji in any
+   field (service description, name, …) was tombstoned. Now excludes content
+   that parses to a valid DID document for the DID; only the human-readable
+   marker form deactivates. Test: BtcoDidResolver.test.ts.
+5. **MED (correctness) — CEL btco state derivation emitted a network-less
+   `did:btco:<sat>` on regtest/signet** (`BtcoCelManager.getCurrentState`): the
+   identifier was hardcoded to the mainnet form, so a regtest/signet asset
+   pointed at the mainnet ordinals namespace. Now network-scoped
+   (`did:btco:reg:` / `did:btco:sig:`) via the inscribing `BitcoinManager`
+   (added a `network` getter). Test: BtcoCelManager.test.ts. The CLI display
+   helpers (migrate/transfer) remain network-agnostic — deferred (FOLLOWUP #15).
+6. **LOW (interop false-negative) — `multikey.decodeMultibase` rejected `u`
+   base64url** while the CEL structural check accepts a `u` proofValue: a
+   spec-valid base64url signature passed the structural gate but failed to
+   decode and was rejected. `decodeMultibase` now accepts both `z` (base58btc)
+   and `u` (base64url); unknown prefixes still fail closed. Test:
+   Multikey.test.ts.
+
+### Deferred (added to FOLLOWUP.md, items 12–15)
+- did:webvh resolution hardcoded to Ed25519Verifier (multi-algo design decision).
+- CEL create-event key not bound to self-certifying data.did (TOFU threat-model).
+- single-transaction batch inscription shares one btco identity + no per-item
+  atomicity (batch-semantics design decision).
+- CEL CLI migrate/transfer display emit network-less btco DID (CLI plumbing;
+  network not in the log).
+
+### Result
+- Full suite: **3222 pass / 0 fail / 71 skip** (was 3216; +6 regression tests).
+- Typecheck clean; lint 0 errors (87 pre-existing warnings, none added).
+- No open PR for this branch — will push and open one. All fixes strengthen or
+  preserve verification; none weaken validation or skip crypto checks.

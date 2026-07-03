@@ -80,6 +80,44 @@ describe('CredentialManager', () => {
     await expect(sdkES256K.credentials.verifyCredential(freshSigned)).resolves.toBe(true);
   });
 
+  test('legacy verifyCredential rejects a signed credential with no issuer to bind to', async () => {
+    // Regression: resolveVerificationMethodMultibase gated its issuer-binding
+    // guards on `issuerDid` being truthy, so a credential with NO issuer and a
+    // self-certifying did:key verification method returned the key
+    // unconditionally and verified true — an unbindable self-signed credential.
+    // The Data Integrity path fails closed on a missing issuer; the legacy path
+    // must too.
+    const sdkES256K = OriginalsSDK.create({ defaultKeyType: 'ES256K' });
+    const sk = secp256k1.utils.randomPrivateKey();
+    const pk = secp256k1.getPublicKey(sk, true);
+    const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
+    const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
+
+    // Sign a credential that carries NO issuer (the digest is computed over the
+    // issuer-less credential both when signing and verifying, so the signature
+    // itself is valid — only the issuer binding is missing).
+    const vcNoIssuer: any = { ...baseVC };
+    delete vcNoIssuer.issuer;
+    const signed = await sdkES256K.credentials.signCredential(
+      vcNoIssuer,
+      skMb,
+      `did:key:${pkMb}`
+    );
+    expect((signed.proof as any).cryptosuite).toBeUndefined(); // legacy proof
+    // Nothing binds the signing key to a credential issuer -> must not verify.
+    await expect(sdkES256K.credentials.verifyCredential(signed)).resolves.toBe(false);
+
+    // The same signature with the issuer present (and equal to the did:key)
+    // still verifies, proving the rejection is due to the missing binding.
+    const vcWithIssuer = { ...baseVC, issuer: `did:key:${pkMb}` };
+    const signedBound = await sdkES256K.credentials.signCredential(
+      vcWithIssuer,
+      skMb,
+      `did:key:${pkMb}`
+    );
+    await expect(sdkES256K.credentials.verifyCredential(signedBound)).resolves.toBe(true);
+  });
+
   test('createPresentation bundles VCs (expected to fail until implemented)', async () => {
     const pres = await sdk.credentials.createPresentation([baseVC], 'did:peer:holder');
     expect(pres.verifiableCredential.length).toBeGreaterThan(0);
