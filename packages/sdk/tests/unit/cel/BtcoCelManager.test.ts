@@ -164,6 +164,39 @@ describe('BtcoCelManager', () => {
 
       const state = regtestManager.getCurrentState(btcoLog);
       expect(state.did).toBe('did:btco:reg:1234567890');
+      // The network is recorded in the SIGNED migration data.
+      const migrationData = btcoLog.events[2].data as Record<string, unknown>;
+      expect(migrationData.network).toBe('regtest');
+    });
+
+    it('derives the btco network from the log, not the replaying SDK config', async () => {
+      // Regression: deriving the network from `this.bitcoinManager.network` at
+      // replay time made state derivation environment-dependent — replaying a
+      // persisted regtest log under a mainnet-configured SDK rewrote the DID to
+      // the mainnet form. The network is recorded in the signed data, so replay
+      // must be deterministic regardless of the replaying manager's network.
+      const regtestBitcoin = {
+        inscribeData: vi.fn().mockResolvedValue({
+          txid: 'abc123def456',
+          inscriptionId: 'abc123def456i0',
+          satoshi: '1234567890',
+          blockHeight: 800000,
+        }),
+        network: 'regtest',
+      } as unknown as BitcoinManager;
+      const regtestManager = new BtcoCelManager(createMockSigner(), regtestBitcoin);
+      const webvhLog = await createWebvhLog();
+      const btcoLog = await regtestManager.migrate(webvhLog);
+
+      // Replay the SAME persisted log under a mainnet-configured manager.
+      const mainnetBitcoin = {
+        inscribeData: vi.fn(),
+        network: 'mainnet',
+      } as unknown as BitcoinManager;
+      const mainnetManager = new BtcoCelManager(createMockSigner(), mainnetBitcoin);
+
+      const state = mainnetManager.getCurrentState(btcoLog);
+      expect(state.did).toBe('did:btco:reg:1234567890');
     });
 
     it('should include layer: btco in migration data', async () => {

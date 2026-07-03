@@ -90,6 +90,13 @@ describe('Multikey encode/decode', () => {
 
     // An unsupported multibase prefix still fails closed.
     expect(() => multikey.decodeMultibase('x' + Buffer.from(raw).toString('hex'))).toThrow();
+
+    // Malformed base64url must throw rather than silently decode to empty:
+    // Buffer.from(..., 'base64url') drops invalid chars instead of erroring, so
+    // the payload is validated first.
+    expect(() => multikey.decodeMultibase('u@@@')).toThrow();
+    expect(() => multikey.decodeMultibase('u')).toThrow();
+    expect(() => multikey.decodeMultibase('u====')).toThrow();
   });
 
   test('encode/decode Bls12381G2', () => {

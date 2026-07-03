@@ -278,6 +278,37 @@ describe('BtcoDidResolver', () => {
     expect(res.didDocumentMetadata.deactivated).toBeUndefined();
   });
 
+  test('a marker tombstone with arbitrary JSON appended still deactivates (no document-guard bypass)', async () => {
+    // Regression: a document-based tombstone guard could be bypassed by
+    // appending a minimal object with the expected id after the marker line —
+    // e.g. "BTCO DID: did:btco:128 🔥\n{\"id\":\"did:btco:128\"}". That parses to
+    // an object whose id matches, which would slip past a `!isDidDocument` guard
+    // and fall back to an older document instead of reporting deactivation.
+    // Tombstone detection keys off the start-anchored marker pattern, so the
+    // trailing JSON does not matter.
+    const inscriptionId = 'insc-marker-json';
+    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
+    provider.resolveInscription.mockResolvedValue({
+      id: inscriptionId,
+      sat: 128,
+      content_type: 'text/plain',
+      content_url: 'http://local/content-marker-json'
+    });
+    provider.getMetadata.mockResolvedValue(null);
+    (global as any).fetch.mockResolvedValue({
+      ok: true,
+      text: async () => 'BTCO DID: did:btco:128 🔥\n{"id":"did:btco:128"}'
+    });
+
+    const resolver = new BtcoDidResolver({ provider });
+    const res = await resolver.resolve('did:btco:128');
+    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
+    expect(entry.deactivated).toBe(true);
+    expect(entry.didDocument).toBeNull();
+    expect(res.didDocument).toBeNull();
+    expect(res.didDocumentMetadata.deactivated).toBe(true);
+  });
+
   test('tombstone after a valid document deactivates the DID (no fallback to older document)', async () => {
     const docContent = JSON.stringify({
       '@context': ['https://www.w3.org/ns/did/v1'],

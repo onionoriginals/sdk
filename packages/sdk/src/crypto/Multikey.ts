@@ -173,7 +173,16 @@ export const multikey = {
       return base58.decode(encoded.slice(1));
     }
     if (encoded[0] === 'u') {
-      return new Uint8Array(Buffer.from(encoded.slice(1), 'base64url'));
+      // Validate before decoding. `Buffer.from(..., 'base64url')` silently drops
+      // invalid characters (e.g. "@@@" -> empty buffer) instead of throwing, so
+      // malformed input would otherwise be accepted as an empty result — unlike
+      // the base58 branch, which throws. Reject anything that is not non-empty
+      // unpadded base64url.
+      const payload = encoded.slice(1);
+      if (!/^[A-Za-z0-9_-]+$/.test(payload)) {
+        throw new Error('Invalid Multibase encoding: malformed u-base64url payload');
+      }
+      return new Uint8Array(Buffer.from(payload, 'base64url'));
     }
     throw new Error('Invalid Multibase encoding: only z-base58btc and u-base64url are supported');
   },

@@ -175,26 +175,29 @@ export class BtcoDidResolver {
         const isDidDocumentForThisDid =
           documentFromContent !== null && documentFromContent.id === expectedDid;
 
+        // The content matches the human-readable BTCO marker line for THIS DID
+        // (e.g. "BTCO DID: did:btco:<sat>"). The pattern is start-anchored, so a
+        // full DID document (JSON, or "BTCO DID: {…}") does not match it.
+        const matchesMarker = didPattern.test(inscriptionData.content);
+
         // A content blob "is a DID" if it either matches the human-readable
         // pattern or parses to a DID document carrying the expected id.
-        inscriptionData.isValidDid =
-          didPattern.test(inscriptionData.content) || isDidDocumentForThisDid;
+        inscriptionData.isValidDid = matchesMarker || isDidDocumentForThisDid;
 
-        if (
-          inscriptionData.isValidDid &&
-          !isDidDocumentForThisDid &&
-          inscriptionData.content.includes('🔥')
-        ) {
+        if (matchesMarker && inscriptionData.content.includes('🔥')) {
           // Deactivation tombstone: the human-readable marker form for THIS DID
           // carrying the 🔥 codepoint (e.g. "BTCO DID: did:btco:<sat> 🔥").
           //
-          // Two guards matter here:
-          //  - `isValidDid`: an unrelated later inscription on the same sat that
-          //    merely contains the emoji must NOT deactivate a live DID.
-          //  - `!isDidDocumentForThisDid`: a full DID *document* that happens to
-          //    contain 🔥 somewhere in a field (a service description, name,
-          //    alsoKnownAs, …) is an update, not a tombstone. Only the marker
-          //    form deactivates; a valid document is handled as an update below.
+          // Detection keys off the marker PATTERN, not the mere presence of the
+          // emoji:
+          //  - a full DID document that happens to contain 🔥 in a field (a
+          //    service description, name, alsoKnownAs, …) does not match the
+          //    start-anchored marker pattern, so it is treated as an update
+          //    (handled below), not a tombstone;
+          //  - conversely, a genuine marker line remains a tombstone even if
+          //    arbitrary JSON is appended after it (which would otherwise parse
+          //    to an object with the expected id and slip past a document-based
+          //    guard), because the pattern anchors at the start of the content.
           inscriptionData.didDocument = null;
           inscriptionData.deactivated = true;
           if (!inscriptionData.error) {

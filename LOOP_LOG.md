@@ -272,3 +272,36 @@ each with a regression test that fails before the fix and passes after
 - Typecheck clean; lint 0 errors (87 pre-existing warnings, none added).
 - No open PR for this branch — will push and open one. All fixes strengthen or
   preserve verification; none weaken validation or skip crypto checks.
+
+## Iteration 2 — 2026-07-03 (Macroscope review on PR #232)
+
+Opened PR #232; subscribed to activity and armed an hourly self check-in. All
+CI checks green (typecheck, lint, tests, coverage, ESM, changeset). Macroscope
+Correctness Check posted three Medium findings — all valid, all fixed with
+regression tests (each verified to fail against the iteration-1 commit):
+
+1. **CEL btco DID was runtime-config-dependent** (BtcoCelManager): iteration 1's
+   network fix derived the prefix from `this.bitcoinManager.network` at replay
+   time, so replaying a persisted regtest/signet log under a differently
+   configured SDK silently rewrote `state.did`. Now the network is recorded in
+   the SIGNED migration data (known before inscription, unlike the satoshi) and
+   read back during replay, with a runtime-config fallback only for legacy logs.
+   State derivation is deterministic from the log. Tests: network recorded in
+   signed data + replay under a mainnet manager still yields did:btco:reg:.
+2. **`decodeMultibase` silently accepted malformed base64url** (Multikey):
+   `Buffer.from('@@@','base64url')` returns empty instead of throwing, so a
+   malformed `u` payload decoded to an empty array (the `z` branch throws). Now
+   validates `^[A-Za-z0-9_-]+$` before decoding; malformed/empty `u` throws.
+   Test: 'u@@@', 'u', 'u====' all throw.
+3. **Tombstone guard bypass** (BtcoDidResolver): iteration 1's
+   `!isDidDocumentForThisDid` guard could be evaded by appending a minimal
+   `{"id":"<did>"}` object after a "BTCO DID: … 🔥" marker — it parsed to a
+   matching-id object, skipped the tombstone branch, and fell back to an older
+   document. Switched tombstone detection to the start-anchored marker PATTERN
+   (`didPattern.test && includes('🔥')`), which correctly classifies both a
+   DID-document-containing-🔥 (not a tombstone) and a marker-with-appended-JSON
+   (a tombstone). Test: marker + appended JSON still deactivates.
+
+### Result
+- Full suite: **3224 pass / 0 fail / 71 skip**. Typecheck clean; lint 0 errors.
+- Replied to all three review threads with the fixing commit SHA.
