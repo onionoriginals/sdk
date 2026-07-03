@@ -127,3 +127,78 @@ behavior today), require a product/design decision, or would exceed the
   fix: options include re-creating affected DIDs, or upstream didwebvh-ts
   accepting the legacy prefixed form during verification for backward
   compatibility. New logs created by the SDK now use the spec format.
+
+## Iteration (branch n08sq0) deferrals
+
+## 12. `did:webvh` resolution is hardcoded to `Ed25519Verifier` — non-Ed25519 did:webvh DIDs are unresolvable (design)
+
+- **Where:** `packages/sdk/src/did/DIDManager.ts` (`resolveDID`, the `did:webvh`
+  branch passes `{ verifier: new Ed25519Verifier() }`).
+- **What:** The did:webvh create path accepts arbitrary `externalSigner` /
+  `verificationMethods` / `updateKeys` (Turnkey, AWS KMS, HSM) with no key-type
+  enforcement (`WebVHManager.ts:336-360`), but resolution only wires an
+  Ed25519 verifier. A did:webvh published with a secp256k1/P-256 external signer
+  verifies with its external verifier yet `resolveDID` returns `null` — the DID
+  appears not to exist.
+- **Why deferred:** This is a design decision about whether did:webvh is
+  Ed25519-only (the SDK's internal signing path is) or must support multiple
+  algorithms. The correct fix is either (a) reject non-Ed25519
+  `verificationMethods`/`updateKeys` up front in the create/update paths, or
+  (b) dispatch a verifier by the log key's multicodec at resolution time — a new
+  multi-algorithm verifier component. Both change the documented capability
+  surface and warrant a dedicated decision + tests rather than a minimal fix.
+
+## 13. CEL create-event controller key is not bound to a self-certifying `data.did` (threat-model / TOFU)
+
+- **Where:** `packages/sdk/src/cel/algorithms/verifyEventLog.ts` (authorized-key
+  seeding from the create event's controller proof; no comparison against
+  `createEvent.data.did`).
+- **What:** For `did:peer` (numalgo-4) and `did:key`, the identifier embeds the
+  controller's public key, so the create key ↔ DID binding is checkable offline.
+  `verifyEventLog` never checks it, so an attacker can copy a victim's create
+  event `data` verbatim, re-sign event 0 with their own key as the single
+  controller proof, append attacker-signed events, and the log verifies — a
+  "valid" provenance log for the victim's DID actually controlled by the
+  attacker's key.
+- **Why deferred:** The code's stated model is explicit trust-on-first-use (the
+  create event is the root of authority; external identity binding is the
+  resolver's job — comment at verifyEventLog.ts ~506-522). Whether to add a
+  self-certifying `create-key == key-in-data.did` check for peer/key DIDs is a
+  threat-model decision, distinct from FOLLOWUP #3 (btco witness anchoring).
+
+## 14. `batchInscribeOnBitcoin({ singleTransaction: true })` collapses N assets onto one Bitcoin identity + no per-item atomicity (design / API)
+
+- **Where:** `packages/sdk/src/lifecycle/BatchLifecycleOperations.ts` (the
+  `singleTransaction` path: one `inscribeData` call, then a migrate loop that
+  sets every asset's `did:btco` binding to `did:btco:<sameSat>`).
+- **What:** All assets in a single-transaction batch receive the same
+  `inscriptionId`/`satoshi` and therefore the same `did:btco:<sat>` identity.
+  Since a did:btco identity is satoshi-scoped, the batched assets share one
+  on-chain identity; worse, `transferOwnership` reads `latestMigration.satoshi`,
+  so transferring one asset moves the UTXO the others also claim. The path also
+  hand-rolls its migrate loop without `BatchOperationExecutor` isolation: a
+  mid-loop `migrate()` throw (e.g. a mixed batch with an already-btco asset)
+  leaves the inscription broadcast and some assets mutated while the thrown
+  `BatchError` reports `successful: 0`.
+- **Why deferred:** Single-transaction batching is an intentional cost-saving
+  mode; whether it should assign distinct sub-identities (e.g. per-index
+  inscription offsets) or be documented as identity-sharing — and how partial
+  failure after broadcast should be reported — are product/design decisions that
+  change batch semantics and the public result shape, not a minimal fix.
+
+## 15. CEL CLI `migrate`/`transfer` display helpers emit a network-less `did:btco:<sat>` (minor, latent)
+
+- **Where:** `packages/sdk/src/cel/cli/migrate.ts` (`resolveMigrationDid`) and
+  `packages/sdk/src/cel/cli/transfer.ts` derive `did:btco:${satoshi}` for
+  human-readable output.
+- **What:** Companion to the programmatic fix in `BtcoCelManager.getCurrentState`
+  (now network-scoped via the inscribing `BitcoinManager`). The CLI helpers are
+  pure functions over an event log, and the btco migration event does not carry
+  the Bitcoin network in its signed data, so they cannot derive the correct
+  `sig`/`reg` prefix without the CLI being told the configured network via a
+  flag/config.
+- **Why deferred:** These are display-only paths (the resolvable identity comes
+  from `getCurrentState`, which is fixed). A correct fix needs a network source
+  threaded into the inspect/migrate/transfer CLI commands — a small CLI-plumbing
+  change best batched with a CLI network-config pass, and not coverable by a
+  meaningful regression test until that config exists.

@@ -295,10 +295,15 @@ export class ResourceManager {
    */
   getResourceVersion(resourceId: string, version: number): Resource | null {
     const versions = this.resources.get(resourceId);
-    if (!versions || version < 1 || version > versions.length) {
+    if (!versions || version < 1) {
       return null;
     }
-    return versions[version - 1];
+    // Match by the stored version number rather than by array position.
+    // importResource inserts versions by sorted version number and permits
+    // gaps (e.g. importing v1 then v3), so positional indexing would return the
+    // wrong version (or null for a version that is present but non-contiguous).
+    // A resource with no explicit version defaults to 1 (mirrors importResource).
+    return versions.find(v => (v.version ?? 1) === version) ?? null;
   }
 
   /**

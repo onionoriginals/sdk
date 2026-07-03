@@ -302,6 +302,41 @@ describe('ResourceManager', () => {
       expect(manager.getResourceVersion(v1.id, 0)).toBeNull();
       expect(manager.getResourceVersion(v1.id, 5)).toBeNull();
     });
+
+    it('should look up by version number for non-contiguous histories', () => {
+      // Regression: getResourceVersion indexed positionally (versions[version-1]),
+      // but importResource inserts by version number and permits gaps. Importing
+      // v1 then v3 (v2 never imported) produced versions = [v1, v3]; the old
+      // getter returned v3 for version 2 (wrong) and null for version 3 (present
+      // but non-contiguous). The lookup must match by the stored version number.
+      const v1: Resource = {
+        id: 'gapped',
+        type: 'text',
+        contentType: 'text/plain',
+        hash: manager.hashContent('v1'),
+        size: 2,
+        version: 1,
+        createdAt: new Date().toISOString(),
+      };
+      const v3: Resource = {
+        id: 'gapped',
+        type: 'text',
+        contentType: 'text/plain',
+        hash: manager.hashContent('v3'),
+        size: 2,
+        version: 3,
+        createdAt: new Date().toISOString(),
+      };
+
+      manager.importResource(v1);
+      manager.importResource(v3);
+
+      expect(manager.getResourceVersion('gapped', 1)?.hash).toBe(v1.hash);
+      // v2 was never imported: it must be reported as absent, not aliased to v3.
+      expect(manager.getResourceVersion('gapped', 2)).toBeNull();
+      // v3 is present even though the history is non-contiguous.
+      expect(manager.getResourceVersion('gapped', 3)?.hash).toBe(v3.hash);
+    });
   });
 
   describe('getCurrentVersion', () => {

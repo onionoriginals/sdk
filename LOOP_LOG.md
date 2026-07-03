@@ -192,3 +192,125 @@ Branch: `claude/originals-sdk-correctness-ws3gte` (continuation after #230 merge
 
 ### Result
 - Full turbo suite green (0 fail), typecheck clean, lint 0 errors.
+
+---
+
+Branch: `claude/originals-sdk-correctness-n08sq0` (fresh off main @ 738dec2, includes merged #230 + #231)
+
+## Iteration 1 — 2026-07-03
+
+### Ground truth
+- Fresh clone; `bun install`, then `bun run build` (dist was missing → 16 CEL-CLI
+  subprocess tests fail without it; environment-only, no code issue).
+- Full suite after build: **3216 pass / 0 fail / 71 skip** across 171 files.
+- `bun run typecheck`: clean. `bun run lint`: 0 errors (87 pre-existing warnings).
+- No open PR for this branch; branch tip == origin/main (738dec2).
+
+### Work
+- Baseline green. Launched 4 parallel subsystem correctness audits
+  (vc/crypto, did, cel/anchoring, lifecycle/migration/storage) instructed to
+  skip everything already in FOLLOWUP.md and to report only concrete,
+  reachable, reproducible bugs. Triage of results pending.
+
+### Audit + fixes (iteration 1)
+Four parallel subsystem audits (vc/crypto, did, cel/anchoring, lifecycle/
+migration/storage) instructed to skip FOLLOWUP.md items and report only
+concrete, reachable, reproducible bugs. Fixed six confirmed correctness bugs,
+each with a regression test that fails before the fix and passes after
+(verified by stashing the src changes and re-running):
+
+1. **MED (revocation bypass) — `verifyCredentialWithStatus` failed OPEN**
+   (`src/vc/CredentialManager.ts`): when a credential declared a
+   `BitstringStatusListEntry` that could not be evaluated (no status list
+   supplied, or `checkStatus` threw on purpose-mismatch / out-of-range index /
+   corrupt list), it left `verified: true` / `revoked: false` and returned only
+   an error string — a caller gating on `verified`/`revoked` would accept a
+   possibly-revoked credential. Now fails closed (`verified = false`),
+   mirroring the Data Integrity path. Determinable revoked/suspended still
+   leave `verified` true. Test: StatusListManager.test.ts.
+2. **LOW (binding inconsistency) — legacy `verifyCredential` accepted an
+   issuer-less self-signed did:key credential** (`resolveVerificationMethodMultibase`):
+   the issuer-binding guards were gated on a truthy `issuerDid`, so a credential
+   with no issuer + a self-certifying did:key VM verified unconditionally, while
+   the DI path fails closed. Added an explicit fail-closed guard on missing
+   issuer. Test: CredentialManager.test.ts.
+3. **LOW-MED (version-history correctness) — `ResourceManager.getResourceVersion`
+   indexed positionally** (`versions[version-1]`): `importResource` inserts by
+   version number and permits gaps, so importing v1 then v3 made
+   `getResourceVersion(id,2)` return v3 and `(id,3)` return null. Now matches by
+   stored version number. Test: ResourceManager.test.ts.
+4. **LOW (spec-fidelity) — `BtcoDidResolver` misclassified a DID document
+   containing 🔥 as a deactivation tombstone**: deactivation was gated on a raw
+   `content.includes('🔥')`, so a valid DID document carrying the emoji in any
+   field (service description, name, …) was tombstoned. Now excludes content
+   that parses to a valid DID document for the DID; only the human-readable
+   marker form deactivates. Test: BtcoDidResolver.test.ts.
+5. **MED (correctness) — CEL btco state derivation emitted a network-less
+   `did:btco:<sat>` on regtest/signet** (`BtcoCelManager.getCurrentState`): the
+   identifier was hardcoded to the mainnet form, so a regtest/signet asset
+   pointed at the mainnet ordinals namespace. Now network-scoped
+   (`did:btco:reg:` / `did:btco:sig:`) via the inscribing `BitcoinManager`
+   (added a `network` getter). Test: BtcoCelManager.test.ts. The CLI display
+   helpers (migrate/transfer) remain network-agnostic — deferred (FOLLOWUP #15).
+6. **LOW (interop false-negative) — `multikey.decodeMultibase` rejected `u`
+   base64url** while the CEL structural check accepts a `u` proofValue: a
+   spec-valid base64url signature passed the structural gate but failed to
+   decode and was rejected. `decodeMultibase` now accepts both `z` (base58btc)
+   and `u` (base64url); unknown prefixes still fail closed. Test:
+   Multikey.test.ts.
+
+### Deferred (added to FOLLOWUP.md, items 12–15)
+- did:webvh resolution hardcoded to Ed25519Verifier (multi-algo design decision).
+- CEL create-event key not bound to self-certifying data.did (TOFU threat-model).
+- single-transaction batch inscription shares one btco identity + no per-item
+  atomicity (batch-semantics design decision).
+- CEL CLI migrate/transfer display emit network-less btco DID (CLI plumbing;
+  network not in the log).
+
+### Result
+- Full suite: **3222 pass / 0 fail / 71 skip** (was 3216; +6 regression tests).
+- Typecheck clean; lint 0 errors (87 pre-existing warnings, none added).
+- No open PR for this branch — will push and open one. All fixes strengthen or
+  preserve verification; none weaken validation or skip crypto checks.
+
+## Iteration 2 — 2026-07-03 (Macroscope review on PR #232)
+
+Opened PR #232; subscribed to activity and armed an hourly self check-in. All
+CI checks green (typecheck, lint, tests, coverage, ESM, changeset). Macroscope
+Correctness Check posted three Medium findings — all valid, all fixed with
+regression tests (each verified to fail against the iteration-1 commit):
+
+1. **CEL btco DID was runtime-config-dependent** (BtcoCelManager): iteration 1's
+   network fix derived the prefix from `this.bitcoinManager.network` at replay
+   time, so replaying a persisted regtest/signet log under a differently
+   configured SDK silently rewrote `state.did`. Now the network is recorded in
+   the SIGNED migration data (known before inscription, unlike the satoshi) and
+   read back during replay, with a runtime-config fallback only for legacy logs.
+   State derivation is deterministic from the log. Tests: network recorded in
+   signed data + replay under a mainnet manager still yields did:btco:reg:.
+2. **`decodeMultibase` silently accepted malformed base64url** (Multikey):
+   `Buffer.from('@@@','base64url')` returns empty instead of throwing, so a
+   malformed `u` payload decoded to an empty array (the `z` branch throws). Now
+   validates `^[A-Za-z0-9_-]+$` before decoding; malformed/empty `u` throws.
+   Test: 'u@@@', 'u', 'u====' all throw.
+3. **Tombstone guard bypass** (BtcoDidResolver): iteration 1's
+   `!isDidDocumentForThisDid` guard could be evaded by appending a minimal
+   `{"id":"<did>"}` object after a "BTCO DID: … 🔥" marker — it parsed to a
+   matching-id object, skipped the tombstone branch, and fell back to an older
+   document. Switched tombstone detection to the start-anchored marker PATTERN
+   (`didPattern.test && includes('🔥')`), which correctly classifies both a
+   DID-document-containing-🔥 (not a tombstone) and a marker-with-appended-JSON
+   (a tombstone). Test: marker + appended JSON still deactivates.
+
+### Result
+- Full suite: **3224 pass / 0 fail / 71 skip**. Typecheck clean; lint 0 errors.
+- Replied to all three review threads with the fixing commit SHA.
+
+### Iteration 2 follow-up (2nd Macroscope round)
+Macroscope flagged one more Medium: iteration-2's fix added `network` to the
+GLOBAL metadata-exclusion list, so an ordinary (non-migration) update event
+carrying an application-defined `network` field had it silently dropped from
+`state.metadata`. Scoped the exclusion to btco migration events only (where
+`network` is consumed explicitly). Regression test: a regular update with a
+custom `network` field now preserves it. Full suite 3225 pass / 0 fail;
+typecheck clean; lint 0 errors.

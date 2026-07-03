@@ -26,6 +26,15 @@ export class BitcoinManager {
     this.ord = config.ordinalsProvider;
   }
 
+  /**
+   * The Bitcoin network this manager operates on. Exposed so callers that
+   * derive `did:btco` identifiers (which are network-scoped) can produce the
+   * correct network prefix rather than assuming mainnet.
+   */
+  get network(): OriginalsConfig['network'] {
+    return this.config.network;
+  }
+
   private async resolveFeeRate(targetBlocks = 1, provided?: number): Promise<number | undefined> {
     // 1) An explicitly provided fee rate always wins: estimators must not
     // silently override what the caller asked to pay.

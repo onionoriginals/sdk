@@ -45,6 +45,15 @@ export interface BtcoMigrationData {
   targetDid?: string;
   /** The target layer */
   layer: 'btco';
+  /**
+   * The Bitcoin network the inscription is made on, recorded at migration time.
+   * The network is known before inscription (unlike the satoshi), so it lives in
+   * the SIGNED migration data — this lets state derivation reconstruct the
+   * network-scoped did:btco identifier deterministically from the log rather
+   * than from the replaying SDK's runtime config. Absent on logs created before
+   * this field existed.
+   */
+  network?: 'mainnet' | 'regtest' | 'signet';
   /** The Bitcoin transaction ID anchoring the migration */
   txid?: string;
   /** The inscription ID on Bitcoin */
@@ -197,6 +206,12 @@ export class BtcoCelManager {
     const migrationData: BtcoMigrationData = {
       sourceDid: currentDid,
       layer: 'btco',
+      // Record the network in the SIGNED data. The satoshi is not yet known
+      // (it comes from the inscription, via the witness proof), but the network
+      // is known now — recording it here keeps state derivation deterministic:
+      // replaying the log yields the same network-scoped did:btco identifier
+      // regardless of the SDK's configured network.
+      network: this.bitcoinManager.network,
       migratedAt: new Date().toISOString(),
     };
 
@@ -226,8 +241,24 @@ export class BtcoCelManager {
   }
 
   /**
+   * The network-scoped did:btco prefix for the configured Bitcoin network.
+   * Mainnet is bare (`did:btco`); signet/regtest carry `sig`/`reg` segments.
+   * Mirrors DIDManager / createBtcoDidDocument so all btco identifiers agree.
+   */
+  private btcoDidPrefix(network: string | undefined): string {
+    switch (network) {
+      case 'signet':
+        return 'did:btco:sig';
+      case 'regtest':
+        return 'did:btco:reg';
+      default:
+        return 'did:btco';
+    }
+  }
+
+  /**
    * Derives the current asset state by replaying all events in the log.
-   * 
+   *
    * @param log - The event log to derive state from
    * @returns The current AssetState derived from replaying events
    */
@@ -295,8 +326,17 @@ export class BtcoCelManager {
             }
             if (bitcoinProof?.satoshi) {
               state.metadata.satoshi = bitcoinProof.satoshi;
-              // Canonical, resolvable did:btco identifier (numeric satoshi).
-              state.did = `did:btco:${bitcoinProof.satoshi as string}`;
+              // Canonical, resolvable did:btco identifier. The identifier is
+              // network-scoped: only mainnet is bare (`did:btco:<sat>`), while
+              // signet/regtest carry a prefix (`did:btco:sig:` / `did:btco:reg:`),
+              // matching DIDManager/createBtcoDidDocument. The network is read
+              // from the SIGNED migration data so replaying a persisted log is
+              // deterministic — the DID does not change with the replaying SDK's
+              // configured network. Fall back to the inscribing manager's network
+              // only for legacy logs written before the network was recorded.
+              const network = (updateData.network as string | undefined) ?? this.bitcoinManager.network;
+              state.metadata.network = network;
+              state.did = `${this.btcoDidPrefix(network)}:${bitcoinProof.satoshi as string}`;
             }
           } else {
             // Non-btco (webvh) migrations carry their targetDid in the data
@@ -327,9 +367,16 @@ export class BtcoCelManager {
           }
         }
         
-        // Store other fields in metadata
+        // Store other fields in metadata. `network` is consumed (and stored)
+        // explicitly only for btco migration events, so exclude it here for
+        // those events alone — for an ordinary update, an application-defined
+        // `network` field must still flow through to metadata.
+        const excludedKeys = ['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt', 'txid', 'inscriptionId'];
+        if (updateData.sourceDid && updateData.layer === 'btco') {
+          excludedKeys.push('network');
+        }
         for (const [key, value] of Object.entries(updateData)) {
-          if (!['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt', 'txid', 'inscriptionId'].includes(key)) {
+          if (!excludedKeys.includes(key)) {
             state.metadata = state.metadata || {};
             state.metadata[key] = value;
           }
