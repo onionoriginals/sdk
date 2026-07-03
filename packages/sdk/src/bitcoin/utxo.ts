@@ -1,4 +1,4 @@
-import { DUST_LIMIT_SATS, Utxo } from '../types/index.js';
+import { DUST_LIMIT_SATS, Utxo, ResourceUtxo } from '../types/index.js';
 
 export interface FeeEstimateOptions {
   bytesPerInput?: number;
@@ -61,7 +61,15 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
   // Filter UTXOs based on policy
   let candidateUtxos = utxos.slice().filter(u => typeof u.value === 'number' && u.value > 0);
   const forbidInscribed = forbidInscriptionBearingInputs !== false;
-  const isInscribed = (u: Utxo): boolean => !!(u.inscriptions && u.inscriptions.length > 0);
+  // A UTXO carries an ordinal either because an inscription id is recorded on it
+  // OR because it is flagged with the first-class `hasResource` marker
+  // (ResourceUtxo). Spending such a UTXO as a plain payment/fee input transfers
+  // or burns the ordinal it carries, so both markers must exclude it. The sibling
+  // selectors in utxo-selection.ts (`carriesResource`) and transactions/commit.ts
+  // (`isProtected`) already check both; this path previously only checked
+  // `inscriptions`, letting a `hasResource: true` UTXO be spent as a fee input.
+  const isInscribed = (u: Utxo): boolean =>
+    !!(u.inscriptions && u.inscriptions.length > 0) || (u as ResourceUtxo).hasResource === true;
   // CONFLICTING_LOCKS is only an accurate diagnosis when unlocking could
   // actually help — i.e. a locked UTXO exists that selection would otherwise
   // be allowed to use. A locked UTXO that is also inscription-protected

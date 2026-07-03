@@ -139,9 +139,15 @@ export class DIDManager {
       .replace(/[^a-zA-Z0-9._-]/g, '-')
       .toLowerCase();
 
+    // Percent-encode the port colon so the domain+port stays a single DID
+    // authority segment. A literal colon (e.g. `localhost:8080`) would be parsed
+    // as `authority=localhost` + `path segment=8080` by every consumer that
+    // splits the DID on ':' — including this SDK's own saveDIDLog, which does
+    // decodeURIComponent(didParts[2]) and expects the port to be encoded there.
+    const authority = portPart ? `${domainPart}%3A${portPart}` : normalized;
     const migrated: DIDDocument = {
       ...didDoc,
-      id: `did:webvh:${normalized}:${slug}`
+      id: `did:webvh:${authority}:${slug}`
     };
     return await Promise.resolve(migrated);
     }); // end track did.migrateToDIDWebVH

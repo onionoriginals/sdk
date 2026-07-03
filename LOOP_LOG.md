@@ -1,6 +1,41 @@
 # Correctness Loop Log
 
-Branch: `claude/originals-sdk-correctness-4pn30u`
+Branch: `claude/originals-sdk-correctness-4pn30u` (iterations 1–N, merged as #230–#233)
+Branch: `claude/originals-sdk-correctness-osnfzp` (current)
+
+## Iteration (osnfzp) 1 — 2026-07-03
+
+### Ground truth
+- Fresh clone, `bun install` + `bun run build`. Baseline fully green:
+  `bun test` 3429 pass / 0 fail / 74 skip; `bun run typecheck` clean;
+  `bun run lint` 0 errors / 87 warnings.
+- Branch was even with `origin/main` (378a445); prior correctness work #230–#233
+  already merged. No open PR for this branch — opened one this firing.
+
+### Work items (fixed, each with a regression test that fails before / passes after)
+- **utxo.ts `selectUtxos` ignored `hasResource`** (HIGH, fund/ordinal loss). Public
+  `buildTransferTransaction` could spend a `hasResource: true` ResourceUtxo (no
+  `inscriptions[]`) as a fee input. Now excludes both markers, matching the two
+  sibling selectors. Tests: `tests/unit/bitcoin/utxo.selection.test.ts` (+3).
+- **Multi-sig verification skipped revocation + expiration** (HIGH, verification
+  bypass). `MultiSigManager.verifyMultiSig` now enforces the credential validity
+  window and fails closed on a declared `BitstringStatusListEntry` it cannot
+  check. Tests: `tests/unit/vc/MultiSigManager.test.ts` (+3).
+- **`migrateToDIDWebVH` un-encoded port colon** (malformed DID). Now percent-encodes
+  the port so the authority stays one segment. Tests:
+  `tests/unit/did/DIDManager.test.ts` (+1).
+
+### Verify
+- Post-fix: `bun test` 3436 pass / 0 fail; typecheck clean; lint 0 errors / 87
+  warnings (no new). Changeset added (`.changeset/correctness-loop-osnfzp.md`, patch).
+
+### Deferred this firing (see FOLLOWUP.md #20, #21)
+- MAX_SATOSHI_SUPPLY above real issued supply (LOW; changes a tested contract).
+- Network-blind `did:btco` binding in Lifecycle/Batch (MEDIUM; network-authority
+  spec ambiguity — an existing test asserts the mainnet form for a regtest SDK).
+
+---
+
 
 ## Iteration 1 — 2026-07-02
 
