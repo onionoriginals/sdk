@@ -991,4 +991,106 @@ describe('verifyEventLog', () => {
       expect(result.events[0].witnessProofs).toBeUndefined();
     });
   });
+
+  describe('first event must be a create event (issue #295)', () => {
+    test('rejects a log whose first (and only) event is a validly-signed update', async () => {
+      const { signer } = await makeRealSigner();
+
+      // A single validly-signed `update` event with no `create` — previously
+      // this verified even though no state-derivation path can consume it.
+      const eventData = { type: 'update' as const, data: { name: 'Orphan Update' } };
+      const proof = await signer(eventData);
+      const log: EventLog = {
+        events: [{ ...eventData, proof: [proof] }],
+      };
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => e.includes("first event must be a 'create' event"))).toBe(true);
+    });
+
+    test('rejects an update-first log on the custom-verifier path too', async () => {
+      const eventData = { type: 'update' as const, data: { name: 'Orphan Update' } };
+      const log: EventLog = {
+        events: [{
+          ...eventData,
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: new Date().toISOString(),
+            verificationMethod: structuralVm,
+            proofPurpose: 'assertionMethod',
+            proofValue: 'z' + 'a'.repeat(86),
+          }],
+        }],
+      };
+
+      const result = await verifyEventLog(log, { verifier: async () => true });
+
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => e.includes("first event must be a 'create' event"))).toBe(true);
+    });
+
+    test('still accepts a valid create-first log', async () => {
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const log = await createEventLog({ name: 'Valid' }, { signer, verificationMethod: vm });
+
+      const result = await verifyEventLog(log);
+      expect(result.verified).toBe(true);
+    });
+  });
+
+  describe('deactivation is terminal (issue #257)', () => {
+    async function makeDeactivatedLogWithTrailingUpdate(): Promise<EventLog> {
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const { deactivateEventLog } = await import('../../../src/cel/algorithms/deactivateEventLog');
+      const { computeDigestMultibase } = await import('../../../src/cel/hash');
+      const { canonicalizeEntryForChain } = await import('../../../src/cel/canonicalize');
+
+      let log = await createEventLog({ name: 'Sealed Asset' }, { signer, verificationMethod: vm });
+      log = await deactivateEventLog(log, 'retired', { signer, verificationMethod: vm });
+
+      // Craft a validly-signed, correctly-chained update AFTER the deactivate —
+      // exactly what deactivateEventLog refuses to append but verification
+      // previously accepted.
+      const lastEvent = log.events[log.events.length - 1];
+      const previousEvent = computeDigestMultibase(canonicalizeEntryForChain(lastEvent));
+      const eventData = { type: 'update' as const, data: { name: 'Mutated After Seal' }, previousEvent };
+      const proof = await signer(eventData);
+      return { ...log, events: [...log.events, { ...eventData, proof: [proof] }] };
+    }
+
+    test('create → deactivate → update fails verification even when all signatures are valid', async () => {
+      const log = await makeDeactivatedLogWithTrailingUpdate();
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => e.includes('deactivate') && e.includes('sealed'))).toBe(true);
+    });
+
+    test('a log ending in a deactivate event still verifies', async () => {
+      const { signer, verificationMethod: vm } = await makeRealSigner();
+      const { deactivateEventLog } = await import('../../../src/cel/algorithms/deactivateEventLog');
+
+      let log = await createEventLog({ name: 'Retiring Asset' }, { signer, verificationMethod: vm });
+      log = await updateEventLog(log, { name: 'Final Form' }, { signer, verificationMethod: vm });
+      log = await deactivateEventLog(log, 'retired', { signer, verificationMethod: vm });
+
+      const result = await verifyEventLog(log);
+
+      expect(result.verified).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    test('events after deactivate fail the log on the custom-verifier path too', async () => {
+      const log = await makeDeactivatedLogWithTrailingUpdate();
+
+      const result = await verifyEventLog(log, { verifier: async () => true });
+
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => e.includes('sealed'))).toBe(true);
+    });
+  });
 });

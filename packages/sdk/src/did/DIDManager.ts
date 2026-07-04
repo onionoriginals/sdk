@@ -4,6 +4,8 @@ import { BtcoDidResolver } from './BtcoDidResolver.js';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient.js';
 import { createBtcoDidDocument } from './createBtcoDidDocument.js';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter.js';
+import { OrdinalsProviderResolverAdapter } from './providers/OrdinalsProviderResolverAdapter.js';
+import { StructuredError } from '../utils/telemetry.js';
 import { multikey } from '../crypto/Multikey.js';
 import { KeyManager } from './KeyManager.js';
 import { WebVHManager, normalizeUpdateKey, assertEd25519WebVHUpdateKeys } from './WebVHManager.js';
@@ -303,26 +305,47 @@ export class DIDManager {
             }
           }
         } else if (did.startsWith('did:btco:')) {
-          const rpcUrl = this.config.bitcoinRpcUrl || 'http://localhost:3000';
-          // The network is encoded in the DID itself (did:btco:reg:/did:btco:sig:,
-          // unprefixed = mainnet), so resolution must follow the DID, not the
-          // SDK-wide config — a signet DID handed to a mainnet-configured SDK
-          // must still be treated as a signet identifier.
-          const btcoPrefix = did.match(/^did:btco:(reg|sig|test):/)?.[1];
-          const network: 'mainnet' | 'regtest' | 'signet' =
-            btcoPrefix === 'reg' ? 'regtest'
-            : btcoPrefix === 'sig' ? 'signet'
-            : btcoPrefix === 'test'
-              // OrdinalsClient has no testnet variant; fall back to the
-              // configured network (BtcoDidResolver still validates the DID
-              // against its own testnet prefix).
-              ? (this.config.network || 'mainnet')
-              : 'mainnet';
-          const client = new OrdinalsClient(rpcUrl, network);
-          const adapter = new OrdinalsClientProviderAdapter(client, rpcUrl);
-          const resolver = new BtcoDidResolver({ provider: adapter });
-          const resolved = await resolver.resolve(did);
-          result = resolved.didDocument || null;
+          if (this.config.ordinalsProvider) {
+            // The configured ordinalsProvider is the source of truth for
+            // Bitcoin state (it performed the inscriptions), so resolution
+            // must go through it — not through a freshly constructed HTTP
+            // client pointed at some unrelated endpoint.
+            const adapter = new OrdinalsProviderResolverAdapter(this.config.ordinalsProvider);
+            const resolver = new BtcoDidResolver({ provider: adapter, fetchFn: adapter.fetchContent });
+            const resolved = await resolver.resolve(did);
+            result = resolved.didDocument || null;
+          } else if (this.config.bitcoinRpcUrl) {
+            const rpcUrl = this.config.bitcoinRpcUrl;
+            // The network is encoded in the DID itself (did:btco:reg:/did:btco:sig:,
+            // unprefixed = mainnet), so resolution must follow the DID, not the
+            // SDK-wide config — a signet DID handed to a mainnet-configured SDK
+            // must still be treated as a signet identifier.
+            const btcoPrefix = did.match(/^did:btco:(reg|sig|test):/)?.[1];
+            const network: 'mainnet' | 'regtest' | 'signet' =
+              btcoPrefix === 'reg' ? 'regtest'
+              : btcoPrefix === 'sig' ? 'signet'
+              : btcoPrefix === 'test'
+                // OrdinalsClient has no testnet variant; fall back to the
+                // configured network (BtcoDidResolver still validates the DID
+                // against its own testnet prefix).
+                ? (this.config.network || 'mainnet')
+                : 'mainnet';
+            const client = new OrdinalsClient(rpcUrl, network);
+            const adapter = new OrdinalsClientProviderAdapter(client, rpcUrl);
+            const resolver = new BtcoDidResolver({ provider: adapter });
+            const resolved = await resolver.resolve(did);
+            result = resolved.didDocument || null;
+          } else {
+            // No provider and no explicit RPC URL: fail loudly. Silently
+            // defaulting to http://localhost:3000 either fails far from the
+            // cause or — worse — trusts whatever unrelated service happens to
+            // listen there as the source of DID documents.
+            throw new StructuredError(
+              'ORD_PROVIDER_REQUIRED',
+              'Resolving did:btco requires an ordinalsProvider (or an explicit bitcoinRpcUrl) to be configured. ' +
+              'Provide an ordinalsProvider when creating the SDK. See README.md for configuration examples.'
+            );
+          }
         } else if (did.startsWith('did:webvh:')) {
           try {
             const mod = await import('didwebvh-ts') as {
@@ -348,6 +371,11 @@ export class DIDManager {
           console.warn(`Unsupported DID method for resolution: ${did}`);
         }
       } catch (err) {
+        // Misconfiguration must fail loudly — swallowing it into a null would
+        // reproduce the silent-failure mode this error exists to prevent.
+        if (err instanceof StructuredError && err.code === 'ORD_PROVIDER_REQUIRED') {
+          throw err;
+        }
         // DID resolution failed
         if (this.config.enableLogging) {
           console.error('Failed to resolve DID:', err);

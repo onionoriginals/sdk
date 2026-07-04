@@ -309,6 +309,46 @@ describe('BtcoDidResolver', () => {
     expect(res.didDocumentMetadata.deactivated).toBe(true);
   });
 
+  test('marker + JSON document form with 🔥 only inside the JSON body is an update, not a tombstone (issue #269)', async () => {
+    // Regression: for the combined "marker line + JSON document" form the
+    // marker pattern matches, and the 🔥 scan used to cover the ENTIRE content
+    // — so a legitimate document update whose JSON merely contained 🔥 (e.g. a
+    // service description) permanently bricked the DID. The scan must cover
+    // only the marker line (the content before the JSON body).
+    const docContent = JSON.stringify({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:btco:128',
+      service: [{
+        id: 'did:btco:128#drops',
+        type: 'LinkedDomains',
+        serviceEndpoint: 'https://example.com',
+        description: '🔥 drops'
+      }]
+    });
+    const inscriptionId = 'insc-marker-doc-fire';
+    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
+    provider.resolveInscription.mockResolvedValue({
+      id: inscriptionId,
+      sat: 128,
+      content_type: 'application/json',
+      content_url: 'http://local/content-marker-doc-fire'
+    });
+    provider.getMetadata.mockResolvedValue(null);
+    (global as any).fetch.mockResolvedValue({
+      ok: true,
+      text: async () => `BTCO DID: did:btco:128\n${docContent}`
+    });
+
+    const resolver = new BtcoDidResolver({ provider });
+    const res = await resolver.resolve('did:btco:128');
+    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
+    expect(entry.deactivated).toBeUndefined();
+    expect(entry.didDocument).not.toBeNull();
+    expect(res.didDocument).not.toBeNull();
+    expect(res.didDocument?.id).toBe('did:btco:128');
+    expect(res.didDocumentMetadata.deactivated).toBeUndefined();
+  });
+
   test('tombstone after a valid document deactivates the DID (no fallback to older document)', async () => {
     const docContent = JSON.stringify({
       '@context': ['https://www.w3.org/ns/did/v1'],

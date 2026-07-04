@@ -619,6 +619,8 @@ async function verifyEvent(
  * - Each proof is structurally valid (type, cryptosuite, proofValue, verificationMethod, proofPurpose)
  * - Proofs use valid cryptosuite (eddsa-jcs-2022 or eddsa-rdfc-2022)
  * - The first event has no previousEvent field
+ * - The first event is a `create` event
+ * - No event follows a `deactivate` event (a deactivated log is sealed)
  * - Each subsequent event's previousEvent matches the digestMultibase of the prior event
  *
  * When no custom verifier is provided, `did:key` + `eddsa-jcs-2022` proofs
@@ -677,6 +679,31 @@ export async function verifyEventLog(
       errors: ['Invalid event log: empty events array'],
       events: [],
     };
+  }
+
+  // The first event must be a `create` event: every state-derivation path
+  // (PeerCelManager/WebVHCelManager/BtcoCelManager/CLI deriveCurrentState)
+  // requires it, so a log that "verifies" without one would be verified yet
+  // un-derivable. Fail closed.
+  if (log.events[0].type !== 'create') {
+    return {
+      verified: false,
+      errors: [`Invalid event log: first event must be a 'create' event (found '${String(log.events[0].type)}')`],
+      events: [],
+    };
+  }
+
+  // A `deactivate` event seals the log (deactivateEventLog refuses to append
+  // to a deactivated log). Enforce the same rule at verification: any event
+  // AFTER a deactivate means the sealed log was mutated, so the log must not
+  // verify — even if every signature and chain link is individually valid.
+  const deactivateIndex = log.events.findIndex(e => e.type === 'deactivate');
+  const deactivationViolated = deactivateIndex !== -1 && deactivateIndex < log.events.length - 1;
+  if (deactivationViolated) {
+    errors.push(
+      `Invalid event log: event ${deactivateIndex} is a 'deactivate' event but ` +
+      `${log.events.length - 1 - deactivateIndex} event(s) follow it; a deactivated log is sealed and must not be extended`
+    );
   }
 
   // Establish the authorized controller key from the create event (event 0):
@@ -775,7 +802,7 @@ export async function verifyEventLog(
   }
 
   return {
-    verified: allProofsValid && allChainsValid && !authorityError,
+    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated,
     errors,
     events: eventVerifications,
   };
