@@ -157,11 +157,15 @@ describe('signer selection from key multicodec (issue #261)', () => {
   });
 
   test('multi-sig Ed25519 proofs verify under an ES256K-default verifier', async () => {
+    // Multi-sig proofs are Data Integrity (eddsa-rdfc-2022) proofs: the
+    // signature algorithm is fixed by the cryptosuite and the key itself, so
+    // the verifier's defaultKeyType configuration cannot influence the
+    // outcome (the hazard issue #261 targeted).
     const [k1, k2] = await Promise.all([
       keyManager.generateKeyPair('Ed25519'),
       keyManager.generateKeyPair('Ed25519'),
     ]);
-    const vms = [k1, k2].map(k => `did:key:${k.publicKey}`);
+    const vms = [k1, k2].map(k => `did:key:${k.publicKey}#${k.publicKey}`);
     const policy = { required: 2, total: 2, signerVerificationMethods: vms };
 
     const credential: VerifiableCredential = {
@@ -173,7 +177,7 @@ describe('signer selection from key multicodec (issue #261)', () => {
     };
 
     const signerConfig: OriginalsConfig = { network: 'regtest', defaultKeyType: 'Ed25519' };
-    const signed = await new MultiSigManager(signerConfig).signCredentialMultiSig(credential, {
+    const signed = await new MultiSigManager(signerConfig, new DIDManager(signerConfig)).signCredentialMultiSig(credential, {
       policy,
       privateKeys: new Map([
         [vms[0], k1.privateKey],
@@ -182,7 +186,7 @@ describe('signer selection from key multicodec (issue #261)', () => {
     });
 
     const verifierConfig: OriginalsConfig = { network: 'regtest', defaultKeyType: 'ES256K' };
-    const result = await new MultiSigManager(verifierConfig).verifyMultiSig(signed, policy);
+    const result = await new MultiSigManager(verifierConfig, new DIDManager(verifierConfig)).verifyMultiSig(signed, policy);
     expect(result.verified).toBe(true);
     expect(result.validSignatures).toBe(2);
   });
