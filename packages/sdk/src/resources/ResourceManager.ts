@@ -219,10 +219,20 @@ export class ResourceManager {
 
     // Determine content type (use provided or inherit from previous)
     const contentType = options?.contentType || currentVersion.contentType;
-    
+
     // Validate new content type if changed
     if (options?.contentType && !this.isValidMimeType(options.contentType)) {
       throw new Error(`Invalid MIME type format: ${options.contentType}`);
+    }
+
+    // Enforce the same allowedContentTypes allowlist as createResource; only
+    // checking the MIME *format* here let updateResource smuggle in content
+    // types the manager was configured to reject, producing versions its own
+    // validateResource then flags invalid (issue #292).
+    if (options?.contentType &&
+        this.config.allowedContentTypes.length > 0 &&
+        !this.config.allowedContentTypes.includes(options.contentType)) {
+      throw new Error(`Content type not allowed: ${options.contentType}. Allowed types: ${this.config.allowedContentTypes.join(', ')}`);
     }
 
     // Create new version
@@ -576,14 +586,20 @@ export class ResourceManager {
       this.resources.set(resourceId, versions);
     }
 
-    // Check if this version already exists (by hash)
-    const existingVersion = versions.find(v => v.hash === assetResource.hash);
+    // Check if this exact version already exists. Dedup must compare
+    // (version, hash) — not hash alone — because a legitimate history can
+    // revert content to an earlier state (v1=A, v2=B, v3=A). Hash-only dedup
+    // silently discarded such reverted versions on the export/import
+    // round-trip, breaking the version chain (issue #275).
+    const version = assetResource.version || 1;
+    const existingVersion = versions.find(
+      v => v.hash === assetResource.hash && (v.version || 1) === version
+    );
     if (existingVersion) {
       return existingVersion;
     }
 
     // Add to version array (maintain order by version number)
-    const version = assetResource.version || 1;
     const insertIndex = versions.findIndex(v => (v.version || 1) > version);
     if (insertIndex === -1) {
       versions.push(assetResource);

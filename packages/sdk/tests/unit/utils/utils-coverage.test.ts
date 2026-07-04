@@ -174,8 +174,8 @@ describe('[UTILS-VERIFY-008] parseSatoshiIdentifier', () => {
   });
 
   test('returns the maximum supply satoshi', () => {
-    // 2,100,000,000,000,000
-    expect(parseSatoshiIdentifier('2100000000000000')).toBe(2_100_000_000_000_000);
+    // 2,099,999,997,689,999 — the last satoshi ordinal ever mined
+    expect(parseSatoshiIdentifier('2099999997689999')).toBe(2_099_999_997_689_999);
   });
 
   test('throws for an invalid did:btco network prefix', () => {

@@ -1,10 +1,13 @@
 import { StructuredError } from './telemetry.js';
 
 /**
- * Maximum number of satoshis in Bitcoin's total supply (21 million BTC)
- * 21,000,000 BTC * 100,000,000 satoshis/BTC = 2,100,000,000,000,000 satoshis
+ * The highest ordinal number a satoshi can have. Because of block-reward
+ * rounding at each halving, total supply never reaches the nominal 21M BTC
+ * (2,100,000,000,000,000 sats); the last satoshi ever mined is ordinal
+ * 2,099,999,997,689,999. Using the nominal figure over-accepted ~2.3M
+ * non-existent sat numbers (issue #292).
  */
-export const MAX_SATOSHI_SUPPLY = 2_100_000_000_000_000;
+export const MAX_SATOSHI_SUPPLY = 2_099_999_997_689_999;
 
 /**
  * Validation result interface for satoshi number validation
@@ -114,7 +117,7 @@ export function canonicalizeSatoshi(satoshi: string | number): string {
     throw new StructuredError('INVALID_SATOSHI', result.error || 'Invalid satoshi identifier');
   }
   // Safe: validateSatoshiNumber guarantees an all-digits string within
-  // MAX_SATOSHI_SUPPLY (2.1e15), which is below Number.MAX_SAFE_INTEGER, so the
+  // MAX_SATOSHI_SUPPLY (~2.1e15), which is below Number.MAX_SAFE_INTEGER, so the
   // round-trip through Number is exact and simply strips whitespace/leading zeros.
   return String(Number(String(satoshi).trim()));
 }

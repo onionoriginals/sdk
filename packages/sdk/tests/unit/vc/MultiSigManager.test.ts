@@ -765,13 +765,13 @@ describe('MultiSigManager', () => {
 
       // First contribution
       const c1 = await manager.createContribution(session.id, keys[0].privateKey, vms[0]);
-      const updated1 = manager.addContribution(session.id, c1);
+      const updated1 = await manager.addContribution(session.id, c1);
       expect(updated1.status).toBe('collecting');
       expect(updated1.contributions.length).toBe(1);
 
       // Second contribution - meets threshold
       const c2 = await manager.createContribution(session.id, keys[1].privateKey, vms[1]);
-      const updated2 = manager.addContribution(session.id, c2);
+      const updated2 = await manager.addContribution(session.id, c2);
       expect(updated2.status).toBe('threshold_met');
       expect(updated2.contributions.length).toBe(2);
     });
@@ -785,11 +785,11 @@ describe('MultiSigManager', () => {
 
       const session = manager.createSession(baseVC, policy);
       const c1 = await manager.createContribution(session.id, keys[0].privateKey, vms[0]);
-      manager.addContribution(session.id, c1);
+      await manager.addContribution(session.id, c1);
 
       // Try to add another contribution from the same signer
       const c1dup = await manager.createContribution(session.id, keys[0].privateKey, vms[0]);
-      expect(() => manager.addContribution(session.id, c1dup)).toThrow(/already contributed/);
+      await expect(manager.addContribution(session.id, c1dup)).rejects.toThrow(/already contributed/);
     });
 
     test('rejects unauthorized signer contribution', async () => {
@@ -817,10 +817,10 @@ describe('MultiSigManager', () => {
       const session = manager.createSession(baseVC, policy);
 
       const c1 = await manager.createContribution(session.id, keys[0].privateKey, vms[0]);
-      manager.addContribution(session.id, c1);
+      await manager.addContribution(session.id, c1);
 
       const c2 = await manager.createContribution(session.id, keys[1].privateKey, vms[1]);
-      manager.addContribution(session.id, c2);
+      await manager.addContribution(session.id, c2);
 
       const signed = manager.finalizeSession(session.id);
       expect(signed.proof).toBeDefined();
@@ -841,7 +841,7 @@ describe('MultiSigManager', () => {
 
       const session = manager.createSession(baseVC, policy);
       const c1 = await manager.createContribution(session.id, keys[0].privateKey, vms[0]);
-      manager.addContribution(session.id, c1);
+      await manager.addContribution(session.id, c1);
 
       expect(() => manager.finalizeSession(session.id)).toThrow(/1\/2 signatures collected/);
     });
@@ -857,7 +857,7 @@ describe('MultiSigManager', () => {
       const session = manager.createSession(baseVC, policy);
       const c1 = await manager.createContribution(session.id, keys[0].privateKey, vms[0]);
 
-      expect(() => manager.addContribution(session.id, c1)).toThrow(/expired/);
+      await expect(manager.addContribution(session.id, c1)).rejects.toThrow(/expired/);
     });
 
     test('rejects contribution to finalized session', async () => {
@@ -869,11 +869,11 @@ describe('MultiSigManager', () => {
 
       const session = manager.createSession(baseVC, policy);
       const c1 = await manager.createContribution(session.id, keys[0].privateKey, vms[0]);
-      manager.addContribution(session.id, c1);
+      await manager.addContribution(session.id, c1);
       manager.finalizeSession(session.id);
 
       const c2 = await manager.createContribution(session.id, keys[1].privateKey, vms[1]);
-      expect(() => manager.addContribution(session.id, c2)).toThrow(/finalized/);
+      await expect(manager.addContribution(session.id, c2)).rejects.toThrow(/finalized/);
     });
 
     test('getSession returns undefined for unknown session', () => {

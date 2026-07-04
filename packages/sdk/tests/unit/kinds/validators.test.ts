@@ -26,7 +26,7 @@ const createResource = (id: string, type = 'code', contentType = 'application/ja
   id,
   type,
   contentType,
-  hash: 'abcdef1234567890',
+  hash: 'a'.repeat(64),
 });
 
 describe('ValidationUtils', () => {

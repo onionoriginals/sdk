@@ -41,9 +41,20 @@ export class BroadcastClient {
     let attempts = 0;
     let last: TransactionStatus = { confirmed: false };
     while (attempts < maxAttempts) {
-      last = await this.statusProvider(txid);
-      if (last.confirmed) {
-        return { txid, confirmations: last.confirmations ?? 1 };
+      // Once the broadcast succeeded, this method must resolve with the txid
+      // no matter what the status endpoint does (issue #271). A transient
+      // status failure that rejected here made callers treat the whole
+      // operation as failed and rebuild/rebroadcast a second commit tx over
+      // the same UTXOs — a double-spend race that can strand funds at a
+      // commit address whose reveal key was discarded. Count a throwing poll
+      // as an unconfirmed attempt instead.
+      try {
+        last = await this.statusProvider(txid);
+        if (last.confirmed) {
+          return { txid, confirmations: last.confirmations ?? 1 };
+        }
+      } catch {
+        // Transient status-provider failure: treat as "not yet confirmed".
       }
       await new Promise(r => setTimeout(r, interval));
       attempts++;

@@ -387,7 +387,7 @@ export class MultiSigManager {
    * @param contribution - The signature contribution
    * @returns Updated session status
    */
-  addContribution(sessionId: string, contribution: SignatureContribution): MultiSigSession {
+  async addContribution(sessionId: string, contribution: SignatureContribution): Promise<MultiSigSession> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`MultiSig session ${sessionId} not found`);
@@ -418,6 +418,25 @@ export class MultiSigManager {
     );
     if (existingContribution) {
       throw new Error(`Signer ${vm} has already contributed to this session`);
+    }
+
+    // Verify the contribution actually signs the session document before it
+    // counts toward the threshold (issue #287). Accepting unverified proofs
+    // let a garbage contribution drive the session to a false "finalized"
+    // state — and, because the duplicate check above keys on the signer,
+    // permanently blocked that signer's corrected resubmission. Rejecting
+    // here (before pushing) keeps the slot free for a valid retry.
+    if (!this.didManager) {
+      throw new Error(
+        'Cannot verify contribution: MultiSigManager requires a DIDManager to verify session contributions'
+      );
+    }
+    const proofValid = await this.verifyProof(
+      session.document as unknown as VerifiableCredential,
+      contribution.proof
+    );
+    if (!proofValid) {
+      throw new Error(`Contribution from ${vm} has an invalid proof and was rejected`);
     }
 
     session.contributions.push(contribution);

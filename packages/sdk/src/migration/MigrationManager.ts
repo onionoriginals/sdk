@@ -26,6 +26,7 @@ import { PeerToWebvhMigration } from './operations/PeerToWebvhMigration.js';
 import { WebvhToBtcoMigration } from './operations/WebvhToBtcoMigration.js';
 import { PeerToBtcoMigration } from './operations/PeerToBtcoMigration.js';
 import { EventEmitter } from '../events/EventEmitter.js';
+import type { EventHandler, EventTypeMap } from '../events/types.js';
 
 export class MigrationManager {
   private static instance: MigrationManager | null = null;
@@ -101,8 +102,32 @@ export class MigrationManager {
         throw new Error('Configuration and managers required for first initialization');
       }
       MigrationManager.instance = new MigrationManager(config, didManager, credentialManager, bitcoinManager);
+      return MigrationManager.instance;
     }
-    return MigrationManager.instance;
+
+    // Already initialized: passing DIFFERENT dependencies must fail loudly.
+    // Silently returning the old instance discarded a newly supplied
+    // bitcoinManager (every btco migration then throws "Bitcoin manager
+    // required") or kept a different network's config for the process
+    // lifetime (issue #280). Same-reference calls remain idempotent; call
+    // resetInstance() first to deliberately reconfigure.
+    const instance = MigrationManager.instance;
+    const mismatches: string[] = [];
+    if (config !== undefined && config !== instance.config) mismatches.push('config');
+    if (didManager !== undefined && didManager !== instance.didManager) mismatches.push('didManager');
+    if (credentialManager !== undefined && credentialManager !== instance.credentialManager) {
+      mismatches.push('credentialManager');
+    }
+    if (bitcoinManager !== undefined && bitcoinManager !== instance.bitcoinManager) {
+      mismatches.push('bitcoinManager');
+    }
+    if (mismatches.length > 0) {
+      throw new Error(
+        `MigrationManager is already initialized with different dependencies (${mismatches.join(', ')}); ` +
+        'the new values would be silently ignored. Call MigrationManager.resetInstance() first to reconfigure.'
+      );
+    }
+    return instance;
   }
 
   /**
@@ -110,6 +135,39 @@ export class MigrationManager {
    */
   static resetInstance(): void {
     MigrationManager.instance = null;
+  }
+
+  /**
+   * Subscribe to migration events (migration:started, migration:completed,
+   * migration:failed, migration:quarantine, ...).
+   *
+   * The internal emitter used to be completely inaccessible, so every emitted
+   * event — including migration:quarantine, which by definition means "manual
+   * intervention required" — was dispatched into the void (issue #282).
+   *
+   * @returns An unsubscribe function
+   */
+  on<K extends keyof EventTypeMap>(
+    eventType: K,
+    handler: EventHandler<EventTypeMap[K]>
+  ): () => void {
+    return this.eventEmitter.on(eventType, handler);
+  }
+
+  /** Subscribe to a migration event for a single emission. */
+  once<K extends keyof EventTypeMap>(
+    eventType: K,
+    handler: EventHandler<EventTypeMap[K]>
+  ): () => void {
+    return this.eventEmitter.once(eventType, handler);
+  }
+
+  /** Unsubscribe a handler registered with on()/once(). */
+  off<K extends keyof EventTypeMap>(
+    eventType: K,
+    handler: EventHandler<EventTypeMap[K]>
+  ): void {
+    this.eventEmitter.off(eventType, handler);
   }
 
   /**

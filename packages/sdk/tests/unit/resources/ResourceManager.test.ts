@@ -675,6 +675,47 @@ describe('ResourceManager', () => {
       expect(history[0].version).toBe(1);
       expect(history[1].version).toBe(2);
     });
+
+    it('preserves a version that reverts to an earlier hash (issue #275)', () => {
+      // A legitimate history can revert content: v1=A, v2=B, v3=A. Dedup by
+      // hash alone silently dropped v3 on the export/import round-trip and
+      // broke the version chain. Dedup on (version, hash) keeps it.
+      const hashA = manager.hashContent('A');
+      const hashB = manager.hashContent('B');
+      const mk = (version: number, hash: string, prev?: string): Resource => ({
+        id: 'reverting',
+        type: 'text',
+        contentType: 'text/plain',
+        hash,
+        size: 1,
+        version,
+        previousVersionHash: prev,
+        createdAt: new Date().toISOString(),
+      });
+
+      manager.importResource(mk(1, hashA));
+      manager.importResource(mk(2, hashB, hashA));
+      manager.importResource(mk(3, hashA, hashB)); // reverts to A's content
+
+      const history = manager.getResourceHistory('reverting');
+      expect(history).toHaveLength(3);
+      expect(history.map(v => v.version)).toEqual([1, 2, 3]);
+    });
+  });
+
+  describe('updateResource content-type allowlist (issue #292)', () => {
+    it('rejects a disallowed content type instead of producing an invalid version', () => {
+      const restricted = new ResourceManager({ allowedContentTypes: ['text/plain'] });
+      const v1 = restricted.createResource('hello', {
+        id: 'r1',
+        type: 'text',
+        contentType: 'text/plain',
+      });
+
+      expect(() =>
+        restricted.updateResource(v1, 'new bytes', { contentType: 'application/x-anything' })
+      ).toThrow(/not allowed/i);
+    });
   });
 
   describe('exportResources', () => {
