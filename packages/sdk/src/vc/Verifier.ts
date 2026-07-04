@@ -5,6 +5,10 @@ import { createDocumentLoader } from './documentLoader.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
 import { StatusListManager } from './StatusListManager.js';
+import { computeCredentialDigest } from '../utils/credential-digest.js';
+import { decodeBase64UrlMultibase } from '../utils/encoding.js';
+import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer.js';
+import { multikey } from '../crypto/Multikey.js';
 
 export type VerificationResult = { verified: boolean; errors: string[] };
 
@@ -339,6 +343,64 @@ export class Verifier {
   }
 
   /**
+   * Verify a legacy (cryptosuite-less) multi-sig proof: signature over the
+   * shared legacy credential digest, key resolved from the verification
+   * method (did:key self-certifying, other DID methods via DIDManager), and
+   * algorithm chosen from the key's multicodec type.
+   */
+  private async verifyLegacyMultiSigProof(
+    vc: VerifiableCredential,
+    proof: Record<string, unknown>
+  ): Promise<boolean> {
+    try {
+      const proofValue = proof.proofValue;
+      const verificationMethod = proof.verificationMethod;
+      if (typeof proofValue !== 'string' || typeof verificationMethod !== 'string') return false;
+
+      const signature = decodeBase64UrlMultibase(proofValue);
+      const digest = await computeCredentialDigest(
+        vc as unknown as Record<string, unknown>,
+        { ...proof, proofValue: '' }
+      );
+
+      let publicKeyMultibase: string | null = null;
+      if (verificationMethod.startsWith('did:key:')) {
+        publicKeyMultibase = verificationMethod.split('#')[0].replace('did:key:', '');
+      } else if (verificationMethod.startsWith('did:')) {
+        const didDoc = await this.didManager.resolveDID(verificationMethod.split('#')[0]);
+        const vms = (didDoc as { verificationMethod?: Array<{ id?: string; publicKeyMultibase?: unknown }> } | null)
+          ?.verificationMethod;
+        if (Array.isArray(vms)) {
+          const fragment = verificationMethod.includes('#') ? verificationMethod.split('#')[1] : undefined;
+          const match = vms.find(vm =>
+            vm.id === verificationMethod ||
+            (fragment !== undefined && typeof vm.id === 'string' && vm.id.split('#')[1] === fragment)
+          ) ?? (vms.length === 1 ? vms[0] : undefined);
+          if (match && typeof match.publicKeyMultibase === 'string') {
+            publicKeyMultibase = match.publicKeyMultibase;
+          }
+        }
+      }
+      if (!publicKeyMultibase) return false;
+
+      let signer: Signer;
+      try {
+        const { type } = multikey.decodePublicKey(publicKeyMultibase);
+        signer = type === 'Ed25519' ? new Ed25519Signer()
+          : type === 'Secp256k1' ? new ES256KSigner()
+          : type === 'P256' ? new ES256Signer()
+          : (() => { throw new Error(`Unsupported key type: ${type}`); })();
+      } catch {
+        return false;
+      }
+
+      return await signer.verify(Buffer.from(digest), Buffer.from(signature), publicKeyMultibase);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Verify a credential with multi-sig threshold requirements.
    * Checks all proofs and ensures the threshold is met.
    *
@@ -393,12 +455,23 @@ export class Verifier {
         }
 
         try {
-          const proofResult = await DataIntegrityProofManager.verifyProof(
-            vc,
-            proof as unknown as DataIntegrityProof,
-            { documentLoader: loader }
-          );
-          if (proofResult.verified) {
+          // Dispatch per proof (issue #239): DataIntegrityProofManager rejects
+          // any proof without cryptosuite 'eddsa-rdfc-2022', which is every
+          // proof produced by MultiSigManager.signWithPrivateKey — those are
+          // legacy-digest proofs and must verify through the legacy path.
+          const cryptosuite = (proof as { cryptosuite?: unknown }).cryptosuite;
+          let proofVerified: boolean;
+          if (typeof cryptosuite === 'string' && cryptosuite.length > 0) {
+            const proofResult = await DataIntegrityProofManager.verifyProof(
+              vc,
+              proof as unknown as DataIntegrityProof,
+              { documentLoader: loader }
+            );
+            proofVerified = proofResult.verified === true;
+          } else {
+            proofVerified = await this.verifyLegacyMultiSigProof(vc, proof as unknown as Record<string, unknown>);
+          }
+          if (proofVerified) {
             // Dedupe only after successful verification: an invalid proof
             // must not consume the signer's slot and suppress a later valid
             // proof from the same signer.

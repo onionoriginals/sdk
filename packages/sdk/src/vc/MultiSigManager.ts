@@ -11,10 +11,15 @@ import type {
   CorporatePolicy,
 } from '../types/index.js';
 import type { OriginalsConfig } from '../types/common.js';
+import type { DIDManager } from '../did/DIDManager.js';
 import { computeCredentialDigest } from '../utils/credential-digest.js';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
 import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer.js';
+import { multikey } from '../crypto/Multikey.js';
 import { checkCredentialValidityPeriod } from './Verifier.js';
+import { DataIntegrityProofManager } from './proofs/data-integrity.js';
+import { createDocumentLoader } from './documentLoader.js';
+import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
 
 /**
  * MultiSigManager handles m-of-n multi-signature operations for verifiable credentials.
@@ -29,7 +34,13 @@ import { checkCredentialValidityPeriod } from './Verifier.js';
 export class MultiSigManager {
   private sessions: Map<string, MultiSigSession> = new Map();
 
-  constructor(private config: OriginalsConfig) {}
+  /**
+   * @param didManager - Enables resolution of non-did:key signer verification
+   *   methods (did:webvh/did:btco/did:peer) and verification of
+   *   `eddsa-rdfc-2022` (Data Integrity) proofs. Without it, only did:key
+   *   signers with legacy (cryptosuite-less) proofs can be verified.
+   */
+  constructor(private config: OriginalsConfig, private didManager?: DIDManager) {}
 
   /**
    * Validate a multi-sig policy for correctness.
@@ -570,6 +581,15 @@ export class MultiSigManager {
     );
   }
 
+  /**
+   * Verify one multi-sig proof, dispatching on its cryptosuite (issue #239):
+   * - proofs labeled `eddsa-rdfc-2022` (external signers) verify through
+   *   DataIntegrityProofManager — checking an RDF-canonicalized signature
+   *   against the legacy digest can never succeed;
+   * - cryptosuite-less proofs (signWithPrivateKey) verify against the legacy
+   *   credential digest;
+   * - any other cryptosuite fails closed.
+   */
   private async verifyProof(
     credential: VerifiableCredential,
     proof: Proof,
@@ -579,29 +599,83 @@ export class MultiSigManager {
       const { proofValue, verificationMethod } = proof;
       if (!proofValue || !verificationMethod) return false;
 
+      const cryptosuite = (proof as { cryptosuite?: unknown }).cryptosuite;
+      if (typeof cryptosuite === 'string' && cryptosuite.length > 0) {
+        if (cryptosuite !== 'eddsa-rdfc-2022' || !this.didManager) {
+          return false;
+        }
+        const loader = createDocumentLoader(this.didManager);
+        const result = await DataIntegrityProofManager.verifyProof(
+          credential as unknown as Record<string, unknown>,
+          proof as unknown as DataIntegrityProof,
+          { documentLoader: loader }
+        );
+        return result.verified === true;
+      }
+
       const signature = decodeBase64UrlMultibase(proofValue);
       if (!signature) return false;
 
       const proofBase: Proof = { ...proof, proofValue: '' };
       const digest = await this.computeDigest(credential, proofBase);
 
-      // Extract public key from verification method (did:key format)
-      const publicKeyMultibase = this.extractPublicKeyFromVM(verificationMethod);
+      const publicKeyMultibase = await this.resolveSignerKey(verificationMethod);
       if (!publicKeyMultibase) return false;
 
-      return await signer.verify(Buffer.from(digest), Buffer.from(signature), publicKeyMultibase);
+      // Choose the signature algorithm from the KEY's multicodec type, not
+      // from local config — signers in a policy may use different key types.
+      const keySigner = this.getSignerForKey(publicKeyMultibase) ?? signer;
+
+      return await keySigner.verify(Buffer.from(digest), Buffer.from(signature), publicKeyMultibase);
     } catch {
       return false;
     }
   }
 
-  private extractPublicKeyFromVM(verificationMethod: string): string | null {
-    // For did:key methods, the key is embedded in the DID
+  /**
+   * Resolve a signer verification method to its public multikey. did:key is
+   * self-certifying; other DID methods resolve through the DIDManager
+   * (issue #239 — previously every non-did:key signer failed as "Invalid
+   * signature" even when the SDK's own policies allowed them).
+   */
+  private async resolveSignerKey(verificationMethod: string): Promise<string | null> {
     if (verificationMethod.startsWith('did:key:')) {
       const keyPart = verificationMethod.split('#')[0];
       return keyPart.replace('did:key:', '');
     }
-    return null;
+    if (!this.didManager || !verificationMethod.startsWith('did:')) {
+      return null;
+    }
+    try {
+      const did = verificationMethod.split('#')[0];
+      const didDoc = await this.didManager.resolveDID(did);
+      const vms = (didDoc as { verificationMethod?: Array<{ id?: string; publicKeyMultibase?: unknown }> } | null)
+        ?.verificationMethod;
+      if (!Array.isArray(vms)) return null;
+      const fragment = verificationMethod.includes('#') ? verificationMethod.split('#')[1] : undefined;
+      const match = vms.find(vm =>
+        vm.id === verificationMethod ||
+        (fragment !== undefined && typeof vm.id === 'string' && vm.id.split('#')[1] === fragment)
+      ) ?? (vms.length === 1 ? vms[0] : undefined);
+      return match && typeof match.publicKeyMultibase === 'string' ? match.publicKeyMultibase : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Pick the Signer implementation matching a public multikey's codec type. */
+  private getSignerForKey(publicKeyMultibase: string): Signer | null {
+    try {
+      const { type } = multikey.decodePublicKey(publicKeyMultibase);
+      switch (type) {
+        case 'Ed25519': return new Ed25519Signer();
+        case 'Secp256k1': return new ES256KSigner();
+        case 'P256': return new ES256Signer();
+        default: return null;
+      }
+    } catch {
+      return null;
+    }
   }
 
   private extractProofs(credential: VerifiableCredential): Proof[] {

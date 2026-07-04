@@ -821,3 +821,93 @@ describe('VC-018/performance – verification method caching (behavioral, not wa
     expect(verificationMethodRegistry.get(vm1Id)).not.toBe(verificationMethodRegistry.get(vm2Id));
   });
 });
+
+// ─── Issue #239 — multi-sig verification paths ───────────────────────────────
+
+describe('Issue #239 – multi-sig proofs verify across both verify paths and non-did:key signers', () => {
+  const km = new KeyManager();
+  const config: OriginalsConfig = { network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: false };
+  const baseVC: VerifiableCredential = {
+    '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
+    type: ['VerifiableCredential'],
+    issuer: 'did:peer:issuer',
+    issuanceDate: new Date().toISOString(),
+    credentialSubject: { id: 'did:peer:subject' },
+  };
+
+  test('Verifier.verifyCredentialMultiSig accepts legacy (cryptosuite-less) proofs from MultiSigManager', async () => {
+    const keys = await Promise.all([km.generateKeyPair('Ed25519'), km.generateKeyPair('Ed25519')]);
+    const vms = keys.map(k => `did:key:${k.publicKey}`);
+    const dm = new DIDManager(config);
+    const mgr = new MultiSigManager(config, dm);
+    const policy: MultiSigPolicy = { required: 2, total: 2, signerVerificationMethods: vms };
+
+    const signed = await mgr.signCredentialMultiSig(baseVC, {
+      policy,
+      privateKeys: new Map([[vms[0], keys[0].privateKey], [vms[1], keys[1].privateKey]]),
+    });
+
+    // The same credential must verify at its threshold through BOTH paths
+    const viaManager = await mgr.verifyMultiSig(signed, policy);
+    expect(viaManager.verified).toBe(true);
+
+    const verifier = new Verifier(dm);
+    const viaVerifier = await verifier.verifyCredentialMultiSig(signed, policy);
+    expect(viaVerifier.verified).toBe(true);
+    expect(viaVerifier.validSignatures).toBe(2);
+  });
+
+  test('MultiSigManager verifies signers whose verification methods are not did:key', async () => {
+    const key = await km.generateKeyPair('Ed25519');
+    const signerDid = 'did:webvh:QmScidExample:signers.example.com:alice';
+    const vmId = `${signerDid}#key-0`;
+
+    const dm = new DIDManager(config);
+    // Stub DID resolution: the signer's did:webvh document publishes the key
+    (dm as any).resolveDID = async (did: string) =>
+      did === signerDid
+        ? {
+            '@context': ['https://www.w3.org/ns/did/v1'],
+            id: signerDid,
+            verificationMethod: [
+              { id: vmId, type: 'Multikey', controller: signerDid, publicKeyMultibase: key.publicKey }
+            ]
+          }
+        : null;
+
+    const mgr = new MultiSigManager(config, dm);
+    const policy: MultiSigPolicy = { required: 1, total: 1, signerVerificationMethods: [vmId] };
+
+    const signed = await mgr.signCredentialMultiSig(baseVC, {
+      policy,
+      privateKeys: new Map([[vmId, key.privateKey]]),
+    });
+
+    const result = await mgr.verifyMultiSig(signed, policy);
+    expect(result.verified).toBe(true);
+    expect(result.validSigners).toContain(vmId);
+  });
+
+  test('unsupported cryptosuites fail closed instead of being checked against the wrong digest', async () => {
+    const key = await km.generateKeyPair('Ed25519');
+    const vm = `did:key:${key.publicKey}`;
+    const dm = new DIDManager(config);
+    const mgr = new MultiSigManager(config, dm);
+    const policy: MultiSigPolicy = { required: 1, total: 1, signerVerificationMethods: [vm] };
+
+    const signed = await mgr.signCredentialMultiSig(baseVC, {
+      policy,
+      privateKeys: new Map([[vm, key.privateKey]]),
+    });
+    // Relabel the valid legacy proof with a bogus cryptosuite
+    const tampered = {
+      ...signed,
+      proof: (Array.isArray(signed.proof) ? signed.proof : [signed.proof]).map(p => ({
+        ...(p as object), cryptosuite: 'ecdsa-jcs-2019'
+      }))
+    } as VerifiableCredential;
+
+    const result = await mgr.verifyMultiSig(tampered, policy);
+    expect(result.verified).toBe(false);
+  });
+});

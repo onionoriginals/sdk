@@ -1317,7 +1317,7 @@ export class CredentialManager {
    * ```
    */
   multiSig(): MultiSigManager {
-    return new MultiSigManager(this.config);
+    return new MultiSigManager(this.config, this.didManager);
   }
 
   /**
@@ -1333,7 +1333,7 @@ export class CredentialManager {
     options: MultiSigSignOptions
   ): Promise<VerifiableCredential> {
     return this.tracked('credential.signMultiSig', async () => {
-      const manager = new MultiSigManager(this.config);
+      const manager = new MultiSigManager(this.config, this.didManager);
       return manager.signCredentialMultiSig(credential, options);
     });
   }
@@ -1351,7 +1351,7 @@ export class CredentialManager {
     policy: MultiSigPolicy
   ): Promise<MultiSigVerificationResult> {
     return this.tracked('credential.verifyMultiSig', async () => {
-      const manager = new MultiSigManager(this.config);
+      const manager = new MultiSigManager(this.config, this.didManager);
       return manager.verifyMultiSig(credential, policy);
     });
   }
