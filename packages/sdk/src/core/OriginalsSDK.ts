@@ -203,7 +203,10 @@ export class OriginalsSDK {
     // Initialize managers
     this.did = new DIDManager(config, this.metrics);
     this.credentials = new CredentialManager(config, this.did, this.metrics);
-    this.lifecycle = new LifecycleManager(config, this.did, this.credentials, undefined, keyStore, this.metrics);
+    // Honor config.keyStore when no dedicated keyStore parameter is passed —
+    // OriginalsConfig declares it, so silently dropping it would type-check
+    // fine and only fail much later (credential:skipped / KEYSTORE_REQUIRED).
+    this.lifecycle = new LifecycleManager(config, this.did, this.credentials, undefined, keyStore ?? config.keyStore, this.metrics);
     this.bitcoin = new BitcoinManager(config);
     this.statusList = new StatusListManager();
     

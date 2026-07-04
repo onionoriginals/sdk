@@ -211,14 +211,74 @@ describe('DIDManager.resolveDID catch path', () => {
 
 /** Inlined from DIDManager.resolve.defaults.part.ts */
 
-describe('DIDManager.resolveDID uses default rpcUrl and network fallbacks', () => {
-  test('falls back to http://localhost:3000 and mainnet when config missing', async () => {
+describe('DIDManager.resolveDID did:btco provider selection (issue #266)', () => {
+  test('fails loudly with ORD_PROVIDER_REQUIRED instead of defaulting to localhost:3000', async () => {
+    // Previously this silently constructed an OrdinalsClient against
+    // http://localhost:3000 — resolving against whatever unrelated service
+    // happened to listen there, or failing far from the cause with a null.
     const dm = new DIDManager({} as any);
-    const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
-    spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:xyz' } });
-    const res = await dm.resolveDID('did:btco:xyz');
-    expect(res?.id).toBe('did:btco:xyz');
-    spy.mockRestore();
+    await expect(dm.resolveDID('did:btco:xyz')).rejects.toThrow(/ordinalsProvider/);
+  });
+
+  test('routes resolution through the configured ordinalsProvider (no HTTP)', async () => {
+    const { OrdMockProvider } = await import('../../../src/adapters/providers/OrdMockProvider');
+    const didDoc = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:btco:123'
+    };
+    const provider = new OrdMockProvider({
+      inscriptionsById: new Map([[
+        'insc-1',
+        {
+          inscriptionId: 'insc-1',
+          content: Buffer.from(JSON.stringify(didDoc), 'utf8'),
+          contentType: 'application/json',
+          txid: 'tx-1',
+          vout: 0,
+          satoshi: '123'
+        }
+      ]]),
+      inscriptionsBySatoshi: new Map([['123', ['insc-1']]])
+    });
+
+    const dm = new DIDManager({
+      network: 'mainnet',
+      defaultKeyType: 'ES256K',
+      ordinalsProvider: provider
+    } as any);
+
+    const res = await dm.resolveDID('did:btco:123', { skipCache: true });
+    expect(res?.id).toBe('did:btco:123');
+  });
+
+  test('ordinalsProvider takes precedence over bitcoinRpcUrl', async () => {
+    const { OrdMockProvider } = await import('../../../src/adapters/providers/OrdMockProvider');
+    const provider = new OrdMockProvider({
+      inscriptionsById: new Map([[
+        'insc-2',
+        {
+          inscriptionId: 'insc-2',
+          content: Buffer.from(JSON.stringify({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:456' }), 'utf8'),
+          contentType: 'application/json',
+          txid: 'tx-2',
+          vout: 0,
+          satoshi: '456'
+        }
+      ]]),
+      inscriptionsBySatoshi: new Map([['456', ['insc-2']]])
+    });
+
+    // If the OrdinalsClient path were taken, resolution would issue HTTP to
+    // this unreachable URL and return null; the provider path needs no HTTP.
+    const dm = new DIDManager({
+      network: 'mainnet',
+      defaultKeyType: 'ES256K',
+      bitcoinRpcUrl: 'http://unreachable.invalid:9999',
+      ordinalsProvider: provider
+    } as any);
+
+    const res = await dm.resolveDID('did:btco:456', { skipCache: true });
+    expect(res?.id).toBe('did:btco:456');
   });
 });
 

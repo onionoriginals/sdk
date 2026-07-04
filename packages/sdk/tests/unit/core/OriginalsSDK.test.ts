@@ -70,6 +70,34 @@ describe('OriginalsSDK', () => {
     expect((explicit as any).config.network).toBe('signet');
   });
 
+  test('constructor honors config.keyStore (issue #277)', () => {
+    // Regression: OriginalsConfig declares keyStore, but the constructor only
+    // forwarded its second parameter — config.keyStore was silently ignored
+    // and signing later failed with KEYSTORE_REQUIRED, far from the cause.
+    const store = {
+      getPrivateKey: async () => null,
+      setPrivateKey: async () => {}
+    };
+    const sdk = new OriginalsSDK({ network: 'mainnet', defaultKeyType: 'ES256K', keyStore: store });
+    expect((sdk.lifecycle as any).keyStore).toBe(store);
+  });
+
+  test('constructor keyStore parameter takes precedence over config.keyStore', () => {
+    const configStore = {
+      getPrivateKey: async () => null,
+      setPrivateKey: async () => {}
+    };
+    const paramStore = {
+      getPrivateKey: async () => null,
+      setPrivateKey: async () => {}
+    };
+    const sdk = new OriginalsSDK(
+      { network: 'mainnet', defaultKeyType: 'ES256K', keyStore: configStore },
+      paramStore
+    );
+    expect((sdk.lifecycle as any).keyStore).toBe(paramStore);
+  });
+
   test('constructor throws error when config is null', () => {
     expect(() => new OriginalsSDK(null as any)).toThrow('Configuration object is required');
   });

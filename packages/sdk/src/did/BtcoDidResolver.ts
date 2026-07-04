@@ -184,20 +184,31 @@ export class BtcoDidResolver {
         // pattern or parses to a DID document carrying the expected id.
         inscriptionData.isValidDid = matchesMarker || isDidDocumentForThisDid;
 
-        if (matchesMarker && inscriptionData.content.includes('🔥')) {
+        // The 🔥 tombstone scan must cover ONLY the marker line, never a JSON
+        // body. The combined "marker line + JSON document" form matches the
+        // start-anchored marker pattern too, so scanning the whole content
+        // would turn a legitimate document update whose JSON merely contains
+        // 🔥 (a service description, name, …) into a permanent tombstone.
+        const jsonBodyStart = inscriptionData.content.indexOf('{');
+        const markerLine = jsonBodyStart === -1
+          ? inscriptionData.content
+          : inscriptionData.content.slice(0, jsonBodyStart);
+
+        if (matchesMarker && markerLine.includes('🔥')) {
           // Deactivation tombstone: the human-readable marker form for THIS DID
           // carrying the 🔥 codepoint (e.g. "BTCO DID: did:btco:<sat> 🔥").
           //
-          // Detection keys off the marker PATTERN, not the mere presence of the
-          // emoji:
+          // Detection keys off the marker PATTERN plus the emoji ON THE MARKER
+          // LINE (the content before any JSON body):
           //  - a full DID document that happens to contain 🔥 in a field (a
-          //    service description, name, alsoKnownAs, …) does not match the
-          //    start-anchored marker pattern, so it is treated as an update
-          //    (handled below), not a tombstone;
-          //  - conversely, a genuine marker line remains a tombstone even if
+          //    service description, name, alsoKnownAs, …) does not tombstone,
+          //    whether it is bare JSON (fails the start-anchored pattern) or
+          //    preceded by a marker line (the emoji sits inside the JSON body,
+          //    not on the marker line);
+          //  - conversely, a genuine marker-line tombstone remains one even if
           //    arbitrary JSON is appended after it (which would otherwise parse
           //    to an object with the expected id and slip past a document-based
-          //    guard), because the pattern anchors at the start of the content.
+          //    guard), because the 🔥 is on the marker line itself.
           inscriptionData.didDocument = null;
           inscriptionData.deactivated = true;
           if (!inscriptionData.error) {
