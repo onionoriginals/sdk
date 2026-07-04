@@ -53,14 +53,35 @@ describe('documentLoader branches', () => {
     await expect(loader('did:ex:404')).rejects.toThrow('DID not resolved');
   });
 
-  test('returns cached verification method for fragment', async () => {
+  test('returns cached verification method for fragment (self-certifying method)', async () => {
     const dm = new DIDManager({} as any);
-    spyOn(dm, 'resolveDID').mockResolvedValueOnce({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:ex:1' } as any);
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:reg1' } as any);
     const loader = createDocumentLoader(dm);
-    registerVerificationMethod({ id: 'did:ex:1#key-1', type: 'Multikey', controller: 'did:ex:1', publicKeyMultibase: 'zAb' });
-    const res = await loader('did:ex:1#key-1');
-    expect(res.document.id).toBe('did:ex:1#key-1');
+    registerVerificationMethod({ id: 'did:peer:reg1#key-1', type: 'Multikey', controller: 'did:peer:reg1', publicKeyMultibase: 'zAb' });
+    const res = await loader('did:peer:reg1#key-1');
+    expect(res.document.id).toBe('did:peer:reg1#key-1');
     expect(res.document.publicKeyMultibase).toBe('zAb');
+  });
+
+  test('does NOT resurrect a registry key absent from a resolved hosted-method document (issue #260)', async () => {
+    // A did:webvh controller that REMOVED a compromised key from its DID log
+    // must not have it resurrected from the process-global registry.
+    const dm = new DIDManager({} as any);
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:webvh:example.com:rotated',
+      verificationMethod: []
+    } as any);
+    const loader = createDocumentLoader(dm);
+    registerVerificationMethod({
+      id: 'did:webvh:example.com:rotated#old-key',
+      type: 'Multikey',
+      controller: 'did:webvh:example.com:rotated',
+      publicKeyMultibase: 'zRemovedKey'
+    });
+    const res = await loader('did:webvh:example.com:rotated#old-key');
+    expect(res.document.publicKeyMultibase).toBeUndefined();
+    expect(res.document.id).toBe('did:webvh:example.com:rotated#old-key');
   });
 
   test('loads base DID without fragment', async () => {
@@ -187,16 +208,16 @@ describe('documentLoader rejects retired verification methods', () => {
     const dm = new DIDManager({} as any);
     spyOn(dm, 'resolveDID').mockResolvedValueOnce({
       '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:ex:revcache'
+      id: 'did:peer:revcache'
     } as any);
     const loader = createDocumentLoader(dm);
     registerVerificationMethod({
-      id: 'did:ex:revcache#key-1',
+      id: 'did:peer:revcache#key-1',
       type: 'Multikey',
-      controller: 'did:ex:revcache',
+      controller: 'did:peer:revcache',
       publicKeyMultibase: 'zCached',
       revoked: '2024-01-01T00:00:00Z'
     } as any);
-    await expect(loader('did:ex:revcache#key-1')).rejects.toThrow('retired');
+    await expect(loader('did:peer:revcache#key-1')).rejects.toThrow('retired');
   });
 });

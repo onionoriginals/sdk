@@ -31,10 +31,12 @@ export function validateCredential(vc: VerifiableCredential): boolean {
     return false;
   }
 
-  // Require VC v1 context presence
+  // Require the VC v1 or v2 credentials context. The SDK itself issues
+  // v2-context credentials (Issuer, StatusListManager), so v2 must validate.
   const contextValues = vc['@context'];
   const hasVcV1 = contextValues.includes('https://www.w3.org/2018/credentials/v1');
-  if (!hasVcV1) {
+  const hasVcV2 = contextValues.includes('https://www.w3.org/ns/credentials/v2');
+  if (!hasVcV1 && !hasVcV2) {
     return false;
   }
 
@@ -46,7 +48,11 @@ export function validateCredential(vc: VerifiableCredential): boolean {
     return false;
   }
 
-  if (!vc.issuer || (!vc.issuanceDate)) {
+  // v1 mandates issuanceDate; VC 2.0 replaced it with validFrom, so under the
+  // v2 context accept either property as the issuance timestamp.
+  const issuanceTimestamp =
+    vc.issuanceDate ?? (hasVcV2 ? (vc as { validFrom?: unknown }).validFrom : undefined);
+  if (!vc.issuer || issuanceTimestamp === undefined) {
     return false;
   }
 
@@ -63,8 +69,8 @@ export function validateCredential(vc: VerifiableCredential): boolean {
     return false;
   }
 
-  // issuanceDate should be a valid ISO timestamp
-  if (typeof vc.issuanceDate !== 'string' || Number.isNaN(Date.parse(vc.issuanceDate))) {
+  // issuanceDate / validFrom should be a valid ISO timestamp
+  if (typeof issuanceTimestamp !== 'string' || Number.isNaN(Date.parse(issuanceTimestamp))) {
     return false;
   }
 

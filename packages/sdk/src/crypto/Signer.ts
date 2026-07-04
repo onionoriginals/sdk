@@ -11,7 +11,28 @@ import { p256 } from '@noble/curves/nist.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
-import { multikey } from './Multikey.js';
+import { multikey, MultikeyType } from './Multikey.js';
+
+/**
+ * Return the Signer that matches a key's multicodec type. The multikey header
+ * on the key itself is authoritative for the signature algorithm — selecting a
+ * signer from local configuration instead makes verification outcomes depend
+ * on the verifier's config rather than on the credential (issue #261).
+ */
+export function signerForKeyType(type: MultikeyType): Signer {
+  switch (type) {
+    case 'Secp256k1':
+      return new ES256KSigner();
+    case 'Ed25519':
+      return new Ed25519Signer();
+    case 'P256':
+      return new ES256Signer();
+    case 'Bls12381G2':
+      return new Bls12381G2Signer();
+    default:
+      throw new Error(`No signer available for key type: ${String(type)}`);
+  }
+}
 
 export class ES256KSigner extends Signer {
   async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {

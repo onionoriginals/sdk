@@ -35,6 +35,11 @@ export interface StatusCheckResult {
 // Minimum bitstring length per W3C spec
 const MINIMUM_BITSTRING_LENGTH = 131072;
 
+// Upper bound for decompressed encodedList payloads. A legitimate status list
+// is a few MiB at most (the spec minimum is 16 KiB); 16 MiB covers 134M
+// entries while keeping a hostile gzip bomb from exhausting memory.
+export const MAX_DECOMPRESSED_BITSTRING_BYTES = 16 * 1024 * 1024;
+
 /**
  * Strictly parse a `statusListIndex` string into a non-negative integer.
  *
@@ -333,6 +338,10 @@ export class StatusListManager {
 
   /**
    * Decode a W3C encoded bitstring (multibase base64url + GZIP).
+   *
+   * Decompression is capped: the encodedList often comes from a status list
+   * credential fetched from an attacker-suppliable URL, so unbounded gunzip
+   * would let a few-KB gzip bomb allocate gigabytes (verifier DoS).
    */
   static decodeBitstring(encoded: string): Uint8Array {
     if (!encoded || encoded[0] !== 'u') {
@@ -341,7 +350,17 @@ export class StatusListManager {
       );
     }
     const compressed = Buffer.from(encoded.slice(1), 'base64url');
-    return new Uint8Array(gunzipSync(compressed));
+    try {
+      return new Uint8Array(
+        gunzipSync(compressed, { maxOutputLength: MAX_DECOMPRESSED_BITSTRING_BYTES })
+      );
+    } catch (err) {
+      throw new Error(
+        `Invalid encoded bitstring: decompression failed or exceeded the ${MAX_DECOMPRESSED_BITSTRING_BYTES}-byte limit: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
   }
 
   private validateStatusListCredential(vc: VerifiableCredential): void {
