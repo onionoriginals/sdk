@@ -15,8 +15,8 @@ import type { DIDManager } from '../did/DIDManager.js';
 import { computeCredentialDigest } from '../utils/credential-digest.js';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
 import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer.js';
-import { multikey } from '../crypto/Multikey.js';
 import { checkCredentialValidityPeriod } from './Verifier.js';
+import { resolveSignerKey, signerForMultikey } from './proofs/legacy-proof.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import { createDocumentLoader } from './documentLoader.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
@@ -619,65 +619,18 @@ export class MultiSigManager {
       const proofBase: Proof = { ...proof, proofValue: '' };
       const digest = await this.computeDigest(credential, proofBase);
 
-      const publicKeyMultibase = await this.resolveSignerKey(verificationMethod);
+      // Shared resolution/dispatch (proofs/legacy-proof.ts): did:key or
+      // DIDManager-resolved keys (issue #239), signature algorithm chosen
+      // from the KEY's multicodec type — signers in a policy may use
+      // different key types.
+      const publicKeyMultibase = await resolveSignerKey(verificationMethod, this.didManager);
       if (!publicKeyMultibase) return false;
 
-      // Choose the signature algorithm from the KEY's multicodec type, not
-      // from local config — signers in a policy may use different key types.
-      const keySigner = this.getSignerForKey(publicKeyMultibase) ?? signer;
+      const keySigner = signerForMultikey(publicKeyMultibase) ?? signer;
 
       return await keySigner.verify(Buffer.from(digest), Buffer.from(signature), publicKeyMultibase);
     } catch {
       return false;
-    }
-  }
-
-  /**
-   * Resolve a signer verification method to its public multikey. did:key is
-   * self-certifying; other DID methods resolve through the DIDManager
-   * (issue #239 — previously every non-did:key signer failed as "Invalid
-   * signature" even when the SDK's own policies allowed them).
-   */
-  private async resolveSignerKey(verificationMethod: string): Promise<string | null> {
-    if (verificationMethod.startsWith('did:key:')) {
-      const keyPart = verificationMethod.split('#')[0];
-      return keyPart.replace('did:key:', '');
-    }
-    if (!this.didManager || !verificationMethod.startsWith('did:')) {
-      return null;
-    }
-    try {
-      const did = verificationMethod.split('#')[0];
-      const didDoc = await this.didManager.resolveDID(did);
-      const vms = (didDoc as { verificationMethod?: Array<{ id?: string; publicKeyMultibase?: unknown }> } | null)
-        ?.verificationMethod;
-      if (!Array.isArray(vms)) return null;
-      const fragment = verificationMethod.includes('#') ? verificationMethod.split('#')[1] : undefined;
-      // No single-VM fallback: a proof whose verificationMethod does not match
-      // any published method must fail closed, not be checked against
-      // whichever lone key the document happens to publish.
-      const match = vms.find(vm =>
-        vm.id === verificationMethod ||
-        (fragment !== undefined && typeof vm.id === 'string' && vm.id.split('#')[1] === fragment)
-      );
-      return match && typeof match.publicKeyMultibase === 'string' ? match.publicKeyMultibase : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /** Pick the Signer implementation matching a public multikey's codec type. */
-  private getSignerForKey(publicKeyMultibase: string): Signer | null {
-    try {
-      const { type } = multikey.decodePublicKey(publicKeyMultibase);
-      switch (type) {
-        case 'Ed25519': return new Ed25519Signer();
-        case 'Secp256k1': return new ES256KSigner();
-        case 'P256': return new ES256Signer();
-        default: return null;
-      }
-    } catch {
-      return null;
     }
   }
 

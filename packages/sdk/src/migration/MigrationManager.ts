@@ -122,33 +122,33 @@ export class MigrationManager {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let checkpoint: any;
 
-    // Tracks whether THIS call claimed the in-flight lock: the finally block
-    // must not release a lock owned by a concurrent winner when this call is
-    // rejected by the guard below.
-    let claimedInFlightLock = false;
-
-    try {
-      // Concurrency guard (issue #255): reject a second migration of the same
-      // DID while one is in flight. The set is mutated synchronously (before
-      // any await), so concurrent callers cannot interleave past this check.
-      // Inside the try block so the rejection flows through
-      // handleMigrationFailure and resolves to a structured MigrationResult
-      // (success: false, code MIGRATION_IN_PROGRESS) like every other
-      // operational failure, instead of rejecting the promise.
-      // estimateCostOnly requests are read-only and exempt.
-      if (!options.estimateCostOnly) {
-        if (this.inFlightSourceDids.has(options.sourceDid)) {
-          throw this.createMigrationError(
+    // Concurrency guard (issue #255): reject a second migration of the same
+    // DID while one is in flight. The set is mutated synchronously (before
+    // any await), so concurrent callers cannot interleave past this check.
+    // The rejected caller gets the same structured MigrationResult
+    // (success: false, code MIGRATION_IN_PROGRESS) every other operational
+    // failure produces — and because the guard returns here, the finally
+    // block below only ever runs for the call that actually claimed the
+    // lock. estimateCostOnly requests are read-only and exempt.
+    if (!options.estimateCostOnly) {
+      if (this.inFlightSourceDids.has(options.sourceDid)) {
+        return await this.handleMigrationFailure(
+          this.createMigrationError(
             MigrationErrorType.VALIDATION_ERROR,
             'MIGRATION_IN_PROGRESS',
             `A migration for ${options.sourceDid} is already in progress; concurrent migrations of the same DID would double-pay for duplicate inscriptions`,
             'not-started'
-          );
-        }
-        this.inFlightSourceDids.add(options.sourceDid);
-        claimedInFlightLock = true;
+          ),
+          options,
+          undefined,
+          undefined,
+          startTime
+        );
       }
+      this.inFlightSourceDids.add(options.sourceDid);
+    }
 
+    try {
       // estimateCostOnly (issue #254): "Return cost estimate without
       // migrating". Validation only — no tracked migration state, no events,
       // no checkpoint. Creating a state entry here would leave a phantom
@@ -325,7 +325,7 @@ export class MigrationManager {
         startTime
       );
     } finally {
-      if (claimedInFlightLock) {
+      if (!options.estimateCostOnly) {
         this.inFlightSourceDids.delete(options.sourceDid);
       }
     }

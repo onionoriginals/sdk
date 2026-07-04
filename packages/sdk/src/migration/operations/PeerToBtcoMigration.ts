@@ -9,6 +9,7 @@ import {
 } from '../types.js';
 import { DIDDocument, OriginalsConfig } from '../../types/index.js';
 import { BaseMigration } from './BaseMigration.js';
+import { StructuredError } from '../../utils/telemetry.js';
 import { BitcoinManager } from '../../bitcoin/BitcoinManager.js';
 import { DIDManager } from '../../did/DIDManager.js';
 import { CredentialManager } from '../../vc/CredentialManager.js';
@@ -69,9 +70,11 @@ export class PeerToBtcoMigration extends BaseMigration {
     // sat the asset does not sit on). Fail clearly when the provider omits it.
     const satoshiId = inscription.satoshi;
     if (!satoshiId) {
-      throw new Error(
+      throw new StructuredError(
+        'ORD_SATOSHI_UNKNOWN',
         'Ordinals provider did not return a satoshi ordinal for the inscription; ' +
-        'a did:btco identifier cannot be derived without it.'
+        'a did:btco identifier cannot be derived without it.',
+        { inscriptionId: inscription.inscriptionId, txid: inscription.txid }
       );
     }
 

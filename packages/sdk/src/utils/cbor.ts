@@ -24,12 +24,19 @@ function mapsToObjects(value: unknown): unknown {
       if (typeof k !== 'string') {
         throw new Error('CBOR decode error: non-string map keys are not supported');
       }
-      Object.defineProperty(obj, k, {
-        value: mapsToObjects(v),
-        writable: true,
-        enumerable: true,
-        configurable: true
-      });
+      // Only '__proto__' needs the defineProperty path — plain assignment
+      // would invoke the prototype setter (the pollution vector this module
+      // exists to close). Everything else takes the fast path.
+      if (k === '__proto__') {
+        Object.defineProperty(obj, k, {
+          value: mapsToObjects(v),
+          writable: true,
+          enumerable: true,
+          configurable: true
+        });
+      } else {
+        obj[k] = mapsToObjects(v);
+      }
     }
     return obj;
   }

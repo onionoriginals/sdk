@@ -65,9 +65,9 @@ describe('DIDManager', () => {
     expect((web as any).alsoKnownAs).toContain('did:peer:abc123');
   });
 
-  test('migrateToDIDWebVHDetailed returns the signed log and generated key pair', async () => {
+  test('migrateToDIDWebVH returns the signed log and generated key pair', async () => {
     const peer: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:xyz789' };
-    const detailed = await sdk.did.migrateToDIDWebVHDetailed(peer, { domain: 'example.com' });
+    const detailed = await sdk.did.migrateToDIDWebVH(peer, 'example.com');
     expect(detailed.previousDid).toBe('did:peer:xyz789');
     expect(detailed.did).toBe(detailed.didDocument.id);
     expect(Array.isArray(detailed.log)).toBe(true);

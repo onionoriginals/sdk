@@ -18,7 +18,6 @@ import { Ed25519Signer } from '../crypto/Signer.js';
 import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
-import * as path from 'path';
 
 export class DIDManager {
   private webvhManager?: WebVHManager;
@@ -127,19 +126,7 @@ export class DIDManager {
     domain?: string,
     options?: MigrateToWebVHOptions
   ): Promise<MigrateToWebVHResult> {
-    return this.migrateToDIDWebVHDetailed(didDoc, { ...(options || {}), domain });
-  }
-
-  /**
-   * @deprecated Use {@link migrateToDIDWebVH}, which now returns the same
-   * full result (document, signed log, key pair, log path).
-   */
-  async migrateToDIDWebVHDetailed(
-    didDoc: DIDDocument,
-    options?: MigrateToWebVHOptions & { domain?: string }
-  ): Promise<MigrateToWebVHResult> {
     return this.track('did.migrateToDIDWebVH', async () => {
-    const domain = options?.domain;
     // Use provided domain or get default from configured network
     const network = this.config.webvhNetwork || DEFAULT_WEBVH_NETWORK;
     const targetDomain = domain || getNetworkDomain(network);
@@ -620,29 +607,6 @@ export class DIDManager {
     return this.getWebVHManager().loadDIDLog(logPath);
   }
 
-  /**
-   * Validates a path segment to prevent directory traversal attacks
-   * @param segment - Path segment to validate
-   * @returns true if valid, false otherwise
-   */
-  private isValidPathSegment(segment: string): boolean {
-    // Reject empty segments, dots, or segments with path separators
-    if (!segment || segment === '.' || segment === '..') {
-      return false;
-    }
-    
-    // Reject segments containing path separators or other dangerous characters
-    if (segment.includes('/') || segment.includes('\\') || segment.includes('\0')) {
-      return false;
-    }
-    
-    // Reject absolute paths (starting with / or drive letter on Windows)
-    if (path.isAbsolute(segment)) {
-      return false;
-    }
-    
-    return true;
-  }
 }
 
 // Type definitions for didwebvh-ts (to avoid module resolution issues)
@@ -715,7 +679,7 @@ export interface MigrateToWebVHResult {
 }
 
 /**
- * Options for migrateToDIDWebVH / migrateToDIDWebVHDetailed. Signing options
+ * Options for migrateToDIDWebVH. Signing options
  * mirror CreateWebVHOptions: supply a keyPair or externalSigner to control the
  * did:webvh update key; otherwise a fresh Ed25519 key pair is generated.
  */

@@ -1,5 +1,27 @@
 import { DUST_LIMIT_SATS, Utxo, ResourceUtxo } from '../types/index.js';
 
+
+/**
+ * True when a UTXO carries an ordinal: an inscription id is recorded on the
+ * outpoint OR it is flagged with the first-class `hasResource` marker
+ * (ResourceUtxo). Spending such a UTXO as a plain payment/fee input transfers
+ * or burns the ordinal it carries. This is THE shared exclusion predicate —
+ * every selector (selectUtxos here, utxo-selection.ts, PSBTBuilder,
+ * transactions/commit.ts) must use it (or `isProtectedUtxo`) so a new
+ * protection marker is added in exactly one place.
+ */
+export function carriesOrdinal(u: Utxo): boolean {
+  return !!(u.inscriptions && u.inscriptions.length > 0) || (u as ResourceUtxo).hasResource === true;
+}
+
+/**
+ * True when a UTXO must not be auto-selected as a plain payment/fee input:
+ * it carries an ordinal (see `carriesOrdinal`) or is wallet-locked.
+ */
+export function isProtectedUtxo(u: Utxo): boolean {
+  return u.locked === true || carriesOrdinal(u);
+}
+
 export interface FeeEstimateOptions {
   bytesPerInput?: number;
   bytesPerOutput?: number;
@@ -111,15 +133,7 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
     typeof u.value === 'number' && u.value > 0 && !isNonSegwit(u)
   );
   const forbidInscribed = forbidInscriptionBearingInputs !== false;
-  // A UTXO carries an ordinal either because an inscription id is recorded on it
-  // OR because it is flagged with the first-class `hasResource` marker
-  // (ResourceUtxo). Spending such a UTXO as a plain payment/fee input transfers
-  // or burns the ordinal it carries, so both markers must exclude it. The sibling
-  // selectors in utxo-selection.ts (`carriesResource`) and transactions/commit.ts
-  // (`isProtected`) already check both; this path previously only checked
-  // `inscriptions`, letting a `hasResource: true` UTXO be spent as a fee input.
-  const isInscribed = (u: Utxo): boolean =>
-    !!(u.inscriptions && u.inscriptions.length > 0) || (u as ResourceUtxo).hasResource === true;
+  const isInscribed = carriesOrdinal;
   // CONFLICTING_LOCKS is only an accurate diagnosis when unlocking could
   // actually help — i.e. a locked UTXO exists that selection would otherwise
   // be allowed to use. A locked UTXO that is also inscription-protected

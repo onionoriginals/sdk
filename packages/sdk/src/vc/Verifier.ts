@@ -5,10 +5,7 @@ import { createDocumentLoader } from './documentLoader.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
 import { StatusListManager } from './StatusListManager.js';
-import { computeCredentialDigest } from '../utils/credential-digest.js';
-import { decodeBase64UrlMultibase } from '../utils/encoding.js';
-import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer.js';
-import { multikey } from '../crypto/Multikey.js';
+import { verifyLegacyProof } from './proofs/legacy-proof.js';
 
 export type VerificationResult = { verified: boolean; errors: string[] };
 
@@ -378,64 +375,15 @@ export class Verifier {
   }
 
   /**
-   * Verify a legacy (cryptosuite-less) multi-sig proof: signature over the
-   * shared legacy credential digest, key resolved from the verification
-   * method (did:key self-certifying, other DID methods via DIDManager), and
-   * algorithm chosen from the key's multicodec type.
+   * Verify a legacy (cryptosuite-less) multi-sig proof via the shared
+   * implementation in proofs/legacy-proof.ts (single source of the
+   * fail-closed key-resolution and algorithm-dispatch rules).
    */
   private async verifyLegacyMultiSigProof(
     vc: VerifiableCredential,
     proof: Record<string, unknown>
   ): Promise<boolean> {
-    try {
-      const proofValue = proof.proofValue;
-      const verificationMethod = proof.verificationMethod;
-      if (typeof proofValue !== 'string' || typeof verificationMethod !== 'string') return false;
-
-      const signature = decodeBase64UrlMultibase(proofValue);
-      const digest = await computeCredentialDigest(
-        vc as unknown as Record<string, unknown>,
-        { ...proof, proofValue: '' }
-      );
-
-      let publicKeyMultibase: string | null = null;
-      if (verificationMethod.startsWith('did:key:')) {
-        publicKeyMultibase = verificationMethod.split('#')[0].replace('did:key:', '');
-      } else if (verificationMethod.startsWith('did:')) {
-        const didDoc = await this.didManager.resolveDID(verificationMethod.split('#')[0]);
-        const vms = (didDoc as { verificationMethod?: Array<{ id?: string; publicKeyMultibase?: unknown }> } | null)
-          ?.verificationMethod;
-        if (Array.isArray(vms)) {
-          const fragment = verificationMethod.includes('#') ? verificationMethod.split('#')[1] : undefined;
-          // No single-VM fallback: a proof whose verificationMethod does not
-          // match any published method must fail closed, not be checked
-          // against whichever lone key the document happens to publish.
-          const match = vms.find(vm =>
-            vm.id === verificationMethod ||
-            (fragment !== undefined && typeof vm.id === 'string' && vm.id.split('#')[1] === fragment)
-          );
-          if (match && typeof match.publicKeyMultibase === 'string') {
-            publicKeyMultibase = match.publicKeyMultibase;
-          }
-        }
-      }
-      if (!publicKeyMultibase) return false;
-
-      let signer: Signer;
-      try {
-        const { type } = multikey.decodePublicKey(publicKeyMultibase);
-        signer = type === 'Ed25519' ? new Ed25519Signer()
-          : type === 'Secp256k1' ? new ES256KSigner()
-          : type === 'P256' ? new ES256Signer()
-          : (() => { throw new Error(`Unsupported key type: ${type}`); })();
-      } catch {
-        return false;
-      }
-
-      return await signer.verify(Buffer.from(digest), Buffer.from(signature), publicKeyMultibase);
-    } catch {
-      return false;
-    }
+    return verifyLegacyProof(vc, proof, this.didManager);
   }
 
   /**

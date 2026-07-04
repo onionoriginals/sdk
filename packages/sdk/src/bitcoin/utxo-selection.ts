@@ -15,6 +15,7 @@ import {
   ResourceUtxoSelectionResult 
 } from '../types/bitcoin.js';
 import { calculateFee } from './fee-calculation.js';
+import { carriesOrdinal, isProtectedUtxo } from './utxo.js';
 
 // Minimum dust limit for Bitcoin outputs (546 satoshis)
 const MIN_DUST_LIMIT = DUST_LIMIT_SATS;
@@ -127,15 +128,10 @@ export function selectUtxos(
   }
 
   // Ordinal safety (issue #249): this selector is exported at the package
-  // root as a general-purpose selector, so it must apply the same exclusion
-  // predicate as selectResourceUtxos/utxo.ts — spending an inscribed or
+  // root as a general-purpose selector, so it must apply the same shared
+  // exclusion predicate as every other selector — spending an inscribed or
   // locked UTXO as a plain payment input destroys/transfers the ordinal.
-  const isProtected = (utxo: Utxo): boolean =>
-    utxo.locked === true ||
-    (Array.isArray(utxo.inscriptions) && utxo.inscriptions.length > 0) ||
-    (utxo as ResourceUtxo).hasResource === true;
-
-  const eligibleUtxos = allowOrdinalUtxos ? utxos : utxos.filter(u => !isProtected(u));
+  const eligibleUtxos = allowOrdinalUtxos ? utxos : utxos.filter(u => !isProtectedUtxo(u));
 
   if (eligibleUtxos.length === 0) {
     throw new Error(
@@ -228,8 +224,7 @@ export function selectResourceUtxos(
   // populate `inscriptions`, not `hasResource`, so both must be checked —
   // spending an inscribed sat as a plain payment input burns/transfers the
   // ordinal it carries.
-  const carriesResource = (utxo: ResourceUtxo): boolean =>
-    utxo.hasResource === true || (Array.isArray(utxo.inscriptions) && utxo.inscriptions.length > 0);
+  const carriesResource = (utxo: ResourceUtxo): boolean => carriesOrdinal(utxo);
 
   // Filter out UTXOs to avoid, locked UTXOs, and those with resources if not allowed
   const eligibleUtxos = availableUtxos.filter(utxo => {

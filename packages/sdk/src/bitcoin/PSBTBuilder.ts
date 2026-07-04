@@ -1,5 +1,5 @@
 import type { Utxo } from '../types/bitcoin.js';
-import { isSegwitScriptPubKey } from './utxo.js';
+import { isSegwitScriptPubKey, isProtectedUtxo } from './utxo.js';
 
 export interface PsbtOutput {
   address: string;
@@ -67,11 +67,7 @@ export class PSBTBuilder {
 
     // Ordinal safety (issue #249): exclude inscription-bearing, resource, and
     // locked UTXOs unless the caller explicitly opts in.
-    const isProtected = (u: Utxo): boolean =>
-      u.locked === true ||
-      (Array.isArray(u.inscriptions) && u.inscriptions.length > 0) ||
-      (u as { hasResource?: boolean }).hasResource === true;
-    const spendable = params.allowOrdinalUtxos === true ? utxos : utxos.filter(u => !isProtected(u));
+    const spendable = params.allowOrdinalUtxos === true ? utxos : utxos.filter(u => !isProtectedUtxo(u));
     if (spendable.length === 0) {
       throw new Error(
         'All available UTXOs carry inscriptions/resources or are locked and cannot be used for fees/payments. ' +

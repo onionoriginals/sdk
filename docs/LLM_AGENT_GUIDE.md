@@ -407,11 +407,16 @@ interface CreateWebVHResult {
 ### Migrating DIDs
 
 ```typescript
-// Migrate to did:webvh
-const webvhDoc = await sdk.did.migrateToDIDWebVH(
-  didDoc: DIDDocument, 
-  domain?: string
-): Promise<DIDDocument>
+// Migrate to did:webvh — returns the FULL result: the migrated document,
+// the signed DID log (host it as did.jsonl or the DID will not resolve),
+// and the generated update key pair (persist it for future rotations).
+const migration = await sdk.did.migrateToDIDWebVH(
+  didDoc: DIDDocument,
+  domain?: string,
+  options?: MigrateToWebVHOptions
+): Promise<MigrateToWebVHResult>
+// MigrateToWebVHResult: { did, didDocument, log, keyPair, logPath?, previousDid }
+const webvhDoc = migration.didDocument;
 
 // Migrate to did:btco
 const btcoDoc = await sdk.did.migrateToDIDBTCO(

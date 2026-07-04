@@ -4,6 +4,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { GetObjectResult, LocalStorageAdapterOptions, StorageAdapter } from './StorageAdapter.js';
+import { StructuredError } from '../utils/telemetry.js';
 
 export class LocalStorageAdapter implements StorageAdapter {
   private baseDir: string;
@@ -20,7 +21,7 @@ export class LocalStorageAdapter implements StorageAdapter {
     // the domain directory resolve to baseDir itself or its parent. Reject
     // dot-only segments outright.
     if (/^\.+$/.test(sanitized)) {
-      throw new Error(`Invalid domain: resolves outside the storage directory: ${domain}`);
+      throw new StructuredError('STORAGE_PATH_TRAVERSAL', `Invalid domain: resolves outside the storage directory: ${domain}`);
     }
     return sanitized;
   }
@@ -39,7 +40,7 @@ export class LocalStorageAdapter implements StorageAdapter {
       baseRelative.startsWith(`..${path.sep}`) ||
       path.isAbsolute(baseRelative)
     ) {
-      throw new Error(`Invalid domain: resolves outside the storage directory: ${domain}`);
+      throw new StructuredError('STORAGE_PATH_TRAVERSAL', `Invalid domain: resolves outside the storage directory: ${domain}`);
     }
     const fullPath = path.resolve(base, cleanPath);
     // Contain object paths inside the domain directory: '..' segments in a
