@@ -160,7 +160,7 @@ export class ES256Signer extends Signer {
 
     const privateKey = decoded.key;
     const hash = sha256(data);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sigAny: any = p256.sign(hash, privateKey);
     /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
     const sigBytes: Uint8Array = sigAny instanceof Uint8Array

@@ -91,7 +91,7 @@ describe('CredentialManager', () => {
     // The Data Integrity path fails closed on a missing issuer; the legacy path
     // must too.
     const sdkES256K = OriginalsSDK.create({ defaultKeyType: 'ES256K' });
-    const sk = secp256k1.utils.randomPrivateKey();
+    const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');

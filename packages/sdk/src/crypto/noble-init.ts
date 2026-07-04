@@ -38,7 +38,7 @@ const hmacSha256Impl = (key: Uint8Array, ...msgs: Uint8Array[]) =>
 /**
  * Safely set a property on an object, handling readonly properties
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function safeSetProperty(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   obj: any,
@@ -55,7 +55,7 @@ function safeSetProperty(
     // Property might be readonly, try defineProperty
     try {
       Object.defineProperty(obj, prop, {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+         
         value,
         writable: options?.writable ?? true,
         configurable: options?.configurable ?? true,

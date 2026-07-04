@@ -116,7 +116,7 @@ export class MigrationManager {
 
     try {
       // Step 1: Create migration state
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       
       migrationState = await this.stateTracker.createMigration(options);
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       const migrationId = migrationState.migrationId;
@@ -156,7 +156,7 @@ export class MigrationManager {
         progress: 20
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       checkpoint = await this.checkpointManager.createCheckpoint(migrationId, options);
 
       // Persist checkpointId immediately so rollback can locate it
@@ -172,7 +172,7 @@ export class MigrationManager {
       // Step 4: Execute migration
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const migration = this.getMigrationOperation(options);
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
       const result = await migration.executeMigration(options, migrationId);
 
       // Step 5: Complete migration
@@ -220,7 +220,7 @@ export class MigrationManager {
       let auditPersisted = true;
       let auditErrorMessage: string | undefined;
       try {
-        await this.auditLogger.logMigration(auditRecord as any);
+        await this.auditLogger.logMigration(auditRecord);
       } catch (auditError) {
         auditPersisted = false;
         auditErrorMessage = auditError instanceof Error ? auditError.message : String(auditError);
@@ -448,9 +448,9 @@ export class MigrationManager {
       try {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
         const rollbackResult = await this.rollbackManager.rollback(migrationId, checkpoint.checkpointId);
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+         
         rollbackSuccess = rollbackResult.success;
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+         
         finalState = rollbackResult.restoredState;
 
         // Advance the tracked state to reflect the rollback outcome
@@ -464,7 +464,7 @@ export class MigrationManager {
         }
 
         if (!rollbackSuccess) {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+           
           await this.emitEvent('migration:quarantine', {
             migrationId,
             // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -483,7 +483,7 @@ export class MigrationManager {
         } catch (stateError) {
           console.error('Failed to update migration state after rollback failure:', stateError);
         }
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+         
         await this.emitEvent('migration:quarantine', {
           migrationId,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -527,7 +527,7 @@ export class MigrationManager {
     let auditPersisted = true;
     let auditErrorMessage: string | undefined;
     try {
-      await this.auditLogger.logMigration(auditRecord as any);
+      await this.auditLogger.logMigration(auditRecord);
     } catch (auditError) {
       auditPersisted = false;
       auditErrorMessage = auditError instanceof Error ? auditError.message : String(auditError);
@@ -610,7 +610,7 @@ export class MigrationManager {
   /**
    * Emit event
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async emitEvent(type: string, data: any): Promise<void> {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument

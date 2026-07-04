@@ -65,7 +65,7 @@ export class KindRegistry {
     kind: K, 
     validator: KindValidator<K>
   ): void {
-    this.validators.set(kind, validator as KindValidator<OriginalKind>);
+    this.validators.set(kind, validator);
   }
   
   /**

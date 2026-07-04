@@ -9,7 +9,7 @@
  * - Performance optimized (<1ms overhead per event)
  */
 
-import type { OriginalsEvent, EventHandler, EventTypeMap } from './types.js';
+import type { EventHandler, EventTypeMap } from './types.js';
 
 /**
  * EventEmitter class for managing event subscriptions and emissions
@@ -141,7 +141,7 @@ export class EventEmitter {
       
       for (const handler of handlerArray) {
         try {
-          await handler(event as OriginalsEvent);
+          await handler(event);
         } catch (error) {
           // Error isolation: log but don't throw
           // This ensures one failing handler doesn't affect others
@@ -163,7 +163,7 @@ export class EventEmitter {
       
       for (const handler of onceHandlerArray) {
         try {
-          await handler(event as OriginalsEvent);
+          await handler(event);
         } catch (error) {
           // Error isolation: log but don't throw
           if (typeof console !== 'undefined' && console.error) {

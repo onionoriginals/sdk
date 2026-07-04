@@ -190,7 +190,7 @@ export class LifecycleManager {
     // Validate that it's a valid multibase-encoded private key
     try {
       multikey.decodePrivateKey(privateKey);
-    } catch (err) {
+    } catch (_err) {
       throw new StructuredError('INVALID_KEY', 'Invalid privateKey format: must be a valid multibase-encoded private key');
     }
     
@@ -1000,8 +1000,8 @@ export class LifecycleManager {
       txid: latestMigration?.transactionId ?? 'unknown-tx',
       vout: 0
     } as const;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-    const tx = await bm.transferInscription(inscription as never, newOwner);
+     
+    const tx = await bm.transferInscription(inscription, newOwner);
     // Record the actual chain of custody: the current owner (the last
     // transfer's recipient) hands off to newOwner. Recording the asset DID
     // as `from` on every transfer broke getTransfersFrom and produced a
