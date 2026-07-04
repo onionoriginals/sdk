@@ -770,7 +770,7 @@ describe('StatusListManager', () => {
       const ed = await import('@noble/ed25519');
       const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
 
-      const sk = ed.utils.randomPrivateKey();
+      const sk = ed.utils.randomSecretKey();
       const pk = await ed.getPublicKeyAsync(sk);
       const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
       const pkMb = multikey.encodePublicKey(pk, 'Ed25519');

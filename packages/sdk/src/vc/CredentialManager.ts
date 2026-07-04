@@ -468,7 +468,7 @@ export class CredentialManager {
       type: ['VerifiablePresentation'],
       holder,
       verifiableCredential: credentials
-    } as VerifiablePresentation;
+    };
   }
 
   private async generateProofValue(
@@ -914,7 +914,7 @@ export class CredentialManager {
    */
   async computeCredentialHash(credential: VerifiableCredential): Promise<string> {
     return this.tracked('credential.computeHash', async () => {
-    const canonicalized = await canonicalizeDocument(credential as unknown as Record<string, unknown>);
+    const canonicalized = await canonicalizeDocument(credential);
     const hash = sha256(Buffer.from(canonicalized, 'utf8'));
     return bytesToHex(hash);
     }); // end tracked

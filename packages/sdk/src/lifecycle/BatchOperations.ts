@@ -192,7 +192,7 @@ export class BatchOperationExecutor {
       
       // If fail-fast mode, throw error
       if (!continueOnError) {
-        throw lastError;
+        throw lastError!;
       }
     };
     

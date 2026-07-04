@@ -142,17 +142,6 @@ describe('[AUTH-009] TurnkeyWebVHSigner – happy paths', () => {
   test('verify → returns true for a valid Ed25519 signature, false for wrong key', async () => {
     // Use @noble/ed25519 directly to generate a real key pair for a genuine sig.
     const ed25519 = await import('@noble/ed25519');
-    const { sha512 } = await import('@noble/hashes/sha2.js');
-    const { concatBytes } = await import('@noble/hashes/utils.js');
-
-    // Ensure sha512Sync is set so synchronous paths work (needed by some versions)
-    const sha512Fn = (...msgs: Uint8Array[]): Uint8Array => sha512(concatBytes(...msgs));
-    const mod = ed25519 as unknown as {
-      etc?: { sha512Sync?: typeof sha512Fn };
-      utils?: { sha512Sync?: typeof sha512Fn };
-    };
-    if (mod.etc && !mod.etc.sha512Sync) mod.etc.sha512Sync = sha512Fn;
-    if (mod.utils && !mod.utils.sha512Sync) mod.utils.sha512Sync = sha512Fn;
 
     const privKey1 = new Uint8Array(32).fill(1);
     const pubKey1 = await ed25519.getPublicKeyAsync(privKey1);
@@ -182,16 +171,6 @@ describe('[AUTH-009] TurnkeyWebVHSigner – happy paths', () => {
 
   test('verify → handles 33-byte prefixed public key (strips first byte, succeeds)', async () => {
     const ed25519 = await import('@noble/ed25519');
-    const { sha512 } = await import('@noble/hashes/sha2.js');
-    const { concatBytes } = await import('@noble/hashes/utils.js');
-
-    const sha512Fn = (...msgs: Uint8Array[]): Uint8Array => sha512(concatBytes(...msgs));
-    const mod = ed25519 as unknown as {
-      etc?: { sha512Sync?: typeof sha512Fn };
-      utils?: { sha512Sync?: typeof sha512Fn };
-    };
-    if (mod.etc && !mod.etc.sha512Sync) mod.etc.sha512Sync = sha512Fn;
-    if (mod.utils && !mod.utils.sha512Sync) mod.utils.sha512Sync = sha512Fn;
 
     const privKey = new Uint8Array(32).fill(5);
     const pubKey32 = await ed25519.getPublicKeyAsync(privKey);
@@ -310,16 +289,6 @@ describe('[AUTH-021] TurnkeyDIDSigner.verify – uses OriginalsSDK.verifyDIDSign
 
   test('verify → returns false when signature does not match the public key (wrong key)', async () => {
     const ed25519 = await import('@noble/ed25519');
-    const { sha512 } = await import('@noble/hashes/sha2.js');
-    const { concatBytes } = await import('@noble/hashes/utils.js');
-
-    const sha512Fn = (...msgs: Uint8Array[]): Uint8Array => sha512(concatBytes(...msgs));
-    const mod = ed25519 as unknown as {
-      etc?: { sha512Sync?: typeof sha512Fn };
-      utils?: { sha512Sync?: typeof sha512Fn };
-    };
-    if (mod.etc && !mod.etc.sha512Sync) mod.etc.sha512Sync = sha512Fn;
-    if (mod.utils && !mod.utils.sha512Sync) mod.utils.sha512Sync = sha512Fn;
 
     const privKey = new Uint8Array(32).fill(9);
     const pubKeyCorrect = await ed25519.getPublicKeyAsync(privKey);
@@ -365,16 +334,6 @@ describe('[AUTH-021] TurnkeyDIDSigner.verify – uses OriginalsSDK.verifyDIDSign
 
   test('verify → returns true for a valid Ed25519 signature (delegates to OriginalsSDK)', async () => {
     const ed25519 = await import('@noble/ed25519');
-    const { sha512 } = await import('@noble/hashes/sha2.js');
-    const { concatBytes } = await import('@noble/hashes/utils.js');
-
-    const sha512Fn = (...msgs: Uint8Array[]): Uint8Array => sha512(concatBytes(...msgs));
-    const mod = ed25519 as unknown as {
-      etc?: { sha512Sync?: typeof sha512Fn };
-      utils?: { sha512Sync?: typeof sha512Fn };
-    };
-    if (mod.etc && !mod.etc.sha512Sync) mod.etc.sha512Sync = sha512Fn;
-    if (mod.utils && !mod.utils.sha512Sync) mod.utils.sha512Sync = sha512Fn;
 
     const privKey = new Uint8Array(32).fill(11);
     const pubKey = await ed25519.getPublicKeyAsync(privKey);

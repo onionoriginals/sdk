@@ -29,7 +29,7 @@ describe('CLI create command', () => {
     
     // Create a test key file (generate a key pair)
     const ed25519 = await import('@noble/ed25519');
-    const privateKeyBytes = ed25519.utils.randomPrivateKey();
+    const privateKeyBytes = ed25519.utils.randomSecretKey();
     const privateKey = multikey.encodePrivateKey(privateKeyBytes as Uint8Array, 'Ed25519');
     
     testKeyPath = path.join(tempDir, 'test-key.txt');
@@ -136,7 +136,7 @@ describe('CLI create command', () => {
     it('loads key from JSON format file', async () => {
       // Create a JSON key file
       const ed25519 = await import('@noble/ed25519');
-      const privateKeyBytes = ed25519.utils.randomPrivateKey();
+      const privateKeyBytes = ed25519.utils.randomSecretKey();
       const privateKey = multikey.encodePrivateKey(privateKeyBytes as Uint8Array, 'Ed25519');
       
       const jsonKeyPath = path.join(tempDir, 'test-key.json');

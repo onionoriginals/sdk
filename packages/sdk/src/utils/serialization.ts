@@ -55,7 +55,7 @@ export function deserializeDIDDocument(data: string): DIDDocument {
   let parsed: unknown;
   try {
     parsed = JSON.parse(data);
-  } catch (error) {
+  } catch (_error) {
     throw new Error('Invalid DID Document JSON');
   }
   // Runtime structure validation: never trust a cast over untrusted
@@ -80,7 +80,7 @@ export function deserializeCredential(data: string): VerifiableCredential {
   let parsed: unknown;
   try {
     parsed = JSON.parse(data);
-  } catch (error) {
+  } catch (_error) {
     throw new Error('Invalid Verifiable Credential JSON');
   }
   // Runtime structure validation: never trust a cast over untrusted

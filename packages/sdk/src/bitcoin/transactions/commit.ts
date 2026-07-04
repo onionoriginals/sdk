@@ -9,7 +9,7 @@
 
 import * as btc from '@scure/btc-signer';
 import * as ordinals from 'micro-ordinals';
-import { schnorr } from '@noble/curves/secp256k1';
+import { schnorr } from '@noble/curves/secp256k1.js';
 import { Utxo, ResourceUtxo } from '../../types/bitcoin.js';
 import { calculateFee } from '../fee-calculation.js';
 import { selectUtxos, SimpleUtxoSelectionOptions } from '../utxo-selection.js';
@@ -353,7 +353,7 @@ export async function createCommitTransaction(
 
   // Step 2: Generate a reveal keypair
   // Use random private key for reveal transaction
-  const revealPrivateKey = schnorr.utils.randomPrivateKey();
+  const revealPrivateKey = schnorr.utils.randomSecretKey();
   const revealPublicKey = schnorr.getPublicKey(revealPrivateKey);
 
   // Step 3: Create the inscription script tree using micro-ordinals

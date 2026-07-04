@@ -3,7 +3,7 @@ import { OriginalsSDK } from '../../../src';
 import { VerifiableCredential, CredentialSubject, Proof } from '../../../src/types';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
-import { p256 } from '@noble/curves/p256';
+import { p256 } from '@noble/curves/nist.js';
 import { multikey } from '../../../src/crypto/Multikey';
 
 describe('CredentialManager', () => {
@@ -38,7 +38,7 @@ describe('CredentialManager', () => {
 
   test('signCredential/verifyCredential works for ES256K', async () => {
     const sdkES256K = OriginalsSDK.create({ defaultKeyType: 'ES256K' });
-    const sk = secp256k1.utils.randomPrivateKey();
+    const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
@@ -58,7 +58,7 @@ describe('CredentialManager', () => {
     // Regression: the legacy verify path validated the signature but skipped the
     // validity window, so an expired legacy-signed credential verified as true.
     const sdkES256K = OriginalsSDK.create({ defaultKeyType: 'ES256K' });
-    const sk = secp256k1.utils.randomPrivateKey();
+    const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
@@ -66,7 +66,10 @@ describe('CredentialManager', () => {
       ...baseVC,
       issuer: `did:key:${pkMb}`,
       issuanceDate: new Date(Date.now() - 60_000).toISOString(),
-      expirationDate: new Date(Date.now() - 1_000).toISOString()
+      // Well in the past (not just barely) so a slow/loaded CI runner can't
+      // race this into a false pass — expirationDate only needs to precede
+      // "now" at verify time, so the margin is free to be generous.
+      expirationDate: new Date(Date.now() - 30_000).toISOString()
     };
     const signed = await sdkES256K.credentials.signCredential(vc, skMb, `did:key:${pkMb}`);
     // Sanity: the proof is a legacy (no cryptosuite) proof.
@@ -88,7 +91,7 @@ describe('CredentialManager', () => {
     // The Data Integrity path fails closed on a missing issuer; the legacy path
     // must too.
     const sdkES256K = OriginalsSDK.create({ defaultKeyType: 'ES256K' });
-    const sk = secp256k1.utils.randomPrivateKey();
+    const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
@@ -174,7 +177,7 @@ describe('CredentialManager', () => {
 
   test('signCredential/verifyCredential works for Ed25519', async () => {
     const sdkEd = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
-    const sk = ed25519.utils.randomPrivateKey();
+    const sk = ed25519.utils.randomSecretKey();
     const pk = await (ed25519 as any).getPublicKeyAsync(sk);
     const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
     const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
@@ -186,7 +189,7 @@ describe('CredentialManager', () => {
 
   test('signCredential/verifyCredential works for ES256', async () => {
     const sdkES256 = OriginalsSDK.create({ defaultKeyType: 'ES256' });
-    const sk = p256.utils.randomPrivateKey();
+    const sk = p256.utils.randomSecretKey();
     const pk = p256.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'P256');
     const pkMb = multikey.encodePublicKey(pk, 'P256');
@@ -213,7 +216,7 @@ describe('CredentialManager verification method resolution', () => {
 
   test('resolves DID verificationMethod to multibase key material', async () => {
     const signingManager = new CredentialManager(baseConfig);
-    const sk = secp256k1.utils.randomPrivateKey();
+    const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
@@ -243,7 +246,7 @@ describe('CredentialManager verification method resolution', () => {
 
   test('does NOT trust proof.publicKeyMultibase when DID resolution lacks key material', async () => {
     const signingManager = new CredentialManager(baseConfig);
-    const sk = secp256k1.utils.randomPrivateKey();
+    const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
@@ -299,7 +302,7 @@ describe('CredentialManager with didManager provided falls back to local signer 
     // Register VM without publicKeyMultibase so DID path cannot proceed and will fall back
     registerVerificationMethod({ id: 'did:ex:vm#fallback', controller: 'did:ex' } as any);
 
-    const sk = secp256k1.utils.randomPrivateKey();
+    const sk = secp256k1.utils.randomSecretKey();
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
 
     const vc: any = {
@@ -343,7 +346,7 @@ describe('CredentialManager DID path fallback when VM doc lacks type', () => {
 describe('CredentialManager local verify path without didManager', () => {
   test('signs and verifies locally when didManager is undefined', async () => {
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
-    const sk = secp256k1.utils.randomPrivateKey();
+    const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
     const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');

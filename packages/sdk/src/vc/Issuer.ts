@@ -91,7 +91,7 @@ export class Issuer {
       // the signed dataset; only default when none was provided (issue #167).
       '@context': withSecuringContext(unsigned['@context']),
       issuer: issuerId || keyController
-    } as VerifiableCredential;
+    };
     delete (credential as unknown as Record<string, unknown>).proof;
 
     if (!this.verificationMethod.secretKeyMultibase) {

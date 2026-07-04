@@ -41,6 +41,9 @@ export function getScureNetwork(network: TransferNetwork): typeof btc.NETWORK {
  */
 export function addressToScriptPubKey(address: string, network: typeof btc.NETWORK): string {
   const decoded = btc.Address(network).decode(address);
+  if (!decoded) {
+    throw new Error(`Invalid address: ${address}`);
+  }
   const script = btc.OutScript.encode(decoded);
   return Buffer.from(script).toString('hex');
 }

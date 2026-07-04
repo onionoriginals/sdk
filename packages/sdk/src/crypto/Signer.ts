@@ -6,8 +6,8 @@ export abstract class Signer {
   abstract verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean>;
 }
 
-import { bls12_381 as bls } from '@noble/curves/bls12-381';
-import { p256 } from '@noble/curves/p256';
+import { bls12_381 as bls } from '@noble/curves/bls12-381.js';
+import { p256 } from '@noble/curves/nist.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
@@ -160,7 +160,7 @@ export class ES256Signer extends Signer {
 
     const privateKey = decoded.key;
     const hash = sha256(data);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sigAny: any = p256.sign(hash, privateKey);
     /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
     const sigBytes: Uint8Array = sigAny instanceof Uint8Array
@@ -226,8 +226,9 @@ export class Bls12381G2Signer extends Signer {
     }
 
     const sk = decoded.key;
-    const sig = bls.sign(data, sk);
-    return await Promise.resolve(Buffer.from(sig));
+    const hashedMessage = bls.shortSignatures.hash(data);
+    const sig = bls.shortSignatures.sign(hashedMessage, sk);
+    return await Promise.resolve(Buffer.from(sig.toBytes()));
   }
 
   async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
@@ -252,7 +253,8 @@ export class Bls12381G2Signer extends Signer {
 
     const pk = decoded.key;
     try {
-      return await Promise.resolve(bls.verify(signature, data, pk));
+      const hashedMessage = bls.shortSignatures.hash(data);
+      return await Promise.resolve(bls.shortSignatures.verify(signature, hashedMessage, pk));
     } catch {
       return false;
     }

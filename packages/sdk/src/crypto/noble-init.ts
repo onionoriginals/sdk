@@ -1,14 +1,18 @@
 /**
  * Noble Crypto Library Initialization
- * 
- * @noble/ed25519 v2.x and @noble/secp256k1 require manual configuration of hash functions.
- * This is by design - they don't bundle hash implementations to allow flexibility.
- * 
+ *
+ * @noble/ed25519 v3.x and @noble/secp256k1 v3.x require manual configuration of
+ * synchronous hash functions via the `hashes` object (async variants such as
+ * `sha512Async`/`sha256Async` ship built-in, but sync APIs like `getPublicKey`,
+ * `sign`, and `verify` need `hashes.sha512` / `hashes.sha256` / `hashes.hmacSha256`
+ * set explicitly). This is by design - they don't bundle sync hash implementations
+ * to allow flexibility and keep bundle size small.
+ *
  * This module centralizes the initialization to ensure:
  * 1. Libraries are configured before any crypto operations
  * 2. Configuration is consistent across the SDK
  * 3. Readonly property issues (Bun) are handled gracefully
- * 
+ *
  * This should be imported at the SDK entry point (index.ts) to ensure it runs first.
  */
 
@@ -19,14 +23,22 @@ import { hmac } from '@noble/hashes/hmac.js';
 import { concatBytes } from '@noble/hashes/utils.js';
 
 // Implementation functions
-const sha512Impl = (...msgs: Uint8Array[]) => sha512(concatBytes(...msgs));
+//
+// IMPORTANT: `hashes.sha256` / `hashes.sha512` are called by the noble libraries
+// as `fn(message)` (a single already-assembled Uint8Array), sometimes invoked as
+// `fn(message, undefined)` internally. They must NOT be variadic wrappers around
+// concatBytes - passing an `undefined` second argument through concatBytes throws
+// ("expected Uint8Array, got type=undefined"). Only `hashes.hmacSha256` takes a
+// fixed (key, msg) shape.
+const sha512Impl = (msg: Uint8Array) => sha512(msg);
+const sha256Impl = (msg: Uint8Array) => sha256(msg);
 const hmacSha256Impl = (key: Uint8Array, ...msgs: Uint8Array[]) =>
   hmac(sha256, key, concatBytes(...msgs));
 
 /**
  * Safely set a property on an object, handling readonly properties
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function safeSetProperty(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   obj: any,
@@ -43,7 +55,7 @@ function safeSetProperty(
     // Property might be readonly, try defineProperty
     try {
       Object.defineProperty(obj, prop, {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+         
         value,
         writable: options?.writable ?? true,
         configurable: options?.configurable ?? true,
@@ -57,21 +69,23 @@ function safeSetProperty(
 }
 
 /**
- * Initialize @noble/secp256k1 with hmacSha256Sync utility
+ * Initialize @noble/secp256k1 with sync hash utilities (v3.x `hashes` object).
+ *
+ * Note: v3.x freezes the legacy v2.x `utils` object, so it is no longer
+ * possible (nor necessary) to inject `utils.hmacSha256Sync` for backward
+ * compatibility - all sync signing/verification now reads from `hashes`.
  */
 function initSecp256k1(): void {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
   const sAny: any = secp256k1 as any;
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  if (!sAny?.utils) {
-    // Try to create utils object if it doesn't exist
+  if (!sAny?.hashes) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      sAny.utils = {};
+      sAny.hashes = {};
     } catch {
-      // If we can't create it, try defineProperty
-      Object.defineProperty(sAny, 'utils', {
+      Object.defineProperty(sAny, 'hashes', {
         value: {},
         writable: true,
         configurable: true,
@@ -79,48 +93,47 @@ function initSecp256k1(): void {
     }
   }
 
-  // Set hmacSha256Sync if not already set
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  if (typeof sAny.utils.hmacSha256Sync !== 'function') {
+  if (typeof sAny.hashes.sha256 !== 'function') {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    safeSetProperty(sAny.utils, 'hmacSha256Sync', hmacSha256Impl);
+    safeSetProperty(sAny.hashes, 'sha256', sha256Impl);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  if (typeof sAny.hashes.hmacSha256 !== 'function') {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    safeSetProperty(sAny.hashes, 'hmacSha256', hmacSha256Impl);
   }
 }
 
 /**
- * Initialize @noble/ed25519 with sha512Sync utility
- * Handles both etc.sha512Sync (v2.x) and utils.sha512Sync (backward compat)
+ * Initialize @noble/ed25519 with sync sha512 utility (v3.x `hashes.sha512`).
+ *
+ * Note: v3.x freezes the legacy v2.x `utils` / `etc` objects, so it is no
+ * longer possible (nor necessary) to inject `utils.sha512Sync` /
+ * `etc.sha512Sync` for backward compatibility - all sync signing/verification
+ * now reads from `hashes`.
  */
 function initEd25519(): void {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
   const eAny: any = ed25519 as any;
 
-  // Set etc.sha512Sync for @noble/ed25519 v2.x (required)
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  if (eAny?.etc && typeof eAny.etc.sha512Sync !== 'function') {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    safeSetProperty(eAny.etc, 'sha512Sync', sha512Impl);
-  }
-
-  // Set utils.sha512Sync for backward compatibility
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  if (!eAny?.utils) {
+  if (!eAny?.hashes) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      eAny.utils = {};
+      eAny.hashes = {};
     } catch {
-      Object.defineProperty(eAny, 'utils', {
+      Object.defineProperty(eAny, 'hashes', {
         value: {},
         writable: true,
         configurable: true,
       });
     }
   }
-
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  if (typeof eAny.utils.sha512Sync !== 'function') {
+  if (typeof eAny.hashes.sha512 !== 'function') {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    safeSetProperty(eAny.utils, 'sha512Sync', sha512Impl);
+    safeSetProperty(eAny.hashes, 'sha512', sha512Impl);
   }
 }
 

@@ -7,7 +7,7 @@ test('forged credential signed with an unrelated key does NOT verify', async () 
   const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
 
   // Attacker's own key — unrelated to the victim issuer DID
-  const attackerSk = secp.utils.randomPrivateKey();
+  const attackerSk = secp.utils.randomSecretKey();
   const attackerPk = secp.getPublicKey(attackerSk, true);
   const attackerSkMb = multikey.encodePrivateKey(attackerSk, 'Secp256k1');
   const attackerPkMb = multikey.encodePublicKey(attackerPk, 'Secp256k1');
@@ -30,7 +30,7 @@ test('forged credential signed with an unrelated key does NOT verify', async () 
 
 test('embedded publicKeyMultibase in the proof is never trusted', async () => {
   const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
-  const sk = secp.utils.randomPrivateKey();
+  const sk = secp.utils.randomSecretKey();
   const pk = secp.getPublicKey(sk, true);
   const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
   const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');

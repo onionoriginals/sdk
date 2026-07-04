@@ -241,7 +241,7 @@ export class PeerCelManager {
   private async generateRandomPublicKey(): Promise<string> {
     // Use @noble/ed25519 for key generation
     const ed25519 = await import('@noble/ed25519');
-    const privateKeyBytes = ed25519.utils.randomPrivateKey();
+    const privateKeyBytes = ed25519.utils.randomSecretKey();
     const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
     
     // Import multikey encoder
