@@ -1,4 +1,5 @@
 import { gzipSync, gunzipSync, inflateSync } from 'node:zlib';
+import { MAX_DECOMPRESSED_BITSTRING_BYTES } from './StatusListManager.js';
 
 const MINIMUM_LIST_SIZE = 131072; // 16KB = 131072 bits per W3C spec recommendation
 
@@ -76,12 +77,24 @@ export class BitstringStatusList {
    * DEFLATE data) are still accepted.
    */
   static decode(encoded: string, length?: number): BitstringStatusList {
+    // Cap decompression: encodedList may come from an untrusted status list
+    // credential, and unbounded gunzip/inflate of a small gzip bomb can
+    // allocate gigabytes (verifier DoS).
+    const limit = { maxOutputLength: MAX_DECOMPRESSED_BITSTRING_BYTES };
     let decompressed: Uint8Array;
-    if (encoded.startsWith('u')) {
-      decompressed = new Uint8Array(gunzipSync(base64urlDecode(encoded.slice(1))));
-    } else {
-      // Legacy pre-spec encoding: bare base64url, raw DEFLATE stream.
-      decompressed = new Uint8Array(inflateSync(base64urlDecode(encoded)));
+    try {
+      if (encoded.startsWith('u')) {
+        decompressed = new Uint8Array(gunzipSync(base64urlDecode(encoded.slice(1)), limit));
+      } else {
+        // Legacy pre-spec encoding: bare base64url, raw DEFLATE stream.
+        decompressed = new Uint8Array(inflateSync(base64urlDecode(encoded), limit));
+      }
+    } catch (err) {
+      throw new Error(
+        `Invalid encoded bitstring: decompression failed or exceeded the ${MAX_DECOMPRESSED_BITSTRING_BYTES}-byte limit: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
     }
     const bitLength = length ?? decompressed.length * 8;
     const list = new BitstringStatusList(

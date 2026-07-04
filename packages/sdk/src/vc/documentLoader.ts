@@ -101,15 +101,23 @@ export class DocumentLoader {
         };
       }
       // Fallback ONLY when the DID document does not itself publish this
-      // verification method. The registry can never override the DID document.
-      const cached = verificationMethodRegistry.get(didUrl);
-      if (cached) {
-        assertNotRetired(cached);
-        return {
-          document: { '@context': didDocTyped['@context'], ...cached },
-          documentUrl: didUrl,
-          contextUrl: null
-        };
+      // verification method, and ONLY for self-certifying methods (did:key,
+      // did:peer) whose key material is bound into the identifier. For hosted
+      // (did:webvh) or on-chain (did:btco) methods the resolved document is
+      // authoritative: a key the controller REMOVED (a common rotation style)
+      // must not be resurrected from the process-global registry, or a
+      // rotated-out key would keep verifying signatures indefinitely.
+      const isSelfCertifyingMethod = did.startsWith('did:key:') || did.startsWith('did:peer:');
+      if (isSelfCertifyingMethod) {
+        const cached = verificationMethodRegistry.get(didUrl);
+        if (cached) {
+          assertNotRetired(cached);
+          return {
+            document: { '@context': didDocTyped['@context'], ...cached },
+            documentUrl: didUrl,
+            contextUrl: null
+          };
+        }
       }
       return {
         document: { '@context': didDocTyped['@context'], id: didUrl },
