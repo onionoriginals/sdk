@@ -1,6 +1,41 @@
 # Correctness Loop Log
 
-Branch: `claude/originals-sdk-correctness-4pn30u`
+Branch: `claude/originals-sdk-correctness-4pn30u` (iterations 1–N, merged as #230–#233)
+Branch: `claude/originals-sdk-correctness-osnfzp` (current)
+
+## Iteration (osnfzp) 1 — 2026-07-03
+
+### Ground truth
+- Fresh clone, `bun install` + `bun run build`. Baseline fully green:
+  `bun test` 3429 pass / 0 fail / 74 skip; `bun run typecheck` clean;
+  `bun run lint` 0 errors / 87 warnings.
+- Branch was even with `origin/main` (378a445); prior correctness work #230–#233
+  already merged. No open PR for this branch — opened one this firing.
+
+### Work items (fixed, each with a regression test that fails before / passes after)
+- **utxo.ts `selectUtxos` ignored `hasResource`** (HIGH, fund/ordinal loss). Public
+  `buildTransferTransaction` could spend a `hasResource: true` ResourceUtxo (no
+  `inscriptions[]`) as a fee input. Now excludes both markers, matching the two
+  sibling selectors. Tests: `tests/unit/bitcoin/utxo.selection.test.ts` (+3).
+- **Multi-sig verification skipped revocation + expiration** (HIGH, verification
+  bypass). `MultiSigManager.verifyMultiSig` now enforces the credential validity
+  window and fails closed on a declared `BitstringStatusListEntry` it cannot
+  check. Tests: `tests/unit/vc/MultiSigManager.test.ts` (+3).
+- **`migrateToDIDWebVH` un-encoded port colon** (malformed DID). Now percent-encodes
+  the port so the authority stays one segment. Tests:
+  `tests/unit/did/DIDManager.test.ts` (+1).
+
+### Verify
+- Post-fix: `bun test` 3436 pass / 0 fail; typecheck clean; lint 0 errors / 87
+  warnings (no new). Changeset added (`.changeset/correctness-loop-osnfzp.md`, patch).
+
+### Deferred this firing (see FOLLOWUP.md #20, #21)
+- MAX_SATOSHI_SUPPLY above real issued supply (LOW; changes a tested contract).
+- Network-blind `did:btco` binding in Lifecycle/Batch (MEDIUM; network-authority
+  spec ambiguity — an existing test asserts the mainnet form for a regtest SDK).
+
+---
+
 
 ## Iteration 1 — 2026-07-02
 
@@ -192,3 +227,180 @@ Branch: `claude/originals-sdk-correctness-ws3gte` (continuation after #230 merge
 
 ### Result
 - Full turbo suite green (0 fail), typecheck clean, lint 0 errors.
+
+---
+
+Branch: `claude/originals-sdk-correctness-n08sq0` (fresh off main @ 738dec2, includes merged #230 + #231)
+
+## Iteration 1 — 2026-07-03
+
+### Ground truth
+- Fresh clone; `bun install`, then `bun run build` (dist was missing → 16 CEL-CLI
+  subprocess tests fail without it; environment-only, no code issue).
+- Full suite after build: **3216 pass / 0 fail / 71 skip** across 171 files.
+- `bun run typecheck`: clean. `bun run lint`: 0 errors (87 pre-existing warnings).
+- No open PR for this branch; branch tip == origin/main (738dec2).
+
+### Work
+- Baseline green. Launched 4 parallel subsystem correctness audits
+  (vc/crypto, did, cel/anchoring, lifecycle/migration/storage) instructed to
+  skip everything already in FOLLOWUP.md and to report only concrete,
+  reachable, reproducible bugs. Triage of results pending.
+
+### Audit + fixes (iteration 1)
+Four parallel subsystem audits (vc/crypto, did, cel/anchoring, lifecycle/
+migration/storage) instructed to skip FOLLOWUP.md items and report only
+concrete, reachable, reproducible bugs. Fixed six confirmed correctness bugs,
+each with a regression test that fails before the fix and passes after
+(verified by stashing the src changes and re-running):
+
+1. **MED (revocation bypass) — `verifyCredentialWithStatus` failed OPEN**
+   (`src/vc/CredentialManager.ts`): when a credential declared a
+   `BitstringStatusListEntry` that could not be evaluated (no status list
+   supplied, or `checkStatus` threw on purpose-mismatch / out-of-range index /
+   corrupt list), it left `verified: true` / `revoked: false` and returned only
+   an error string — a caller gating on `verified`/`revoked` would accept a
+   possibly-revoked credential. Now fails closed (`verified = false`),
+   mirroring the Data Integrity path. Determinable revoked/suspended still
+   leave `verified` true. Test: StatusListManager.test.ts.
+2. **LOW (binding inconsistency) — legacy `verifyCredential` accepted an
+   issuer-less self-signed did:key credential** (`resolveVerificationMethodMultibase`):
+   the issuer-binding guards were gated on a truthy `issuerDid`, so a credential
+   with no issuer + a self-certifying did:key VM verified unconditionally, while
+   the DI path fails closed. Added an explicit fail-closed guard on missing
+   issuer. Test: CredentialManager.test.ts.
+3. **LOW-MED (version-history correctness) — `ResourceManager.getResourceVersion`
+   indexed positionally** (`versions[version-1]`): `importResource` inserts by
+   version number and permits gaps, so importing v1 then v3 made
+   `getResourceVersion(id,2)` return v3 and `(id,3)` return null. Now matches by
+   stored version number. Test: ResourceManager.test.ts.
+4. **LOW (spec-fidelity) — `BtcoDidResolver` misclassified a DID document
+   containing 🔥 as a deactivation tombstone**: deactivation was gated on a raw
+   `content.includes('🔥')`, so a valid DID document carrying the emoji in any
+   field (service description, name, …) was tombstoned. Now excludes content
+   that parses to a valid DID document for the DID; only the human-readable
+   marker form deactivates. Test: BtcoDidResolver.test.ts.
+5. **MED (correctness) — CEL btco state derivation emitted a network-less
+   `did:btco:<sat>` on regtest/signet** (`BtcoCelManager.getCurrentState`): the
+   identifier was hardcoded to the mainnet form, so a regtest/signet asset
+   pointed at the mainnet ordinals namespace. Now network-scoped
+   (`did:btco:reg:` / `did:btco:sig:`) via the inscribing `BitcoinManager`
+   (added a `network` getter). Test: BtcoCelManager.test.ts. The CLI display
+   helpers (migrate/transfer) remain network-agnostic — deferred (FOLLOWUP #15).
+6. **LOW (interop false-negative) — `multikey.decodeMultibase` rejected `u`
+   base64url** while the CEL structural check accepts a `u` proofValue: a
+   spec-valid base64url signature passed the structural gate but failed to
+   decode and was rejected. `decodeMultibase` now accepts both `z` (base58btc)
+   and `u` (base64url); unknown prefixes still fail closed. Test:
+   Multikey.test.ts.
+
+### Deferred (added to FOLLOWUP.md, items 12–15)
+- did:webvh resolution hardcoded to Ed25519Verifier (multi-algo design decision).
+- CEL create-event key not bound to self-certifying data.did (TOFU threat-model).
+- single-transaction batch inscription shares one btco identity + no per-item
+  atomicity (batch-semantics design decision).
+- CEL CLI migrate/transfer display emit network-less btco DID (CLI plumbing;
+  network not in the log).
+
+### Result
+- Full suite: **3222 pass / 0 fail / 71 skip** (was 3216; +6 regression tests).
+- Typecheck clean; lint 0 errors (87 pre-existing warnings, none added).
+- No open PR for this branch — will push and open one. All fixes strengthen or
+  preserve verification; none weaken validation or skip crypto checks.
+
+## Iteration 2 — 2026-07-03 (Macroscope review on PR #232)
+
+Opened PR #232; subscribed to activity and armed an hourly self check-in. All
+CI checks green (typecheck, lint, tests, coverage, ESM, changeset). Macroscope
+Correctness Check posted three Medium findings — all valid, all fixed with
+regression tests (each verified to fail against the iteration-1 commit):
+
+1. **CEL btco DID was runtime-config-dependent** (BtcoCelManager): iteration 1's
+   network fix derived the prefix from `this.bitcoinManager.network` at replay
+   time, so replaying a persisted regtest/signet log under a differently
+   configured SDK silently rewrote `state.did`. Now the network is recorded in
+   the SIGNED migration data (known before inscription, unlike the satoshi) and
+   read back during replay, with a runtime-config fallback only for legacy logs.
+   State derivation is deterministic from the log. Tests: network recorded in
+   signed data + replay under a mainnet manager still yields did:btco:reg:.
+2. **`decodeMultibase` silently accepted malformed base64url** (Multikey):
+   `Buffer.from('@@@','base64url')` returns empty instead of throwing, so a
+   malformed `u` payload decoded to an empty array (the `z` branch throws). Now
+   validates `^[A-Za-z0-9_-]+$` before decoding; malformed/empty `u` throws.
+   Test: 'u@@@', 'u', 'u====' all throw.
+3. **Tombstone guard bypass** (BtcoDidResolver): iteration 1's
+   `!isDidDocumentForThisDid` guard could be evaded by appending a minimal
+   `{"id":"<did>"}` object after a "BTCO DID: … 🔥" marker — it parsed to a
+   matching-id object, skipped the tombstone branch, and fell back to an older
+   document. Switched tombstone detection to the start-anchored marker PATTERN
+   (`didPattern.test && includes('🔥')`), which correctly classifies both a
+   DID-document-containing-🔥 (not a tombstone) and a marker-with-appended-JSON
+   (a tombstone). Test: marker + appended JSON still deactivates.
+
+### Result
+- Full suite: **3224 pass / 0 fail / 71 skip**. Typecheck clean; lint 0 errors.
+- Replied to all three review threads with the fixing commit SHA.
+
+### Iteration 2 follow-up (2nd Macroscope round)
+Macroscope flagged one more Medium: iteration-2's fix added `network` to the
+GLOBAL metadata-exclusion list, so an ordinary (non-migration) update event
+carrying an application-defined `network` field had it silently dropped from
+`state.metadata`. Scoped the exclusion to btco migration events only (where
+`network` is consumed explicitly). Regression test: a regular update with a
+custom `network` field now preserves it. Full suite 3225 pass / 0 fail;
+typecheck clean; lint 0 errors.
+
+---
+
+# Correctness Loop Log (branch `claude/originals-sdk-correctness-asdkdz`)
+
+## Iteration 1 — 2026-07-03
+
+### Ground truth
+- Fresh branch at `origin/main` (561664d); prior correctness passes (#230, #232) already merged. No open PR for this branch, so the eval signal this iteration is the test suite + spec/protocol consistency (no PR review comments yet).
+- After `bun install` + `bun run build`: full suite **3415 pass / 0 fail / 74 skip** (182 files). `bun run typecheck` clean. `bun run lint` clean (88 warnings, 0 errors).
+
+### Audit
+Ran four parallel subsystem audits (vc/crypto, did, bitcoin, cel/lifecycle), each told to exclude the items already logged in FOLLOWUP.md. Fixed every confirmed correctness bug with a regression test that fails before / passes after.
+
+### Fixes (this iteration)
+1. **HIGH — ordinal-loss in payment UTXO selection** (`utxo-selection.ts`):
+   `selectResourceUtxos`/`selectUtxosForPayment` only excluded UTXOs flagged
+   `hasResource === true`, never the first-class `inscriptions[]` array (what ord
+   indexers actually populate) nor `locked`. A wallet UTXO carrying an inscription
+   but no `hasResource` flag would be selected as a plain payment input, burning
+   the ordinal. Now excludes inscription-bearing (via `inscriptions.length > 0`)
+   and locked UTXOs, matching the sibling `utxo.ts` selector. Regression tests in
+   `tests/unit/bitcoin/utxo-selection-new.test.ts`.
+2. **MED — non-canonical `did:btco` identifiers** (`satoshi-validation.ts`,
+   `createBtcoDidDocument.ts`, `DIDManager.ts`): `validateSatoshiNumber` trims/parses
+   before validating, so `' 42 '` and `'007'` passed, but the DID was built from the
+   raw argument → `did:btco: 42 ` (unresolvable) / `did:btco:007` (never matches the
+   inscribed `did:btco:7`). Added `canonicalizeSatoshi()` and used it in both DID-
+   building paths. Regression tests in `createBtcoDidDocument.test.ts` and
+   `DIDManager.more.test.ts`.
+3. **MED — network-blind satoshi extraction in transfer** (`LifecycleManager.ts`):
+   `transferOwnership` fell back to `asset.id.split(':')[2]`, which returns the
+   network tag `'reg'`/`'sig'` for `did:btco:reg:<sat>` / `did:btco:sig:<sat>` instead
+   of the satoshi, so a regtest/signet transfer without a migration record looked up
+   the wrong ordinal. Switched to the network-aware `parseSatoshiIdentifier`.
+   Regression test in `LifecycleManager.transfer.unit.test.ts`.
+4. **LOW — `hexToBytes` silently accepted malformed hex** (`utils/encoding.ts`):
+   the per-byte `parseInt` NaN check let `'1g'`→`[0x01]`, `'aa1z'`→`[0xaa,0x01]`
+   through. Added a strict `^[0-9a-fA-F]*$` guard. Regression tests in
+   `encoding.test.ts`.
+5. **LOW — lenient `statusListIndex` parsing** (`vc/StatusListManager.ts`,
+   `vc/CredentialManager.ts`): `parseInt('5abc', 10) === 5` silently targeted the
+   wrong revocation bit in `checkStatus`/`revoke`/`suspend`/`unsuspend`. Added a
+   strict `parseStatusListIndex()` used at all four sites. Regression tests in
+   `StatusListManager.test.ts`.
+
+### Verify
+- Full suite **3428 pass / 0 fail / 74 skip**; typecheck clean; lint clean.
+- One flaky timing-based perf guard (`did:peer creation should not regress beyond 2x baseline`) failed once under full-suite CPU contention and passed in isolation (6/6) and on re-run; unrelated to these changes (no did:peer creation code touched).
+
+### Deferred (added to FOLLOWUP.md, items 16–19)
+- 16. `OriginalsCel.getCurrentState` on a btco log requires a BitcoinManager it doesn't need (design/dependency-structure).
+- 17. `WebVHCelManager.getCurrentState` stale `targetDid` migration detection (latent, unreachable via public API).
+- 18. `WebvhToBtcoMigration` satoshi fallback derives a txid, not a satoshi (fallback-only dead path).
+- 19. Data Integrity `proofPurpose` not validated at verification time (spec conformance; needs a focused semantics change).

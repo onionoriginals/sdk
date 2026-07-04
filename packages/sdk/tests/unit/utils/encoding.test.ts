@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
+  encodeBase64UrlMultibase,
+  decodeBase64UrlMultibase,
   hexToBytes,
   base64,
   utf8,
@@ -14,6 +16,19 @@ import {
 } from '../../../src/utils/encoding';
 
 describe('utils/encoding', () => {
+  describe('encodeBase64UrlMultibase', () => {
+    test('emits the spec-correct base64url multibase prefix (u)', () => {
+      const encoded = encodeBase64UrlMultibase(new Uint8Array([1, 2, 3, 250]));
+      expect(encoded.startsWith('u')).toBe(true);
+      expect(Array.from(decodeBase64UrlMultibase(encoded))).toEqual([1, 2, 3, 250]);
+    });
+
+    test('rejects the legacy z prefix (base58btc header on base64url payload)', () => {
+      const legacy = 'z' + Buffer.from([1, 2, 3]).toString('base64url');
+      expect(() => decodeBase64UrlMultibase(legacy)).toThrow('Invalid Multibase encoding');
+    });
+  });
+
   describe('hexToBytes', () => {
     test('decodes even-length hex', () => {
       const u8 = hexToBytes('0a0b0c');
@@ -31,6 +46,14 @@ describe('utils/encoding', () => {
 
     test('throws on invalid characters', () => {
       expect(() => hexToBytes('zz')).toThrow('Invalid hex string');
+    });
+
+    test('rejects partial-nibble garbage instead of silently parsing a prefix', () => {
+      // Regression: parseInt('1g', 16) === 1, so a per-byte NaN check accepted
+      // '1g' as [0x01] and 'aa1z' as [0xaa, 0x01]. These must throw.
+      expect(() => hexToBytes('1g')).toThrow('Invalid hex string');
+      expect(() => hexToBytes('aa1z')).toThrow('Invalid hex string');
+      expect(() => hexToBytes('0xdeadbeeg')).toThrow('Invalid hex string');
     });
   });
 

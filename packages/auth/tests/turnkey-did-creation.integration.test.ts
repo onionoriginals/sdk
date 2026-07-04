@@ -20,8 +20,9 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-// Import the SDK first — its noble-init module configures @noble/ed25519's sha512Sync
-// before any crypto operations run, so we don't need to configure it ourselves.
+// Import the SDK first — its noble-init module configures @noble/ed25519's
+// hashes.sha512 before any crypto operations run, so we don't need to
+// configure it ourselves.
 import { encoding } from '@originals/sdk';
 import * as ed25519Module from '@noble/ed25519';
 import { TurnkeyDIDSigner, createDIDWithTurnkey } from '../src/client/turnkey-did-signer';
@@ -32,9 +33,9 @@ import type { Turnkey } from '@turnkey/sdk-server';
 // Helpers
 // ---------------------------------------------------------------------------
 
-// @noble/ed25519 v2 exports at the module level: getPublicKeyAsync, signAsync, utils.
+// @noble/ed25519 v3 exports at the module level: getPublicKeyAsync, signAsync, utils.
 const ed = ed25519Module as unknown as {
-  utils: { randomPrivateKey: () => Uint8Array };
+  utils: { randomSecretKey: () => Uint8Array };
   getPublicKeyAsync: (priv: Uint8Array) => Promise<Uint8Array>;
   signAsync: (msg: Uint8Array, priv: Uint8Array) => Promise<Uint8Array>;
 };
@@ -63,7 +64,7 @@ async function generateKeypair(): Promise<{
   privateKeyBytes: Uint8Array;
   publicKeyMultibase: string;
 }> {
-  const privateKeyBytes = ed.utils.randomPrivateKey();
+  const privateKeyBytes = ed.utils.randomSecretKey();
   const publicKeyBytes = await ed.getPublicKeyAsync(privateKeyBytes);
   const publicKeyMultibase = toPublicKeyMultibase(publicKeyBytes);
   return { privateKeyBytes, publicKeyMultibase };

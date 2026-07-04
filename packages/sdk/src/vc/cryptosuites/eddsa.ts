@@ -104,12 +104,12 @@ export class EdDSACryptosuiteManager {
       if (privateKey.length === 64) privateKey = privateKey.slice(0, 32);
       else throw new Error('Invalid private key length');
     }
-    const signature = await ed25519.signAsync(Buffer.from(data).toString('hex'), Buffer.from(privateKey).toString('hex'));
+    const signature = await ed25519.signAsync(data, privateKey);
     return signature;
   }
 
   static async verify({ data, signature, publicKey }: { data: Uint8Array; signature: Uint8Array; publicKey: Uint8Array }): Promise<boolean> {
-    return await ed25519.verifyAsync(Buffer.from(signature).toString('hex'), Buffer.from(data).toString('hex'), Buffer.from(publicKey).toString('hex'));
+    return await ed25519.verifyAsync(signature, data, publicKey);
   }
 }
 

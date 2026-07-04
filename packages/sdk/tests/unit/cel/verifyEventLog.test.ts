@@ -40,7 +40,7 @@ async function makeRealSigner(): Promise<{
   verificationMethod: string;
 }> {
   const ed25519 = await import('@noble/ed25519');
-  const privateKeyBytes = ed25519.utils.randomPrivateKey();
+  const privateKeyBytes = ed25519.utils.randomSecretKey();
   const publicKeyBytes = new Uint8Array(
     await (ed25519 as any).getPublicKeyAsync(privateKeyBytes),
   );
@@ -873,7 +873,7 @@ describe('verifyEventLog', () => {
 
       // Generate a real Ed25519 keypair for the witness.
       const ed25519 = await import('@noble/ed25519');
-      const witnessPrivateKey = ed25519.utils.randomPrivateKey();
+      const witnessPrivateKey = ed25519.utils.randomSecretKey();
       const witnessPublicKey = new Uint8Array(
         await (ed25519 as any).getPublicKeyAsync(witnessPrivateKey),
       );

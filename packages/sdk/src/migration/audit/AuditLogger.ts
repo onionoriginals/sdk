@@ -116,8 +116,8 @@ export class AuditLogger implements IAuditLogger {
 
     if (this.signerConfig) {
       const signature = await ed25519.signAsync(
-        Buffer.from(canonical).toString('hex'),
-        Buffer.from(this.signerConfig.privateKey).toString('hex')
+        canonical,
+        this.signerConfig.privateKey
       );
       return MULTIBASE_BASE58BTC_HEADER + base58.encode(signature);
     }
@@ -141,9 +141,9 @@ export class AuditLogger implements IAuditLogger {
       try {
         const sig = base58.decode(record.signature.slice(1));
         return await ed25519.verifyAsync(
-          Buffer.from(sig).toString('hex'),
-          Buffer.from(canonical).toString('hex'),
-          Buffer.from(this.signerConfig.publicKey).toString('hex')
+          sig,
+          canonical,
+          this.signerConfig.publicKey
         );
       } catch {
         return false;

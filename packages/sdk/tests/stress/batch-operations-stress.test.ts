@@ -175,10 +175,18 @@ describe('Batch Operations Stress Tests', () => {
 
       const assets = createResult.successful.map(s => s.result);
 
-      // Inscribe in batch with single transaction
+      // singleTransaction is rejected: batched assets must not share one
+      // inscription/satoshi (a did:btco identity is satoshi-scoped).
+      await expect(
+        sdk.lifecycle.batchInscribeOnBitcoin(assets, {
+          singleTransaction: true,
+          feeRate: 10,
+          continueOnError: false
+        })
+      ).rejects.toThrow('singleTransaction batch inscription is not supported');
+
       const startTime = Date.now();
       const inscribeResult = await sdk.lifecycle.batchInscribeOnBitcoin(assets, {
-        singleTransaction: true,
         feeRate: 10,
         continueOnError: false
       });
@@ -186,10 +194,9 @@ describe('Batch Operations Stress Tests', () => {
 
       expect(inscribeResult.successful).toHaveLength(10);
 
-      console.log(`[STRESS] Batch inscription (single tx):`);
+      console.log(`[STRESS] Batch inscription (per-asset txs):`);
       console.log(`  - Assets: 10`);
       console.log(`  - Duration: ${duration}ms`);
-      console.log(`  - Mode: Single transaction`);
     }, 60000);
 
     it('should handle batch inscription with individual transactions', async () => {
@@ -220,12 +227,11 @@ describe('Batch Operations Stress Tests', () => {
       const createResult = await sdk.lifecycle.batchCreateAssets(resourcesList);
       const assets = createResult.successful.map(s => s.result);
 
-      // Test single transaction mode
+      // Batch mode with default concurrency
       const singleTxStart = Date.now();
       const singleTxResult = await sdk.lifecycle.batchInscribeOnBitcoin(
         assets.slice(0, 25),
         {
-          singleTransaction: true,
           feeRate: 10
         }
       );

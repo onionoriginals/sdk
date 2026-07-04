@@ -77,10 +77,20 @@ describe('BtcoCelManager', () => {
       );
     });
 
-    it('should throw error for missing BitcoinManager', () => {
-      expect(() => new BtcoCelManager(createMockSigner(), null as any)).toThrow(
-        'BtcoCelManager requires a BitcoinManager instance'
+    it('rejects a config object passed in the BitcoinManager position', () => {
+      expect(() => new BtcoCelManager(createMockSigner(), { feeRate: 5 } as any)).toThrow(
+        'second argument must be a BitcoinManager'
       );
+    });
+
+    it('constructs without a BitcoinManager (read-only replay), but migrate() requires one', async () => {
+      // Pure reads (getCurrentState) replay the persisted log and need no
+      // Bitcoin access; only the inscribing write path requires the manager.
+      const manager = new BtcoCelManager(createMockSigner(), undefined);
+      expect(manager).toBeDefined();
+      await expect(
+        manager.migrate({ events: [] } as any)
+      ).rejects.toThrow('BTCO operations require a BitcoinManager');
     });
 
     it('should accept custom config', () => {
@@ -140,6 +150,63 @@ describe('BtcoCelManager', () => {
       const state = manager.getCurrentState(btcoLog);
       expect(state.did).toBe('did:btco:1234567890');
       expect(/^did:btco:[0-9]+$/.test(state.did)).toBe(true);
+    });
+
+    it('derives a network-scoped did:btco identifier for non-mainnet networks', async () => {
+      // Regression: getCurrentState hardcoded the mainnet form `did:btco:<sat>`.
+      // On regtest/signet the identifier must carry the network segment
+      // (`did:btco:reg:` / `did:btco:sig:`), matching DIDManager and
+      // createBtcoDidDocument — otherwise a regtest/signet asset resolves
+      // against the mainnet ordinals namespace.
+      const regtestBitcoin = {
+        inscribeData: vi.fn().mockResolvedValue({
+          txid: 'abc123def456',
+          inscriptionId: 'abc123def456i0',
+          satoshi: '1234567890',
+          blockHeight: 800000,
+        }),
+        network: 'regtest',
+      } as unknown as BitcoinManager;
+      const regtestManager = new BtcoCelManager(createMockSigner(), regtestBitcoin);
+
+      const webvhLog = await createWebvhLog();
+      const btcoLog = await regtestManager.migrate(webvhLog);
+
+      const state = regtestManager.getCurrentState(btcoLog);
+      expect(state.did).toBe('did:btco:reg:1234567890');
+      // The network is recorded in the SIGNED migration data.
+      const migrationData = btcoLog.events[2].data as Record<string, unknown>;
+      expect(migrationData.network).toBe('regtest');
+    });
+
+    it('derives the btco network from the log, not the replaying SDK config', async () => {
+      // Regression: deriving the network from `this.bitcoinManager.network` at
+      // replay time made state derivation environment-dependent — replaying a
+      // persisted regtest log under a mainnet-configured SDK rewrote the DID to
+      // the mainnet form. The network is recorded in the signed data, so replay
+      // must be deterministic regardless of the replaying manager's network.
+      const regtestBitcoin = {
+        inscribeData: vi.fn().mockResolvedValue({
+          txid: 'abc123def456',
+          inscriptionId: 'abc123def456i0',
+          satoshi: '1234567890',
+          blockHeight: 800000,
+        }),
+        network: 'regtest',
+      } as unknown as BitcoinManager;
+      const regtestManager = new BtcoCelManager(createMockSigner(), regtestBitcoin);
+      const webvhLog = await createWebvhLog();
+      const btcoLog = await regtestManager.migrate(webvhLog);
+
+      // Replay the SAME persisted log under a mainnet-configured manager.
+      const mainnetBitcoin = {
+        inscribeData: vi.fn(),
+        network: 'mainnet',
+      } as unknown as BitcoinManager;
+      const mainnetManager = new BtcoCelManager(createMockSigner(), mainnetBitcoin);
+
+      const state = mainnetManager.getCurrentState(btcoLog);
+      expect(state.did).toBe('did:btco:reg:1234567890');
     });
 
     it('should include layer: btco in migration data', async () => {
@@ -363,6 +430,24 @@ describe('BtcoCelManager', () => {
       const state = manager.getCurrentState(btcoLog);
 
       expect(state.updatedAt).toBeDefined();
+    });
+
+    it('preserves an application-defined `network` field on an ordinary update', async () => {
+      // Regression: `network` was added to the global metadata exclusion list, so
+      // an ordinary (non-migration) update event carrying an application-defined
+      // `network` field had it silently dropped from state.metadata. The
+      // exclusion must apply only to btco migration events, where `network` is
+      // consumed explicitly.
+      const log = {
+        events: [
+          { type: 'create', data: { did: 'did:peer:abc', name: 'A', layer: 'peer', resources: [] } },
+          { type: 'update', data: { name: 'B', network: 'my-app-network', updatedAt: '2020-01-01T00:00:00.000Z' } },
+        ],
+      } as unknown as EventLog;
+
+      const state = manager.getCurrentState(log);
+      expect(state.metadata?.network).toBe('my-app-network');
+      expect(state.name).toBe('B');
     });
 
     it('should not be deactivated after migration', async () => {

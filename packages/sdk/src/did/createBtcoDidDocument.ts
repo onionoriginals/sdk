@@ -1,6 +1,6 @@
 import { DIDDocument, VerificationMethod } from '../types/did.js';
 import { multikey, MultikeyType } from '../crypto/Multikey.js';
-import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
+import { canonicalizeSatoshi } from '../utils/satoshi-validation.js';
 
 export type BitcoinNetwork = 'mainnet' | 'regtest' | 'signet';
 
@@ -35,13 +35,17 @@ export function createBtcoDidDocument(
 	network: BitcoinNetwork,
 	params: CreateBtcoDidDocumentParams
 ): DIDDocument {
-	// Validate satNumber parameter at entry
-	const validation = validateSatoshiNumber(satNumber);
-	if (!validation.valid) {
-		throw new Error(`Invalid satoshi number: ${validation.error}`);
+	// Validate and canonicalize satNumber at entry. The canonical string (no
+	// whitespace, no leading zeros) is what gets embedded in the DID so the
+	// identifier is resolvable and matches its canonically-inscribed form.
+	let canonicalSat: string;
+	try {
+		canonicalSat = canonicalizeSatoshi(satNumber);
+	} catch (err) {
+		throw new Error(`Invalid satoshi number: ${err instanceof Error ? err.message : String(err)}`);
 	}
 
-	const did = `${getDidPrefix(network)}:${String(satNumber)}`;
+	const did = `${getDidPrefix(network)}:${canonicalSat}`;
 	const vm = buildVerificationMethod(did, params);
 
 	const document: DIDDocument = {

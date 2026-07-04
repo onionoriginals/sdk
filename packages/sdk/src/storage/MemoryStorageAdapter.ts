@@ -10,7 +10,10 @@ const globalStore: Map<DomainPath, Uint8Array> = new Map();
 
 function key(domain: string, objectPath: string): string {
   const cleanPath = objectPath.replace(/^\/+/, '');
-  return `${domain}::${cleanPath}`;
+  // Encode both parts so the delimiter cannot appear inside either: with a
+  // raw `${domain}::${path}` key, key('a::b','c') === key('a','b::c') and a
+  // did:webvh domain containing ':' (encoded port) could collide with a path.
+  return `${encodeURIComponent(domain)}::${encodeURIComponent(cleanPath)}`;
 }
 
 export class MemoryStorageAdapter implements StorageAdapter {

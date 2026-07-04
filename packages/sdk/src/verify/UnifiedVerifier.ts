@@ -15,7 +15,7 @@ import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import type { DIDManager } from '../did/DIDManager.js';
 import type { VerifiableCredential } from '../types/index.js';
-import type { EventLog } from '../cel/types.js';
+import type { EventLog, OrdinalsLookup } from '../cel/types.js';
 
 export type VerifiableKind = 'credential' | 'eventLog' | 'unknown';
 
@@ -45,7 +45,16 @@ export function classifyDocument(document: unknown): VerifiableKind {
 }
 
 export class UnifiedVerifier {
-  constructor(private didManager: DIDManager) {}
+  constructor(
+    private didManager: DIDManager,
+    private options?: {
+      /**
+       * Required to verify event logs carrying bitcoin-ordinals-2024 witness
+       * proofs — btco anchoring is gating (see verifyEventLog).
+       */
+      ordinalsProvider?: OrdinalsLookup;
+    }
+  ) {}
 
   /**
    * Verify a document by inferring its kind and delegating to the appropriate
@@ -66,6 +75,7 @@ export class UnifiedVerifier {
       case 'eventLog': {
         const res = await verifyEventLog(document as EventLog, {
           resolveKey: createDidManagerKeyResolver(this.didManager),
+          ordinalsProvider: this.options?.ordinalsProvider,
         });
         return { kind, verified: res.verified, errors: res.errors, details: res };
       }

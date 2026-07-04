@@ -36,6 +36,26 @@ export interface StatusCheckResult {
 const MINIMUM_BITSTRING_LENGTH = 131072;
 
 /**
+ * Strictly parse a `statusListIndex` string into a non-negative integer.
+ *
+ * `parseInt('5abc', 10)` returns 5 (it stops at the first non-digit) and is not
+ * NaN, so a malformed index like "5abc" would silently target bit 5 — the wrong
+ * credential slot for a revoke/suspend/check. Requiring the whole string to be
+ * digits fails closed on malformed input instead.
+ */
+export function parseStatusListIndex(value: string): number {
+  const str = typeof value === 'string' ? value.trim() : String(value);
+  if (!/^\d+$/.test(str)) {
+    throw new Error(`Invalid statusListIndex: ${value}`);
+  }
+  const index = Number(str);
+  if (!Number.isSafeInteger(index) || index < 0) {
+    throw new Error(`Invalid statusListIndex: ${value}`);
+  }
+  return index;
+}
+
+/**
  * Manages W3C Bitstring Status List credentials for credential revocation and suspension.
  *
  * Implements the W3C Verifiable Credentials Bitstring Status List v1.0 specification.
@@ -201,10 +221,7 @@ export class StatusListManager {
       );
     }
 
-    const index = parseInt(entry.statusListIndex, 10);
-    if (isNaN(index) || index < 0) {
-      throw new Error(`Invalid statusListIndex: ${entry.statusListIndex}`);
-    }
+    const index = parseStatusListIndex(entry.statusListIndex);
 
     const bitstring = StatusListManager.decodeBitstring(subject.encodedList);
     const byteIndex = Math.floor(index / 8);

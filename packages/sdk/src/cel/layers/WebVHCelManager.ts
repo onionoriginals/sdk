@@ -291,13 +291,19 @@ export class WebVHCelManager {
       if (event.type === 'update') {
         const updateData = event.data as Record<string, unknown>;
         
-        // Check if this is a migration event
-        if (updateData.targetDid && updateData.layer) {
+        // Check if this is a migration event. Detect via sourceDid + layer
+        // (present on BOTH webvh and btco migrations) rather than targetDid
+        // (webvh-only): keying off targetDid would misclassify a btco
+        // migration as a regular update. Mirrors OriginalsCel.getCurrentLayer
+        // and BtcoCelManager.getCurrentState.
+        if (updateData.sourceDid && updateData.layer && updateData.migratedAt) {
           // Migration event - update DID and layer
-          state.did = updateData.targetDid as string;
+          if (updateData.targetDid) {
+            state.did = updateData.targetDid as string;
+          }
           state.layer = updateData.layer as 'peer' | 'webvh' | 'btco';
           state.updatedAt = updateData.migratedAt as string;
-          
+
           // Store migration info in metadata
           state.metadata = state.metadata || {};
           state.metadata.sourceDid = updateData.sourceDid;

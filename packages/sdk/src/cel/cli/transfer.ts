@@ -19,6 +19,7 @@ import { serializeEventLogCbor } from '../serialization/cbor.js';
 import { multikey } from '../../crypto/Multikey.js';
 import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize.js';
 import { computeDigestMultibase } from '../hash.js';
+import { btcoDidFromSatoshi } from '../btcoDid.js';
 
 /**
  * Flags parsed from command line arguments
@@ -72,7 +73,7 @@ function getCurrentDid(log: EventLog): string {
     const data = event.data as Record<string, unknown>;
     if (event.type === 'create' && data.did) {
       currentDid = data.did as string;
-    } else if (event.type === 'update' && data.sourceDid && data.layer) {
+    } else if (event.type === 'update' && data.sourceDid && data.layer && data.migratedAt) {
       // Migration event. webvh migrations carry the resolvable targetDid; btco
       // migrations derive did:btco:<satoshi> from the bitcoin witness proof.
       // Transfers happen at the btco layer, so getting this right matters for
@@ -83,8 +84,10 @@ function getCurrentDid(log: EventLog): string {
             !!p && typeof p === 'object' && (p as Record<string, unknown>).cryptosuite === 'bitcoin-ordinals-2024'
         );
         const satoshi = proof?.satoshi;
+        // Network-scoped identifier derived from the SIGNED migration data's
+        // network; legacy logs without one default to the bare mainnet form.
         currentDid = satoshi !== undefined && satoshi !== null
-          ? `did:btco:${satoshi as string | number}`
+          ? btcoDidFromSatoshi(satoshi as string | number, data.network as string | undefined)
           : (data.targetDid as string | undefined) ?? currentDid;
       } else {
         currentDid = (data.targetDid as string | undefined) ?? currentDid;

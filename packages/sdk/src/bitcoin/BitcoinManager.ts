@@ -26,6 +26,24 @@ export class BitcoinManager {
     this.ord = config.ordinalsProvider;
   }
 
+  /**
+   * The Bitcoin network this manager operates on. Exposed so callers that
+   * derive `did:btco` identifiers (which are network-scoped) can produce the
+   * correct network prefix rather than assuming mainnet.
+   */
+  get network(): OriginalsConfig['network'] {
+    return this.config.network;
+  }
+
+  /**
+   * The configured ordinals provider, if any. Exposed so verification paths
+   * (e.g. CEL bitcoin witness proof checks) can query the chain through the
+   * same provider that made the inscriptions.
+   */
+  get ordinalsProvider(): OrdinalsProvider | undefined {
+    return this.ord;
+  }
+
   private async resolveFeeRate(targetBlocks = 1, provided?: number): Promise<number | undefined> {
     // 1) An explicitly provided fee rate always wins: estimators must not
     // silently override what the caller asked to pay.

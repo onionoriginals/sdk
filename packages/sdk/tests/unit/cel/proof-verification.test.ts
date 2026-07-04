@@ -37,7 +37,7 @@ async function generateEd25519KeyPair(): Promise<{
   publicKeyMultikey: string;
 }> {
   const ed25519 = await import('@noble/ed25519');
-  const privateKeyBytes = ed25519.utils.randomPrivateKey();
+  const privateKeyBytes = ed25519.utils.randomSecretKey();
   const publicKeyBytes = new Uint8Array(
     await (ed25519 as any).getPublicKeyAsync(privateKeyBytes)
   );

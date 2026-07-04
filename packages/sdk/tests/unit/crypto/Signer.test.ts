@@ -1,8 +1,8 @@
 import { describe, test, expect, afterEach, spyOn } from 'bun:test';
 import { ES256KSigner, ES256Signer, Ed25519Signer, Bls12381G2Signer } from '../../../src/crypto/Signer';
 import * as secp256k1 from '@noble/secp256k1';
-import { p256 } from '@noble/curves/p256';
-import { bls12_381 as bls } from '@noble/curves/bls12-381';
+import { p256 } from '@noble/curves/nist.js';
+import { bls12_381 as bls } from '@noble/curves/bls12-381.js';
 import * as ed25519 from '@noble/ed25519';
 import { multikey } from '../../../src/crypto/Multikey';
 
@@ -83,14 +83,14 @@ describe('Signer classes', () => {
 
     test('wrong key type throws on sign and verify', async () => {
       const signer = new ES256KSigner();
-      const edPriv = ed25519.utils.randomPrivateKey();
+      const edPriv = ed25519.utils.randomSecretKey();
       const edPub = await ed25519.getPublicKey(edPriv);
       await expect(signer.sign(data, edPrivMb(edPriv))).rejects.toThrow('Invalid key type for ES256K');
       await expect(signer.verify(data, Buffer.alloc(64), edPubMb(edPub))).rejects.toThrow('Invalid key type for ES256K');
     });
 
     test('sign returns bytes path (Uint8Array direct)', async () => {
-      const sk = secp256k1.utils.randomPrivateKey();
+      const sk = secp256k1.utils.randomSecretKey();
       const pk = secp256k1.getPublicKey(sk);
       const signer = new ES256KSigner();
       const sig = await signer.sign(data, secpPrivMb(sk));
@@ -100,7 +100,7 @@ describe('Signer classes', () => {
     });
 
     test('verify returns false for bad signature', async () => {
-      const sk = secp256k1.utils.randomPrivateKey();
+      const sk = secp256k1.utils.randomSecretKey();
       const pk = secp256k1.getPublicKey(sk);
       const signer = new ES256KSigner();
       const sig = await signer.sign(data, secpPrivMb(sk));
@@ -111,7 +111,7 @@ describe('Signer classes', () => {
     });
 
     test('sign handles object with toCompactRawBytes()', async () => {
-      const sk = secp256k1.utils.randomPrivateKey();
+      const sk = secp256k1.utils.randomSecretKey();
       const signer = new ES256KSigner();
       const bytes = new Uint8Array(64).fill(7);
       spyOn(secp256k1, 'signAsync').mockResolvedValue({
@@ -122,7 +122,7 @@ describe('Signer classes', () => {
     });
 
     test('sign handles object with toRawBytes()', async () => {
-      const sk = secp256k1.utils.randomPrivateKey();
+      const sk = secp256k1.utils.randomSecretKey();
       const signer = new ES256KSigner();
       const bytes = new Uint8Array(64).fill(9);
       spyOn(secp256k1, 'signAsync').mockResolvedValue({
@@ -133,7 +133,7 @@ describe('Signer classes', () => {
     });
 
     test('sign handles fallback via new Uint8Array(sigAny)', async () => {
-      const sk = secp256k1.utils.randomPrivateKey();
+      const sk = secp256k1.utils.randomSecretKey();
       const signer = new ES256KSigner();
       const arr = Array.from({ length: 64 }, (_, i) => (i + 1) & 0xff);
       spyOn(secp256k1, 'signAsync').mockResolvedValue(arr as any);
@@ -144,7 +144,7 @@ describe('Signer classes', () => {
     });
 
     test('verify exception path returns false', async () => {
-      const sk = secp256k1.utils.randomPrivateKey();
+      const sk = secp256k1.utils.randomSecretKey();
       const pk = secp256k1.getPublicKey(sk);
       const signer = new ES256KSigner();
       const sig = await signer.sign(data, secpPrivMb(sk));
@@ -164,14 +164,14 @@ describe('Signer classes', () => {
 
     test('wrong key type throws on sign and verify', async () => {
       const signer = new ES256Signer();
-      const edPriv = ed25519.utils.randomPrivateKey();
+      const edPriv = ed25519.utils.randomSecretKey();
       const edPub = await ed25519.getPublicKey(edPriv);
       await expect(signer.sign(data, edPrivMb(edPriv))).rejects.toThrow('Invalid key type for ES256');
       await expect(signer.verify(data, Buffer.alloc(64), edPubMb(edPub))).rejects.toThrow('Invalid key type for ES256');
     });
 
     test('sign returns bytes path (Uint8Array direct)', async () => {
-      const sk = p256.utils.randomPrivateKey();
+      const sk = p256.utils.randomSecretKey();
       const pk = p256.getPublicKey(sk);
       const signer = new ES256Signer();
       const sig = await signer.sign(data, p256PrivMb(sk));
@@ -181,7 +181,7 @@ describe('Signer classes', () => {
     });
 
     test('verify returns false for bad signature', async () => {
-      const sk = p256.utils.randomPrivateKey();
+      const sk = p256.utils.randomSecretKey();
       const pk = p256.getPublicKey(sk);
       const signer = new ES256Signer();
       const sig = await signer.sign(data, p256PrivMb(sk));
@@ -192,7 +192,7 @@ describe('Signer classes', () => {
     });
 
     test('sign handles object with toCompactRawBytes()', async () => {
-      const sk = p256.utils.randomPrivateKey();
+      const sk = p256.utils.randomSecretKey();
       const signer = new ES256Signer();
       const bytes = new Uint8Array(64).fill(11);
       const spy = spyOn(p256, 'sign').mockReturnValue({
@@ -204,7 +204,7 @@ describe('Signer classes', () => {
     });
 
     test('sign handles object with toRawBytes()', async () => {
-      const sk = p256.utils.randomPrivateKey();
+      const sk = p256.utils.randomSecretKey();
       const signer = new ES256Signer();
       const bytes = new Uint8Array(64).fill(13);
       const spy = spyOn(p256, 'sign').mockReturnValue({
@@ -216,7 +216,7 @@ describe('Signer classes', () => {
     });
 
     test('sign handles direct Uint8Array return', async () => {
-      const sk = p256.utils.randomPrivateKey();
+      const sk = p256.utils.randomSecretKey();
       const signer = new ES256Signer();
       const bytes = new Uint8Array(64).fill(21);
       const spy = spyOn(p256, 'sign').mockReturnValue(bytes as any);
@@ -226,7 +226,7 @@ describe('Signer classes', () => {
     });
 
     test('sign handles fallback via new Uint8Array(sigAny)', async () => {
-      const sk = p256.utils.randomPrivateKey();
+      const sk = p256.utils.randomSecretKey();
       const signer = new ES256Signer();
       const arr = Array.from({ length: 64 }, (_, i) => (i + 1) & 0xff);
       const spy = spyOn(p256, 'sign').mockReturnValue(arr as any);
@@ -238,7 +238,7 @@ describe('Signer classes', () => {
     });
 
     test('verify exception path returns false', async () => {
-      const sk = p256.utils.randomPrivateKey();
+      const sk = p256.utils.randomSecretKey();
       const pk = p256.getPublicKey(sk);
       const signer = new ES256Signer();
       const sig = await signer.sign(data, p256PrivMb(sk));
@@ -258,14 +258,14 @@ describe('Signer classes', () => {
 
     test('wrong key type throws on sign and verify', async () => {
       const signer = new Ed25519Signer();
-      const sk = secp256k1.utils.randomPrivateKey();
+      const sk = secp256k1.utils.randomSecretKey();
       const pk = secp256k1.getPublicKey(sk);
       await expect(signer.sign(data, secpPrivMb(sk))).rejects.toThrow('Invalid key type for Ed25519');
       await expect(signer.verify(data, Buffer.alloc(64), secpPubMb(pk))).rejects.toThrow('Invalid key type for Ed25519');
     });
 
     test('sign and verify success; verify returns false with bad signature', async () => {
-      const sk = ed25519.utils.randomPrivateKey();
+      const sk = ed25519.utils.randomSecretKey();
       const pk = await ed25519.getPublicKey(sk);
       const signer = new Ed25519Signer();
       const sig = await signer.sign(data, edPrivMb(sk));
@@ -279,7 +279,7 @@ describe('Signer classes', () => {
     });
 
     test('verify exception path returns false', async () => {
-      const sk = ed25519.utils.randomPrivateKey();
+      const sk = ed25519.utils.randomSecretKey();
       const pk = await ed25519.getPublicKey(sk);
       const signer = new Ed25519Signer();
       const sig = await signer.sign(data, edPrivMb(sk));
@@ -299,15 +299,15 @@ describe('Signer classes', () => {
 
     test('wrong key type throws on sign and verify', async () => {
       const signer = new Bls12381G2Signer();
-      const edPriv = ed25519.utils.randomPrivateKey();
+      const edPriv = ed25519.utils.randomSecretKey();
       const edPub = await ed25519.getPublicKey(edPriv);
       await expect(signer.sign(data, edPrivMb(edPriv))).rejects.toThrow('Invalid key type for Bls12381G2');
       await expect(signer.verify(data, Buffer.alloc(96), edPubMb(edPub))).rejects.toThrow('Invalid key type for Bls12381G2');
     });
 
     test('sign and verify success; verify returns false with bad signature', async () => {
-      const sk = bls.utils.randomPrivateKey();
-      const pk = await bls.getPublicKey(sk);
+      const sk = bls.utils.randomSecretKey();
+      const pk = bls.shortSignatures.getPublicKey(sk).toBytes();
       const signer = new Bls12381G2Signer();
       const sig = await signer.sign(data, blsPrivMb(sk));
       const ok = await signer.verify(data, sig, blsPubMb(pk));
@@ -320,11 +320,11 @@ describe('Signer classes', () => {
     });
 
     test('verify exception path returns false', async () => {
-      const sk = bls.utils.randomPrivateKey();
-      const pk = await bls.getPublicKey(sk);
+      const sk = bls.utils.randomSecretKey();
+      const pk = bls.shortSignatures.getPublicKey(sk).toBytes();
       const signer = new Bls12381G2Signer();
       const sig = await signer.sign(data, blsPrivMb(sk));
-      spyOn(bls, 'verify').mockImplementation((_sig: any, _msg: any, _pk: any) => { throw new Error('boom'); });
+      spyOn(bls.shortSignatures, 'verify').mockImplementation((_sig: any, _msg: any, _pk: any) => { throw new Error('boom'); });
       const ok = await signer.verify(data, sig, blsPubMb(pk));
       expect(ok).toBe(false);
     });
@@ -336,7 +336,7 @@ describe('Signer classes', () => {
 describe('ES256Signer extra branch coverage', () => {
   test('verify catch path when p256.verify throws', async () => {
     const signer = new ES256Signer();
-    const sk = p256.utils.randomPrivateKey();
+    const sk = p256.utils.randomSecretKey();
     const pk = p256.getPublicKey(sk);
     const sig = await signer.sign(Buffer.from('x'), p256PrivMb(sk));
     const spy = spyOn(p256, 'verify').mockImplementation(() => { throw new Error('boom'); });
@@ -350,17 +350,20 @@ describe('ES256Signer extra branch coverage', () => {
 
 
 /** Inlined from Signer.env.false-branch.part.ts */
+// NOTE: @noble/secp256k1 v3.x and @noble/ed25519 v3.x moved sync hash
+// configuration from the (now frozen) `utils` / `etc` objects to a dedicated,
+// writable `hashes` object. Assert against that real v3 configuration surface.
 describe('Signer module env false branches (no injection when already present)', () => {
   test('module initialization ensures utility functions exist', async () => {
     // After module load, verify the utility functions are available
     // This validates lines 20-27 run successfully
     const sAny: any = secp256k1 as any;
     const eAny: any = ed25519 as any;
-    
-    expect(sAny.utils).toBeDefined();
-    expect(typeof sAny.utils.hmacSha256Sync).toBe('function');
-    expect(eAny.utils).toBeDefined();
-    expect(typeof eAny.utils.sha512Sync).toBe('function');
+
+    expect(sAny.hashes).toBeDefined();
+    expect(typeof sAny.hashes.hmacSha256).toBe('function');
+    expect(eAny.hashes).toBeDefined();
+    expect(typeof eAny.hashes.sha512).toBe('function');
   });
 });
 
@@ -369,21 +372,21 @@ describe('Signer module env false branches (no injection when already present)',
 
 /** Inlined from Signer.env.part.ts */
 describe('Signer module utils injection', () => {
-  test('verifies hmacSha256Sync is callable', async () => {
+  test('verifies hmacSha256 is callable', async () => {
     // Verify the injected/existing function works
     const sAny: any = secp256k1 as any;
-    const result = sAny.utils.hmacSha256Sync(
-      new Uint8Array(32).fill(1), 
+    const result = sAny.hashes.hmacSha256(
+      new Uint8Array(32).fill(1),
       new Uint8Array(10).fill(2)
     );
     expect(result).toBeInstanceOf(Uint8Array);
     expect(result.length).toBe(32);
   });
 
-  test('verifies ed25519 sha512Sync is callable', async () => {
+  test('verifies ed25519 sha512 is callable', async () => {
     // Verify the injected/existing function works
     const eAny: any = ed25519 as any;
-    const result = eAny.utils.sha512Sync(new Uint8Array(10).fill(3));
+    const result = eAny.hashes.sha512(new Uint8Array(10).fill(3));
     expect(result).toBeInstanceOf(Uint8Array);
     expect(result.length).toBe(64);
   });
@@ -397,7 +400,7 @@ describe('Signer module utils injection', () => {
 describe('ES256KSigner branch: sign returns direct Uint8Array', () => {
   test('covers instanceof Uint8Array path', async () => {
     const signer = new ES256KSigner();
-    const sk = secp256k1.utils.randomPrivateKey();
+    const sk = secp256k1.utils.randomSecretKey();
     const bytes = new Uint8Array(64).fill(5);
     const spy = spyOn(secp256k1, 'signAsync').mockResolvedValue(bytes as any);
     const sig = await signer.sign(Buffer.from('x'), secpPrivMb(sk));

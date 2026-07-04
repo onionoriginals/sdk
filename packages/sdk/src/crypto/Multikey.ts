@@ -161,10 +161,30 @@ export const multikey = {
   },
 
   decodeMultibase: (encoded: string): Uint8Array => {
-    if (!encoded || encoded[0] !== 'z') {
-      throw new Error('Invalid Multibase encoding: only z-base58btc is supported');
+    if (!encoded || encoded.length < 2) {
+      throw new Error('Invalid Multibase encoding');
     }
-    return base58.decode(encoded.slice(1));
+    // Support the two multibase prefixes the SDK actually emits/accepts:
+    //   'z' = base58btc, 'u' = base64url (no padding).
+    // The CEL structural check accepts a 'u' proofValue as well, so decoding
+    // must accept it too — otherwise a spec-valid base64url signature passes the
+    // structural gate but fails to decode and is rejected as unverifiable.
+    if (encoded[0] === 'z') {
+      return base58.decode(encoded.slice(1));
+    }
+    if (encoded[0] === 'u') {
+      // Validate before decoding. `Buffer.from(..., 'base64url')` silently drops
+      // invalid characters (e.g. "@@@" -> empty buffer) instead of throwing, so
+      // malformed input would otherwise be accepted as an empty result — unlike
+      // the base58 branch, which throws. Reject anything that is not non-empty
+      // unpadded base64url.
+      const payload = encoded.slice(1);
+      if (!/^[A-Za-z0-9_-]+$/.test(payload)) {
+        throw new Error('Invalid Multibase encoding: malformed u-base64url payload');
+      }
+      return new Uint8Array(Buffer.from(payload, 'base64url'));
+    }
+    throw new Error('Invalid Multibase encoding: only z-base58btc and u-base64url are supported');
   },
 
   decodePublicKey: (publicKeyMultibase: string): { key: Uint8Array; type: MultikeyType } => {

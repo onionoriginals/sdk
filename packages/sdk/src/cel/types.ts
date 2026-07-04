@@ -128,6 +128,21 @@ export type UpdateOptions = CreateOptions;
 export type DeactivateOptions = CreateOptions;
 
 /**
+ * Minimal ordinals lookup surface needed to verify bitcoin witness proofs.
+ * Structurally compatible with the SDK's OrdinalsProvider adapter interface.
+ */
+export interface OrdinalsLookup {
+  getInscriptionById(id: string): Promise<{
+    inscriptionId: string;
+    content: Buffer;
+    contentType: string;
+    txid?: string;
+    satoshi?: string;
+  } | null>;
+  getInscriptionsBySatoshi?(satoshi: string): Promise<Array<{ inscriptionId: string }>>;
+}
+
+/**
  * Options for verifying an event log
  */
 export interface VerifyOptions {
@@ -140,6 +155,16 @@ export interface VerifyOptions {
    * resolved or its key is not Ed25519 — the proof then fails closed.
    */
   resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>;
+  /**
+   * Ordinals provider used to verify `bitcoin-ordinals-2024` witness proofs
+   * against the Bitcoin chain. btco anchoring is GATING: a log that carries a
+   * bitcoin witness proof fails verification unless the proof's inscription
+   * exists, is carried by the claimed satoshi, and its content commits to the
+   * event's digest — and that check requires this provider. Logs without
+   * bitcoin witness proofs verify without it. (Skipped on the custom
+   * `verifier` path, where the caller owns proof semantics.)
+   */
+  ordinalsProvider?: OrdinalsLookup;
 }
 
 /**

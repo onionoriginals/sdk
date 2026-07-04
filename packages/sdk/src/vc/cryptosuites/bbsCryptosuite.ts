@@ -115,13 +115,13 @@ export class BBSCryptosuiteManager {
       // Derive public key from private key
       BbsSimple.generateKeyPair();
       // Re-derive with the actual private key
-      const { bls12_381 } = await import('@noble/curves/bls12-381');
+      const { bls12_381 } = await import('@noble/curves/bls12-381.js');
       const Fr = bls12_381.fields.Fr;
-      const G2 = bls12_381.G2.ProjectivePoint;
+      const G2 = bls12_381.G2.Point;
       let hex = '';
       for (let i = 0; i < privateKey.length; i++) hex += privateKey[i].toString(16).padStart(2, '0');
       const sk = Fr.create(BigInt('0x' + hex));
-      publicKey = G2.BASE.multiply(sk).toRawBytes(true);
+      publicKey = G2.BASE.multiply(sk).toBytes(true);
     }
 
     const keypair: BbsKeyPair = { privateKey, publicKey };
@@ -329,7 +329,11 @@ export class BBSCryptosuiteManager {
       const parsed = BBSCryptosuiteUtils.parseDerivedProofValue(proof.proofValue);
       const presentationHeader = options.presentationHeader || new Uint8Array(0);
 
-      // Reconstruct disclosed messages from the document
+      // Reconstruct disclosed messages from the document. The disclosed
+      // document is built by buildDisclosedDocument, which inserts fields in
+      // original-credential enumeration order, so enumerating it yields the
+      // disclosed messages in ascending original-index order — the same order
+      // deriveProof paired them with disclosedIndexes.
       const docCopy = { ...document };
       delete docCopy.proof;
       const { messages: disclosedMessages } = credentialToMessages(
@@ -341,6 +345,19 @@ export class BBSCryptosuiteManager {
         ...parsed.mandatoryIndexes,
         ...parsed.selectiveIndexes,
       ].sort((a, b) => a - b);
+
+      // Positional pairing of message k with allDisclosedIndexes[k] is only
+      // meaningful when the counts agree. A disclosed document with extra or
+      // missing fields would silently shift every message onto the wrong
+      // index, so fail closed instead.
+      if (disclosedMessages.length !== allDisclosedIndexes.length) {
+        return {
+          verified: false,
+          errors: [
+            `Disclosed document has ${disclosedMessages.length} field(s) but the derived proof discloses ${allDisclosedIndexes.length} index(es)`
+          ]
+        };
+      }
 
       const valid = await BbsSimple.verifyProof({
         publicKey: options.publicKey,

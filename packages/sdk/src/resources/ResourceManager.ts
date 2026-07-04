@@ -125,8 +125,17 @@ export class ResourceManager {
     // Generate hash
     const hash = this.hashContent(contentBuffer);
 
-    // Generate or use provided ID
+    // Generate or use provided ID. An explicit id that already exists must
+    // not silently replace that id's version history with a fresh v1 —
+    // creating is not overwriting. Use updateResource to append a version,
+    // or importResource to merge an externally-produced version.
     const id = options.id || uuidv4();
+    if (options.id && this.resources.has(id)) {
+      throw new Error(
+        `Resource with id "${id}" already exists; createResource does not overwrite. ` +
+        `Use updateResource to add a new version or importResource to merge.`
+      );
+    }
 
     // Create resource object
     const resource: Resource = {
@@ -295,10 +304,15 @@ export class ResourceManager {
    */
   getResourceVersion(resourceId: string, version: number): Resource | null {
     const versions = this.resources.get(resourceId);
-    if (!versions || version < 1 || version > versions.length) {
+    if (!versions || version < 1) {
       return null;
     }
-    return versions[version - 1];
+    // Match by the stored version number rather than by array position.
+    // importResource inserts versions by sorted version number and permits
+    // gaps (e.g. importing v1 then v3), so positional indexing would return the
+    // wrong version (or null for a version that is present but non-contiguous).
+    // A resource with no explicit version defaults to 1 (mirrors importResource).
+    return versions.find(v => (v.version ?? 1) === version) ?? null;
   }
 
   /**

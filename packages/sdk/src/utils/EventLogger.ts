@@ -97,7 +97,20 @@ export class EventLogger {
       'verification:completed',
       'batch:started',
       'batch:completed',
-      'batch:failed'
+      'batch:failed',
+      // Migration and batch-progress events: DEFAULT_EVENT_CONFIG advertises
+      // levels for these, so they must actually be subscribed — otherwise the
+      // configured levels are dead settings.
+      'batch:progress',
+      'migration:started',
+      'migration:validated',
+      'migration:checkpointed',
+      'migration:in_progress',
+      'migration:anchoring',
+      'migration:completed',
+      'migration:failed',
+      'migration:rolledback',
+      'migration:quarantine'
     ];
     
     for (const eventType of eventTypes) {
@@ -261,8 +274,20 @@ export class EventLogger {
         };
         break;
         
-      default:
+      default: {
+        // Migration and batch-progress events carry flat, self-describing
+        // payloads; log them generically so their configured levels apply.
+        const genericType = (event as { type: string }).type;
+        if (genericType.startsWith('migration:') || genericType === 'batch:progress') {
+          const rest = { ...(event as unknown as Record<string, unknown>) };
+          delete rest.type;
+          delete rest.timestamp;
+          message = `Event: ${genericType}`;
+          data = rest;
+          break;
+        }
         return; // Unknown event type
+      }
     }
     
     // Call the appropriate log method based on level

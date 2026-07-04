@@ -31,7 +31,7 @@ describe('CLI create command - boundary [CEL-CLI-001 / CEL-CLI-014]', () => {
 
     // Generate and persist a shared key for tests that need one
     const ed25519 = await import('@noble/ed25519');
-    const privateKeyBytes = ed25519.utils.randomPrivateKey();
+    const privateKeyBytes = ed25519.utils.randomSecretKey();
     const privateKey = multikey.encodePrivateKey(privateKeyBytes as Uint8Array, 'Ed25519');
     testKeyPath = path.join(tempDir, 'shared-key.json');
     fs.writeFileSync(testKeyPath, JSON.stringify({ privateKey }));

@@ -1,6 +1,20 @@
 import { describe, test, expect } from 'bun:test';
-import { StatusListManager } from '../../../src/vc/StatusListManager';
+import { StatusListManager, parseStatusListIndex } from '../../../src/vc/StatusListManager';
 import type { BitstringStatusListEntry, BitstringStatusListSubject } from '../../../src/types';
+
+describe('parseStatusListIndex', () => {
+  test('parses canonical non-negative integer strings', () => {
+    expect(parseStatusListIndex('0')).toBe(0);
+    expect(parseStatusListIndex('42')).toBe(42);
+    expect(parseStatusListIndex(' 7 ')).toBe(7);
+  });
+
+  test('fails closed on partially-numeric or non-numeric input (parseInt leniency)', () => {
+    for (const bad of ['5abc', 'not-a-number', '', '-1', '1.5', '0x10', 'aa1z']) {
+      expect(() => parseStatusListIndex(bad)).toThrow(/Invalid statusListIndex/);
+    }
+  });
+});
 
 describe('StatusListManager', () => {
   const manager = new StatusListManager();
@@ -284,6 +298,26 @@ describe('StatusListManager', () => {
         type: 'BitstringStatusListEntry',
         statusPurpose: 'revocation',
         statusListIndex: 'not-a-number',
+        statusListCredential: 'https://example.com/status/1',
+      };
+
+      expect(() => manager.checkStatus(entry, vc)).toThrow(/Invalid statusListIndex/);
+    });
+
+    test('rejects a partially-numeric statusListIndex instead of silently targeting a prefix bit', () => {
+      // Regression: parseInt('5abc', 10) === 5, so checkStatus would silently
+      // read bit 5 for a malformed index. It must fail closed.
+      const vc = manager.createStatusListCredential({
+        id: 'https://example.com/status/1',
+        issuer: 'did:example:issuer',
+        statusPurpose: 'revocation',
+      });
+
+      const entry: BitstringStatusListEntry = {
+        id: 'https://example.com/status/1#bad',
+        type: 'BitstringStatusListEntry',
+        statusPurpose: 'revocation',
+        statusListIndex: '5abc',
         statusListCredential: 'https://example.com/status/1',
       };
 
@@ -717,6 +751,74 @@ describe('StatusListManager', () => {
         credential as any
       );
       expect(result.errors.some(e => e.includes('no status list credential was provided'))).toBe(true);
+    });
+
+    test('verifyCredentialWithStatus fails closed when a declared status cannot be evaluated', async () => {
+      // Regression: when a credential declared a BitstringStatusListEntry that
+      // could not be evaluated (no status list supplied, or checkStatus threw),
+      // verifyCredentialWithStatus left `verified: true` / `revoked: false` and
+      // reported only an error string. A caller gating on `verified`/`revoked`
+      // would treat a possibly-revoked credential as valid. It must fail closed,
+      // mirroring the Data Integrity path (Verifier.verifyCredential).
+      const { OriginalsSDK } = await import('../../../src');
+      const { multikey } = await import('../../../src/crypto/Multikey');
+      const ed = await import('@noble/ed25519');
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+
+      const sk = ed.utils.randomSecretKey();
+      const pk = await ed.getPublicKeyAsync(sk);
+      const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
+      const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
+      const issuer = `did:key:${pkMb}`;
+
+      const statusListVC = sdk.statusList.createStatusListCredential({
+        id: 'https://example.com/status/failclosed/1',
+        issuer,
+        statusPurpose: 'revocation',
+      });
+      const entry = sdk.statusList.allocateStatusEntry(
+        'https://example.com/status/failclosed/1',
+        7,
+        'revocation'
+      );
+
+      const unsignedVc = {
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
+        type: ['VerifiableCredential'],
+        issuer,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:example:subject' },
+        credentialStatus: entry,
+      };
+      const signed = await sdk.credentials.signCredential(unsignedVc as any, skMb, issuer);
+
+      // Baseline: with the correct (unrevoked) status list, it verifies.
+      const ok = await sdk.credentials.verifyCredentialWithStatus(signed, statusListVC);
+      expect(ok.verified).toBe(true);
+      expect(ok.revoked).toBe(false);
+
+      // Fail closed #1: status declared but no status list supplied.
+      const noList = await sdk.credentials.verifyCredentialWithStatus(signed);
+      expect(noList.verified).toBe(false);
+      expect(noList.errors.some(e => e.includes('no status list credential was provided'))).toBe(true);
+
+      // Fail closed #2: an unevaluable status (purpose mismatch -> checkStatus
+      // throws) must not be treated as "not revoked".
+      const suspensionList = sdk.statusList.createStatusListCredential({
+        id: 'https://example.com/status/failclosed/suspension',
+        issuer,
+        statusPurpose: 'suspension',
+      });
+      const mismatch = await sdk.credentials.verifyCredentialWithStatus(signed, suspensionList);
+      expect(mismatch.verified).toBe(false);
+      expect(mismatch.errors.some(e => e.includes('Status check error'))).toBe(true);
+
+      // Determinable revocation still leaves the signature valid: `revoked`
+      // carries the status, `verified` stays true (the signature is genuine).
+      const revokedList = sdk.statusList.setStatus(statusListVC, 7, true);
+      const revoked = await sdk.credentials.verifyCredentialWithStatus(signed, revokedList);
+      expect(revoked.revoked).toBe(true);
+      expect(revoked.verified).toBe(true);
     });
 
     test('SDK exposes statusList on top-level instance', async () => {

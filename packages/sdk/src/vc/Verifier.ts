@@ -92,6 +92,15 @@ export class Verifier {
         return issuerBinding;
       }
 
+      // A credential proof must be an assertion. proofPurpose is bound into
+      // the signed proof-config hash, so it cannot be flipped after signing —
+      // but without this check a credential signed for a different purpose
+      // (e.g. `authentication`) would still verify as a valid assertion.
+      const purposeCheck = await this.checkProofPurpose(proof, 'assertionMethod');
+      if (!purposeCheck.verified) {
+        return purposeCheck;
+      }
+
       const result = await DataIntegrityProofManager.verifyProof(vc, proof as unknown as DataIntegrityProof, { documentLoader: loader });
       if (!result.verified) {
         return { verified: false, errors: result.errors ?? ['Verification failed'] };
@@ -158,6 +167,70 @@ export class Verifier {
       return {
         verified: false,
         errors: [`Proof verificationMethod (${vmDid}) does not match credential ${subjectLabel} (${expectedSubject})`]
+      };
+    }
+    return { verified: true, errors: [] };
+  }
+
+  /**
+   * Enforce that the proof was created for the contextually required purpose:
+   * `assertionMethod` for credentials, `authentication` for presentations.
+   * When the verification method's DID document is resolvable and declares the
+   * corresponding relationship, the verification method must also be listed
+   * (by reference or embedded) under that relationship. Unresolvable DIDs
+   * skip the relationship check — the key itself is still authenticated by
+   * the controller binding plus signature verification.
+   */
+  private async checkProofPurpose(
+    proof: unknown,
+    expectedPurpose: 'assertionMethod' | 'authentication'
+  ): Promise<VerificationResult> {
+    const proofRecord = proof as { proofPurpose?: unknown; verificationMethod?: unknown };
+    const purpose = proofRecord?.proofPurpose;
+    if (purpose !== expectedPurpose) {
+      return {
+        verified: false,
+        errors: [`Proof proofPurpose (${String(purpose)}) does not match the required purpose (${expectedPurpose})`]
+      };
+    }
+
+    const verificationMethod = proofRecord?.verificationMethod;
+    if (typeof verificationMethod !== 'string') {
+      return { verified: false, errors: ['Proof is missing a verificationMethod'] };
+    }
+
+    const vmDid = verificationMethod.split('#')[0];
+    let didDoc: { [k: string]: unknown } | null = null;
+    try {
+      didDoc = (await this.didManager.resolveDID(vmDid)) as { [k: string]: unknown } | null;
+    } catch {
+      didDoc = null;
+    }
+    if (!didDoc) {
+      return { verified: true, errors: [] };
+    }
+
+    const relationship = didDoc[expectedPurpose];
+    if (!Array.isArray(relationship)) {
+      // Document resolves but declares no such relationship: the key is not
+      // authorized for this purpose.
+      return {
+        verified: false,
+        errors: [`DID document for ${vmDid} does not authorize any key for ${expectedPurpose}`]
+      };
+    }
+
+    const fragment = verificationMethod.split('#')[1];
+    const matches = (id: unknown): boolean =>
+      typeof id === 'string' &&
+      (id === verificationMethod || (fragment !== undefined && id.split('#')[1] === fragment));
+    const authorized = relationship.some((entry) =>
+      typeof entry === 'string' ? matches(entry) : matches((entry as { id?: unknown })?.id)
+    );
+    if (!authorized) {
+      return {
+        verified: false,
+        errors: [`Verification method ${verificationMethod} is not authorized for ${expectedPurpose} in ${vmDid}`]
       };
     }
     return { verified: true, errors: [] };
@@ -351,6 +424,13 @@ export class Verifier {
       );
       if (!holderBinding.verified) {
         return holderBinding;
+      }
+
+      // A presentation proof must be an authentication by the holder, not a
+      // re-used assertion proof.
+      const purposeCheck = await this.checkProofPurpose(proof, 'authentication');
+      if (!purposeCheck.verified) {
+        return purposeCheck;
       }
 
       // Validate challenge/domain BEFORE signature verification so a replayed

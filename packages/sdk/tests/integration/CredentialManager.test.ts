@@ -20,7 +20,7 @@ describe('Integration: CredentialManager issue/verify roundtrip', () => {
 
   test('issue and verify using Issuer/Verifier wiring', async () => {
     const did = 'did:peer:issuer1';
-    const sk = ed25519.utils.randomPrivateKey();
+    const sk = ed25519.utils.randomSecretKey();
     const pk = await (ed25519 as any).getPublicKeyAsync(sk);
     const secretKeyMultibase = multikey.encodePrivateKey(sk, 'Ed25519');
     const publicKeyMultibase = multikey.encodePublicKey(pk, 'Ed25519');

@@ -35,6 +35,17 @@ describe('DIDManager additional branches', () => {
     expect(doc).toBeNull();
   });
 
+  test('migrateToDIDBTCO canonicalizes satoshi in keyless fallback (no leading zeros/whitespace)', async () => {
+    // Regression: the keyless-fallback branch built the id from the raw satoshi
+    // argument, so ' 42 ' / '007' produced unresolvable/non-canonical ids.
+    const dm = new DIDManager({ network: 'mainnet' } as any);
+    const doc = await dm.migrateToDIDBTCO({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:webvh:x' }, ' 42 ');
+    expect(doc.id).toBe('did:btco:42');
+
+    const doc2 = await dm.migrateToDIDBTCO({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:webvh:x' }, '007');
+    expect(doc2.id).toBe('did:btco:7');
+  });
+
   test('migrateToDIDBTCO uses first VM when present', async () => {
     const dm = new DIDManager({ network: 'mainnet' } as any);
     const pubDoc = createBtcoDidDocument('1', 'mainnet', { publicKey: new Uint8Array(32).fill(1), keyType: 'Ed25519' });
