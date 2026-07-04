@@ -409,6 +409,32 @@ export class CredentialManager {
         errors.push('Credential has a BitstringStatusListEntry but no status list credential was provided');
       } else {
         try {
+          // Trust checks (issue #238): the supplied status list credential
+          // must be the referenced one, must carry a valid proof, and must be
+          // issued by the checked credential's issuer — otherwise a holder
+          // can hand the verifier a fabricated all-zeros list and bypass
+          // revocation.
+          if (!statusListCredential.id || statusListCredential.id !== status.statusListCredential) {
+            throw new Error(
+              `Status list credential id (${String(statusListCredential.id)}) does not match the ` +
+              `credential's statusListCredential reference (${status.statusListCredential})`
+            );
+          }
+          const listProofValid = await this.verifyCredential(statusListCredential);
+          if (!listProofValid) {
+            throw new Error('Status list credential proof verification failed');
+          }
+          const issuerOf = (c: VerifiableCredential): string | undefined =>
+            typeof c.issuer === 'string' ? c.issuer : (c.issuer as { id?: string } | undefined)?.id;
+          const credentialIssuer = issuerOf(credential);
+          const listIssuer = issuerOf(statusListCredential);
+          if (!credentialIssuer || !listIssuer || credentialIssuer !== listIssuer) {
+            throw new Error(
+              `Status list credential issuer (${String(listIssuer)}) does not match the ` +
+              `checked credential's issuer (${String(credentialIssuer)})`
+            );
+          }
+
           const result = this.statusList.checkStatus(status, statusListCredential);
           if (result.isSet) {
             if (result.statusPurpose === 'revocation') {

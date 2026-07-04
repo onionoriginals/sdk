@@ -112,6 +112,10 @@ describe('VC-003/happy – statusListResolver called during Verifier.checkCreden
         return statusListVC;
       },
     });
+    // The status list fixture is unsigned; stub the proof check so this test
+    // stays focused on resolver invocation (trust checks are covered in
+    // Verifier status-list trust tests).
+    (verifier as any).verifyCredential = async () => ({ verified: true, errors: [] });
 
     const entry = slMgr.allocateStatusEntry(
       'https://example.com/status/list-1',
@@ -152,6 +156,8 @@ describe('VC-003/happy – statusListResolver called during Verifier.checkCreden
     const verifier = new Verifier(dm, {
       statusListResolver: async () => statusListVC,
     });
+    // Unsigned fixture — stub the status list proof check (see note above).
+    (verifier as any).verifyCredential = async () => ({ verified: true, errors: [] });
 
     const entry = slMgr.allocateStatusEntry(
       'https://example.com/status/list-rev',

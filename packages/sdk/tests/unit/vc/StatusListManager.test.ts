@@ -643,6 +643,9 @@ describe('StatusListManager', () => {
     test('verifyCredentialWithStatus detects revoked credentials', async () => {
       const { OriginalsSDK } = await import('../../../src');
       const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      // Unsigned fixtures — stub proof verification so the test focuses on
+      // bit-level status detection (trust checks have dedicated tests).
+      (sdk.credentials as any).verifyCredential = async () => true;
 
       // Create a status list
       const statusListVC = sdk.statusList.createStatusListCredential({
@@ -689,6 +692,8 @@ describe('StatusListManager', () => {
     test('verifyCredentialWithStatus detects suspended credentials', async () => {
       const { OriginalsSDK } = await import('../../../src');
       const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      // Unsigned fixtures — stub proof verification (see note above).
+      (sdk.credentials as any).verifyCredential = async () => true;
 
       const statusListVC = sdk.statusList.createStatusListCredential({
         id: 'https://example.com/status/suspension/1',
@@ -776,6 +781,13 @@ describe('StatusListManager', () => {
         issuer,
         statusPurpose: 'revocation',
       });
+      // Status list credentials must now carry a valid proof (issue #238).
+      // The fixtures here are unsigned, so stub proof verification for
+      // status list credentials ONLY — the credential under test still goes
+      // through real signature verification.
+      const realVerify = sdk.credentials.verifyCredential.bind(sdk.credentials);
+      (sdk.credentials as any).verifyCredential = async (c: any) =>
+        Array.isArray(c?.type) && c.type.includes('BitstringStatusListCredential') ? true : realVerify(c);
       const entry = sdk.statusList.allocateStatusEntry(
         'https://example.com/status/failclosed/1',
         7,
@@ -826,5 +838,111 @@ describe('StatusListManager', () => {
       const sdk = OriginalsSDK.create();
       expect(sdk.statusList).toBeInstanceOf(StatusListManager);
     });
+  });
+});
+
+describe('status list credential trust checks (issue #238)', () => {
+  test('verifyCredentialWithStatus rejects a fabricated status list (revocation bypass attempt)', async () => {
+    const { OriginalsSDK } = await import('../../../src');
+    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    // Main credential signature is treated as valid so the status-path checks are isolated
+    const realVerify = sdk.credentials.verifyCredential.bind(sdk.credentials);
+    (sdk.credentials as any).verifyCredential = async (c: any) =>
+      Array.isArray(c?.type) && c.type.includes('BitstringStatusListCredential') ? realVerify(c) : true;
+
+    const entry = sdk.statusList.allocateStatusEntry('https://issuer.example/status/1', 3, 'revocation');
+    const credential = {
+      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:example:issuer',
+      issuanceDate: new Date().toISOString(),
+      credentialSubject: { id: 'did:example:subject' },
+      credentialStatus: entry,
+    };
+
+    // Attack 1: an all-zeros list with the WRONG id (any list with matching purpose)
+    const wrongIdList = sdk.statusList.createStatusListCredential({
+      id: 'https://attacker.example/status/other',
+      issuer: 'did:example:issuer',
+      statusPurpose: 'revocation',
+    });
+    const r1 = await sdk.credentials.verifyCredentialWithStatus(credential as any, wrongIdList);
+    expect(r1.verified).toBe(false);
+    expect(r1.errors.some(e => e.includes('does not match'))).toBe(true);
+
+    // Attack 2: correct id but UNSIGNED (no proof) — must not decide revocation
+    const unsignedList = sdk.statusList.createStatusListCredential({
+      id: 'https://issuer.example/status/1',
+      issuer: 'did:example:issuer',
+      statusPurpose: 'revocation',
+    });
+    const r2 = await sdk.credentials.verifyCredentialWithStatus(credential as any, unsignedList);
+    expect(r2.verified).toBe(false);
+    expect(r2.errors.some(e => e.includes('proof verification failed'))).toBe(true);
+
+    // Attack 3: correct id, "valid" proof, but issued by a DIFFERENT issuer
+    (sdk.credentials as any).verifyCredential = async () => true; // all proofs "valid"
+    const foreignIssuerList = sdk.statusList.createStatusListCredential({
+      id: 'https://issuer.example/status/1',
+      issuer: 'did:example:attacker',
+      statusPurpose: 'revocation',
+    });
+    const r3 = await sdk.credentials.verifyCredentialWithStatus(credential as any, foreignIssuerList);
+    expect(r3.verified).toBe(false);
+    expect(r3.errors.some(e => e.includes('issuer'))).toBe(true);
+  });
+
+  test('Verifier.checkCredentialStatus enforces id, proof, and issuer binding', async () => {
+    const { Verifier } = await import('../../../src/vc/Verifier');
+    const { DIDManager } = await import('../../../src/did/DIDManager');
+    const { StatusListManager } = await import('../../../src/vc/StatusListManager');
+    const dm = new DIDManager({} as any);
+    const slMgr = new StatusListManager();
+
+    const entry = slMgr.allocateStatusEntry('https://issuer.example/status/2', 9, 'revocation');
+    const credential: any = {
+      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:example:issuer',
+      issuanceDate: new Date().toISOString(),
+      credentialSubject: { id: 'did:example:subject' },
+      credentialStatus: entry,
+    };
+
+    // Wrong id
+    const wrongId = slMgr.createStatusListCredential({
+      id: 'https://elsewhere.example/status', issuer: 'did:example:issuer', statusPurpose: 'revocation'
+    });
+    let verifier = new Verifier(dm, { statusListResolver: async () => wrongId });
+    (verifier as any).verifyCredential = async () => ({ verified: true, errors: [] });
+    const r1 = await verifier.checkCredentialStatus(credential);
+    expect(r1.verified).toBe(false);
+    expect(r1.errors.some(e => e.includes('does not match'))).toBe(true);
+
+    // Unverifiable proof
+    const rightId = slMgr.createStatusListCredential({
+      id: 'https://issuer.example/status/2', issuer: 'did:example:issuer', statusPurpose: 'revocation'
+    });
+    verifier = new Verifier(dm, { statusListResolver: async () => rightId });
+    (verifier as any).verifyCredential = async () => ({ verified: false, errors: ['no proof'] });
+    const r2 = await verifier.checkCredentialStatus(credential);
+    expect(r2.verified).toBe(false);
+    expect(r2.errors.some(e => e.includes('proof verification failed'))).toBe(true);
+
+    // Foreign issuer
+    const foreign = slMgr.createStatusListCredential({
+      id: 'https://issuer.example/status/2', issuer: 'did:example:attacker', statusPurpose: 'revocation'
+    });
+    verifier = new Verifier(dm, { statusListResolver: async () => foreign });
+    (verifier as any).verifyCredential = async () => ({ verified: true, errors: [] });
+    const r3 = await verifier.checkCredentialStatus(credential);
+    expect(r3.verified).toBe(false);
+    expect(r3.errors.some(e => e.includes('issuer'))).toBe(true);
+
+    // Fully consistent list passes
+    verifier = new Verifier(dm, { statusListResolver: async () => rightId });
+    (verifier as any).verifyCredential = async () => ({ verified: true, errors: [] });
+    const ok = await verifier.checkCredentialStatus(credential);
+    expect(ok.verified).toBe(true);
   });
 });
