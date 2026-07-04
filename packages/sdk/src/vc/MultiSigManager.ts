@@ -593,6 +593,12 @@ export class MultiSigManager {
       if (cryptosuite !== 'eddsa-rdfc-2022' || !this.didManager) {
         return false;
       }
+      // A multi-sig member proof must be an assertion; a proof made for
+      // another purpose must not count toward the threshold (cross-purpose
+      // signature reuse).
+      if ((proof as { proofPurpose?: unknown }).proofPurpose !== 'assertionMethod') {
+        return false;
+      }
       const loader = createDocumentLoader(this.didManager);
       const result = await DataIntegrityProofManager.verifyProof(
         credential,

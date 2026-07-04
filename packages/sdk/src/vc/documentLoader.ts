@@ -38,9 +38,23 @@ export class DocumentLoader {
       const isSelfCertifying = did.startsWith('did:key:') || did.startsWith('did:peer:');
       // did:key is FULLY self-certifying: the identifier IS the public
       // multikey, so the key node can be synthesized locally with no
-      // resolution and no registry — did:key:{mk}#{mk} always denotes the
-      // key {mk}. Only the canonical fragment form is accepted, and the key
-      // must decode as a valid multikey (fail closed on garbage).
+      // resolution — did:key:{mk}#{mk} always denotes the key {mk}. Only the
+      // canonical fragment form is accepted, and the key must decode as a
+      // valid multikey (fail closed on garbage).
+      //
+      // Retirement still wins: an out-of-band registry entry marking this
+      // exact VM revoked/compromised must fail closed even though the key is
+      // self-certifying — otherwise the only compromise-recovery mechanism
+      // for did:key would be unreachable (the synthesis below would always
+      // return a fresh, unmarked node first). So the registry retirement
+      // check runs BEFORE synthesis.
+      if (fragment && isSelfCertifying) {
+        const cached = verificationMethodRegistry.get(didUrl);
+        if (cached && ((cached as { revoked?: string; compromised?: string }).revoked ||
+                       (cached as { revoked?: string; compromised?: string }).compromised)) {
+          throw new Error(`Verification method is retired (revoked or compromised): ${didUrl}`);
+        }
+      }
       if (fragment && did.startsWith('did:key:')) {
         const mk = did.slice('did:key:'.length);
         if (fragment === mk) {
@@ -65,10 +79,7 @@ export class DocumentLoader {
       if (fragment && isSelfCertifying) {
         const cached = verificationMethodRegistry.get(didUrl);
         if (cached) {
-          if ((cached as { revoked?: string; compromised?: string }).revoked ||
-              (cached as { revoked?: string; compromised?: string }).compromised) {
-            throw new Error(`Verification method is retired (revoked or compromised): ${didUrl}`);
-          }
+          // (retirement already handled above)
           return {
             document: { '@context': ['https://www.w3.org/ns/did/v1'], ...cached },
             documentUrl: didUrl,

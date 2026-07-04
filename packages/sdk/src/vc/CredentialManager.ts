@@ -239,9 +239,21 @@ export class CredentialManager {
           return await issuer.issueCredential(unsigned, { proofPurpose: 'assertionMethod' });
         }
       } catch (e) {
-        // The issuer-binding refusal must fail closed: falling through to
-        // legacy signing here would sign the impersonating credential anyway.
-        if (e instanceof Error && e.message.includes('does not match the verification method controller')) {
+        // SECURITY refusals must fail closed — never fall through to the
+        // legacy local signer, which would sign the credential the Data
+        // Integrity path just refused. Two conditions are security refusals:
+        //   1. issuer-binding mismatch — a key for did:me minting a
+        //      credential that claims issuer did:victim;
+        //   2. a retired (revoked/compromised) verification method.
+        // Every OTHER error (the loader can't resolve this VM, the key is not
+        // Ed25519, the VM doc is incomplete) is a legitimate reason to fall
+        // back to the legacy signer, which supports ES256K/ES256 did:key
+        // signing that eddsa-rdfc-2022 cannot.
+        const msg = e instanceof Error ? e.message : String(e);
+        const isSecurityRefusal =
+          msg.includes('does not match the verification method controller') ||
+          /retired|revoked|compromised/i.test(msg);
+        if (isSecurityRefusal) {
           throw e;
         }
         // fall through to legacy signing

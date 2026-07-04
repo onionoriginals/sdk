@@ -394,6 +394,18 @@ export class Verifier {
           continue;
         }
 
+        // A multi-sig member proof is an ASSERTION (issuance assent). Without
+        // this check, a signature an authorized signer produced for another
+        // purpose (e.g. `authentication`) would count toward the assertion
+        // threshold — cross-purpose signature reuse. proofPurpose is bound
+        // into the signed proof-config hash, so it cannot be flipped after
+        // signing; rejecting the wrong purpose here refuses the reuse.
+        if ((proof as { proofPurpose?: unknown }).proofPurpose !== 'assertionMethod') {
+          result.invalidSigners.push(vm);
+          result.errors.push(`Proof from ${vm} has proofPurpose ${String((proof as { proofPurpose?: unknown }).proofPurpose)}, expected assertionMethod`);
+          continue;
+        }
+
         try {
           // Every proof this SDK emits is a Data Integrity eddsa-rdfc-2022
           // proof; there is no legacy proof format. Anything else fails

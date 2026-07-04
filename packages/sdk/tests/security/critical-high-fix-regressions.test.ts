@@ -83,3 +83,100 @@ describe('inscription-bearing UTXOs as fee inputs (issue #249)', () => {
     )).toThrow(/inscriptions\/resources or are locked/);
   });
 });
+
+describe('did:key retirement is honored despite self-certifying synthesis (review follow-up)', () => {
+  test('a registered revoked/compromised did:key VM fails closed instead of being resynthesized', async () => {
+    const { createDocumentLoader, registerVerificationMethod, verificationMethodRegistry } =
+      await import('../../src/vc/documentLoader');
+    const { DIDManager } = await import('../../src/did/DIDManager');
+    const { KeyManager } = await import('../../src/did/KeyManager');
+
+    const km = new KeyManager();
+    const key = await km.generateKeyPair('Ed25519');
+    const did = `did:key:${key.publicKey}`;
+    const vmId = `${did}#${key.publicKey}`;
+
+    const dm = new DIDManager({ network: 'regtest' } as never);
+    const loader = createDocumentLoader(dm);
+
+    // Baseline: the canonical did:key fragment synthesizes fine when not retired
+    const ok = await loader(vmId);
+    expect((ok.document as { publicKeyMultibase?: string }).publicKeyMultibase).toBe(key.publicKey);
+
+    // Operator marks the key compromised out-of-band
+    registerVerificationMethod({ id: vmId, publicKeyMultibase: key.publicKey, compromised: '2026-01-01' });
+    try {
+      await expect(loader(vmId)).rejects.toThrow(/retired|revoked|compromised/i);
+    } finally {
+      verificationMethodRegistry.delete(vmId);
+    }
+  });
+});
+
+describe('signCredential fails closed on security refusals (review follow-up)', () => {
+  test('a retired verification method is not silently signed via the legacy fallback', async () => {
+    const { CredentialManager } = await import('../../src/vc/CredentialManager');
+    const { DIDManager } = await import('../../src/did/DIDManager');
+    const { KeyManager } = await import('../../src/did/KeyManager');
+    const { registerVerificationMethod, verificationMethodRegistry } = await import('../../src/vc/documentLoader');
+
+    const km = new KeyManager();
+    const key = await km.generateKeyPair('Ed25519');
+    const did = `did:key:${key.publicKey}`;
+    const vmId = `${did}#${key.publicKey}`;
+
+    const dm = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519' } as never);
+    const cm = new CredentialManager({ network: 'regtest', defaultKeyType: 'Ed25519' } as never, dm);
+
+    registerVerificationMethod({ id: vmId, publicKeyMultibase: key.publicKey, revoked: '2026-01-01' });
+    try {
+      const credential = {
+        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        type: ['VerifiableCredential'],
+        issuer: did,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:example:subject' },
+      };
+      // The DI path refuses (retired key); this must propagate, NOT fall
+      // through to the legacy signer and sign with the revoked key anyway.
+      await expect(cm.signCredential(credential as never, key.privateKey, vmId))
+        .rejects.toThrow(/retired|revoked|compromised/i);
+    } finally {
+      verificationMethodRegistry.delete(vmId);
+    }
+  });
+});
+
+describe('multi-sig proofs must be assertions (review follow-up)', () => {
+  test('an authorized signer proof with a non-assertion proofPurpose does not count toward the threshold', async () => {
+    const { MultiSigManager } = await import('../../src/vc/MultiSigManager');
+    const { DIDManager } = await import('../../src/did/DIDManager');
+    const { KeyManager } = await import('../../src/did/KeyManager');
+
+    const km = new KeyManager();
+    const [k1, k2] = await Promise.all([km.generateKeyPair('Ed25519'), km.generateKeyPair('Ed25519')]);
+    const vms = [k1, k2].map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    const config = { network: 'regtest', defaultKeyType: 'Ed25519' } as never;
+    const mgr = new MultiSigManager(config, new DIDManager(config));
+    const policy = { required: 2, total: 2, signerVerificationMethods: vms };
+
+    const credential = {
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:peer:issuer',
+      issuanceDate: new Date().toISOString(),
+      credentialSubject: { id: 'did:peer:subject' },
+    };
+    const signed = await mgr.signCredentialMultiSig(credential as never, {
+      policy,
+      privateKeys: new Map([[vms[0], k1.privateKey], [vms[1], k2.privateKey]]),
+    });
+
+    // Tamper the first proof's purpose to authentication — it must no longer count
+    const proofs = signed.proof as Array<Record<string, unknown>>;
+    proofs[0].proofPurpose = 'authentication';
+
+    const result = await mgr.verifyMultiSig(signed, policy);
+    expect(result.verified).toBe(false); // only 1 valid assertion proof, threshold 2
+  });
+});
