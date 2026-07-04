@@ -410,7 +410,7 @@ import * as ed25519 from '@noble/ed25519';
 
 describe('EdDSA verifyProof success path', () => {
   test('createProof then verifyProof returns verified=true', async () => {
-    const sk = ed25519.utils.randomPrivateKey();
+    const sk = ed25519.utils.randomSecretKey();
     const pk = ed25519.getPublicKey(sk);
     const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
     const pkMb = multikey.encodePublicKey(pk, 'Ed25519');
@@ -442,7 +442,7 @@ describe('EdDSA verifyProof rejects retired verification methods', () => {
   // verification fail is the revoked/compromised check.
   async function makeSignedCredential() {
     const ed = await import('@noble/ed25519');
-    const sk = ed.utils.randomPrivateKey();
+    const sk = ed.utils.randomSecretKey();
     const pk = await ed.getPublicKeyAsync(sk);
     const pkMb = multikey.encodePublicKey(new Uint8Array(pk), 'Ed25519');
     const skMb = multikey.encodePrivateKey(new Uint8Array(sk), 'Ed25519');

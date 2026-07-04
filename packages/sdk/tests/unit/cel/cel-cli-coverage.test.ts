@@ -49,7 +49,7 @@ async function makeRealDidKeySigner(): Promise<{
   verificationMethod: string;
 }> {
   const ed25519 = await import('@noble/ed25519');
-  const privBytes = ed25519.utils.randomPrivateKey();
+  const privBytes = ed25519.utils.randomSecretKey();
   const pubBytes = new Uint8Array(
     await (ed25519 as unknown as { getPublicKeyAsync: (k: Uint8Array) => Promise<Uint8Array> }).getPublicKeyAsync(privBytes),
   );

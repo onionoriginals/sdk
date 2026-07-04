@@ -36,7 +36,7 @@ import { canonicalizeEvent } from '../../src/cel/canonicalize';
  */
 async function createRealSigner(): Promise<{ signer: CelSigner; verificationMethod: string }> {
   const ed25519 = await import('@noble/ed25519');
-  const privateKeyBytes = ed25519.utils.randomPrivateKey();
+  const privateKeyBytes = ed25519.utils.randomSecretKey();
   const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
   const publicKey = multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519');
   const verificationMethod = `did:key:${publicKey}#${publicKey}`;

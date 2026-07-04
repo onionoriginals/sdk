@@ -8,23 +8,24 @@
 import { Turnkey } from '@turnkey/sdk-server';
 import { ExternalSigner, ExternalVerifier, multikey, OriginalsSDK } from '@originals/sdk';
 import { sha512 } from '@noble/hashes/sha2.js';
-import { concatBytes, bytesToHex } from '@noble/hashes/utils.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import * as ed25519 from '@noble/ed25519';
 
-// Configure @noble/ed25519 with required SHA-512 function
-const sha512Fn = (...msgs: Uint8Array[]): Uint8Array => sha512(concatBytes(...msgs));
+// Configure @noble/ed25519 with required SHA-512 function.
+//
+// NOTE: @noble/ed25519 v3.x moved sync hash configuration from the (now
+// frozen) `utils` / `etc` objects to a dedicated, writable `hashes` object.
+// `hashes.sha512` is called by the library as `fn(message)` with a single
+// already-assembled Uint8Array, so this must not be a variadic wrapper.
+const sha512Fn = (msg: Uint8Array): Uint8Array => sha512(msg);
 
 // Initialize Ed25519 configuration
 try {
   const ed25519Module = ed25519 as unknown as {
-    utils?: { sha512Sync?: typeof sha512Fn };
-    etc?: { sha512Sync?: typeof sha512Fn };
+    hashes?: { sha512?: typeof sha512Fn };
   };
-  if (ed25519Module.utils) {
-    ed25519Module.utils.sha512Sync = sha512Fn;
-  }
-  if (ed25519Module.etc) {
-    ed25519Module.etc.sha512Sync = sha512Fn;
+  if (ed25519Module.hashes) {
+    ed25519Module.hashes.sha512 = sha512Fn;
   }
 } catch (error) {
   console.warn('Failed to configure ed25519 utils:', error);
@@ -138,13 +139,6 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
         ed25519PublicKey = publicKey.slice(1);
       } else if (publicKey.length !== 32) {
         return false;
-      }
-
-      const ed25519Module = ed25519 as unknown as {
-        utils?: { sha512Sync?: typeof sha512Fn };
-      };
-      if (typeof ed25519Module.utils?.sha512Sync !== 'function') {
-        ed25519Module.utils!.sha512Sync = sha512Fn;
       }
 
       return await ed25519.verifyAsync(signature, message, ed25519PublicKey);

@@ -115,13 +115,13 @@ export class BBSCryptosuiteManager {
       // Derive public key from private key
       BbsSimple.generateKeyPair();
       // Re-derive with the actual private key
-      const { bls12_381 } = await import('@noble/curves/bls12-381');
+      const { bls12_381 } = await import('@noble/curves/bls12-381.js');
       const Fr = bls12_381.fields.Fr;
-      const G2 = bls12_381.G2.ProjectivePoint;
+      const G2 = bls12_381.G2.Point;
       let hex = '';
       for (let i = 0; i < privateKey.length; i++) hex += privateKey[i].toString(16).padStart(2, '0');
       const sk = Fr.create(BigInt('0x' + hex));
-      publicKey = G2.BASE.multiply(sk).toRawBytes(true);
+      publicKey = G2.BASE.multiply(sk).toBytes(true);
     }
 
     const keypair: BbsKeyPair = { privateKey, publicKey };

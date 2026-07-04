@@ -112,7 +112,9 @@ describe('diwings Verifier', () => {
         type: ['VerifiableCredential', 'Test'],
         issuer: did,
         issuanceDate: new Date(Date.now() - 60_000).toISOString(),
-        expirationDate: new Date(Date.now() - 1_000).toISOString(),
+        // Well in the past (not just barely) so a slow/loaded CI runner can't
+        // race this into a false pass.
+        expirationDate: new Date(Date.now() - 30_000).toISOString(),
         credentialSubject: { id: 'did:peer:subject1' }
       } as any,
       { proofPurpose: 'assertionMethod' }

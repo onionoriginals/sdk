@@ -162,7 +162,7 @@ describe('CEL-CORE-023/security – revoked/compromised key rejection through ve
 
   beforeAll(async () => {
     const ed25519 = await import('@noble/ed25519');
-    privateKeyBytes = ed25519.utils.randomPrivateKey();
+    privateKeyBytes = ed25519.utils.randomSecretKey();
     publicKeyBytes = new Uint8Array(
       await (ed25519 as any).getPublicKeyAsync(privateKeyBytes),
     );

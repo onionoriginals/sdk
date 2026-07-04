@@ -173,8 +173,8 @@ describe('Peer to WebVH Migration', () => {
   });
 
   test('records a signed audit entry that verifies when a signer is configured', async () => {
-    const privateKey = ed25519.utils.randomPrivateKey();
-    const publicKey = await ed25519.getPublicKeyAsync(Buffer.from(privateKey).toString('hex'));
+    const privateKey = ed25519.utils.randomSecretKey();
+    const publicKey = await ed25519.getPublicKeyAsync(privateKey);
     const auditSigner: AuditSignerConfig = {
       privateKey,
       publicKey,
@@ -205,8 +205,8 @@ describe('Peer to WebVH Migration', () => {
     expect(await verifier.verifyAuditRecord(record)).toBe(true);
 
     // ...but not under a different key (signatures are key-bound).
-    const otherPriv = ed25519.utils.randomPrivateKey();
-    const otherPub = await ed25519.getPublicKeyAsync(Buffer.from(otherPriv).toString('hex'));
+    const otherPriv = ed25519.utils.randomSecretKey();
+    const otherPub = await ed25519.getPublicKeyAsync(otherPriv);
     const wrongVerifier = new AuditLogger(signedSdk['config'], {
       privateKey: otherPriv,
       publicKey: otherPub,

@@ -4,7 +4,7 @@ import '../crypto/noble-init.js';
 import { DIDDocument, KeyPair, KeyType, KeyRecoveryCredential } from '../types/index.js';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
-import { p256 } from '@noble/curves/p256';
+import { p256 } from '@noble/curves/nist.js';
 import { multikey, MultikeyType } from '../crypto/Multikey.js';
 
 function toMultikeyType(type: KeyType): MultikeyType {
@@ -29,7 +29,7 @@ export class KeyManager {
 	}
 	async generateKeyPair(type: KeyType): Promise<KeyPair> {
                 if (type === 'ES256K') {
-                        const privateKeyBytes = secp256k1.utils.randomPrivateKey();
+                        const privateKeyBytes = secp256k1.utils.randomSecretKey();
                         const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, true);
                         return {
                                 privateKey: multikey.encodePrivateKey(privateKeyBytes, 'Secp256k1'),
@@ -38,7 +38,7 @@ export class KeyManager {
                 }
 
                 if (type === 'Ed25519') {
-                        const privateKeyBytes = ed25519.utils.randomPrivateKey();
+                        const privateKeyBytes = ed25519.utils.randomSecretKey();
                         const ed25519Module = ed25519 as unknown as { getPublicKeyAsync: (privateKey: Uint8Array) => Promise<Uint8Array> };
                         const publicKeyBytes = await ed25519Module.getPublicKeyAsync(privateKeyBytes);
                         return {
@@ -48,7 +48,7 @@ export class KeyManager {
                 }
 
                 if (type === 'ES256') {
-                        const privateKeyBytes = p256.utils.randomPrivateKey();
+                        const privateKeyBytes = p256.utils.randomSecretKey();
                         const publicKeyBytes = p256.getPublicKey(privateKeyBytes, true);
                         return {
                                 privateKey: multikey.encodePrivateKey(privateKeyBytes, 'P256'),

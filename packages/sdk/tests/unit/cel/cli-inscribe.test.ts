@@ -62,7 +62,7 @@ async function createWebvhLog(name: string = 'Test Asset'): Promise<EventLog> {
 
 async function createTestWallet(dir: string): Promise<string> {
   const ed25519 = await import('@noble/ed25519');
-  const privateKeyBytes = ed25519.utils.randomPrivateKey();
+  const privateKeyBytes = ed25519.utils.randomSecretKey();
   const privateKey = multikey.encodePrivateKey(privateKeyBytes as Uint8Array, 'Ed25519');
 
   const walletPath = path.join(dir, 'test-wallet.key');

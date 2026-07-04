@@ -3,12 +3,12 @@
 /** Inlined from bbs.simple.part.ts */
 import { describe, test, expect } from 'bun:test';
 import { BbsSimple } from '../../../src';
-import { bls12_381 as bls } from '@noble/curves/bls12-381';
+import { bls12_381 as bls } from '@noble/curves/bls12-381.js';
 
 describe('BbsSimple e2e', () => {
   test('sign/verify not implemented with header', async () => {
-    const sk = bls.utils.randomPrivateKey();
-    const pk = bls.getPublicKey(sk);
+    const sk = bls.utils.randomSecretKey();
+    const pk = bls.shortSignatures.getPublicKey(sk).toBytes();
     const keypair = { privateKey: sk, publicKey: pk };
     const header = new Uint8Array([1, 2, 3]);
     const messages = [
@@ -22,8 +22,8 @@ describe('BbsSimple e2e', () => {
   });
 
   test('sign/verify not implemented with default header', async () => {
-    const sk = bls.utils.randomPrivateKey();
-    const pk = bls.getPublicKey(sk);
+    const sk = bls.utils.randomSecretKey();
+    const pk = bls.shortSignatures.getPublicKey(sk).toBytes();
     const keypair = { privateKey: sk, publicKey: pk };
     const messages = [
       new TextEncoder().encode('a'),
