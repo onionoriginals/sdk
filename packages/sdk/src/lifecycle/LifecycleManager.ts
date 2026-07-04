@@ -126,6 +126,13 @@ export class LifecycleManager {
   private batchOps: BatchLifecycleOperations;
   private logger: Logger;
   private metrics: MetricsCollector;
+  /**
+   * Assets with an inscription or publication currently in flight, keyed by
+   * asset id. Mutated synchronously before the first await so concurrent
+   * calls for the same asset cannot both pass the layer guard and double-pay
+   * for two inscriptions (issue #255).
+   */
+  private inFlightAssets = new Set<string>();
 
   constructor(
     private config: OriginalsConfig,
@@ -546,7 +553,18 @@ export class LifecycleManager {
       if (asset.currentLayer !== 'did:peer') {
         throw new StructuredError('INVALID_STATE', 'Asset must be in did:peer layer to publish to web. Assets can only be published from the did:peer layer.');
       }
-      
+
+      // Concurrency guard (issue #255): the layer check above is
+      // check-then-act across awaits — overlapping publishes would both pass
+      // it and duplicate storage writes/credentials.
+      if (this.inFlightAssets.has(asset.id)) {
+        throw new StructuredError(
+          'OPERATION_IN_PROGRESS',
+          `An inscription or publication for asset ${asset.id} is already in progress.`
+        );
+      }
+      this.inFlightAssets.add(asset.id);
+      try {
       const { publisherDid, signer } = this.extractPublisherInfo(publisherDidOrSigner);
       const { domain, userPath } = this.parseWebVHDid(publisherDid);
       
@@ -575,6 +593,9 @@ export class LifecycleManager {
       this.metrics.recordMigration('did:peer', 'did:webvh');
 
       return asset;
+      } finally {
+        this.inFlightAssets.delete(asset.id);
+      }
     } catch (error) {
       stopTimer();
       this.logger.error('Publish to web failed', error as Error, { assetId: asset.id });
@@ -913,6 +934,18 @@ export class LifecycleManager {
     if (asset.currentLayer !== 'did:webvh' && asset.currentLayer !== 'did:peer') {
       throw new StructuredError('NOT_IMPLEMENTED', 'Asset inscription is not yet implemented for this layer. Assets must be in did:peer or did:webvh layer to inscribe.');
     }
+    // Concurrency guard (issue #255): the layer check above is check-then-act
+    // across the awaits below — two overlapping calls would both pass it,
+    // both broadcast paid commit/reveal pairs, and the loser's inscription
+    // would be orphaned. Claim the asset synchronously before the first await.
+    if (this.inFlightAssets.has(asset.id)) {
+      throw new StructuredError(
+        'OPERATION_IN_PROGRESS',
+        `An inscription or publication for asset ${asset.id} is already in progress; concurrent operations on the same asset would double-pay for duplicate inscriptions.`
+      );
+    }
+    this.inFlightAssets.add(asset.id);
+    try {
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const manifest = {
       assetId: asset.id,
@@ -972,6 +1005,9 @@ export class LifecycleManager {
     this.metrics.recordMigration(fromLayer, 'did:btco');
 
     return asset;
+    } finally {
+      this.inFlightAssets.delete(asset.id);
+    }
     } catch (error) {
       stopTimer();
       this.logger.error('Bitcoin inscription failed', error as Error, { assetId: asset.id, feeRate });

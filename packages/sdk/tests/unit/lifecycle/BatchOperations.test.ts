@@ -350,6 +350,20 @@ describe('BatchOperations', () => {
         expect(results[1].isValid).toBe(true);
       });
 
+      test('rejects the same asset listed twice in one batch (issue #243)', () => {
+        const asset = {
+          id: 'did:peer:dup',
+          currentLayer: 'did:peer',
+          resources: [{ id: 'res1' }]
+        } as any;
+
+        const results = validator.validateBatchInscription([asset, asset]);
+
+        expect(results[0].isValid).toBe(true);
+        expect(results[1].isValid).toBe(false);
+        expect(results[1].errors.join(' ')).toContain('Duplicate asset in batch');
+      });
+
       test('should detect already inscribed assets', () => {
         const assets = [
           {

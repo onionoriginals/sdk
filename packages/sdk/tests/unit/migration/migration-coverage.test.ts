@@ -1315,3 +1315,95 @@ describe('MigrationManager: audit failures and rollback state consistency', () =
     expect(batch.batchId).toBe(`batch_${batch.startTime}`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Issue #254: migrate() must honor estimateCostOnly
+// Issue #255: concurrent migrations of the same DID must be rejected
+// ---------------------------------------------------------------------------
+
+describe('migrate() honors estimateCostOnly (issue #254)', () => {
+  afterEach(() => {
+    MigrationManager.resetInstance();
+  });
+
+  it('migrate({ estimateCostOnly: true }) returns an estimate and performs no migration', async () => {
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const result = await manager.migrate({
+      sourceDid: peerDid.id,
+      targetLayer: 'webvh',
+      domain: 'example.com',
+      estimateCostOnly: true
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.cost).toBeDefined();
+    // No migration executed: no target DID was created
+    expect(result.targetDid).toBeUndefined();
+  });
+});
+
+describe('concurrent migrations of the same DID are rejected (issue #255)', () => {
+  afterEach(() => {
+    MigrationManager.resetInstance();
+  });
+
+  it('the second concurrent migrate() for the same sourceDid fails with MIGRATION_IN_PROGRESS', async () => {
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const opts = { sourceDid: peerDid.id, targetLayer: 'webvh' as const, domain: 'example.com' };
+
+    const [first, second] = await Promise.allSettled([
+      manager.migrate(opts),
+      manager.migrate(opts)
+    ]);
+
+    const outcomes = [first, second];
+    // Exactly one attempt proceeds; the other is rejected by the in-flight guard
+    const inProgressErrors = outcomes.filter(o =>
+      o.status === 'rejected' && /already in progress/i.test(String((o as PromiseRejectedResult).reason?.message ?? (o as PromiseRejectedResult).reason))
+    );
+    expect(inProgressErrors.length).toBe(1);
+  });
+
+  it('sequential migrations are not blocked by the guard', async () => {
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const opts = { sourceDid: peerDid.id, targetLayer: 'webvh' as const, domain: 'example.com' };
+
+    const r1 = await manager.migrate(opts);
+    // The guard must have been released — a second call reaches normal
+    // validation/migration logic instead of MIGRATION_IN_PROGRESS
+    let secondError: unknown = null;
+    try {
+      await manager.migrate(opts);
+    } catch (e) {
+      secondError = e;
+    }
+    expect(r1).toBeDefined();
+    if (secondError) {
+      expect(String((secondError as Error).message)).not.toMatch(/already in progress/i);
+    }
+  });
+});

@@ -353,6 +353,11 @@ export class BatchValidator {
    * Validate batch of assets for inscription
    */
   validateBatchInscription(assets: OriginalsAsset[]): ValidationResult[] {
+    // Detect duplicates across the whole batch: each per-item check runs
+    // against pre-batch state, so the same asset listed twice would pass both
+    // checks independently and then be inscribed twice — paying twice and
+    // failing the second migration after the money is spent (issue #243).
+    const seenIds = new Map<string, number>();
     return assets.map((asset, index) => {
       const errors: string[] = [];
 
@@ -363,6 +368,10 @@ export class BatchValidator {
 
       if (!asset.id || typeof asset.id !== 'string') {
         errors.push(`Item ${index}: Missing or invalid asset id`);
+      } else if (seenIds.has(asset.id)) {
+        errors.push(`Item ${index}: Duplicate asset in batch (same id as item ${seenIds.get(asset.id)}): ${asset.id}`);
+      } else {
+        seenIds.set(asset.id, index);
       }
 
       const currentLayer = asset.currentLayer;
