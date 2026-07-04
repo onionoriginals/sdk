@@ -5,10 +5,11 @@ import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../src';
 import { AssetResource } from '../../src/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';
+import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 
 describe('WebVH publish end-to-end', () => {
   const keyStore = new MockKeyStore();
-  const sdk = OriginalsSDK.create({ network: 'regtest', keyStore });
+  const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', keyStore });
   const publisherDid = 'did:webvh:example.com:alice';
 
   test('createAsset → publishToWeb yields did:webvh and provenance event', async () => {

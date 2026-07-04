@@ -33,6 +33,7 @@ import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { BitcoinManager } from '../../../src/bitcoin/BitcoinManager';
 import type { OriginalsConfig } from '../../../src/types';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
+import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 
 // ---------------------------------------------------------------------------
 // Shared test helpers
@@ -43,6 +44,7 @@ const baseConfig: OriginalsConfig = {
   webvhNetwork: 'magby',
   defaultKeyType: 'Ed25519',
   enableLogging: false,
+  storageAdapter: new MemoryStorageAdapter(),
 };
 
 const sampleResources = [
@@ -355,6 +357,7 @@ describe('CORE-MIG-EVENTS-034: StorageValidator', () => {
     const configNoStorage: OriginalsConfig = {
       ...baseConfig,
       // storageAdapter intentionally omitted
+      storageAdapter: undefined,
     };
     const validator = new StorageValidator(configNoStorage);
 

@@ -14,14 +14,14 @@ const resources = [
 
 describe('LifecycleManager', () => {
   test('createAsset creates a peer-layer asset', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset(resources);
     expect(asset.currentLayer).toBe('did:peer');
     expect(asset.id.startsWith('did:peer:')).toBe(true);
   });
 
   test('publishToWeb migrates and records binding', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset(resources);
     const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
     expect(published.currentLayer).toBe('did:webvh');
@@ -30,7 +30,7 @@ describe('LifecycleManager', () => {
 
   test('inscribeOnBitcoin uses provider details for provenance', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset(resources);
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     const btco = await sdk.lifecycle.inscribeOnBitcoin(asset, 9);
@@ -46,19 +46,19 @@ describe('LifecycleManager', () => {
   });
 
   test('inscribeOnBitcoin without provider throws error', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset(resources);
     await expect(sdk.lifecycle.inscribeOnBitcoin(asset, 5)).rejects.toThrow('Ordinals provider must be configured');
   });
 
   test('inscribeOnBitcoin enforces migration guard', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const fakeAsset = { currentLayer: 'did:webvh', migrate: undefined } as unknown as OriginalsAsset;
     await expect(sdk.lifecycle.inscribeOnBitcoin(fakeAsset, 5)).rejects.toThrow('not yet implemented for this asset type');
   });
 
   test('publishToWeb throws Not implemented (coverage for throw)', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const fakeAsset: any = { currentLayer: 'did:peer' };
     await expect(
       sdk.lifecycle.publishToWeb(fakeAsset, 'example.com')
@@ -66,7 +66,7 @@ describe('LifecycleManager', () => {
   });
 
   test('inscribeOnBitcoin throws Not implemented (coverage for throw)', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const fakeAsset: any = { currentLayer: 'did:webvh' };
     await expect(
       sdk.lifecycle.inscribeOnBitcoin(fakeAsset, 10)
@@ -75,7 +75,7 @@ describe('LifecycleManager', () => {
 
   test('transferOwnership succeeds when on btco (returns tx)', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }
     ]);
@@ -85,7 +85,7 @@ describe('LifecycleManager', () => {
   });
 
   test('transferOwnership errors if not on btco layer', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     // This one should pass given current guard
     const asset = await (async () => {
       try {
@@ -108,7 +108,7 @@ import { PSBTBuilder } from '../../../src/bitcoin/PSBTBuilder';
 describe('Bitcoin inscription MVP - dry run', () => {
   test('dry-run using mocked provider and broadcaster', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
 
     // Inject mocked dependencies
     const mockBroadcast = new BroadcastClient(async (_hex) => 'tx-dryrun', async (_txid) => ({ confirmed: true, confirmations: 1 }));
@@ -146,6 +146,7 @@ describe('Bitcoin inscription MVP - dry run', () => {
 import { LifecycleManager } from '../../../src/lifecycle/LifecycleManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
+import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 
 describe('LifecycleManager additional branch coverage', () => {
   const lm = new LifecycleManager({ network: 'mainnet' } as any, new DIDManager({} as any), new CredentialManager({} as any));
@@ -191,7 +192,7 @@ describe('LifecycleManager additional branches', () => {
 describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
   test('uses provider.estimateFee when feeRate not provided', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }]);
     const result = await sdk.lifecycle.inscribeOnBitcoin(asset);
     expect(result.currentLayer).toBe('did:btco');
@@ -202,7 +203,7 @@ describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
 
   test('transferOwnership uses provenance inscription data', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset(resources);
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     await sdk.lifecycle.inscribeOnBitcoin(asset, 8);
@@ -217,7 +218,7 @@ describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
 describe('LifecycleManager.issuePublicationCredential guard', () => {
   test('publishToWeb with empty resources does not crash on credential issuance', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
     // Create asset then clear its resources to simulate empty-resource edge case
     const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }]);
     // Forcefully empty the resources array
@@ -229,5 +230,28 @@ describe('LifecycleManager.issuePublicationCredential guard', () => {
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     // Verify no ResourceMigrated credential was issued (since resources were empty)
     expect(asset.credentials.length).toBe(0);
+  });
+});
+
+describe('publishToWeb storage requirement (issue #244)', () => {
+  test('throws STORAGE_REQUIRED when no storageAdapter is configured', async () => {
+    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'ff00', url: undefined as any }
+    ] as any);
+    await expect(sdk.lifecycle.publishToWeb(asset, 'example.com'))
+      .rejects.toThrow(/storageAdapter must be configured/);
+    // The asset must NOT have migrated
+    expect(asset.currentLayer).toBe('did:peer');
+  });
+
+  test('throws STORAGE_REQUIRED when the adapter implements neither put nor putObject', async () => {
+    const sdk = OriginalsSDK.create({ network: 'regtest', storageAdapter: { get: async () => null } as any });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'ff00', url: undefined as any }
+    ] as any);
+    await expect(sdk.lifecycle.publishToWeb(asset, 'example.com'))
+      .rejects.toThrow(/neither put\(\) nor putObject\(\)/);
+    expect(asset.currentLayer).toBe('did:peer');
   });
 });

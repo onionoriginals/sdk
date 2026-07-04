@@ -7,6 +7,7 @@
  */
 import { describe, it, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
+import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 
 const resources = [
   {
@@ -19,7 +20,7 @@ const resources = [
 ];
 
 async function createDraftAsset() {
-  const sdk = OriginalsSDK.create({ network: 'regtest', enableLogging: false });
+  const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', enableLogging: false });
   return { sdk, asset: await sdk.lifecycle.createAsset(resources) };
 }
 

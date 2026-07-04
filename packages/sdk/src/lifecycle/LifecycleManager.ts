@@ -634,8 +634,28 @@ export class LifecycleManager {
     domain: string,
     userPath: string
   ): Promise<void> {
-    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter || new MemoryStorageAdapter();
-    
+    // Publication must actually host content somewhere. Falling back to a
+    // method-local MemoryStorageAdapter (whose contents are garbage-collected
+    // the moment this call returns) — or writing nothing because the adapter
+    // implements neither put() nor putObject() — would still migrate the
+    // asset and issue a publication credential asserting content is hosted
+    // when it is not (issue #244).
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
+    if (!storage) {
+      throw new StructuredError(
+        'STORAGE_REQUIRED',
+        'A storageAdapter must be configured to publish to web: resource content has to be hosted somewhere. ' +
+        'Provide config.storageAdapter (e.g. MemoryStorageAdapter for tests, LocalStorageAdapter, or a custom adapter).'
+      );
+    }
+    const storageWithPutCheck = storage as { put?: unknown; putObject?: unknown };
+    if (typeof storageWithPutCheck.put !== 'function' && typeof storageWithPutCheck.putObject !== 'function') {
+      throw new StructuredError(
+        'STORAGE_REQUIRED',
+        'The configured storageAdapter implements neither put() nor putObject(); resources cannot be published.'
+      );
+    }
+
     for (const resource of asset.resources) {
       const hashBytes = hexToBytes(resource.hash);
       const multibase = encodeBase64UrlMultibase(hashBytes);

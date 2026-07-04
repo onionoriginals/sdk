@@ -11,6 +11,7 @@ import '../crypto/noble-init.js';
 import { OriginalsSDK } from '../core/OriginalsSDK.js';
 import { OrdMockProvider } from '../adapters/providers/OrdMockProvider.js';
 import { ResourceManager } from '../resources/index.js';
+import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter.js';
 import type { OriginalsAsset } from '../lifecycle/OriginalsAsset.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
@@ -336,6 +337,7 @@ const state: SessionState = {
     defaultKeyType: 'Ed25519',
     webvhNetwork: 'magby',
     ordinalsProvider: new OrdMockProvider(),
+    storageAdapter: new MemoryStorageAdapter(),
     logging: { level: 'error' },
   }),
   resourceManager: new ResourceManager(),
