@@ -44,17 +44,23 @@ export class CheckpointManager implements ICheckpointManager {
       }
 
       // Create checkpoint
+      // HONESTY NOTE (issue #237): this checkpoint captures the resolved DID
+      // document, the migration's layers, and caller metadata — nothing more.
+      // credentials/storageReferences/lifecycleState/ownershipProofs are NOT
+      // captured in this version, so rollback cannot restore them and must
+      // not claim to. RollbackManager reports partial results accordingly.
       const checkpoint: MigrationCheckpoint = {
         checkpointId,
         migrationId,
         timestamp: Date.now(),
         sourceDid: options.sourceDid,
         sourceLayer,
+        targetLayer: options.targetLayer,
         didDocument,
-        credentials: [], // Would be populated by querying credential store
-        storageReferences: {}, // Would be populated by querying storage adapter
-        lifecycleState: {}, // Would be populated by querying lifecycle manager
-        ownershipProofs: [], // Would be populated if available
+        credentials: [],
+        storageReferences: {},
+        lifecycleState: {},
+        ownershipProofs: [],
         metadata: options.metadata || {}
       };
 

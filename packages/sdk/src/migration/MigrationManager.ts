@@ -497,10 +497,13 @@ export class MigrationManager {
     // rollback's restoredState (ROLLED_BACK on success, QUARANTINED on failure).
     let rollbackSuccess = false;
     let finalState: MigrationStateEnum = MigrationStateEnum.FAILED;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let rollbackOutcome: any;
     if (checkpoint) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-        const rollbackResult = await this.rollbackManager.rollback(migrationId, checkpoint.checkpointId);
+        const rollbackResult = await this.rollbackManager.rollback(migrationId, checkpoint.checkpointId, { error });
+        rollbackOutcome = rollbackResult;
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         rollbackSuccess = rollbackResult.success;
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -516,7 +519,11 @@ export class MigrationManager {
           console.error('Failed to update migration state after rollback:', stateError);
         }
 
-        if (!rollbackSuccess) {
+        // PARTIALLY_ROLLED_BACK is an accurate report of irreversible
+        // artifacts (e.g. a paid Bitcoin inscription), not a rollback
+        // machinery failure — only genuine QUARANTINED outcomes raise the
+        // quarantine event.
+        if (!rollbackSuccess && finalState === MigrationStateEnum.QUARANTINED) {
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
           await this.emitEvent('migration:quarantine', {
             migrationId,
@@ -599,6 +606,8 @@ export class MigrationManager {
       auditRecord,
       error: migrationError,
       auditPersisted,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      ...(rollbackOutcome ? { rollback: rollbackOutcome } : {}),
       ...(auditErrorMessage ? { auditError: auditErrorMessage } : {})
     };
   }
