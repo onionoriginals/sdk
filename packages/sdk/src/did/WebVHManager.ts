@@ -194,6 +194,16 @@ export interface CreateWebVHOptions {
    * persisted by the caller for use in the next `rotateDIDWebVHKeys` call.
    */
   prerotation?: boolean;
+  /**
+   * Extra verification methods to publish in the DID document alongside the
+   * signing key (e.g. keys carried over from a migrated did:peer document).
+   * These do NOT become updateKeys — they are published for verification only.
+   */
+  additionalVerificationMethods?: VerificationMethod[];
+  /** alsoKnownAs identifiers to record (e.g. the pre-migration did:peer). */
+  alsoKnownAs?: string[];
+  /** Service endpoints to carry into the DID document. */
+  services?: Array<Record<string, unknown>>;
 }
 
 export interface CreateWebVHResult {
@@ -314,6 +324,9 @@ export class WebVHManager {
       verificationMethods: providedVerificationMethods,
       updateKeys: providedUpdateKeys,
       prerotation = false,
+      additionalVerificationMethods,
+      alsoKnownAs,
+      services,
     } = options;
 
     // Validate path segments before creating DID to prevent directory traversal
@@ -422,6 +435,12 @@ export class WebVHManager {
       nextKeyHashes = [computeNextKeyHash(nextKeyPairForPrerotation.publicKey)];
     }
 
+    // Publish any carried-over verification methods after the signing key.
+    // They are verification-only: updateKeys stays restricted to the signing key(s).
+    if (additionalVerificationMethods && additionalVerificationMethods.length > 0) {
+      verificationMethods = [...verificationMethods, ...additionalVerificationMethods];
+    }
+
     // Create the DID using didwebvh-ts
     const createArgs: Record<string, unknown> = {
       domain,
@@ -440,6 +459,12 @@ export class WebVHManager {
     };
     if (nextKeyHashes) {
       createArgs.nextKeyHashes = nextKeyHashes;
+    }
+    if (alsoKnownAs && alsoKnownAs.length > 0) {
+      createArgs.alsoKnownAs = alsoKnownAs;
+    }
+    if (services && services.length > 0) {
+      createArgs.services = services;
     }
     const result = await createDID(createArgs);
 
@@ -520,15 +545,22 @@ export class WebVHManager {
    * @returns The full path where the log was saved
    */
   async saveDIDLog(did: string, log: DIDLog, baseDir: string): Promise<string> {
-    // Parse the DID to extract domain and path components
-    // Format: did:webvh:domain[:port]:path1:path2...
+    // Parse the DID per the did:webvh method spec (and didwebvh-ts, which
+    // produced it): did:webvh:{SCID}:{domain}[:path1:path2...]. The SCID comes
+    // BEFORE the domain — treating segment 2 as the domain (the old behavior)
+    // filed logs under the (lowercased) SCID and made them unhostable (issue #246).
     const didParts = did.split(':');
-    if (didParts.length < 3 || didParts[0] !== 'did' || didParts[1] !== 'webvh') {
-      throw new Error('Invalid did:webvh format');
+    if (didParts.length < 4 || didParts[0] !== 'did' || didParts[1] !== 'webvh') {
+      throw new Error('Invalid did:webvh format: expected did:webvh:{SCID}:{domain}[:paths]');
     }
 
-    // Extract path parts (everything after domain)
-    const pathParts = didParts.slice(3);
+    const scid = didParts[2];
+    if (!scid) {
+      throw new Error('Invalid did:webvh format: missing SCID');
+    }
+
+    // Extract path parts (everything after the domain)
+    const pathParts = didParts.slice(4);
 
     // Validate all path segments to prevent directory traversal
     for (const segment of pathParts) {
@@ -537,22 +569,30 @@ export class WebVHManager {
       }
     }
 
-    // Extract and sanitize domain for filesystem safety
-    const rawDomain = decodeURIComponent(didParts[2]);
-    // Normalize: lowercase and replace any characters not in [a-z0-9._-] with '_'
+    // Extract and sanitize the domain for filesystem safety. Ports are
+    // percent-encoded in the DID (example.com%3A8080); after decoding, the
+    // ':' is replaced with '_' by the sanitizer below. Lowercasing is safe
+    // here because DNS names are case-insensitive (the SCID, which IS
+    // case-sensitive, is not part of the filesystem layout).
+    const rawDomain = decodeURIComponent(didParts[3]);
     const safeDomain = rawDomain
       .toLowerCase()
       .replace(/[^a-z0-9._-]/g, '_');
-    
+
     // Validate the sanitized domain (reject '..' and other dangerous patterns)
     if (!this.isValidPathSegment(safeDomain)) {
       throw new Error(`Invalid domain segment in DID: "${rawDomain}"`);
     }
 
-    // Construct the file path with domain isolation
-    // For did:webvh:example.com:user:alice -> baseDir/did/example.com/user/alice/did.jsonl
-    // For did:webvh:example.com:alice -> baseDir/did/example.com/alice/did.jsonl
-    const segments = [safeDomain, ...pathParts];
+    // Lay files out to mirror the did:webvh resolution URL so hosting the
+    // tree under the domain serves the log where resolvers fetch it:
+    //   did:webvh:{SCID}:example.com:user:alice -> baseDir/did/example.com/user/alice/did.jsonl
+    //     (resolved at https://example.com/user/alice/did.jsonl)
+    //   did:webvh:{SCID}:example.com            -> baseDir/did/example.com/.well-known/did.jsonl
+    //     (resolved at https://example.com/.well-known/did.jsonl)
+    const segments = pathParts.length > 0
+      ? [safeDomain, ...pathParts]
+      : [safeDomain, '.well-known'];
     const didPath = path.join(baseDir, 'did', ...segments, 'did.jsonl');
 
     // Verify the resolved path is still within baseDir (defense in depth)
