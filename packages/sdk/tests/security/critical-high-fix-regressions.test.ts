@@ -180,3 +180,34 @@ describe('multi-sig proofs must be assertions (review follow-up)', () => {
     expect(result.verified).toBe(false); // only 1 valid assertion proof, threshold 2
   });
 });
+
+describe('multi-sig signs plain VCDM 1.1 credentials (review follow-up)', () => {
+  test('a credential without a data-integrity context signs and verifies (securing context added)', async () => {
+    const { MultiSigManager } = await import('../../src/vc/MultiSigManager');
+    const { DIDManager } = await import('../../src/did/DIDManager');
+    const { KeyManager } = await import('../../src/did/KeyManager');
+
+    const km = new KeyManager();
+    const k1 = await km.generateKeyPair('Ed25519');
+    const vm = `did:key:${k1.publicKey}#${k1.publicKey}`;
+    const config = { network: 'regtest', defaultKeyType: 'Ed25519' } as never;
+    const mgr = new MultiSigManager(config, new DIDManager(config));
+    const policy = { required: 1, total: 1, signerVerificationMethods: [vm] };
+
+    // Plain VCDM 1.1 context only — previously threw 'Safe mode validation error'
+    const credential = {
+      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:peer:issuer',
+      issuanceDate: new Date().toISOString(),
+      credentialSubject: { id: 'did:peer:subject' },
+    };
+    const signed = await mgr.signCredentialMultiSig(credential as never, {
+      policy,
+      privateKeys: new Map([[vm, k1.privateKey]]),
+    });
+    expect(signed['@context']).toContain('https://w3id.org/security/data-integrity/v2');
+    const result = await mgr.verifyMultiSig(signed, policy);
+    expect(result.verified).toBe(true);
+  });
+});

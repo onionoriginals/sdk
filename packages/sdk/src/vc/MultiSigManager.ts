@@ -13,6 +13,7 @@ import type {
 import type { OriginalsConfig } from '../types/common.js';
 import type { DIDManager } from '../did/DIDManager.js';
 import { checkCredentialValidityPeriod } from './Verifier.js';
+import { withSecuringContext } from './Issuer.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import { createDocumentLoader } from './documentLoader.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
@@ -135,7 +136,7 @@ export class MultiSigManager {
    * @returns The credential with multiple proofs attached
    */
   async signCredentialMultiSig(
-    credential: VerifiableCredential,
+    inputCredential: VerifiableCredential,
     options: MultiSigSignOptions
   ): Promise<VerifiableCredential> {
     const { policy, privateKeys, externalSigners } = options;
@@ -144,6 +145,14 @@ export class MultiSigManager {
     if (!this.isTimelockValid(policy)) {
       throw new Error('MultiSig signing is outside the allowed timelock window');
     }
+
+    // Data Integrity proofs are canonicalized in safe mode: a plain VCDM 1.1
+    // credential (no data-integrity/v2 context) would fail with a
+    // 'Safe mode validation error' on the proof config's DataIntegrityProof/
+    // cryptosuite terms. Mirror Issuer.issueCredential and add the securing
+    // context ONCE, so all parallel proofs sign — and the returned credential
+    // is verified over — identical bytes.
+    const credential = { ...inputCredential, '@context': withSecuringContext(inputCredential['@context']) };
 
     const availableSigners: string[] = [];
     if (privateKeys) {
@@ -358,7 +367,9 @@ export class MultiSigManager {
     const session: MultiSigSession = {
       id: this.generateSessionId(),
       policy,
-      document: { ...credential },
+      // Secure the context up front so every contribution and the finalized
+      // credential share the exact bytes verifiers will canonicalize.
+      document: { ...credential, '@context': withSecuringContext(credential['@context']) },
       contributions: [],
       createdAt: now.toISOString(),
       expiresAt,
