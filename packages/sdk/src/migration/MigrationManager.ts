@@ -283,7 +283,7 @@ export class MigrationManager {
       let auditPersisted = true;
       let auditErrorMessage: string | undefined;
       try {
-        await this.auditLogger.logMigration(auditRecord as any);
+        await this.auditLogger.logMigration(auditRecord);
       } catch (auditError) {
         auditPersisted = false;
         auditErrorMessage = auditError instanceof Error ? auditError.message : String(auditError);
@@ -615,7 +615,7 @@ export class MigrationManager {
     let auditPersisted = true;
     let auditErrorMessage: string | undefined;
     try {
-      await this.auditLogger.logMigration(auditRecord as any);
+      await this.auditLogger.logMigration(auditRecord);
     } catch (auditError) {
       auditPersisted = false;
       auditErrorMessage = auditError instanceof Error ? auditError.message : String(auditError);

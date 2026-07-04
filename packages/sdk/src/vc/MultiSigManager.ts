@@ -606,7 +606,7 @@ export class MultiSigManager {
         }
         const loader = createDocumentLoader(this.didManager);
         const result = await DataIntegrityProofManager.verifyProof(
-          credential as unknown as Record<string, unknown>,
+          credential,
           proof as unknown as DataIntegrityProof,
           { documentLoader: loader }
         );

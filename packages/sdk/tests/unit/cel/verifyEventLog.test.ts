@@ -1016,7 +1016,7 @@ describe('issue #240: honest WitnessService attestations verify', () => {
 
     // Honest Ed25519 witness: signs exactly the digest string it is handed
     // (the only thing the WitnessService interface ever receives).
-    const witnessPrivateKey = ed25519.utils.randomPrivateKey();
+    const witnessPrivateKey = ed25519.utils.randomSecretKey();
     const witnessPublicKey = new Uint8Array(await (ed25519 as any).getPublicKeyAsync(witnessPrivateKey));
     const witnessPub = multikey.encodePublicKey(witnessPublicKey, 'Ed25519');
     const witnessVm = `did:key:${witnessPub}#${witnessPub}`;
