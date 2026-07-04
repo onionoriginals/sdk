@@ -11,7 +11,6 @@ import { BitcoinManager } from '../bitcoin/BitcoinManager.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { CredentialManager } from '../vc/CredentialManager.js';
 import { OriginalsAsset } from './OriginalsAsset.js';
-import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter.js';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';

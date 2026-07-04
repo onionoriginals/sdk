@@ -10,7 +10,8 @@ import type {
   VerifyOptions,
 } from '../../../src/cel/types';
 import { multikey } from '../../../src/crypto/Multikey';
-import { canonicalizeEvent } from '../../../src/cel/canonicalize';
+import { canonicalizeEvent, canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
+import { computeDigestMultibase } from '../../../src/cel/hash';
 
 /**
  * Mock signer that creates a structurally valid DataIntegrityProof.
@@ -879,8 +880,17 @@ describe('verifyEventLog', () => {
       );
       const witnessVm = 'did:webvh:witness.example.com#key-ed25519';
 
-      // Sign the event data with the witness key.
-      const dataBytes = canonicalizeEvent({ type: 'create', data: eventData });
+      // Witnesses attest to the event DIGEST — witnessEvent hands
+      // witness.witness(digestMultibase) only the digest string, so that is
+      // what an honest witness signs (issue #240; verification previously
+      // checked the signature against the event object and could never pass
+      // for a real witness).
+      const digest = computeDigestMultibase(canonicalizeEntryForChain({
+        type: 'create',
+        data: eventData,
+        proof: []
+      } as any));
+      const dataBytes = canonicalizeEvent(digest);
       const witnessSig = await (ed25519 as any).signAsync(dataBytes, witnessPrivateKey);
       const witnessProofValue = multikey.encodeMultibase(new Uint8Array(witnessSig));
 
@@ -990,5 +1000,50 @@ describe('verifyEventLog', () => {
       // witnessProofs should be absent when there are no witnesses.
       expect(result.events[0].witnessProofs).toBeUndefined();
     });
+  });
+});
+
+// ─── Issue #240 — witness proofs verify against the digest they attested ────
+
+describe('issue #240: honest WitnessService attestations verify', () => {
+  test('witnessEvent + verifyEventLog round-trip reports the witness proof as verified', async () => {
+    const { witnessEvent } = await import('../../../src/cel/algorithms/witnessEvent');
+    const ed25519 = await import('@noble/ed25519');
+
+    // Controller creates the log with a real did:key signer
+    const { signer } = await makeRealSigner();
+    const log = await createEventLog({ name: 'Witnessed Asset' }, { signer });
+
+    // Honest Ed25519 witness: signs exactly the digest string it is handed
+    // (the only thing the WitnessService interface ever receives).
+    const witnessPrivateKey = ed25519.utils.randomPrivateKey();
+    const witnessPublicKey = new Uint8Array(await (ed25519 as any).getPublicKeyAsync(witnessPrivateKey));
+    const witnessPub = multikey.encodePublicKey(witnessPublicKey, 'Ed25519');
+    const witnessVm = `did:key:${witnessPub}#${witnessPub}`;
+    const honestWitness = {
+      async witness(digestMultibase: string) {
+        const sig = await (ed25519 as any).signAsync(canonicalizeEvent(digestMultibase), witnessPrivateKey);
+        return {
+          type: 'DataIntegrityProof' as const,
+          cryptosuite: 'eddsa-jcs-2022',
+          created: new Date().toISOString(),
+          verificationMethod: witnessVm,
+          proofPurpose: 'assertionMethod',
+          proofValue: multikey.encodeMultibase(new Uint8Array(sig)),
+          witnessedAt: new Date().toISOString(),
+        };
+      },
+    };
+
+    const witnessed = await witnessEvent(log.events[0], honestWitness);
+    const witnessedLog = { events: [witnessed] };
+
+    const result = await verifyEventLog(witnessedLog);
+
+    expect(result.verified).toBe(true);
+    expect(result.events[0].witnessProofs).toHaveLength(1);
+    // Before the fix this was always false: the signature (over the digest)
+    // was checked against the event object.
+    expect(result.events[0].witnessProofs![0].verified).toBe(true);
   });
 });

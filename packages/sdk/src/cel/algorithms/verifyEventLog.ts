@@ -570,6 +570,14 @@ async function verifyEvent(
   // proof semantics entirely, so bitcoin gating is skipped on that path.
   const witnessResults: { verificationMethod: string; verified: boolean }[] = [];
 
+  // Witnesses attest to the event DIGEST, not the event object: witnessEvent
+  // hands `witness.witness(digestMultibase)` only the digest string, so an
+  // honest witness signs that string. Verifying witness signatures against
+  // the event object could never succeed (issue #240).
+  const witnessedDigest = witnessProofEntries.length > 0
+    ? computeDigestMultibase(canonicalizeEntryForChain(event))
+    : undefined;
+
   for (const { proof, originalIndex } of witnessProofEntries) {
     let witnessVerified = false;
     try {
@@ -586,7 +594,7 @@ async function verifyEvent(
           errors.push(`Event ${index}, Proof ${originalIndex}: ${anchorError}`);
         }
       } else {
-        const { verified } = await dispatchVerify(proof, eventData, resolveKey);
+        const { verified } = await dispatchVerify(proof, witnessedDigest, resolveKey);
         witnessVerified = verified;
       }
     } catch {

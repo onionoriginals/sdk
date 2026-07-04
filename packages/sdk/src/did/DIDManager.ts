@@ -18,7 +18,6 @@ import { Ed25519Signer } from '../crypto/Signer.js';
 import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
-import * as fs from 'fs';
 import * as path from 'path';
 
 export class DIDManager {
@@ -190,7 +189,7 @@ export class DIDManager {
       .filter((vm) => typeof vm.publicKeyMultibase === 'string' && vm.publicKeyMultibase.length > 0)
       .map((vm) => ({
         type: 'Multikey',
-        publicKeyMultibase: vm.publicKeyMultibase as string,
+        publicKeyMultibase: vm.publicKeyMultibase,
       }));
 
     // Preserve service endpoints
