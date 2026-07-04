@@ -30,6 +30,14 @@ import { EventEmitter } from '../events/EventEmitter.js';
 export class MigrationManager {
   private static instance: MigrationManager | null = null;
 
+  /**
+   * DIDs with a migration currently in flight. Set synchronously before the
+   * first await in migrate() so two concurrent migrate() calls for the same
+   * sourceDid cannot both pass the guard and double-pay for two inscriptions
+   * (issue #255).
+   */
+  private inFlightSourceDids = new Set<string>();
+
   private validationPipeline: ValidationPipeline;
   private checkpointManager: CheckpointManager;
   private rollbackManager: RollbackManager;
@@ -114,9 +122,64 @@ export class MigrationManager {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let checkpoint: any;
 
+    // Concurrency guard (issue #255): reject a second migration of the same
+    // DID while one is in flight. The set is mutated synchronously (before
+    // any await), so concurrent callers cannot interleave past this check.
+    // The rejected caller gets the same structured MigrationResult
+    // (success: false, code MIGRATION_IN_PROGRESS) every other operational
+    // failure produces — and because the guard returns here, the finally
+    // block below only ever runs for the call that actually claimed the
+    // lock. estimateCostOnly requests are read-only and exempt.
+    if (!options.estimateCostOnly) {
+      if (this.inFlightSourceDids.has(options.sourceDid)) {
+        return await this.handleMigrationFailure(
+          this.createMigrationError(
+            MigrationErrorType.VALIDATION_ERROR,
+            'MIGRATION_IN_PROGRESS',
+            `A migration for ${options.sourceDid} is already in progress; concurrent migrations of the same DID would double-pay for duplicate inscriptions`,
+            'not-started'
+          ),
+          options,
+          undefined,
+          undefined,
+          startTime
+        );
+      }
+      this.inFlightSourceDids.add(options.sourceDid);
+    }
+
     try {
+      // estimateCostOnly (issue #254): "Return cost estimate without
+      // migrating". Validation only — no tracked migration state, no events,
+      // no checkpoint. Creating a state entry here would leave a phantom
+      // non-terminal migration that getMigrationStatus reports as in-progress
+      // forever and cleanupOldStates never reclaims.
+      if (options.estimateCostOnly) {
+        const estimateValidation = await this.validationPipeline.validate(options);
+        if (!estimateValidation.valid) {
+          throw this.createMigrationError(
+            MigrationErrorType.VALIDATION_ERROR,
+            'VALIDATION_FAILED',
+            `Migration validation failed: ${estimateValidation.errors.map(e => e.message).join(', ')}`,
+            'estimate-only',
+            { errors: estimateValidation.errors }
+          );
+        }
+        return {
+          migrationId: `estimate_${startTime}`,
+          success: true,
+          sourceDid: options.sourceDid,
+          targetDid: undefined,
+          sourceLayer: this.extractLayer(options.sourceDid),
+          targetLayer: options.targetLayer,
+          state: MigrationStateEnum.COMPLETED,
+          duration: Date.now() - startTime,
+          cost: estimateValidation.estimatedCost
+        };
+      }
+
       // Step 1: Create migration state
-       
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       migrationState = await this.stateTracker.createMigration(options);
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       const migrationId = migrationState.migrationId;
@@ -156,7 +219,7 @@ export class MigrationManager {
         progress: 20
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment
       checkpoint = await this.checkpointManager.createCheckpoint(migrationId, options);
 
       // Persist checkpointId immediately so rollback can locate it
@@ -172,7 +235,7 @@ export class MigrationManager {
       // Step 4: Execute migration
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const migration = this.getMigrationOperation(options);
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument
       const result = await migration.executeMigration(options, migrationId);
 
       // Step 5: Complete migration
@@ -261,6 +324,10 @@ export class MigrationManager {
         checkpoint,
         startTime
       );
+    } finally {
+      if (!options.estimateCostOnly) {
+        this.inFlightSourceDids.delete(options.sourceDid);
+      }
     }
   }
 
@@ -407,6 +474,20 @@ export class MigrationManager {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
     const migrationId = migrationState?.migrationId || `mig_failed_${Date.now()}`;
 
+    // Capture the operational state at the moment of failure (before we mark
+    // it FAILED below): the rollback needs to know whether the migration had
+    // reached the ANCHORING step to decide if on-chain side effects can exist.
+    let stateAtFailure: MigrationStateEnum | undefined;
+    if (migrationState) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+        const tracked = await this.stateTracker.getState(migrationId);
+        stateAtFailure = tracked?.state;
+      } catch {
+        stateAtFailure = undefined;
+      }
+    }
+
     const migrationError: MigrationError = {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       type: error.type || MigrationErrorType.UNKNOWN_ERROR,
@@ -444,13 +525,16 @@ export class MigrationManager {
     // rollback's restoredState (ROLLED_BACK on success, QUARANTINED on failure).
     let rollbackSuccess = false;
     let finalState: MigrationStateEnum = MigrationStateEnum.FAILED;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let rollbackOutcome: any;
     if (checkpoint) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-        const rollbackResult = await this.rollbackManager.rollback(migrationId, checkpoint.checkpointId);
-         
+        const rollbackResult = await this.rollbackManager.rollback(migrationId, checkpoint.checkpointId, { error, stateAtFailure });
+        rollbackOutcome = rollbackResult;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         rollbackSuccess = rollbackResult.success;
-         
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         finalState = rollbackResult.restoredState;
 
         // Advance the tracked state to reflect the rollback outcome
@@ -463,8 +547,12 @@ export class MigrationManager {
           console.error('Failed to update migration state after rollback:', stateError);
         }
 
-        if (!rollbackSuccess) {
-           
+        // PARTIALLY_ROLLED_BACK is an accurate report of irreversible
+        // artifacts (e.g. a paid Bitcoin inscription), not a rollback
+        // machinery failure — only genuine QUARANTINED outcomes raise the
+        // quarantine event.
+        if (!rollbackSuccess && finalState === MigrationStateEnum.QUARANTINED) {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
           await this.emitEvent('migration:quarantine', {
             migrationId,
             // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -483,7 +571,7 @@ export class MigrationManager {
         } catch (stateError) {
           console.error('Failed to update migration state after rollback failure:', stateError);
         }
-         
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         await this.emitEvent('migration:quarantine', {
           migrationId,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -546,6 +634,8 @@ export class MigrationManager {
       auditRecord,
       error: migrationError,
       auditPersisted,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      ...(rollbackOutcome ? { rollback: rollbackOutcome } : {}),
       ...(auditErrorMessage ? { auditError: auditErrorMessage } : {})
     };
   }
@@ -610,7 +700,7 @@ export class MigrationManager {
   /**
    * Emit event
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument
   private async emitEvent(type: string, data: any): Promise<void> {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument

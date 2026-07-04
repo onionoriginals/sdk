@@ -3,6 +3,7 @@ import { OriginalsSDK, LifecycleManager, type LifecycleProgress, type CostEstima
 import { MockOrdinalsProvider } from '../../mocks/adapters';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
+import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 
 const resources = [
   {
@@ -17,14 +18,14 @@ const resources = [
 describe('LifecycleManager - Clean API', () => {
   describe('createDraft', () => {
     test('creates a peer-layer asset', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const asset = await sdk.lifecycle.createDraft(resources);
       expect(asset.currentLayer).toBe('did:peer');
       expect(asset.id.startsWith('did:peer:')).toBe(true);
     });
 
     test('reports progress during creation', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const progressEvents: LifecycleProgress[] = [];
       
       const asset = await sdk.lifecycle.createDraft(resources, {
@@ -39,7 +40,7 @@ describe('LifecycleManager - Clean API', () => {
     });
 
     test('reports failure progress on error', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const progressEvents: LifecycleProgress[] = [];
       
       // Pass invalid resources to trigger error
@@ -57,7 +58,7 @@ describe('LifecycleManager - Clean API', () => {
 
   describe('publish', () => {
     test('migrates asset to webvh layer', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       const published = await sdk.lifecycle.publish(draft, 'example.com');
       
@@ -66,7 +67,7 @@ describe('LifecycleManager - Clean API', () => {
     });
 
     test('reports progress during publish', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       const progressEvents: LifecycleProgress[] = [];
       
@@ -79,7 +80,7 @@ describe('LifecycleManager - Clean API', () => {
     });
 
     test('validates before publishing', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       
       // Migrate to webvh first (can't publish from webvh)
@@ -95,8 +96,7 @@ describe('LifecycleManager - Clean API', () => {
   describe('inscribe', () => {
     test('inscribes asset on Bitcoin', async () => {
       const provider = new MockOrdinalsProvider();
-      const sdk = OriginalsSDK.create({ 
-        network: 'regtest', 
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', 
         ordinalsProvider: provider 
       } as any);
       
@@ -109,8 +109,7 @@ describe('LifecycleManager - Clean API', () => {
 
     test('reports progress during inscription', async () => {
       const provider = new MockOrdinalsProvider();
-      const sdk = OriginalsSDK.create({ 
-        network: 'regtest', 
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', 
         ordinalsProvider: provider 
       } as any);
       
@@ -132,7 +131,7 @@ describe('LifecycleManager - Clean API', () => {
     });
 
     test('fails validation without ordinals provider', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       await sdk.lifecycle.publish(draft, 'example.com');
       
@@ -145,8 +144,7 @@ describe('LifecycleManager - Clean API', () => {
   describe('transfer', () => {
     test('transfers inscribed asset', async () => {
       const provider = new MockOrdinalsProvider();
-      const sdk = OriginalsSDK.create({ 
-        network: 'regtest', 
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', 
         ordinalsProvider: provider 
       } as any);
       
@@ -164,8 +162,7 @@ describe('LifecycleManager - Clean API', () => {
 
     test('reports progress during transfer', async () => {
       const provider = new MockOrdinalsProvider();
-      const sdk = OriginalsSDK.create({ 
-        network: 'regtest', 
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', 
         ordinalsProvider: provider 
       } as any);
       
@@ -186,7 +183,7 @@ describe('LifecycleManager - Clean API', () => {
     });
 
     test('fails if asset not inscribed', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       
       await expect(
@@ -199,7 +196,7 @@ describe('LifecycleManager - Clean API', () => {
 describe('LifecycleManager - Cost Estimation', () => {
   describe('estimateCost', () => {
     test('returns zero cost for webvh migration', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       
       const cost = await sdk.lifecycle.estimateCost(draft, 'did:webvh');
@@ -210,7 +207,7 @@ describe('LifecycleManager - Cost Estimation', () => {
     });
 
     test('estimates btco inscription cost', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       
       const cost = await sdk.lifecycle.estimateCost(draft, 'did:btco', 10);
@@ -227,8 +224,7 @@ describe('LifecycleManager - Cost Estimation', () => {
       const mockFeeOracle = {
         estimateFeeRate: async (blocks: number) => 15
       };
-      const sdk = OriginalsSDK.create({ 
-        network: 'regtest',
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest',
         feeOracle: mockFeeOracle as any
       });
       const draft = await sdk.lifecycle.createDraft(resources);
@@ -241,8 +237,7 @@ describe('LifecycleManager - Cost Estimation', () => {
 
     test('uses ordinals provider when fee oracle unavailable', async () => {
       const provider = new MockOrdinalsProvider();
-      const sdk = OriginalsSDK.create({ 
-        network: 'regtest',
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest',
         ordinalsProvider: provider
       } as any);
       const draft = await sdk.lifecycle.createDraft(resources);
@@ -254,7 +249,7 @@ describe('LifecycleManager - Cost Estimation', () => {
     });
 
     test('falls back to default fee rate', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       
       const cost = await sdk.lifecycle.estimateCost(draft, 'did:btco');
@@ -264,7 +259,7 @@ describe('LifecycleManager - Cost Estimation', () => {
     });
 
     test('returns zero for peer layer (no migration needed)', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       
       const cost = await sdk.lifecycle.estimateCost(draft, 'did:peer');
@@ -278,7 +273,7 @@ describe('LifecycleManager - Cost Estimation', () => {
 describe('LifecycleManager - Migration Validation', () => {
   describe('validateMigration', () => {
     test('validates peer to webvh migration', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       
       const validation = await sdk.lifecycle.validateMigration(draft, 'did:webvh');
@@ -294,8 +289,7 @@ describe('LifecycleManager - Migration Validation', () => {
 
     test('validates peer to btco migration with provider', async () => {
       const provider = new MockOrdinalsProvider();
-      const sdk = OriginalsSDK.create({ 
-        network: 'regtest',
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest',
         ordinalsProvider: provider
       } as any);
       const draft = await sdk.lifecycle.createDraft(resources);
@@ -307,7 +301,7 @@ describe('LifecycleManager - Migration Validation', () => {
     });
 
     test('fails validation for btco without provider', async () => {
-      const sdk = OriginalsSDK.create({ network: 'regtest' });
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       
       const validation = await sdk.lifecycle.validateMigration(draft, 'did:btco');
@@ -319,8 +313,7 @@ describe('LifecycleManager - Migration Validation', () => {
 
     test('rejects invalid layer transition (btco to webvh)', async () => {
       const provider = new MockOrdinalsProvider();
-      const sdk = OriginalsSDK.create({ 
-        network: 'regtest',
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest',
         ordinalsProvider: provider
       } as any);
       
@@ -376,8 +369,7 @@ describe('LifecycleManager - Migration Validation', () => {
 
     test('warns about large manifest sizes', async () => {
       const provider = new MockOrdinalsProvider();
-      const sdk = OriginalsSDK.create({ 
-        network: 'regtest',
+      const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest',
         ordinalsProvider: provider
       } as any);
       

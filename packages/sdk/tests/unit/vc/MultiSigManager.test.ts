@@ -3,6 +3,7 @@ import { MultiSigManager } from '../../../src/vc/MultiSigManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { OriginalsSDK } from '../../../src';
+import { DIDManager } from '../../../src/did/DIDManager';
 import type {
   VerifiableCredential,
   MultiSigPolicy,
@@ -34,9 +35,9 @@ describe('MultiSigManager', () => {
     ]);
 
     // Verification methods are did:key:<publicKey>
-    vms = keys.map(k => `did:key:${k.publicKey}`);
+    vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
 
-    manager = new MultiSigManager(config);
+    manager = new MultiSigManager(config, new DIDManager(config));
 
     baseVC = {
       // The Originals context defines the custom subject terms so safe-mode
@@ -1002,15 +1003,18 @@ describe('MultiSigManager', () => {
   // ===== Key type compatibility =====
 
   describe('key type support', () => {
-    test('works with ES256K keys', async () => {
+    // Multi-sig proofs are Data Integrity eddsa-rdfc-2022 proofs, which are
+    // Ed25519-only. Non-Ed25519 signer keys are rejected at signing time
+    // rather than producing proofs nothing can verify.
+    test('rejects ES256K keys (eddsa-rdfc-2022 is Ed25519-only)', async () => {
       const es256kConfig: OriginalsConfig = { network: 'regtest', defaultKeyType: 'ES256K' };
-      const es256kManager = new MultiSigManager(es256kConfig);
+      const es256kManager = new MultiSigManager(es256kConfig, new DIDManager(es256kConfig));
 
       const es256kKeys = await Promise.all([
         keyManager.generateKeyPair('ES256K'),
         keyManager.generateKeyPair('ES256K'),
       ]);
-      const es256kVMs = es256kKeys.map(k => `did:key:${k.publicKey}`);
+      const es256kVMs = es256kKeys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
 
       const policy: MultiSigPolicy = {
         required: 2,
@@ -1018,28 +1022,24 @@ describe('MultiSigManager', () => {
         signerVerificationMethods: es256kVMs,
       };
 
-      const signed = await es256kManager.signCredentialMultiSig(baseVC, {
+      await expect(es256kManager.signCredentialMultiSig(baseVC, {
         policy,
         privateKeys: new Map([
           [es256kVMs[0], es256kKeys[0].privateKey],
           [es256kVMs[1], es256kKeys[1].privateKey],
         ]),
-      });
-
-      const result = await es256kManager.verifyMultiSig(signed, policy);
-      expect(result.verified).toBe(true);
-      expect(result.validSignatures).toBe(2);
+      })).rejects.toThrow(/EdDSA|Ed25519/);
     });
 
-    test('works with ES256 keys', async () => {
+    test('rejects ES256 keys (eddsa-rdfc-2022 is Ed25519-only)', async () => {
       const es256Config: OriginalsConfig = { network: 'regtest', defaultKeyType: 'ES256' };
-      const es256Manager = new MultiSigManager(es256Config);
+      const es256Manager = new MultiSigManager(es256Config, new DIDManager(es256Config));
 
       const es256Keys = await Promise.all([
         keyManager.generateKeyPair('ES256'),
         keyManager.generateKeyPair('ES256'),
       ]);
-      const es256VMs = es256Keys.map(k => `did:key:${k.publicKey}`);
+      const es256VMs = es256Keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
 
       const policy: MultiSigPolicy = {
         required: 2,
@@ -1047,17 +1047,13 @@ describe('MultiSigManager', () => {
         signerVerificationMethods: es256VMs,
       };
 
-      const signed = await es256Manager.signCredentialMultiSig(baseVC, {
+      await expect(es256Manager.signCredentialMultiSig(baseVC, {
         policy,
         privateKeys: new Map([
           [es256VMs[0], es256Keys[0].privateKey],
           [es256VMs[1], es256Keys[1].privateKey],
         ]),
-      });
-
-      const result = await es256Manager.verifyMultiSig(signed, policy);
-      expect(result.verified).toBe(true);
-      expect(result.validSignatures).toBe(2);
+      })).rejects.toThrow(/EdDSA|Ed25519/);
     });
   });
 

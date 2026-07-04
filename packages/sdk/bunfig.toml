@@ -1,0 +1,10 @@
+[test]
+# Bun only reads bunfig.toml from the current working directory, so the root
+# bunfig's preload does not apply when tests run with cwd packages/sdk (CI via
+# turbo, or the documented `cd packages/sdk && bun test ...` commands).
+preload = ["./tests/setup.bun.ts"]
+coveragePathIgnorePatterns = [
+  "tests/mocks/**",
+  "tests/setup.bun.ts",
+  "dist/**"
+]

@@ -22,6 +22,7 @@ export enum MigrationStateEnum {
   COMPLETED = 'completed',       // Successfully completed
   FAILED = 'failed',             // Failed, rollback initiated
   ROLLED_BACK = 'rolled_back',   // Rolled back successfully
+  PARTIALLY_ROLLED_BACK = 'partially_rolled_back', // Rolled back, but irreversible artifacts remain (e.g. a paid Bitcoin inscription)
   QUARANTINED = 'quarantined'    // Rollback failed, needs manual intervention
 }
 
@@ -118,6 +119,8 @@ export interface MigrationCheckpoint {
   timestamp: number;
   sourceDid: string;
   sourceLayer: DIDLayer;
+  /** Target layer of the migration this checkpoint belongs to (drives rollback semantics). */
+  targetLayer?: DIDLayer;
   didDocument: DIDDocument;
   credentials: VerifiableCredential[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -140,6 +143,18 @@ export interface RollbackResult {
   restoredState: MigrationStateEnum;
   duration: number;                     // milliseconds
   errors?: MigrationError[];
+  /**
+   * Side effects of the failed migration that rollback CANNOT undo — e.g. a
+   * broadcast Bitcoin commit/reveal pair (fees spent, inscription committed).
+   * Non-empty whenever restoredState is PARTIALLY_ROLLED_BACK. Callers must
+   * NOT retry the migration blindly while these exist: a retry would pay for
+   * a second inscription (issue #237).
+   */
+  irreversibleArtifacts?: Array<{
+    type: 'bitcoin-inscription' | 'bitcoin-transaction' | 'unknown';
+    description: string;
+    details?: Record<string, unknown>;
+  }>;
 }
 
 /**
@@ -213,6 +228,12 @@ export interface MigrationResult {
   cost: CostEstimate;
   auditRecord?: MigrationAuditRecord;  // Optional - undefined when AuditLogger disabled (v1.0)
   error?: MigrationError;
+  /**
+   * Outcome of the automatic rollback attempted after a failure. Inspect
+   * `rollback.restoredState` and `rollback.irreversibleArtifacts` before
+   * retrying: PARTIALLY_ROLLED_BACK means paid on-chain side effects remain.
+   */
+  rollback?: RollbackResult;
   /**
    * Whether the audit record was successfully persisted to the audit log.
    * A migration can succeed (`success: true`) while audit persistence fails

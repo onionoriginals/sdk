@@ -32,8 +32,12 @@ export class PeerToWebvhMigration extends BaseMigration {
       progress: 30
     });
 
-    // Migrate DID document to webvh
-    const migratedDoc = await this.didManager.migrateToDIDWebVH(sourceDid, options.domain);
+    // Migrate DID document to webvh. The full result carries the signed DID
+    // log and update key pair; the migration result surfaces the document,
+    // and callers needing to host the log should use
+    // didManager.migrateToDIDWebVH directly with an outputDir.
+    const migration = await this.didManager.migrateToDIDWebVH(sourceDid, options.domain);
+    const migratedDoc = migration.didDocument;
 
     await this.updateStateWithRetry(migrationId, {
       currentOperation: 'Migration completed',

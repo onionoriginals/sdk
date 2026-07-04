@@ -156,7 +156,7 @@ describe('DID Creation Performance', () => {
         const webvhDoc = await sdk.did.migrateToDIDWebVH(peerDoc);
         durations.push(performance.now() - start);
 
-        expect(webvhDoc.id).toContain('did:webvh');
+        expect(webvhDoc.didDocument.id).toContain('did:webvh');
       }
 
       const avg = durations.reduce((a, b) => a + b, 0) / durations.length;

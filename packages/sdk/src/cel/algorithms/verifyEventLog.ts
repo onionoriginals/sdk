@@ -310,7 +310,7 @@ const BITCOIN_WITNESS_CRYPTOSUITE = 'bitcoin-ordinals-2024';
  */
 async function verifyBitcoinWitnessProof(
   proof: DataIntegrityProof,
-  event: LogEntry,
+  expectedDigest: string,
   ordinalsProvider: OrdinalsLookup | undefined
 ): Promise<string | null> {
   // Structural validity first (the generic structuralCheck does not apply —
@@ -375,8 +375,8 @@ async function verifyBitcoinWitnessProof(
   }
 
   // The inscription content must commit to the event's digest — the exact
-  // digest witnessEvent computed over the committed fields.
-  const expectedDigest = computeDigestMultibase(canonicalizeEntryForChain(event));
+  // digest witnessEvent computed over the committed fields (computed once by
+  // the caller and shared with ordinary witness verification).
   let content: { digestMultibase?: unknown };
   try {
     content = JSON.parse(inscription.content.toString('utf8')) as { digestMultibase?: unknown };
@@ -570,13 +570,22 @@ async function verifyEvent(
   // proof semantics entirely, so bitcoin gating is skipped on that path.
   const witnessResults: { verificationMethod: string; verified: boolean }[] = [];
 
+  // Witnesses attest to the event DIGEST, not the event object: witnessEvent
+  // hands `witness.witness(digestMultibase)` only the digest string, so an
+  // honest witness signs that string. Verifying witness signatures against
+  // the event object could never succeed (issue #240). Computed once and
+  // shared with bitcoin-anchor verification below.
+  const witnessedDigest = witnessProofEntries.length > 0
+    ? computeDigestMultibase(canonicalizeEntryForChain(event))
+    : undefined;
+
   for (const { proof, originalIndex } of witnessProofEntries) {
     let witnessVerified = false;
     try {
       if (customVerifier) {
         witnessVerified = await customVerifier(proof, eventData);
       } else if (proof.cryptosuite === BITCOIN_WITNESS_CRYPTOSUITE) {
-        const anchorError = await verifyBitcoinWitnessProof(proof, event, ordinalsProvider);
+        const anchorError = await verifyBitcoinWitnessProof(proof, witnessedDigest as string, ordinalsProvider);
         witnessVerified = anchorError === null;
         if (anchorError !== null) {
           // A failed btco anchor gates BOTH signals: the event is not valid
@@ -586,7 +595,7 @@ async function verifyEvent(
           errors.push(`Event ${index}, Proof ${originalIndex}: ${anchorError}`);
         }
       } else {
-        const { verified } = await dispatchVerify(proof, eventData, resolveKey);
+        const { verified } = await dispatchVerify(proof, witnessedDigest, resolveKey);
         witnessVerified = verified;
       }
     } catch {

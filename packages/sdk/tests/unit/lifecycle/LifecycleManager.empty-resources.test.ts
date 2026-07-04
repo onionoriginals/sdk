@@ -1,9 +1,10 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
+import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 
 describe('LifecycleManager - empty resources guard', () => {
   test('publishToWeb with emptied resources does not produce credential with undefined resourceId', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'abc' }
     ]);
@@ -22,7 +23,7 @@ describe('LifecycleManager - empty resources guard', () => {
   });
 
   test('publishToWeb with valid resources produces credential with defined resourceId', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'abc123' }
     ]);
@@ -42,7 +43,7 @@ describe('LifecycleManager - empty resources guard', () => {
   });
 
   test('publishToWeb with resource having empty id does not produce credential', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'abc123' }
     ]);

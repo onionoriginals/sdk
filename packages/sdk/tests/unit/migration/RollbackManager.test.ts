@@ -134,11 +134,10 @@ describe('RollbackManager', () => {
       expect(resolved!.id).toBe(peerDid.id);
     });
 
-    // CORE-MIG-EVENTS-024/happy — rollback layer-specific logic for Bitcoin
-    it('rollback for btco source still verifies source DID can be resolved', async () => {
-      // NOTE: Bitcoin transactions cannot truly be reversed, but rollback still
-      // verifies the source DID remains valid. We simulate this by using a
-      // did:peer source (the actual btco layer would require live Bitcoin infra).
+    // Issue #237 — a btco-targeted migration is NOT fully reversible: rollback
+    // must report PARTIALLY_ROLLED_BACK with the irreversible artifacts rather
+    // than an unqualified success that invites a fee-paying retry.
+    it('rollback of a btco-targeted migration reports PARTIALLY_ROLLED_BACK with irreversible artifacts', async () => {
       const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
 
       const peerDid = await sdk.did.createDIDPeer([
@@ -146,19 +145,53 @@ describe('RollbackManager', () => {
       ]);
 
       const migrationId = 'mig_btco_src_rollback';
-      // Inject a checkpoint that claims to be from a btco source
-      // (source DID is still did:peer so it can be resolved in this test env)
       const checkpoint = await checkpointManager.createCheckpoint(migrationId, {
         sourceDid: peerDid.id,
         targetLayer: 'btco',
       });
 
-      const result = await rollbackManager.rollback(migrationId, checkpoint.checkpointId!);
+      const failureError = Object.assign(new Error('satoshi unknown'), {
+        details: { inscriptionId: 'abc123i0', txid: 'deadbeef', commitTxId: 'c0ffee' }
+      });
+      const result = await rollbackManager.rollback(migrationId, checkpoint.checkpointId!, { error: failureError });
 
-      // Source DID resolves → rollback logic runs and succeeds
+      expect(result.success).toBe(false);
+      expect(result.restoredState).toBe(MigrationStateEnum.PARTIALLY_ROLLED_BACK);
+      expect(result.irreversibleArtifacts).toBeDefined();
+      expect(result.irreversibleArtifacts!.length).toBeGreaterThan(0);
+      expect(result.irreversibleArtifacts![0].type).toBe('bitcoin-inscription');
+      // On-chain identifiers from the failing error are surfaced for recovery
+      expect(result.irreversibleArtifacts![0].details).toMatchObject({
+        inscriptionId: 'abc123i0',
+        txid: 'deadbeef',
+        commitTxId: 'c0ffee'
+      });
+    });
+    // Review follow-up: a btco migration that failed BEFORE the anchoring step
+    // (no transaction could have been broadcast) rolls back cleanly.
+    it('btco migration that failed before anchoring reports a clean ROLLED_BACK', async () => {
+      const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
+
+      const peerDid = await sdk.did.createDIDPeer([
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+      ]);
+
+      const migrationId = 'mig_btco_preanchor_rollback';
+      const checkpoint = await checkpointManager.createCheckpoint(migrationId, {
+        sourceDid: peerDid.id,
+        targetLayer: 'btco',
+      });
+
+      const result = await rollbackManager.rollback(migrationId, checkpoint.checkpointId!, {
+        error: new Error('ORD_PROVIDER_REQUIRED'),
+        stateAtFailure: MigrationStateEnum.IN_PROGRESS
+      });
+
       expect(result.success).toBe(true);
       expect(result.restoredState).toBe(MigrationStateEnum.ROLLED_BACK);
+      expect(result.irreversibleArtifacts).toBeUndefined();
     });
+
 
     // CORE-MIG-EVENTS-024/happy — rollback restores storage references (checkpoint contains them)
     it('rollback captures storageReferences from checkpoint', async () => {

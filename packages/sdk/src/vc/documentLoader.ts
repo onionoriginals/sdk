@@ -1,5 +1,6 @@
 import { DIDManager } from '../did/DIDManager.js';
 import { PRELOADED_CONTEXTS } from '../utils/serialization.js';
+import { multikey } from '../crypto/Multikey.js';
 
 type LoadedDocument = { document: unknown; documentUrl: string; contextUrl: string | null };
 
@@ -35,13 +36,50 @@ export class DocumentLoader {
       // document must fail closed: trusting a registry entry would bypass
       // deactivation and key rotation published by the authoritative source.
       const isSelfCertifying = did.startsWith('did:key:') || did.startsWith('did:peer:');
+      // did:key is FULLY self-certifying: the identifier IS the public
+      // multikey, so the key node can be synthesized locally with no
+      // resolution — did:key:{mk}#{mk} always denotes the key {mk}. Only the
+      // canonical fragment form is accepted, and the key must decode as a
+      // valid multikey (fail closed on garbage).
+      //
+      // Retirement still wins: an out-of-band registry entry marking this
+      // exact VM revoked/compromised must fail closed even though the key is
+      // self-certifying — otherwise the only compromise-recovery mechanism
+      // for did:key would be unreachable (the synthesis below would always
+      // return a fresh, unmarked node first). So the registry retirement
+      // check runs BEFORE synthesis.
+      if (fragment && isSelfCertifying) {
+        const cached = verificationMethodRegistry.get(didUrl);
+        if (cached && ((cached as { revoked?: string; compromised?: string }).revoked ||
+                       (cached as { revoked?: string; compromised?: string }).compromised)) {
+          throw new Error(`Verification method is retired (revoked or compromised): ${didUrl}`);
+        }
+      }
+      if (fragment && did.startsWith('did:key:')) {
+        const mk = did.slice('did:key:'.length);
+        if (fragment === mk) {
+          try {
+            multikey.decodePublicKey(mk);
+            return {
+              document: {
+                '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'],
+                id: didUrl,
+                type: 'Multikey',
+                controller: did,
+                publicKeyMultibase: mk
+              },
+              documentUrl: didUrl,
+              contextUrl: null
+            };
+          } catch {
+            // not a decodable multikey — fall through to the registry/failure path
+          }
+        }
+      }
       if (fragment && isSelfCertifying) {
         const cached = verificationMethodRegistry.get(didUrl);
         if (cached) {
-          if ((cached as { revoked?: string; compromised?: string }).revoked ||
-              (cached as { revoked?: string; compromised?: string }).compromised) {
-            throw new Error(`Verification method is retired (revoked or compromised): ${didUrl}`);
-          }
+          // (retirement already handled above)
           return {
             document: { '@context': ['https://www.w3.org/ns/did/v1'], ...cached },
             documentUrl: didUrl,

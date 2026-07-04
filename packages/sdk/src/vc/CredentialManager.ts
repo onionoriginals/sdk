@@ -232,12 +232,28 @@ export class CredentialManager {
           // definitions its fields rely on, excluding them from the signature.
           const unsigned = { ...credential };
           delete (unsigned as Partial<VerifiableCredential>).proof;
-          return issuer.issueCredential(unsigned, { proofPurpose: 'assertionMethod' });
+          // `return await` (not `return`) — a returned un-awaited promise
+          // rejects OUTSIDE this try, so issuance failures (e.g. a
+          // non-Ed25519 key, which eddsa-rdfc-2022 cannot sign) would escape
+          // instead of falling back to the legacy signer below.
+          return await issuer.issueCredential(unsigned, { proofPurpose: 'assertionMethod' });
         }
       } catch (e) {
-        // The issuer-binding refusal must fail closed: falling through to
-        // legacy signing here would sign the impersonating credential anyway.
-        if (e instanceof Error && e.message.includes('does not match the verification method controller')) {
+        // SECURITY refusals must fail closed — never fall through to the
+        // legacy local signer, which would sign the credential the Data
+        // Integrity path just refused. Two conditions are security refusals:
+        //   1. issuer-binding mismatch — a key for did:me minting a
+        //      credential that claims issuer did:victim;
+        //   2. a retired (revoked/compromised) verification method.
+        // Every OTHER error (the loader can't resolve this VM, the key is not
+        // Ed25519, the VM doc is incomplete) is a legitimate reason to fall
+        // back to the legacy signer, which supports ES256K/ES256 did:key
+        // signing that eddsa-rdfc-2022 cannot.
+        const msg = e instanceof Error ? e.message : String(e);
+        const isSecurityRefusal =
+          msg.includes('does not match the verification method controller') ||
+          /retired|revoked|compromised/i.test(msg);
+        if (isSecurityRefusal) {
           throw e;
         }
         // fall through to legacy signing
@@ -428,6 +444,32 @@ export class CredentialManager {
         errors.push('Credential has a BitstringStatusListEntry but no status list credential was provided');
       } else {
         try {
+          // Trust checks (issue #238): the supplied status list credential
+          // must be the referenced one, must carry a valid proof, and must be
+          // issued by the checked credential's issuer — otherwise a holder
+          // can hand the verifier a fabricated all-zeros list and bypass
+          // revocation.
+          if (!statusListCredential.id || statusListCredential.id !== status.statusListCredential) {
+            throw new Error(
+              `Status list credential id (${String(statusListCredential.id)}) does not match the ` +
+              `credential's statusListCredential reference (${status.statusListCredential})`
+            );
+          }
+          const listProofValid = await this.verifyCredential(statusListCredential);
+          if (!listProofValid) {
+            throw new Error('Status list credential proof verification failed');
+          }
+          const issuerOf = (c: VerifiableCredential): string | undefined =>
+            typeof c.issuer === 'string' ? c.issuer : (c.issuer as { id?: string } | undefined)?.id;
+          const credentialIssuer = issuerOf(credential);
+          const listIssuer = issuerOf(statusListCredential);
+          if (!credentialIssuer || !listIssuer || credentialIssuer !== listIssuer) {
+            throw new Error(
+              `Status list credential issuer (${String(listIssuer)}) does not match the ` +
+              `checked credential's issuer (${String(credentialIssuer)})`
+            );
+          }
+
           const result = this.statusList.checkStatus(status, statusListCredential);
           if (result.isSet) {
             if (result.statusPurpose === 'revocation') {
@@ -1299,7 +1341,7 @@ export class CredentialManager {
    * ```
    */
   multiSig(): MultiSigManager {
-    return new MultiSigManager(this.config);
+    return new MultiSigManager(this.config, this.didManager);
   }
 
   /**
@@ -1315,7 +1357,7 @@ export class CredentialManager {
     options: MultiSigSignOptions
   ): Promise<VerifiableCredential> {
     return this.tracked('credential.signMultiSig', async () => {
-      const manager = new MultiSigManager(this.config);
+      const manager = new MultiSigManager(this.config, this.didManager);
       return manager.signCredentialMultiSig(credential, options);
     });
   }
@@ -1333,7 +1375,7 @@ export class CredentialManager {
     policy: MultiSigPolicy
   ): Promise<MultiSigVerificationResult> {
     return this.tracked('credential.verifyMultiSig', async () => {
-      const manager = new MultiSigManager(this.config);
+      const manager = new MultiSigManager(this.config, this.didManager);
       return manager.verifyMultiSig(credential, policy);
     });
   }

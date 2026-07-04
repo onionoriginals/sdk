@@ -57,7 +57,7 @@
         "@stablelib/ed25519": "^2.0.2",
         "b58": "^4.0.3",
         "bitcoinjs-lib": "^6.1.0",
-        "cbor-js": "^0.1.0",
+        "cborg": "^5.1.6",
         "didwebvh-ts": "^2.8.0",
         "jsonld": "^8.3.3",
         "micro-ordinals": "^0.2.2",
@@ -542,6 +542,8 @@
     "canonicalize": ["canonicalize@1.0.8", "", {}, "sha512-0CNTVCLZggSh7bc5VkX5WWPWO+cyZbNd07IHIsSXLia/eAq+r836hgk+8BKoEh7949Mda87VUOitx5OddVj64A=="],
 
     "cbor-js": ["cbor-js@0.1.0", "", {}, "sha512-7sQ/TvDZPl7csT1Sif9G0+MA0I0JOVah8+wWlJVQdVEgIbCzlN/ab3x+uvMNsc34TUvO6osQTAmB2ls80JX6tw=="],
+
+    "cborg": ["cborg@5.1.7", "", { "bin": { "cborg": "lib/bin.js" } }, "sha512-rGg2MG9zZEUKtKqjkBppIWUecTXf9N1vs1Qru43vJWoDaODhCrtmzdehCaA/aq/c1cPI5A0kPrJ5Tf+jIfhV4w=="],
 
     "chardet": ["chardet@2.2.0", "", {}, "sha512-rddelWYNPRrXq6PtNEN2S3f6t9ILzvqaN5pVgi4kqt9jHQaXIial9PznB5iSPVlQSLNaaH22ItWz3EJtQ10+OA=="],
 

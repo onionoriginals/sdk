@@ -273,6 +273,43 @@ describe('LocalStorageAdapter path containment', () => {
 
     fs.rmSync(baseDir, { recursive: true, force: true });
   });
+
+  test('rejects domains that escape the storage directory (issue #251)', async () => {
+    const os = await import('os');
+    const path = await import('path');
+    const fs = await import('fs');
+    const { LocalStorageAdapter } = await import('../../../src/storage/LocalStorageAdapter');
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'originals-lsa-parent-'));
+    const baseDir = path.join(parent, 'storage');
+    fs.mkdirSync(baseDir);
+    const adapter = new LocalStorageAdapter({ baseDir });
+
+    // A bare '..' domain used to resolve the domain directory to the PARENT of
+    // baseDir, turning putObject/getObject into out-of-bounds file I/O.
+    for (const domain of ['..', '.', '...']) {
+      await expect(adapter.putObject(domain, 'secret/data.txt', 'x'))
+        .rejects.toThrow(/outside the storage directory/);
+      await expect(adapter.getObject(domain, 'secret/data.txt'))
+        .rejects.toThrow(/outside the storage directory/);
+      await expect(adapter.exists(domain, 'secret/data.txt'))
+        .rejects.toThrow(/outside the storage directory/);
+    }
+
+    // Nothing may have been written outside baseDir
+    expect(fs.existsSync(path.join(parent, 'secret'))).toBe(false);
+
+    // Multi-segment traversal attempts stay neutralized ('/' becomes '_')
+    const url = await adapter.putObject('../..', 'file.txt', 'ok');
+    expect(url).toContain('.._..');
+    expect(fs.existsSync(path.join(baseDir, '.._..', 'file.txt'))).toBe(true);
+
+    // Normal domains still work
+    await adapter.putObject('example.com', 'file.txt', 'hello');
+    const got = await adapter.getObject('example.com', 'file.txt');
+    expect(new TextDecoder().decode(got!.content)).toBe('hello');
+
+    fs.rmSync(parent, { recursive: true, force: true });
+  });
 });
 
 describe('MemoryStorageAdapter copy semantics', () => {

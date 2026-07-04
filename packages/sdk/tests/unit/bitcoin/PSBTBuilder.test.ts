@@ -96,3 +96,51 @@ describe('PSBTBuilder', () => {
   });
 });
 
+
+describe('PSBTBuilder ordinal safety (issue #249)', () => {
+  const utxo = (txid: string, vout: number, value: number, extra: Record<string, unknown> = {}) =>
+    ({ txid, vout, value, ...extra });
+
+  test('never selects inscription-bearing, resource, or locked UTXOs by default', () => {
+    const b = new PSBTBuilder();
+    // 546-sat inscribed UTXO is the smallest — the old ascending greedy
+    // selection would have spent it first.
+    const res = b.build({
+      utxos: [
+        utxo('inscribed', 0, 546, { inscriptions: ['abci0'] }),
+        utxo('resource', 0, 800, { hasResource: true }),
+        utxo('locked', 0, 900, { locked: true }),
+        utxo('clean', 0, 100_000)
+      ],
+      outputs: [{ address: 'to', value: 50_000 }],
+      changeAddress: 'change',
+      feeRate: 1,
+      network: 'regtest'
+    });
+    expect(res.selectedUtxos.map(u => u.txid)).toEqual(['clean']);
+  });
+
+  test('throws when only protected UTXOs are available', () => {
+    const b = new PSBTBuilder();
+    expect(() => b.build({
+      utxos: [utxo('inscribed', 0, 100_000, { inscriptions: ['abci0'] })],
+      outputs: [{ address: 'to', value: 1_000 }],
+      changeAddress: 'change',
+      feeRate: 1,
+      network: 'regtest'
+    })).toThrow(/inscriptions\/resources or are locked/);
+  });
+
+  test('allowOrdinalUtxos: true opts back in', () => {
+    const b = new PSBTBuilder();
+    const res = b.build({
+      utxos: [utxo('inscribed', 0, 100_000, { inscriptions: ['abci0'] })],
+      outputs: [{ address: 'to', value: 1_000 }],
+      changeAddress: 'change',
+      feeRate: 1,
+      network: 'regtest',
+      allowOrdinalUtxos: true
+    });
+    expect(res.selectedUtxos.map(u => u.txid)).toEqual(['inscribed']);
+  });
+});

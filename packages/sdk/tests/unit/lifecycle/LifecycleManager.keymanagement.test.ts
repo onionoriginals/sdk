@@ -8,6 +8,7 @@ import { OriginalsConfig } from '../../../src/types';
 import * as fs from 'fs';
 import * as path from 'path';
 import { tmpdir } from 'os';
+import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 
 const resources = [
   {
@@ -22,7 +23,8 @@ const resources = [
 const config: OriginalsConfig = {
   network: 'regtest',
   defaultKeyType: 'Ed25519', // Use Ed25519 for did:webvh compatibility
-  enableLogging: true
+  enableLogging: true,
+  storageAdapter: new MemoryStorageAdapter()
 };
 
 describe('LifecycleManager Key Management', () => {

@@ -18,8 +18,6 @@ import { Ed25519Signer } from '../crypto/Signer.js';
 import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
-import * as fs from 'fs';
-import * as path from 'path';
 
 export class DIDManager {
   private webvhManager?: WebVHManager;
@@ -99,7 +97,35 @@ export class DIDManager {
     }); // end track did.createDIDPeer
   }
 
-  async migrateToDIDWebVH(didDoc: DIDDocument, domain?: string): Promise<DIDDocument> {
+  /**
+   * Migrate a did:peer document to a real did:webvh.
+   *
+   * The migration goes through WebVHManager.createDIDWebVH (didwebvh-ts
+   * createDID), so the resulting DID has a genuine SCID and a signed DID log
+   * — `did:webvh:{SCID}:{domain}:{slug}` — resolvable by any conformant
+   * resolver once the log is hosted. (The previous implementation merely
+   * renamed the document id to `did:webvh:{domain}:{slug}`, which no resolver
+   * — including this SDK's own — could ever resolve; issue #245.)
+   *
+   * Returns the FULL migration result — not just the DID document. The signed
+   * `log` must be hosted (did.jsonl) for the DID to resolve, and the returned
+   * `keyPair` (generated unless a keyPair/externalSigner was supplied via
+   * `options`) must be persisted for future updates/rotations. Discarding
+   * them leaves the migrated DID unhostable and un-updatable.
+   *
+   * The peer document's verification methods are carried over as
+   * verification-only keys, its services are preserved, and the original
+   * did:peer is recorded in `alsoKnownAs`. Verification relationships other
+   * than the signing key's `authentication`/`assertionMethod` (e.g.
+   * `keyAgreement`, `capabilityInvocation`, `capabilityDelegation`) are NOT
+   * carried over — didwebvh-ts owns the relationship arrays of the created
+   * document; republish such relationships via updateDIDWebVH if needed.
+   */
+  async migrateToDIDWebVH(
+    didDoc: DIDDocument,
+    domain?: string,
+    options?: MigrateToWebVHOptions
+  ): Promise<MigrateToWebVHResult> {
     return this.track('did.migrateToDIDWebVH', async () => {
     // Use provided domain or get default from configured network
     const network = this.config.webvhNetwork || DEFAULT_WEBVH_NETWORK;
@@ -139,70 +165,49 @@ export class DIDManager {
       .replace(/[^a-zA-Z0-9._-]/g, '-')
       .toLowerCase();
 
-    // Percent-encode the port colon so the domain+port stays a single DID
-    // authority segment. A literal colon (e.g. `localhost:8080`) would be parsed
-    // as `authority=localhost` + `path segment=8080` by every consumer that
-    // splits the DID on ':' — including this SDK's own saveDIDLog, which does
-    // decodeURIComponent(didParts[2]) and expects the port to be encoded there.
-    const authority = portPart ? `${domainPart}%3A${portPart}` : normalized;
-    const oldDid = didDoc.id;
-    const newDid = `did:webvh:${authority}:${slug}`;
-
-    // Rewrite a reference from the old DID to the new one. Relative
-    // references ('#key-0') and references to foreign DIDs are preserved.
-    const rewriteRef = (ref: string): string =>
-      ref === oldDid ? newDid : ref.startsWith(`${oldDid}#`) ? newDid + ref.slice(oldDid.length) : ref;
-
-    // The migrated document must be internally consistent: verification
-    // method ids/controllers, relationship references, top-level controller
-    // and service ids must all point at the new did:webvh subject, not the
-    // retired did:peer.
-    const migrated: DIDDocument = {
-      ...didDoc,
-      id: newDid
-    };
-    const docController = (didDoc as unknown as { controller?: unknown }).controller;
-    if (typeof docController === 'string') {
-      (migrated as unknown as Record<string, unknown>).controller = rewriteRef(docController);
-    } else if (Array.isArray(docController)) {
-      (migrated as unknown as Record<string, unknown>).controller = docController.map((c) =>
-        typeof c === 'string' ? rewriteRef(c) : c
-      );
-    }
-    if (Array.isArray(didDoc.service)) {
-      migrated.service = didDoc.service.map((svc) =>
-        svc && typeof svc === 'object'
-          ? {
-              ...svc,
-              ...(typeof svc.id === 'string' ? { id: rewriteRef(svc.id) } : {})
-            }
-          : svc
-      );
-    }
-    if (Array.isArray(didDoc.verificationMethod)) {
-      migrated.verificationMethod = didDoc.verificationMethod.map((vm) => ({
-        ...vm,
-        ...(typeof vm.id === 'string' ? { id: rewriteRef(vm.id) } : {}),
-        ...(typeof vm.controller === 'string' ? { controller: rewriteRef(vm.controller) } : {})
+    // Carry the peer document's multikey verification methods over as
+    // verification-only keys (they do not become updateKeys — log updates are
+    // authorized by the signing key generated/provided below).
+    const carriedVerificationMethods = (didDoc.verificationMethod || [])
+      .filter((vm) => typeof vm.publicKeyMultibase === 'string' && vm.publicKeyMultibase.length > 0)
+      .map((vm) => ({
+        type: 'Multikey',
+        publicKeyMultibase: vm.publicKeyMultibase,
       }));
-    }
-    for (const rel of ['authentication', 'assertionMethod', 'keyAgreement', 'capabilityInvocation', 'capabilityDelegation'] as const) {
-      const entries = (didDoc as unknown as Record<string, unknown>)[rel];
-      if (Array.isArray(entries)) {
-        (migrated as unknown as Record<string, unknown>)[rel] = entries.map((entry) =>
-          typeof entry === 'string'
-            ? rewriteRef(entry)
-            : entry && typeof entry === 'object'
-              ? {
-                  ...(entry as Record<string, unknown>),
-                  ...(typeof (entry as { id?: unknown }).id === 'string' ? { id: rewriteRef((entry as { id: string }).id) } : {}),
-                  ...(typeof (entry as { controller?: unknown }).controller === 'string' ? { controller: rewriteRef((entry as { controller: string }).controller) } : {})
-                }
-              : entry
-        );
-      }
-    }
-    return await Promise.resolve(migrated);
+
+    // Preserve service endpoints
+    const services = Array.isArray(didDoc.service)
+      ? didDoc.service.map((svc) => ({ ...(svc as unknown as Record<string, unknown>) }))
+      : undefined;
+
+    const oldDid = didDoc.id;
+
+    // Create a REAL did:webvh — genuine SCID, signed DID log — via
+    // WebVHManager/didwebvh-ts (issue #245). didwebvh-ts percent-encodes a
+    // port colon itself, so host[:port] is passed as-is.
+    const result = await this.getWebVHManager().createDIDWebVH({
+      domain: normalized,
+      paths: slug ? [slug] : [],
+      keyPair: options?.keyPair,
+      externalSigner: options?.externalSigner,
+      externalVerifier: options?.externalVerifier,
+      verificationMethods: options?.verificationMethods,
+      updateKeys: options?.updateKeys,
+      outputDir: options?.outputDir,
+      portable: options?.portable ?? false,
+      additionalVerificationMethods: carriedVerificationMethods,
+      alsoKnownAs: [oldDid],
+      services,
+    });
+
+    return {
+      did: result.did,
+      didDocument: result.didDocument,
+      log: result.log as unknown as DIDLog,
+      keyPair: result.keyPair,
+      logPath: result.logPath,
+      previousDid: oldDid,
+    };
     }); // end track did.migrateToDIDWebVH
   }
 
@@ -223,14 +228,20 @@ export class DIDManager {
       throw new Error(`Satoshi identifier must be within Bitcoin's total supply (0 to ${MAX_SATOSHI_SUPPLY.toLocaleString()})`);
     }
 
-    // Determine Bitcoin network from WebVH network configuration if available
-    // This ensures consistent environment mapping: magby→regtest, cleffa→signet, pichu→mainnet
+    // Determine the Bitcoin network. An explicitly configured `network` wins:
+    // OriginalsSDK.create() always injects a default webvhNetwork ('pichu'),
+    // so deriving from webvhNetwork first would silently override an explicit
+    // `network: 'regtest'` and mint mainnet-form identifiers for regtest
+    // inscriptions (issue #247). The WebVH mapping (magby→regtest,
+    // cleffa→signet, pichu→mainnet) applies only when no explicit Bitcoin
+    // network was configured.
     let network: 'mainnet' | 'regtest' | 'signet';
-    if (this.config.webvhNetwork) {
+    if (this.config.network) {
+      network = this.config.network;
+    } else if (this.config.webvhNetwork) {
       network = getBitcoinNetworkForWebVH(this.config.webvhNetwork);
     } else {
-      // Fall back to explicit network config
-      network = this.config.network || 'mainnet';
+      network = 'mainnet';
     }
 
     // Try to carry over the first multikey VM if present
@@ -582,60 +593,9 @@ export class DIDManager {
    * @returns The full path where the log was saved
    */
   async saveDIDLog(did: string, log: DIDLog, baseDir: string): Promise<string> {
-    // Parse the DID to extract domain and path components
-    // Format: did:webvh:domain[:port]:path1:path2...
-    const didParts = did.split(':');
-    if (didParts.length < 3 || didParts[0] !== 'did' || didParts[1] !== 'webvh') {
-      throw new Error('Invalid did:webvh format');
-    }
-
-    // Extract path parts (everything after domain)
-    const pathParts = didParts.slice(3);
-
-    // Validate all path segments to prevent directory traversal
-    for (const segment of pathParts) {
-      if (!this.isValidPathSegment(segment)) {
-        throw new Error(`Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`);
-      }
-    }
-
-    // Extract and sanitize domain for filesystem safety
-    const rawDomain = decodeURIComponent(didParts[2]);
-    // Normalize: lowercase and replace any characters not in [a-z0-9._-] with '_'
-    const safeDomain = rawDomain
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]/g, '_');
-    
-    // Validate the sanitized domain (reject '..' and other dangerous patterns)
-    if (!this.isValidPathSegment(safeDomain)) {
-      throw new Error(`Invalid domain segment in DID: "${rawDomain}"`);
-    }
-
-    // Construct the file path with domain isolation
-    // For did:webvh:example.com:user:alice -> baseDir/did/example.com/user/alice/did.jsonl
-    // For did:webvh:example.com:alice -> baseDir/did/example.com/alice/did.jsonl
-    const segments = [safeDomain, ...pathParts];
-    const didPath = path.join(baseDir, 'did', ...segments, 'did.jsonl');
-
-    // Verify the resolved path is still within baseDir (defense in depth)
-    const resolvedBaseDir = path.resolve(baseDir);
-    const resolvedPath = path.resolve(didPath);
-    const relativePath = path.relative(resolvedBaseDir, resolvedPath);
-    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-      throw new Error('Invalid DID path: resolved path is outside base directory');
-    }
-
-    // Create directories if they don't exist
-    const dirPath = path.dirname(didPath);
-    await fs.promises.mkdir(dirPath, { recursive: true });
-
-    // Convert log to JSONL format (one JSON object per line)
-    const jsonlContent = log.map((entry: DIDLogEntry) => JSON.stringify(entry)).join('\n');
-
-    // Write the log file
-    await fs.promises.writeFile(didPath, jsonlContent, 'utf8');
-
-    return didPath;
+    // Delegate to WebVHManager: single source of truth for the SCID-first
+    // did:webvh parsing and the resolution-URL-mirroring layout (issue #246).
+    return this.getWebVHManager().saveDIDLog(did, log, baseDir);
   }
 
   /**
@@ -644,34 +604,9 @@ export class DIDManager {
    * @returns The loaded DID log
    */
   async loadDIDLog(logPath: string): Promise<DIDLog> {
-    const content = await fs.promises.readFile(logPath, 'utf8');
-    const lines = content.trim().split('\n');
-    return lines.map(line => JSON.parse(line) as DIDLogEntry);
+    return this.getWebVHManager().loadDIDLog(logPath);
   }
 
-  /**
-   * Validates a path segment to prevent directory traversal attacks
-   * @param segment - Path segment to validate
-   * @returns true if valid, false otherwise
-   */
-  private isValidPathSegment(segment: string): boolean {
-    // Reject empty segments, dots, or segments with path separators
-    if (!segment || segment === '.' || segment === '..') {
-      return false;
-    }
-    
-    // Reject segments containing path separators or other dangerous characters
-    if (segment.includes('/') || segment.includes('\\') || segment.includes('\0')) {
-      return false;
-    }
-    
-    // Reject absolute paths (starting with / or drive letter on Windows)
-    if (path.isAbsolute(segment)) {
-      return false;
-    }
-    
-    return true;
-  }
 }
 
 // Type definitions for didwebvh-ts (to avoid module resolution issues)
@@ -727,6 +662,35 @@ export interface CreateWebVHOptions {
   externalVerifier?: ExternalVerifier;
   verificationMethods?: WebVHVerificationMethod[];
   updateKeys?: string[];
+}
+
+/**
+ * Result of migrateToDIDWebVH: the migrated document plus everything needed
+ * to actually operate the DID — the signed log to host and the update key
+ * pair to persist.
+ */
+export interface MigrateToWebVHResult {
+  did: string;
+  didDocument: DIDDocument;
+  log: DIDLog;
+  keyPair: KeyPair;
+  logPath?: string;
+  previousDid: string;
+}
+
+/**
+ * Options for migrateToDIDWebVH. Signing options
+ * mirror CreateWebVHOptions: supply a keyPair or externalSigner to control the
+ * did:webvh update key; otherwise a fresh Ed25519 key pair is generated.
+ */
+export interface MigrateToWebVHOptions {
+  keyPair?: KeyPair;
+  externalSigner?: ExternalSigner;
+  externalVerifier?: ExternalVerifier;
+  verificationMethods?: WebVHVerificationMethod[];
+  updateKeys?: string[];
+  outputDir?: string;
+  portable?: boolean;
 }
 
 export interface CreateWebVHResult {

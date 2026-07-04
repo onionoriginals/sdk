@@ -133,7 +133,7 @@ describe('CORE-MIG-EVENTS-003/happy: DID update adds new service endpoint', () =
     const sdk = makeSdk();
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
 
-    const webvhDoc = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
+    const webvhDoc = (await sdk.did.migrateToDIDWebVH(peerDid, 'example.com')).didDocument;
 
     expect(webvhDoc.id).toMatch(/did:webvh:/);
     // The migrated document should have at least one verificationMethod
@@ -143,7 +143,7 @@ describe('CORE-MIG-EVENTS-003/happy: DID update adds new service endpoint', () =
   it('resolveDID returns null for a migrated did:webvh with no hosted log', async () => {
     const sdk = makeSdk();
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
-    const webvhDoc = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
+    const webvhDoc = (await sdk.did.migrateToDIDWebVH(peerDid, 'example.com')).didDocument;
 
     // migrateToDIDWebVH only rewrites the identifier; nothing is hosted at
     // example.com, so honest resolution returns null (no fabricated stubs).
@@ -792,7 +792,7 @@ describe('CORE-MIG-EVENTS-021/error: WebVH→BTCO fails with invalid satoshi / n
     );
 
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
-    const webvhDid = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
+    const webvhDid = (await sdk.did.migrateToDIDWebVH(peerDid, 'example.com')).didDocument;
 
     const result = await pipeline.validate({
       sourceDid: webvhDid.id,
@@ -816,7 +816,7 @@ describe('CORE-MIG-EVENTS-021/error: WebVH→BTCO fails with invalid satoshi / n
     );
 
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
-    const webvhDid = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
+    const webvhDid = (await sdk.did.migrateToDIDWebVH(peerDid, 'example.com')).didDocument;
 
     const result = await manager.migrate({
       sourceDid: webvhDid.id,
@@ -1313,5 +1313,124 @@ describe('MigrationManager: audit failures and rollback state consistency', () =
     expect(batch.startTime).toBeLessThanOrEqual(after);
     // batchId is derived from the same start timestamp.
     expect(batch.batchId).toBe(`batch_${batch.startTime}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #254: migrate() must honor estimateCostOnly
+// Issue #255: concurrent migrations of the same DID must be rejected
+// ---------------------------------------------------------------------------
+
+describe('migrate() honors estimateCostOnly (issue #254)', () => {
+  afterEach(() => {
+    MigrationManager.resetInstance();
+  });
+
+  it('migrate({ estimateCostOnly: true }) returns an estimate and performs no migration', async () => {
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const result = await manager.migrate({
+      sourceDid: peerDid.id,
+      targetLayer: 'webvh',
+      domain: 'example.com',
+      estimateCostOnly: true
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.cost).toBeDefined();
+    // No migration executed: no target DID was created
+    expect(result.targetDid).toBeUndefined();
+  });
+});
+
+describe('concurrent migrations of the same DID are rejected (issue #255)', () => {
+  afterEach(() => {
+    MigrationManager.resetInstance();
+  });
+
+  it('the second concurrent migrate() for the same sourceDid fails with MIGRATION_IN_PROGRESS', async () => {
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const opts = { sourceDid: peerDid.id, targetLayer: 'webvh' as const, domain: 'example.com' };
+
+    const [first, second] = await Promise.allSettled([
+      manager.migrate(opts),
+      manager.migrate(opts)
+    ]);
+
+    const outcomes = [first, second];
+    // Both calls RESOLVE (migrate() returns structured MigrationResults for
+    // operational failures); exactly one is rejected by the in-flight guard
+    // with a MIGRATION_IN_PROGRESS failure result.
+    expect(outcomes.every(o => o.status === 'fulfilled')).toBe(true);
+    const results = outcomes.map(o => (o as PromiseFulfilledResult<any>).value);
+    const guarded = results.filter(r =>
+      r.success === false && r.error?.code === 'MIGRATION_IN_PROGRESS'
+    );
+    expect(guarded.length).toBe(1);
+  });
+
+  it('sequential migrations are not blocked by the guard', async () => {
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const opts = { sourceDid: peerDid.id, targetLayer: 'webvh' as const, domain: 'example.com' };
+
+    const r1 = await manager.migrate(opts);
+    // The guard must have been released — a second call reaches normal
+    // validation/migration logic instead of MIGRATION_IN_PROGRESS
+    const r2 = await manager.migrate(opts);
+    expect(r1).toBeDefined();
+    expect(r2.error?.code === 'MIGRATION_IN_PROGRESS').toBe(false);
+  });
+});
+
+describe('estimateCostOnly leaves no tracked migration state (review follow-up on #254)', () => {
+  afterEach(() => {
+    MigrationManager.resetInstance();
+  });
+
+  it('estimate-only requests create no phantom in-progress migration', async () => {
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance(
+      (sdk as any).config,
+      sdk.did,
+      sdk.credentials
+    );
+
+    const peerDid = await sdk.did.createDIDPeer(sampleResources);
+    const result = await manager.migrate({
+      sourceDid: peerDid.id,
+      targetLayer: 'webvh',
+      domain: 'example.com',
+      estimateCostOnly: true
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.state).toBe(MigrationStateEnum.COMPLETED);
+    // No tracked state entry was created for the estimate
+    const tracked = await manager.getMigrationStatus(result.migrationId);
+    expect(tracked).toBeNull();
   });
 });

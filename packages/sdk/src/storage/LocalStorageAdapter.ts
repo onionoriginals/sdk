@@ -4,6 +4,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { GetObjectResult, LocalStorageAdapterOptions, StorageAdapter } from './StorageAdapter.js';
+import { StructuredError } from '../utils/telemetry.js';
 
 export class LocalStorageAdapter implements StorageAdapter {
   private baseDir: string;
@@ -15,13 +16,32 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   private sanitizeDomain(domain: string): string {
-    return domain.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const sanitized = domain.replace(/[^a-zA-Z0-9.-]/g, '_');
+    // '.' and '-' survive sanitization, so a domain of '.' or '..' would make
+    // the domain directory resolve to baseDir itself or its parent. Reject
+    // dot-only segments outright.
+    if (/^\.+$/.test(sanitized)) {
+      throw new StructuredError('STORAGE_PATH_TRAVERSAL', `Invalid domain: resolves outside the storage directory: ${domain}`);
+    }
+    return sanitized;
   }
 
   private resolvePath(domain: string, objectPath: string): string {
     const safeDomain = this.sanitizeDomain(domain);
     const cleanPath = objectPath.replace(/^\/+/, '');
     const base = path.resolve(this.baseDir, safeDomain);
+    // Defense in depth: the domain directory itself must be a strict child of
+    // baseDir; '..' segments in a domain (which can derive from external data)
+    // must not become a read/write primitive outside baseDir.
+    const baseRelative = path.relative(path.resolve(this.baseDir), base);
+    if (
+      baseRelative === '' ||
+      baseRelative === '..' ||
+      baseRelative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(baseRelative)
+    ) {
+      throw new StructuredError('STORAGE_PATH_TRAVERSAL', `Invalid domain: resolves outside the storage directory: ${domain}`);
+    }
     const fullPath = path.resolve(base, cleanPath);
     // Contain object paths inside the domain directory: '..' segments in a
     // path (which can derive from external data) must not become a read/write

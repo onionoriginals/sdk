@@ -1,5 +1,5 @@
 import type { Utxo } from '../types/bitcoin.js';
-import { isSegwitScriptPubKey } from './utxo.js';
+import { isSegwitScriptPubKey, isProtectedUtxo } from './utxo.js';
 
 export interface PsbtOutput {
   address: string;
@@ -13,6 +13,13 @@ export interface BuildPsbtParams {
   feeRate: number; // sat/vB
   network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
   dustLimit?: number;
+  /**
+   * Opt in to spending UTXOs that carry inscriptions/resources or are locked.
+   * Defaults to false: inscription outputs are characteristically the smallest
+   * UTXOs, so the ascending greedy selection below would otherwise
+   * preferentially spend them as plain payment inputs.
+   */
+  allowOrdinalUtxos?: boolean;
 }
 
 export interface BuildPsbtResult {
@@ -58,8 +65,18 @@ export class PSBTBuilder {
       );
     }
 
+    // Ordinal safety (issue #249): exclude inscription-bearing, resource, and
+    // locked UTXOs unless the caller explicitly opts in.
+    const spendable = params.allowOrdinalUtxos === true ? utxos : utxos.filter(u => !isProtectedUtxo(u));
+    if (spendable.length === 0) {
+      throw new Error(
+        'All available UTXOs carry inscriptions/resources or are locked and cannot be used for fees/payments. ' +
+        'Add non-resource UTXOs, or pass allowOrdinalUtxos: true to override (dangerous).'
+      );
+    }
+
     // Sort UTXOs ascending by value for simple greedy selection
-    const sorted = [...utxos].sort((a, b) => a.value - b.value);
+    const sorted = [...spendable].sort((a, b) => a.value - b.value);
 
     // Start with smallest set to cover target + estimated fee; refine iteratively
     const targetValue = outputs.reduce((s, o) => s + o.value, 0);

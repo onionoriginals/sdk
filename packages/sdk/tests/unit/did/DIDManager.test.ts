@@ -27,11 +27,15 @@ describe('DIDManager', () => {
 
   test('migrateToDIDWebVH converts to did:webvh (expected to fail until implemented)', async () => {
     const didDoc: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:xyz' };
-    const webDoc = await sdk.did.migrateToDIDWebVH(didDoc, 'example.com');
-    expect(webDoc.id.startsWith('did:webvh:')).toBe(true);
+    const migration = await sdk.did.migrateToDIDWebVH(didDoc, 'example.com');
+    expect(migration.didDocument.id.startsWith('did:webvh:')).toBe(true);
+    // The full result carries what a caller needs to host and update the DID
+    expect(Array.isArray(migration.log)).toBe(true);
+    expect(migration.keyPair.publicKey.length).toBeGreaterThan(0);
+    expect(migration.previousDid).toBe('did:peer:xyz');
   });
 
-  test('migrateToDIDWebVH preserves VMs and services and stable slug', async () => {
+  test('migrateToDIDWebVH creates a real SCID-first did:webvh, carrying VMs/services and the stable slug (issue #245)', async () => {
     const peer: DIDDocument = {
       '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'],
       id: 'did:peer:abc123',
@@ -40,13 +44,42 @@ describe('DIDManager', () => {
       assertionMethod: ['did:peer:abc123#0'],
       service: [{ id: '#svc', type: 'Example', serviceEndpoint: 'https://api.example/svc' }]
     };
-    const web = await sdk.did.migrateToDIDWebVH(peer, 'Example.COM');
-    expect(web.id).toBe('did:webvh:example.com:abc123');
-    expect(web.verificationMethod?.[0].publicKeyMultibase).toBe(peer.verificationMethod![0].publicKeyMultibase);
+    const web = (await sdk.did.migrateToDIDWebVH(peer, 'Example.COM')).didDocument;
+    // Spec format: did:webvh:{SCID}:{domain}:{slug} — a genuine SCID, not a renamed peer doc
+    const parts = web.id.split(':');
+    expect(parts.length).toBe(5);
+    expect(parts.slice(0, 2).join(':')).toBe('did:webvh');
+    expect(parts[2].length).toBeGreaterThan(10); // SCID
+    expect(parts[3]).toBe('example.com');
+    expect(parts[4]).toBe('abc123'); // stable slug from the peer suffix
+    // The peer verification method is carried over (verification-only)
+    const carried = (web.verificationMethod || []).map(vm => vm.publicKeyMultibase);
+    expect(carried).toContain(peer.verificationMethod![0].publicKeyMultibase);
+    // All VM ids/controllers are rooted at the new did:webvh
+    for (const vm of web.verificationMethod || []) {
+      expect(vm.id!.startsWith(web.id)).toBe(true);
+      expect(vm.controller).toBe(web.id);
+    }
+    // Services preserved, old DID recorded in alsoKnownAs
     expect(web.service?.[0].id).toBe('#svc');
+    expect((web as any).alsoKnownAs).toContain('did:peer:abc123');
   });
 
-  test('migrateToDIDWebVH rewrites verification method ids, controllers and relationship refs to the new DID', async () => {
+  test('migrateToDIDWebVH returns the signed log and generated key pair', async () => {
+    const peer: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:xyz789' };
+    const detailed = await sdk.did.migrateToDIDWebVH(peer, 'example.com');
+    expect(detailed.previousDid).toBe('did:peer:xyz789');
+    expect(detailed.did).toBe(detailed.didDocument.id);
+    expect(Array.isArray(detailed.log)).toBe(true);
+    expect(detailed.log.length).toBeGreaterThan(0);
+    // The log entry is signed and carries the SCID parameter
+    expect((detailed.log[0].parameters as any).scid).toBeDefined();
+    expect(Array.isArray(detailed.log[0].proof)).toBe(true);
+    expect(detailed.keyPair.publicKey.length).toBeGreaterThan(0);
+    expect(detailed.keyPair.privateKey.length).toBeGreaterThan(0);
+  });
+
+  test('migrateToDIDWebVH roots verification methods and relationships at the new DID', async () => {
     const peer: DIDDocument = {
       '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'],
       id: 'did:peer:abc123',
@@ -54,35 +87,32 @@ describe('DIDManager', () => {
       authentication: ['did:peer:abc123#0'],
       assertionMethod: ['did:peer:abc123#0']
     };
-    const web = await sdk.did.migrateToDIDWebVH(peer, 'example.com');
-    expect(web.id).toBe('did:webvh:example.com:abc123');
-    expect(web.verificationMethod?.[0].id).toBe('did:webvh:example.com:abc123#0');
-    expect(web.verificationMethod?.[0].controller).toBe('did:webvh:example.com:abc123');
-    expect(web.authentication).toEqual(['did:webvh:example.com:abc123#0']);
-    expect(web.assertionMethod).toEqual(['did:webvh:example.com:abc123#0']);
-    // Relative and foreign refs are preserved untouched
-    const peer2: DIDDocument = {
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:peer:abc123',
-      authentication: ['#0', 'did:example:other#1']
-    };
-    const web2 = await sdk.did.migrateToDIDWebVH(peer2, 'example.com');
-    expect(web2.authentication).toEqual(['#0', 'did:example:other#1']);
+    const web = (await sdk.did.migrateToDIDWebVH(peer, 'example.com')).didDocument;
+    // No reference to the retired did:peer remains outside alsoKnownAs
+    for (const vm of web.verificationMethod || []) {
+      expect(vm.id!.startsWith(web.id)).toBe(true);
+      expect(vm.controller).toBe(web.id);
+    }
+    const rels = ([] as unknown[]).concat(web.authentication || [], web.assertionMethod || []);
+    for (const ref of rels) {
+      if (typeof ref === 'string') {
+        expect(ref === web.id || ref.startsWith('#') || ref.startsWith(web.id)).toBe(true);
+      }
+    }
   });
 
   test('migrateToDIDWebVH percent-encodes a domain port so it stays one authority segment', async () => {
     const peer: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:abc123' };
-    const web = await sdk.did.migrateToDIDWebVH(peer, 'localhost:8080');
+    const web = (await sdk.did.migrateToDIDWebVH(peer, 'localhost:8080')).didDocument;
     // The port colon must be percent-encoded (%3A), otherwise splitting the DID
-    // on ':' would parse `8080` as a path segment and `localhost` as the domain.
-    expect(web.id).toBe('did:webvh:localhost%3A8080:abc123');
+    // on ':' would parse `8080` as a path segment.
     const parts = web.id.split(':');
-    // did / webvh / <authority> / <slug> — exactly one authority segment.
-    expect(parts.length).toBe(4);
-    expect(decodeURIComponent(parts[2])).toBe('localhost:8080');
-    // saveDIDLog decodes didParts[2] as the authority; the slug (not the port)
+    // did / webvh / <scid> / <authority> / <slug> — exactly one authority segment.
+    expect(parts.length).toBe(5);
+    expect(decodeURIComponent(parts[3])).toBe('localhost:8080');
+    // saveDIDLog decodes didParts[3] as the authority; the slug (not the port)
     // must be the only path segment.
-    expect(parts.slice(3)).toEqual(['abc123']);
+    expect(parts.slice(4)).toEqual(['abc123']);
   });
 
   test('migrateToDIDBTCO converts to did:btco (expected to fail until implemented)', async () => {

@@ -1,13 +1,3 @@
-declare module 'cbor-js' {
-  export function encode(value: unknown): ArrayBuffer | Uint8Array;
-  export function decode(buffer: ArrayBufferLike): unknown;
-  const _default: {
-    encode: typeof encode;
-    decode: typeof decode;
-  };
-  export default _default;
-}
-
 declare module 'multiformats/bases/base64' {
   export const base64url: {
     encode: (bytes: Uint8Array) => string;

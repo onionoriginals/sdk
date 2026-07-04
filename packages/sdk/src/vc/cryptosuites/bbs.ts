@@ -1,4 +1,4 @@
-import * as cbor from 'cbor-js';
+import * as cbor from '../../utils/cbor.js';
 
 /**
  * Minimal BBS utility methods ported from legacy for working with
@@ -103,7 +103,7 @@ export class BBSCryptosuiteUtils {
     else if (this.compareBytes(header, [0xd9, 0x5d, 0x03])) featureOption = 'base_proof';
     else throw new Error('Invalid BBS base proof header');
 
-    const components: any[] = cbor.decode(decoded.slice(3).buffer) as any[];
+    const components: any[] = cbor.decode(decoded.slice(3)) as any[];
     const base = {
       bbsSignature: components[0] as Uint8Array,
       bbsHeader: components[1] as Uint8Array,
@@ -231,7 +231,7 @@ export class BBSCryptosuiteUtils {
     else if (this.compareBytes(header, [0xd9, 0x5d, 0x07])) featureOption = 'pseudonym';
     else throw new Error('Invalid BBS derived proof header');
 
-    const components: any[] = cbor.decode(decoded.slice(3).buffer) as any[];
+    const components: any[] = cbor.decode(decoded.slice(3)) as any[];
     const decompressedLabelMap = this.decompressLabelMap(components[1]);
     const result: any = {
       bbsProof: components[0],

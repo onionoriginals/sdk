@@ -140,7 +140,7 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
     });
 
     const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = await manager.migrateToDIDWebVH(peerDoc); // no explicit domain
+    const webDoc = (await manager.migrateToDIDWebVH(peerDoc)).didDocument; // no explicit domain
 
     expect(webDoc.id).toMatch(/^did:webvh:/);
     expect(webDoc.id).toContain('magby.originals.build');
@@ -153,7 +153,7 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
     });
 
     const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = await manager.migrateToDIDWebVH(peerDoc);
+    const webDoc = (await manager.migrateToDIDWebVH(peerDoc)).didDocument;
 
     expect(webDoc.id).toMatch(/^did:webvh:/);
     expect(webDoc.id).toContain('cleffa.originals.build');
@@ -166,7 +166,7 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
     });
 
     const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = await manager.migrateToDIDWebVH(peerDoc);
+    const webDoc = (await manager.migrateToDIDWebVH(peerDoc)).didDocument;
 
     expect(webDoc.id).toMatch(/^did:webvh:/);
     expect(webDoc.id).toContain('pichu.originals.build');
@@ -179,7 +179,7 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
     });
 
     const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = await manager.migrateToDIDWebVH(peerDoc, 'custom.example.com');
+    const webDoc = (await manager.migrateToDIDWebVH(peerDoc, 'custom.example.com')).didDocument;
 
     expect(webDoc.id).toContain('custom.example.com');
     expect(webDoc.id).not.toContain('magby.originals.build');
@@ -237,10 +237,14 @@ describe('DID-003 — migrateToDIDBTCO on regtest produces did:btco:reg prefix',
   });
 
   test('webvhNetwork=cleffa (signet) → did:btco:sig:<sat>', async () => {
+    // No explicit `network`: an explicitly configured Bitcoin network takes
+    // precedence over the webvhNetwork mapping (issue #247), so the mapping
+    // only applies when `network` is absent.
     const manager = new DIDManager({
-      ...baseConfig,
+      defaultKeyType: 'Ed25519',
+      enableLogging: false,
       webvhNetwork: 'cleffa',
-    });
+    } as OriginalsConfig);
 
     const peerDoc = {
       '@context': ['https://www.w3.org/ns/did/v1'],

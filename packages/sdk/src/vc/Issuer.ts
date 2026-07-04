@@ -29,7 +29,7 @@ const SECURING_CONTEXTS = ['https://www.w3.org/ns/credentials/v2', DATA_INTEGRIT
  * behaviour of jsonld-signatures). Without it, safe-mode canonicalization
  * of the proof configuration fails for e.g. plain VCDM 1.1 credentials.
  */
-function withSecuringContext(
+export function withSecuringContext(
   context: VerifiableCredential['@context'] | undefined
 ): VerifiableCredential['@context'] {
   if (context === undefined) return [...DEFAULT_CONTEXTS];

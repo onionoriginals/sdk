@@ -22,7 +22,7 @@
     "check": "turbo run check --filter='./packages/*'",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "changeset publish --provenance"
+    "release": "changeset publish"
   },
   "author": "Aviary Tech",
   "license": "MIT",

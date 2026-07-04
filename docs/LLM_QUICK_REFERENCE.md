@@ -106,8 +106,9 @@ const chainValid = manager.verifyVersionChain(resource.id);
 const { didDocument, keyPair } = await sdk.did.createDIDPeer(resources, true);
 const result = await sdk.did.createDIDWebVH({ domain: 'example.com' });
 
-// Migrate
-await sdk.did.migrateToDIDWebVH(didDoc, 'example.com');
+// Migrate (returns { did, didDocument, log, keyPair, logPath?, previousDid } —
+// host `log` as did.jsonl and persist `keyPair` for future updates)
+const { didDocument: webvhDoc } = await sdk.did.migrateToDIDWebVH(didDoc, 'example.com');
 await sdk.did.migrateToDIDBTCO(didDoc, '1234567890');  // satoshi
 
 // Resolve

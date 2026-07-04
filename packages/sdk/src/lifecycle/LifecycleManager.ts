@@ -11,10 +11,10 @@ import { BitcoinManager } from '../bitcoin/BitcoinManager.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { CredentialManager } from '../vc/CredentialManager.js';
 import { OriginalsAsset } from './OriginalsAsset.js';
-import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter.js';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
+import { btcoDidPrefix } from '../cel/btcoDid.js';
 import { multikey } from '../crypto/Multikey.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
@@ -125,6 +125,13 @@ export class LifecycleManager {
   private batchOps: BatchLifecycleOperations;
   private logger: Logger;
   private metrics: MetricsCollector;
+  /**
+   * Assets with an inscription or publication currently in flight, keyed by
+   * asset id. Mutated synchronously before the first await so concurrent
+   * calls for the same asset cannot both pass the layer guard and double-pay
+   * for two inscriptions (issue #255).
+   */
+  private inFlightAssets = new Set<string>();
 
   constructor(
     private config: OriginalsConfig,
@@ -545,7 +552,18 @@ export class LifecycleManager {
       if (asset.currentLayer !== 'did:peer') {
         throw new StructuredError('INVALID_STATE', 'Asset must be in did:peer layer to publish to web. Assets can only be published from the did:peer layer.');
       }
-      
+
+      // Concurrency guard (issue #255): the layer check above is
+      // check-then-act across awaits — overlapping publishes would both pass
+      // it and duplicate storage writes/credentials.
+      if (this.inFlightAssets.has(asset.id)) {
+        throw new StructuredError(
+          'OPERATION_IN_PROGRESS',
+          `An inscription or publication for asset ${asset.id} is already in progress.`
+        );
+      }
+      this.inFlightAssets.add(asset.id);
+      try {
       const { publisherDid, signer } = this.extractPublisherInfo(publisherDidOrSigner);
       const { domain, userPath } = this.parseWebVHDid(publisherDid);
       
@@ -574,6 +592,9 @@ export class LifecycleManager {
       this.metrics.recordMigration('did:peer', 'did:webvh');
 
       return asset;
+      } finally {
+        this.inFlightAssets.delete(asset.id);
+      }
     } catch (error) {
       stopTimer();
       this.logger.error('Publish to web failed', error as Error, { assetId: asset.id });
@@ -633,8 +654,36 @@ export class LifecycleManager {
     domain: string,
     userPath: string
   ): Promise<void> {
-    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter || new MemoryStorageAdapter();
-    
+    // Publication must actually host content somewhere. Falling back to a
+    // method-local MemoryStorageAdapter (whose contents are garbage-collected
+    // the moment this call returns) — or writing nothing because the adapter
+    // implements neither put() nor putObject() — would still migrate the
+    // asset and issue a publication credential asserting content is hosted
+    // when it is not (issue #244). The requirement applies only when there is
+    // inline content to write: an asset whose resources are all hash-only
+    // (content hosted elsewhere) performs no storage writes and remains
+    // publishable without an adapter.
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
+    const hasInlineContent = asset.resources.some(
+      (r) => r.content !== undefined && r.content !== null
+    );
+    if (hasInlineContent) {
+      if (!storage) {
+        throw new StructuredError(
+          'STORAGE_REQUIRED',
+          'A storageAdapter must be configured to publish to web: resource content has to be hosted somewhere. ' +
+          'Provide config.storageAdapter (e.g. MemoryStorageAdapter for tests, LocalStorageAdapter, or a custom adapter).'
+        );
+      }
+      const storageWithPutCheck = storage as { put?: unknown; putObject?: unknown };
+      if (typeof storageWithPutCheck.put !== 'function' && typeof storageWithPutCheck.putObject !== 'function') {
+        throw new StructuredError(
+          'STORAGE_REQUIRED',
+          'The configured storageAdapter implements neither put() nor putObject(); resources cannot be published.'
+        );
+      }
+    }
+
     for (const resource of asset.resources) {
       const hashBytes = hexToBytes(resource.hash);
       const multibase = encodeBase64UrlMultibase(hashBytes);
@@ -892,6 +941,18 @@ export class LifecycleManager {
     if (asset.currentLayer !== 'did:webvh' && asset.currentLayer !== 'did:peer') {
       throw new StructuredError('NOT_IMPLEMENTED', 'Asset inscription is not yet implemented for this layer. Assets must be in did:peer or did:webvh layer to inscribe.');
     }
+    // Concurrency guard (issue #255): the layer check above is check-then-act
+    // across the awaits below — two overlapping calls would both pass it,
+    // both broadcast paid commit/reveal pairs, and the loser's inscription
+    // would be orphaned. Claim the asset synchronously before the first await.
+    if (this.inFlightAssets.has(asset.id)) {
+      throw new StructuredError(
+        'OPERATION_IN_PROGRESS',
+        `An inscription or publication for asset ${asset.id} is already in progress; concurrent operations on the same asset would double-pay for duplicate inscriptions.`
+      );
+    }
+    this.inFlightAssets.add(asset.id);
+    try {
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const manifest = {
       assetId: asset.id,
@@ -911,6 +972,18 @@ export class LifecycleManager {
     const commitTxId = inscription.commitTxId;
     const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : feeRate;
 
+    // did:btco identity is satoshi-scoped. inscribeData now guarantees a
+    // non-empty, validated satoshi (issue #256); check before migrating so a
+    // missing satoshi cannot leave the asset half-migrated. An inscription id
+    // is never a valid did:btco identifier, so there is no fallback.
+    if (!inscription.satoshi) {
+      throw new StructuredError(
+        'ORD_SATOSHI_UNKNOWN',
+        'Inscription completed but no satoshi was returned; cannot derive a did:btco binding.',
+        { inscriptionId: inscription.inscriptionId, txid: revealTxId }
+      );
+    }
+
     // Capture the layer before migration for accurate metrics
     const fromLayer = asset.currentLayer;
 
@@ -923,9 +996,10 @@ export class LifecycleManager {
       feeRate: usedFeeRate
     });
 
-    const bindingValue = inscription.satoshi
-      ? `did:btco:${inscription.satoshi}`
-      : `did:btco:${inscription.inscriptionId}`;
+    // The binding must be network-prefixed: a regtest/signet satoshi recorded
+    // in bare mainnet form would collide with (and resolve to) whoever owns
+    // that satoshi on mainnet (issue #247).
+    const bindingValue = `${btcoDidPrefix(this.config.network || 'mainnet')}:${inscription.satoshi}`;
     asset.bindings = Object.assign({}, asset.bindings || {}, { 'did:btco': bindingValue });
     
     stopTimer();
@@ -938,6 +1012,9 @@ export class LifecycleManager {
     this.metrics.recordMigration(fromLayer, 'did:btco');
 
     return asset;
+    } finally {
+      this.inFlightAssets.delete(asset.id);
+    }
     } catch (error) {
       stopTimer();
       this.logger.error('Bitcoin inscription failed', error as Error, { assetId: asset.id, feeRate });

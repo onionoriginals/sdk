@@ -583,3 +583,37 @@ describe('selectUtxosForPayment', () => {
   });
 });
 
+
+describe('selectUtxos ordinal safety (issue #249)', () => {
+  const mk = (txid: string, value: number, extra: Record<string, unknown> = {}): Utxo =>
+    ({ txid, vout: 0, value, ...extra } as Utxo);
+
+  test('excludes inscription-bearing, resource, and locked UTXOs by default', () => {
+    const result = selectUtxosSimple([
+      mk('inscribed', 500_000, { inscriptions: ['abci0'] }),
+      mk('resource', 400_000, { hasResource: true }),
+      mk('locked', 300_000, { locked: true }),
+      mk('clean', 100_000)
+    ], { targetAmount: 50_000 });
+    expect(result.selectedUtxos.map(u => u.txid)).toEqual(['clean']);
+  });
+
+  test('throws when only protected UTXOs are available', () => {
+    expect(() => selectUtxosSimple([
+      mk('inscribed', 500_000, { inscriptions: ['abci0'] })
+    ], { targetAmount: 50_000 })).toThrow(/inscriptions\/resources or are locked/);
+  });
+
+  test('numeric options form applies ordinal safety too', () => {
+    expect(() => selectUtxosSimple([
+      mk('inscribed', 500_000, { inscriptions: ['abci0'] })
+    ], 50_000)).toThrow(/inscriptions\/resources or are locked/);
+  });
+
+  test('allowOrdinalUtxos: true opts back in', () => {
+    const result = selectUtxosSimple([
+      mk('inscribed', 500_000, { inscriptions: ['abci0'] })
+    ], { targetAmount: 50_000, allowOrdinalUtxos: true });
+    expect(result.selectedUtxos.map(u => u.txid)).toEqual(['inscribed']);
+  });
+});

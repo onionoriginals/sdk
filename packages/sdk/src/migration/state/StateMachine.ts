@@ -48,15 +48,17 @@ export class StateMachine {
       MigrationStateEnum.FAILED
     ]);
 
-    // FAILED can transition to ROLLED_BACK or QUARANTINED
+    // FAILED can transition to ROLLED_BACK, PARTIALLY_ROLLED_BACK, or QUARANTINED
     transitions.set(MigrationStateEnum.FAILED, [
       MigrationStateEnum.ROLLED_BACK,
+      MigrationStateEnum.PARTIALLY_ROLLED_BACK,
       MigrationStateEnum.QUARANTINED
     ]);
 
-    // COMPLETED, ROLLED_BACK, and QUARANTINED are terminal states
+    // COMPLETED, ROLLED_BACK, PARTIALLY_ROLLED_BACK, and QUARANTINED are terminal states
     transitions.set(MigrationStateEnum.COMPLETED, []);
     transitions.set(MigrationStateEnum.ROLLED_BACK, []);
+    transitions.set(MigrationStateEnum.PARTIALLY_ROLLED_BACK, []);
     transitions.set(MigrationStateEnum.QUARANTINED, []);
 
     return transitions;

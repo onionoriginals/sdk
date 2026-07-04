@@ -101,6 +101,9 @@ describe('VC-003/happy – statusListResolver called during Verifier.checkCreden
       issuer: 'did:peer:issuer',
       statusPurpose: 'revocation',
     });
+    // DI-labeled dummy proof: the trust check dispatches on cryptosuite, and
+    // the DI path is stubbed below (see verifyCredential override).
+    (statusListVC as any).proof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zstub', verificationMethod: 'did:peer:issuer#key-0', proofPurpose: 'assertionMethod' };
 
     let resolverCallCount = 0;
     let resolvedUrl = '';
@@ -112,6 +115,10 @@ describe('VC-003/happy – statusListResolver called during Verifier.checkCreden
         return statusListVC;
       },
     });
+    // The status list fixture is unsigned; stub the proof check so this test
+    // stays focused on resolver invocation (trust checks are covered in
+    // Verifier status-list trust tests).
+    (verifier as any).verifyCredential = async () => ({ verified: true, errors: [] });
 
     const entry = slMgr.allocateStatusEntry(
       'https://example.com/status/list-1',
@@ -146,12 +153,15 @@ describe('VC-003/happy – statusListResolver called during Verifier.checkCreden
       issuer: 'did:peer:issuer',
       statusPurpose: 'revocation',
     });
+    (statusListVC as any).proof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zstub', verificationMethod: 'did:peer:issuer#key-0', proofPurpose: 'assertionMethod' };
     // Revoke index 5
     statusListVC = slMgr.setStatus(statusListVC, 5, true);
 
     const verifier = new Verifier(dm, {
       statusListResolver: async () => statusListVC,
     });
+    // Unsigned fixture — stub the status list proof check (see note above).
+    (verifier as any).verifyCredential = async () => ({ verified: true, errors: [] });
 
     const entry = slMgr.allocateStatusEntry(
       'https://example.com/status/list-rev',
@@ -195,8 +205,8 @@ describe('VC-006/happy – multi-sig session collects m-of-n and threshold passe
       km.generateKeyPair('Ed25519'),
       km.generateKeyPair('Ed25519'),
     ]);
-    vms = keys.map(k => `did:key:${k.publicKey}`);
-    mgr = new MultiSigManager(config);
+    vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    mgr = new MultiSigManager(config, new DIDManager(config));
   });
 
   test('2-of-3 session: create → collect 2 contributions → finalize → threshold verified', async () => {
@@ -252,8 +262,8 @@ describe('VC-006/error – finalize before threshold throws insufficient-signatu
 
   beforeEach(async () => {
     keys = await Promise.all([km.generateKeyPair('Ed25519'), km.generateKeyPair('Ed25519'), km.generateKeyPair('Ed25519')]);
-    vms = keys.map(k => `did:key:${k.publicKey}`);
-    mgr = new MultiSigManager(config);
+    vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    mgr = new MultiSigManager(config, new DIDManager(config));
   });
 
   test('finalizeSession with 1 of 2 required signatures throws "Cannot finalize"', async () => {
@@ -303,8 +313,8 @@ describe('VC-007/happy – escrow policy with release conditions passes validati
       km.generateKeyPair('Ed25519'),
       km.generateKeyPair('Ed25519'),
     ]);
-    vms = keys.map(k => `did:key:${k.publicKey}`);
-    mgr = new MultiSigManager(config);
+    vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    mgr = new MultiSigManager(config, new DIDManager(config));
   });
 
   test('validateEscrowPolicy accepts a complete escrow policy', () => {
@@ -334,7 +344,7 @@ describe('VC-007/happy – escrow policy with release conditions passes validati
 
 describe('VC-007/error – escrow policy without escrow agent is rejected', () => {
   test('validateEscrowPolicy throws "must specify an escrow agent" when escrowAgent is empty', () => {
-    const mgr = new MultiSigManager(config);
+    const mgr = new MultiSigManager(config, new DIDManager(config));
     const policy: EscrowPolicy = {
       required: 1,
       total: 1,
@@ -347,7 +357,7 @@ describe('VC-007/error – escrow policy without escrow agent is rejected', () =
   });
 
   test('validateEscrowPolicy throws when releaseConditions is empty', () => {
-    const mgr = new MultiSigManager(config);
+    const mgr = new MultiSigManager(config, new DIDManager(config));
     const policy: EscrowPolicy = {
       required: 1,
       total: 1,
@@ -373,8 +383,8 @@ describe('VC-008/happy – corporate policy with role-based signers passes valid
       km.generateKeyPair('Ed25519'),
       km.generateKeyPair('Ed25519'),
     ]);
-    vms = keys.map(k => `did:key:${k.publicKey}`);
-    mgr = new MultiSigManager(config);
+    vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    mgr = new MultiSigManager(config, new DIDManager(config));
   });
 
   test('validateCorporatePolicy accepts a policy where all mandatory roles are assigned', () => {
@@ -410,8 +420,8 @@ describe('VC-008/error – corporate policy with unassigned mandatory role is re
   test('validateCorporatePolicy throws "Mandatory role not assigned to any signer"', async () => {
     const km = new KeyManager();
     const keys = await Promise.all([km.generateKeyPair('Ed25519'), km.generateKeyPair('Ed25519')]);
-    const vms = keys.map(k => `did:key:${k.publicKey}`);
-    const mgr = new MultiSigManager(config);
+    const vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    const mgr = new MultiSigManager(config, new DIDManager(config));
 
     const policy: CorporatePolicy = {
       required: 1,
@@ -429,8 +439,8 @@ describe('VC-008/error – corporate policy with unassigned mandatory role is re
   test('error message names the unassigned role', async () => {
     const km = new KeyManager();
     const keys = await Promise.all([km.generateKeyPair('Ed25519')]);
-    const vms = keys.map(k => `did:key:${k.publicKey}`);
-    const mgr = new MultiSigManager(config);
+    const vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    const mgr = new MultiSigManager(config, new DIDManager(config));
 
     const policy: CorporatePolicy = {
       required: 1,
@@ -813,5 +823,95 @@ describe('VC-018/performance – verification method caching (behavioral, not wa
     expect(verificationMethodRegistry.get(vm1Id)).toBe(vm1);
     expect(verificationMethodRegistry.get(vm2Id)).toBe(vm2);
     expect(verificationMethodRegistry.get(vm1Id)).not.toBe(verificationMethodRegistry.get(vm2Id));
+  });
+});
+
+// ─── Issue #239 — multi-sig verification paths ───────────────────────────────
+
+describe('Issue #239 – multi-sig Data Integrity proofs verify across both verify paths and non-did:key signers', () => {
+  const km = new KeyManager();
+  const config: OriginalsConfig = { network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: false };
+  const baseVC: VerifiableCredential = {
+    '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
+    type: ['VerifiableCredential'],
+    issuer: 'did:peer:issuer',
+    issuanceDate: new Date().toISOString(),
+    credentialSubject: { id: 'did:peer:subject' },
+  };
+
+  test('the same multi-sig credential verifies at its threshold through BOTH verify paths', async () => {
+    const keys = await Promise.all([km.generateKeyPair('Ed25519'), km.generateKeyPair('Ed25519')]);
+    const vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    const dm = new DIDManager(config);
+    const mgr = new MultiSigManager(config, dm);
+    const policy: MultiSigPolicy = { required: 2, total: 2, signerVerificationMethods: vms };
+
+    const signed = await mgr.signCredentialMultiSig(baseVC, {
+      policy,
+      privateKeys: new Map([[vms[0], keys[0].privateKey], [vms[1], keys[1].privateKey]]),
+    });
+
+    // The same credential must verify at its threshold through BOTH paths
+    const viaManager = await mgr.verifyMultiSig(signed, policy);
+    expect(viaManager.verified).toBe(true);
+
+    const verifier = new Verifier(dm);
+    const viaVerifier = await verifier.verifyCredentialMultiSig(signed, policy);
+    expect(viaVerifier.verified).toBe(true);
+    expect(viaVerifier.validSignatures).toBe(2);
+  });
+
+  test('MultiSigManager verifies signers whose verification methods are not did:key', async () => {
+    const key = await km.generateKeyPair('Ed25519');
+    const signerDid = 'did:webvh:QmScidExample:signers.example.com:alice';
+    const vmId = `${signerDid}#key-0`;
+
+    const dm = new DIDManager(config);
+    // Stub DID resolution: the signer's did:webvh document publishes the key
+    (dm as any).resolveDID = async (did: string) =>
+      did === signerDid
+        ? {
+            '@context': ['https://www.w3.org/ns/did/v1'],
+            id: signerDid,
+            verificationMethod: [
+              { id: vmId, type: 'Multikey', controller: signerDid, publicKeyMultibase: key.publicKey }
+            ]
+          }
+        : null;
+
+    const mgr = new MultiSigManager(config, dm);
+    const policy: MultiSigPolicy = { required: 1, total: 1, signerVerificationMethods: [vmId] };
+
+    const signed = await mgr.signCredentialMultiSig(baseVC, {
+      policy,
+      privateKeys: new Map([[vmId, key.privateKey]]),
+    });
+
+    const result = await mgr.verifyMultiSig(signed, policy);
+    expect(result.verified).toBe(true);
+    expect(result.validSigners).toContain(vmId);
+  });
+
+  test('unsupported cryptosuites fail closed instead of being checked against the wrong digest', async () => {
+    const key = await km.generateKeyPair('Ed25519');
+    const vm = `did:key:${key.publicKey}#${key.publicKey}`;
+    const dm = new DIDManager(config);
+    const mgr = new MultiSigManager(config, dm);
+    const policy: MultiSigPolicy = { required: 1, total: 1, signerVerificationMethods: [vm] };
+
+    const signed = await mgr.signCredentialMultiSig(baseVC, {
+      policy,
+      privateKeys: new Map([[vm, key.privateKey]]),
+    });
+    // Relabel the valid legacy proof with a bogus cryptosuite
+    const tampered = {
+      ...signed,
+      proof: (Array.isArray(signed.proof) ? signed.proof : [signed.proof]).map(p => ({
+        ...(p as object), cryptosuite: 'ecdsa-jcs-2019'
+      }))
+    } as VerifiableCredential;
+
+    const result = await mgr.verifyMultiSig(tampered, policy);
+    expect(result.verified).toBe(false);
   });
 });

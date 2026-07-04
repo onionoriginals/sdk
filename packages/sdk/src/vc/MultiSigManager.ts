@@ -11,11 +11,12 @@ import type {
   CorporatePolicy,
 } from '../types/index.js';
 import type { OriginalsConfig } from '../types/common.js';
-import { computeCredentialDigest } from '../utils/credential-digest.js';
-import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
-import { signerForKeyType } from '../crypto/Signer.js';
-import { multikey } from '../crypto/Multikey.js';
+import type { DIDManager } from '../did/DIDManager.js';
 import { checkCredentialValidityPeriod } from './Verifier.js';
+import { withSecuringContext } from './Issuer.js';
+import { DataIntegrityProofManager } from './proofs/data-integrity.js';
+import { createDocumentLoader } from './documentLoader.js';
+import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
 
 /**
  * MultiSigManager handles m-of-n multi-signature operations for verifiable credentials.
@@ -30,7 +31,13 @@ import { checkCredentialValidityPeriod } from './Verifier.js';
 export class MultiSigManager {
   private sessions: Map<string, MultiSigSession> = new Map();
 
-  constructor(private config: OriginalsConfig) {}
+  /**
+   * @param didManager - Enables resolution of non-did:key signer verification
+   *   methods (did:webvh/did:btco/did:peer) and verification of
+   *   `eddsa-rdfc-2022` (Data Integrity) proofs. Without it, only did:key
+   *   signers with legacy (cryptosuite-less) proofs can be verified.
+   */
+  constructor(private config: OriginalsConfig, private didManager?: DIDManager) {}
 
   /**
    * Validate a multi-sig policy for correctness.
@@ -129,7 +136,7 @@ export class MultiSigManager {
    * @returns The credential with multiple proofs attached
    */
   async signCredentialMultiSig(
-    credential: VerifiableCredential,
+    inputCredential: VerifiableCredential,
     options: MultiSigSignOptions
   ): Promise<VerifiableCredential> {
     const { policy, privateKeys, externalSigners } = options;
@@ -138,6 +145,14 @@ export class MultiSigManager {
     if (!this.isTimelockValid(policy)) {
       throw new Error('MultiSig signing is outside the allowed timelock window');
     }
+
+    // Data Integrity proofs are canonicalized in safe mode: a plain VCDM 1.1
+    // credential (no data-integrity/v2 context) would fail with a
+    // 'Safe mode validation error' on the proof config's DataIntegrityProof/
+    // cryptosuite terms. Mirror Issuer.issueCredential and add the securing
+    // context ONCE, so all parallel proofs sign — and the returned credential
+    // is verified over — identical bytes.
+    const credential = { ...inputCredential, '@context': withSecuringContext(inputCredential['@context']) };
 
     const availableSigners: string[] = [];
     if (privateKeys) {
@@ -352,7 +367,9 @@ export class MultiSigManager {
     const session: MultiSigSession = {
       id: this.generateSessionId(),
       policy,
-      document: { ...credential },
+      // Secure the context up front so every contribution and the finalized
+      // credential share the exact bytes verifiers will canonicalize.
+      document: { ...credential, '@context': withSecuringContext(credential['@context']) },
       contributions: [],
       createdAt: now.toISOString(),
       expiresAt,
@@ -520,22 +537,28 @@ export class MultiSigManager {
     privateKeyMultibase: string,
     verificationMethod: string
   ): Promise<Proof> {
-    const proofBase: Proof = {
+    // Multi-sig proofs are standard Data Integrity (eddsa-rdfc-2022) proofs
+    // over the proof-less credential — a parallel proof set. There is no
+    // legacy digest format: every proof this SDK emits is spec-conformant
+    // and verifiable by DataIntegrityProofManager.
+    if (!this.didManager) {
+      throw new Error(
+        'MultiSigManager requires a DIDManager to create Data Integrity proofs; pass one to the constructor'
+      );
+    }
+    const documentLoader = createDocumentLoader(this.didManager);
+    const unsigned: Record<string, unknown> = { ...credential };
+    delete unsigned.proof;
+    const proof = await DataIntegrityProofManager.createProof(unsigned, {
       type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-rdfc-2022',
       created: new Date().toISOString(),
       verificationMethod,
       proofPurpose: 'assertionMethod',
-      proofValue: '',
-    };
-
-    const digest = await this.computeDigest(credential, proofBase);
-    // Sign with the algorithm the private key actually is, not whatever
-    // config.defaultKeyType happens to be on this instance (issue #261).
-    const signer = signerForKeyType(multikey.decodePrivateKey(privateKeyMultibase).type);
-    const sig = await signer.sign(Buffer.from(digest), privateKeyMultibase);
-    const proofValue = encodeBase64UrlMultibase(sig);
-
-    return { ...proofBase, proofValue };
+      privateKey: privateKeyMultibase,
+      documentLoader
+    });
+    return proof as unknown as Proof;
   }
 
   private async signWithExternalSigner(
@@ -562,16 +585,13 @@ export class MultiSigManager {
     return { ...proofBase, proofValue };
   }
 
-  private async computeDigest(
-    credential: VerifiableCredential,
-    proofBase: Proof
-  ): Promise<Uint8Array> {
-    return computeCredentialDigest(
-      credential as unknown as Record<string, unknown>,
-      proofBase as unknown as Record<string, unknown>
-    );
-  }
-
+  /**
+   * Verify one multi-sig proof. Every proof must be a Data Integrity
+   * `eddsa-rdfc-2022` proof (the only format this SDK emits — there is no
+   * legacy proof format); anything else fails closed. The verification
+   * method is resolved through the document loader (did:key offline, other
+   * DID methods via the DIDManager — issue #239).
+   */
   private async verifyProof(
     credential: VerifiableCredential,
     proof: Proof
@@ -580,33 +600,26 @@ export class MultiSigManager {
       const { proofValue, verificationMethod } = proof;
       if (!proofValue || !verificationMethod) return false;
 
-      const signature = decodeBase64UrlMultibase(proofValue);
-      if (!signature) return false;
-
-      const proofBase: Proof = { ...proof, proofValue: '' };
-      const digest = await this.computeDigest(credential, proofBase);
-
-      // Extract public key from verification method (did:key format)
-      const publicKeyMultibase = this.extractPublicKeyFromVM(verificationMethod);
-      if (!publicKeyMultibase) return false;
-
-      // The key's multicodec header identifies the signature algorithm;
-      // selecting a signer from config.defaultKeyType made the verification
-      // outcome depend on the verifier's configuration (issue #261).
-      const signer = signerForKeyType(multikey.decodePublicKey(publicKeyMultibase).type);
-      return await signer.verify(Buffer.from(digest), Buffer.from(signature), publicKeyMultibase);
+      const cryptosuite = (proof as { cryptosuite?: unknown }).cryptosuite;
+      if (cryptosuite !== 'eddsa-rdfc-2022' || !this.didManager) {
+        return false;
+      }
+      // A multi-sig member proof must be an assertion; a proof made for
+      // another purpose must not count toward the threshold (cross-purpose
+      // signature reuse).
+      if ((proof as { proofPurpose?: unknown }).proofPurpose !== 'assertionMethod') {
+        return false;
+      }
+      const loader = createDocumentLoader(this.didManager);
+      const result = await DataIntegrityProofManager.verifyProof(
+        credential,
+        proof as unknown as DataIntegrityProof,
+        { documentLoader: loader }
+      );
+      return result.verified === true;
     } catch {
       return false;
     }
-  }
-
-  private extractPublicKeyFromVM(verificationMethod: string): string | null {
-    // For did:key methods, the key is embedded in the DID
-    if (verificationMethod.startsWith('did:key:')) {
-      const keyPart = verificationMethod.split('#')[0];
-      return keyPart.replace('did:key:', '');
-    }
-    return null;
   }
 
   private extractProofs(credential: VerifiableCredential): Proof[] {

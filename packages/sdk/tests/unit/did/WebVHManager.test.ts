@@ -239,7 +239,8 @@ describe('WebVHManager', () => {
         state: {}
       }];
 
-      const logPath = await manager.saveDIDLog('did:webvh:example.com', validLog, tempDir);
+      // Pathless DIDs land in .well-known, mirroring the resolution URL (issue #246)
+      const logPath = await manager.saveDIDLog('did:webvh:QmScid123:example.com', validLog, tempDir);
       
       expect(logPath).toContain('did.jsonl');
       expect(logPath.startsWith(tempDir)).toBe(true);
@@ -259,7 +260,7 @@ describe('WebVHManager', () => {
         state: {}
       }];
 
-      const logPath = await manager.saveDIDLog('did:webvh:localhost%3A5000:test', validLog, tempDir);
+      const logPath = await manager.saveDIDLog('did:webvh:QmScid123:localhost%3A5000:test', validLog, tempDir);
       
       expect(logPath).toBeDefined();
       expect(logPath.startsWith(tempDir)).toBe(true);
@@ -274,7 +275,7 @@ describe('WebVHManager', () => {
       }];
 
       await expect(
-        manager.saveDIDLog('did:webvh:example.com::test', validLog, tempDir)
+        manager.saveDIDLog('did:webvh:QmScid123:example.com::test', validLog, tempDir)
       ).rejects.toThrow('Invalid path segment in DID');
     }, 10000);
 

@@ -6,11 +6,11 @@ import { KeyManager } from '../../src/did/KeyManager';
 import * as fs from 'fs';
 import * as path from 'path';
 import { tmpdir } from 'os';
+import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 
 describe('DID Peer to WebVH Publication Flow', () => {
   const keyStore = new MockKeyStore();
-  const sdk = OriginalsSDK.create({ 
-    network: 'regtest', 
+  const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', 
     keyStore,
     defaultKeyType: 'Ed25519', // Use Ed25519 for did:webvh compatibility
     enableLogging: true 

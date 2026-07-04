@@ -263,6 +263,16 @@ export class Verifier {
       return { verified: false, errors: [`Could not resolve status list credential: ${status.statusListCredential}`] };
     }
 
+    // The status list credential itself must be trustworthy before its bits
+    // decide revocation. Without these checks a holder (or a poisoned
+    // resolver channel) can supply a fabricated all-zeros list and bypass
+    // revocation entirely (issue #238). Per the W3C Bitstring Status List
+    // algorithm the verifier must validate the status list credential.
+    const trust = await this.validateStatusListCredential(vc, status, statusListVC);
+    if (!trust.verified) {
+      return trust;
+    }
+
     const manager = new StatusListManager();
     try {
       const checkResult = manager.checkStatus(status, statusListVC);
@@ -275,6 +285,59 @@ export class Verifier {
       const error = e as Error;
       return { verified: false, errors: [`Status check failed: ${error.message}`] };
     }
+  }
+
+  /**
+   * Trust checks for a resolved status list credential (issue #238):
+   * 1. its `id` must equal the entry's `statusListCredential` URL (any list
+   *    with a matching statusPurpose would otherwise be accepted),
+   * 2. its own proof must verify (an entirely unsigned list must not decide
+   *    revocation),
+   * 3. its issuer must equal the issuer of the credential being checked —
+   *    revocation authority lies with the credential's issuer.
+   */
+  private async validateStatusListCredential(
+    vc: VerifiableCredential,
+    entry: BitstringStatusListEntry,
+    statusListVC: VerifiableCredential
+  ): Promise<VerificationResult> {
+    if (!statusListVC.id || statusListVC.id !== entry.statusListCredential) {
+      return {
+        verified: false,
+        errors: [
+          `Status list credential id (${String(statusListVC.id)}) does not match the credential's ` +
+          `statusListCredential reference (${entry.statusListCredential})`
+        ]
+      };
+    }
+
+    const issuerOf = (c: VerifiableCredential): string | undefined =>
+      typeof c.issuer === 'string' ? c.issuer : (c.issuer as { id?: string } | undefined)?.id;
+
+    // Verify the status list credential's own proof. Status lists must carry
+    // a Data Integrity (eddsa-rdfc-2022) proof — the only proof format this
+    // SDK supports. checkStatus: false because the list's own status (if any)
+    // is out of scope here and would recurse.
+    const proofResult = await this.verifyCredential(statusListVC, { checkStatus: false });
+    if (!proofResult.verified) {
+      return {
+        verified: false,
+        errors: ['Status list credential proof verification failed', ...proofResult.errors]
+      };
+    }
+    const credentialIssuer = issuerOf(vc);
+    const listIssuer = issuerOf(statusListVC);
+    if (!credentialIssuer || !listIssuer || credentialIssuer !== listIssuer) {
+      return {
+        verified: false,
+        errors: [
+          `Status list credential issuer (${String(listIssuer)}) does not match the ` +
+          `checked credential's issuer (${String(credentialIssuer)})`
+        ]
+      };
+    }
+
+    return { verified: true, errors: [] };
   }
 
   /**
@@ -331,13 +394,29 @@ export class Verifier {
           continue;
         }
 
+        // A multi-sig member proof is an ASSERTION (issuance assent). Without
+        // this check, a signature an authorized signer produced for another
+        // purpose (e.g. `authentication`) would count toward the assertion
+        // threshold — cross-purpose signature reuse. proofPurpose is bound
+        // into the signed proof-config hash, so it cannot be flipped after
+        // signing; rejecting the wrong purpose here refuses the reuse.
+        if ((proof as { proofPurpose?: unknown }).proofPurpose !== 'assertionMethod') {
+          result.invalidSigners.push(vm);
+          result.errors.push(`Proof from ${vm} has proofPurpose ${String((proof as { proofPurpose?: unknown }).proofPurpose)}, expected assertionMethod`);
+          continue;
+        }
+
         try {
+          // Every proof this SDK emits is a Data Integrity eddsa-rdfc-2022
+          // proof; there is no legacy proof format. Anything else fails
+          // closed inside DataIntegrityProofManager.
           const proofResult = await DataIntegrityProofManager.verifyProof(
             vc,
             proof as unknown as DataIntegrityProof,
             { documentLoader: loader }
           );
-          if (proofResult.verified) {
+          const proofVerified = proofResult.verified === true;
+          if (proofVerified) {
             // Dedupe only after successful verification: an invalid proof
             // must not consume the signer's slot and suppress a later valid
             // proof from the same signer.
