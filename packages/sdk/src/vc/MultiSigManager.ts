@@ -13,7 +13,8 @@ import type {
 import type { OriginalsConfig } from '../types/common.js';
 import { computeCredentialDigest } from '../utils/credential-digest.js';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
-import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer.js';
+import { signerForKeyType } from '../crypto/Signer.js';
+import { multikey } from '../crypto/Multikey.js';
 import { checkCredentialValidityPeriod } from './Verifier.js';
 
 /**
@@ -214,7 +215,6 @@ export class MultiSigManager {
     }
 
     // Verify each proof individually, tracking unique signers
-    const signer = this.getSigner();
     const seenSigners = new Set<string>();
     for (const proof of proofs) {
       const vm = proof.verificationMethod;
@@ -224,7 +224,7 @@ export class MultiSigManager {
         continue;
       }
 
-      const valid = await this.verifyProof(credential, proof, signer);
+      const valid = await this.verifyProof(credential, proof);
       if (valid) {
         // Reject duplicate proofs from the same signer. Dedupe only after
         // successful verification so an invalid proof cannot consume the
@@ -529,7 +529,9 @@ export class MultiSigManager {
     };
 
     const digest = await this.computeDigest(credential, proofBase);
-    const signer = this.getSigner();
+    // Sign with the algorithm the private key actually is, not whatever
+    // config.defaultKeyType happens to be on this instance (issue #261).
+    const signer = signerForKeyType(multikey.decodePrivateKey(privateKeyMultibase).type);
     const sig = await signer.sign(Buffer.from(digest), privateKeyMultibase);
     const proofValue = encodeBase64UrlMultibase(sig);
 
@@ -572,8 +574,7 @@ export class MultiSigManager {
 
   private async verifyProof(
     credential: VerifiableCredential,
-    proof: Proof,
-    signer: Signer
+    proof: Proof
   ): Promise<boolean> {
     try {
       const { proofValue, verificationMethod } = proof;
@@ -589,6 +590,10 @@ export class MultiSigManager {
       const publicKeyMultibase = this.extractPublicKeyFromVM(verificationMethod);
       if (!publicKeyMultibase) return false;
 
+      // The key's multicodec header identifies the signature algorithm;
+      // selecting a signer from config.defaultKeyType made the verification
+      // outcome depend on the verifier's configuration (issue #261).
+      const signer = signerForKeyType(multikey.decodePublicKey(publicKeyMultibase).type);
       return await signer.verify(Buffer.from(digest), Buffer.from(signature), publicKeyMultibase);
     } catch {
       return false;
@@ -607,19 +612,6 @@ export class MultiSigManager {
   private extractProofs(credential: VerifiableCredential): Proof[] {
     if (!credential.proof) return [];
     return Array.isArray(credential.proof) ? credential.proof : [credential.proof];
-  }
-
-  private getSigner(): Signer {
-    switch (this.config.defaultKeyType) {
-      case 'ES256K':
-        return new ES256KSigner();
-      case 'Ed25519':
-        return new Ed25519Signer();
-      case 'ES256':
-        return new ES256Signer();
-      default:
-        return new ES256KSigner();
-    }
   }
 
   private generateSessionId(): string {

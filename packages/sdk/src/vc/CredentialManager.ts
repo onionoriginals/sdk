@@ -18,7 +18,8 @@ import { computeCredentialDigest } from '../utils/credential-digest.js';
 import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer.js';
+import { signerForKeyType } from '../crypto/Signer.js';
+import { multikey } from '../crypto/Multikey.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { Issuer, VerificationMethodLike } from './Issuer.js';
 import { createDocumentLoader } from './documentLoader.js';
@@ -206,12 +207,22 @@ export class CredentialManager {
         interface DocumentWithKey {
           publicKeyMultibase?: string;
           type?: string;
+          controller?: string;
         }
         const docWithKey = document as DocumentWithKey;
         if (docWithKey && docWithKey.publicKeyMultibase) {
           const vm: VerificationMethodLike = {
             id: verificationMethod,
-            controller: typeof credential.issuer === 'string' ? credential.issuer : (credential.issuer as { id?: string })?.id ?? '',
+            // The controller must come from the resolved verification method
+            // document (falling back to the VM's DID), NEVER from
+            // credential.issuer: Issuer.issueCredential's issuer-binding guard
+            // compares the credential's issuer against this value, and
+            // populating it from the issuer made that comparison
+            // issuer === issuer — dead code that let a key for did:me mint
+            // credentials claiming issuer did:victim.
+            controller: typeof docWithKey.controller === 'string' && docWithKey.controller
+              ? docWithKey.controller
+              : verificationMethod.split('#')[0],
             publicKeyMultibase: docWithKey.publicKeyMultibase,
             secretKeyMultibase: privateKeyMultibase,
             type: docWithKey.type || 'Multikey'
@@ -223,7 +234,12 @@ export class CredentialManager {
           delete (unsigned as Partial<VerifiableCredential>).proof;
           return issuer.issueCredential(unsigned, { proofPurpose: 'assertionMethod' });
         }
-      } catch {
+      } catch (e) {
+        // The issuer-binding refusal must fail closed: falling through to
+        // legacy signing here would sign the impersonating credential anyway.
+        if (e instanceof Error && e.message.includes('does not match the verification method controller')) {
+          throw e;
+        }
         // fall through to legacy signing
       }
     }
@@ -344,7 +360,6 @@ export class CredentialManager {
     const digest = Buffer.from(
       await computeCredentialDigest(credential as unknown as Record<string, unknown>, proof as unknown as Record<string, unknown>)
     );
-    const signer = this.getSigner();
     try {
       const resolvedKey = await this.resolveVerificationMethodMultibase(
         verificationMethod,
@@ -353,6 +368,10 @@ export class CredentialManager {
       if (!resolvedKey) {
         return false;
       }
+      // The resolved key's multicodec header identifies the signature
+      // algorithm; selecting it from config.defaultKeyType made verification
+      // fail whenever the verifier's config differed from the issuer's key.
+      const signer = signerForKeyType(multikey.decodePublicKey(resolvedKey).type);
       return await signer.verify(Buffer.from(digest), Buffer.from(signature), resolvedKey);
     } catch {
       return false;
@@ -453,22 +472,11 @@ export class CredentialManager {
     const digest = Buffer.from(
       await computeCredentialDigest(credential as unknown as Record<string, unknown>, proofBase as unknown as Record<string, unknown>)
     );
-    const signer = this.getSigner();
+    // Sign with the algorithm the private key actually is, not whatever
+    // config.defaultKeyType happens to be on this instance.
+    const signer = signerForKeyType(multikey.decodePrivateKey(privateKeyMultibase).type);
     const sig = await signer.sign(Buffer.from(digest), privateKeyMultibase);
     return encodeBase64UrlMultibase(sig);
-  }
-
-  private getSigner(): Signer {
-    switch (this.config.defaultKeyType) {
-      case 'ES256K':
-        return new ES256KSigner();
-      case 'Ed25519':
-        return new Ed25519Signer();
-      case 'ES256':
-        return new ES256Signer();
-      default:
-        return new ES256KSigner();
-    }
   }
 
   private async resolveVerificationMethodMultibase(
