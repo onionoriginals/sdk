@@ -108,40 +108,36 @@ export class DIDManager {
    * renamed the document id to `did:webvh:{domain}:{slug}`, which no resolver
    * — including this SDK's own — could ever resolve; issue #245.)
    *
+   * Returns the FULL migration result — not just the DID document. The signed
+   * `log` must be hosted (did.jsonl) for the DID to resolve, and the returned
+   * `keyPair` (generated unless a keyPair/externalSigner was supplied via
+   * `options`) must be persisted for future updates/rotations. Discarding
+   * them leaves the migrated DID unhostable and un-updatable.
+   *
    * The peer document's verification methods are carried over as
    * verification-only keys, its services are preserved, and the original
-   * did:peer is recorded in `alsoKnownAs`.
-   *
-   * Note: unless a keyPair/externalSigner is supplied via `options`, a fresh
-   * Ed25519 update key is generated. Use {@link migrateToDIDWebVHDetailed} to
-   * obtain the generated key pair and the signed log for hosting/updates.
+   * did:peer is recorded in `alsoKnownAs`. Verification relationships other
+   * than the signing key's `authentication`/`assertionMethod` (e.g.
+   * `keyAgreement`, `capabilityInvocation`, `capabilityDelegation`) are NOT
+   * carried over — didwebvh-ts owns the relationship arrays of the created
+   * document; republish such relationships via updateDIDWebVH if needed.
    */
   async migrateToDIDWebVH(
     didDoc: DIDDocument,
     domain?: string,
     options?: MigrateToWebVHOptions
-  ): Promise<DIDDocument> {
-    const result = await this.migrateToDIDWebVHDetailed(didDoc, { ...(options || {}), domain });
-    return result.didDocument;
+  ): Promise<MigrateToWebVHResult> {
+    return this.migrateToDIDWebVHDetailed(didDoc, { ...(options || {}), domain });
   }
 
   /**
-   * Same as {@link migrateToDIDWebVH} but returns the full creation result:
-   * the signed DID log (which must be hosted for the DID to resolve), the
-   * generated key pair (required for future updates/rotations), and the log
-   * path when `outputDir` was provided.
+   * @deprecated Use {@link migrateToDIDWebVH}, which now returns the same
+   * full result (document, signed log, key pair, log path).
    */
   async migrateToDIDWebVHDetailed(
     didDoc: DIDDocument,
     options?: MigrateToWebVHOptions & { domain?: string }
-  ): Promise<{
-    did: string;
-    didDocument: DIDDocument;
-    log: DIDLog;
-    keyPair: KeyPair;
-    logPath?: string;
-    previousDid: string;
-  }> {
+  ): Promise<MigrateToWebVHResult> {
     return this.track('did.migrateToDIDWebVH', async () => {
     const domain = options?.domain;
     // Use provided domain or get default from configured network
@@ -702,6 +698,20 @@ export interface CreateWebVHOptions {
   externalVerifier?: ExternalVerifier;
   verificationMethods?: WebVHVerificationMethod[];
   updateKeys?: string[];
+}
+
+/**
+ * Result of migrateToDIDWebVH: the migrated document plus everything needed
+ * to actually operate the DID — the signed log to host and the update key
+ * pair to persist.
+ */
+export interface MigrateToWebVHResult {
+  did: string;
+  didDocument: DIDDocument;
+  log: DIDLog;
+  keyPair: KeyPair;
+  logPath?: string;
+  previousDid: string;
 }
 
 /**

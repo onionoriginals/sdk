@@ -909,10 +909,12 @@ describe('status list credential trust checks (issue #238)', () => {
       credentialStatus: entry,
     };
 
+    const diProof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zstub', verificationMethod: 'did:example:issuer#key-0', proofPurpose: 'assertionMethod' };
     // Wrong id
     const wrongId = slMgr.createStatusListCredential({
       id: 'https://elsewhere.example/status', issuer: 'did:example:issuer', statusPurpose: 'revocation'
     });
+    (wrongId as any).proof = diProof;
     let verifier = new Verifier(dm, { statusListResolver: async () => wrongId });
     (verifier as any).verifyCredential = async () => ({ verified: true, errors: [] });
     const r1 = await verifier.checkCredentialStatus(credential);
@@ -923,6 +925,7 @@ describe('status list credential trust checks (issue #238)', () => {
     const rightId = slMgr.createStatusListCredential({
       id: 'https://issuer.example/status/2', issuer: 'did:example:issuer', statusPurpose: 'revocation'
     });
+    (rightId as any).proof = diProof;
     verifier = new Verifier(dm, { statusListResolver: async () => rightId });
     (verifier as any).verifyCredential = async () => ({ verified: false, errors: ['no proof'] });
     const r2 = await verifier.checkCredentialStatus(credential);
@@ -933,6 +936,7 @@ describe('status list credential trust checks (issue #238)', () => {
     const foreign = slMgr.createStatusListCredential({
       id: 'https://issuer.example/status/2', issuer: 'did:example:attacker', statusPurpose: 'revocation'
     });
+    (foreign as any).proof = { ...diProof, verificationMethod: 'did:example:attacker#key-0' };
     verifier = new Verifier(dm, { statusListResolver: async () => foreign });
     (verifier as any).verifyCredential = async () => ({ verified: true, errors: [] });
     const r3 = await verifier.checkCredentialStatus(credential);

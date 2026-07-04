@@ -101,6 +101,9 @@ describe('VC-003/happy – statusListResolver called during Verifier.checkCreden
       issuer: 'did:peer:issuer',
       statusPurpose: 'revocation',
     });
+    // DI-labeled dummy proof: the trust check dispatches on cryptosuite, and
+    // the DI path is stubbed below (see verifyCredential override).
+    (statusListVC as any).proof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zstub', verificationMethod: 'did:peer:issuer#key-0', proofPurpose: 'assertionMethod' };
 
     let resolverCallCount = 0;
     let resolvedUrl = '';
@@ -150,6 +153,7 @@ describe('VC-003/happy – statusListResolver called during Verifier.checkCreden
       issuer: 'did:peer:issuer',
       statusPurpose: 'revocation',
     });
+    (statusListVC as any).proof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zstub', verificationMethod: 'did:peer:issuer#key-0', proofPurpose: 'assertionMethod' };
     // Revoke index 5
     statusListVC = slMgr.setStatus(statusListVC, 5, true);
 

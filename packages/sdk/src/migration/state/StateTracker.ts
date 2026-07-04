@@ -78,6 +78,7 @@ export class StateTracker implements IStateTracker {
       updatedState.state === MigrationStateEnum.COMPLETED ||
       updatedState.state === MigrationStateEnum.FAILED ||
       updatedState.state === MigrationStateEnum.ROLLED_BACK ||
+      updatedState.state === MigrationStateEnum.PARTIALLY_ROLLED_BACK ||
       updatedState.state === MigrationStateEnum.QUARANTINED
     ) {
       updatedState.endTime = Date.now();
@@ -152,7 +153,8 @@ export class StateTracker implements IStateTracker {
         state.endTime &&
         state.endTime < cutoffTime &&
         (state.state === MigrationStateEnum.COMPLETED ||
-          state.state === MigrationStateEnum.ROLLED_BACK)
+          state.state === MigrationStateEnum.ROLLED_BACK ||
+          state.state === MigrationStateEnum.PARTIALLY_ROLLED_BACK)
       ) {
         toDelete.push(id);
       }

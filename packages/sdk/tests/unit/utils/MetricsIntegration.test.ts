@@ -122,7 +122,7 @@ describe('Metrics Integration', () => {
 
       const didDoc = await didManager.createDIDPeer(resources);
       const migrated = await didManager.migrateToDIDWebVH(didDoc);
-      expect(migrated.id).toContain('did:webvh:');
+      expect(migrated.didDocument.id).toContain('did:webvh:');
 
       const opMetrics = metrics.getOperationMetrics('did.migrateToDIDWebVH');
       expect(opMetrics).not.toBeNull();

@@ -27,8 +27,12 @@ describe('DIDManager', () => {
 
   test('migrateToDIDWebVH converts to did:webvh (expected to fail until implemented)', async () => {
     const didDoc: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:xyz' };
-    const webDoc = await sdk.did.migrateToDIDWebVH(didDoc, 'example.com');
-    expect(webDoc.id.startsWith('did:webvh:')).toBe(true);
+    const migration = await sdk.did.migrateToDIDWebVH(didDoc, 'example.com');
+    expect(migration.didDocument.id.startsWith('did:webvh:')).toBe(true);
+    // The full result carries what a caller needs to host and update the DID
+    expect(Array.isArray(migration.log)).toBe(true);
+    expect(migration.keyPair.publicKey.length).toBeGreaterThan(0);
+    expect(migration.previousDid).toBe('did:peer:xyz');
   });
 
   test('migrateToDIDWebVH creates a real SCID-first did:webvh, carrying VMs/services and the stable slug (issue #245)', async () => {
@@ -40,7 +44,7 @@ describe('DIDManager', () => {
       assertionMethod: ['did:peer:abc123#0'],
       service: [{ id: '#svc', type: 'Example', serviceEndpoint: 'https://api.example/svc' }]
     };
-    const web = await sdk.did.migrateToDIDWebVH(peer, 'Example.COM');
+    const web = (await sdk.did.migrateToDIDWebVH(peer, 'Example.COM')).didDocument;
     // Spec format: did:webvh:{SCID}:{domain}:{slug} — a genuine SCID, not a renamed peer doc
     const parts = web.id.split(':');
     expect(parts.length).toBe(5);
@@ -83,7 +87,7 @@ describe('DIDManager', () => {
       authentication: ['did:peer:abc123#0'],
       assertionMethod: ['did:peer:abc123#0']
     };
-    const web = await sdk.did.migrateToDIDWebVH(peer, 'example.com');
+    const web = (await sdk.did.migrateToDIDWebVH(peer, 'example.com')).didDocument;
     // No reference to the retired did:peer remains outside alsoKnownAs
     for (const vm of web.verificationMethod || []) {
       expect(vm.id!.startsWith(web.id)).toBe(true);
@@ -99,7 +103,7 @@ describe('DIDManager', () => {
 
   test('migrateToDIDWebVH percent-encodes a domain port so it stays one authority segment', async () => {
     const peer: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:abc123' };
-    const web = await sdk.did.migrateToDIDWebVH(peer, 'localhost:8080');
+    const web = (await sdk.did.migrateToDIDWebVH(peer, 'localhost:8080')).didDocument;
     // The port colon must be percent-encoded (%3A), otherwise splitting the DID
     // on ':' would parse `8080` as a path segment.
     const parts = web.id.split(':');

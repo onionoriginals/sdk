@@ -140,7 +140,7 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
     });
 
     const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = await manager.migrateToDIDWebVH(peerDoc); // no explicit domain
+    const webDoc = (await manager.migrateToDIDWebVH(peerDoc)).didDocument; // no explicit domain
 
     expect(webDoc.id).toMatch(/^did:webvh:/);
     expect(webDoc.id).toContain('magby.originals.build');
@@ -153,7 +153,7 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
     });
 
     const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = await manager.migrateToDIDWebVH(peerDoc);
+    const webDoc = (await manager.migrateToDIDWebVH(peerDoc)).didDocument;
 
     expect(webDoc.id).toMatch(/^did:webvh:/);
     expect(webDoc.id).toContain('cleffa.originals.build');
@@ -166,7 +166,7 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
     });
 
     const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = await manager.migrateToDIDWebVH(peerDoc);
+    const webDoc = (await manager.migrateToDIDWebVH(peerDoc)).didDocument;
 
     expect(webDoc.id).toMatch(/^did:webvh:/);
     expect(webDoc.id).toContain('pichu.originals.build');
@@ -179,7 +179,7 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
     });
 
     const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = await manager.migrateToDIDWebVH(peerDoc, 'custom.example.com');
+    const webDoc = (await manager.migrateToDIDWebVH(peerDoc, 'custom.example.com')).didDocument;
 
     expect(webDoc.id).toContain('custom.example.com');
     expect(webDoc.id).not.toContain('magby.originals.build');

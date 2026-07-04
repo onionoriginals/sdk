@@ -167,6 +167,31 @@ describe('RollbackManager', () => {
         commitTxId: 'c0ffee'
       });
     });
+    // Review follow-up: a btco migration that failed BEFORE the anchoring step
+    // (no transaction could have been broadcast) rolls back cleanly.
+    it('btco migration that failed before anchoring reports a clean ROLLED_BACK', async () => {
+      const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
+
+      const peerDid = await sdk.did.createDIDPeer([
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+      ]);
+
+      const migrationId = 'mig_btco_preanchor_rollback';
+      const checkpoint = await checkpointManager.createCheckpoint(migrationId, {
+        sourceDid: peerDid.id,
+        targetLayer: 'btco',
+      });
+
+      const result = await rollbackManager.rollback(migrationId, checkpoint.checkpointId!, {
+        error: new Error('ORD_PROVIDER_REQUIRED'),
+        stateAtFailure: MigrationStateEnum.IN_PROGRESS
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.restoredState).toBe(MigrationStateEnum.ROLLED_BACK);
+      expect(result.irreversibleArtifacts).toBeUndefined();
+    });
+
 
     // CORE-MIG-EVENTS-024/happy — rollback restores storage references (checkpoint contains them)
     it('rollback captures storageReferences from checkpoint', async () => {

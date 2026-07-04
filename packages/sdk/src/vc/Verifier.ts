@@ -315,18 +315,53 @@ export class Verifier {
       };
     }
 
-    // checkStatus: false — the status list credential's own status (if any)
-    // is out of scope here and would recurse.
-    const proofResult = await this.verifyCredential(statusListVC, { checkStatus: false });
-    if (!proofResult.verified) {
-      return {
-        verified: false,
-        errors: ['Status list credential proof verification failed', ...proofResult.errors]
-      };
-    }
-
     const issuerOf = (c: VerifiableCredential): string | undefined =>
       typeof c.issuer === 'string' ? c.issuer : (c.issuer as { id?: string } | undefined)?.id;
+
+    // Verify the status list credential's own proof, dispatching on its
+    // cryptosuite: Data Integrity proofs go through verifyCredential
+    // (checkStatus: false — the list's own status is out of scope here and
+    // would recurse); legacy cryptosuite-less proofs (produced by
+    // CredentialManager.signCredential) verify against the legacy digest with
+    // the verification method bound to the list's issuer. Without the legacy
+    // branch, every status list signed via the SDK's own legacy path would be
+    // rejected and revocation checks would fail closed for valid credentials.
+    const listProof = Array.isArray(statusListVC.proof) ? statusListVC.proof[0] : statusListVC.proof;
+    const listCryptosuite = (listProof as { cryptosuite?: unknown } | undefined)?.cryptosuite;
+    let proofVerified = false;
+    let proofErrors: string[] = [];
+    if (typeof listCryptosuite === 'string' && listCryptosuite.length > 0) {
+      const proofResult = await this.verifyCredential(statusListVC, { checkStatus: false });
+      proofVerified = proofResult.verified;
+      proofErrors = proofResult.errors;
+    } else if (listProof) {
+      // Legacy proof: bind the signing key to the list's issuer, then verify
+      // the signature and the validity window.
+      const vm = (listProof as { verificationMethod?: unknown }).verificationMethod;
+      const listIssuerForBinding = issuerOf(statusListVC);
+      if (typeof vm !== 'string' || !listIssuerForBinding || vm.split('#')[0] !== listIssuerForBinding) {
+        proofErrors = ['Status list credential proof verificationMethod is not bound to its issuer'];
+      } else {
+        const validity = checkCredentialValidityPeriod(statusListVC);
+        if (!validity.verified) {
+          proofErrors = validity.errors;
+        } else {
+          proofVerified = await this.verifyLegacyMultiSigProof(
+            statusListVC,
+            listProof as unknown as Record<string, unknown>
+          );
+          if (!proofVerified) proofErrors = ['Legacy proof signature verification failed'];
+        }
+      }
+    } else {
+      proofErrors = ['Status list credential has no proof'];
+    }
+    if (!proofVerified) {
+      return {
+        verified: false,
+        errors: ['Status list credential proof verification failed', ...proofErrors]
+      };
+    }
     const credentialIssuer = issuerOf(vc);
     const listIssuer = issuerOf(statusListVC);
     if (!credentialIssuer || !listIssuer || credentialIssuer !== listIssuer) {
@@ -372,10 +407,13 @@ export class Verifier {
           ?.verificationMethod;
         if (Array.isArray(vms)) {
           const fragment = verificationMethod.includes('#') ? verificationMethod.split('#')[1] : undefined;
+          // No single-VM fallback: a proof whose verificationMethod does not
+          // match any published method must fail closed, not be checked
+          // against whichever lone key the document happens to publish.
           const match = vms.find(vm =>
             vm.id === verificationMethod ||
             (fragment !== undefined && typeof vm.id === 'string' && vm.id.split('#')[1] === fragment)
-          ) ?? (vms.length === 1 ? vms[0] : undefined);
+          );
           if (match && typeof match.publicKeyMultibase === 'string') {
             publicKeyMultibase = match.publicKeyMultibase;
           }

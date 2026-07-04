@@ -17,6 +17,13 @@ import { DIDManager } from '../../did/DIDManager.js';
 export interface RollbackContext {
   /** The error that caused the migration to fail (may carry inscription details). */
   error?: unknown;
+  /**
+   * The migration's tracked operational state at the moment of failure
+   * (before it was marked FAILED). Lets rollback distinguish failures that
+   * occurred before the Bitcoin anchoring step (no on-chain side effects
+   * possible) from failures during/after it.
+   */
+  stateAtFailure?: MigrationStateEnum;
 }
 
 export class RollbackManager implements IRollbackManager {
@@ -94,7 +101,21 @@ export class RollbackManager implements IRollbackManager {
       // rollback can undo. Reporting unqualified success here previously led
       // callers to retry and pay for a second inscription (issue #237).
       // Report PARTIALLY_ROLLED_BACK and enumerate what could not be undone.
-      if (checkpoint.targetLayer === 'btco') {
+      //
+      // Failures that provably occurred BEFORE the anchoring step (the
+      // migration operations transition the tracked state to ANCHORING before
+      // calling inscribeData) cannot have broadcast anything — those roll
+      // back cleanly. When the state at failure is unknown, fail conservative
+      // and report partial rollback.
+      const preAnchoringStates = new Set<MigrationStateEnum>([
+        MigrationStateEnum.PENDING,
+        MigrationStateEnum.VALIDATING,
+        MigrationStateEnum.CHECKPOINTED,
+        MigrationStateEnum.IN_PROGRESS
+      ]);
+      const failedBeforeAnchoring =
+        context?.stateAtFailure !== undefined && preAnchoringStates.has(context.stateAtFailure);
+      if (checkpoint.targetLayer === 'btco' && !failedBeforeAnchoring) {
         const artifactDetails = this.extractBitcoinArtifacts(context);
         return {
           success: false,

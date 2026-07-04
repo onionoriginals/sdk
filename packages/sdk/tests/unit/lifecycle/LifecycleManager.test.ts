@@ -255,3 +255,15 @@ describe('publishToWeb storage requirement (issue #244)', () => {
     expect(asset.currentLayer).toBe('did:peer');
   });
 });
+
+describe('publishToWeb with URL-only resources (review follow-up on #244)', () => {
+  test('publishes without a storageAdapter when no resource carries inline content', async () => {
+    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r1', type: 'text', contentType: 'text/plain', hash: 'ff00', url: 'https://cdn.example.com/r1' }
+    ] as any);
+    // No inline content → no storage writes needed → no STORAGE_REQUIRED
+    const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    expect(published.currentLayer).toBe('did:webvh');
+  });
+});

@@ -187,7 +187,7 @@ describe('CORE-MIG-EVENTS-032: DIDCompatibilityValidator', () => {
 
   test('[happy] passes for webvh → btco migration', async () => {
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
-    const webvhDid = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
+    const webvhDid = (await sdk.did.migrateToDIDWebVH(peerDid, 'example.com')).didDocument;
 
     // The synthetic did:webvh has no hosted log; inject its resolution
     // (resolveDID no longer fabricates stub documents for unresolvable DIDs).
@@ -728,7 +728,7 @@ describe('CORE-MIG-EVENTS-039: Peer→WebVH migration preserves asset resources'
     expect(asset.resources).toHaveLength(2);
 
     const peerDid = await sdk.did.createDIDPeer(resources);
-    const webvhDid = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
+    const webvhDid = (await sdk.did.migrateToDIDWebVH(peerDid, 'example.com')).didDocument;
 
     const published = await sdk.lifecycle.publishToWeb(asset, webvhDid.id);
 
@@ -778,7 +778,7 @@ describe('CORE-MIG-EVENTS-040: WebVH→Bitcoin migration via LifecycleManager', 
 
     const asset = await sdk.lifecycle.createAsset(sampleResources);
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
-    const webvhDid = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
+    const webvhDid = (await sdk.did.migrateToDIDWebVH(peerDid, 'example.com')).didDocument;
     await sdk.lifecycle.publishToWeb(asset, webvhDid.id);
 
     const inscribed = await sdk.lifecycle.inscribeOnBitcoin(asset);
@@ -799,7 +799,7 @@ describe('CORE-MIG-EVENTS-040: WebVH→Bitcoin migration via LifecycleManager', 
 
     const asset = await sdk.lifecycle.createAsset(sampleResources);
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
-    const webvhDid = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
+    const webvhDid = (await sdk.did.migrateToDIDWebVH(peerDid, 'example.com')).didDocument;
     await sdk.lifecycle.publishToWeb(asset, webvhDid.id);
 
     const inscribed = await sdk.lifecycle.inscribeOnBitcoin(asset, 25);
@@ -930,7 +930,7 @@ describe('CORE-MIG-EVENTS-042: Cost estimation webvh→btco includes Bitcoin fee
     );
 
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
-    const webvhDid = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
+    const webvhDid = (await sdk.did.migrateToDIDWebVH(peerDid, 'example.com')).didDocument;
 
     const cost = await migrationManager.estimateMigrationCost(webvhDid.id, 'btco', 10);
 
@@ -958,7 +958,7 @@ describe('CORE-MIG-EVENTS-042: Cost estimation webvh→btco includes Bitcoin fee
     );
 
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
-    const webvhDid = await sdk.did.migrateToDIDWebVH(peerDid, 'example.com');
+    const webvhDid = (await sdk.did.migrateToDIDWebVH(peerDid, 'example.com')).didDocument;
 
     const costLow = await migrationManager.estimateMigrationCost(webvhDid.id, 'btco', 5);
     const costHigh = await migrationManager.estimateMigrationCost(webvhDid.id, 'btco', 50);

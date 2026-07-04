@@ -653,10 +653,13 @@ export class MultiSigManager {
         ?.verificationMethod;
       if (!Array.isArray(vms)) return null;
       const fragment = verificationMethod.includes('#') ? verificationMethod.split('#')[1] : undefined;
+      // No single-VM fallback: a proof whose verificationMethod does not match
+      // any published method must fail closed, not be checked against
+      // whichever lone key the document happens to publish.
       const match = vms.find(vm =>
         vm.id === verificationMethod ||
         (fragment !== undefined && typeof vm.id === 'string' && vm.id.split('#')[1] === fragment)
-      ) ?? (vms.length === 1 ? vms[0] : undefined);
+      );
       return match && typeof match.publicKeyMultibase === 'string' ? match.publicKeyMultibase : null;
     } catch {
       return null;

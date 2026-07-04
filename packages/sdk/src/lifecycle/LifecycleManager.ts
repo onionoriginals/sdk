@@ -659,21 +659,29 @@ export class LifecycleManager {
     // the moment this call returns) — or writing nothing because the adapter
     // implements neither put() nor putObject() — would still migrate the
     // asset and issue a publication credential asserting content is hosted
-    // when it is not (issue #244).
+    // when it is not (issue #244). The requirement applies only when there is
+    // inline content to write: an asset whose resources are all hash-only
+    // (content hosted elsewhere) performs no storage writes and remains
+    // publishable without an adapter.
     const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
-    if (!storage) {
-      throw new StructuredError(
-        'STORAGE_REQUIRED',
-        'A storageAdapter must be configured to publish to web: resource content has to be hosted somewhere. ' +
-        'Provide config.storageAdapter (e.g. MemoryStorageAdapter for tests, LocalStorageAdapter, or a custom adapter).'
-      );
-    }
-    const storageWithPutCheck = storage as { put?: unknown; putObject?: unknown };
-    if (typeof storageWithPutCheck.put !== 'function' && typeof storageWithPutCheck.putObject !== 'function') {
-      throw new StructuredError(
-        'STORAGE_REQUIRED',
-        'The configured storageAdapter implements neither put() nor putObject(); resources cannot be published.'
-      );
+    const hasInlineContent = asset.resources.some(
+      (r) => r.content !== undefined && r.content !== null
+    );
+    if (hasInlineContent) {
+      if (!storage) {
+        throw new StructuredError(
+          'STORAGE_REQUIRED',
+          'A storageAdapter must be configured to publish to web: resource content has to be hosted somewhere. ' +
+          'Provide config.storageAdapter (e.g. MemoryStorageAdapter for tests, LocalStorageAdapter, or a custom adapter).'
+        );
+      }
+      const storageWithPutCheck = storage as { put?: unknown; putObject?: unknown };
+      if (typeof storageWithPutCheck.put !== 'function' && typeof storageWithPutCheck.putObject !== 'function') {
+        throw new StructuredError(
+          'STORAGE_REQUIRED',
+          'The configured storageAdapter implements neither put() nor putObject(); resources cannot be published.'
+        );
+      }
     }
 
     for (const resource of asset.resources) {
