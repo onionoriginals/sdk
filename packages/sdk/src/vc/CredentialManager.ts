@@ -221,7 +221,11 @@ export class CredentialManager {
           // definitions its fields rely on, excluding them from the signature.
           const unsigned = { ...credential };
           delete (unsigned as Partial<VerifiableCredential>).proof;
-          return issuer.issueCredential(unsigned, { proofPurpose: 'assertionMethod' });
+          // `return await` (not `return`) — a returned un-awaited promise
+          // rejects OUTSIDE this try, so issuance failures (e.g. a
+          // non-Ed25519 key, which eddsa-rdfc-2022 cannot sign) would escape
+          // instead of falling back to the legacy signer below.
+          return await issuer.issueCredential(unsigned, { proofPurpose: 'assertionMethod' });
         }
       } catch {
         // fall through to legacy signing

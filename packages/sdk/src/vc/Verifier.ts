@@ -5,7 +5,6 @@ import { createDocumentLoader } from './documentLoader.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
 import { StatusListManager } from './StatusListManager.js';
-import { verifyLegacyProof } from './proofs/legacy-proof.js';
 
 export type VerificationResult = { verified: boolean; errors: string[] };
 
@@ -315,48 +314,15 @@ export class Verifier {
     const issuerOf = (c: VerifiableCredential): string | undefined =>
       typeof c.issuer === 'string' ? c.issuer : (c.issuer as { id?: string } | undefined)?.id;
 
-    // Verify the status list credential's own proof, dispatching on its
-    // cryptosuite: Data Integrity proofs go through verifyCredential
-    // (checkStatus: false — the list's own status is out of scope here and
-    // would recurse); legacy cryptosuite-less proofs (produced by
-    // CredentialManager.signCredential) verify against the legacy digest with
-    // the verification method bound to the list's issuer. Without the legacy
-    // branch, every status list signed via the SDK's own legacy path would be
-    // rejected and revocation checks would fail closed for valid credentials.
-    const listProof = Array.isArray(statusListVC.proof) ? statusListVC.proof[0] : statusListVC.proof;
-    const listCryptosuite = (listProof as { cryptosuite?: unknown } | undefined)?.cryptosuite;
-    let proofVerified = false;
-    let proofErrors: string[] = [];
-    if (typeof listCryptosuite === 'string' && listCryptosuite.length > 0) {
-      const proofResult = await this.verifyCredential(statusListVC, { checkStatus: false });
-      proofVerified = proofResult.verified;
-      proofErrors = proofResult.errors;
-    } else if (listProof) {
-      // Legacy proof: bind the signing key to the list's issuer, then verify
-      // the signature and the validity window.
-      const vm = (listProof as { verificationMethod?: unknown }).verificationMethod;
-      const listIssuerForBinding = issuerOf(statusListVC);
-      if (typeof vm !== 'string' || !listIssuerForBinding || vm.split('#')[0] !== listIssuerForBinding) {
-        proofErrors = ['Status list credential proof verificationMethod is not bound to its issuer'];
-      } else {
-        const validity = checkCredentialValidityPeriod(statusListVC);
-        if (!validity.verified) {
-          proofErrors = validity.errors;
-        } else {
-          proofVerified = await this.verifyLegacyMultiSigProof(
-            statusListVC,
-            listProof as unknown as Record<string, unknown>
-          );
-          if (!proofVerified) proofErrors = ['Legacy proof signature verification failed'];
-        }
-      }
-    } else {
-      proofErrors = ['Status list credential has no proof'];
-    }
-    if (!proofVerified) {
+    // Verify the status list credential's own proof. Status lists must carry
+    // a Data Integrity (eddsa-rdfc-2022) proof — the only proof format this
+    // SDK supports. checkStatus: false because the list's own status (if any)
+    // is out of scope here and would recurse.
+    const proofResult = await this.verifyCredential(statusListVC, { checkStatus: false });
+    if (!proofResult.verified) {
       return {
         verified: false,
-        errors: ['Status list credential proof verification failed', ...proofErrors]
+        errors: ['Status list credential proof verification failed', ...proofResult.errors]
       };
     }
     const credentialIssuer = issuerOf(vc);
@@ -372,18 +338,6 @@ export class Verifier {
     }
 
     return { verified: true, errors: [] };
-  }
-
-  /**
-   * Verify a legacy (cryptosuite-less) multi-sig proof via the shared
-   * implementation in proofs/legacy-proof.ts (single source of the
-   * fail-closed key-resolution and algorithm-dispatch rules).
-   */
-  private async verifyLegacyMultiSigProof(
-    vc: VerifiableCredential,
-    proof: Record<string, unknown>
-  ): Promise<boolean> {
-    return verifyLegacyProof(vc, proof, this.didManager);
   }
 
   /**
@@ -441,22 +395,15 @@ export class Verifier {
         }
 
         try {
-          // Dispatch per proof (issue #239): DataIntegrityProofManager rejects
-          // any proof without cryptosuite 'eddsa-rdfc-2022', which is every
-          // proof produced by MultiSigManager.signWithPrivateKey — those are
-          // legacy-digest proofs and must verify through the legacy path.
-          const cryptosuite = (proof as { cryptosuite?: unknown }).cryptosuite;
-          let proofVerified: boolean;
-          if (typeof cryptosuite === 'string' && cryptosuite.length > 0) {
-            const proofResult = await DataIntegrityProofManager.verifyProof(
-              vc,
-              proof as unknown as DataIntegrityProof,
-              { documentLoader: loader }
-            );
-            proofVerified = proofResult.verified === true;
-          } else {
-            proofVerified = await this.verifyLegacyMultiSigProof(vc, proof as unknown as Record<string, unknown>);
-          }
+          // Every proof this SDK emits is a Data Integrity eddsa-rdfc-2022
+          // proof; there is no legacy proof format. Anything else fails
+          // closed inside DataIntegrityProofManager.
+          const proofResult = await DataIntegrityProofManager.verifyProof(
+            vc,
+            proof as unknown as DataIntegrityProof,
+            { documentLoader: loader }
+          );
+          const proofVerified = proofResult.verified === true;
           if (proofVerified) {
             // Dedupe only after successful verification: an invalid proof
             // must not consume the signer's slot and suppress a later valid

@@ -12,11 +12,7 @@ import type {
 } from '../types/index.js';
 import type { OriginalsConfig } from '../types/common.js';
 import type { DIDManager } from '../did/DIDManager.js';
-import { computeCredentialDigest } from '../utils/credential-digest.js';
-import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
-import { Signer, ES256KSigner, Ed25519Signer, ES256Signer } from '../crypto/Signer.js';
 import { checkCredentialValidityPeriod } from './Verifier.js';
-import { resolveSignerKey, signerForMultikey } from './proofs/legacy-proof.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import { createDocumentLoader } from './documentLoader.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
@@ -225,7 +221,6 @@ export class MultiSigManager {
     }
 
     // Verify each proof individually, tracking unique signers
-    const signer = this.getSigner();
     const seenSigners = new Set<string>();
     for (const proof of proofs) {
       const vm = proof.verificationMethod;
@@ -235,7 +230,7 @@ export class MultiSigManager {
         continue;
       }
 
-      const valid = await this.verifyProof(credential, proof, signer);
+      const valid = await this.verifyProof(credential, proof);
       if (valid) {
         // Reject duplicate proofs from the same signer. Dedupe only after
         // successful verification so an invalid proof cannot consume the
@@ -531,20 +526,28 @@ export class MultiSigManager {
     privateKeyMultibase: string,
     verificationMethod: string
   ): Promise<Proof> {
-    const proofBase: Proof = {
+    // Multi-sig proofs are standard Data Integrity (eddsa-rdfc-2022) proofs
+    // over the proof-less credential — a parallel proof set. There is no
+    // legacy digest format: every proof this SDK emits is spec-conformant
+    // and verifiable by DataIntegrityProofManager.
+    if (!this.didManager) {
+      throw new Error(
+        'MultiSigManager requires a DIDManager to create Data Integrity proofs; pass one to the constructor'
+      );
+    }
+    const documentLoader = createDocumentLoader(this.didManager);
+    const unsigned: Record<string, unknown> = { ...credential };
+    delete unsigned.proof;
+    const proof = await DataIntegrityProofManager.createProof(unsigned, {
       type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-rdfc-2022',
       created: new Date().toISOString(),
       verificationMethod,
       proofPurpose: 'assertionMethod',
-      proofValue: '',
-    };
-
-    const digest = await this.computeDigest(credential, proofBase);
-    const signer = this.getSigner();
-    const sig = await signer.sign(Buffer.from(digest), privateKeyMultibase);
-    const proofValue = encodeBase64UrlMultibase(sig);
-
-    return { ...proofBase, proofValue };
+      privateKey: privateKeyMultibase,
+      documentLoader
+    });
+    return proof as unknown as Proof;
   }
 
   private async signWithExternalSigner(
@@ -571,64 +574,32 @@ export class MultiSigManager {
     return { ...proofBase, proofValue };
   }
 
-  private async computeDigest(
-    credential: VerifiableCredential,
-    proofBase: Proof
-  ): Promise<Uint8Array> {
-    return computeCredentialDigest(
-      credential as unknown as Record<string, unknown>,
-      proofBase as unknown as Record<string, unknown>
-    );
-  }
-
   /**
-   * Verify one multi-sig proof, dispatching on its cryptosuite (issue #239):
-   * - proofs labeled `eddsa-rdfc-2022` (external signers) verify through
-   *   DataIntegrityProofManager — checking an RDF-canonicalized signature
-   *   against the legacy digest can never succeed;
-   * - cryptosuite-less proofs (signWithPrivateKey) verify against the legacy
-   *   credential digest;
-   * - any other cryptosuite fails closed.
+   * Verify one multi-sig proof. Every proof must be a Data Integrity
+   * `eddsa-rdfc-2022` proof (the only format this SDK emits — there is no
+   * legacy proof format); anything else fails closed. The verification
+   * method is resolved through the document loader (did:key offline, other
+   * DID methods via the DIDManager — issue #239).
    */
   private async verifyProof(
     credential: VerifiableCredential,
-    proof: Proof,
-    signer: Signer
+    proof: Proof
   ): Promise<boolean> {
     try {
       const { proofValue, verificationMethod } = proof;
       if (!proofValue || !verificationMethod) return false;
 
       const cryptosuite = (proof as { cryptosuite?: unknown }).cryptosuite;
-      if (typeof cryptosuite === 'string' && cryptosuite.length > 0) {
-        if (cryptosuite !== 'eddsa-rdfc-2022' || !this.didManager) {
-          return false;
-        }
-        const loader = createDocumentLoader(this.didManager);
-        const result = await DataIntegrityProofManager.verifyProof(
-          credential,
-          proof as unknown as DataIntegrityProof,
-          { documentLoader: loader }
-        );
-        return result.verified === true;
+      if (cryptosuite !== 'eddsa-rdfc-2022' || !this.didManager) {
+        return false;
       }
-
-      const signature = decodeBase64UrlMultibase(proofValue);
-      if (!signature) return false;
-
-      const proofBase: Proof = { ...proof, proofValue: '' };
-      const digest = await this.computeDigest(credential, proofBase);
-
-      // Shared resolution/dispatch (proofs/legacy-proof.ts): did:key or
-      // DIDManager-resolved keys (issue #239), signature algorithm chosen
-      // from the KEY's multicodec type — signers in a policy may use
-      // different key types.
-      const publicKeyMultibase = await resolveSignerKey(verificationMethod, this.didManager);
-      if (!publicKeyMultibase) return false;
-
-      const keySigner = signerForMultikey(publicKeyMultibase) ?? signer;
-
-      return await keySigner.verify(Buffer.from(digest), Buffer.from(signature), publicKeyMultibase);
+      const loader = createDocumentLoader(this.didManager);
+      const result = await DataIntegrityProofManager.verifyProof(
+        credential,
+        proof as unknown as DataIntegrityProof,
+        { documentLoader: loader }
+      );
+      return result.verified === true;
     } catch {
       return false;
     }
@@ -637,19 +608,6 @@ export class MultiSigManager {
   private extractProofs(credential: VerifiableCredential): Proof[] {
     if (!credential.proof) return [];
     return Array.isArray(credential.proof) ? credential.proof : [credential.proof];
-  }
-
-  private getSigner(): Signer {
-    switch (this.config.defaultKeyType) {
-      case 'ES256K':
-        return new ES256KSigner();
-      case 'Ed25519':
-        return new Ed25519Signer();
-      case 'ES256':
-        return new ES256Signer();
-      default:
-        return new ES256KSigner();
-    }
   }
 
   private generateSessionId(): string {

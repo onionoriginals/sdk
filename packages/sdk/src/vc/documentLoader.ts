@@ -1,5 +1,6 @@
 import { DIDManager } from '../did/DIDManager.js';
 import { PRELOADED_CONTEXTS } from '../utils/serialization.js';
+import { multikey } from '../crypto/Multikey.js';
 
 type LoadedDocument = { document: unknown; documentUrl: string; contextUrl: string | null };
 
@@ -35,6 +36,32 @@ export class DocumentLoader {
       // document must fail closed: trusting a registry entry would bypass
       // deactivation and key rotation published by the authoritative source.
       const isSelfCertifying = did.startsWith('did:key:') || did.startsWith('did:peer:');
+      // did:key is FULLY self-certifying: the identifier IS the public
+      // multikey, so the key node can be synthesized locally with no
+      // resolution and no registry — did:key:{mk}#{mk} always denotes the
+      // key {mk}. Only the canonical fragment form is accepted, and the key
+      // must decode as a valid multikey (fail closed on garbage).
+      if (fragment && did.startsWith('did:key:')) {
+        const mk = did.slice('did:key:'.length);
+        if (fragment === mk) {
+          try {
+            multikey.decodePublicKey(mk);
+            return {
+              document: {
+                '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'],
+                id: didUrl,
+                type: 'Multikey',
+                controller: did,
+                publicKeyMultibase: mk
+              },
+              documentUrl: didUrl,
+              contextUrl: null
+            };
+          } catch {
+            // not a decodable multikey — fall through to the registry/failure path
+          }
+        }
+      }
       if (fragment && isSelfCertifying) {
         const cached = verificationMethodRegistry.get(didUrl);
         if (cached) {

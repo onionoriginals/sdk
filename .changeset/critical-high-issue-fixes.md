@@ -17,7 +17,7 @@ Fix all open critical- and high-severity issues (#236–#256). Several are break
 Security and correctness fixes:
 
 - #238: status list credentials are validated (id binding, own proof, issuer match) before their bits decide revocation — closes a revocation bypass.
-- #239: multi-sig verification dispatches per proof cryptosuite in both `MultiSigManager.verifyMultiSig` and `Verifier.verifyCredentialMultiSig`, and resolves non-did:key signers via DIDManager.
+- #239: multi-sig signing now emits standard Data Integrity (`eddsa-rdfc-2022`) proofs and verification is DI-only in both `MultiSigManager.verifyMultiSig` and `Verifier.verifyCredentialMultiSig` — the legacy digest proof format is gone entirely (Ed25519 signer keys required); non-did:key signers resolve via DIDManager, and `did:key` verification methods resolve offline through the document loader.
 - #240: CEL witness proofs are verified against the digest the witness actually signed; honest witness attestations now report `verified: true`.
 - #247: explicit `config.network` takes precedence over the webvhNetwork mapping for did:btco identifiers; lifecycle bindings are network-prefixed.
 - #249: `selectUtxosSimple` and `PSBTBuilder` exclude inscription-bearing/resource/locked UTXOs by default (opt-in `allowOrdinalUtxos`).

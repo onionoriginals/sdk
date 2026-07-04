@@ -205,8 +205,8 @@ describe('VC-006/happy – multi-sig session collects m-of-n and threshold passe
       km.generateKeyPair('Ed25519'),
       km.generateKeyPair('Ed25519'),
     ]);
-    vms = keys.map(k => `did:key:${k.publicKey}`);
-    mgr = new MultiSigManager(config);
+    vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    mgr = new MultiSigManager(config, new DIDManager(config));
   });
 
   test('2-of-3 session: create → collect 2 contributions → finalize → threshold verified', async () => {
@@ -262,8 +262,8 @@ describe('VC-006/error – finalize before threshold throws insufficient-signatu
 
   beforeEach(async () => {
     keys = await Promise.all([km.generateKeyPair('Ed25519'), km.generateKeyPair('Ed25519'), km.generateKeyPair('Ed25519')]);
-    vms = keys.map(k => `did:key:${k.publicKey}`);
-    mgr = new MultiSigManager(config);
+    vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    mgr = new MultiSigManager(config, new DIDManager(config));
   });
 
   test('finalizeSession with 1 of 2 required signatures throws "Cannot finalize"', async () => {
@@ -313,8 +313,8 @@ describe('VC-007/happy – escrow policy with release conditions passes validati
       km.generateKeyPair('Ed25519'),
       km.generateKeyPair('Ed25519'),
     ]);
-    vms = keys.map(k => `did:key:${k.publicKey}`);
-    mgr = new MultiSigManager(config);
+    vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    mgr = new MultiSigManager(config, new DIDManager(config));
   });
 
   test('validateEscrowPolicy accepts a complete escrow policy', () => {
@@ -344,7 +344,7 @@ describe('VC-007/happy – escrow policy with release conditions passes validati
 
 describe('VC-007/error – escrow policy without escrow agent is rejected', () => {
   test('validateEscrowPolicy throws "must specify an escrow agent" when escrowAgent is empty', () => {
-    const mgr = new MultiSigManager(config);
+    const mgr = new MultiSigManager(config, new DIDManager(config));
     const policy: EscrowPolicy = {
       required: 1,
       total: 1,
@@ -357,7 +357,7 @@ describe('VC-007/error – escrow policy without escrow agent is rejected', () =
   });
 
   test('validateEscrowPolicy throws when releaseConditions is empty', () => {
-    const mgr = new MultiSigManager(config);
+    const mgr = new MultiSigManager(config, new DIDManager(config));
     const policy: EscrowPolicy = {
       required: 1,
       total: 1,
@@ -383,8 +383,8 @@ describe('VC-008/happy – corporate policy with role-based signers passes valid
       km.generateKeyPair('Ed25519'),
       km.generateKeyPair('Ed25519'),
     ]);
-    vms = keys.map(k => `did:key:${k.publicKey}`);
-    mgr = new MultiSigManager(config);
+    vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    mgr = new MultiSigManager(config, new DIDManager(config));
   });
 
   test('validateCorporatePolicy accepts a policy where all mandatory roles are assigned', () => {
@@ -420,8 +420,8 @@ describe('VC-008/error – corporate policy with unassigned mandatory role is re
   test('validateCorporatePolicy throws "Mandatory role not assigned to any signer"', async () => {
     const km = new KeyManager();
     const keys = await Promise.all([km.generateKeyPair('Ed25519'), km.generateKeyPair('Ed25519')]);
-    const vms = keys.map(k => `did:key:${k.publicKey}`);
-    const mgr = new MultiSigManager(config);
+    const vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    const mgr = new MultiSigManager(config, new DIDManager(config));
 
     const policy: CorporatePolicy = {
       required: 1,
@@ -439,8 +439,8 @@ describe('VC-008/error – corporate policy with unassigned mandatory role is re
   test('error message names the unassigned role', async () => {
     const km = new KeyManager();
     const keys = await Promise.all([km.generateKeyPair('Ed25519')]);
-    const vms = keys.map(k => `did:key:${k.publicKey}`);
-    const mgr = new MultiSigManager(config);
+    const vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    const mgr = new MultiSigManager(config, new DIDManager(config));
 
     const policy: CorporatePolicy = {
       required: 1,
@@ -828,7 +828,7 @@ describe('VC-018/performance – verification method caching (behavioral, not wa
 
 // ─── Issue #239 — multi-sig verification paths ───────────────────────────────
 
-describe('Issue #239 – multi-sig proofs verify across both verify paths and non-did:key signers', () => {
+describe('Issue #239 – multi-sig Data Integrity proofs verify across both verify paths and non-did:key signers', () => {
   const km = new KeyManager();
   const config: OriginalsConfig = { network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: false };
   const baseVC: VerifiableCredential = {
@@ -839,9 +839,9 @@ describe('Issue #239 – multi-sig proofs verify across both verify paths and no
     credentialSubject: { id: 'did:peer:subject' },
   };
 
-  test('Verifier.verifyCredentialMultiSig accepts legacy (cryptosuite-less) proofs from MultiSigManager', async () => {
+  test('the same multi-sig credential verifies at its threshold through BOTH verify paths', async () => {
     const keys = await Promise.all([km.generateKeyPair('Ed25519'), km.generateKeyPair('Ed25519')]);
-    const vms = keys.map(k => `did:key:${k.publicKey}`);
+    const vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
     const dm = new DIDManager(config);
     const mgr = new MultiSigManager(config, dm);
     const policy: MultiSigPolicy = { required: 2, total: 2, signerVerificationMethods: vms };
@@ -894,7 +894,7 @@ describe('Issue #239 – multi-sig proofs verify across both verify paths and no
 
   test('unsupported cryptosuites fail closed instead of being checked against the wrong digest', async () => {
     const key = await km.generateKeyPair('Ed25519');
-    const vm = `did:key:${key.publicKey}`;
+    const vm = `did:key:${key.publicKey}#${key.publicKey}`;
     const dm = new DIDManager(config);
     const mgr = new MultiSigManager(config, dm);
     const policy: MultiSigPolicy = { required: 1, total: 1, signerVerificationMethods: [vm] };
