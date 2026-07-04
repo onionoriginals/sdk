@@ -96,6 +96,32 @@ describe('Multi-sig sessions reject unverified contributions (issue #287)', () =
     expect(updated.contributions.length).toBe(1);
     expect(updated.status).toBe('threshold_met');
   });
+
+  test('concurrent contributions from the same signer cannot both land (TOCTOU)', async () => {
+    const km = new KeyManager();
+    const keys = await Promise.all([km.generateKeyPair('Ed25519'), km.generateKeyPair('Ed25519')]);
+    const vms = keys.map(k => `did:key:${k.publicKey}#${k.publicKey}`);
+    const mgr = new MultiSigManager(config, new DIDManager(config));
+
+    const policy: MultiSigPolicy = { required: 2, total: 2, signerVerificationMethods: vms };
+    const session = mgr.createSession(baseVC, policy);
+
+    // Two valid contributions from the SAME signer, submitted concurrently.
+    // The async verify step opens a window between the duplicate check and the
+    // push; the re-check must ensure only one survives so a single key cannot
+    // count twice toward the threshold.
+    const c1 = await mgr.createContribution(session.id, keys[0].privateKey, vms[0]);
+    const c2 = await mgr.createContribution(session.id, keys[0].privateKey, vms[0]);
+
+    const results = await Promise.allSettled([
+      mgr.addContribution(session.id, c1),
+      mgr.addContribution(session.id, c2),
+    ]);
+    const fulfilled = results.filter(r => r.status === 'fulfilled').length;
+    expect(fulfilled).toBe(1);
+    expect(mgr.getSession(session.id)!.contributions.length).toBe(1);
+    expect(mgr.getSession(session.id)!.status).toBe('collecting');
+  });
 });
 
 describe('Migration audit log is tamper-resistant (issue #281)', () => {
@@ -229,5 +255,20 @@ describe('Prometheus label values are escaped (issue #292)', () => {
     // The raw control/quote characters must not appear unescaped in the label.
     expect(line).toContain('code="bad\\"code\\\\with\\nnewline"');
     expect(line).not.toContain('\n' + 'newline');
+  });
+
+  test('an operation name with a newline does not split the # HELP line', () => {
+    const metrics = new MetricsCollector();
+    metrics.recordOperation('op\ninjected', 5, true);
+    const out = metrics.export('prometheus');
+    // The per-operation HELP lines must carry the escaped name on one physical
+    // line (raw newline replaced with the literal \n escape).
+    const perOpHelp = out.split('\n').filter(l => l.startsWith('# HELP originals_operation_op_injected'));
+    expect(perOpHelp.length).toBeGreaterThan(0);
+    for (const line of perOpHelp) {
+      expect(line).toContain('op\\ninjected');
+    }
+    // The injected fragment must not appear as its own stray line.
+    expect(out.split('\n').some(l => l === 'injected operations')).toBe(false);
   });
 });

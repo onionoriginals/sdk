@@ -213,6 +213,20 @@ export class DIDManager {
     }); // end track did.migrateToDIDWebVH
   }
 
+  /**
+   * The Bitcoin network this SDK instance is configured for, or `undefined`
+   * when neither an explicit `network` nor a `webvhNetwork` is set (the SDK's
+   * network is genuinely unknown). An explicit `network` wins over the WebVH
+   * mapping (issue #247). Single source of truth for both did:btco minting
+   * (migrateToDIDBTCO) and the cross-network resolution guard (issue #267), so
+   * the two can never disagree about which network the SDK is on.
+   */
+  private getConfiguredBitcoinNetwork(): 'mainnet' | 'regtest' | 'signet' | undefined {
+    if (this.config.network) return this.config.network;
+    if (this.config.webvhNetwork) return getBitcoinNetworkForWebVH(this.config.webvhNetwork);
+    return undefined;
+  }
+
   async migrateToDIDBTCO(didDoc: DIDDocument, satoshi: string): Promise<DIDDocument> {
     return this.track('did.migrateToDIDBTCO', async () => {
     // Validate satoshi parameter
@@ -237,14 +251,7 @@ export class DIDManager {
     // inscriptions (issue #247). The WebVH mapping (magby→regtest,
     // cleffa→signet, pichu→mainnet) applies only when no explicit Bitcoin
     // network was configured.
-    let network: 'mainnet' | 'regtest' | 'signet';
-    if (this.config.network) {
-      network = this.config.network;
-    } else if (this.config.webvhNetwork) {
-      network = getBitcoinNetworkForWebVH(this.config.webvhNetwork);
-    } else {
-      network = 'mainnet';
-    }
+    const network: 'mainnet' | 'regtest' | 'signet' = this.getConfiguredBitcoinNetwork() ?? 'mainnet';
 
     // Try to carry over the first multikey VM if present
     const firstVm = didDoc.verificationMethod?.[0];
@@ -325,17 +332,18 @@ export class DIDManager {
             const btcoNetworkPrefix = did.match(/^did:btco:(reg|sig|test):/)?.[1];
             // 'test' (testnet) has no OrdinalsClient/config counterpart;
             // preserve existing pass-through behavior for it.
-            if (btcoNetworkPrefix !== 'test') {
+            //
+            // Only reject when the SDK's network is actually known. If neither
+            // `network` nor `webvhNetwork` is configured, the provider's chain
+            // is genuinely unknown, so defaulting to mainnet and rejecting a
+            // reg/sig DID would be a false positive — fall through and let the
+            // provider answer (its own resolution still validates the DID).
+            const providerNetwork = this.getConfiguredBitcoinNetwork();
+            if (btcoNetworkPrefix !== 'test' && providerNetwork) {
               const didNetwork: 'mainnet' | 'regtest' | 'signet' =
                 btcoNetworkPrefix === 'reg' ? 'regtest'
                 : btcoNetworkPrefix === 'sig' ? 'signet'
                 : 'mainnet';
-              const providerNetwork: 'mainnet' | 'regtest' | 'signet' =
-                this.config.network
-                  ? this.config.network
-                  : this.config.webvhNetwork
-                    ? getBitcoinNetworkForWebVH(this.config.webvhNetwork)
-                    : 'mainnet';
               if (didNetwork !== providerNetwork) {
                 throw new StructuredError(
                   'BTCO_NETWORK_MISMATCH',

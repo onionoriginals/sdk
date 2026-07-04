@@ -439,6 +439,22 @@ export class MultiSigManager {
       throw new Error(`Contribution from ${vm} has an invalid proof and was rejected`);
     }
 
+    // Re-check the invariants that were validated before the `await` above.
+    // Because this method is now async, the duplicate-signer check and the
+    // push are no longer atomic: a concurrently-interleaved addContribution()
+    // for the same signer could have run its check (also seeing no duplicate)
+    // and pushed while we awaited verifyProof. Without this re-check both
+    // would push, letting one physical key count twice toward the m-of-n
+    // threshold. Re-validate against the now-current session state.
+    // Cast: TS narrows session.status to the pre-await value, but a concurrent
+    // finalizeSession() may have moved it to 'finalized' during the await.
+    if ((session.status as MultiSigSession['status']) === 'finalized') {
+      throw new Error(`MultiSig session ${sessionId} has already been finalized`);
+    }
+    if (session.contributions.some(c => c.proof.verificationMethod === vm)) {
+      throw new Error(`Signer ${vm} has already contributed to this session`);
+    }
+
     session.contributions.push(contribution);
 
     // Check if threshold is met

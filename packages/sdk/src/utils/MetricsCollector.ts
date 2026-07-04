@@ -304,6 +304,14 @@ export class MetricsCollector {
     const escapeLabelValue = (value: string): string =>
       value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 
+    // `# HELP` text uses a narrower escape set than label values (backslash and
+    // newline only — quotes are literal in HELP), but it must still be escaped:
+    // an operation name containing a newline would otherwise split the HELP
+    // line and corrupt the whole exposition (same failure class as the label
+    // values above).
+    const escapeHelpText = (value: string): string =>
+      value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n');
+
     // Asset metrics
     lines.push('# HELP originals_assets_created_total Total number of assets created');
     lines.push('# TYPE originals_assets_created_total counter');
@@ -365,13 +373,14 @@ export class MetricsCollector {
 
     for (const [operation, opMetrics] of Object.entries(metrics.operationTimes)) {
       const safeOpName = safeNameFor.get(operation)!;
+      const helpOp = escapeHelpText(operation);
 
-      lines.push(`# HELP originals_operation_${safeOpName}_total Total number of ${operation} operations`);
+      lines.push(`# HELP originals_operation_${safeOpName}_total Total number of ${helpOp} operations`);
       lines.push(`# TYPE originals_operation_${safeOpName}_total counter`);
       lines.push(`originals_operation_${safeOpName}_total ${opMetrics.count}`);
       lines.push('');
 
-      lines.push(`# HELP originals_operation_${safeOpName}_duration_milliseconds Duration of ${operation} operations`);
+      lines.push(`# HELP originals_operation_${safeOpName}_duration_milliseconds Duration of ${helpOp} operations`);
       lines.push(`# TYPE originals_operation_${safeOpName}_duration_milliseconds summary`);
       lines.push(`originals_operation_${safeOpName}_duration_milliseconds{quantile="0.0"} ${opMetrics.minTime}`);
       lines.push(`originals_operation_${safeOpName}_duration_milliseconds{quantile="0.5"} ${opMetrics.avgTime}`);
@@ -380,7 +389,7 @@ export class MetricsCollector {
       lines.push(`originals_operation_${safeOpName}_duration_milliseconds_count ${opMetrics.count}`);
       lines.push('');
 
-      lines.push(`# HELP originals_operation_${safeOpName}_errors_total Total number of errors in ${operation} operations`);
+      lines.push(`# HELP originals_operation_${safeOpName}_errors_total Total number of errors in ${helpOp} operations`);
       lines.push(`# TYPE originals_operation_${safeOpName}_errors_total counter`);
       lines.push(`originals_operation_${safeOpName}_errors_total ${opMetrics.errorCount}`);
       lines.push('');
