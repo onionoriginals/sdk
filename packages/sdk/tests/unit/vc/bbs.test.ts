@@ -190,7 +190,11 @@ describe('BBSCryptosuiteUtils', () => {
     expect(p.lengthBBSMessages).toBe(5);
   });
 
-  test('parse base proof with base_proof header', () => {
+  test('parseBaseProofValue rejects the derived-proof header (0x03)', () => {
+    // 0xd9 0x5d 0x03 is the *derived*-proof baseline header, not a base-proof
+    // header. Feeding it to parseBaseProofValue must throw rather than misparse
+    // derived components as a base proof (type-confusion). Base proofs use the
+    // even tags 0x02/0x04/0x06/0x08.
     const components = [bbsSignature, bbsHeader, publicKey, hmacKey, mandatoryPointers];
     const encoded = (cbor as any).encode(components) as Uint8Array | ArrayBuffer;
     const encBytes = encoded instanceof Uint8Array ? encoded : new Uint8Array(encoded as ArrayBuffer);
@@ -199,8 +203,7 @@ describe('BBSCryptosuiteUtils', () => {
     bytes.set(header, 0);
     bytes.set(encBytes, header.length);
     const s = 'u' + Buffer.from(bytes).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-    const p = (BBSCryptosuiteUtils as any).parseBaseProofValue(s);
-    expect(p.featureOption).toBe('base_proof');
+    expect(() => (BBSCryptosuiteUtils as any).parseBaseProofValue(s)).toThrow('Invalid BBS base proof header');
   });
 
   test('serializeDerivedProofValue throws on missing length for anonymous_holder_binding', () => {

@@ -71,7 +71,13 @@ export class Verifier {
       if (!vc.proof) throw new Error('Credential has no proof');
       const loader = options.documentLoader || createDocumentLoader(this.didManager);
       const vcContext = vc['@context'];
-      const ctxs: string[] = Array.isArray(vcContext) ? vcContext.filter((c): c is string => typeof c === 'string') : [String(vcContext)];
+      // Only string contexts need pre-loading into the loader cache; jsonld
+      // handles inline-object contexts natively. A single inline-object
+      // `@context` must NOT be String()-ified to "[object Object]" (which the
+      // loader can't resolve → spurious verified:false). Normalize to an array
+      // and keep only the string entries in both the array and scalar cases.
+      const ctxs: string[] = (Array.isArray(vcContext) ? vcContext : [vcContext])
+        .filter((c): c is string => typeof c === 'string');
       for (const c of ctxs) await loader(c);
       const proofValue = vc.proof;
       const proof = Array.isArray(proofValue) ? proofValue[0] : proofValue;

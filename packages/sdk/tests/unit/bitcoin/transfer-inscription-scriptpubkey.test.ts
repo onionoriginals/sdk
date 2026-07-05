@@ -1,16 +1,16 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import type { OrdinalsProvider } from '../../../src/adapters';
-import { scriptPubKeyForAddress } from '../../../src/bitcoin/transfer';
 
 // A valid regtest (bech32 'bcrt') P2WPKH destination address.
 const TO_ADDRESS = 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080';
 
 /**
- * Provider whose transferInscription deliberately omits `vout`, forcing
- * BitcoinManager.transferInscription onto its fallback-output code path.
+ * Provider whose transferInscription reports only a txid (no vin/vout), which
+ * is a realistic response from a provider that only exposes the broadcast id.
+ * BitcoinManager must NOT fabricate transaction data to fill the gaps.
  */
-const createNoVoutProvider = (): OrdinalsProvider =>
+const createNoVinVoutProvider = (): OrdinalsProvider =>
   ({
     async createInscription({ data, contentType }: any) {
       return {
@@ -33,14 +33,12 @@ const createNoVoutProvider = (): OrdinalsProvider =>
         satoshi: '123456789'
       };
     },
-    async transferInscription(_id: string, toAddress: string, options?: { feeRate?: number }) {
-      // Intentionally return NO vout -> exercises the fallback branch.
+    async transferInscription(_id: string, _toAddress: string, options?: { feeRate?: number }) {
+      // Provider reports only the txid — no vin, no vout, and a NEW satoshi.
       return {
         txid: 'tx-transfer',
-        vin: [{ txid: 'tx-out', vout: 0 }],
-        vout: [] as Array<{ value: number; scriptPubKey: string; address?: string }>,
         fee: options?.feeRate ? Math.round(options.feeRate) : 100,
-        satoshi: '123456789',
+        satoshi: '999999999',
         confirmations: 0
       };
     },
@@ -58,37 +56,32 @@ const createNoVoutProvider = (): OrdinalsProvider =>
     }
   } as unknown as OrdinalsProvider);
 
-describe('BitcoinManager.transferInscription fallback output scriptPubKey', () => {
-  test('derives a valid hex scriptPubKey from the destination address (not a placeholder)', async () => {
+describe('BitcoinManager.transferInscription returns only provider-attested data (#290)', () => {
+  test('does not fabricate vin/vout and does not mutate the caller inscription', async () => {
     const sdk = OriginalsSDK.create({
       network: 'regtest',
-      ordinalsProvider: createNoVoutProvider()
+      ordinalsProvider: createNoVinVoutProvider()
     } as any);
 
-    const tx = await sdk.bitcoin.transferInscription(
-      {
-        inscriptionId: 'insc-test',
-        satoshi: '123456789',
-        txid: 'tx-out',
-        vout: 0
-      } as any,
-      TO_ADDRESS
-    );
+    const inscription = {
+      inscriptionId: 'insc-test',
+      satoshi: '123456789',
+      txid: 'tx-out',
+      vout: 0
+    } as any;
 
-    expect(tx.vout.length).toBe(1);
-    const script = tx.vout[0].scriptPubKey;
+    const tx = await sdk.bitcoin.transferInscription(inscription, TO_ADDRESS);
 
-    // Must NOT be the old placeholder.
-    expect(script).not.toBe('script');
+    // Provider attested only the txid; inputs/outputs are unknown, so they must
+    // be empty rather than invented from the caller's stale data or a made-up
+    // dust value.
+    expect(tx.txid).toBe('tx-transfer');
+    expect(tx.vin).toEqual([]);
+    expect(tx.vout).toEqual([]);
 
-    // Must be valid, non-empty, lowercase hex.
-    expect(script.length).toBeGreaterThan(0);
-    expect(/^[0-9a-f]+$/.test(script)).toBe(true);
-    // Hex strings have even length and round-trip through Buffer.
-    expect(script.length % 2).toBe(0);
-    expect(Buffer.from(script, 'hex').toString('hex')).toBe(script);
-
-    // Must equal the script genuinely derived from the destination address.
-    expect(script).toBe(scriptPubKeyForAddress(TO_ADDRESS, 'regtest'));
+    // The caller's inscription object must be untouched — the old code wrote
+    // `inscription.satoshi = response.satoshi`, silently rewriting the caller's
+    // record to the provider's (here different) value.
+    expect(inscription.satoshi).toBe('123456789');
   });
 });

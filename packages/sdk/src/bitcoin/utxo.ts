@@ -193,6 +193,18 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
       }
       return { selected, feeSats, changeSats: change };
     }
+
+    // A two-output (recipient + change) transaction is not yet fundable, but a
+    // changeless one might be: with no change output the entire remainder above
+    // the recipient amount becomes fee. This is a valid solution as long as
+    // that remainder covers the single-output fee. Without this branch a wallet
+    // holding exactly enough for a changeless spend — accumulated in
+    // [target + fee(1out), target + fee(2out)) — was wrongly rejected with
+    // INSUFFICIENT_FUNDS. Overpay is bounded by one output's cost.
+    const feeChangeless = feeForSelection(1);
+    if (accumulated - targetAmountSats >= feeChangeless) {
+      return { selected, feeSats: accumulated - targetAmountSats, changeSats: 0 };
+    }
   }
 
   // If we got here, insufficient funds with the given policy

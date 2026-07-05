@@ -132,6 +132,23 @@ describe('StatusListManager', () => {
   });
 
   describe('setStatus', () => {
+    test('strips any stale proof from the returned credential (#289)', () => {
+      const vc = manager.createStatusListCredential({
+        id: 'https://example.com/status/1',
+        issuer: 'did:example:issuer',
+        statusPurpose: 'revocation',
+      });
+      // Simulate a previously-signed status list.
+      (vc as any).proof = { type: 'DataIntegrityProof', proofValue: 'zStaleSignature' };
+
+      const updated = manager.setStatus(vc, 42, true);
+      // The bitstring changed, so the old signature is invalid; it must be gone
+      // to force a re-sign rather than shipping an unverifiable list.
+      expect((updated as any).proof).toBeUndefined();
+      // The original is untouched.
+      expect((vc as any).proof).toBeDefined();
+    });
+
     test('sets a bit at a given index', () => {
       const vc = manager.createStatusListCredential({
         id: 'https://example.com/status/1',
@@ -342,6 +359,19 @@ describe('StatusListManager', () => {
   });
 
   describe('batchSetStatus', () => {
+    test('strips any stale proof from the returned credential (#289)', () => {
+      const vc = manager.createStatusListCredential({
+        id: 'https://example.com/status/1',
+        issuer: 'did:example:issuer',
+        statusPurpose: 'revocation',
+      });
+      (vc as any).proof = { type: 'DataIntegrityProof', proofValue: 'zStaleSignature' };
+
+      const updated = manager.batchSetStatus(vc, [[0, true], [7, true]]);
+      expect((updated as any).proof).toBeUndefined();
+      expect((vc as any).proof).toBeDefined();
+    });
+
     test('sets multiple bits at once', () => {
       const vc = manager.createStatusListCredential({
         id: 'https://example.com/status/1',

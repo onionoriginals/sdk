@@ -1,7 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import type { OrdinalsProvider } from '../../../src/adapters';
-import { DUST_LIMIT_SATS } from '../../../src/types';
 // Use global Buffer available in Node test environment
 
 const createMockProvider = () => {
@@ -185,21 +184,22 @@ describe('BitcoinManager integration with providers', () => {
     expect(tx.vout[0].address).toBe('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
   });
 
-  test('transferInscription enforces dust limit on fallback vout', async () => {
+  test('does not fabricate a vout when the provider reports none (#290)', async () => {
     const provider = createMockProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
-    const inscription = await sdk.bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
-    // provider returns vout with value 12_000 so skip; force empty vout by using a provider that returns none
+    const inscription0 = await OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any)
+      .bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
+    // Provider reports only a txid — no vout. BitcoinManager must surface the
+    // unknown outputs as empty rather than inventing a dust output.
     const provider2: OrdinalsProvider = {
       ...provider,
       async transferInscription() {
-        return { txid: 'tx', vin: [{ txid: 'a', vout: 0 }], vout: [], fee: 1 } as any;
+        return { txid: 'tx', vin: [], vout: [], fee: 1 } as any;
       }
     } as OrdinalsProvider;
     const sdk2 = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider2 } as any);
-    const tx2 = await sdk2.bitcoin.transferInscription(inscription, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
-    expect(tx2.vout[0].value).toBeGreaterThanOrEqual(DUST_LIMIT_SATS);
-    expect(tx2.vout[0].address).toBe('tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
+    const tx2 = await sdk2.bitcoin.transferInscription(inscription0, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
+    expect(tx2.vout).toEqual([]);
+    expect(tx2.vin).toEqual([]);
   });
 
   test('getSatoshiFromInscription returns null when provider missing', async () => {
