@@ -4,6 +4,7 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
+import { encryptOtpCode } from '../otp-encryption.js';
 import type { TurnkeyWallet, TurnkeyWalletAccount } from '../types.js';
 
 /**
@@ -63,13 +64,68 @@ export function initializeTurnkeyClient(
 }
 
 /**
- * Send OTP code to email via Turnkey
+ * Result of initiating an OTP flow via {@link initOtp}.
+ */
+export interface InitOtpResult {
+  /** Unique identifier for the OTP flow. */
+  otpId: string;
+  /**
+   * Signed bundle containing the target encryption key. The OTP code must be
+   * encrypted to this bundle when calling {@link completeOtp} (Turnkey v6
+   * encrypted-bundle flow).
+   */
+  otpEncryptionTargetBundle: string;
+}
+
+/**
+ * Options for {@link completeOtp}.
+ */
+export interface CompleteOtpOptions {
+  /**
+   * Optional compressed P-256 public key (hex) to embed in the encrypted OTP
+   * bundle. When omitted, an ephemeral key pair is generated and returned.
+   */
+  publicKey?: string;
+  /**
+   * Override for the enclave signing key used to verify the target bundle's
+   * signature. ONLY for tests or non-production Turnkey environments.
+   */
+  dangerouslyOverrideSignerPublicKey?: string;
+}
+
+/**
+ * Result of completing an OTP flow via {@link completeOtp}.
+ */
+export interface CompleteOtpResult {
+  /** Verification token issued by Turnkey (consumed by OTP_LOGIN). */
+  verificationToken: string;
+  /** Turnkey sub-organization ID. */
+  subOrgId: string;
+  /**
+   * Compressed P-256 public key (hex) that the verification token is bound
+   * to. Pass this as `publicKey` to a subsequent `otpLogin` activity.
+   */
+  publicKey: string;
+  /**
+   * Private key (hex) for the ephemeral key pair, present only when no
+   * `publicKey` option was supplied. Needed to prove possession of the bound
+   * key in subsequent requests. Sensitive: never log or persist insecurely.
+   */
+  privateKey?: string;
+}
+
+/**
+ * Send OTP code to email via Turnkey.
+ *
+ * Returns the OTP ID together with the `otpEncryptionTargetBundle`, which is
+ * required by {@link completeOtp} to encrypt the OTP code (Turnkey v6 no
+ * longer accepts plaintext OTP codes on verification).
  */
 export async function initOtp(
   turnkeyClient: Turnkey,
   email: string,
   subOrgId?: string
-): Promise<string> {
+): Promise<InitOtpResult> {
   try {
     const result = await turnkeyClient.apiClient().initOtp({
       otpType: 'OTP_TYPE_EMAIL',
@@ -83,7 +139,12 @@ export async function initOtp(
       throw new Error('No OTP ID returned from Turnkey');
     }
 
-    return otpId;
+    const otpEncryptionTargetBundle = result.otpEncryptionTargetBundle;
+    if (!otpEncryptionTargetBundle) {
+      throw new Error('No OTP encryption target bundle returned from Turnkey');
+    }
+
+    return { otpId, otpEncryptionTargetBundle };
   } catch (error) {
     console.error('Error initializing OTP:', error);
     throw new Error(
@@ -93,30 +154,37 @@ export async function initOtp(
 }
 
 /**
- * Complete OTP verification flow
- * Returns verification token and sub-org ID
+ * Complete OTP verification flow (Turnkey v6 encrypted-bundle flow).
+ *
+ * Encrypts the user-supplied OTP code (plus a client-generated P-256 public
+ * key) to the `otpEncryptionTargetBundle` returned by {@link initOtp}, then
+ * submits it as `encryptedOtpBundle` to Turnkey's `verifyOtp` activity.
+ *
+ * Returns the verification token, the sub-org ID, and the key pair the token
+ * is bound to (for use with a subsequent `otpLogin`).
  */
 export async function completeOtp(
   turnkeyClient: Turnkey,
   otpId: string,
   otpCode: string,
-  subOrgId: string
-): Promise<{ verificationToken: string; subOrgId: string }> {
+  subOrgId: string,
+  otpEncryptionTargetBundle: string,
+  options?: CompleteOtpOptions
+): Promise<CompleteOtpResult> {
   try {
-    // TODO(@turnkey-sdk-server-6): @turnkey/sdk-server v6 replaced the plaintext
-    // `otpCode` field on verifyOtp with a required `encryptedOtpBundle` (produced via
-    // `encryptOtpCodeToBundle` from `@turnkey/crypto`, encrypted to the
-    // `otpEncryptionTargetBundle` returned by initOtp). This cast preserves the
-    // pre-v6 plaintext call shape (and existing test expectations) to unblock the
-    // dependency bump, but the OTP verification flow will not work against the real
-    // Turnkey v6 API until it is migrated to the encrypted-bundle flow. See
-    // src/server/email-auth.ts for the matching TODO.
+    const { encryptedOtpBundle, publicKey, privateKey } = await encryptOtpCode({
+      otpCode,
+      otpEncryptionTargetBundle,
+      publicKey: options?.publicKey,
+      dangerouslyOverrideSignerPublicKey: options?.dangerouslyOverrideSignerPublicKey,
+    });
+
     const result = await turnkeyClient.apiClient().verifyOtp({
       otpId,
-      otpCode,
+      encryptedOtpBundle,
       expirationSeconds: '900',
       organizationId: subOrgId,
-    } as unknown as Parameters<ReturnType<Turnkey['apiClient']>['verifyOtp']>[0]);
+    });
 
     if (!result.verificationToken) {
       throw new Error('OTP verification failed - no verification token returned');
@@ -125,6 +193,8 @@ export async function completeOtp(
     return {
       verificationToken: result.verificationToken,
       subOrgId,
+      publicKey,
+      privateKey,
     };
   } catch (error) {
     console.error('Error completing OTP:', error);

@@ -10,6 +10,14 @@ import {
   getKeyByCurve,
 } from '../src/client/turnkey-client';
 import type { TurnkeyWallet } from '../src/types';
+import { createOtpTargetBundle, decryptOtpBundle } from './helpers/otp-test-utils';
+
+// Shared OTP target-bundle fixture (validly signed with test keys). The
+// Turnkey client itself is always MOCKED in these tests.
+const otpFixture = createOtpTargetBundle();
+const completeOtpOptions = {
+  dangerouslyOverrideSignerPublicKey: otpFixture.signerPublicKey,
+};
 
 describe('client/turnkey-client', () => {
   const originalEnv = { ...process.env };
@@ -117,19 +125,32 @@ describe('client/turnkey-client', () => {
     function createMockClient(initOtpFn?: () => Promise<unknown>) {
       return {
         apiClient: () => ({
-          initOtp: initOtpFn ?? mock(() => Promise.resolve({ otpId: 'otp_abc' })),
+          initOtp:
+            initOtpFn ??
+            mock(() =>
+              Promise.resolve({
+                otpId: 'otp_abc',
+                otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
+              })
+            ),
         }),
       } as unknown as import('@turnkey/sdk-server').Turnkey;
     }
 
-    test('returns OTP ID on success', async () => {
+    test('returns OTP ID and encryption target bundle on success', async () => {
       const client = createMockClient();
       const result = await initOtp(client, 'user@example.com');
-      expect(result).toBe('otp_abc');
+      expect(result.otpId).toBe('otp_abc');
+      expect(result.otpEncryptionTargetBundle).toBe(otpFixture.otpEncryptionTargetBundle);
     });
 
     test('passes subOrgId when provided', async () => {
-      const initOtpFn = mock(() => Promise.resolve({ otpId: 'otp_123' }));
+      const initOtpFn = mock(() =>
+        Promise.resolve({
+          otpId: 'otp_123',
+          otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
+        })
+      );
       const client = createMockClient(initOtpFn);
       await initOtp(client, 'user@example.com', 'sub_org_456');
 
@@ -144,6 +165,12 @@ describe('client/turnkey-client', () => {
 
     test('throws when no OTP ID returned', async () => {
       const client = createMockClient(mock(() => Promise.resolve({ otpId: null })));
+      await expect(initOtp(client, 'user@example.com')).rejects.toThrow('Failed to send OTP');
+    });
+
+    test('throws when no encryption target bundle returned', async () => {
+      // Turnkey v6 initOtp must return otpEncryptionTargetBundle
+      const client = createMockClient(mock(() => Promise.resolve({ otpId: 'otp_abc' })));
       await expect(initOtp(client, 'user@example.com')).rejects.toThrow('Failed to send OTP');
     });
 
@@ -164,44 +191,120 @@ describe('client/turnkey-client', () => {
       } as unknown as import('@turnkey/sdk-server').Turnkey;
     }
 
-    test('returns verification token and subOrgId', async () => {
+    test('returns verification token, subOrgId and bound key pair', async () => {
       const client = createMockClient();
-      const result = await completeOtp(client, 'otp_123', '654321', 'sub_org_abc');
+      const result = await completeOtp(
+        client,
+        'otp_123',
+        '654321',
+        'sub_org_abc',
+        otpFixture.otpEncryptionTargetBundle,
+        completeOtpOptions
+      );
       expect(result.verificationToken).toBe('vtoken_123');
       expect(result.subOrgId).toBe('sub_org_abc');
+      // Ephemeral key pair the verification token is bound to
+      expect(result.publicKey).toMatch(/^0[23][0-9a-f]{64}$/);
+      expect(result.privateKey).toMatch(/^[0-9a-f]{64}$/);
     });
 
-    test('passes correct parameters to verifyOtp', async () => {
+    test('sends an encrypted OTP bundle to verifyOtp (v6 flow)', async () => {
       const verifyOtpFn = mock(() => Promise.resolve({ verificationToken: 'tok' }));
       const client = createMockClient(verifyOtpFn);
-      await completeOtp(client, 'otp_id_1', '111222', 'sub_org_1');
+      const result = await completeOtp(
+        client,
+        'otp_id_1',
+        '111222',
+        'sub_org_1',
+        otpFixture.otpEncryptionTargetBundle,
+        completeOtpOptions
+      );
 
       expect(verifyOtpFn).toHaveBeenCalledWith(
         expect.objectContaining({
           otpId: 'otp_id_1',
-          otpCode: '111222',
+          encryptedOtpBundle: expect.any(String),
           expirationSeconds: '900',
           organizationId: 'sub_org_1',
         })
       );
+
+      // The plaintext OTP code must never be sent to Turnkey
+      const callArg = verifyOtpFn.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg.otpCode).toBeUndefined();
+
+      // The bundle decrypts (with the target key) to the OTP code and the
+      // returned public key
+      const plaintext = decryptOtpBundle(
+        callArg.encryptedOtpBundle as string,
+        otpFixture.targetPrivateKey
+      );
+      expect(plaintext.otp_code).toBe('111222');
+      expect(plaintext.public_key).toBe(result.publicKey);
+    });
+
+    test('uses a caller-provided public key when supplied', async () => {
+      const client = createMockClient();
+      const result = await completeOtp(
+        client,
+        'otp_123',
+        '654321',
+        'sub_org_abc',
+        otpFixture.otpEncryptionTargetBundle,
+        { ...completeOtpOptions, publicKey: '02' + 'ab'.repeat(32) }
+      );
+      expect(result.publicKey).toBe('02' + 'ab'.repeat(32));
+      expect(result.privateKey).toBeUndefined();
     });
 
     test('throws when no verification token returned', async () => {
       const client = createMockClient(
         mock(() => Promise.resolve({ verificationToken: null }))
       );
-      await expect(completeOtp(client, 'otp_1', '123456', 'sub_1')).rejects.toThrow(
-        'Failed to complete OTP'
-      );
+      await expect(
+        completeOtp(
+          client,
+          'otp_1',
+          '123456',
+          'sub_1',
+          otpFixture.otpEncryptionTargetBundle,
+          completeOtpOptions
+        )
+      ).rejects.toThrow('Failed to complete OTP');
     });
 
     test('throws on API error', async () => {
       const client = createMockClient(
         mock(() => Promise.reject(new Error('Verification failed')))
       );
-      await expect(completeOtp(client, 'otp_1', '123456', 'sub_1')).rejects.toThrow(
-        'Failed to complete OTP'
-      );
+      await expect(
+        completeOtp(
+          client,
+          'otp_1',
+          '123456',
+          'sub_1',
+          otpFixture.otpEncryptionTargetBundle,
+          completeOtpOptions
+        )
+      ).rejects.toThrow('Failed to complete OTP');
+    });
+
+    test('throws without calling verifyOtp when the target bundle is untrusted', async () => {
+      // Without the test signer override, the bundle must be signed by
+      // Turnkey's production enclave key - our test bundle is not.
+      const verifyOtpFn = mock(() => Promise.resolve({ verificationToken: 'tok' }));
+      const client = createMockClient(verifyOtpFn);
+      await expect(
+        completeOtp(client, 'otp_1', '123456', 'sub_1', otpFixture.otpEncryptionTargetBundle)
+      ).rejects.toThrow('Failed to complete OTP');
+      expect(verifyOtpFn).not.toHaveBeenCalled();
+    });
+
+    test('throws when the target bundle is missing', async () => {
+      const client = createMockClient();
+      await expect(
+        completeOtp(client, 'otp_1', '123456', 'sub_1', '', completeOtpOptions)
+      ).rejects.toThrow('Failed to complete OTP');
     });
   });
 

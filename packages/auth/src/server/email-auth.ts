@@ -8,6 +8,7 @@ import { Turnkey } from '@turnkey/sdk-server';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import type { EmailAuthSession, InitiateAuthResult, VerifyAuthResult } from '../types.js';
+import { encryptOtpCode } from '../otp-encryption.js';
 import { getOrCreateTurnkeySubOrg } from './turnkey-client.js';
 
 // Session timeout (15 minutes to match Turnkey OTP)
@@ -127,6 +128,14 @@ export async function initiateEmailAuth(
     throw new Error('Failed to initiate OTP - no OTP ID returned');
   }
 
+  // Turnkey v6 (ACTIVITY_TYPE_INIT_OTP_V3) returns a signed target-encryption
+  // bundle; the OTP code must be encrypted to it during verification.
+  const otpEncryptionTargetBundle = otpResult.otpEncryptionTargetBundle;
+
+  if (!otpEncryptionTargetBundle) {
+    throw new Error('Failed to initiate OTP - no OTP encryption target bundle returned');
+  }
+
   console.log('[email-auth] OTP sent');
 
   // Create auth session
@@ -135,6 +144,7 @@ export async function initiateEmailAuth(
     email,
     subOrgId,
     otpId,
+    otpEncryptionTargetBundle,
     timestamp: Date.now(),
     verified: false,
   });
@@ -146,13 +156,31 @@ export async function initiateEmailAuth(
 }
 
 /**
+ * Options for {@link verifyEmailAuth}.
+ */
+export interface VerifyEmailAuthOptions {
+  /**
+   * Override for the enclave signing key used to verify the OTP encryption
+   * target bundle's signature before encrypting the OTP code. ONLY for tests
+   * or non-production Turnkey environments; defaults to Turnkey's production
+   * signer key.
+   */
+  dangerouslyOverrideSignerPublicKey?: string;
+}
+
+/**
  * Verify email authentication code using Turnkey OTP
+ *
+ * Implements the Turnkey v6 encrypted-bundle flow: the OTP code is encrypted
+ * to the `otpEncryptionTargetBundle` captured during {@link initiateEmailAuth}
+ * and submitted as `encryptedOtpBundle` to Turnkey's `verifyOtp` activity.
  */
 export async function verifyEmailAuth(
   sessionId: string,
   code: string,
   turnkeyClient: Turnkey,
-  sessionStorage?: SessionStorage
+  sessionStorage?: SessionStorage,
+  options?: VerifyEmailAuthOptions
 ): Promise<VerifyAuthResult> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
   const session = storage.get(sessionId);
@@ -175,6 +203,12 @@ export async function verifyEmailAuth(
     throw new Error('Sub-organization ID not found');
   }
 
+  if (!session.otpEncryptionTargetBundle) {
+    throw new Error(
+      'OTP encryption target bundle not found in session. Please request a new code.'
+    );
+  }
+
   // Reject malformed or oversized codes before hitting Turnkey
   if (!/^[A-Za-z0-9]{4,10}$/.test(code)) {
     throw new Error('Invalid verification code format');
@@ -182,20 +216,30 @@ export async function verifyEmailAuth(
 
   console.log('[email-auth] Verifying OTP');
 
+  // Encrypt the OTP code (plus an ephemeral client public key) to the target
+  // encryption bundle. Turnkey v6 verifyOtp only accepts encrypted bundles.
+  // This also verifies the enclave signature on the target bundle.
+  let encryptedOtpBundle: string;
   try {
-    // Verify the OTP code with Turnkey
-    // TODO(@turnkey-sdk-server-6): @turnkey/sdk-server v6 replaced the plaintext
-    // `otpCode` field on verifyOtp with a required `encryptedOtpBundle` (produced via
-    // `encryptOtpCodeToBundle` from `@turnkey/crypto`, encrypted to the
-    // `otpEncryptionTargetBundle` returned by initOtp). This cast preserves the
-    // pre-v6 plaintext call shape (and existing test expectations) to unblock the
-    // dependency bump, but the OTP verification flow will not work against the real
-    // Turnkey v6 API until it is migrated to the encrypted-bundle flow.
+    ({ encryptedOtpBundle } = await encryptOtpCode({
+      otpCode: code,
+      otpEncryptionTargetBundle: session.otpEncryptionTargetBundle,
+      dangerouslyOverrideSignerPublicKey: options?.dangerouslyOverrideSignerPublicKey,
+    }));
+  } catch (error) {
+    console.error('❌ Failed to encrypt OTP code:', error);
+    throw new Error(
+      `Failed to encrypt OTP code: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  try {
+    // Verify the encrypted OTP bundle with Turnkey
     const verifyResult = await turnkeyClient.apiClient().verifyOtp({
       otpId: session.otpId,
-      otpCode: code,
+      encryptedOtpBundle,
       expirationSeconds: '900', // 15 minutes
-    } as unknown as Parameters<ReturnType<Turnkey['apiClient']>['verifyOtp']>[0]);
+    });
 
     if (!verifyResult.verificationToken) {
       throw new Error('OTP verification failed - no verification token returned');
@@ -211,6 +255,7 @@ export async function verifyEmailAuth(
       verified: true,
       email: session.email,
       subOrgId: session.subOrgId,
+      verificationToken: verifyResult.verificationToken,
     };
   } catch (error) {
     console.error('❌ OTP verification failed:', error);
