@@ -116,7 +116,7 @@
   display: flex;
   align-items: flex-start;
   gap: var(--sp-3);
-  max-width: 720px;
+  max-width: 640px;
   margin-top: var(--sp-8);
   padding: var(--sp-4) var(--sp-5);
   border-radius: var(--r-md);

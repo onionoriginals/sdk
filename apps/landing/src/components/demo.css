@@ -304,6 +304,10 @@
   border-bottom-color: var(--accent);
 }
 
+.demo-tabs [role='tab'][aria-selected='true']:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .demo-tab-count {
   display: inline-grid;
   place-items: center;

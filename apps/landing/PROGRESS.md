@@ -3,7 +3,36 @@
 Status board for the landing page at `apps/landing/`. Updated every
 build→grade cycle. Craft bar and grading protocol: see `GRADING.md`.
 
-## Current status — cycle 3 in progress (grader interrupted by API session limit)
+## Current status — DONE: cycle-4 grader found no done-bar failure
+
+Final fresh-context adversarial grader (cycle 4) verdict: **NO DONE-BAR
+FAILURE FOUND.** All five tests passed with evidence:
+- Founder test: what + why stated from the hero alone in <10s.
+- Developer test: layers/direction named; quickstart copied via the button
+  and verified identifier-by-identifier against the real SDK source — "the
+  real API, not pseudocode".
+- Demo test (attacked hardest): two full runs at each viewport; zero
+  identifier overlap across runs; displayed sha-256 recomputed in-page and
+  matched; network showed only lazy JS chunks, no data fetches; grader's
+  kill shot — calling `window.__originalsDemo.sdk.lifecycle.createAsset()`
+  directly with its own random content — minted a fresh did:peer echoing
+  its exact hash. "A canned facade cannot do that."
+- Craft test: full GRADING.md §A sweep clean (2 fonts, token scale, 128/96
+  rhythm, zero contrast failures, single easing family, CLS 0.0035,
+  reduced-motion clean); design-director judgment: "could not honestly
+  nominate it as the lower-craft page" vs Stripe/Linear.
+- Mechanical floor: zero console errors through load + two full demo runs
+  at 375 and 1440; throttled CTA-clickable at 829ms (bar <3s).
+
+Post-verdict polish from the grader's nitpick list: hover delta added to
+the selected demo tab; protocol note narrowed to ~95ch→640px; caret-blink
+idiom (~1.1s steps) documented as a rubric exception (grader judged it
+non-failing; it pauses under reduced-motion). Accepted as-is: mock txids
+look like `tx-…` rather than 64-hex — they come from the SDK's
+OrdMockProvider, which we don't modify per house rules, and the page
+discloses the mock provider prominently.
+
+## Cycle 3 (interrupted by API session limit, finished inline)
 
 The cycle-3 fresh-context grader confirmed demo authenticity again
 (recomputed sha-256 matched the displayed content) before being killed by
@@ -150,3 +179,5 @@ all fixed and re-verified in-browser. Cycle 2 grading next.
 | 0 | 2026-07-05 | not yet run | initial build |
 | 1 | 2026-07-05 | 4/5 pass; craft FAIL (contrast + “undefined” log line + vanishing verify hook) | all three fixed & re-verified; quickstart made runnable |
 | 2 | 2026-07-05 | regressions hold, edge cases pass; FAIL on blind side-by-side + comment contrast + logo hover | code clipping, zero state, copy-button unification, footer bottom row, all contrast — fixed & re-verified |
+| 3 | 2026-07-05 | grader killed by API limit after re-confirming demo authenticity; checklist finished inline | anchor links no longer bury headings under sticky nav; explicit badge colors |
+| 4 | 2026-07-05 | **NO DONE-BAR FAILURE FOUND** (all five tests pass, incl. direct-SDK kill-shot verification) | nitpick polish: selected-tab hover, note width; caret idiom documented |

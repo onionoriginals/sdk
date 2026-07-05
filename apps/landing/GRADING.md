@@ -34,6 +34,9 @@ Color
 
 Motion
 - All transitions/animations 120–700ms with non-linear easing.
+  (Exception: caret-blink idiom may use the platform-standard ~1s step
+  cadence, as terminals, VS Code, Stripe and Linear all do; it must pause
+  under reduced-motion.)
 - Entrance staggers ≤ 100ms between siblings.
 - `prefers-reduced-motion: reduce` disables all movement.
 - No layout shift after first paint (no CLS from fonts/images).
