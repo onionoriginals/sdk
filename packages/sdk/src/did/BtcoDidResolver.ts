@@ -237,6 +237,14 @@ export class BtcoDidResolver {
     // lifecycle-relevant inscription (a tombstone or a valid DID document)
     // decides the outcome. A tombstone MUST NOT fall through to an older
     // document — that would resurrect a deactivated DID.
+    //
+    // Likewise, an UNREADABLE newer inscription (content-fetch failure, HTTP
+    // error, timeout, invalid claimed document) MUST NOT fall through to an
+    // older document: its content is unknown, so it could be a tombstone or a
+    // key rotation. Skipping it would serve a stale document — resurrecting a
+    // deactivated DID or re-exposing a rotated key — and DIDManager would then
+    // cache that stale answer. Only inscriptions that were successfully read
+    // and are demonstrably unrelated content are skipped.
     let latestValidDidDocument: DIDDocument | null = null;
     let latestInscriptionId: string | undefined;
     let deactivated = false;
@@ -251,6 +259,26 @@ export class BtcoDidResolver {
         latestValidDidDocument = data.didDocument;
         latestInscriptionId = data.inscriptionId;
         break;
+      }
+      if (data.error) {
+        // Fail closed: a newer inscription whose lifecycle relevance cannot be
+        // determined blocks resolution instead of yielding an older document.
+        return {
+          didDocument: null,
+          inscriptions: inscriptionDataList,
+          resolutionMetadata: {
+            error: 'unresolvable',
+            message: `Cannot determine the current state of ${did}: inscription ` +
+              `${data.inscriptionId} (newer than the latest readable DID document) could not be ` +
+              `read (${data.error}). Refusing to fall back to an older document, which could be ` +
+              'stale (deactivated DID or rotated key).',
+            inscriptionId: data.inscriptionId,
+            satNumber,
+            network,
+            totalInscriptions: inscriptionDataList.length
+          },
+          didDocumentMetadata: {}
+        };
       }
     }
 
