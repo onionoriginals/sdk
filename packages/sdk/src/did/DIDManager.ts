@@ -20,7 +20,6 @@ import { Ed25519Signer } from '../crypto/Signer.js';
 import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
-import type { VerificationMethod } from '../types/did.js';
 
 /** A carried-over verification method annotated with the single relationship
  * (purpose) it should assume in the migrated did:webvh document. */
@@ -74,7 +73,7 @@ function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerifica
         const vm = (didDoc.verificationMethod || []).find((v) => v.id === entry);
         if (vm) add(vm.publicKeyMultibase, rel);
       } else if (entry && typeof entry === 'object') {
-        add((entry as VerificationMethod).publicKeyMultibase, rel);
+        add(entry.publicKeyMultibase, rel);
       }
     }
   }

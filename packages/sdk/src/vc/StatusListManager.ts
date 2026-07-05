@@ -203,12 +203,13 @@ export class StatusListManager {
     // the stale proof intact would let a publisher host an unverifiable list
     // (every credential in it then fails a proof-checking verifier). Forcing a
     // re-sign is the only safe contract.
-    const { proof: _oldProof, ...unsigned } = statusListCredential as VerifiableCredential & { proof?: unknown };
-    return {
-      ...unsigned,
+    const result = {
+      ...statusListCredential,
       credentialSubject: newSubject,
       issuanceDate: new Date().toISOString(),
-    };
+    } as VerifiableCredential & { proof?: unknown };
+    delete result.proof;
+    return result;
   }
 
   /**
@@ -298,12 +299,13 @@ export class StatusListManager {
 
     // Strip any existing proof — see setStatus: the mutated bitstring
     // invalidates the prior signature, so the caller must re-sign.
-    const { proof: _oldProof, ...unsigned } = statusListCredential as VerifiableCredential & { proof?: unknown };
-    return {
-      ...unsigned,
+    const result = {
+      ...statusListCredential,
       credentialSubject: newSubject,
       issuanceDate: new Date().toISOString(),
-    };
+    } as VerifiableCredential & { proof?: unknown };
+    delete result.proof;
+    return result;
   }
 
   /**

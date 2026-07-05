@@ -70,6 +70,25 @@ describe('OriginalsSDK', () => {
     expect((explicit as any).config.network).toBe('signet');
   });
 
+  test('create() derives the webvhNetwork tier from an explicit network (#294)', () => {
+    // Regression: create({ network: 'regtest' }) with no tier used to leave
+    // webvhNetwork defaulting to 'pichu' (the PRODUCTION domain) while doing
+    // regtest Bitcoin. The tier must be derived from the network instead.
+    const reg = OriginalsSDK.create({ network: 'regtest' });
+    expect((reg as any).config.webvhNetwork).toBe('magby');
+    expect((reg as any).config.network).toBe('regtest');
+
+    const sig = OriginalsSDK.create({ network: 'signet' });
+    expect((sig as any).config.webvhNetwork).toBe('cleffa');
+
+    const main = OriginalsSDK.create({ network: 'mainnet' });
+    expect((main as any).config.webvhNetwork).toBe('pichu');
+
+    // An explicit webvhNetwork still wins over the reverse derivation.
+    const explicitTier = OriginalsSDK.create({ network: 'regtest', webvhNetwork: 'pichu' });
+    expect((explicitTier as any).config.webvhNetwork).toBe('pichu');
+  });
+
   test('constructor honors config.keyStore (issue #277)', () => {
     // Regression: OriginalsConfig declares keyStore, but the constructor only
     // forwarded its second parameter — config.keyStore was silently ignored
