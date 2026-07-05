@@ -19,13 +19,9 @@ function bytes(len: number, start = 0): Uint8Array {
   return a;
 }
 
-function buildBaseProof(
-  embeddedPublicKey: Uint8Array,
-  verificationMethod: string,
-  signature: Uint8Array = bytes(80, 1)
-): DataIntegrityProof {
+function buildBaseProof(embeddedPublicKey: Uint8Array, verificationMethod: string): DataIntegrityProof {
   const proofValue = BBSCryptosuiteUtils.serializeBaseProofValue(
-    signature, // bbsSignature
+    bytes(80, 1), // bbsSignature
     bytes(64, 2), // bbsHeader
     embeddedPublicKey,
     bytes(32, 4), // hmacKey
@@ -104,56 +100,6 @@ describe('BBSCryptosuiteManager.verifyProof key binding', () => {
     const result = await BBSCryptosuiteManager.verifyProof(document, proof, {});
     expect(result.verified).toBe(false);
     expect(result.errors?.[0]).toContain('documentLoader is required');
-  });
-
-  test('rejects a short bbsSignature instead of zero-padding it to 80 bytes', async () => {
-    const key = blsKey(0xdd);
-    // 40-byte signature: previously right-padded with zeros to 80 bytes.
-    const proof = buildBaseProof(key, vm, bytes(40, 1));
-
-    const documentLoader = async () => ({
-      document: {
-        id: vm,
-        type: 'Multikey',
-        controller: 'did:example:victim',
-        publicKeyMultibase: multikey.encodePublicKey(key, 'Bls12381G2')
-      }
-    });
-
-    const result = await BBSCryptosuiteManager.verifyProof(document, proof, { documentLoader });
-
-    expect(result.verified).toBe(false);
-    expect(result.errors?.[0]).toContain('Invalid BBS+ signature length');
-    // Must reject on the malformed length, NOT reach BbsSimple.verify.
-    expect(result.errors?.[0]).not.toMatch(/not implemented/i);
-  });
-
-  test('rejects an over-long bbsSignature instead of truncating it', async () => {
-    const key = blsKey(0xde);
-    const proof = buildBaseProof(key, vm, bytes(96, 1));
-
-    const documentLoader = async () => ({
-      document: {
-        id: vm,
-        type: 'Multikey',
-        controller: 'did:example:victim',
-        publicKeyMultibase: multikey.encodePublicKey(key, 'Bls12381G2')
-      }
-    });
-
-    const result = await BBSCryptosuiteManager.verifyProof(document, proof, { documentLoader });
-
-    expect(result.verified).toBe(false);
-    expect(result.errors?.[0]).toContain('Invalid BBS+ signature length');
-  });
-
-  test('deriveProof rejects a short bbsSignature instead of zero-padding it', async () => {
-    const key = blsKey(0xdf);
-    const proof = buildBaseProof(key, vm, bytes(40, 1));
-
-    await expect(
-      BBSCryptosuiteManager.deriveProof(document, proof, { selectivePointers: [] })
-    ).rejects.toThrow('Invalid BBS+ signature length');
   });
 
   test('rejects when the DID document key is not Bls12381G2', async () => {

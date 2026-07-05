@@ -3,31 +3,17 @@ export type BbsKeyPair = {
   privateKey: Uint8Array;
 };
 
-/**
- * EXPERIMENTAL — NOT A SHIPPING FEATURE.
- *
- * BBS+ selective disclosure is not implemented in this release. Every
- * primitive on this class throws so that any caller fails loudly rather than
- * silently producing fake selective-disclosure proofs. The class exists only
- * so the BBS+ cryptosuite (bbsCryptosuite.ts) type-checks.
- *
- * Do NOT wire these methods into production flows. Implementing real BBS+
- * (per draft-irtf-cfrg-bbs-signatures / W3C Data Integrity BBS Cryptosuites
- * v1.0) is a separate effort with its own test plan; see also the SECURITY
- * TODOs in bbsCryptosuite.ts that must be resolved before these stubs are
- * replaced with real implementations.
- */
 export class BbsSimple {
   static readonly CIPHERSUITE = 'BLS12-381-SHA-256';
 
   // eslint-disable-next-line @typescript-eslint/require-await
   static async sign(_messages: Uint8Array[], _keypair: BbsKeyPair, _header?: Uint8Array): Promise<Uint8Array> {
-    throw new Error('BbsSimple.sign is not implemented (BBS+ selective disclosure is EXPERIMENTAL; see vc/cryptosuites/bbsSimple.ts)');
+    throw new Error('BbsSimple.sign is not implemented');
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
   static async verify(_messages: Uint8Array[], _signature: Uint8Array, _publicKey: Uint8Array, _header?: Uint8Array): Promise<boolean> {
-    throw new Error('BbsSimple.verify is not implemented (BBS+ selective disclosure is EXPERIMENTAL; see vc/cryptosuites/bbsSimple.ts)');
+    throw new Error('BbsSimple.verify is not implemented');
   }
 
   // The methods below are unimplemented stubs. They exist so the BBS+
@@ -35,7 +21,7 @@ export class BbsSimple {
   // producing fake selective-disclosure proofs. Implementing real BBS+ is a
   // separate effort with its own test plan.
   static generateKeyPair(): BbsKeyPair {
-    throw new Error('BbsSimple.generateKeyPair is not implemented (BBS+ selective disclosure is EXPERIMENTAL; see vc/cryptosuites/bbsSimple.ts)');
+    throw new Error('BbsSimple.generateKeyPair is not implemented');
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -47,7 +33,7 @@ export class BbsSimple {
     messages: Uint8Array[];
     disclosedIndexes: number[];
   }): Promise<Uint8Array> {
-    throw new Error('BbsSimple.createProof is not implemented (BBS+ selective disclosure is EXPERIMENTAL; see vc/cryptosuites/bbsSimple.ts)');
+    throw new Error('BbsSimple.createProof is not implemented');
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -60,6 +46,7 @@ export class BbsSimple {
     disclosedIndexes: number[];
     totalMessageCount: number;
   }): Promise<boolean> {
-    throw new Error('BbsSimple.verifyProof is not implemented (BBS+ selective disclosure is EXPERIMENTAL; see vc/cryptosuites/bbsSimple.ts)');
+    throw new Error('BbsSimple.verifyProof is not implemented');
   }
 }
+
