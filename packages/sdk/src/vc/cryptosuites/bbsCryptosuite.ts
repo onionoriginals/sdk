@@ -1,9 +1,15 @@
 /**
  * BBS+ Cryptosuite Manager (bbs-2023)
  *
- * Implements the Data Integrity BBS cryptosuite for creating and verifying
- * BBS+ proofs with selective disclosure support. Follows the W3C Data
- * Integrity BBS Cryptosuites v1.0 specification.
+ * EXPERIMENTAL — NOT A SHIPPING FEATURE.
+ *
+ * Scaffolding for the Data Integrity BBS cryptosuite (selective disclosure)
+ * following the W3C Data Integrity BBS Cryptosuites v1.0 specification. The
+ * underlying BBS+ primitives (BbsSimple) are unimplemented and THROW on every
+ * call, so no BBS+ proof can currently be created, derived, or verified —
+ * every code path here fails loudly. Do not present bbs-2023 as a supported
+ * cryptosuite to SDK consumers until BbsSimple is implemented and the
+ * SECURITY TODOs in this file are resolved.
  */
 import { BbsSimple, type BbsKeyPair } from './bbsSimple.js';
 import { BBSCryptosuiteUtils } from './bbs.js';
@@ -71,6 +77,12 @@ function credentialToMessages(credential: Record<string, unknown>, mandatoryPoin
 
   return { messages, fieldPaths, mandatoryIndexes, selectiveIndexes };
 }
+
+/**
+ * Exact length of a BLS12-381-SHA-256 BBS signature: a 48-byte compressed G1
+ * point (A) followed by a 32-byte scalar (e).
+ */
+const BBS_SIGNATURE_LENGTH = 80;
 
 /** Constant-time-ish byte comparison for public key matching. */
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -142,6 +154,14 @@ export class BBSCryptosuiteManager {
     const signature = await BbsSimple.sign(messages, keypair, headerData);
 
     // Serialize the base proof value using BBSCryptosuiteUtils
+    //
+    // SECURITY TODO (must fix before enabling BBS+): this "hmacKey" is
+    // derived from the canonicalized document hash — a DETERMINISTIC, PUBLIC
+    // value, not a secret. Per the bbs-2023 spec the HMAC key must be a
+    // fresh cryptographically random secret used to shuffle blank-node
+    // labels; a public/predictable key defeats the unlinkability that BBS+
+    // selective disclosure is supposed to provide. Inert today only because
+    // BbsSimple.sign above always throws before this line is reached.
     const hmacKey = headerData.slice(0, 32);
     const proofValue = BBSCryptosuiteUtils.serializeBaseProofValue(
       signature,
@@ -206,10 +226,21 @@ export class BBSCryptosuiteManager {
         return { verified: false, errors: ['Proof public key does not match verification method'] };
       }
 
+      // A BLS12-381-SHA-256 BBS signature is exactly 80 bytes (A: 48-byte G1
+      // point || e: 32-byte scalar). Anything else is malformed and must be
+      // REJECTED — never zero-padded or truncated into a "plausible" 80-byte
+      // value, which would hand attacker-controlled bytes to the verifier.
+      if (parsed.bbsSignature.length !== BBS_SIGNATURE_LENGTH) {
+        return {
+          verified: false,
+          errors: [`Invalid BBS+ signature length: expected ${BBS_SIGNATURE_LENGTH} bytes, got ${parsed.bbsSignature.length}`]
+        };
+      }
+
       // Verify the BBS+ signature against the DID-document public key.
       const valid = await BbsSimple.verify(
         messages,
-        new Uint8Array([...parsed.bbsSignature, ...new Uint8Array(80 - parsed.bbsSignature.length)]).slice(0, 80),
+        parsed.bbsSignature,
         dec.key,
         parsed.bbsHeader
       );
@@ -261,10 +292,14 @@ export class BBSCryptosuiteManager {
       }
     }
 
-    // Reconstruct the signature bytes (A || e format)
-    const sigBytes = parsed.bbsSignature.length >= 80
-      ? parsed.bbsSignature.slice(0, 80)
-      : new Uint8Array([...parsed.bbsSignature, ...new Uint8Array(80 - parsed.bbsSignature.length)]);
+    // The base proof's signature bytes (A || e format) must be exactly 80
+    // bytes. Reject malformed lengths instead of padding/truncating — a
+    // zero-padded signature is attacker-influenceable garbage, not a
+    // recoverable input.
+    if (parsed.bbsSignature.length !== BBS_SIGNATURE_LENGTH) {
+      throw new Error(`Invalid BBS+ signature length: expected ${BBS_SIGNATURE_LENGTH} bytes, got ${parsed.bbsSignature.length}`);
+    }
+    const sigBytes = parsed.bbsSignature;
 
     // Generate the BBS+ selective disclosure proof
     const bbsProof = await BbsSimple.createProof({
