@@ -18,6 +18,7 @@ import type {
 } from './WebVHManager.js';
 import { Ed25519Signer } from '../crypto/Signer.js';
 import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
 
@@ -35,6 +36,15 @@ interface CarriedVerificationMethod {
 // order is the priority used when a key participates in more than one (a single
 // Multikey `purpose` can encode only one).
 const PRESERVABLE_RELATIONSHIPS = ['keyAgreement', 'capabilityDelegation', 'capabilityInvocation'] as const;
+
+/**
+ * Longest did:peer suffix carried verbatim into the did:webvh slug during
+ * migration. Longer suffixes (every numalgo-4 long-form did:peer) are replaced
+ * by a 32-hex-char SHA-256 prefix of the suffix so the slug — which becomes a
+ * filesystem directory name when the DID log is saved, and a URL path segment
+ * when it is hosted — always fits within the 255-byte filename limit.
+ */
+const MAX_HUMAN_READABLE_SLUG_LENGTH = 64;
 
 /**
  * Collect the source did:peer document's verification methods to carry into the
@@ -218,15 +228,25 @@ export class DIDManager {
       }
     }
 
-    // Stable slug derived from original peer DID suffix (or last segment)
+    // Stable slug derived from original peer DID suffix (or last segment).
+    // The slug becomes both a did:webvh path segment and a directory name in
+    // saveDIDLog, so it must stay well under the 255-byte filename limit. A
+    // did:peer numalgo-4 suffix is hash + full encoded document (~384 chars
+    // for a one-key DID), so using it verbatim made saveDIDLog throw
+    // ENAMETOOLONG and left the migrated DID unhostable. Short suffixes keep
+    // the human-readable form; anything longer collapses to a short, stable
+    // hash of the suffix.
     const parts = (didDoc.id || '').split(':');
     const method = parts.slice(0, 2).join(':');
     const originalSuffix = method === 'did:peer' ? parts.slice(2).join(':') : parts[parts.length - 1];
-    const slug = (originalSuffix || '')
+    const rawSlug = (originalSuffix || '')
       .toString()
       .trim()
       .replace(/[^a-zA-Z0-9._-]/g, '-')
       .toLowerCase();
+    const slug = rawSlug.length <= MAX_HUMAN_READABLE_SLUG_LENGTH
+      ? rawSlug
+      : Buffer.from(sha256(new TextEncoder().encode(originalSuffix))).toString('hex').slice(0, 32);
 
     // Carry the peer document's multikey verification methods over as
     // verification-only keys (they do not become updateKeys — log updates are
