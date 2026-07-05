@@ -573,9 +573,11 @@ export class MultiSigManager {
     verificationMethod: string
   ): Promise<Proof> {
     // Multi-sig proofs are standard Data Integrity (eddsa-rdfc-2022) proofs
-    // over the proof-less credential — a parallel proof set. There is no
-    // legacy digest format: every proof this SDK emits is spec-conformant
-    // and verifiable by DataIntegrityProofManager.
+    // over the proof-less credential — a parallel proof set. SDK releases
+    // before the #239 rework emitted a nonstandard digest-based proof format;
+    // those proofs are intentionally NOT supported and fail verification
+    // (credentials must be re-signed). Everything emitted since is
+    // spec-conformant and verifiable by DataIntegrityProofManager.
     if (!this.didManager) {
       throw new Error(
         'MultiSigManager requires a DIDManager to create Data Integrity proofs; pass one to the constructor'
@@ -622,10 +624,12 @@ export class MultiSigManager {
 
   /**
    * Verify one multi-sig proof. Every proof must be a Data Integrity
-   * `eddsa-rdfc-2022` proof (the only format this SDK emits — there is no
-   * legacy proof format); anything else fails closed. The verification
-   * method is resolved through the document loader (did:key offline, other
-   * DID methods via the DIDManager — issue #239).
+   * `eddsa-rdfc-2022` proof (the only format this SDK emits since the #239
+   * rework); anything else fails closed — including the nonstandard
+   * digest-based proofs emitted by earlier releases, which are intentionally
+   * unsupported and require re-signing. The verification method is resolved
+   * through the document loader (did:key offline, other DID methods via the
+   * DIDManager — issue #239).
    */
   private async verifyProof(
     credential: VerifiableCredential,

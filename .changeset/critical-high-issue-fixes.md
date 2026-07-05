@@ -14,10 +14,12 @@ Fix all open critical- and high-severity issues (#236–#256). Several are break
 
 **BREAKING — OrdinalsClient fails loudly (#248):** `broadcastTransaction`/`getTransactionStatus`/`estimateFee` throw `NOT_IMPLEMENTED` structured errors instead of fabricating success values.
 
+**BREAKING — multi-sig proofs are Ed25519 Data Integrity only (#239):** multi-sig signing emits standard `eddsa-rdfc-2022` Data Integrity proofs and verification is DI-only in both `MultiSigManager.verifyMultiSig` and `Verifier.verifyCredentialMultiSig`. Two compatibility consequences: (1) **multi-sig signer keys must be Ed25519** — ES256K/ES256 keys are rejected until an ECDSA cryptosuite lands (tracked in #306); (2) **credentials multi-signed by earlier SDK releases no longer verify** — the nonstandard digest-based legacy proof format is intentionally unsupported and such credentials must be re-signed. Note that `did:btco`-inscribed provenance is immutable: anything anchored on-chain with legacy multi-sig proofs cannot be re-signed in place and should be re-issued/re-anchored where verification matters.
+
 Security and correctness fixes:
 
 - #238: status list credentials are validated (id binding, own proof, issuer match) before their bits decide revocation — closes a revocation bypass.
-- #239: multi-sig signing now emits standard Data Integrity (`eddsa-rdfc-2022`) proofs and verification is DI-only in both `MultiSigManager.verifyMultiSig` and `Verifier.verifyCredentialMultiSig` — the legacy digest proof format is gone entirely (Ed25519 signer keys required); non-did:key signers resolve via DIDManager, and `did:key` verification methods resolve offline through the document loader.
+- #239: (see BREAKING above) non-did:key signers resolve via DIDManager, and `did:key` verification methods resolve offline through the document loader.
 - #240: CEL witness proofs are verified against the digest the witness actually signed; honest witness attestations now report `verified: true`.
 - #247: explicit `config.network` takes precedence over the webvhNetwork mapping for did:btco identifiers; lifecycle bindings are network-prefixed.
 - #249: `selectUtxosSimple` and `PSBTBuilder` exclude inscription-bearing/resource/locked UTXOs by default (opt-in `allowOrdinalUtxos`).

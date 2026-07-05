@@ -413,9 +413,10 @@ export class Verifier {
         }
 
         try {
-          // Every proof this SDK emits is a Data Integrity eddsa-rdfc-2022
-          // proof; there is no legacy proof format. Anything else fails
-          // closed inside DataIntegrityProofManager.
+          // Every proof this SDK emits since the #239 rework is a Data
+          // Integrity eddsa-rdfc-2022 proof. The pre-rework digest-based
+          // legacy format is intentionally unsupported — such proofs (and
+          // anything else) fail closed inside DataIntegrityProofManager.
           const proofResult = await DataIntegrityProofManager.verifyProof(
             vc,
             proof as unknown as DataIntegrityProof,
