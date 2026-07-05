@@ -429,6 +429,12 @@ export class BatchValidator {
    * Validate batch of transfer operations
    */
   validateBatchTransfer(transfers: Array<{ asset: OriginalsAsset; to: string }>): ValidationResult[] {
+    // Detect duplicates across the whole batch (same rationale as
+    // validateBatchInscription, issue #243): each per-item check runs against
+    // pre-batch state, so the same asset listed twice would pass both checks
+    // independently and then be transferred twice — broadcasting two paid
+    // transactions where the second races the first's UTXO state.
+    const seenIds = new Map<string, number>();
     return transfers.map((transfer, index) => {
       const errors: string[] = [];
 
@@ -440,6 +446,14 @@ export class BatchValidator {
       if (!transfer.asset || typeof transfer.asset !== 'object') {
         errors.push(`Item ${index}: Invalid asset`);
       } else {
+        const assetId = transfer.asset.id;
+        if (assetId && typeof assetId === 'string') {
+          if (seenIds.has(assetId)) {
+            errors.push(`Item ${index}: Duplicate asset in batch (same id as item ${seenIds.get(assetId)}): ${assetId}`);
+          } else {
+            seenIds.set(assetId, index);
+          }
+        }
         const currentLayer = transfer.asset.currentLayer;
         if (currentLayer !== 'did:btco') {
           errors.push(`Item ${index}: Asset must be inscribed on Bitcoin before transfer`);

@@ -126,10 +126,11 @@ export class LifecycleManager {
   private logger: Logger;
   private metrics: MetricsCollector;
   /**
-   * Assets with an inscription or publication currently in flight, keyed by
-   * asset id. Mutated synchronously before the first await so concurrent
-   * calls for the same asset cannot both pass the layer guard and double-pay
-   * for two inscriptions (issue #255).
+   * Assets with an inscription, publication, or ownership transfer currently
+   * in flight, keyed by asset id. Mutated synchronously before the first
+   * await so concurrent calls for the same asset cannot both pass the layer
+   * guard and double-pay for two inscriptions or broadcast duplicate
+   * transfers (issue #255).
    */
   private inFlightAssets = new Set<string>();
 
@@ -1118,6 +1119,19 @@ export class LifecycleManager {
     if (asset.currentLayer !== 'did:btco') {
       throw new StructuredError('INVALID_STATE', 'Asset must be inscribed on Bitcoin before transfer. Migrate to did:btco first.');
     }
+    // Concurrency guard (issue #255, same pattern as publishToWeb/
+    // inscribeOnBitcoin): the checks above are check-then-act across the
+    // awaits below — two overlapping transfers of the same asset would both
+    // pass them and both broadcast paid transactions. Claim the asset
+    // synchronously before the first await.
+    if (this.inFlightAssets.has(asset.id)) {
+      throw new StructuredError(
+        'OPERATION_IN_PROGRESS',
+        `An operation for asset ${asset.id} is already in progress; concurrent transfers of the same asset would broadcast duplicate paid transactions.`
+      );
+    }
+    this.inFlightAssets.add(asset.id);
+    try {
     const bm = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const provenance = asset.getProvenance();
     const latestMigration = provenance.migrations[provenance.migrations.length - 1];
@@ -1188,6 +1202,9 @@ export class LifecycleManager {
     this.metrics.recordTransfer();
 
     return tx;
+    } finally {
+      this.inFlightAssets.delete(asset.id);
+    }
     } catch (error) {
       stopTimer();
       this.logger.error('Ownership transfer failed', error as Error, { assetId: asset.id, newOwner });
