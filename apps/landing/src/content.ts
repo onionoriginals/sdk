@@ -87,7 +87,7 @@ export const demo = {
   eyebrow: 'Live demo',
   headline: 'Watch an original come to life.',
   subhead:
-    'This is the real @originals/sdk running in your browser — real keys, real DIDs, real signatures, real events. Bitcoin steps use the SDK’s built-in mock Ordinals provider, so there’s nothing to install and no wallet to connect.',
+    'Name a piece and your browser generates a one-of-a-kind artwork — a real SVG file. The real @originals/sdk then hashes its actual bytes, mints its identity, signs its credentials, and inscribes it. Bitcoin steps use the SDK’s built-in mock Ordinals provider, so there’s nothing to install and no wallet to connect.',
   consoleHint:
     'Skeptical? Open your devtools console — every SDK event is logged live.',
   form: {
@@ -95,7 +95,9 @@ export const demo = {
     titlePlaceholder: 'e.g. Genesis Artwork #001',
     defaultTitle: 'Genesis Artwork #001',
     mediumLabel: 'Medium',
-    mediums: ['Artwork', 'Music', 'Writing', 'Photograph', 'Dataset']
+    mediums: ['Artwork', 'Music', 'Writing', 'Photograph', 'Dataset'],
+    regenerate: 'Regenerate',
+    artHint: 'Generated in your browser from the title — its exact bytes are what gets hashed and inscribed.'
   },
   steps: [
     {
@@ -105,7 +107,7 @@ export const demo = {
       title: 'Create',
       layer: 'did:peer',
       description:
-        'Hashes your content and mints a did:peer identity — entirely in this tab, no server involved.'
+        'Hashes the artwork’s bytes and mints a did:peer identity — entirely in this tab, no server involved.'
     },
     {
       id: 'publish',

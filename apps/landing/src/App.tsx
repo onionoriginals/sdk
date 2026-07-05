@@ -34,11 +34,15 @@ function SmokeTest() {
   const [out, setOut] = useState('booting');
   useEffect(() => {
     (async () => {
-      const { DemoEngine } = await import('./sdk/engine');
+      const [{ DemoEngine }, { generateArtwork }] = await Promise.all([
+        import('./sdk/engine'),
+        import('./sdk/artwork')
+      ]);
       const engine = new DemoEngine();
       const events: string[] = [];
       engine.on((e) => events.push(e.type));
-      const s1 = await engine.create('Smoke Test', 'test');
+      const art = generateArtwork('Smoke Test', 'Artwork', 1);
+      const s1 = await engine.create('Smoke Test', 'Artwork', art.svg);
       const s2 = await engine.publish();
       const s3 = await engine.inscribe(7);
       setOut(

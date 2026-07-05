@@ -3,7 +3,33 @@
 Status board for the landing page at `apps/landing/`. Updated every
 build→grade cycle. Craft bar and grading protocol: see `GRADING.md`.
 
-## Current status — DONE: cycle-4 grader found no done-bar failure
+## Current status — cycle 5: demo redesigned around a real, visible asset
+
+Direct user steering: “I want to see a real asset, not just a bunch of
+JSON.” The demo now creates one:
+- `src/sdk/artwork.ts` — deterministic generative SVG art (seeded PRNG from
+  title + medium + a regenerate nonce; three visual programs: orbital
+  constellations, radial waveform for Music, dot-matrix for Dataset; all in
+  the site palette). The artwork preview updates live as you type and can
+  be regenerated while idle.
+- The SVG file's **actual bytes** are now the asset's primary resource
+  (`artwork.svg`, image/svg+xml): the SDK hashes those bytes, publishes
+  them, and the inscription manifest references them — provenance bound to
+  a thing you can see. A `metadata.json` resource rides along (both emit
+  `resource:published` events).
+- The asset card shows the artwork with its current layer badge (draft →
+  did:peer → did:webvh → did:btco); the Resource tab shows the rendered
+  artwork, file/sha-256/credentials, and the raw SVG + metadata bytes.
+- JSON is still available (Provenance/Resource tabs + console) but no
+  longer the face of the demo.
+- Verified: full lifecycle in Chromium, two resources published, zero
+  console errors at 375/1440; mobile input-overflow bug found in
+  screenshots and fixed (fields now fill their grid column); throttled
+  interactive 1.4s. Root `bun run landing` convenience script added
+  (build packages → build landing → preview) after the earlier
+  404-from-missing-dist confusion.
+
+## Cycle 4 — grader found no done-bar failure
 
 Final fresh-context adversarial grader (cycle 4) verdict: **NO DONE-BAR
 FAILURE FOUND.** All five tests passed with evidence:
@@ -181,3 +207,4 @@ all fixed and re-verified in-browser. Cycle 2 grading next.
 | 2 | 2026-07-05 | regressions hold, edge cases pass; FAIL on blind side-by-side + comment contrast + logo hover | code clipping, zero state, copy-button unification, footer bottom row, all contrast — fixed & re-verified |
 | 3 | 2026-07-05 | grader killed by API limit after re-confirming demo authenticity; checklist finished inline | anchor links no longer bury headings under sticky nav; explicit badge colors |
 | 4 | 2026-07-05 | **NO DONE-BAR FAILURE FOUND** (all five tests pass, incl. direct-SDK kill-shot verification) | nitpick polish: selected-tab hover, note width; caret idiom documented |
+| 5 | 2026-07-05 | user steering: “show a real asset, not JSON” | demo now generates a real SVG artwork whose bytes are hashed/published/inscribed; asset card + layer badge; mobile field overflow fixed |

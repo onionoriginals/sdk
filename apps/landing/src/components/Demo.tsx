@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine, DemoEvent } from '../sdk/engine';
+import { generateArtwork } from '../sdk/artwork';
 import { Pipeline } from './Pipeline';
 import { Reveal } from './Reveal';
 import './demo.css';
@@ -63,6 +64,13 @@ export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [medium, setMedium] = useState(demo.form.mediums[0]);
+  const [nonce, setNonce] = useState(1);
+  // The artwork is the asset: regenerated live from title/medium/nonce while
+  // idle, frozen the moment it's created (its bytes are hashed by the SDK).
+  const artwork = useMemo(
+    () => generateArtwork(title.trim() || demo.form.defaultTitle, medium, nonce),
+    [title, medium, nonce]
+  );
   const [events, setEvents] = useState<DemoEvent[]>([]);
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +131,7 @@ export function Demo() {
 
   const create = () =>
     run('idle', 'creating', 'created', (engine) =>
-      engine.create(title.trim() || demo.form.defaultTitle, medium)
+      engine.create(title.trim() || demo.form.defaultTitle, medium, artwork.svg)
     );
   const publish = () =>
     run('created', 'publishing', 'published', (engine) => engine.publish());
@@ -177,30 +185,53 @@ export function Demo() {
 
             <div className="demo-body">
               <div className="demo-controls">
-                <div className="demo-form" data-disabled={phase !== 'idle' || undefined}>
-                  <label className="demo-field">
-                    <span>{demo.form.titleLabel}</span>
-                    <input
-                      type="text"
-                      value={title}
-                      maxLength={80}
-                      placeholder={demo.form.titlePlaceholder}
-                      disabled={phase !== 'idle'}
-                      onChange={(e) => setTitle(e.target.value)}
-                    />
-                  </label>
-                  <label className="demo-field">
-                    <span>{demo.form.mediumLabel}</span>
-                    <select
-                      value={medium}
-                      disabled={phase !== 'idle'}
-                      onChange={(e) => setMedium(e.target.value)}
-                    >
-                      {demo.form.mediums.map((m) => (
-                        <option key={m}>{m}</option>
-                      ))}
-                    </select>
-                  </label>
+                <div className="demo-asset" data-layer={asset?.layer ?? 'draft'}>
+                  <div className="demo-art">
+                    <img src={artwork.dataUri} alt={`Generated artwork for “${title || demo.form.defaultTitle}”`} />
+                    {phase === 'idle' && (
+                      <button
+                        type="button"
+                        className="demo-art-refresh"
+                        onClick={() => setNonce((n) => n + 1)}
+                      >
+                        <svg viewBox="0 0 16 16" aria-hidden="true">
+                          <path d="M13.3 6.6A5.6 5.6 0 0 0 3.1 5.2M2.7 9.4a5.6 5.6 0 0 0 10.2 1.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                          <path d="M3 2.4v2.9h2.9M13 13.6v-2.9h-2.9" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        {demo.form.regenerate}
+                      </button>
+                    )}
+                    <span className="demo-art-badge layer-pill" data-layer={asset?.layer ?? undefined}>
+                      <span className="dot" />
+                      {asset?.layer ?? 'draft'}
+                    </span>
+                  </div>
+                  <div className="demo-form" data-disabled={phase !== 'idle' || undefined}>
+                    <label className="demo-field">
+                      <span>{demo.form.titleLabel}</span>
+                      <input
+                        type="text"
+                        value={title}
+                        maxLength={80}
+                        placeholder={demo.form.titlePlaceholder}
+                        disabled={phase !== 'idle'}
+                        onChange={(e) => setTitle(e.target.value)}
+                      />
+                    </label>
+                    <label className="demo-field">
+                      <span>{demo.form.mediumLabel}</span>
+                      <select
+                        value={medium}
+                        disabled={phase !== 'idle'}
+                        onChange={(e) => setMedium(e.target.value)}
+                      >
+                        {demo.form.mediums.map((m) => (
+                          <option key={m}>{m}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <p className="demo-art-hint">{demo.form.artHint}</p>
+                  </div>
                 </div>
 
                 <ol className="demo-steps">
@@ -367,28 +398,36 @@ export function Demo() {
                   <div className="demo-json">
                     {asset ? (
                       <>
-                        <dl className="demo-kv">
-                          <div>
-                            <dt>sha-256</dt>
-                            <dd>
-                              <code>{asset.resource.hash}</code>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>content-type</dt>
-                            <dd>
-                              <code>{asset.resource.contentType}</code>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>credentials</dt>
-                            <dd>
-                              <code>{asset.credentials} signed</code>
-                            </dd>
-                          </div>
-                        </dl>
+                        <div className="demo-resource-head">
+                          <img
+                            className="demo-resource-thumb"
+                            src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(asset.resource.content)}`}
+                            alt="The asset's artwork resource"
+                          />
+                          <dl className="demo-kv">
+                            <div>
+                              <dt>file</dt>
+                              <dd>
+                                <code>{asset.resource.id} · {asset.resource.contentType}</code>
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>sha-256</dt>
+                              <dd>
+                                <code>{asset.resource.hash}</code>
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>credentials</dt>
+                              <dd>
+                                <code>{asset.credentials} signed</code>
+                              </dd>
+                            </div>
+                          </dl>
+                        </div>
                         <pre>
-                          <code>{asset.resource.content}</code>
+                          <code>{asset.metadata?.content}
+{'\n'}{asset.resource.content}</code>
                         </pre>
                       </>
                     ) : (

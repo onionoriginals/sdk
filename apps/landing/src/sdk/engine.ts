@@ -44,6 +44,11 @@ export interface DemoAssetState {
     contentType: string;
     content: string;
   };
+  metadata?: {
+    id: string;
+    hash: string;
+    content: string;
+  };
   credentials: number;
   inscription?: {
     txid: string;
@@ -142,29 +147,44 @@ export class DemoEngine {
     for (const l of this.listeners) l(event);
   }
 
-  /** Step 1 — create a did:peer asset from user-supplied content. */
-  async create(title: string, medium: string): Promise<DemoAssetState> {
-    const content = JSON.stringify(
+  /**
+   * Step 1 — create a did:peer asset. The primary resource is the artwork
+   * itself: a real SVG file whose exact bytes are hashed and carried through
+   * the whole lifecycle. A small JSON metadata resource rides along.
+   */
+  async create(title: string, medium: string, artworkSvg: string): Promise<DemoAssetState> {
+    const svgBytes = new TextEncoder().encode(artworkSvg);
+    const svgHash = toHex(sha256(svgBytes));
+
+    const metadata = JSON.stringify(
       {
         title,
         medium,
         creator: 'you',
-        created: new Date().toISOString()
+        created: new Date().toISOString(),
+        artwork: { file: 'artwork.svg', sha256: svgHash }
       },
       null,
       2
     );
-    const bytes = new TextEncoder().encode(content);
-    const hash = toHex(sha256(bytes));
+    const metaBytes = new TextEncoder().encode(metadata);
 
     const asset = await this.sdk.lifecycle.createAsset([
       {
-        id: 'artifact.json',
+        id: 'artwork.svg',
+        type: 'image',
+        content: artworkSvg,
+        contentType: 'image/svg+xml',
+        hash: svgHash,
+        size: svgBytes.length
+      },
+      {
+        id: 'metadata.json',
         type: 'data',
-        content,
+        content: metadata,
         contentType: 'application/json',
-        hash,
-        size: bytes.length
+        hash: toHex(sha256(metaBytes)),
+        size: metaBytes.length
       }
     ]);
     this.asset = asset;
@@ -251,6 +271,7 @@ export class DemoEngine {
     const last = provenance.migrations[provenance.migrations.length - 1];
     const bindings = (asset.bindings ?? {}) as Record<string, string>;
     const res = asset.resources[0];
+    const meta = asset.resources[1] as { id: string; hash: string; content?: string } | undefined;
     return {
       layer: asset.currentLayer as LayerId,
       did: asset.id,
@@ -262,6 +283,9 @@ export class DemoEngine {
         contentType: res.contentType,
         content: (res as { content?: string }).content ?? ''
       },
+      metadata: meta
+        ? { id: meta.id, hash: meta.hash, content: meta.content ?? '' }
+        : undefined,
       credentials: asset.credentials.length,
       inscription:
         last && last.to === 'did:btco' && last.transactionId
