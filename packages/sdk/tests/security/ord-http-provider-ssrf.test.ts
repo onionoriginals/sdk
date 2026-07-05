@@ -21,6 +21,7 @@ function jsonResponse(body: unknown) {
     ok: true,
     status: 200,
     headers: { get: (h: string) => (h.toLowerCase() === 'content-length' ? String(text.length) : null) },
+    async json() { return body; },
     async arrayBuffer() { return new TextEncoder().encode(text).buffer; },
     async text() { return text; }
   };

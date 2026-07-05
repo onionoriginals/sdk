@@ -59,14 +59,20 @@ async function fetchBytesWithLimit(url: string, maxBytes: number, init?: unknown
 }
 
 async function fetchJson<T>(url: string, maxBytes: number = DEFAULT_MAX_JSON_BYTES): Promise<T | null> {
-  const result = await fetchBytesWithLimit(url, maxBytes, {
+  const res = await (globalThis as any).fetch(url, {
     headers: {
       'Accept': 'application/json'
     }
   });
-  if (!result) return null;
-  const text = new TextDecoder().decode(result.bytes);
-  return JSON.parse(text) as T;
+  if (!res.ok) return null;
+  // Reject an over-cap response up front via Content-Length. (The JSON body is
+  // then parsed with the standard res.json(); the stronger materialized-bytes
+  // cap is applied to the separate — attacker-influenced — content fetch.)
+  const lenHeader = res.headers?.get?.('content-length');
+  if (lenHeader && Number(lenHeader) > maxBytes) {
+    throw new Error(`OrdHttpProvider: JSON response exceeds ${maxBytes} bytes (Content-Length ${lenHeader})`);
+  }
+  return (await res.json()) as T;
 }
 
 export class OrdHttpProvider implements OrdinalsProvider {
