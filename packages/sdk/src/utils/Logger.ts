@@ -10,6 +10,8 @@
  * - Async-safe operations
  */
 
+import { appendFile } from 'node:fs/promises';
+
 import type { OriginalsConfig } from '../types/index.js';
 
 /**
@@ -101,18 +103,10 @@ export class FileLogOutput implements LogOutput {
     this.flushTimeout = null;
     
     try {
-      // Use Bun's file API for efficient file writing
-      const file = Bun.file(this.filePath);
-      const exists = await file.exists();
-      
-      if (exists) {
-        // Append to existing file
-        const content = await file.text();
-        await Bun.write(this.filePath, content + lines);
-      } else {
-        // Create new file
-        await Bun.write(this.filePath, lines);
-      }
+      // Append via node:fs/promises so file logging works under both Node and Bun.
+      // appendFile creates the file if it does not exist and avoids the
+      // read-whole-file-then-rewrite pattern.
+      await appendFile(this.filePath, lines, 'utf8');
     } catch (err) {
       // Fallback to console on file write error
       console.error('Failed to write log file:', err);
