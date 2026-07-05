@@ -735,7 +735,12 @@ export class LifecycleManager {
       const hashBytes = hexToBytes(resource.hash);
       const multibase = encodeBase64UrlMultibase(hashBytes);
       const resourceUrl = `${publisherDid}/resources/${multibase}`;
-      const relativePath = `${userPath}/resources/${multibase}`;
+      // A canonical did:webvh with no user path (did:webvh:{SCID}:{domain})
+      // yields an empty userPath; omit it so the storage key is
+      // `${domain}/resources/...` rather than `${domain}//resources/...`.
+      const relativePath = userPath
+        ? `${userPath}/resources/${multibase}`
+        : `resources/${multibase}`;
 
       // Hash-only resources (content hosted elsewhere) cannot be published:
       // writing the hash string as the body would serve bytes that fail the
