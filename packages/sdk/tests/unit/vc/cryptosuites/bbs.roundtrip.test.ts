@@ -411,6 +411,23 @@ describe('BBS+ bbs-2023 selective disclosure round-trip', () => {
     );
     expect(replayed.verified).toBe(false);
     expect(replayed.errors?.[0]).toContain('presentation header mismatch');
+
+    // Same enforcement must apply through the verifyProof entry point, which
+    // routes derived proofs into the shared verifyDerivedCore.
+    const okViaVerifyProof = await BBSCryptosuiteManager.verifyProof(
+      revealed,
+      derivedProof,
+      { documentLoader, expectedPresentationHeader: nonce }
+    );
+    expect(okViaVerifyProof.verified).toBe(true);
+
+    const replayedViaVerifyProof = await BBSCryptosuiteManager.verifyProof(
+      revealed,
+      derivedProof,
+      { documentLoader, expectedPresentationHeader: new TextEncoder().encode('different-nonce') }
+    );
+    expect(replayedViaVerifyProof.verified).toBe(false);
+    expect(replayedViaVerifyProof.errors?.[0]).toContain('presentation header mismatch');
   });
 
   // domain may be a string OR an array of strings per VC Data Integrity;
