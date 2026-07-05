@@ -691,9 +691,12 @@ asset.getProvenanceSummary(): { created, creator, currentLayer, migrationCount, 
 asset.queryProvenance(): ProvenanceQuery  // Fluent API for queries
 
 // Resource versioning
+// newContent must be a string: AssetResource stores inline content as a string,
+// so Buffer input throws StructuredError('BINARY_CONTENT_UNSUPPORTED') rather
+// than silently dropping the bytes. Encode binary content (e.g. base64) first.
 asset.addResourceVersion(
   resourceId: string,
-  newContent: string | Buffer,
+  newContent: string,
   contentType: string,
   changes?: string
 ): AssetResource

@@ -38,15 +38,17 @@ export class AuditLogger implements IAuditLogger {
     const signature = await this.signAuditRecord(record);
     const signedRecord = { ...record, signature };
 
-    // Store by source DID
+    // Store an independent deep copy per DID key. Sharing one mutable object
+    // between the sourceDid and targetDid entries meant tampering via one
+    // DID's history silently altered the other's (issue #281).
     const existingRecords = this.auditRecords.get(record.sourceDid) || [];
-    existingRecords.push(signedRecord);
+    existingRecords.push(structuredClone(signedRecord));
     this.auditRecords.set(record.sourceDid, existingRecords);
 
     // Also store by target DID if available
     if (record.targetDid) {
       const targetRecords = this.auditRecords.get(record.targetDid) || [];
-      targetRecords.push(signedRecord);
+      targetRecords.push(structuredClone(signedRecord));
       this.auditRecords.set(record.targetDid, targetRecords);
     }
 
@@ -55,11 +57,16 @@ export class AuditLogger implements IAuditLogger {
   }
 
   /**
-   * Get migration history for a DID
+   * Get migration history for a DID.
+   *
+   * Returns deep copies: handing out the live internal array/objects let any
+   * caller pop records or rewrite finalState/targetDid in place, corrupting
+   * the "append-only" log for every future reader (issue #281).
    */
   // eslint-disable-next-line @typescript-eslint/require-await
   async getMigrationHistory(did: string): Promise<MigrationAuditRecord[]> {
-    return this.auditRecords.get(did) || [];
+    const records = this.auditRecords.get(did) || [];
+    return records.map(record => structuredClone(record));
   }
 
   /**
@@ -77,7 +84,8 @@ export class AuditLogger implements IAuditLogger {
         const dedupKey = record.signature || `${record.migrationId}-${record.timestamp}-${record.finalState}`;
         if (!seen.has(dedupKey)) {
           seen.add(dedupKey);
-          allRecords.push(record);
+          // Deep copy for the same reason as getMigrationHistory (issue #281).
+          allRecords.push(structuredClone(record));
         }
       }
     }

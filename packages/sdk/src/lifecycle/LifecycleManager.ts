@@ -27,7 +27,7 @@ import {
   type BatchInscriptionOptions,
 } from './BatchOperations.js';
 import { BatchLifecycleOperations } from './BatchLifecycleOperations.js';
-import { validateAndNormalizeDomain } from './domainUtils.js';
+import { validateAndNormalizeDomain, tryValidateDomain, safeDecodeURIComponent } from './domainUtils.js';
 import { 
   type OriginalKind, 
   type OriginalManifest, 
@@ -637,15 +637,62 @@ export class LifecycleManager {
   }
 
   private parseWebVHDid(did: string): { domain: string; userPath: string } {
+    if (!did.startsWith('did:webvh:')) {
+      throw new StructuredError('INVALID_DID', 'Invalid did:webvh format: must start with did:webvh:');
+    }
     const parts = did.split(':');
     if (parts.length < 4) {
       throw new StructuredError('INVALID_DID', 'Invalid did:webvh format: must include domain and user path');
     }
-    
-    const domain = decodeURIComponent(parts[2]);
-    const userPath = parts.slice(3).join('/');
-    
-    return { domain, userPath };
+
+    // Two shapes reach this method and the domain lives in a different
+    // position in each:
+    //   - canonical resolved/migrated DID: did:webvh:{SCID}:{domain}[:paths]
+    //     (the SCID at parts[2] is a dotless multibase string, never a domain)
+    //   - the domain shorthand built by extractPublisherInfo:
+    //     did:webvh:{domain}:user
+    // Disambiguate by asking whether parts[2] is itself a valid domain: a real
+    // domain has a dot or is `localhost`, so it validates; a SCID does not.
+    // This keeps the storage layout aligned with WebVHManager.saveDIDLog
+    // (domain-first, SCID excluded), which the old parts[2]-is-domain
+    // assumption broke.
+    let domainIndex: number;
+    let normalizedDomain: string;
+    const decodedSegment2 = safeDecodeURIComponent(parts[2]);
+    const domainFromSegment2 = tryValidateDomain(decodedSegment2);
+    if (domainFromSegment2 !== null) {
+      domainIndex = 2;
+      normalizedDomain = domainFromSegment2;
+    } else {
+      // parts[2] is a SCID; the domain is the next segment.
+      normalizedDomain = validateAndNormalizeDomain(safeDecodeURIComponent(parts[3]));
+      domainIndex = 3;
+    }
+
+    // Every path segment after the domain feeds directly into storage keys
+    // (`${domain}/${userPath}/...`), so validate each the same way
+    // WebVHManager.saveDIDLog does (issue #274). Without this, a DID like
+    // did:webvh:{SCID}:example.com:..:..:x — or a segment that percent-decodes
+    // to `..` — lets path-hierarchy-backed storage adapters write outside
+    // their root.
+    const segments = parts.slice(domainIndex + 1);
+    for (const rawSegment of segments) {
+      const segment = safeDecodeURIComponent(rawSegment);
+      if (
+        rawSegment === '' ||
+        segment === '' ||
+        segment === '.' ||
+        segment === '..' ||
+        segment.includes('/') ||
+        segment.includes('\\') ||
+        segment.includes('\0')
+      ) {
+        throw new StructuredError('INVALID_DID', `Invalid did:webvh path segment: ${rawSegment}`);
+      }
+    }
+    const userPath = segments.join('/');
+
+    return { domain: normalizedDomain, userPath };
   }
 
   private async publishResources(
@@ -688,7 +735,12 @@ export class LifecycleManager {
       const hashBytes = hexToBytes(resource.hash);
       const multibase = encodeBase64UrlMultibase(hashBytes);
       const resourceUrl = `${publisherDid}/resources/${multibase}`;
-      const relativePath = `${userPath}/resources/${multibase}`;
+      // A canonical did:webvh with no user path (did:webvh:{SCID}:{domain})
+      // yields an empty userPath; omit it so the storage key is
+      // `${domain}/resources/...` rather than `${domain}//resources/...`.
+      const relativePath = userPath
+        ? `${userPath}/resources/${multibase}`
+        : `resources/${multibase}`;
 
       // Hash-only resources (content hosted elsewhere) cannot be published:
       // writing the hash string as the body would serve bytes that fail the

@@ -296,7 +296,22 @@ export class MetricsCollector {
   private exportPrometheus(): string {
     const lines: string[] = [];
     const metrics = this.getMetrics();
-    
+
+    // Prometheus exposition-format label escaping. Every interpolated label
+    // value (operation names, error codes, migration layers) must go through
+    // this — an unescaped `"`, `\`, or newline yields malformed output that
+    // breaks the whole scrape (issue #292).
+    const escapeLabelValue = (value: string): string =>
+      value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+
+    // `# HELP` text uses a narrower escape set than label values (backslash and
+    // newline only — quotes are literal in HELP), but it must still be escaped:
+    // an operation name containing a newline would otherwise split the HELP
+    // line and corrupt the whole exposition (same failure class as the label
+    // values above).
+    const escapeHelpText = (value: string): string =>
+      value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n');
+
     // Asset metrics
     lines.push('# HELP originals_assets_created_total Total number of assets created');
     lines.push('# TYPE originals_assets_created_total counter');
@@ -313,7 +328,7 @@ export class MetricsCollector {
     lines.push('# TYPE originals_assets_migrated_total counter');
     for (const [transition, count] of Object.entries(metrics.assetsMigrated)) {
       const [from, to] = transition.split('→');
-      lines.push(`originals_assets_migrated_total{from="${from}",to="${to}"} ${count}`);
+      lines.push(`originals_assets_migrated_total{from="${escapeLabelValue(from)}",to="${escapeLabelValue(to)}"} ${count}`);
     }
     lines.push('');
     
@@ -321,8 +336,7 @@ export class MetricsCollector {
     lines.push('# HELP originals_operation_total Total number of operations by name');
     lines.push('# TYPE originals_operation_total counter');
     for (const [operation, opMetrics] of Object.entries(metrics.operationTimes)) {
-      const escaped = operation.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
-      lines.push(`originals_operation_total{operation="${escaped}"} ${opMetrics.count}`);
+      lines.push(`originals_operation_total{operation="${escapeLabelValue(operation)}"} ${opMetrics.count}`);
     }
     lines.push('');
 
@@ -359,13 +373,14 @@ export class MetricsCollector {
 
     for (const [operation, opMetrics] of Object.entries(metrics.operationTimes)) {
       const safeOpName = safeNameFor.get(operation)!;
+      const helpOp = escapeHelpText(operation);
 
-      lines.push(`# HELP originals_operation_${safeOpName}_total Total number of ${operation} operations`);
+      lines.push(`# HELP originals_operation_${safeOpName}_total Total number of ${helpOp} operations`);
       lines.push(`# TYPE originals_operation_${safeOpName}_total counter`);
       lines.push(`originals_operation_${safeOpName}_total ${opMetrics.count}`);
       lines.push('');
 
-      lines.push(`# HELP originals_operation_${safeOpName}_duration_milliseconds Duration of ${operation} operations`);
+      lines.push(`# HELP originals_operation_${safeOpName}_duration_milliseconds Duration of ${helpOp} operations`);
       lines.push(`# TYPE originals_operation_${safeOpName}_duration_milliseconds summary`);
       lines.push(`originals_operation_${safeOpName}_duration_milliseconds{quantile="0.0"} ${opMetrics.minTime}`);
       lines.push(`originals_operation_${safeOpName}_duration_milliseconds{quantile="0.5"} ${opMetrics.avgTime}`);
@@ -374,7 +389,7 @@ export class MetricsCollector {
       lines.push(`originals_operation_${safeOpName}_duration_milliseconds_count ${opMetrics.count}`);
       lines.push('');
 
-      lines.push(`# HELP originals_operation_${safeOpName}_errors_total Total number of errors in ${operation} operations`);
+      lines.push(`# HELP originals_operation_${safeOpName}_errors_total Total number of errors in ${helpOp} operations`);
       lines.push(`# TYPE originals_operation_${safeOpName}_errors_total counter`);
       lines.push(`originals_operation_${safeOpName}_errors_total ${opMetrics.errorCount}`);
       lines.push('');
@@ -384,7 +399,7 @@ export class MetricsCollector {
     lines.push('# HELP originals_errors_total Total number of errors by code');
     lines.push('# TYPE originals_errors_total counter');
     for (const [code, count] of Object.entries(metrics.errors)) {
-      lines.push(`originals_errors_total{code="${code}"} ${count}`);
+      lines.push(`originals_errors_total{code="${escapeLabelValue(code)}"} ${count}`);
     }
     lines.push('');
     

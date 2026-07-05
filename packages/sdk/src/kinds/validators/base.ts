@@ -216,8 +216,11 @@ export abstract class BaseKindValidator<K extends OriginalKind> implements KindV
         if (!resource.contentType || !ValidationUtils.isValidMimeType(resource.contentType)) {
           errors.push(ValidationUtils.error('INVALID_CONTENT_TYPE', `Resource at index ${i} must have a valid MIME contentType`, `${resourcePath}.contentType`, resource.contentType));
         }
-        if (!resource.hash || typeof resource.hash !== 'string' || !/^[0-9a-fA-F]+$/.test(resource.hash)) {
-          errors.push(ValidationUtils.error('INVALID_RESOURCE_HASH', `Resource at index ${i} must have a valid hex hash`, `${resourcePath}.hash`));
+        // Resource hashes are SHA-256 digests: exactly 64 hex characters.
+        // Accepting any non-empty hex ("abc") let malformed manifests pass
+        // validation (issue #292).
+        if (!resource.hash || typeof resource.hash !== 'string' || !/^[0-9a-fA-F]{64}$/.test(resource.hash)) {
+          errors.push(ValidationUtils.error('INVALID_RESOURCE_HASH', `Resource at index ${i} must have a valid 64-character hex SHA-256 hash`, `${resourcePath}.hash`));
         }
       }
       

@@ -113,10 +113,10 @@ setInterval(() => {
   }
 }, 15000);
 
+// No CORS headers: the UI is served same-origin from this server. A wildcard
+// Access-Control-Allow-Origin let any web page open in the developer's
+// browser read the full agent transcript via fetch('http://localhost:3333/stream').
 const server = createServer((req, res) => {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  
   if (req.url === '/') {
     // Serve HTML
     res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -157,7 +157,10 @@ const server = createServer((req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+// Bind to loopback only: the log stream is the developer's full session
+// transcript (can include env output, tokens, code) and /clear lets anyone
+// truncate it — neither belongs on the LAN.
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n🎬 Agent Viewer running at http://localhost:${PORT}\n`);
   console.log(`Watching: ${LOG_FILE}`);
   console.log(`\nMake sure to run ./loop.sh to see output.\n`);

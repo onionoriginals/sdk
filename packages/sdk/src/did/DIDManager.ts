@@ -213,6 +213,20 @@ export class DIDManager {
     }); // end track did.migrateToDIDWebVH
   }
 
+  /**
+   * The Bitcoin network this SDK instance is configured for, or `undefined`
+   * when neither an explicit `network` nor a `webvhNetwork` is set (the SDK's
+   * network is genuinely unknown). An explicit `network` wins over the WebVH
+   * mapping (issue #247). Single source of truth for both did:btco minting
+   * (migrateToDIDBTCO) and the cross-network resolution guard (issue #267), so
+   * the two can never disagree about which network the SDK is on.
+   */
+  private getConfiguredBitcoinNetwork(): 'mainnet' | 'regtest' | 'signet' | undefined {
+    if (this.config.network) return this.config.network;
+    if (this.config.webvhNetwork) return getBitcoinNetworkForWebVH(this.config.webvhNetwork);
+    return undefined;
+  }
+
   async migrateToDIDBTCO(didDoc: DIDDocument, satoshi: string): Promise<DIDDocument> {
     return this.track('did.migrateToDIDBTCO', async () => {
     // Validate satoshi parameter
@@ -237,14 +251,7 @@ export class DIDManager {
     // inscriptions (issue #247). The WebVH mapping (magby→regtest,
     // cleffa→signet, pichu→mainnet) applies only when no explicit Bitcoin
     // network was configured.
-    let network: 'mainnet' | 'regtest' | 'signet';
-    if (this.config.network) {
-      network = this.config.network;
-    } else if (this.config.webvhNetwork) {
-      network = getBitcoinNetworkForWebVH(this.config.webvhNetwork);
-    } else {
-      network = 'mainnet';
-    }
+    const network: 'mainnet' | 'regtest' | 'signet' = this.getConfiguredBitcoinNetwork() ?? 'mainnet';
 
     // Try to carry over the first multikey VM if present
     const firstVm = didDoc.verificationMethod?.[0];
@@ -317,6 +324,35 @@ export class DIDManager {
           }
         } else if (did.startsWith('did:btco:')) {
           if (this.config.ordinalsProvider) {
+            // The configured ordinalsProvider is pinned to one Bitcoin
+            // network, so a DID whose encoded network differs must be
+            // rejected before querying (issue #267): otherwise an attacker
+            // can inscribe "did:btco:reg:N" content on mainnet sat N and have
+            // it resolve — and be cached — as the regtest DID.
+            const btcoNetworkPrefix = did.match(/^did:btco:(reg|sig|test):/)?.[1];
+            // 'test' (testnet) has no OrdinalsClient/config counterpart;
+            // preserve existing pass-through behavior for it.
+            //
+            // Only reject when the SDK's network is actually known. If neither
+            // `network` nor `webvhNetwork` is configured, the provider's chain
+            // is genuinely unknown, so defaulting to mainnet and rejecting a
+            // reg/sig DID would be a false positive — fall through and let the
+            // provider answer (its own resolution still validates the DID).
+            const providerNetwork = this.getConfiguredBitcoinNetwork();
+            if (btcoNetworkPrefix !== 'test' && providerNetwork) {
+              const didNetwork: 'mainnet' | 'regtest' | 'signet' =
+                btcoNetworkPrefix === 'reg' ? 'regtest'
+                : btcoNetworkPrefix === 'sig' ? 'signet'
+                : 'mainnet';
+              if (didNetwork !== providerNetwork) {
+                throw new StructuredError(
+                  'BTCO_NETWORK_MISMATCH',
+                  `Cannot resolve ${did}: the DID targets the ${didNetwork} network but the configured ` +
+                  `ordinalsProvider serves ${providerNetwork}. Configure an SDK instance for ${didNetwork} ` +
+                  'to resolve this DID.'
+                );
+              }
+            }
             // The configured ordinalsProvider is the source of truth for
             // Bitcoin state (it performed the inscriptions), so resolution
             // must go through it — not through a freshly constructed HTTP
@@ -384,7 +420,8 @@ export class DIDManager {
       } catch (err) {
         // Misconfiguration must fail loudly — swallowing it into a null would
         // reproduce the silent-failure mode this error exists to prevent.
-        if (err instanceof StructuredError && err.code === 'ORD_PROVIDER_REQUIRED') {
+        if (err instanceof StructuredError &&
+            (err.code === 'ORD_PROVIDER_REQUIRED' || err.code === 'BTCO_NETWORK_MISMATCH')) {
           throw err;
         }
         // DID resolution failed
@@ -583,7 +620,9 @@ export class DIDManager {
     verifier?: ExternalVerifier;
     outputDir?: string;
   }): Promise<{ didDocument: DIDDocument; log: DIDLog; logPath?: string }> {
-    return this.getWebVHManager().updateDIDWebVH(options);
+    const result = await this.getWebVHManager().updateDIDWebVH(options);
+    await this.invalidateCachedDID(options.did);
+    return result;
   }
 
   /**
@@ -593,7 +632,9 @@ export class DIDManager {
    * updateKey authorized for the next rotation.
    */
   async rotateDIDWebVHKeys(options: RotateWebVHKeysOptions): Promise<RotateWebVHKeysResult> {
-    return this.getWebVHManager().rotateDIDWebVHKeys(options);
+    const result = await this.getWebVHManager().rotateDIDWebVHKeys(options);
+    await this.invalidateCachedDID(options.did);
+    return result;
   }
 
   /**
@@ -602,7 +643,24 @@ export class DIDManager {
    * additionally emits a W3C KeyRecoveryCredential documenting the event.
    */
   async recoverDIDWebVH(options: RecoverWebVHOptions): Promise<RecoverWebVHResult> {
-    return this.getWebVHManager().recoverDIDWebVH(options);
+    const result = await this.getWebVHManager().recoverDIDWebVH(options);
+    await this.invalidateCachedDID(options.did);
+    return result;
+  }
+
+  /**
+   * Drop the cached document for a DID after a successful mutation
+   * (update/rotate/recover). Without this, resolveDID keeps serving the
+   * pre-mutation document — including a compromised key after recovery —
+   * for up to the cache TTL (issue #268). Best-effort: a failing cache
+   * backend must not fail the mutation that already succeeded.
+   */
+  private async invalidateCachedDID(did: string): Promise<void> {
+    try {
+      await this.cache.delete(did);
+    } catch {
+      // best-effort cache invalidation
+    }
   }
 
   /** Lazily instantiate the WebVHManager used for rotation/recovery primitives. */

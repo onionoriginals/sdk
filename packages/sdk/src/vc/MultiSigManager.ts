@@ -387,7 +387,7 @@ export class MultiSigManager {
    * @param contribution - The signature contribution
    * @returns Updated session status
    */
-  addContribution(sessionId: string, contribution: SignatureContribution): MultiSigSession {
+  async addContribution(sessionId: string, contribution: SignatureContribution): Promise<MultiSigSession> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`MultiSig session ${sessionId} not found`);
@@ -417,6 +417,41 @@ export class MultiSigManager {
       c => c.proof.verificationMethod === vm
     );
     if (existingContribution) {
+      throw new Error(`Signer ${vm} has already contributed to this session`);
+    }
+
+    // Verify the contribution actually signs the session document before it
+    // counts toward the threshold (issue #287). Accepting unverified proofs
+    // let a garbage contribution drive the session to a false "finalized"
+    // state — and, because the duplicate check above keys on the signer,
+    // permanently blocked that signer's corrected resubmission. Rejecting
+    // here (before pushing) keeps the slot free for a valid retry.
+    if (!this.didManager) {
+      throw new Error(
+        'Cannot verify contribution: MultiSigManager requires a DIDManager to verify session contributions'
+      );
+    }
+    const proofValid = await this.verifyProof(
+      session.document as unknown as VerifiableCredential,
+      contribution.proof
+    );
+    if (!proofValid) {
+      throw new Error(`Contribution from ${vm} has an invalid proof and was rejected`);
+    }
+
+    // Re-check the invariants that were validated before the `await` above.
+    // Because this method is now async, the duplicate-signer check and the
+    // push are no longer atomic: a concurrently-interleaved addContribution()
+    // for the same signer could have run its check (also seeing no duplicate)
+    // and pushed while we awaited verifyProof. Without this re-check both
+    // would push, letting one physical key count twice toward the m-of-n
+    // threshold. Re-validate against the now-current session state.
+    // Cast: TS narrows session.status to the pre-await value, but a concurrent
+    // finalizeSession() may have moved it to 'finalized' during the await.
+    if ((session.status as MultiSigSession['status']) === 'finalized') {
+      throw new Error(`MultiSig session ${sessionId} has already been finalized`);
+    }
+    if (session.contributions.some(c => c.proof.verificationMethod === vm)) {
       throw new Error(`Signer ${vm} has already contributed to this session`);
     }
 

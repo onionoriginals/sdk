@@ -47,7 +47,21 @@ export function validateAndNormalizeDomain(domain: string): string {
 
   // Allow localhost and IP addresses for development.
   const isLocalhost = domainPart === 'localhost';
+  // Anything shaped like a dotted quad must be a REAL IPv4 address: without
+  // the octet range check, 999.999.999.999 was accepted (and would otherwise
+  // also slip through the hostname regex below, which allows all-numeric
+  // labels), so junk did:webvh:999.999.999.999:user DIDs were constructible
+  // (issue #292).
   const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(domainPart);
+  if (isIP) {
+    const octetsValid = domainPart.split('.').every(octet => parseInt(octet, 10) <= 255);
+    if (!octetsValid) {
+      throw new StructuredError(
+        'INVALID_DOMAIN',
+        `Invalid domain format: ${domain} - IPv4 octets must be in the range 0-255`
+      );
+    }
+  }
 
   if (!isLocalhost && !isIP) {
     const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
@@ -61,4 +75,30 @@ export function validateAndNormalizeDomain(domain: string): string {
   }
 
   return normalized;
+}
+
+/**
+ * Like {@link validateAndNormalizeDomain} but returns `null` instead of
+ * throwing when the input is not a valid domain. Useful when a caller needs to
+ * probe whether a string is a domain (e.g. disambiguating a did:webvh segment
+ * that could be either a domain or a SCID).
+ */
+export function tryValidateDomain(domain: string): string | null {
+  try {
+    return validateAndNormalizeDomain(domain);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decode a percent-encoded URI component, throwing a StructuredError with a
+ * clear code on malformed input rather than a bare URIError.
+ */
+export function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new StructuredError('INVALID_DID', `Malformed percent-encoding in DID segment: ${value}`);
+  }
 }

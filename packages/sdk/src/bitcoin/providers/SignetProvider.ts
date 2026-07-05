@@ -6,6 +6,12 @@ export interface SignetProviderOptions {
   ordUrl: string;
   /** Optional Bitcoin Core RPC URL for wallet operations */
   bitcoinRpcUrl?: string;
+  /**
+   * Optional Bitcoin Core RPC credentials, sent as HTTP Basic auth.
+   * Stock bitcoind requires RPC auth; fetch rejects URLs with embedded
+   * credentials, so they must be supplied here instead of in bitcoinRpcUrl.
+   */
+  bitcoinRpcAuth?: { username: string; password: string };
   /** Request timeout in milliseconds (default: 10000) */
   timeout?: number;
 }
@@ -24,13 +30,26 @@ export class SignetProvider implements OrdinalsProvider {
   private readonly client: OrdinalsClient;
   private readonly ordUrl: string;
   private readonly bitcoinRpcUrl?: string;
+  private readonly bitcoinRpcAuth?: { username: string; password: string };
   private readonly timeout: number;
 
   constructor(options: SignetProviderOptions) {
     this.ordUrl = options.ordUrl.replace(/\/$/, '');
     this.bitcoinRpcUrl = options.bitcoinRpcUrl;
+    this.bitcoinRpcAuth = options.bitcoinRpcAuth;
     this.timeout = options.timeout ?? 10_000;
     this.client = new OrdinalsClient(this.ordUrl, 'signet');
+  }
+
+  private rpcHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.bitcoinRpcAuth) {
+      const token = Buffer.from(
+        `${this.bitcoinRpcAuth.username}:${this.bitcoinRpcAuth.password}`
+      ).toString('base64');
+      headers['Authorization'] = `Basic ${token}`;
+    }
+    return headers;
   }
 
   async getInscriptionById(id: string) {
@@ -58,10 +77,18 @@ export class SignetProvider implements OrdinalsProvider {
         'broadcastTransaction requires bitcoinRpcUrl. Configure SignetProvider with a Bitcoin Core RPC URL.'
       );
     }
-    const txHex = typeof txHexOrObj === 'string' ? txHexOrObj : JSON.stringify(txHexOrObj);
+    // sendrawtransaction only accepts raw transaction hex. JSON.stringify-ing
+    // an object here (issue #272) produced a guaranteed-invalid RPC parameter
+    // that failed far from the cause — reject non-hex input up front instead.
+    if (typeof txHexOrObj !== 'string' || !/^(?:[0-9a-fA-F]{2})+$/.test(txHexOrObj)) {
+      throw new Error(
+        'broadcastTransaction requires a raw transaction hex string (even-length hexadecimal)'
+      );
+    }
+    const txHex = txHexOrObj;
     const res = await fetch(this.bitcoinRpcUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.rpcHeaders(),
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
@@ -70,9 +97,28 @@ export class SignetProvider implements OrdinalsProvider {
       }),
       signal: AbortSignal.timeout(this.timeout),
     });
-    const data = await res.json() as { result?: string; error?: { message: string } };
-    if (data.error) throw new Error(`Bitcoin RPC error: ${data.error.message}`);
-    return data.result ?? '';
+    // bitcoind reports RPC-level errors with non-2xx statuses but still sends
+    // a JSON body; an auth failure or proxy error may send HTML. Parse the
+    // body when possible so the RPC error surfaces, and otherwise fail with
+    // the HTTP status instead of an opaque JSON parse error.
+    let data: { result?: unknown; error?: { message?: string } };
+    try {
+      data = await res.json() as { result?: unknown; error?: { message?: string } };
+    } catch {
+      throw new Error(`Bitcoin RPC request failed: HTTP ${res.status} ${res.statusText}`);
+    }
+    if (data.error) {
+      throw new Error(`Bitcoin RPC error: ${data.error.message ?? JSON.stringify(data.error)}`);
+    }
+    if (!res.ok) {
+      throw new Error(`Bitcoin RPC request failed: HTTP ${res.status} ${res.statusText}`);
+    }
+    // A response with neither result nor error must not become a "successful"
+    // empty-string txid that downstream code records (issue #272).
+    if (typeof data.result !== 'string' || data.result.length === 0) {
+      throw new Error('Bitcoin RPC returned no txid for sendrawtransaction');
+    }
+    return data.result;
   }
 
   async getTransactionStatus(txid: string) {
@@ -98,7 +144,7 @@ export class SignetProvider implements OrdinalsProvider {
       try {
         const res = await fetch(this.bitcoinRpcUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.rpcHeaders(),
           body: JSON.stringify({
             jsonrpc: '2.0',
             id: 1,

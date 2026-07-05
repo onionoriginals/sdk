@@ -93,10 +93,15 @@ export class DIDCache {
   async get(did: string): Promise<DIDDocument | null> {
     let entry = this.cache.get(did) ?? null;
 
-    // Try persistent storage fallback
+    // Try persistent storage fallback. Hydrated entries go through the same
+    // eviction guard as set()/pin(); otherwise a large persistent store could
+    // grow the in-memory map unboundedly past maxEntries (issue #291).
     if (!entry && this.storage) {
       entry = await this.storage.get(did);
       if (entry) {
+        if (!this.cache.has(did) && this.cache.size >= this.maxEntries) {
+          await this.evictLRU();
+        }
         this.cache.set(did, entry);
       }
     }
@@ -116,7 +121,10 @@ export class DIDCache {
 
     this.touchAccessOrder(did);
     this.metrics?.recordCacheHit();
-    return entry.document;
+    // Return a copy: handing out the cached object by reference would let a
+    // caller that annotates/mutates the resolved document silently poison the
+    // cache for every later resolution of this DID (issue #291).
+    return structuredClone(entry.document);
   }
 
   /**
@@ -125,7 +133,9 @@ export class DIDCache {
   async set(did: string, document: DIDDocument): Promise<void> {
     const entry: DIDCacheEntry = {
       did,
-      document,
+      // Store a copy so later caller-side mutation of the original object
+      // cannot alter what the cache serves (issue #291).
+      document: structuredClone(document),
       resolvedAt: Date.now(),
       ttlMs: this.ttlMs,
       pinned: false,
@@ -154,7 +164,7 @@ export class DIDCache {
 
     const entry: DIDCacheEntry = {
       did,
-      document: document ?? existing!.document,
+      document: document ? structuredClone(document) : existing!.document,
       resolvedAt: existing?.resolvedAt ?? Date.now(),
       ttlMs: this.ttlMs,
       pinned: true,

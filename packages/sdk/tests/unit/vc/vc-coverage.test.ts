@@ -222,13 +222,13 @@ describe('VC-006/happy – multi-sig session collects m-of-n and threshold passe
 
     // First signer contributes
     const c1 = await mgr.createContribution(session.id, keys[0].privateKey, vms[0]);
-    const s1 = mgr.addContribution(session.id, c1);
+    const s1 = await mgr.addContribution(session.id, c1);
     expect(s1.status).toBe('collecting');
     expect(s1.contributions).toHaveLength(1);
 
     // Second signer hits threshold
     const c2 = await mgr.createContribution(session.id, keys[1].privateKey, vms[1]);
-    const s2 = mgr.addContribution(session.id, c2);
+    const s2 = await mgr.addContribution(session.id, c2);
     expect(s2.status).toBe('threshold_met');
     expect(s2.contributions).toHaveLength(2);
 
@@ -275,7 +275,7 @@ describe('VC-006/error – finalize before threshold throws insufficient-signatu
 
     const session = mgr.createSession(baseVC, policy);
     const c1 = await mgr.createContribution(session.id, keys[0].privateKey, vms[0]);
-    mgr.addContribution(session.id, c1);
+    await mgr.addContribution(session.id, c1);
     // Only 1 contribution; threshold is 2
 
     expect(() => mgr.finalizeSession(session.id)).toThrow(/Cannot finalize/);

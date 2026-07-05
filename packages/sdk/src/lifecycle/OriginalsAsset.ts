@@ -5,6 +5,7 @@ import {
   LayerType 
 } from '../types/index.js';
 import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation.js';
+import { StructuredError } from '../utils/telemetry.js';
 import { CredentialManager } from '../vc/CredentialManager.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { ProvenanceQuery, Migration, Transfer } from './ProvenanceQuery.js';
@@ -385,11 +386,15 @@ export class OriginalsAsset {
    * Creates a new AssetResource with incremented version number and links it to the previous version.
    * 
    * @param resourceId - The logical resource ID
-   * @param newContent - The new content (string or Buffer)
+   * @param newContent - The new content. Must be a string: AssetResource can
+   *   only carry inline string content, so Buffer input is rejected rather
+   *   than silently reduced to a hash-only version (issue #276). For binary
+   *   resources, pass the content as a string in a text-safe encoding you
+   *   control, or manage the bytes externally and reference them by hash.
    * @param contentType - The content type
    * @param changes - Optional description of changes
    * @returns The newly created AssetResource
-   * @throws Error if content is unchanged or resource not found
+   * @throws Error if content is unchanged, resource not found, or newContent is a Buffer
    */
   addResourceVersion(
     resourceId: string,
@@ -397,6 +402,18 @@ export class OriginalsAsset {
     contentType: string,
     changes?: string
   ): AssetResource {
+    // AssetResource.content is a string; a Buffer used to be silently dropped
+    // (only its hash was stored), unrecoverably losing the binary content
+    // while the caller believed it was versioned (issue #276). Fail loudly
+    // instead.
+    if (typeof newContent !== 'string') {
+      throw new StructuredError(
+        'BINARY_CONTENT_UNSUPPORTED',
+        'addResourceVersion cannot store binary (Buffer) content inline: AssetResource.content is a string. ' +
+        'Encode the content as a string (e.g. base64) and handle decoding at publish time, ' +
+        'or host the bytes externally and reference them by hash.'
+      );
+    }
     // Find the current version of the resource by id
     const currentResources = this.resources.filter(r => r.id === resourceId);
     if (currentResources.length === 0) {
@@ -411,9 +428,7 @@ export class OriginalsAsset {
     })[0];
     
     // Compute new hash
-    const contentBuffer = typeof newContent === 'string' 
-      ? Buffer.from(newContent, 'utf-8')
-      : newContent;
+    const contentBuffer = Buffer.from(newContent, 'utf-8');
     const newHash = hashResource(contentBuffer);
     
     // Check if content has actually changed
@@ -426,7 +441,7 @@ export class OriginalsAsset {
     const newResource: AssetResource = {
       id: resourceId,
       type: currentResource.type,
-      content: typeof newContent === 'string' ? newContent : undefined,
+      content: newContent,
       contentType,
       hash: newHash,
       size: contentBuffer.length,

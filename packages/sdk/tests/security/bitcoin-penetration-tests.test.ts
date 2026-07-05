@@ -271,7 +271,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
     });
 
     it('should handle maximum valid satoshi', () => {
-      const maxValidSatoshi = '2100000000000000'; // Exactly 21M BTC
+      const maxValidSatoshi = '2099999997689999'; // The last satoshi ordinal ever mined
 
       const result = validateSatoshiNumber(maxValidSatoshi);
       expect(result.valid).toBe(true);
@@ -523,7 +523,7 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
     });
 
     it('should handle maximum valid satoshi number', () => {
-      const maxSatoshi = '2100000000000000';
+      const maxSatoshi = '2099999997689999';
       const result = validateSatoshiNumber(maxSatoshi);
       expect(result.valid).toBe(true);
 

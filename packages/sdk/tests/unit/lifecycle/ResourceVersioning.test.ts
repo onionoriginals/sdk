@@ -355,7 +355,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
     expect(newResource.hash).not.toBe(hash1);
   });
 
-  test('versioning works with Buffer content', () => {
+  test('addResourceVersion rejects Buffer content instead of silently dropping it (issue #276)', () => {
     const buffer1 = Buffer.from('binary content 1', 'utf-8');
     const resources: AssetResource[] = [
       {
@@ -365,13 +365,13 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(buffer1)
       }
     ];
-    
+
     const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
     const buffer2 = Buffer.from('binary content 2', 'utf-8');
-    const newResource = asset.addResourceVersion('res1', buffer2, 'application/octet-stream');
-    
-    expect(newResource.version).toBe(2);
-    expect(newResource.hash).toBe(hashResource(buffer2));
+    // Buffer content used to be accepted but only its hash was stored — the
+    // bytes were unrecoverably lost. It now throws so the loss is impossible.
+    expect(() => asset.addResourceVersion('res1', buffer2, 'application/octet-stream'))
+      .toThrow(/binary \(Buffer\) content/);
   });
 
   test('versioning works across all layers (did:peer)', () => {
