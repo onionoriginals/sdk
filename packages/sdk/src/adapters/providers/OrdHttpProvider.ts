@@ -3,36 +3,89 @@ import type { OrdinalsProvider } from '../types.js';
 
 interface HttpProviderOptions {
   baseUrl: string;
+  /** Max bytes accepted for a JSON indexer response (default 1 MiB). */
+  maxJsonBytes?: number;
+  /** Max bytes accepted for fetched inscription content (default 5 MiB). */
+  maxContentBytes?: number;
 }
+
+const DEFAULT_MAX_JSON_BYTES = 1 * 1024 * 1024;
+const DEFAULT_MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
 function buildUrl(baseUrl: string, path: string): string {
   const base = baseUrl.replace(/\/$/, '');
   return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
-async function fetchJson<T>(url: string): Promise<T | null> {
-  const res = await (globalThis as any).fetch(url, {
+/**
+ * Reject a candidate URL whose origin differs from baseUrl's. The indexer's
+ * JSON is attacker-controllable (a compromised/malicious ord endpoint), so a
+ * `content_url` it returns must never be followed to an arbitrary host — that
+ * is a Server-Side Request Forgery vector (e.g. http://169.254.169.254/… cloud
+ * metadata). Relative URLs resolve against baseUrl and stay same-origin.
+ */
+function assertSameOrigin(candidate: string, baseUrl: string): void {
+  let candidateOrigin: string;
+  try {
+    candidateOrigin = new URL(candidate, baseUrl).origin;
+  } catch {
+    throw new Error(`OrdHttpProvider: malformed content_url '${candidate}'`);
+  }
+  if (candidateOrigin !== new URL(baseUrl).origin) {
+    throw new Error(
+      `OrdHttpProvider: refusing to fetch content_url from origin ${candidateOrigin}, ` +
+      `which differs from baseUrl origin ${new URL(baseUrl).origin} (possible SSRF)`
+    );
+  }
+}
+
+/**
+ * Fetch a body while enforcing a hard byte cap — first via the Content-Length
+ * header (cheap early reject) and again on the materialized bytes (a lying or
+ * absent header can't smuggle an oversized/streamed body past the cap).
+ */
+async function fetchBytesWithLimit(url: string, maxBytes: number, init?: unknown): Promise<{ ok: boolean; bytes: Uint8Array } | null> {
+  const res = await (globalThis as any).fetch(url, init);
+  if (!res.ok) return null;
+  const lenHeader = res.headers?.get?.('content-length');
+  if (lenHeader && Number(lenHeader) > maxBytes) {
+    throw new Error(`OrdHttpProvider: response exceeds ${maxBytes} bytes (Content-Length ${lenHeader})`);
+  }
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.byteLength > maxBytes) {
+    throw new Error(`OrdHttpProvider: response body exceeds ${maxBytes} bytes`);
+  }
+  return { ok: res.ok, bytes };
+}
+
+async function fetchJson<T>(url: string, maxBytes: number = DEFAULT_MAX_JSON_BYTES): Promise<T | null> {
+  const result = await fetchBytesWithLimit(url, maxBytes, {
     headers: {
       'Accept': 'application/json'
     }
   });
-  if (!res.ok) return null;
-  return (await res.json()) as T;
+  if (!result) return null;
+  const text = new TextDecoder().decode(result.bytes);
+  return JSON.parse(text) as T;
 }
 
 export class OrdHttpProvider implements OrdinalsProvider {
   private readonly baseUrl: string;
+  private readonly maxJsonBytes: number;
+  private readonly maxContentBytes: number;
 
   constructor(options: HttpProviderOptions) {
     if (!options?.baseUrl) {
       throw new Error('OrdHttpProvider requires baseUrl');
     }
     this.baseUrl = options.baseUrl;
+    this.maxJsonBytes = options.maxJsonBytes ?? DEFAULT_MAX_JSON_BYTES;
+    this.maxContentBytes = options.maxContentBytes ?? DEFAULT_MAX_CONTENT_BYTES;
   }
 
   async getInscriptionById(id: string) {
     if (!id) return null;
-    const data = await fetchJson<any>(buildUrl(this.baseUrl, `/inscription/${id}`));
+    const data = await fetchJson<any>(buildUrl(this.baseUrl, `/inscription/${id}`), this.maxJsonBytes);
     if (!data) return null;
     // Expecting a shape similar to Ordinals indexers; adapt minimally
     const ownerOutput: string | undefined = data.owner_output;
@@ -45,12 +98,16 @@ export class OrdHttpProvider implements OrdinalsProvider {
     }
 
     const contentType = data.content_type || 'application/octet-stream';
+    // The content URL may come from the (untrusted) indexer response. Pin it to
+    // baseUrl's origin before fetching so a malicious endpoint cannot redirect
+    // us to an internal host (SSRF), and cap the downloaded size.
     const contentUrl = data.content_url || buildUrl(this.baseUrl, `/content/${id}`);
-    const contentRes = await (globalThis as any).fetch(contentUrl);
-    if (!contentRes.ok) return null;
+    assertSameOrigin(contentUrl, this.baseUrl);
+    const content = await fetchBytesWithLimit(contentUrl, this.maxContentBytes);
+    if (!content) return null;
     const buf = (globalThis as any).Buffer
-      ? (globalThis as any).Buffer.from(new Uint8Array(await contentRes.arrayBuffer()))
-      : new Uint8Array(await contentRes.arrayBuffer()) as any;
+      ? (globalThis as any).Buffer.from(content.bytes)
+      : content.bytes as any;
 
     return {
       inscriptionId: data.inscription_id || id,
