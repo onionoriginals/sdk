@@ -334,6 +334,16 @@ describe('BBS+ bbs-2023 selective disclosure round-trip', () => {
       expectedController: 'did:example:other'
     });
     expect(wrongController.verified).toBe(false);
+
+    // A full verification-method URL (with #fragment) is a valid
+    // expectedController: binding is on DID identity, so the fragment on the
+    // expected value must not cause a spurious mismatch against the
+    // fragment-stripped proof.verificationMethod.
+    const boundWithFragment = await BBSCryptosuiteManager.verifyProof(issuerlessCred, baseProof, {
+      documentLoader,
+      expectedController: 'did:example:issuer#bbs-key-1'
+    });
+    expect(boundWithFragment.verified).toBe(true);
   });
 
   // Issue #315 (related): a verifier that supplies challenge/domain
