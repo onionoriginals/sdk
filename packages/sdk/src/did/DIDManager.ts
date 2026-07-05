@@ -337,24 +337,39 @@ export class DIDManager {
     // network was configured.
     const network: 'mainnet' | 'regtest' | 'signet' = this.getConfiguredBitcoinNetwork() ?? 'mainnet';
 
-    // Try to carry over the first multikey VM if present
+    // Carry over the first verification method's key into the did:btco
+    // document. If the source document declares a verification method but its
+    // key cannot be carried (missing or undecodable multikey), FAIL LOUDLY:
+    // silently continuing used to mint a KEYLESS did:btco document, so callers
+    // believed they had migrated an identity they control while the resulting
+    // DID had no usable verification method (issue #318).
     const firstVm = didDoc.verificationMethod?.[0];
     let publicKey: Uint8Array | undefined;
     let keyType: Parameters<typeof createBtcoDidDocument>[2]['keyType'] | undefined;
-    try {
-      if (firstVm && firstVm.publicKeyMultibase) {
+    if (firstVm) {
+      if (!firstVm.publicKeyMultibase) {
+        throw new StructuredError(
+          'BTCO_MIGRATION_KEY_DECODE_FAILED',
+          `Cannot migrate ${didDoc.id} to did:btco: verification method ${firstVm.id} has no publicKeyMultibase, so its key cannot be carried into the did:btco document. Migrating anyway would produce a keyless DID with no usable verification method.`,
+          { did: didDoc.id, verificationMethodId: firstVm.id }
+        );
+      }
+      try {
         const decoded = multikey.decodePublicKey(firstVm.publicKeyMultibase);
         publicKey = decoded.key;
         keyType = decoded.type;
-      }
-    } catch (err) {
-      // Unable to decode public key from verification method; will proceed without key material
-      if (this.config.enableLogging) {
-        console.warn('Failed to decode verification method public key:', err);
+      } catch (err) {
+        throw new StructuredError(
+          'BTCO_MIGRATION_KEY_DECODE_FAILED',
+          `Cannot migrate ${didDoc.id} to did:btco: failed to decode the multikey of verification method ${firstVm.id} (${err instanceof Error ? err.message : String(err)}). Migrating anyway would produce a keyless DID with no usable verification method.`,
+          { did: didDoc.id, verificationMethodId: firstVm.id }
+        );
       }
     }
 
-    // If no key material is available, generate a minimal btco DID doc without keys
+    // Explicit keyless case: the source document declares NO verification
+    // methods at all, so there is genuinely no key material to lose. Only then
+    // do we mint a minimal btco DID document without keys.
     let btcoDoc: DIDDocument;
     if (publicKey && keyType) {
       btcoDoc = createBtcoDidDocument(satoshi, network, { publicKey, keyType });
