@@ -321,9 +321,21 @@ export class BitcoinManager {
    * instead of a fabricated placeholder when no local migration record exists.
    */
   async getInscriptionIdBySatoshi(satoshi: string): Promise<string | null> {
-    if (!this.ord) return null;
+    if (!this.ord) {
+      // Distinguish "no provider configured" from "satoshi has no inscription"
+      // so callers don't report a misleading INSCRIPTION_NOT_FOUND for what is
+      // actually a configuration problem.
+      throw new StructuredError(
+        'ORD_PROVIDER_REQUIRED',
+        'Cannot look up inscriptions by satoshi: no ordinalsProvider is configured.'
+      );
+    }
     const list = await this.ord.getInscriptionsBySatoshi(satoshi);
-    return list.length > 0 ? list[0].inscriptionId : null;
+    if (list.length === 0) return null;
+    // Providers return inscriptions in chronological order; on a reinscribed
+    // sat the last entry is the current inscription, which is what a transfer
+    // should record in provenance (the genesis id would be stale).
+    return list[list.length - 1].inscriptionId;
   }
 
   async getSatoshiFromInscription(inscriptionId: string): Promise<string | null> {

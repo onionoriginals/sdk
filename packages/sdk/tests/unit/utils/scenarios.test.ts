@@ -349,7 +349,9 @@ describe('UTILS-VERIFY-020: OrdHttpProvider URL construction', () => {
       return {
         ok: true,
         json: async () => JSON.parse(body),
-        arrayBuffer: async () => new ArrayBuffer(4),
+        // fetchJson materializes bytes (arrayBuffer), not res.json(), so the
+        // stub must return the JSON body as real bytes.
+        arrayBuffer: async () => new TextEncoder().encode(body).buffer,
       };
     };
 
@@ -382,7 +384,9 @@ describe('UTILS-VERIFY-020: OrdHttpProvider URL construction', () => {
       return {
         ok: true,
         json: async () => JSON.parse(body),
-        arrayBuffer: async () => new ArrayBuffer(4),
+        // fetchJson materializes bytes (arrayBuffer), not res.json(), so the
+        // stub must return the JSON body as real bytes.
+        arrayBuffer: async () => new TextEncoder().encode(body).buffer,
       };
     };
 

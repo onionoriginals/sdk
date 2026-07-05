@@ -64,13 +64,34 @@ export function computeDigestMultibase(content: Uint8Array): string {
  */
 export function verifyDigestMultibase(content: Uint8Array, digest: string): boolean {
   try {
-    // Compute hash of content
-    const computedDigest = computeDigestMultibase(content);
-    
-    // Compare with expected digest
-    return computedDigest === digest;
+    const expected = decodeDigestMultibase(digest);
+    const actual = sha256(content);
+    if (expected.length !== actual.length) return false;
+    let diff = 0;
+    for (let i = 0; i < actual.length; i++) diff |= expected[i] ^ actual[i];
+    return diff === 0;
   } catch {
     // Invalid digest format or encoding error
+    return false;
+  }
+}
+
+/**
+ * Compares two digestMultibase strings for equality of the underlying
+ * sha2-256 digest, tolerating a mix of the spec-conformant multihash form
+ * and the legacy bare-digest form (see decodeDigestMultibase).
+ *
+ * @returns True iff both values decode to the same 32-byte digest
+ */
+export function digestMultibaseEquals(a: string, b: string): boolean {
+  try {
+    const da = decodeDigestMultibase(a);
+    const db = decodeDigestMultibase(b);
+    if (da.length !== db.length) return false;
+    let diff = 0;
+    for (let i = 0; i < da.length; i++) diff |= da[i] ^ db[i];
+    return diff === 0;
+  } catch {
     return false;
   }
 }
@@ -85,16 +106,20 @@ export function verifyDigestMultibase(content: Uint8Array, digest: string): bool
  */
 export function decodeDigestMultibase(digest: string): Uint8Array {
   const bytes = multibase.decode(digest);
-  // Validate and strip the sha2-256 multihash header, returning the raw digest.
-  // Rejecting a header-less (legacy bare-digest) value here is deliberate: it
-  // surfaces the format mismatch instead of silently returning wrong-length
-  // bytes.
+  // Spec-conformant form: sha2-256 multihash header + 32-byte digest.
   if (
-    bytes.length !== SHA2_256_MULTIHASH_PREFIX.length + 32 ||
-    bytes[0] !== SHA2_256_MULTIHASH_PREFIX[0] ||
-    bytes[1] !== SHA2_256_MULTIHASH_PREFIX[1]
+    bytes.length === SHA2_256_MULTIHASH_PREFIX.length + 32 &&
+    bytes[0] === SHA2_256_MULTIHASH_PREFIX[0] &&
+    bytes[1] === SHA2_256_MULTIHASH_PREFIX[1]
   ) {
-    throw new Error('Invalid digestMultibase: expected a Multibase-encoded sha2-256 multihash');
+    return bytes.slice(SHA2_256_MULTIHASH_PREFIX.length);
   }
-  return bytes.slice(SHA2_256_MULTIHASH_PREFIX.length);
+  // Legacy bare-digest form emitted by SDK releases before the #258 multihash
+  // fix. Logs anchored on Bitcoin in that format are immutable and cannot be
+  // recomputed, so reads must keep accepting it; only computeDigestMultibase
+  // (the write path) is multihash-only.
+  if (bytes.length === 32) {
+    return bytes;
+  }
+  throw new Error('Invalid digestMultibase: expected a Multibase-encoded sha2-256 multihash (or legacy 32-byte bare digest)');
 }

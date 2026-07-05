@@ -62,22 +62,16 @@ async function fetchBytesWithLimit(url: string, maxBytes: number, init?: Record<
 }
 
 async function fetchJson<T>(url: string, maxBytes: number = DEFAULT_MAX_JSON_BYTES): Promise<T | null> {
-  const res = await (globalThis as any).fetch(url, {
+  // Route through fetchBytesWithLimit so the cap holds even when the indexer
+  // omits or understates Content-Length — the JSON response is as
+  // attacker-controllable as the content fetch.
+  const result = await fetchBytesWithLimit(url, maxBytes, {
     headers: {
       'Accept': 'application/json'
-    },
-    // Do not follow redirects to another host (SSRF via redirect).
-    redirect: 'error'
+    }
   });
-  if (!res.ok) return null;
-  // Reject an over-cap response up front via Content-Length. (The JSON body is
-  // then parsed with the standard res.json(); the stronger materialized-bytes
-  // cap is applied to the separate — attacker-influenced — content fetch.)
-  const lenHeader = res.headers?.get?.('content-length');
-  if (lenHeader && Number(lenHeader) > maxBytes) {
-    throw new Error(`OrdHttpProvider: JSON response exceeds ${maxBytes} bytes (Content-Length ${lenHeader})`);
-  }
-  return (await res.json()) as T;
+  if (!result) return null;
+  return JSON.parse(new TextDecoder().decode(result.bytes)) as T;
 }
 
 export class OrdHttpProvider implements OrdinalsProvider {
@@ -133,7 +127,7 @@ export class OrdHttpProvider implements OrdinalsProvider {
 
   async getInscriptionsBySatoshi(satoshi: string) {
     if (!satoshi) return [];
-    const data = await fetchJson<any>(buildUrl(this.baseUrl, `/sat/${satoshi}`));
+    const data = await fetchJson<any>(buildUrl(this.baseUrl, `/sat/${satoshi}`), this.maxJsonBytes);
     const ids: string[] = Array.isArray(data?.inscription_ids) ? data.inscription_ids : [];
     return ids.map((inscriptionId) => ({ inscriptionId }));
   }

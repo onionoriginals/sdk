@@ -208,6 +208,7 @@ export {
   computeDigestMultibase,
   verifyDigestMultibase,
   decodeDigestMultibase,
+  digestMultibaseEquals,
 } from './cel/hash.js';
 export {
   createExternalReference,

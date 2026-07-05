@@ -81,10 +81,19 @@ export class BatchError extends Error {
      * callers can recover what already ran (including txids of already-broadcast
      * inscriptions) instead of losing it to a bare re-throw.
      */
-    public result?: BatchResult<unknown>
+    public result?: BatchResult<unknown>,
+    /**
+     * The original error that aborted the batch, preserved so callers can
+     * still match on `instanceof StructuredError` / error codes instead of
+     * only the flattened message.
+     */
+    cause?: unknown
   ) {
     super(message);
     this.name = 'BatchError';
+    if (cause !== undefined) {
+      this.cause = cause;
+    }
   }
 }
 
@@ -243,7 +252,8 @@ export class BatchOperationExecutor {
           'batch',
           { successful: successful.length, failed: failed.length },
           message,
-          partial
+          partial,
+          error
         );
       }
       // In continue-on-error mode, the error was already logged in processItem

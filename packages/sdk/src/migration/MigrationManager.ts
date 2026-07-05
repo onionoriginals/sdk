@@ -513,7 +513,14 @@ export class MigrationManager {
     // so the loop always ran strictly sequentially). Distinct DIDs are safe to
     // run in parallel — migrate() guards against concurrent migrations of the
     // same source DID internally.
-    const concurrency = Math.max(1, Math.min(options?.maxConcurrent ?? 1, total || 1));
+    const requestedConcurrency = options?.maxConcurrent;
+    const concurrency = Math.max(
+      1,
+      Math.min(
+        Number.isFinite(requestedConcurrency) ? Math.floor(requestedConcurrency as number) : 1,
+        total || 1
+      )
+    );
     let cursor = 0;
     const worker = async (): Promise<void> => {
       while (!stopped) {

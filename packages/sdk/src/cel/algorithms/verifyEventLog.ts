@@ -17,7 +17,7 @@ import type {
   DataIntegrityProof,
   OrdinalsLookup
 } from '../types.js';
-import { computeDigestMultibase } from '../hash.js';
+import { computeDigestMultibase, digestMultibaseEquals } from '../hash.js';
 import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize.js';
 import { multikey } from '../../crypto/Multikey.js';
 
@@ -270,8 +270,11 @@ function verifyChain(
     // later) is excluded, so the chain cannot depend on data no signature
     // commits to. See canonicalizeEntryForChain.
     const expectedHash = computeDigestMultibase(canonicalizeEntryForChain(previousEvent));
-    
-    if (event.previousEvent !== expectedHash) {
+
+    // Digest-level comparison (not string equality): logs written by SDK
+    // releases before the #258 multihash fix carry legacy bare-digest
+    // previousEvent values, and Bitcoin-anchored logs cannot be recomputed.
+    if (!digestMultibaseEquals(event.previousEvent, expectedHash)) {
       errors.push(`Event ${index}: Hash chain broken - previousEvent does not match hash of prior event`);
       return { chainValid: false, errors };
     }
@@ -383,7 +386,10 @@ async function verifyBitcoinWitnessProof(
   } catch {
     return `bitcoin witness inscription ${inscriptionId} content is not valid JSON`;
   }
-  if (content?.digestMultibase !== expectedDigest) {
+  if (
+    typeof content?.digestMultibase !== 'string' ||
+    !digestMultibaseEquals(content.digestMultibase, expectedDigest)
+  ) {
     return `bitcoin witness inscription ${inscriptionId} does not commit to this event's digest`;
   }
 
