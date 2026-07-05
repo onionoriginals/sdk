@@ -65,7 +65,15 @@ export class Verifier {
     this.statusListResolver = options?.statusListResolver;
   }
 
-  async verifyCredential(vc: VerifiableCredential, options: { documentLoader?: (iri: string) => Promise<unknown>; checkStatus?: boolean } = {}): Promise<VerificationResult> {
+  async verifyCredential(vc: VerifiableCredential, options: {
+    documentLoader?: (iri: string) => Promise<unknown>;
+    checkStatus?: boolean;
+    /** Forwarded to the proof cryptosuite (used by bbs-2023 anti-replay/binding). */
+    expectedChallenge?: string;
+    expectedDomain?: string;
+    expectedPresentationHeader?: Uint8Array;
+    expectedController?: string;
+  } = {}): Promise<VerificationResult> {
     try {
       if (!vc || !vc['@context'] || !vc.type) throw new Error('Invalid credential');
       if (!vc.proof) throw new Error('Credential has no proof');
@@ -107,7 +115,13 @@ export class Verifier {
         return purposeCheck;
       }
 
-      const result = await DataIntegrityProofManager.verifyProof(vc, proof as unknown as DataIntegrityProof, { documentLoader: loader });
+      const result = await DataIntegrityProofManager.verifyProof(vc, proof as unknown as DataIntegrityProof, {
+        documentLoader: loader,
+        expectedChallenge: options.expectedChallenge,
+        expectedDomain: options.expectedDomain,
+        expectedPresentationHeader: options.expectedPresentationHeader,
+        expectedController: options.expectedController
+      });
       if (!result.verified) {
         return { verified: false, errors: result.errors ?? ['Verification failed'] };
       }

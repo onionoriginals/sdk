@@ -14,6 +14,22 @@ describe('DataIntegrityProofManager branches', () => {
     } as any)).rejects.toThrow('Unsupported cryptosuite');
   });
 
+  // createProof must be symmetric with verifyProof: bbs-2023 is dispatched to
+  // the BBS backend, not rejected as an unsupported cryptosuite.
+  test('bbs-2023 on create dispatches to the BBS cryptosuite', async () => {
+    // Missing privateKey → BBS backend throws its own error, proving dispatch
+    // reached it rather than the "Unsupported cryptosuite" guard.
+    await expect(DataIntegrityProofManager.createProof(
+      { '@context': [], id: 'x', issuer: 'did:example:issuer' },
+      {
+        verificationMethod: 'did:example:issuer#k',
+        proofPurpose: 'assertionMethod',
+        type: 'DataIntegrityProof',
+        cryptosuite: 'bbs-2023'
+      } as any
+    )).rejects.toThrow('Private key required for BBS+ proof creation');
+  });
+
   test('unsupported cryptosuite on verify returns false', async () => {
     const res = await DataIntegrityProofManager.verifyProof({ id: 'x' }, {
       type: 'DataIntegrityProof', cryptosuite: 'unknown', verificationMethod: 'did:ex#k', proofPurpose: 'assertionMethod', proofValue: 'z'
