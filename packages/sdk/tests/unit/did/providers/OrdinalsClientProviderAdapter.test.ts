@@ -39,7 +39,7 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
     );
   });
 
-  test('maps fields correctly when JSON has explicit values and numeric sat', async () => {
+  test('maps fields correctly when JSON has explicit values and numeric sat (same-origin content_url)', async () => {
     const client = new OrdinalsClient('http://rpc', 'mainnet');
     const adapter = new OrdinalsClientProviderAdapter(client, 'https://ord.example');
 
@@ -47,7 +47,7 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
       inscription_id: 'abc123',
       sat: 42,
       content_type: 'image/png',
-      content_url: 'https://cdn.example/abc123.png'
+      content_url: 'https://ord.example/content/abc123'
     };
 
     const fetchMock = mock(() => Promise.resolve({ ok: true, json: async () => apiResponse }));
@@ -59,7 +59,7 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
       id: 'abc123',
       sat: 42,
       content_type: 'image/png',
-      content_url: 'https://cdn.example/abc123.png'
+      content_url: 'https://ord.example/content/abc123'
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -70,6 +70,25 @@ describe('OrdinalsClientProviderAdapter.resolveInscription', () => {
         signal: expect.any(AbortSignal)
       })
     );
+  });
+
+  test('rejects a content_url on a different origin than baseUrl (SSRF guard)', async () => {
+    const client = new OrdinalsClient('http://rpc', 'mainnet');
+    const adapter = new OrdinalsClientProviderAdapter(client, 'https://ord.example');
+
+    // A malicious/compromised ord endpoint pointing content at another host
+    // must not be trusted: the URL is later fetched during DID resolution.
+    const apiResponse = {
+      inscription_id: 'abc123',
+      sat: 42,
+      content_type: 'image/png',
+      content_url: 'https://cdn.example/abc123.png'
+    };
+
+    const fetchMock = mock(() => Promise.resolve({ ok: true, json: async () => apiResponse }));
+    (globalThis as any).fetch = fetchMock;
+
+    await expect(adapter.resolveInscription(inscriptionId)).rejects.toThrow(`Failed to resolve inscription: ${inscriptionId}`);
   });
 
   test('applies fallbacks and coerces string sat to number', async () => {
