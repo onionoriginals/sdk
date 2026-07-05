@@ -176,8 +176,11 @@ export class BBSCryptosuiteManager {
     // opaque "pointer does not match" error; such callers pass `mandatoryPointers`
     // explicitly.
     const mandatoryPointers = options.mandatoryPointers ?? (
-      document?.issuer !== undefined ? ['/issuer']
-      : document?.holder !== undefined ? ['/holder']
+      // `!= null` (not `!== undefined`): a null-valued issuer/holder is dropped
+      // by JSON-LD expansion, so defaulting to its pointer would throw the same
+      // opaque "pointer does not match" error the fallback exists to avoid.
+      document?.issuer != null ? ['/issuer']
+      : document?.holder != null ? ['/holder']
       : []
     );
 
