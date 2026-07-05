@@ -7,7 +7,14 @@ import { OriginalsConfig } from '../../types/index.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as ed25519 from '@noble/ed25519';
 import { encodeBase64UrlMultibase, base58, MULTIBASE_BASE58BTC_HEADER } from '../../utils/encoding.js';
-import { storedDataToString } from '../checkpoint/CheckpointStorage.js';
+import { resolveMigrationStorage, MigrationStorage } from '../storage/MigrationStorage.js';
+
+/**
+ * Index object listing every persisted audit-record key. The canonical
+ * StorageAdapter interface has no list(); the index makes persisted records
+ * discoverable again after a restart.
+ */
+const AUDIT_INDEX_KEY = 'audit/migrations/index.json';
 
 /**
  * Key material for signing audit records with Ed25519. When omitted, the
@@ -22,6 +29,11 @@ export interface AuditSignerConfig {
 
 export class AuditLogger implements IAuditLogger {
   private auditRecords: Map<string, MigrationAuditRecord[]>;
+  /**
+   * Serializes read-modify-write updates of the persisted audit index so
+   * concurrent migrations in one process cannot drop each other's entries.
+   */
+  private indexLock: Promise<void> = Promise.resolve();
 
   constructor(
     private config: OriginalsConfig,
@@ -164,21 +176,54 @@ export class AuditLogger implements IAuditLogger {
   }
 
   /**
-   * Persist audit record to storage (append-only, never overwrite)
-   * Updated key design: audit/migrations/{migrationId}/{timestamp}-{finalState}.json
+   * Persist audit record to storage (append-only, never overwrite).
+   * Key design: audit/migrations/{migrationId}/{timestamp}-{finalState}.json
+   *
+   * Goes through resolveMigrationStorage so the shipped putObject/getObject
+   * adapters persist too (previously only legacy duck-typed `put` adapters
+   * did — with Memory/Local adapters the signed audit trail silently never
+   * hit storage). Persistence failures PROPAGATE: MigrationManager catches
+   * them and surfaces auditPersisted:false/auditError on the result instead
+   * of the trail being lost silently.
    */
   private async persistAuditRecord(record: MigrationAuditRecord): Promise<void> {
-    const storageAdapter = (this.config as any).storageAdapter;
-    if (storageAdapter && typeof storageAdapter.put === 'function') {
-      try {
-        const data = JSON.stringify(record);
-        // Use unique key to prevent overwriting: migrationId/timestamp-state
-        const key = `audit/migrations/${record.migrationId}/${record.timestamp}-${record.finalState}.json`;
-        await storageAdapter.put(key, Buffer.from(data), { contentType: 'application/json' });
-      } catch (error) {
-        console.error('Failed to persist audit record:', error);
-        // Continue - in-memory record is still available
+    const storage = resolveMigrationStorage(this.config);
+    if (!storage) return; // no adapter configured: in-memory only
+
+    // Use unique key to prevent overwriting: migrationId/timestamp-state
+    const key = `audit/migrations/${record.migrationId}/${record.timestamp}-${record.finalState}.json`;
+    await storage.putText(key, JSON.stringify(record));
+    await this.appendToIndex(storage, key);
+  }
+
+  /**
+   * Record a persisted key in the audit index (read-modify-write, serialized
+   * through indexLock). Only needed for canonical adapters, which cannot
+   * list; kept for legacy adapters too so the index stays complete.
+   */
+  private appendToIndex(storage: MigrationStorage, key: string): Promise<void> {
+    const update = this.indexLock.then(async () => {
+      const keys = await this.readIndex(storage);
+      if (!keys.includes(key)) {
+        keys.push(key);
+        await storage.putText(AUDIT_INDEX_KEY, JSON.stringify(keys));
       }
+    });
+    // Keep the chain alive even if this update fails, but propagate the
+    // failure to THIS caller (a broken index means the record is not
+    // discoverable after a restart — that is a persistence failure).
+    this.indexLock = update.catch(() => undefined);
+    return update;
+  }
+
+  private async readIndex(storage: MigrationStorage): Promise<string[]> {
+    try {
+      const text = await storage.getText(AUDIT_INDEX_KEY);
+      if (!text) return [];
+      const parsed: unknown = JSON.parse(text);
+      return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === 'string') : [];
+    } catch {
+      return [];
     }
   }
 
@@ -186,22 +231,23 @@ export class AuditLogger implements IAuditLogger {
    * Load audit records from storage
    */
   async loadAuditRecords(did: string): Promise<void> {
-    const storageAdapter = (this.config as any).storageAdapter;
-    if (!storageAdapter || typeof storageAdapter.list !== 'function') {
+    const storage = resolveMigrationStorage(this.config);
+    if (!storage) {
       return;
     }
 
     try {
-      // List all audit records
-      const files = await storageAdapter.list('audit/migrations/');
+      // Prefer a native list() when the (legacy) adapter offers one;
+      // otherwise fall back to the persisted index maintained by
+      // persistAuditRecord (the canonical StorageAdapter cannot list).
+      const files = (await storage.listNative('audit/migrations/')) ?? (await this.readIndex(storage));
 
       for (const file of files) {
+        if (file === AUDIT_INDEX_KEY) continue;
         try {
-          const data = await storageAdapter.get(file);
+          const data = await storage.getText(file);
           if (data) {
-            // StorageAdapter.get returns { content, contentType }; data.toString()
-            // was "[object Object]" and silently skipped every persisted record.
-            const record: MigrationAuditRecord = JSON.parse(storedDataToString(data));
+            const record: MigrationAuditRecord = JSON.parse(data);
 
             // Add to in-memory store if it matches the DID
             if (record.sourceDid === did || record.targetDid === did) {

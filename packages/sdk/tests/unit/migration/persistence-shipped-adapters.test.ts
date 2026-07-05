@@ -1,0 +1,211 @@
+/**
+ * Item 2 (blocker): checkpoint & audit persistence must work with the SHIPPED
+ * StorageAdapter interface (putObject/getObject/exists).
+ *
+ * CheckpointStorage and AuditLogger previously duck-typed
+ * storageAdapter.put/get/delete/list — methods that neither the public
+ * StorageAdapter interface nor the shipped Memory/Local adapters define. The
+ * typeof guards skipped silently, so checkpoints and the signed audit trail
+ * were NEVER persisted: after a crash (fresh process, empty in-memory maps),
+ * rollback() found nothing and quarantined.
+ */
+import { describe, it, expect, beforeEach } from 'bun:test';
+import { CheckpointStorage } from '../../../src/migration/checkpoint/CheckpointStorage';
+import { AuditLogger } from '../../../src/migration/audit/AuditLogger';
+import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
+import { LocalStorageAdapter } from '../../../src/storage/LocalStorageAdapter';
+import { MigrationStateEnum, MigrationAuditRecord, MigrationCheckpoint } from '../../../src/migration/types';
+import type { OriginalsConfig } from '../../../src/types';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+function makeConfig(storageAdapter: unknown): OriginalsConfig {
+  return {
+    network: 'regtest',
+    defaultKeyType: 'Ed25519',
+    enableLogging: false,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    storageAdapter: storageAdapter as any
+  } as OriginalsConfig;
+}
+
+function makeCheckpoint(id: string): MigrationCheckpoint {
+  return {
+    checkpointId: id,
+    migrationId: `mig_for_${id}`,
+    timestamp: Date.now(),
+    sourceDid: 'did:peer:z6MkPersist',
+    sourceLayer: 'peer',
+    targetLayer: 'webvh',
+    didDocument: { id: 'did:peer:z6MkPersist' } as never,
+    credentials: [],
+    storageReferences: {},
+    lifecycleState: {},
+    ownershipProofs: [],
+    metadata: {}
+  };
+}
+
+function makeAuditRecord(overrides: Partial<MigrationAuditRecord> = {}): MigrationAuditRecord {
+  return {
+    migrationId: 'mig_audit_persist_001',
+    timestamp: 1700000000000,
+    initiator: 'system',
+    sourceDid: 'did:peer:z6MkAuditPersist',
+    sourceLayer: 'peer',
+    targetDid: 'did:webvh:example.com:user:persist',
+    targetLayer: 'webvh',
+    finalState: MigrationStateEnum.COMPLETED,
+    validationResults: {
+      valid: true,
+      errors: [],
+      warnings: [],
+      estimatedCost: { storageCost: 0, networkFees: 0, totalCost: 0, estimatedDuration: 1, currency: 'sats' },
+      estimatedDuration: 1
+    },
+    costActual: { storageCost: 0, networkFees: 0, totalCost: 0, estimatedDuration: 1, currency: 'sats' },
+    duration: 5,
+    errors: [],
+    metadata: {},
+    ...overrides
+  };
+}
+
+beforeEach(() => {
+  MemoryStorageAdapter.clear();
+});
+
+describe('CheckpointStorage persists through the shipped StorageAdapter interface', () => {
+  it('a checkpoint saved with MemoryStorageAdapter survives loss of the in-memory map', async () => {
+    const config = makeConfig(new MemoryStorageAdapter());
+    const storageA = new CheckpointStorage(config);
+    await storageA.save(makeCheckpoint('chk_mem_persist'));
+
+    // Fresh instance = crash simulation: empty in-memory map, same adapter.
+    const storageB = new CheckpointStorage(config);
+    const loaded = await storageB.get('chk_mem_persist');
+    expect(loaded).not.toBeNull();
+    expect(loaded!.checkpointId).toBe('chk_mem_persist');
+    expect(loaded!.sourceDid).toBe('did:peer:z6MkPersist');
+  });
+
+  it('a checkpoint saved with LocalStorageAdapter survives loss of the in-memory map', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'originals-chk-'));
+    try {
+      const config = makeConfig(new LocalStorageAdapter({ baseDir: dir }));
+      const storageA = new CheckpointStorage(config);
+      await storageA.save(makeCheckpoint('chk_local_persist'));
+
+      const storageB = new CheckpointStorage(config);
+      const loaded = await storageB.get('chk_local_persist');
+      expect(loaded).not.toBeNull();
+      expect(loaded!.checkpointId).toBe('chk_local_persist');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('delete removes a persisted checkpoint so a fresh instance no longer sees it', async () => {
+    const config = makeConfig(new MemoryStorageAdapter());
+    const storageA = new CheckpointStorage(config);
+    await storageA.save(makeCheckpoint('chk_deleted'));
+
+    const storageB = new CheckpointStorage(config);
+    expect(await storageB.get('chk_deleted')).not.toBeNull();
+    await storageB.delete('chk_deleted');
+
+    const storageC = new CheckpointStorage(config);
+    expect(await storageC.get('chk_deleted')).toBeNull();
+  });
+
+  it('still supports legacy duck-typed put/get adapters', async () => {
+    const objects = new Map<string, Buffer>();
+    const legacyAdapter = {
+      async put(key: string, data: Buffer | string) {
+        objects.set(key, Buffer.from(data));
+        return key;
+      },
+      async get(key: string) {
+        const content = objects.get(key);
+        return content ? { content, contentType: 'application/json' } : null;
+      }
+    };
+    const config = makeConfig(legacyAdapter);
+    const storageA = new CheckpointStorage(config);
+    await storageA.save(makeCheckpoint('chk_legacy'));
+    expect(objects.size).toBeGreaterThan(0);
+
+    const storageB = new CheckpointStorage(config);
+    const loaded = await storageB.get('chk_legacy');
+    expect(loaded).not.toBeNull();
+    expect(loaded!.checkpointId).toBe('chk_legacy');
+  });
+});
+
+describe('AuditLogger persists through the shipped StorageAdapter interface', () => {
+  it('an audit record logged with MemoryStorageAdapter is loadable by a fresh logger', async () => {
+    const config = makeConfig(new MemoryStorageAdapter());
+    const loggerA = new AuditLogger(config);
+    const record = makeAuditRecord();
+    await loggerA.logMigration(record);
+
+    // Fresh logger = crash simulation: empty in-memory records.
+    const loggerB = new AuditLogger(config);
+    expect(await loggerB.getMigrationHistory(record.sourceDid)).toHaveLength(0);
+    await loggerB.loadAuditRecords(record.sourceDid);
+    const history = await loggerB.getMigrationHistory(record.sourceDid);
+    expect(history).toHaveLength(1);
+    expect(history[0].migrationId).toBe(record.migrationId);
+    expect(history[0].signature).toBeDefined();
+    // The reloaded record still verifies (integrity preserved across storage).
+    expect(await loggerB.verifyAuditRecord(history[0])).toBe(true);
+  });
+
+  it('an audit record logged with LocalStorageAdapter is loadable by a fresh logger', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'originals-audit-'));
+    try {
+      const config = makeConfig(new LocalStorageAdapter({ baseDir: dir }));
+      const loggerA = new AuditLogger(config);
+      const record = makeAuditRecord({ migrationId: 'mig_audit_local' });
+      await loggerA.logMigration(record);
+
+      const loggerB = new AuditLogger(config);
+      await loggerB.loadAuditRecords(record.sourceDid);
+      const history = await loggerB.getMigrationHistory(record.sourceDid);
+      expect(history).toHaveLength(1);
+      expect(history[0].migrationId).toBe('mig_audit_local');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('records are append-only: multiple migrations of the same DID are all reloadable', async () => {
+    const config = makeConfig(new MemoryStorageAdapter());
+    const loggerA = new AuditLogger(config);
+    await loggerA.logMigration(makeAuditRecord({ migrationId: 'mig_a1', timestamp: 1700000000001 }));
+    await loggerA.logMigration(makeAuditRecord({ migrationId: 'mig_a2', timestamp: 1700000000002 }));
+    await loggerA.logMigration(makeAuditRecord({
+      migrationId: 'mig_a2',
+      timestamp: 1700000000003,
+      finalState: MigrationStateEnum.FAILED
+    }));
+
+    const loggerB = new AuditLogger(config);
+    await loggerB.loadAuditRecords('did:peer:z6MkAuditPersist');
+    const history = await loggerB.getMigrationHistory('did:peer:z6MkAuditPersist');
+    expect(history.length).toBe(3);
+  });
+
+  it('audit persistence failures propagate so callers can surface auditPersisted:false', async () => {
+    const failingAdapter = {
+      putObject: async () => {
+        throw new Error('disk full');
+      },
+      getObject: async () => null,
+      exists: async () => false
+    };
+    const logger = new AuditLogger(makeConfig(failingAdapter));
+    await expect(logger.logMigration(makeAuditRecord())).rejects.toThrow('disk full');
+  });
+});
