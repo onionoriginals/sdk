@@ -8,7 +8,7 @@ import { OrdinalsProviderResolverAdapter } from './providers/OrdinalsProviderRes
 import { StructuredError } from '../utils/telemetry.js';
 import { multikey } from '../crypto/Multikey.js';
 import { KeyManager } from './KeyManager.js';
-import { WebVHManager, normalizeUpdateKey, assertEd25519WebVHUpdateKeys } from './WebVHManager.js';
+import { WebVHManager } from './WebVHManager.js';
 import { Ed25519Verifier } from './Ed25519Verifier.js';
 import type {
   RotateWebVHKeysOptions,
@@ -16,7 +16,6 @@ import type {
   RecoverWebVHOptions,
   RecoverWebVHResult,
 } from './WebVHManager.js';
-import { Ed25519Signer } from '../crypto/Signer.js';
 import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { DIDCache } from './DIDCache.js';
@@ -181,9 +180,11 @@ export class DIDManager {
    *
    * Returns the FULL migration result — not just the DID document. The signed
    * `log` must be hosted (did.jsonl) for the DID to resolve, and the returned
-   * `keyPair` (generated unless a keyPair/externalSigner was supplied via
-   * `options`) must be persisted for future updates/rotations. Discarding
-   * them leaves the migrated DID unhostable and un-updatable.
+   * `keyPair` (generated unless a keyPair or externalSigner was supplied via
+   * `options`; absent when an externalSigner holds the key material) must be
+   * persisted for future updates/rotations. Discarding them leaves the
+   * migrated DID unhostable and un-updatable. Provide either `keyPair` OR
+   * `externalSigner` in `options`, never both.
    *
    * The peer document's verification methods are carried over as
    * verification-only keys, its services are preserved, and the original
@@ -289,7 +290,7 @@ export class DIDManager {
       did: result.did,
       didDocument: result.didDocument,
       log: result.log as unknown as DIDLog,
-      keyPair: result.keyPair,
+      ...(result.keyPair ? { keyPair: result.keyPair } : {}),
       logPath: result.logPath,
       previousDid: oldDid,
     };
@@ -556,140 +557,24 @@ export class DIDManager {
   // ========================================================================
 
   /**
-   * Creates a new did:webvh DID with proper cryptographic signing
+   * Creates a new did:webvh DID with proper cryptographic signing.
+   *
+   * Delegates to WebVHManager.createDIDWebVH — the single implementation —
+   * after resolving the default domain from the configured WebVH network.
+   * (This method used to carry a diverged duplicate of that logic which,
+   * among other gaps, skipped path-segment validation.)
+   *
+   * Provide either `keyPair` OR `externalSigner`, never both (CLAUDE.md
+   * gotcha #7). With an externalSigner the result carries NO `keyPair`.
+   *
    * @param options - Creation options including domain and optional key pair or external signer
    * @returns The created DID, document, log, and key pair (if generated)
    */
   async createDIDWebVH(options: CreateWebVHOptions): Promise<CreateWebVHResult> {
-    const {
-      domain: providedDomain,
-      keyPair: providedKeyPair,
-      paths = [],
-      portable = false,
-      outputDir,
-      externalSigner,
-      externalVerifier,
-      verificationMethods: providedVerificationMethods,
-      updateKeys: providedUpdateKeys
-    } = options;
-
     // Use provided domain or get default from configured network
     const network = this.config.webvhNetwork || DEFAULT_WEBVH_NETWORK;
-    const domain = providedDomain || getNetworkDomain(network);
-
-    // Dynamically import didwebvh-ts to avoid module resolution issues
-    const mod = await import('didwebvh-ts') as unknown as {
-      createDID: (options: Record<string, unknown>) => Promise<{
-        did: string;
-        doc: Record<string, unknown>;
-        log: DIDLog;
-      }>;
-      prepareDataForSigning: (
-        document: Record<string, unknown>,
-        proof: Record<string, unknown>
-      ) => Promise<Uint8Array>;
-    };
-    const { createDID, prepareDataForSigning } = mod;
-
-    // Runtime validation of imported module
-    if (typeof createDID !== 'function' || typeof prepareDataForSigning !== 'function') {
-      throw new Error('Failed to load didwebvh-ts: invalid module exports');
-    }
-
-    let signer: Signer | ExternalSigner;
-    let verifier: Verifier | ExternalVerifier;
-    let keyPair: KeyPair | undefined;
-    let verificationMethods: WebVHVerificationMethod[];
-    let updateKeys: string[];
-
-    // Use external signer if provided (e.g., Turnkey integration)
-    if (externalSigner) {
-      if (!providedVerificationMethods || providedVerificationMethods.length === 0) {
-        throw new Error('verificationMethods are required when using externalSigner');
-      }
-      if (!providedUpdateKeys || providedUpdateKeys.length === 0) {
-        throw new Error('updateKeys are required when using externalSigner');
-      }
-
-      signer = externalSigner;
-      // An ExternalSigner has no verify(); silently casting it to a verifier
-      // makes didwebvh-ts fail deep inside with "verifier.verify is not a
-      // function". Accept the signer only if it actually implements verify().
-      if (externalVerifier) {
-        verifier = externalVerifier;
-      } else if (typeof (externalSigner as unknown as { verify?: unknown }).verify === 'function') {
-        verifier = externalSigner as unknown as ExternalVerifier;
-      } else {
-        throw new Error(
-          'externalVerifier is required when the provided externalSigner does not implement verify()'
-        );
-      }
-      verificationMethods = providedVerificationMethods;
-      updateKeys = providedUpdateKeys.map(normalizeUpdateKey);
-      assertEd25519WebVHUpdateKeys(updateKeys);
-      keyPair = undefined; // No key pair when using external signer
-    } else {
-      // Generate or use provided key pair (Ed25519 for did:webvh)
-      const keyManager = new KeyManager();
-      keyPair = providedKeyPair || await keyManager.generateKeyPair('Ed25519');
-
-      // Create verification methods
-      verificationMethods = [
-        {
-          type: 'Multikey',
-          publicKeyMultibase: keyPair.publicKey,
-        }
-      ];
-
-      // Create signer using our adapter
-      const internalSigner = new OriginalsWebVHSigner(
-        keyPair.privateKey,
-        verificationMethods[0],
-        prepareDataForSigning,
-        { verificationMethod: verificationMethods[0] }
-      );
-
-      signer = internalSigner;
-      verifier = internalSigner; // Use the same signer as verifier
-      // Bare multikey format per the did:webvh spec (didwebvh-ts >= 2.8)
-      updateKeys = [keyPair.publicKey];
-    }
-
-    // Create the DID using didwebvh-ts
-    const result = await createDID({
-      domain,
-      signer,
-      verifier,
-      updateKeys,
-      verificationMethods,
-      context: [
-        'https://www.w3.org/ns/did/v1',
-        'https://w3id.org/security/multikey/v1'
-      ],
-      paths,
-      portable,
-      authentication: ['#key-0'],
-      assertionMethod: ['#key-0'],
-    });
-
-    // Validate the returned DID document
-    if (!this.validateDIDDocument(result.doc as unknown as DIDDocument)) {
-      throw new Error('Invalid DID document returned from createDID');
-    }
-
-    // Save the log to did.jsonl if output directory is provided
-    let logPath: string | undefined;
-    if (outputDir) {
-      logPath = await this.saveDIDLog(result.did, result.log, outputDir);
-    }
-
-    return {
-      did: result.did,
-      didDocument: result.doc as unknown as DIDDocument,
-      log: result.log,
-      keyPair: keyPair || { publicKey: '', privateKey: '' }, // Return empty keypair if using external signer
-      logPath,
-    };
+    const domain = options.domain || getNetworkDomain(network);
+    return this.getWebVHManager().createDIDWebVH({ ...options, domain });
   }
 
   /**
@@ -792,29 +677,6 @@ interface WebVHVerificationMethod {
   purpose?: 'authentication' | 'assertionMethod' | 'keyAgreement' | 'capabilityInvocation' | 'capabilityDelegation';
 }
 
-interface SigningInput {
-  document: Record<string, unknown>;
-  proof: Record<string, unknown>;
-}
-
-interface SigningOutput {
-  proofValue: string;
-}
-
-interface SignerOptions {
-  verificationMethod?: WebVHVerificationMethod | null;
-  useStaticId?: boolean;
-}
-
-interface Signer {
-  sign(input: SigningInput): Promise<SigningOutput>;
-  getVerificationMethodId(): string;
-}
-
-interface Verifier {
-  verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): Promise<boolean>;
-}
-
 interface DIDLogEntry {
   versionId: string;
   versionTime: string;
@@ -846,7 +708,12 @@ export interface MigrateToWebVHResult {
   did: string;
   didDocument: DIDDocument;
   log: DIDLog;
-  keyPair: KeyPair;
+  /**
+   * The generated (or caller-provided) update key pair — MUST be persisted
+   * for future updates/rotations. Absent when an `externalSigner` was used:
+   * the external system holds the key material.
+   */
+  keyPair?: KeyPair;
   logPath?: string;
   previousDid: string;
 }
@@ -870,7 +737,11 @@ export interface CreateWebVHResult {
   did: string;
   didDocument: DIDDocument;
   log: DIDLog;
-  keyPair: KeyPair;
+  /**
+   * The generated (or caller-provided) update key pair — MUST be persisted.
+   * Absent when an `externalSigner` was used (no fake placeholder is returned).
+   */
+  keyPair?: KeyPair;
   logPath?: string;
 }
 
@@ -883,71 +754,5 @@ export type {
   RecoverWebVHResult,
   KeyRecoveryCredential,
 } from './WebVHManager.js';
-
-/**
- * Adapter to use Originals SDK signers with didwebvh-ts
- */
-class OriginalsWebVHSigner implements Signer, Verifier {
-  private privateKeyMultibase: string;
-  private signer: Ed25519Signer;
-  protected verificationMethod?: WebVHVerificationMethod | null;
-  protected useStaticId: boolean;
-  private prepareDataForSigning: (document: Record<string, unknown>, proof: Record<string, unknown>) => Promise<Uint8Array>;
-
-  constructor(
-    privateKeyMultibase: string,
-    verificationMethod: WebVHVerificationMethod,
-    prepareDataForSigning: (document: Record<string, unknown>, proof: Record<string, unknown>) => Promise<Uint8Array>,
-    options: SignerOptions = {}
-  ) {
-    this.privateKeyMultibase = privateKeyMultibase;
-    this.verificationMethod = options.verificationMethod || verificationMethod;
-    this.useStaticId = options.useStaticId || false;
-    this.signer = new Ed25519Signer();
-    this.prepareDataForSigning = prepareDataForSigning;
-  }
-
-  async sign(input: SigningInput): Promise<SigningOutput> {
-    // Prepare the data for signing using didwebvh-ts's canonical approach
-    const dataToSign = await this.prepareDataForSigning(input.document, input.proof);
-    
-    // Sign using our Ed25519 signer
-    const signature: Buffer = await this.signer.sign(
-      Buffer.from(dataToSign),
-      this.privateKeyMultibase
-    );
-
-    // Encode signature as multibase
-    const proofValue = multikey.encodeMultibase(signature);
-
-    return { proofValue };
-  }
-
-  async verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): Promise<boolean> {
-    // Decode the public key to multibase format
-    const publicKeyMultibase = multikey.encodePublicKey(publicKey, 'Ed25519');
-    
-    // Verify using our Ed25519 signer
-    const messageBuffer: Buffer = Buffer.from(message);
-    const signatureBuffer: Buffer = Buffer.from(signature);
-    
-    return this.signer.verify(
-      messageBuffer,
-      signatureBuffer,
-      publicKeyMultibase
-    );
-  }
-
-  getVerificationMethodId(): string {
-    // didwebvh-ts requires verification method to be a did:key: identifier
-    // Extract the multibase key from the verification method
-    const publicKeyMultibase = this.verificationMethod?.publicKeyMultibase;
-    if (!publicKeyMultibase) {
-      throw new Error('Verification method must have publicKeyMultibase');
-    }
-    // Return as did:key format which didwebvh-ts expects
-    return `did:key:${publicKeyMultibase}`;
-  }
-}
 
 

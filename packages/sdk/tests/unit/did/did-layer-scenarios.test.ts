@@ -193,9 +193,8 @@ describe('DID-006 — did:webvh with external (mock Turnkey-style) signer', () =
     // The external signer must have been called at least once
     expect(signCallCount()).toBeGreaterThan(0);
 
-    // When using external signer, no internal keyPair is returned (empty strings)
-    expect(result.keyPair.publicKey).toBe('');
-    expect(result.keyPair.privateKey).toBe('');
+    // When using external signer, no internal keyPair is returned at all
+    expect(result.keyPair).toBeUndefined();
   }, 20000);
 
   test('createDIDWebVH with external signer requires verificationMethods', async () => {
