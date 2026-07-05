@@ -65,7 +65,7 @@ export {
 export { calculateFee } from './bitcoin/fee-calculation.js';
 export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs.js';
 export { BBSCryptosuiteManager } from './vc/cryptosuites/bbsCryptosuite.js';
-export type { BBSProofOptions, BBSDeriveOptions } from './vc/cryptosuites/bbsCryptosuite.js';
+export type { BBSProofOptions, BBSDeriveOptions, BBSVerifyOptions } from './vc/cryptosuites/bbsCryptosuite.js';
 export type { StatusListResolver } from './vc/Verifier.js';
 export { MultiSigManager } from './vc/MultiSigManager.js';
 export * from './storage/index.js';

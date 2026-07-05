@@ -53,6 +53,20 @@ export interface BBSDeriveOptions {
   selectivePointers: string[];
 }
 
+export interface BBSVerifyOptions {
+  documentLoader?: (url: string) => Promise<any>;
+  /**
+   * DID expected to control the proof's verification method. When omitted,
+   * the binding is checked against the document's `issuer` (credentials) or
+   * `holder` (presentations); verification fails closed if neither is present.
+   */
+  expectedController?: string;
+  /** When set, the proof's challenge must match exactly (anti-replay). */
+  expectedChallenge?: string;
+  /** When set, the proof's domain must match exactly. */
+  expectedDomain?: string;
+}
+
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(a.length + b.length);
   out.set(a, 0);
@@ -430,18 +444,94 @@ export class BBSCryptosuiteManager {
   }
 
   /**
+   * Bind the proof's verification method to the DID that must control it: the
+   * credential `issuer` (or presentation `holder`), or an explicitly supplied
+   * `expectedController`. The signature is verified against whatever key
+   * `proof.verificationMethod` resolves to, so without this check an attacker
+   * can sign a credential naming a trusted issuer with their own key and have
+   * it verify — full issuer impersonation (issue #315). Mirrors
+   * Verifier.checkVerificationMethodController; fails closed when no expected
+   * subject can be determined. Returns an error message, or null if bound.
+   */
+  private static checkProofBinding(
+    unsecuredDocument: any,
+    proof: DataIntegrityProof,
+    expectedController?: string
+  ): string | null {
+    const verificationMethod = (proof as { verificationMethod?: unknown })?.verificationMethod;
+    if (typeof verificationMethod !== 'string' || verificationMethod.length === 0) {
+      return 'Proof is missing a verificationMethod';
+    }
+    let expected = expectedController;
+    let subjectLabel = 'expected controller';
+    if (expected === undefined) {
+      const issuer = unsecuredDocument?.issuer;
+      const holder = unsecuredDocument?.holder;
+      if (issuer !== undefined && issuer !== null) {
+        expected = typeof issuer === 'string' ? issuer : (issuer as { id?: string })?.id;
+        subjectLabel = 'issuer';
+      } else if (holder !== undefined && holder !== null) {
+        expected = typeof holder === 'string' ? holder : (holder as { id?: string })?.id;
+        subjectLabel = 'holder';
+      }
+    }
+    if (!expected) {
+      return 'Document has no issuer or holder to bind the proof to (pass expectedController to verify non-credential documents)';
+    }
+    const vmDid = verificationMethod.split('#')[0];
+    if (vmDid !== expected) {
+      return `Proof verificationMethod (${vmDid}) does not match ${subjectLabel} (${expected})`;
+    }
+    return null;
+  }
+
+  /**
+   * Enforce verifier-supplied challenge/domain expectations against the proof
+   * (anti-replay: a derived proof observed once must not be replayable to a
+   * verifier that issued a different challenge). Returns an error message, or
+   * null when all supplied expectations match.
+   */
+  private static checkProofExpectations(
+    proof: DataIntegrityProof,
+    options: BBSVerifyOptions
+  ): string | null {
+    const proofRecord = proof as unknown as { challenge?: string; domain?: string };
+    if (options.expectedChallenge !== undefined && proofRecord.challenge !== options.expectedChallenge) {
+      return 'Proof challenge mismatch (possible replay)';
+    }
+    if (options.expectedDomain !== undefined && proofRecord.domain !== options.expectedDomain) {
+      return 'Proof domain mismatch';
+    }
+    return null;
+  }
+
+  /**
    * 3.4.7 — verify a derived (selective-disclosure) proof.
    */
   static async verifyDerivedProof(
     securedDocument: any,
-    options: { documentLoader?: (url: string) => Promise<any> } = {}
-  ): Promise<{ verified: boolean; verifiedDocument: any }> {
+    options: BBSVerifyOptions = {}
+  ): Promise<{ verified: boolean; verifiedDocument: any; errors?: string[] }> {
     try {
+      const { proof, ...unsecuredDocument } = securedDocument;
+
+      const bindingError = BBSCryptosuiteManager.checkProofBinding(
+        unsecuredDocument,
+        proof,
+        options.expectedController
+      );
+      if (bindingError) {
+        return { verified: false, verifiedDocument: null, errors: [bindingError] };
+      }
+      const expectationError = BBSCryptosuiteManager.checkProofExpectations(proof, options);
+      if (expectationError) {
+        return { verified: false, verifiedDocument: null, errors: [expectationError] };
+      }
+
       const publicKey = await BBSCryptosuiteManager.resolveVerificationKey(
-        securedDocument.proof.verificationMethod,
+        proof.verificationMethod,
         options.documentLoader
       );
-      const { proof, ...unsecuredDocument } = securedDocument;
       const { bbsProof, proofHash, mandatoryHash, selectiveIndexes, presentationHeader, nonMandatory } =
         await BBSCryptosuiteManager.createVerifyData(unsecuredDocument, proof, options);
 
@@ -456,9 +546,17 @@ export class BBSCryptosuiteManager {
         disclosedMessageIndexes: selectiveIndexes
       });
 
-      return { verified, verifiedDocument: verified ? unsecuredDocument : null };
-    } catch {
-      return { verified: false, verifiedDocument: null };
+      return verified
+        ? { verified: true, verifiedDocument: unsecuredDocument }
+        : { verified: false, verifiedDocument: null, errors: ['BBS+ derived proof verification failed'] };
+    } catch (e: any) {
+      // Surface the underlying error: swallowing it makes internal failures
+      // (e.g. canonicalization bugs) indistinguishable from a bad signature.
+      return {
+        verified: false,
+        verifiedDocument: null,
+        errors: [e?.message ?? 'Unknown BBS+ derived proof verification error']
+      };
     }
   }
 
@@ -472,11 +570,28 @@ export class BBSCryptosuiteManager {
   static async verifyProof(
     document: any,
     proof: DataIntegrityProof,
-    options: { documentLoader?: (url: string) => Promise<any> } = {}
+    options: BBSVerifyOptions = {}
   ): Promise<VerificationResult> {
     try {
       if (proof.cryptosuite !== 'bbs-2023') {
         return { verified: false, errors: [`Expected bbs-2023 cryptosuite, got ${proof.cryptosuite}`] };
+      }
+
+      // Accept either an unsecured document or a secured one (proof attached):
+      // an embedded proof must never be canonicalized into the verified data.
+      const { proof: _docProof, ...unsecuredDocument } = document ?? {};
+
+      const bindingError = BBSCryptosuiteManager.checkProofBinding(
+        unsecuredDocument,
+        proof,
+        options.expectedController
+      );
+      if (bindingError) {
+        return { verified: false, errors: [bindingError] };
+      }
+      const expectationError = BBSCryptosuiteManager.checkProofExpectations(proof, options);
+      if (expectationError) {
+        return { verified: false, errors: [expectationError] };
       }
 
       const decoded = decodeMultibaseB64url(proof.proofValue);
@@ -495,12 +610,12 @@ export class BBSCryptosuiteManager {
 
       if (!isBaseProof) {
         const result = await BBSCryptosuiteManager.verifyDerivedProof(
-          { ...document, proof },
+          { ...unsecuredDocument, proof },
           options
         );
         return result.verified
           ? { verified: true }
-          : { verified: false, errors: ['BBS+ derived proof verification failed'] };
+          : { verified: false, errors: result.errors ?? ['BBS+ derived proof verification failed'] };
       }
 
       // Base proof: bind the embedded public key to the resolved DID key before
@@ -513,11 +628,11 @@ export class BBSCryptosuiteManager {
       const proofOptions: any = { ...proof };
       delete proofOptions.proofValue;
       const proofHash = sha256Of(await canonize(
-        { '@context': document['@context'], ...proofOptions },
+        { '@context': unsecuredDocument['@context'], ...proofOptions },
         { documentLoader: options.documentLoader }
       ));
 
-      const { mandatory, nonMandatory } = await BBSCryptosuiteManager.baseProofTransformation(document, {
+      const { mandatory, nonMandatory } = await BBSCryptosuiteManager.baseProofTransformation(unsecuredDocument, {
         mandatoryPointers: parsed.mandatoryPointers,
         hmacKey: toUint8(parsed.hmacKey),
         documentLoader: options.documentLoader

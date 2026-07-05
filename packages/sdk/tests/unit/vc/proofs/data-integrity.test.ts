@@ -21,4 +21,20 @@ describe('DataIntegrityProofManager branches', () => {
     expect(res.verified).toBe(false);
     expect(res.errors?.[0]).toContain('Unsupported cryptosuite');
   });
+
+  // Issue #315: bbs-2023 must be routed to the BBS cryptosuite (with its
+  // issuer↔verificationMethod binding), not rejected as unsupported.
+  test('bbs-2023 on verify dispatches to the BBS cryptosuite', async () => {
+    const res = await DataIntegrityProofManager.verifyProof(
+      { id: 'x', issuer: 'did:example:victim' },
+      {
+        type: 'DataIntegrityProof', cryptosuite: 'bbs-2023',
+        verificationMethod: 'did:example:attacker#k', proofPurpose: 'assertionMethod', proofValue: 'z'
+      } as any,
+      { documentLoader: async () => ({ document: {}, documentUrl: '', contextUrl: null }) }
+    );
+    expect(res.verified).toBe(false);
+    // Rejected by the BBS issuer-binding check, not as an unknown cryptosuite.
+    expect(res.errors?.[0]).toContain('does not match issuer');
+  });
 });

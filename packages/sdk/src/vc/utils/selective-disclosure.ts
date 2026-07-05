@@ -194,18 +194,23 @@ export function skolemizeExpandedJsonLd(
   expanded: Record<string, unknown>[],
   options: { urnScheme?: string; randomString?: string; count?: number }
 ): any[] {
-  const localOptions = {
-    urnScheme: options.urnScheme || CUSTOM_URN_SCHEME,
-    randomString: options.randomString || crypto.randomUUID(),
-    count: options.count || 0
-  };
+  // The anonymous-node counter MUST be one shared object mutated by reference
+  // across the entire recursion (as in the di-wings reference algorithm).
+  // Copying `count` into a per-level object and writing it back only one level
+  // up loses the increments accumulated beneath any node that carries an
+  // explicit @id (such a node never calls generateId), so a later sibling
+  // branch reuses the same skolem URN and two distinct blank nodes collapse
+  // into one after deskolemization (issue #316).
+  if (options.urnScheme === undefined) options.urnScheme = CUSTOM_URN_SCHEME;
+  if (options.randomString === undefined) options.randomString = crypto.randomUUID();
+  if (options.count === undefined) options.count = 0;
 
   const generateId = (blankNodeId?: string): string => {
     if (blankNodeId) {
-      return `urn:${localOptions.urnScheme}:${blankNodeId}`;
+      return `urn:${options.urnScheme}:${blankNodeId}`;
     }
-    const id = `urn:${localOptions.urnScheme}:_${localOptions.randomString}_${localOptions.count}`;
-    options.count = ++localOptions.count; // Update the parent options count
+    const id = `urn:${options.urnScheme}:_${options.randomString}_${options.count}`;
+    options.count = (options.count as number) + 1;
     return id;
   };
 
@@ -225,11 +230,11 @@ export function skolemizeExpandedJsonLd(
       const value = (element as any)[property];
 
       if (Array.isArray(value)) {
-        skolemizedNode[property] = skolemizeExpandedJsonLd(value, localOptions);
+        skolemizedNode[property] = skolemizeExpandedJsonLd(value, options);
       } else {
         skolemizedNode[property] = skolemizeExpandedJsonLd(
           [value as Record<string, unknown>],
-          localOptions
+          options
         )[0];
       }
     }
