@@ -1,0 +1,112 @@
+.hero {
+  position: relative;
+  padding: var(--sp-20) 0 var(--sp-24);
+  text-align: center;
+  overflow: hidden;
+}
+
+.hero-glow {
+  position: absolute;
+  inset: -40% -20% auto;
+  height: 720px;
+  background:
+    radial-gradient(560px 300px at 30% 18%, rgba(167, 139, 250, 0.09), transparent 70%),
+    radial-gradient(560px 300px at 70% 12%, rgba(247, 147, 26, 0.08), transparent 70%),
+    radial-gradient(700px 360px at 50% 0%, rgba(76, 194, 255, 0.06), transparent 70%);
+  pointer-events: none;
+}
+
+.hero .container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.hero-eyebrow {
+  font-size: var(--text-sm);
+  font-weight: 550;
+  letter-spacing: 0.01em;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  border-radius: var(--r-full);
+  padding: 6px 14px;
+  margin-bottom: var(--sp-6);
+  animation: hero-rise 600ms var(--ease) both;
+}
+
+.hero-headline {
+  max-width: 15ch;
+  font-size: clamp(2.25rem, 6.5vw, var(--text-4xl));
+  font-weight: 620;
+  letter-spacing: -0.032em;
+  line-height: 1.05;
+  margin-bottom: var(--sp-6);
+  animation: hero-rise 600ms var(--ease) 60ms both;
+}
+
+.hero-subhead {
+  max-width: 62ch;
+  font-size: var(--text-md);
+  line-height: 1.7;
+  margin-bottom: var(--sp-8);
+  animation: hero-rise 600ms var(--ease) 120ms both;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-16);
+  animation: hero-rise 600ms var(--ease) 180ms both;
+}
+
+.hero-or {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+
+.hero-visual {
+  width: 100%;
+  max-width: 780px;
+  padding: var(--sp-6) var(--sp-8) var(--sp-5);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 55%),
+    var(--bg-raised);
+  animation: hero-rise 700ms var(--ease) 260ms both;
+}
+
+.hero-visual figcaption {
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .hero {
+    padding-top: var(--sp-12);
+    padding-bottom: var(--sp-20);
+  }
+  .hero-visual {
+    padding: var(--sp-4) var(--sp-4) var(--sp-4);
+  }
+  .hero-actions {
+    margin-bottom: var(--sp-12);
+  }
+}
