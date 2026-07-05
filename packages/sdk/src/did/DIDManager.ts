@@ -21,6 +21,66 @@ import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
 
+/** A carried-over verification method annotated with the single relationship
+ * (purpose) it should assume in the migrated did:webvh document. */
+interface CarriedVerificationMethod {
+  type: 'Multikey';
+  publicKeyMultibase: string;
+  purpose?: 'keyAgreement' | 'capabilityInvocation' | 'capabilityDelegation';
+}
+
+// Relationships that survive migration to did:webvh. authentication and
+// assertionMethod are intentionally excluded: the created document assigns them
+// to the new signing key (#key-0), so a carried key cannot re-assume them. The
+// order is the priority used when a key participates in more than one (a single
+// Multikey `purpose` can encode only one).
+const PRESERVABLE_RELATIONSHIPS = ['keyAgreement', 'capabilityDelegation', 'capabilityInvocation'] as const;
+
+/**
+ * Collect the source did:peer document's verification methods to carry into the
+ * migrated did:webvh document, preserving each key's verification relationship
+ * (#299). Keys are gathered both from the top-level `verificationMethod` list
+ * and — for relationships whose keys are embedded directly (common for X25519
+ * `keyAgreement` in did:peer) — from the relationship arrays themselves, so a
+ * keyAgreement key that never appears in `verificationMethod` is not lost.
+ */
+function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerificationMethod[] {
+  const byKey = new Map<string, CarriedVerificationMethod>();
+
+  const add = (publicKeyMultibase: unknown, purpose?: CarriedVerificationMethod['purpose']): void => {
+    if (typeof publicKeyMultibase !== 'string' || publicKeyMultibase.length === 0) return;
+    const existing = byKey.get(publicKeyMultibase);
+    if (existing) {
+      // First preservable relationship wins the single `purpose` slot.
+      if (!existing.purpose && purpose) existing.purpose = purpose;
+      return;
+    }
+    byKey.set(publicKeyMultibase, { type: 'Multikey', publicKeyMultibase, purpose });
+  };
+
+  // Bare verification methods (relationship, if any, resolved below).
+  for (const vm of didDoc.verificationMethod || []) {
+    add(vm.publicKeyMultibase);
+  }
+
+  // Assign purposes from the relationship arrays; also picks up embedded keys
+  // that are not present in `verificationMethod`.
+  for (const rel of PRESERVABLE_RELATIONSHIPS) {
+    const entries = didDoc[rel];
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (typeof entry === 'string') {
+        const vm = (didDoc.verificationMethod || []).find((v) => v.id === entry);
+        if (vm) add(vm.publicKeyMultibase, rel);
+      } else if (entry && typeof entry === 'object') {
+        add(entry.publicKeyMultibase, rel);
+      }
+    }
+  }
+
+  return Array.from(byKey.values());
+}
+
 export class DIDManager {
   private webvhManager?: WebVHManager;
   private readonly metrics?: MetricsCollector;
@@ -117,11 +177,12 @@ export class DIDManager {
    *
    * The peer document's verification methods are carried over as
    * verification-only keys, its services are preserved, and the original
-   * did:peer is recorded in `alsoKnownAs`. Verification relationships other
-   * than the signing key's `authentication`/`assertionMethod` (e.g.
-   * `keyAgreement`, `capabilityInvocation`, `capabilityDelegation`) are NOT
-   * carried over — didwebvh-ts owns the relationship arrays of the created
-   * document; republish such relationships via updateDIDWebVH if needed.
+   * did:peer is recorded in `alsoKnownAs`. The `keyAgreement`,
+   * `capabilityInvocation`, and `capabilityDelegation` relationships each key
+   * held in the source document are preserved (#299). `authentication` and
+   * `assertionMethod` are re-assigned to the new signing key (`#key-0`) in the
+   * created document — a carried key cannot re-assume them here; republish via
+   * updateDIDWebVH if a carried key must also authenticate/assert.
    */
   async migrateToDIDWebVH(
     didDoc: DIDDocument,
@@ -169,13 +230,15 @@ export class DIDManager {
 
     // Carry the peer document's multikey verification methods over as
     // verification-only keys (they do not become updateKeys — log updates are
-    // authorized by the signing key generated/provided below).
-    const carriedVerificationMethods = (didDoc.verificationMethod || [])
-      .filter((vm) => typeof vm.publicKeyMultibase === 'string' && vm.publicKeyMultibase.length > 0)
-      .map((vm) => ({
-        type: 'Multikey',
-        publicKeyMultibase: vm.publicKeyMultibase,
-      }));
+    // authorized by the signing key generated/provided below). Each carried key
+    // also keeps the verification relationship it held in the source document
+    // (keyAgreement / capabilityInvocation / capabilityDelegation) so that,
+    // e.g., an X25519 keyAgreement key still authorizes encryption after the
+    // migration instead of existing as an orphaned verification method (#299).
+    // authentication and assertionMethod are owned by the new signing key
+    // (#key-0) in the created did:webvh document, so a carried key cannot
+    // re-assume those here.
+    const carriedVerificationMethods = collectCarriedVerificationMethods(didDoc);
 
     // Preserve service endpoints
     const services = Array.isArray(didDoc.service)

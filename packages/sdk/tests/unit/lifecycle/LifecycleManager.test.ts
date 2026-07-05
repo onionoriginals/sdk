@@ -79,7 +79,10 @@ describe('LifecycleManager', () => {
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }
     ]);
-    await asset.migrate('did:btco');
+    // Migrate with real inscription details (as a genuine inscribeOnBitcoin flow
+    // would record), so the transfer is backed by a real inscription id rather
+    // than a fabricated placeholder (#273).
+    await asset.migrate('did:btco', { satoshi: '123', inscriptionId: 'insc-mock', transactionId: 'tx-reveal-mock' });
     const tx = await sdk.lifecycle.transferOwnership(asset as any, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
     expect(typeof tx.txid).toBe('string');
   });

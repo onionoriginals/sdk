@@ -1,14 +1,12 @@
 import {
   OriginalsConfig,
   OrdinalsInscription,
-  BitcoinTransaction,
-  DUST_LIMIT_SATS
+  BitcoinTransaction
 } from '../types/index.js';
 import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters/index.js';
 import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
-import { scriptPubKeyForAddress } from './transfer.js';
 
 /**
  * Upper bound on any fee rate the SDK will use, whether caller-provided or
@@ -289,24 +287,18 @@ export class BitcoinManager {
       );
     }
 
-    if (response.satoshi) {
-      inscription.satoshi = response.satoshi;
-    }
-
+    // Return ONLY provider-attested data. The provider is the source of truth
+    // for the transfer's on-chain effects. Fabricating a `vin` from the
+    // caller's (possibly stale) inscription.txid/vout, or a `vout` with a
+    // made-up DUST_LIMIT_SATS value, wrote invented transaction data into
+    // provenance records downstream. When the provider does not report
+    // inputs/outputs they are genuinely unknown here — surface them as empty
+    // rather than inventing them. We also do NOT mutate the caller's
+    // inscription object (previously `inscription.satoshi = response.satoshi`).
     return {
       txid: response.txid,
-      vin: response.vin ?? [{ txid: inscription.txid, vout: inscription.vout }],
-      vout:
-        response.vout?.length
-          ? response.vout
-          : [{
-              value: DUST_LIMIT_SATS,
-              // Derive a valid hex-encoded scriptPubKey from the (already
-              // validated) destination address so the fallback output can be
-              // correctly referenced by downstream transaction construction.
-              scriptPubKey: scriptPubKeyForAddress(toAddress, this.config.network),
-              address: toAddress
-            }],
+      vin: response.vin ?? [],
+      vout: response.vout ?? [],
       fee: response.fee,
       blockHeight: response.blockHeight,
       confirmations: response.confirmations
@@ -321,6 +313,29 @@ export class BitcoinManager {
       return list.length <= 1;
     }
     return true;
+  }
+
+  /**
+   * Resolve the inscription id currently recorded on a satoshi, or null if the
+   * provider reports none. Used to back a transfer with a real inscription id
+   * instead of a fabricated placeholder when no local migration record exists.
+   */
+  async getInscriptionIdBySatoshi(satoshi: string): Promise<string | null> {
+    if (!this.ord) {
+      // Distinguish "no provider configured" from "satoshi has no inscription"
+      // so callers don't report a misleading INSCRIPTION_NOT_FOUND for what is
+      // actually a configuration problem.
+      throw new StructuredError(
+        'ORD_PROVIDER_REQUIRED',
+        'Cannot look up inscriptions by satoshi: no ordinalsProvider is configured.'
+      );
+    }
+    const list = await this.ord.getInscriptionsBySatoshi(satoshi);
+    if (list.length === 0) return null;
+    // Providers return inscriptions in chronological order; on a reinscribed
+    // sat the last entry is the current inscription, which is what a transfer
+    // should record in provenance (the genesis id would be stale).
+    return list[list.length - 1].inscriptionId;
   }
 
   async getSatoshiFromInscription(inscriptionId: string): Promise<string | null> {

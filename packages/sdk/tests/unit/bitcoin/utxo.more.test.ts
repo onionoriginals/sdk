@@ -94,6 +94,27 @@ describe('UTXO selection additional branches', () => {
     expect(res.selected.length).toBeGreaterThan(0);
   });
 
+  test('funds a changeless transaction instead of rejecting it (#290)', () => {
+    // Unclassified input: fee(1 out) = 10 + 148 + 34 = 192; fee(2 out) = 226.
+    // With accumulated = target + 200, a two-output tx is NOT fundable
+    // (needs target + 226) but a changeless one IS (200 >= 192). The whole
+    // 200-sat remainder becomes fee. Previously this threw INSUFFICIENT_FUNDS.
+    const target = 10_000;
+    const utxos = [U(target + 200)];
+    const res = selectUtxos(utxos, { targetAmountSats: target, feeRateSatsPerVb: 1 });
+    expect(res.changeSats).toBe(0);
+    expect(res.feeSats).toBe(200);
+    expect(res.selected.length).toBe(1);
+  });
+
+  test('still rejects when even a changeless transaction is underfunded (#290)', () => {
+    // accumulated = target + 100 < target + fee(1 out)=192 -> not fundable.
+    const target = 10_000;
+    const utxos = [U(target + 100)];
+    expect(() => selectUtxos(utxos, { targetAmountSats: target, feeRateSatsPerVb: 1 }))
+      .toThrow('INSUFFICIENT_FUNDS');
+  });
+
   test('dust change is dropped and folded into the reported fee', () => {
     // An input with no scriptPubKey is unclassified and priced conservatively
     // at legacy width: fee(2 outs, 1 input, fr=1) = 10 + 148 + 2*34 = 226.

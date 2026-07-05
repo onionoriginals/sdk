@@ -33,18 +33,23 @@ export class ResourceVersionManager {
    * @param contentType - Content type of the resource
    * @param previousVersionHash - Hash of the previous version (optional for v1)
    * @param changes - Optional description of changes
+   * @param declaredVersion - The resource's own version number, when known.
+   *   Threading it through keeps the version-manager numbering in agreement with
+   *   the resources' declared `version` for gapped ([v1, v3]) or duplicate sets,
+   *   instead of renumbering everything 1..N by insertion order.
    */
   addVersion(
     resourceId: string,
     hash: string,
     contentType: string,
     previousVersionHash?: string,
-    changes?: string
+    changes?: string,
+    declaredVersion?: number
   ): void {
     const versions = this.versionMap.get(resourceId) || [];
-    
+
     const version: ResourceVersion = {
-      version: versions.length + 1,
+      version: declaredVersion ?? versions.length + 1,
       hash,
       timestamp: new Date().toISOString(),
       contentType,
@@ -83,10 +88,14 @@ export class ResourceVersionManager {
    */
   getVersion(resourceId: string, version: number): ResourceVersion | null {
     const versions = this.versionMap.get(resourceId);
-    if (!versions || version < 1 || version > versions.length) {
+    if (!versions) {
       return null;
     }
-    return versions[version - 1];
+    // Look up by the declared version NUMBER, not by array position. With
+    // gapped sets ([v1, v3]) position-based indexing returned the wrong entry
+    // (getVersion(id, 2) yielded the v3 resource) and disagreed with
+    // currentVersion.version — the core inconsistency in #293.
+    return versions.find((v) => v.version === version) ?? null;
   }
 
   /**
@@ -105,10 +114,12 @@ export class ResourceVersionManager {
   /**
    * Verify the integrity of the version chain for a resource.
    * Ensures that:
-   * - Version numbers are sequential starting at 1
-   * - Each version (except v1) has a previousVersionHash
+   * - Version numbers are strictly increasing from >= 1 (a gap from an
+   *   unpersisted intermediate version is allowed; duplicate version numbers
+   *   are not)
+   * - Each version (except the first) has a previousVersionHash
    * - Each previousVersionHash matches the actual previous version's hash
-   * 
+   *
    * @param resourceId - Logical resource ID
    * @returns true if the chain is valid, false otherwise
    */
@@ -120,20 +131,23 @@ export class ResourceVersionManager {
 
     for (let i = 0; i < versions.length; i++) {
       const version = versions[i];
-      
-      // Check version number is sequential
-      if (version.version !== i + 1) {
-        return false;
-      }
 
-      // First version should not have previousVersionHash
+      // First version should be >= 1 and have no previousVersionHash.
       if (i === 0) {
+        if (version.version < 1) {
+          return false;
+        }
         if (version.previousVersionHash !== undefined) {
           return false;
         }
       } else {
-        // Subsequent versions must have previousVersionHash matching the prior version
         const prevVersion = versions[i - 1];
+        // Version numbers must strictly increase (rejects duplicates; tolerates
+        // gaps from versions that were never persisted).
+        if (version.version <= prevVersion.version) {
+          return false;
+        }
+        // Subsequent versions must have previousVersionHash matching the prior version
         if (version.previousVersionHash !== prevVersion.hash) {
           return false;
         }

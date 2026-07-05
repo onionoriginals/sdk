@@ -132,12 +132,21 @@ export class StateTracker implements IStateTracker {
   }
 
   /**
-   * Get all active migrations
+   * Get all active (non-terminal) migrations. Includes every state in which a
+   * migration is still doing work or holding resources — not just IN_PROGRESS.
+   * Notably ANCHORING (a Bitcoin broadcast may be outstanding), so a caller
+   * gating shutdown on this does not act while an anchoring tx is in flight.
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getActiveMigrations(): Promise<MigrationState[]> {
-    return this.queryStates({
-      state: MigrationStateEnum.IN_PROGRESS
-    });
+    const activeStates = new Set<MigrationStateEnum>([
+      MigrationStateEnum.PENDING,
+      MigrationStateEnum.VALIDATING,
+      MigrationStateEnum.CHECKPOINTED,
+      MigrationStateEnum.IN_PROGRESS,
+      MigrationStateEnum.ANCHORING
+    ]);
+    return Array.from(this.states.values()).filter((s) => activeStates.has(s.state));
   }
 
   /**

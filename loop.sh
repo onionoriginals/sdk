@@ -19,6 +19,11 @@
 #   ./loop.sh restart      # Reset and re-run Lisa's interview
 
 set -e
+# Without pipefail, a pipeline's exit status is that of its LAST command, so a
+# `claude -p ... | log_claude` pipeline masks a failing `claude` (log_claude
+# exits 0) and `set -e` never trips — after which the script would git-push
+# whatever the unattended agent committed. pipefail propagates the real failure.
+set -o pipefail
 
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "main")
 

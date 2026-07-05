@@ -39,6 +39,28 @@ describe('ResourceVersionManager', () => {
     expect(history!.currentVersion.previousVersionHash).toBeUndefined();
   });
 
+  test('honors a declared version number for gapped sets (#293)', () => {
+    // Persisted resources may skip a version (e.g. [v1, v3]). The manager must
+    // record the declared number, not renumber to versions.length+1 (=2).
+    versionManager.addVersion('res1', 'hash1', 'text/plain', undefined, undefined, 1);
+    versionManager.addVersion('res1', 'hash3', 'text/plain', 'hash1', undefined, 3);
+
+    const history = versionManager.getHistory('res1');
+    expect(history!.versions.map(v => v.version)).toEqual([1, 3]);
+    expect(history!.currentVersion.version).toBe(3);
+    // getVersion(id, 3) agrees with currentVersion (they used to disagree).
+    expect(versionManager.getVersion('res1', 3)?.hash).toBe('hash3');
+    expect(versionManager.getVersion('res1', 2)).toBeNull();
+    // A gapped-but-hash-linked chain is valid; strictly-increasing numbers pass.
+    expect(versionManager.verifyChain('res1')).toBe(true);
+  });
+
+  test('verifyChain rejects duplicate version numbers (#293)', () => {
+    versionManager.addVersion('res1', 'hash1', 'text/plain', undefined, undefined, 1);
+    versionManager.addVersion('res1', 'hash2', 'text/plain', 'hash1', undefined, 1);
+    expect(versionManager.verifyChain('res1')).toBe(false);
+  });
+
   test('adds second version with previous hash link', () => {
     versionManager.addVersion('res1', 'hash1', 'text/plain');
     versionManager.addVersion('res1', 'hash2', 'text/plain', 'hash1', 'Updated content');

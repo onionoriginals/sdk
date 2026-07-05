@@ -1,71 +1,60 @@
 # GitHub Actions Workflows
 
-## NPM Package Publish Workflow
+## Release Workflow (`release.yml`)
 
-The `publish.yml` workflow automatically publishes the `@originals/sdk` package to npm when changes are pushed to the `main` branch.
+Publishing of `@originals/sdk` and `@originals/auth` to npm is handled by the
+`release.yml` workflow using [Changesets](https://github.com/changesets/changesets),
+gated by two human-in-the-loop steps. It triggers on every push to `main`.
 
 ### Required Secrets
 
-You only need to configure **ONE secret** in your GitHub repository:
+Configure these in **Settings → Secrets and variables → Actions**:
 
-#### `NPM_TOKEN`
-This is your npm authentication token used to publish packages.
+#### `NPM_TOKEN` (required to publish)
+An npm **Automation** access token used to publish packages (also used as
+`NODE_AUTH_TOKEN`). npm provenance is enabled via `NPM_CONFIG_PROVENANCE` and the
+workflow's `id-token: write` permission.
 
 **How to create it:**
 
-1. Log in to [npmjs.com](https://www.npmjs.com)
-2. Click on your profile icon → "Access Tokens"
-3. Click "Generate New Token" → "Classic Token"
-4. Select **"Automation"** type (for CI/CD publishing)
-5. Copy the token
+1. Log in to [npmjs.com](https://www.npmjs.com).
+2. Profile icon → "Access Tokens" → "Generate New Token" → "Classic Token".
+3. Select **"Automation"** (for CI/CD publishing) and copy the token.
 
-**Add it to GitHub:**
-
-1. Go to your repository on GitHub
-2. Click "Settings" → "Secrets and variables" → "Actions"
-3. Click "New repository secret"
-4. Name: `NPM_TOKEN`
-5. Value: Paste your npm token
-6. Click "Add secret"
+#### `CHANGESETS_TOKEN` (optional but recommended)
+A PAT (or GitHub App token) used to push the "Version Packages" PR branch. Pushes
+made with the built-in `GITHUB_TOKEN` do **not** trigger other workflows, so
+without this secret the Version PR opens but does not run `ci.yml` until it is
+added. Falls back to `GITHUB_TOKEN` when unset.
 
 ### Built-in Tokens
 
-The workflow uses `GITHUB_TOKEN` which is automatically provided by GitHub Actions - **you don't need to create this**.
+`GITHUB_TOKEN` is provided automatically by GitHub Actions — you don't create it.
 
 ### How It Works
 
-The workflow:
-1. Triggers on every push to `main`
-2. Checks out the code
-3. Sets up Bun and installs dependencies
-4. Builds the project
-5. Runs tests to ensure quality
-6. Uses semantic-release to:
-   - Analyze commit messages
-   - Determine the new version number
-   - Update package.json and CHANGELOG.md
-   - Publish to npm
-   - Create a GitHub release
+1. **Gate 1 — Version (open release PR).** While changesets are pending on `main`,
+   the `version` job opens/updates a "Version Packages" PR that bumps versions and
+   updates CHANGELOGs. **Merging that PR is the human approval that a release should
+   happen.** No publishing occurs here.
+2. **Check for unpublished versions.** After the Version PR merges, `check-publish`
+   compares each package's local version against the npm registry and only proceeds
+   when a version is genuinely not yet published (any other registry error fails
+   loudly rather than over-publishing).
+3. **Gate 2 — Publish.** The `publish` job runs under the `npm-publish` GitHub
+   Environment, which carries a **required reviewer** — a human must approve in the
+   GitHub UI before anything reaches npm. It builds, runs `scripts/verify-esm.mjs`
+   (refusing to publish a dist Node ESM consumers can't import), then publishes via
+   `changeset publish`, pushing tags and creating GitHub Releases as one step.
 
-### Commit Message Format
+### Adding a Changeset
 
-Use conventional commits to control versioning:
-
-- `feat: add new feature` → **minor** version bump (1.0.0 → 1.1.0)
-- `fix: resolve bug` → **patch** version bump (1.0.0 → 1.0.1)
-- Commit with `BREAKING CHANGE:` in body → **major** version bump (1.0.0 → 2.0.0)
-
-### Example Commits
+Contributors describe releasable changes with a changeset:
 
 ```bash
-# Patch release (1.0.0 → 1.0.1)
-git commit -m "fix: correct DID resolution error"
-
-# Minor release (1.0.0 → 1.1.0)
-git commit -m "feat: add support for did:btco migration"
-
-# Major release (1.0.0 → 2.0.0)
-git commit -m "feat: redesign credential API
-
-BREAKING CHANGE: CredentialManager.create() now requires issuerDID parameter"
+bun run changeset
 ```
+
+This records the affected packages and the semver bump (patch/minor/major) plus a
+summary that becomes the CHANGELOG entry. The Version PR aggregates pending
+changesets into the next release.

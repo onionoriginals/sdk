@@ -89,7 +89,7 @@ export class BBSCryptosuiteUtils {
     publicKey: Uint8Array;
     hmacKey: Uint8Array;
     mandatoryPointers: string[];
-    featureOption: 'baseline' | 'anonymous_holder_binding' | 'pseudonym_issuer_pid' | 'pseudonym_hidden_pid' | 'base_proof';
+    featureOption: 'baseline' | 'anonymous_holder_binding' | 'pseudonym_issuer_pid' | 'pseudonym_hidden_pid';
     pid?: Uint8Array;
     signerBlind?: Uint8Array;
   } {
@@ -100,7 +100,10 @@ export class BBSCryptosuiteUtils {
     else if (this.compareBytes(header, [0xd9, 0x5d, 0x04])) featureOption = 'anonymous_holder_binding';
     else if (this.compareBytes(header, [0xd9, 0x5d, 0x06])) featureOption = 'pseudonym_issuer_pid';
     else if (this.compareBytes(header, [0xd9, 0x5d, 0x08])) featureOption = 'pseudonym_hidden_pid';
-    else if (this.compareBytes(header, [0xd9, 0x5d, 0x03])) featureOption = 'base_proof';
+    // 0x03 is the *derived*-proof baseline header (see serializeDerivedProofValue /
+    // parseDerivedProofValue), NOT a base-proof header. Accepting it here caused
+    // type-confusion: derived components were misparsed as a base proof. Base
+    // proofs use only the even tags 0x02/0x04/0x06/0x08.
     else throw new Error('Invalid BBS base proof header');
 
     const components: any[] = cbor.decode(decoded.slice(3)) as any[];

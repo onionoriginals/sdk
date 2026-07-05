@@ -1,9 +1,12 @@
 import { describe, test, expect } from 'bun:test';
-import { 
-  computeDigestMultibase, 
-  verifyDigestMultibase, 
-  decodeDigestMultibase 
+import {
+  computeDigestMultibase,
+  verifyDigestMultibase,
+  decodeDigestMultibase,
+  digestMultibaseEquals
 } from '../../../src/cel/hash';
+import { multibase } from '../../../src/utils/encoding';
+import { sha256 } from '@noble/hashes/sha2.js';
 
 describe('CEL Hash Utilities', () => {
   describe('computeDigestMultibase', () => {
@@ -54,6 +57,18 @@ describe('CEL Hash Utilities', () => {
       const digest = computeDigestMultibase(content);
       
       expect(digest.startsWith('u')).toBe(true);
+    });
+
+    test('encodes a spec-conformant sha2-256 multihash with the 0x12 0x20 header (#258)', () => {
+      const content = new TextEncoder().encode('hello');
+      const digest = computeDigestMultibase(content);
+      // Decode the raw multibase payload WITHOUT stripping the multihash header.
+      const raw = multibase.decode(digest);
+      expect(raw.length).toBe(34); // 2-byte multihash header + 32-byte digest
+      expect(raw[0]).toBe(0x12); // sha2-256 multicodec code
+      expect(raw[1]).toBe(0x20); // 32-byte length
+      // Spec-conformant sha2-256 multihashes multibase-encode to a "uEi..." prefix.
+      expect(digest.startsWith('uEi')).toBe(true);
     });
 
     test('hash length is consistent (SHA-256 produces 32 bytes)', () => {
@@ -121,6 +136,49 @@ describe('CEL Hash Utilities', () => {
 
     test('throws on invalid multibase prefix', () => {
       expect(() => decodeDigestMultibase('xInvalid')).toThrow();
+    });
+
+    test('accepts a legacy bare (header-less) digest on the read path (#258)', () => {
+      // A pre-fix value: 32 raw hash bytes multibase-encoded with NO multihash
+      // header. Logs anchored on Bitcoin in this format are immutable, so the
+      // read path must keep accepting it (write path emits multihash only).
+      const raw = new Uint8Array(32).fill(7);
+      const bare = multibase.encode(raw, 'base64url');
+      expect(decodeDigestMultibase(bare)).toEqual(raw);
+    });
+
+    test('rejects values that are neither multihash nor a 32-byte bare digest', () => {
+      const wrongLength = multibase.encode(new Uint8Array(31), 'base64url');
+      expect(() => decodeDigestMultibase(wrongLength)).toThrow('Invalid digestMultibase');
+      const wrongHeader = multibase.encode(
+        Uint8Array.from([0x13, 0x20, ...new Uint8Array(32)]),
+        'base64url'
+      );
+      expect(() => decodeDigestMultibase(wrongHeader)).toThrow('Invalid digestMultibase');
+    });
+  });
+
+  describe('legacy interop (#258 tolerant read)', () => {
+    test('verifyDigestMultibase accepts a legacy bare digest of the content', () => {
+      const content = new TextEncoder().encode('anchored before the multihash fix');
+      const legacy = multibase.encode(sha256(content), 'base64url');
+      expect(verifyDigestMultibase(content, legacy)).toBe(true);
+      // But a legacy digest of DIFFERENT content still fails
+      expect(verifyDigestMultibase(new TextEncoder().encode('other'), legacy)).toBe(false);
+    });
+
+    test('digestMultibaseEquals matches legacy and multihash forms of the same digest', () => {
+      const content = new TextEncoder().encode('same content, two encodings');
+      const modern = computeDigestMultibase(content);
+      const legacy = multibase.encode(sha256(content), 'base64url');
+      expect(digestMultibaseEquals(modern, legacy)).toBe(true);
+      expect(digestMultibaseEquals(legacy, modern)).toBe(true);
+      expect(digestMultibaseEquals(modern, modern)).toBe(true);
+
+      const other = computeDigestMultibase(new TextEncoder().encode('different'));
+      expect(digestMultibaseEquals(modern, other)).toBe(false);
+      expect(digestMultibaseEquals(legacy, other)).toBe(false);
+      expect(digestMultibaseEquals('not-multibase', modern)).toBe(false);
     });
   });
 

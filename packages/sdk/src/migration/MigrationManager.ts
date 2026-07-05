@@ -11,7 +11,8 @@ import {
   MigrationErrorType,
   BatchMigrationOptions,
   BatchMigrationResult,
-  CostEstimate
+  CostEstimate,
+  MigrationValidationResult
 } from './types.js';
 import { OriginalsConfig } from '../types/index.js';
 import { DIDManager } from '../did/DIDManager.js';
@@ -179,6 +180,9 @@ export class MigrationManager {
     let migrationState: any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let checkpoint: any;
+    // Captured so the failure handler can record the REAL validation results in
+    // the audit trail instead of a hardcoded { valid: false, errors: [] }.
+    let validationResult: MigrationValidationResult | undefined;
 
     // Concurrency guard (issue #255): reject a second migration of the same
     // DID while one is in flight. The set is mutated synchronously (before
@@ -253,7 +257,7 @@ export class MigrationManager {
         progress: 10
       });
 
-      const validationResult = await this.validationPipeline.validate(options);
+      validationResult = await this.validationPipeline.validate(options);
 
       if (!validationResult.valid) {
         throw this.createMigrationError(
@@ -380,7 +384,8 @@ export class MigrationManager {
         options,
         migrationState,
         checkpoint,
-        startTime
+        startTime,
+        validationResult
       );
     } finally {
       if (!options.estimateCostOnly) {
@@ -466,21 +471,24 @@ export class MigrationManager {
     const results = new Map<string, MigrationResult>();
     const errors: MigrationError[] = [];
 
+    // Deduplicate: the same DID twice would overwrite its results-Map entry
+    // while both iterations bumped the counters, so results.size drifted from
+    // completed + failed. One migration per distinct DID.
+    const uniqueDids = Array.from(new Set(dids));
+    const total = uniqueDids.length;
     let completed = 0;
     let failed = 0;
-    const total = dids.length;
+    let stopped = false; // set on the first failure in fail-fast mode
 
-    for (const did of dids) {
+    const runOne = async (did: string): Promise<void> => {
       try {
         const migrationOptions: MigrationOptions = {
           sourceDid: did,
           targetLayer: targetLayer as any,
           ...options
         };
-
         const result = await this.migrate(migrationOptions);
         results.set(did, result);
-
         if (result.success) {
           completed++;
         } else {
@@ -488,20 +496,40 @@ export class MigrationManager {
         }
       } catch (error) {
         failed++;
-        const migrationError: MigrationError = {
+        errors.push({
           type: MigrationErrorType.UNKNOWN_ERROR,
           code: 'BATCH_MIGRATION_ERROR',
           message: error instanceof Error ? error.message : String(error),
           sourceDid: did,
           timestamp: Date.now()
-        };
-        errors.push(migrationError);
-
+        });
         if (!options?.continueOnError) {
-          break;
+          stopped = true; // stop scheduling further migrations
         }
       }
-    }
+    };
+
+    // Honor maxConcurrent with a bounded worker pool (was accepted but ignored,
+    // so the loop always ran strictly sequentially). Distinct DIDs are safe to
+    // run in parallel — migrate() guards against concurrent migrations of the
+    // same source DID internally.
+    const requestedConcurrency = options?.maxConcurrent;
+    const concurrency = Math.max(
+      1,
+      Math.min(
+        Number.isFinite(requestedConcurrency) ? Math.floor(requestedConcurrency as number) : 1,
+        total || 1
+      )
+    );
+    let cursor = 0;
+    const worker = async (): Promise<void> => {
+      while (!stopped) {
+        const i = cursor++;
+        if (i >= uniqueDids.length) return;
+        await runOne(uniqueDids[i]);
+      }
+    };
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
     return {
       batchId,
@@ -510,7 +538,8 @@ export class MigrationManager {
       failed,
       inProgress: 0,
       results,
-      overallProgress: (completed + failed) / total * 100,
+      // Guard against total === 0 (empty input) which otherwise yields NaN.
+      overallProgress: total === 0 ? 0 : ((completed + failed) / total) * 100,
       startTime,
       errors
     };
@@ -527,7 +556,8 @@ export class MigrationManager {
     migrationState: any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     checkpoint: any,
-    startTime: number
+    startTime: number,
+    validationResult?: MigrationValidationResult
   ): Promise<MigrationResult> {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
     const migrationId = migrationState?.migrationId || `mig_failed_${Date.now()}`;
@@ -651,7 +681,12 @@ export class MigrationManager {
       targetDid: null,
       targetLayer: options.targetLayer,
       finalState,
-      validationResults: {
+      // Record the REAL validation results when they were computed (threaded in
+      // from migrate()): a validation failure keeps its actual errors, and a
+      // post-validation failure is no longer misrecorded as valid:false. Only
+      // fall back to the empty placeholder when the failure occurred before
+      // validation ran (validationResult is undefined).
+      validationResults: validationResult ?? {
         valid: false,
         errors: [],
         warnings: [],

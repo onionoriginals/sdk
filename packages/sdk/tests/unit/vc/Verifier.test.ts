@@ -63,6 +63,30 @@ describe('diwings Verifier', () => {
     expect(res.verified).toBe(true);
   });
 
+  test('does not stringify an inline-object @context into a loader lookup (#289)', async () => {
+    // A credential whose @context is a single inline object (valid JSON-LD,
+    // non-array) must not be turned into the string "[object Object]" and fed
+    // to the document loader — jsonld resolves inline contexts natively. The
+    // old code did `[String(vcContext)]`, so the loader was asked for
+    // "[object Object]", threw "Document not found", and the whole verify
+    // returned verified:false for a structurally valid credential.
+    const requested: string[] = [];
+    const spyLoader = async (iri: string) => {
+      requested.push(iri);
+      return { documentUrl: iri, document: {} };
+    };
+    const vc = {
+      '@context': { '@vocab': 'https://example.com/vocab#' },
+      type: ['VerifiableCredential'],
+      issuer: 'did:peer:issuer1',
+      credentialSubject: { id: 'did:peer:subject1' },
+      proof: { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zDummy', verificationMethod: `${did}#keys-1` }
+    } as any;
+    const verifier = new Verifier(didManager);
+    await verifier.verifyCredential(vc, { documentLoader: spyLoader });
+    expect(requested).not.toContain('[object Object]');
+  });
+
   test('rejects a credential whose proof was created for authentication', async () => {
     const issuer = new Issuer(didManager, vm);
     const vc = await issuer.issueCredential(

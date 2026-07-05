@@ -506,6 +506,39 @@ describe('CORE-MIG-EVENTS-036: BitcoinValidator network validation', () => {
     expect(warnCodes).toContain('HIGH_FEE_RATE');
   });
 
+  test('warns NON_MAINNET_NETWORK (not the wrong "will use signet") on regtest (#293)', async () => {
+    const provider = new MockOrdinalsProvider();
+    const config = { ...baseConfig, network: 'regtest', ordinalsProvider: provider } as OriginalsConfig;
+    const validator = new BitcoinValidator(config, new BitcoinManager(config));
+    const result = await validator.validate({ sourceDid: 'did:webvh:example.com:a', targetLayer: 'btco', feeRate: 10 });
+    const warn = result.warnings.find(w => w.code === 'NON_MAINNET_NETWORK');
+    expect(warn).toBeDefined();
+    expect(warn!.message).toContain('regtest');
+    // The old bug claimed regtest would use signet; it must not.
+    expect(warn!.message).not.toContain('signet');
+  });
+
+  test('consults the provider fee estimator when no feeRate is supplied (#293)', async () => {
+    const provider = new MockOrdinalsProvider();
+    let estimateCalls = 0;
+    provider.estimateFee = async (blocks = 1) => { estimateCalls++; return 7 * blocks; };
+    const config = { ...baseConfig, network: 'mainnet', ordinalsProvider: provider } as OriginalsConfig;
+    const validator = new BitcoinValidator(config, new BitcoinManager(config));
+    const result = await validator.validate({ sourceDid: 'did:webvh:example.com:a', targetLayer: 'btco' });
+    expect(estimateCalls).toBeGreaterThan(0);
+    // 1024 bytes * 7 sat/vB
+    expect(result.estimatedCost.networkFees).toBe(1024 * 7);
+  });
+
+  test('surfaces FEE_ESTIMATION_FAILED when the estimator throws (#293)', async () => {
+    const provider = new MockOrdinalsProvider();
+    provider.estimateFee = async () => { throw new Error('oracle down'); };
+    const config = { ...baseConfig, network: 'mainnet', ordinalsProvider: provider } as OriginalsConfig;
+    const validator = new BitcoinValidator(config, new BitcoinManager(config));
+    const result = await validator.validate({ sourceDid: 'did:webvh:example.com:a', targetLayer: 'btco' });
+    expect(result.warnings.map(w => w.code)).toContain('FEE_ESTIMATION_FAILED');
+  });
+
   test('[boundary] higher feeRate produces proportionally larger network fee estimate', async () => {
     const provider = new MockOrdinalsProvider();
     const config = { ...baseConfig, network: 'mainnet', ordinalsProvider: provider } as OriginalsConfig;
@@ -590,6 +623,38 @@ describe('CORE-MIG-EVENTS-037: StateTracker migration state recording', () => {
     const final = await stateTracker.getState(state.migrationId);
     expect(final!.state).toBe(MigrationStateEnum.COMPLETED);
     expect(final!.endTime).toBeGreaterThan(0);
+  });
+
+  test('getActiveMigrations includes all non-terminal states, not just IN_PROGRESS (#293)', async () => {
+    const advance = async (id: string, target: MigrationStateEnum) => {
+      const chain = [
+        MigrationStateEnum.VALIDATING,
+        MigrationStateEnum.CHECKPOINTED,
+        MigrationStateEnum.IN_PROGRESS,
+        MigrationStateEnum.ANCHORING,
+        MigrationStateEnum.COMPLETED
+      ];
+      for (const st of chain) {
+        await stateTracker.updateState(id, { state: st });
+        if (st === target) return;
+      }
+    };
+    const pending = await stateTracker.createMigration({ sourceDid: 'did:peer:zActPending', targetLayer: 'webvh', domain: 'example.com' });
+    const validating = await stateTracker.createMigration({ sourceDid: 'did:peer:zActValidating', targetLayer: 'webvh', domain: 'example.com' });
+    const anchoring = await stateTracker.createMigration({ sourceDid: 'did:peer:zActAnchoring', targetLayer: 'btco' });
+    const completed = await stateTracker.createMigration({ sourceDid: 'did:peer:zActCompleted', targetLayer: 'webvh', domain: 'example.com' });
+    await advance(validating.migrationId, MigrationStateEnum.VALIDATING);
+    await advance(anchoring.migrationId, MigrationStateEnum.ANCHORING);
+    await advance(completed.migrationId, MigrationStateEnum.COMPLETED);
+
+    const active = await stateTracker.getActiveMigrations();
+    const ids = active.map(a => a.migrationId);
+    // PENDING, VALIDATING and (notably) ANCHORING are active...
+    expect(ids).toContain(pending.migrationId);
+    expect(ids).toContain(validating.migrationId);
+    expect(ids).toContain(anchoring.migrationId);
+    // ...COMPLETED (terminal) is not.
+    expect(ids).not.toContain(completed.migrationId);
   });
 
   test('[happy] queryStates filters by state correctly', async () => {

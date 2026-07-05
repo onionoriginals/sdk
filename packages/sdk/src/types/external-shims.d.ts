@@ -1,10 +1,3 @@
-declare module 'multiformats/bases/base64' {
-  export const base64url: {
-    encode: (bytes: Uint8Array) => string;
-    decode: (s: string) => Uint8Array;
-  };
-}
-
 declare module 'jsonld';
 declare module 'b58';
 declare module '@aviarytech/did-peer' {

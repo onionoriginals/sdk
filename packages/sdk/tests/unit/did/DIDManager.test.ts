@@ -101,6 +101,47 @@ describe('DIDManager', () => {
     }
   });
 
+  test('migrateToDIDWebVH preserves keyAgreement / capability relationships (#299)', async () => {
+    const kaKey = multikey.encodePublicKey(new Uint8Array(32).fill(9), 'Ed25519'); // keyAgreement (referenced by id)
+    const ciKey = multikey.encodePublicKey(new Uint8Array(32).fill(11), 'Ed25519'); // capabilityInvocation (referenced)
+    const embeddedKaKey = multikey.encodePublicKey(new Uint8Array(32).fill(13), 'Ed25519'); // keyAgreement embedded only
+    const peer: DIDDocument = {
+      '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'],
+      id: 'did:peer:rel1',
+      verificationMethod: [
+        { id: 'did:peer:rel1#sign', type: 'Multikey', controller: 'did:peer:rel1', publicKeyMultibase: multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519') },
+        { id: 'did:peer:rel1#ka', type: 'Multikey', controller: 'did:peer:rel1', publicKeyMultibase: kaKey },
+        { id: 'did:peer:rel1#ci', type: 'Multikey', controller: 'did:peer:rel1', publicKeyMultibase: ciKey }
+      ],
+      authentication: ['did:peer:rel1#sign'],
+      assertionMethod: ['did:peer:rel1#sign'],
+      keyAgreement: [
+        'did:peer:rel1#ka',
+        // A key embedded directly in the relationship array (not in verificationMethod).
+        { id: 'did:peer:rel1#ka2', type: 'Multikey', controller: 'did:peer:rel1', publicKeyMultibase: embeddedKaKey }
+      ],
+      capabilityInvocation: ['did:peer:rel1#ci']
+    };
+
+    const web = (await sdk.did.migrateToDIDWebVH(peer, 'example.com')).didDocument as any;
+
+    // Helper: the migrated VM id for a given source public key.
+    const idFor = (pub: string): string | undefined =>
+      (web.verificationMethod || []).find((vm: any) => vm.publicKeyMultibase === pub)?.id;
+
+    // Every carried key exists as a verification method in the migrated doc...
+    for (const pub of [kaKey, ciKey, embeddedKaKey]) {
+      expect(idFor(pub)).toBeDefined();
+    }
+    // ...and authorizes the relationship it held in the source document.
+    expect(web.keyAgreement).toContain(idFor(kaKey));
+    expect(web.keyAgreement).toContain(idFor(embeddedKaKey));
+    expect(web.capabilityInvocation).toContain(idFor(ciKey));
+    // authentication/assertionMethod remain the new signing key only.
+    expect(web.authentication).toEqual(['#key-0']);
+    expect(web.assertionMethod).toEqual(['#key-0']);
+  });
+
   test('migrateToDIDWebVH percent-encodes a domain port so it stays one authority segment', async () => {
     const peer: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:abc123' };
     const web = (await sdk.did.migrateToDIDWebVH(peer, 'localhost:8080')).didDocument;

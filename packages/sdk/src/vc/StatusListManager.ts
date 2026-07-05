@@ -198,11 +198,18 @@ export class StatusListManager {
       encodedList: StatusListManager.encodeBitstring(updated),
     };
 
-    return {
+    // Strip any existing proof: the bitstring (and issuanceDate) just changed,
+    // so the prior signature no longer covers this document. Returning it with
+    // the stale proof intact would let a publisher host an unverifiable list
+    // (every credential in it then fails a proof-checking verifier). Forcing a
+    // re-sign is the only safe contract.
+    const result = {
       ...statusListCredential,
       credentialSubject: newSubject,
       issuanceDate: new Date().toISOString(),
-    };
+    } as VerifiableCredential & { proof?: unknown };
+    delete result.proof;
+    return result;
   }
 
   /**
@@ -290,11 +297,15 @@ export class StatusListManager {
       encodedList: StatusListManager.encodeBitstring(updated),
     };
 
-    return {
+    // Strip any existing proof — see setStatus: the mutated bitstring
+    // invalidates the prior signature, so the caller must re-sign.
+    const result = {
       ...statusListCredential,
       credentialSubject: newSubject,
       issuanceDate: new Date().toISOString(),
-    };
+    } as VerifiableCredential & { proof?: unknown };
+    delete result.proof;
+    return result;
   }
 
   /**

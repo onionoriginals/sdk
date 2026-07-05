@@ -5,7 +5,7 @@ import { BitcoinManager } from '../bitcoin/BitcoinManager.js';
 import { StatusListManager } from '../vc/StatusListManager.js';
 import { OriginalsConfig, KeyStore, ExternalSigner, ExternalVerifier } from '../types/index.js';
 import { DIDDocument, VerificationMethod, ServiceEndpoint } from '../types/did.js';
-import { DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH } from '../types/network.js';
+import { DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH, getWebVHNetworkForBitcoin } from '../types/network.js';
 import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
 import { Logger } from '../utils/Logger.js';
 import { MetricsCollector } from '../utils/MetricsCollector.js';
@@ -269,6 +269,18 @@ export class OriginalsSDK {
     // contradicting `network` is preserved (and still warned about below).
     if (configOptions.webvhNetwork && configOptions.network === undefined) {
       merged.network = getBitcoinNetworkForWebVH(configOptions.webvhNetwork);
+    } else if (configOptions.network && configOptions.webvhNetwork === undefined) {
+      // Symmetric reverse derivation: when the caller sets an explicit Bitcoin
+      // `network` but no webvhNetwork tier, derive the tier (regtest→magby,
+      // signet→cleffa, mainnet→pichu) instead of leaving the default 'pichu'.
+      // Otherwise `create({ network: 'regtest' })` would target the PRODUCTION
+      // pichu domain while doing regtest Bitcoin — the same environment
+      // mismatch the forward mapping prevents. If there is no tier for the
+      // network, keep the default.
+      const derivedTier = getWebVHNetworkForBitcoin(configOptions.network);
+      if (derivedTier) {
+        merged.webvhNetwork = derivedTier;
+      }
     }
     return new OriginalsSDK(merged, keyStore ?? merged.keyStore);
   }

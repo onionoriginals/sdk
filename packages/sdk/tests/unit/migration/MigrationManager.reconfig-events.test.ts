@@ -3,7 +3,7 @@
  * and event subscription (issue #282).
  */
 
-import { describe, test, expect, afterEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { MigrationManager } from '../../../src/migration/MigrationManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
@@ -17,6 +17,11 @@ const config: OriginalsConfig = {
 };
 
 describe('MigrationManager singleton reconfiguration (issue #280)', () => {
+  // Reset BEFORE each test too: these tests assert on the singleton's
+  // uninitialized→initialized transition, so they must start from a clean
+  // singleton regardless of what a prior test file left behind (test-file
+  // execution order is not guaranteed). afterEach alone left them order-dependent.
+  beforeEach(() => MigrationManager.resetInstance());
   afterEach(() => MigrationManager.resetInstance());
 
   test('re-initializing with different dependencies throws instead of silently ignoring them', () => {
@@ -58,6 +63,7 @@ describe('MigrationManager singleton reconfiguration (issue #280)', () => {
 });
 
 describe('MigrationManager exposes event subscription (issue #282)', () => {
+  beforeEach(() => MigrationManager.resetInstance());
   afterEach(() => MigrationManager.resetInstance());
 
   test('on()/off() are available so migration events are observable', () => {

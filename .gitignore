@@ -16,6 +16,10 @@ build/
 .env.test.local
 .env.production.local
 
+# TLS keys/certs — never commit private keys (mkcert leaf keys, etc.)
+*.pem
+*.key
+
 # IDE
 .vscode/
 .idea/

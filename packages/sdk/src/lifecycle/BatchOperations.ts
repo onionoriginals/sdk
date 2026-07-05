@@ -75,10 +75,25 @@ export class BatchError extends Error {
     public batchId: string,
     public operation: string,
     public partialResults: { successful: number; failed: number },
-    message: string
+    message: string,
+    /**
+     * The full partial BatchResult accumulated before fail-fast aborted, so
+     * callers can recover what already ran (including txids of already-broadcast
+     * inscriptions) instead of losing it to a bare re-throw.
+     */
+    public result?: BatchResult<unknown>,
+    /**
+     * The original error that aborted the batch, preserved so callers can
+     * still match on `instanceof StructuredError` / error codes instead of
+     * only the flattened message.
+     */
+    cause?: unknown
   ) {
     super(message);
     this.name = 'BatchError';
+    if (cause !== undefined) {
+      this.cause = cause;
+    }
   }
 }
 
@@ -217,9 +232,29 @@ export class BatchOperationExecutor {
         }
       }
     } catch (error) {
-      // In fail-fast mode, re-throw the error so callers can handle it
+      // In fail-fast mode, surface the accumulated partial result rather than a
+      // bare re-throw that discards the successful/failed arrays (which may
+      // carry txids of already-broadcast inscriptions). Wrap in a BatchError so
+      // callers — and the batch:failed event — can see what already ran.
       if (!continueOnError) {
-        throw error instanceof Error ? error : new Error(String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        const partial: BatchResult<R> = {
+          successful,
+          failed,
+          totalProcessed: successful.length + failed.length,
+          totalDuration: Date.now() - startTime,
+          batchId,
+          startedAt,
+          completedAt: new Date().toISOString()
+        };
+        throw new BatchError(
+          batchId,
+          'batch',
+          { successful: successful.length, failed: failed.length },
+          message,
+          partial,
+          error
+        );
       }
       // In continue-on-error mode, the error was already logged in processItem
       // and we'll return the partial results below

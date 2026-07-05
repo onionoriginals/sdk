@@ -286,7 +286,8 @@ describe('[UTILS-VERIFY-017] OrdHttpProvider — fetch stub; URL + parsed result
       capturedUrls.push(url);
       return {
         ok: true,
-        json: async () => mockResponse,
+        // fetchJson materializes bytes (arrayBuffer) rather than res.json().
+        arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(mockResponse)).buffer,
       };
     };
 
@@ -316,7 +317,8 @@ describe('[UTILS-VERIFY-017] OrdHttpProvider — fetch stub; URL + parsed result
   test('getInscriptionsBySatoshi returns [] when inscription_ids is missing', async () => {
     (globalThis as Record<string, unknown>).fetch = async () => ({
       ok: true,
-      json: async () => ({ sat: '99' }), // no inscription_ids field
+      arrayBuffer: async () =>
+        new TextEncoder().encode(JSON.stringify({ sat: '99' })).buffer, // no inscription_ids field
     });
 
     const result = await provider.getInscriptionsBySatoshi('99');
