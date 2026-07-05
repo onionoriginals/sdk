@@ -479,7 +479,11 @@ export class BBSCryptosuiteManager {
       return 'Document has no issuer or holder to bind the proof to (pass expectedController to verify non-credential documents)';
     }
     const vmDid = verificationMethod.split('#')[0];
-    if (vmDid !== expected) {
+    // Compare on DID identity: `expected` may be a full verification-method URL
+    // (with a #fragment) when supplied as expectedController, so strip its
+    // fragment too before comparing.
+    const expectedDid = expected.split('#')[0];
+    if (vmDid !== expectedDid) {
       return `Proof verificationMethod (${vmDid}) does not match ${subjectLabel} (${expected})`;
     }
     return null;
