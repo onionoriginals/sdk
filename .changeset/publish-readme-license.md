@@ -1,6 +1,5 @@
 ---
-"@originals/sdk": patch
 "@originals/auth": patch
 ---
 
-Ship `README.md` and `LICENSE` (MIT) in the published npm tarballs; previously neither package included them, so the npm pages rendered blank and `"license": "MIT"` shipped without license text. The SDK exports map also gains a `"default"` condition alongside `"import"` for compatibility with tooling that does not match the `import` condition (e.g. `require(esm)` consumers).
+Ship `README.md` and `LICENSE` (MIT) in the published npm tarball; previously the package included neither, so the npm page rendered blank and `"license": "MIT"` shipped without license text. (The same fix for `@originals/sdk`, plus its `"default"` export condition, is recorded in `packages/sdk/CHANGELOG.md` under 2.0.0.)
