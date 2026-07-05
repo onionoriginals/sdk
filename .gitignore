@@ -110,6 +110,9 @@ playwright/.cache/
 # Turborepo
 .turbo/
 
+# Claude Code harness worktrees / scratch (transient, never versioned)
+.claude/worktrees/
+
 # CLI-generated key files (written by `cel create`/`cel migrate`, incl. during tests)
 *.key
 
