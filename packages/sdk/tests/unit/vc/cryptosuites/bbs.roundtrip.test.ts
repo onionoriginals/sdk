@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import * as bbs from '@digitalbazaar/bbs-signatures';
 import { BBSCryptosuiteManager } from '../../../../src/vc/cryptosuites/bbsCryptosuite';
+import { Verifier } from '../../../../src/vc/Verifier';
 import { multikey } from '../../../../src/crypto/Multikey';
 import { PRELOADED_CONTEXTS } from '../../../../src/utils/serialization';
 
@@ -375,6 +376,60 @@ describe('BBS+ bbs-2023 selective disclosure round-trip', () => {
     expect(result.verified).toBe(true);
   });
 
+  // The default mandatory set adapts to the document's binding field so
+  // createProof does not throw an opaque pointer error on non-credential
+  // documents. A presentation (holder, no issuer) binds on '/holder'.
+  test('default mandatory set adapts to holder for presentation-shaped documents', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+    const presentation = {
+      '@context': ['https://www.w3.org/ns/credentials/v2', { '@vocab': 'https://example.org/vocab#' }],
+      type: ['VerifiablePresentation'],
+      holder: 'did:example:issuer',
+      credentialSubject: { id: 'did:example:subject', name: 'Alice' }
+    };
+
+    // No mandatoryPointers → defaults to ['/holder'] (not ['/issuer'], which
+    // would throw because the document has no issuer).
+    const baseProof = await BBSCryptosuiteManager.createProof(presentation, {
+      verificationMethod: vm,
+      proofPurpose: 'assertionMethod',
+      privateKey: secretKey,
+      publicKey,
+      documentLoader
+    });
+    // Binds on holder, so it verifies without an explicit expectedController.
+    const res = await BBSCryptosuiteManager.verifyProof(presentation, baseProof, { documentLoader });
+    expect(res.verified).toBe(true);
+  });
+
+  // A base (issued) proof carries no presentation-header binding, so it must be
+  // rejected — not silently accepted — when the verifier requires one. Otherwise
+  // a captured base proof could be replayed where a fresh derived presentation
+  // was demanded.
+  test('a base proof is rejected when the verifier requires a presentation header', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+    const baseProof = await BBSCryptosuiteManager.createProof(credential, {
+      verificationMethod: vm,
+      proofPurpose: 'assertionMethod',
+      privateKey: secretKey,
+      publicKey,
+      documentLoader,
+      mandatoryPointers
+    });
+    // Sanity: it verifies with no presentation-header expectation.
+    expect((await BBSCryptosuiteManager.verifyProof(credential, baseProof, { documentLoader })).verified).toBe(true);
+
+    // With an expected presentation header, the base proof cannot satisfy it.
+    const res = await BBSCryptosuiteManager.verifyProof(credential, baseProof, {
+      documentLoader,
+      expectedPresentationHeader: new TextEncoder().encode('verifier-nonce')
+    });
+    expect(res.verified).toBe(false);
+    expect(res.errors?.[0]).toContain('Base proof cannot satisfy expectedPresentationHeader');
+  });
+
   // A verifier-supplied expectedPresentationHeader is the freshness/anti-replay
   // channel for presentations: the derived proof's bound header must match.
   test('expectedPresentationHeader binds a derived presentation (anti-replay)', async () => {
@@ -428,6 +483,46 @@ describe('BBS+ bbs-2023 selective disclosure round-trip', () => {
     );
     expect(replayedViaVerifyProof.verified).toBe(false);
     expect(replayedViaVerifyProof.errors?.[0]).toContain('presentation header mismatch');
+  });
+
+  // The anti-replay/binding options must be reachable through the public
+  // Verifier.verifyCredential entry point (not only when calling
+  // BBSCryptosuiteManager directly), and actually reach the bbs-2023 path.
+  test('expectedPresentationHeader reaches the bbs-2023 path through Verifier.verifyCredential', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+    const nonce = new TextEncoder().encode('verifier-session-nonce');
+
+    const baseProof = await BBSCryptosuiteManager.createProof(credential, {
+      verificationMethod: vm,
+      proofPurpose: 'assertionMethod',
+      privateKey: secretKey,
+      publicKey,
+      documentLoader,
+      mandatoryPointers
+    });
+    const { document: revealed, proof: derivedProof } = await BBSCryptosuiteManager.deriveProof(
+      { ...credential, proof: baseProof },
+      baseProof,
+      { documentLoader, selectivePointers: ['/credentialSubject/name'], presentationHeader: nonce }
+    );
+
+    // Stub DIDManager: resolveDID returns null so checkProofPurpose skips the
+    // relationship check (the controller binding + signature still gate it).
+    const verifier = new Verifier({ resolveDID: async () => null } as any);
+    const vc = { ...revealed, proof: derivedProof };
+
+    const ok = await verifier.verifyCredential(vc as any, {
+      documentLoader, checkStatus: false, expectedPresentationHeader: nonce
+    });
+    expect(ok.verified).toBe(true);
+
+    // A mismatched nonce is rejected — proving the option actually reaches the
+    // cryptosuite rather than being dropped at the Verifier boundary.
+    const bad = await verifier.verifyCredential(vc as any, {
+      documentLoader, checkStatus: false, expectedPresentationHeader: new TextEncoder().encode('other-nonce')
+    });
+    expect(bad.verified).toBe(false);
   });
 
   // domain may be a string OR an array of strings per VC Data Integrity;

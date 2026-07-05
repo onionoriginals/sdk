@@ -166,14 +166,20 @@ export class BBSCryptosuiteManager {
    * disclose them via {@link deriveProof}.
    */
   static async createProof(document: any, options: BBSProofOptions): Promise<DataIntegrityProof> {
-    // Default to making the issuer mandatory so that derived proofs remain
-    // bound to their issuer out of the box: verifyDerivedProof fails closed
-    // when the revealed document has no issuer/holder (issue #315), so a base
-    // proof created with no mandatory pointers would otherwise yield derived
-    // proofs that cannot be verified. `/issuer` is present on both VC 1.1 and
-    // VC 2.0 credentials; callers signing non-credential documents (or wanting
-    // a different mandatory set) pass `mandatoryPointers` explicitly.
-    const mandatoryPointers = options.mandatoryPointers ?? ['/issuer'];
+    // Default the mandatory set to the document's binding field so derived
+    // proofs stay bound out of the box: verifyDerivedProof fails closed when the
+    // revealed document has no issuer/holder (issue #315), so a base proof
+    // created with no mandatory pointers would otherwise yield derived proofs
+    // that cannot be verified. Credentials bind on `/issuer` (present on both
+    // VC 1.1 and 2.0), presentations on `/holder`. For any other document there
+    // is no field to default to, so leave the set empty rather than throwing an
+    // opaque "pointer does not match" error; such callers pass `mandatoryPointers`
+    // explicitly.
+    const mandatoryPointers = options.mandatoryPointers ?? (
+      document?.issuer !== undefined ? ['/issuer']
+      : document?.holder !== undefined ? ['/holder']
+      : []
+    );
 
     const privateKey = resolveKey(options.privateKey, true);
     if (!privateKey) throw new Error('Private key required for BBS+ proof creation');
@@ -673,6 +679,15 @@ export class BBSCryptosuiteManager {
         return result.verified
           ? { verified: true }
           : { verified: false, errors: result.errors ?? ['BBS+ derived proof verification failed'] };
+      }
+
+      // A base (issued) proof carries no presentation-header binding, so it can
+      // never satisfy a verifier that required a fresh presentation header.
+      // Fail closed rather than silently ignoring the expectation — otherwise a
+      // captured base proof could be replayed where a derived presentation
+      // (bound to the verifier's per-session nonce) was required.
+      if (options.expectedPresentationHeader !== undefined) {
+        return { verified: false, errors: ['Base proof cannot satisfy expectedPresentationHeader; a derived presentation is required'] };
       }
 
       // Bind the embedded public key to the resolved DID key before any
