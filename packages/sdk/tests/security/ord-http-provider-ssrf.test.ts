@@ -72,6 +72,23 @@ describe('OrdHttpProvider SSRF / size hardening (#265)', () => {
     expect(res!.contentType).toBe('text/plain');
   });
 
+  test('does not follow redirects (closes the redirect-bypass SSRF hole)', async () => {
+    const inits: any[] = [];
+    installFetch(async (url, init) => {
+      inits.push({ url, init });
+      if (url.includes('/inscription/')) {
+        return jsonResponse({ content_url: `${BASE}/content/abc`, content_type: 'text/plain', sat: '123' });
+      }
+      return bytesResponse(new Uint8Array([1]));
+    });
+    const provider = new OrdHttpProvider({ baseUrl: BASE });
+    await provider.getInscriptionById('abc');
+    // Every fetch this provider makes must opt out of redirect-following so a
+    // same-origin URL cannot 30x-redirect us to an internal host.
+    expect(inits.length).toBeGreaterThan(0);
+    expect(inits.every((c) => c.init?.redirect === 'error')).toBe(true);
+  });
+
   test('rejects an oversized content body (declared Content-Length)', async () => {
     installFetch(async (url) => {
       if (url.includes('/inscription/')) {

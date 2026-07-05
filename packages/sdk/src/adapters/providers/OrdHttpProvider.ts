@@ -44,8 +44,11 @@ function assertSameOrigin(candidate: string, baseUrl: string): void {
  * header (cheap early reject) and again on the materialized bytes (a lying or
  * absent header can't smuggle an oversized/streamed body past the cap).
  */
-async function fetchBytesWithLimit(url: string, maxBytes: number, init?: unknown): Promise<{ ok: boolean; bytes: Uint8Array } | null> {
-  const res = await (globalThis as any).fetch(url, init);
+async function fetchBytesWithLimit(url: string, maxBytes: number, init?: Record<string, unknown>): Promise<{ ok: boolean; bytes: Uint8Array } | null> {
+  // redirect: 'error' closes the redirect-bypass hole in the origin pin: without
+  // it, a same-origin content_url that HTTP-redirects to an internal host would
+  // be followed past assertSameOrigin (which only checks the first hop).
+  const res = await (globalThis as any).fetch(url, { redirect: 'error', ...(init ?? {}) });
   if (!res.ok) return null;
   const lenHeader = res.headers?.get?.('content-length');
   if (lenHeader && Number(lenHeader) > maxBytes) {
@@ -62,7 +65,9 @@ async function fetchJson<T>(url: string, maxBytes: number = DEFAULT_MAX_JSON_BYT
   const res = await (globalThis as any).fetch(url, {
     headers: {
       'Accept': 'application/json'
-    }
+    },
+    // Do not follow redirects to another host (SSRF via redirect).
+    redirect: 'error'
   });
   if (!res.ok) return null;
   // Reject an over-cap response up front via Content-Length. (The JSON body is
