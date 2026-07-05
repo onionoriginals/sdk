@@ -315,6 +315,17 @@ export class BitcoinManager {
     return true;
   }
 
+  /**
+   * Resolve the inscription id currently recorded on a satoshi, or null if the
+   * provider reports none. Used to back a transfer with a real inscription id
+   * instead of a fabricated placeholder when no local migration record exists.
+   */
+  async getInscriptionIdBySatoshi(satoshi: string): Promise<string | null> {
+    if (!this.ord) return null;
+    const list = await this.ord.getInscriptionsBySatoshi(satoshi);
+    return list.length > 0 ? list[0].inscriptionId : null;
+  }
+
   async getSatoshiFromInscription(inscriptionId: string): Promise<string | null> {
     if (this.ord) {
       const info = await this.ord.getInscriptionById(inscriptionId);

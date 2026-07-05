@@ -1,9 +1,10 @@
 import { describe, test, expect } from 'bun:test';
-import { 
-  computeDigestMultibase, 
-  verifyDigestMultibase, 
-  decodeDigestMultibase 
+import {
+  computeDigestMultibase,
+  verifyDigestMultibase,
+  decodeDigestMultibase
 } from '../../../src/cel/hash';
+import { multibase } from '../../../src/utils/encoding';
 
 describe('CEL Hash Utilities', () => {
   describe('computeDigestMultibase', () => {
@@ -54,6 +55,18 @@ describe('CEL Hash Utilities', () => {
       const digest = computeDigestMultibase(content);
       
       expect(digest.startsWith('u')).toBe(true);
+    });
+
+    test('encodes a spec-conformant sha2-256 multihash with the 0x12 0x20 header (#258)', () => {
+      const content = new TextEncoder().encode('hello');
+      const digest = computeDigestMultibase(content);
+      // Decode the raw multibase payload WITHOUT stripping the multihash header.
+      const raw = multibase.decode(digest);
+      expect(raw.length).toBe(34); // 2-byte multihash header + 32-byte digest
+      expect(raw[0]).toBe(0x12); // sha2-256 multicodec code
+      expect(raw[1]).toBe(0x20); // 32-byte length
+      // Spec-conformant sha2-256 multihashes multibase-encode to a "uEi..." prefix.
+      expect(digest.startsWith('uEi')).toBe(true);
     });
 
     test('hash length is consistent (SHA-256 produces 32 bytes)', () => {
@@ -121,6 +134,13 @@ describe('CEL Hash Utilities', () => {
 
     test('throws on invalid multibase prefix', () => {
       expect(() => decodeDigestMultibase('xInvalid')).toThrow();
+    });
+
+    test('rejects a legacy bare (header-less) digest (#258)', () => {
+      // A pre-fix value: 32 raw hash bytes multibase-encoded with NO multihash
+      // header. It must be rejected rather than returned as a 32-byte "digest".
+      const bare = multibase.encode(new Uint8Array(32), 'base64url');
+      expect(() => decodeDigestMultibase(bare)).toThrow('Invalid digestMultibase');
     });
   });
 

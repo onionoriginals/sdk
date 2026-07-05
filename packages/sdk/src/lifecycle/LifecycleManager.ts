@@ -1121,15 +1121,40 @@ export class LifecycleManager {
         satoshi = '';
       }
     }
+    // Determine the inscription that backs this transfer. When a migration
+    // record exists we trust its inscription id; otherwise (e.g. an asset
+    // rehydrated from a did:btco document, whose provenance starts empty) we
+    // must resolve the REAL inscription on the satoshi via the provider rather
+    // than fabricating `insc-<sat>` / `unknown-tx` placeholders — those write
+    // invented backing-transaction data into provenance, and a real provider
+    // rejects the transfer with a confusing "inscription not found".
+    let inscriptionId = latestMigration?.inscriptionId;
+    if (!inscriptionId) {
+      if (!satoshi) {
+        throw new StructuredError(
+          'INSCRIPTION_NOT_FOUND',
+          `Cannot transfer ${asset.id}: no migration record and no satoshi could be derived from the DID to locate its inscription.`
+        );
+      }
+      inscriptionId = await bm.getInscriptionIdBySatoshi(satoshi) ?? undefined;
+      if (!inscriptionId) {
+        throw new StructuredError(
+          'INSCRIPTION_NOT_FOUND',
+          `Cannot transfer ${asset.id}: no inscription found on satoshi ${satoshi} to back the transfer.`
+        );
+      }
+    }
     const inscription = {
       satoshi,
-      inscriptionId: latestMigration?.inscriptionId ?? `insc-${satoshi || 'unknown'}`,
+      inscriptionId,
       content: Buffer.alloc(0),
       contentType: 'application/octet-stream',
-      txid: latestMigration?.transactionId ?? 'unknown-tx',
+      // Not used by transferInscription (which reads only inscriptionId); kept
+      // for shape. Empty rather than a fabricated 'unknown-tx'.
+      txid: latestMigration?.transactionId ?? '',
       vout: 0
     } as const;
-     
+
     const tx = await bm.transferInscription(inscription, newOwner);
     // Record the actual chain of custody: the current owner (the last
     // transfer's recipient) hands off to newOwner. Recording the asset DID

@@ -27,13 +27,21 @@ describe('LifecycleManager.transferOwnership unit edge cases', () => {
     expect(asset.getProvenance().transfers.length).toBe(1);
   });
 
-  test('extracts satoshi network-blindly from a regtest btco DID with no migration record', async () => {
-    // Regression: for `did:btco:reg:<sat>` the old `split(':')[2]` returned the
-    // network tag 'reg' instead of the satoshi, so the transfer looked up the
-    // wrong (nonexistent) ordinal. With no migration record present, the
-    // satoshi must come from parsing the DID network-aware.
+  test('extracts satoshi network-blindly and resolves the real inscription (no migration record) (#273)', async () => {
+    // Two regressions in one path:
+    //  1. For `did:btco:reg:<sat>` the old `split(':')[2]` returned the network
+    //     tag 'reg' instead of the satoshi.
+    //  2. The inscription that backs the transfer must be looked up on the
+    //     satoshi via the provider, NOT fabricated as `insc-<sat>` — otherwise a
+    //     transfer records invented backing-transaction data.
+    let lookedUpSatoshi: string | undefined;
     let capturedInscriptionId: string | undefined;
     const spyProvider = new MockOrdinalsProvider();
+    const origBySat = spyProvider.getInscriptionsBySatoshi.bind(spyProvider);
+    spyProvider.getInscriptionsBySatoshi = async (satoshi: string) => {
+      lookedUpSatoshi = satoshi;
+      return origBySat(satoshi);
+    };
     const origTransfer = spyProvider.transferInscription.bind(spyProvider);
     spyProvider.transferInscription = async (inscriptionId: string, toAddress: string, options?: { feeRate?: number }) => {
       capturedInscriptionId = inscriptionId;
@@ -50,9 +58,28 @@ describe('LifecycleManager.transferOwnership unit edge cases', () => {
     expect(asset.getProvenance().migrations.length).toBe(0);
 
     await spySdk.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
-    // inscriptionId is derived as `insc-<satoshi>` when no migration record exists.
-    expect(capturedInscriptionId).toBe('insc-123456');
-    expect(capturedInscriptionId).not.toContain('reg');
+    // Satoshi parsed network-aware: '123456', never the 'reg' network tag.
+    expect(lookedUpSatoshi).toBe('123456');
+    // The inscription id is the REAL one the provider reports for that satoshi,
+    // not a fabricated `insc-123456` placeholder.
+    expect(capturedInscriptionId).toBe('insc-mock');
+  });
+
+  test('throws INSCRIPTION_NOT_FOUND when no inscription backs the satoshi (#273)', async () => {
+    // A did:btco asset with no migration record whose satoshi carries no
+    // inscription must fail loudly rather than fabricate an `insc-<sat>` id and
+    // write invented provenance.
+    const emptyProvider = new MockOrdinalsProvider();
+    emptyProvider.getInscriptionsBySatoshi = async () => [];
+    const s = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: emptyProvider } as any);
+    const asset = new OriginalsAsset(
+      [{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'h' }],
+      { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:reg:999999' } as any,
+      []
+    );
+    await expect(
+      s.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7')
+    ).rejects.toThrow('no inscription found on satoshi');
   });
 });
 
