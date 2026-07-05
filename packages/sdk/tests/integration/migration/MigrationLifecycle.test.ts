@@ -456,9 +456,9 @@ describe('CORE-MIG-EVENTS-020 — batch migration behavior', () => {
 
   // CORE-MIG-EVENTS-020 / performance: concurrency cap
   it('batch migration respects maxConcurrent limit', async () => {
-    // NOTE: The current migrateBatch implementation is sequential (no actual
-    // concurrency control in the loop itself). We verify the option is accepted
-    // and the overall batch result is correct/consistent regardless.
+    // migrateBatch now honors maxConcurrent via a bounded worker pool. With
+    // maxConcurrent=1 it runs sequentially; either way the batch result must be
+    // correct/consistent.
     const { sdk, migrationManager } = makeSdk();
     const peerDid1 = await makePeerDid(sdk, 'res-a');
     const peerDid2 = await makePeerDid(sdk, 'res-b');

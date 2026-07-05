@@ -12,6 +12,7 @@ import { validateAndNormalizeDomain } from './domainUtils.js';
 import {
   BatchOperationExecutor,
   BatchValidator,
+  BatchError,
   type BatchResult,
   type BatchOperationOptions,
   type BatchInscriptionOptions,
@@ -109,7 +110,8 @@ export class BatchLifecycleOperations {
         timestamp: new Date().toISOString(),
         batchId,
         operation: 'create',
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        partialResults: error instanceof BatchError ? error.partialResults : undefined
       });
 
       throw error;
@@ -169,7 +171,8 @@ export class BatchLifecycleOperations {
         timestamp: new Date().toISOString(),
         batchId,
         operation: 'publish',
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        partialResults: error instanceof BatchError ? error.partialResults : undefined
       });
 
       throw error;
@@ -262,7 +265,8 @@ export class BatchLifecycleOperations {
         timestamp: new Date().toISOString(),
         batchId,
         operation: 'inscribe',
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        partialResults: error instanceof BatchError ? error.partialResults : undefined
       });
 
       throw error;
@@ -338,7 +342,8 @@ export class BatchLifecycleOperations {
         timestamp: new Date().toISOString(),
         batchId,
         operation: 'transfer',
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        partialResults: error instanceof BatchError ? error.partialResults : undefined
       });
 
       throw error;

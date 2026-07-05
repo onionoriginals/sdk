@@ -94,13 +94,17 @@ export class OriginalsAsset {
         return versionA - versionB;
       });
       
-      // Add versions in correct order to version manager
+      // Add versions in correct order to version manager, preserving each
+      // resource's own declared version number (so gapped/duplicate sets are
+      // not silently renumbered 1..N).
       for (const resource of sorted) {
         this.versionManager.addVersion(
           resource.id,
           resource.hash,
           resource.contentType,
-          resource.previousVersionHash
+          resource.previousVersionHash,
+          undefined,
+          resource.version
         );
       }
     }
@@ -453,13 +457,15 @@ export class OriginalsAsset {
     // Add to resources array (immutable - don't modify old resource)
     this.resources.push(newResource);
     
-    // Track in version manager
+    // Track in version manager, using the resource's own next version number so
+    // the manager numbering matches getResourceVersion(id, newVersion).
     this.versionManager.addVersion(
       resourceId,
       newHash,
       contentType,
       currentResource.hash,
-      changes
+      changes,
+      newVersion
     );
     
     // Update provenance

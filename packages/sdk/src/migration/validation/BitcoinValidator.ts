@@ -18,7 +18,6 @@ export class BitcoinValidator implements IValidator {
     private bitcoinManager: BitcoinManager
   ) {}
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async validate(options: MigrationOptions): Promise<MigrationValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
@@ -45,9 +44,19 @@ export class BitcoinValidator implements IValidator {
       const estimatedDuration = 600000; // 10 minutes default
 
       try {
-        // Estimate fee for a typical inscription (assume 1KB data)
+        // Estimate fee for a typical inscription (assume ~1KB envelope).
         const estimatedSize = 1024; // bytes
-        const feeRate = options.feeRate || 10; // sats/vB
+        // Prefer the caller-supplied feeRate; otherwise actually consult the
+        // fee oracle, then the provider's estimator. This is a real (possibly
+        // network) call, so a genuine failure now reaches the catch below —
+        // previously the block was pure arithmetic and FEE_ESTIMATION_FAILED
+        // was unreachable dead code.
+        let feeRate = options.feeRate;
+        if (feeRate === undefined) {
+          feeRate = this.config.feeOracle
+            ? await this.config.feeOracle.estimateFeeRate(1)
+            : await ordinalsProvider.estimateFee(1);
+        }
         networkFees = estimatedSize * feeRate;
 
         // Check if fee is within reasonable limits
@@ -66,11 +75,14 @@ export class BitcoinValidator implements IValidator {
         networkFees = 10240; // Default fallback: ~1KB at 10 sat/vB
       }
 
-      // Validate network (should be signet for testnet)
-      if (this.config.network !== 'mainnet' && this.config.network !== 'signet') {
+      // btco anchoring uses the SDK's configured Bitcoin network as-is
+      // (regtest->regtest, signet->signet). Warn on any non-mainnet network so
+      // the caller knows this is not a production anchor — the old text wrongly
+      // claimed regtest "will use signet", which the network mapping never does.
+      if (this.config.network !== 'mainnet') {
         warnings.push({
-          code: 'NETWORK_MISMATCH',
-          message: `Network '${this.config.network}' will use signet for Bitcoin anchoring`
+          code: 'NON_MAINNET_NETWORK',
+          message: `Bitcoin anchoring will use the '${this.config.network}' network (non-mainnet)`
         });
       }
 

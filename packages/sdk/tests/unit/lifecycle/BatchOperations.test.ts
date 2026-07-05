@@ -99,6 +99,28 @@ describe('BatchOperations', () => {
       ).rejects.toThrow('Failed on item 3');
     });
 
+    test('fail-fast throws a BatchError carrying the partial results (#293)', async () => {
+      const items = [1, 2, 3, 4, 5];
+      const operation = async (item: number) => {
+        if (item === 3) throw new Error('Failed on item 3');
+        return item * 2;
+      };
+
+      let caught: unknown;
+      try {
+        await executor.execute(items, operation, { continueOnError: false, maxConcurrent: 1 });
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(BatchError);
+      const be = caught as BatchError;
+      // Items 1 and 2 succeeded before item 3 aborted the batch.
+      expect(be.partialResults).toEqual({ successful: 2, failed: 1 });
+      // The full accumulated result is recoverable, not discarded.
+      expect(be.result?.successful.map((s: any) => s.result)).toEqual([2, 4]);
+      expect(be.result?.failed[0].error.message).toBe('Failed on item 3');
+    });
+
     test('should retry failed operations with exponential backoff', async () => {
       let attempts = 0;
       const items = [1];

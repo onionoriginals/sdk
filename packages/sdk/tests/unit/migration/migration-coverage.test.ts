@@ -1294,6 +1294,42 @@ describe('MigrationManager: audit failures and rollback state consistency', () =
     expect(status.state).toBe(MigrationStateEnum.QUARANTINED);
   });
 
+  it('migrateBatch guards empty input (no NaN progress) and dedups DIDs (#293)', async () => {
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance((sdk as any).config, sdk.did, sdk.credentials);
+
+    // Empty input: overallProgress must be 0, not NaN.
+    const empty = await manager.migrateBatch([], 'webvh', { continueOnError: true });
+    expect(empty.total).toBe(0);
+    expect(empty.overallProgress).toBe(0);
+    expect(Number.isNaN(empty.overallProgress)).toBe(false);
+
+    // Duplicate DIDs collapse to one migration; counters stay consistent with
+    // the results Map (they used to double-count).
+    const dup = await manager.migrateBatch(
+      ['did:peer:z6MkDupA', 'did:peer:z6MkDupA'],
+      'webvh',
+      { continueOnError: true }
+    );
+    expect(dup.total).toBe(1);
+    expect(dup.completed + dup.failed).toBe(dup.results.size);
+    expect(dup.results.size).toBe(1);
+  });
+
+  it('failure audit records the REAL validation errors, not a hardcoded empty set (#293)', async () => {
+    MigrationManager.resetInstance();
+    const sdk = makeSdk();
+    const manager = MigrationManager.getInstance((sdk as any).config, sdk.did, sdk.credentials);
+    // webvh target with no domain → validation fails (DOMAIN_REQUIRED).
+    const result = await manager.migrate({ sourceDid: 'did:peer:z6MkValFail', targetLayer: 'webvh' });
+    expect(result.success).toBe(false);
+    const vr = result.auditRecord?.validationResults;
+    expect(vr?.valid).toBe(false);
+    // The real validation errors are threaded in (previously errors:[] was hardcoded).
+    expect(vr?.errors.length).toBeGreaterThan(0);
+  });
+
   it('migrateBatch startTime is the batch start, consistent with batchId', async () => {
     // Regression: startTime was Date.now() evaluated at return (batch end) and
     // differed from the timestamp baked into batchId.

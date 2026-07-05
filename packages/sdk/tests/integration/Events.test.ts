@@ -114,6 +114,30 @@ describe('Integration: Event System', () => {
       expect(asset.currentLayer).toBe('did:peer');
     });
 
+    test('asset:created reaches pre-subscribed lifecycle handlers; asset-level post-await does not (#293)', async () => {
+      const resources: AssetResource[] = [
+        { id: 'resource-1', type: 'text', contentType: 'text/plain', hash: makeHash('cafe01'), content: 'x' }
+      ];
+      const lifecycleEvents: string[] = [];
+      // Supported path: subscribe on the LifecycleManager emitter before creating.
+      sdk.lifecycle.on('asset:created', (event) => {
+        lifecycleEvents.push(event.asset.id);
+      });
+
+      const asset = await sdk.lifecycle.createAsset(resources);
+
+      // Subscribing on the asset after the await can never observe asset:created
+      // (the emission microtask has already run). The previously-present
+      // asset-level emit was therefore dead code and was removed.
+      let assetLevelReceived = false;
+      asset.on('asset:created', () => { assetLevelReceived = true; });
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(lifecycleEvents).toContain(asset.id);
+      expect(assetLevelReceived).toBe(false);
+    });
+
     test('should include correct data in asset:created event', async () => {
       const resources: AssetResource[] = [
         {

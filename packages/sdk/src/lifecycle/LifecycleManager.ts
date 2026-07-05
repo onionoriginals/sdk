@@ -262,7 +262,9 @@ export class LifecycleManager {
       
       const asset = new OriginalsAsset(resources, didDoc, []);
       
-      // Defer asset:created event emission to next microtask so callers can subscribe first
+      // Defer asset:created emission to the next microtask so a handler
+      // subscribed on the LifecycleManager emitter immediately before this call
+      // still observes it. (Only pre-subscription works — see below.)
       queueMicrotask(() => {
         const event = {
           type: 'asset:created' as const,
@@ -275,9 +277,13 @@ export class LifecycleManager {
           }
         };
 
-        // Emit from both LifecycleManager and asset emitters
+        // Emitted only on the LifecycleManager emitter. An asset-level emit
+        // here would be dead code: a caller obtains the asset reference only
+        // after `await createAsset()` resolves, and this microtask has already
+        // run by then, so `(await createAsset()).on('asset:created', ...)` could
+        // never fire. Subscribe via `sdk.lifecycle.on('asset:created', ...)`
+        // before creating instead.
         void this.eventEmitter.emit(event);
-        void (asset as unknown as { eventEmitter: EventEmitter }).eventEmitter.emit(event);
       });
       
       stopTimer();
@@ -291,7 +297,9 @@ export class LifecycleManager {
       const didDoc = await this.didManager.createDIDPeer(resources);
       const asset = new OriginalsAsset(resources, didDoc, []);
       
-      // Defer asset:created event emission to next microtask so callers can subscribe first
+      // Defer asset:created emission to the next microtask so a handler
+      // subscribed on the LifecycleManager emitter immediately before this call
+      // still observes it. (Only pre-subscription works — see below.)
       queueMicrotask(() => {
         const event = {
           type: 'asset:created' as const,
@@ -304,9 +312,13 @@ export class LifecycleManager {
           }
         };
 
-        // Emit from both LifecycleManager and asset emitters
+        // Emitted only on the LifecycleManager emitter. An asset-level emit
+        // here would be dead code: a caller obtains the asset reference only
+        // after `await createAsset()` resolves, and this microtask has already
+        // run by then, so `(await createAsset()).on('asset:created', ...)` could
+        // never fire. Subscribe via `sdk.lifecycle.on('asset:created', ...)`
+        // before creating instead.
         void this.eventEmitter.emit(event);
-        void (asset as unknown as { eventEmitter: EventEmitter }).eventEmitter.emit(event);
       });
       
       stopTimer();
