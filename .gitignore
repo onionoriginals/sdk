@@ -112,3 +112,6 @@ playwright/.cache/
 
 # CLI-generated key files (written by `cel create`/`cel migrate`, incl. during tests)
 *.key
+
+# Claude Code harness state (agent worktrees, local settings)
+.claude/
