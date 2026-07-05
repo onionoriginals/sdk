@@ -187,25 +187,42 @@ export class MigrationManager {
     // Concurrency guard (issue #255): reject a second migration of the same
     // DID while one is in flight. The set is mutated synchronously (before
     // any await), so concurrent callers cannot interleave past this check.
-    // The rejected caller gets the same structured MigrationResult
-    // (success: false, code MIGRATION_IN_PROGRESS) every other operational
-    // failure produces — and because the guard returns here, the finally
-    // block below only ever runs for the call that actually claimed the
-    // lock. estimateCostOnly requests are read-only and exempt.
+    // The rejected caller gets a structured MigrationResult (success: false,
+    // code MIGRATION_IN_PROGRESS) — and because the guard returns here, the
+    // finally block below only ever runs for the call that actually claimed
+    // the lock. estimateCostOnly requests are read-only and exempt.
+    //
+    // The rejection is returned INLINE rather than via
+    // handleMigrationFailure: no migration ever started, so routing it
+    // through the failure handler emitted a migration:failed event and wrote
+    // a signed audit record for a phantom migration (a mig_failed_* id with
+    // no matching migration:started and nothing on disk to roll back) —
+    // pure noise in the audit trail.
     if (!options.estimateCostOnly) {
       if (this.inFlightSourceDids.has(options.sourceDid)) {
-        return await this.handleMigrationFailure(
-          this.createMigrationError(
-            MigrationErrorType.VALIDATION_ERROR,
-            'MIGRATION_IN_PROGRESS',
-            `A migration for ${options.sourceDid} is already in progress; concurrent migrations of the same DID would double-pay for duplicate inscriptions`,
-            'not-started'
-          ),
-          options,
-          undefined,
-          undefined,
-          startTime
-        );
+        let sourceLayer: 'peer' | 'webvh' | 'btco';
+        try {
+          sourceLayer = this.extractLayer(options.sourceDid);
+        } catch {
+          sourceLayer = 'peer';
+        }
+        return {
+          migrationId: `mig_rejected_${Date.now()}`,
+          success: false,
+          sourceDid: options.sourceDid,
+          sourceLayer,
+          targetLayer: options.targetLayer,
+          state: MigrationStateEnum.FAILED,
+          duration: Date.now() - startTime,
+          cost: { storageCost: 0, networkFees: 0, totalCost: 0, currency: 'sats' },
+          error: {
+            type: MigrationErrorType.VALIDATION_ERROR,
+            code: 'MIGRATION_IN_PROGRESS',
+            message: `A migration for ${options.sourceDid} is already in progress; concurrent migrations of the same DID would double-pay for duplicate inscriptions`,
+            sourceDid: options.sourceDid,
+            timestamp: Date.now()
+          }
+        };
       }
       this.inFlightSourceDids.add(options.sourceDid);
     }
