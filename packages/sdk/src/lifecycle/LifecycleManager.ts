@@ -598,9 +598,9 @@ export class LifecycleManager {
       // half-published (some resources with url set + orphaned storage
       // writes) while the caller sees a plain failure.
       const atomicRollback = options?.atomicRollback !== false;
-      const urlSnapshots = asset.resources.map((resource) => ({
-        resource: resource as { url?: string },
-        url: (resource as { url?: string }).url
+      const urlSnapshots = asset.resources.map((resource: { url?: string }) => ({
+        resource,
+        url: resource.url
       }));
       const writtenObjects: Array<{ domain: string; relativePath: string }> = [];
 

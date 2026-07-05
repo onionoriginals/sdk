@@ -255,7 +255,6 @@ export class BatchOperationExecutor {
               (s): s is PromiseRejectedResult => s.status === 'rejected'
             );
             if (firstRejection) {
-              // eslint-disable-next-line @typescript-eslint/no-throw-literal
               throw firstRejection.reason;
             }
           }
