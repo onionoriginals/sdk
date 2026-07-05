@@ -201,8 +201,8 @@ export function skolemizeExpandedJsonLd(
   // explicit @id (such a node never calls generateId), so a later sibling
   // branch reuses the same skolem URN and two distinct blank nodes collapse
   // into one after deskolemization (issue #316).
-  if (options.urnScheme === undefined) options.urnScheme = CUSTOM_URN_SCHEME;
-  if (options.randomString === undefined) options.randomString = crypto.randomUUID();
+  if (!options.urnScheme) options.urnScheme = CUSTOM_URN_SCHEME;
+  if (!options.randomString) options.randomString = crypto.randomUUID();
   if (options.count === undefined) options.count = 0;
 
   const generateId = (blankNodeId?: string): string => {
