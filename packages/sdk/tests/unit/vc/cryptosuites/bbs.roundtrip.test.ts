@@ -199,6 +199,193 @@ describe('BBS+ bbs-2023 selective disclosure round-trip', () => {
     ).rejects.toThrow(/at least one mandatory or selective pointer/i);
   });
 
+  // Regression (issue #316): an id-less credential with anonymous nested nodes
+  // across sibling branches must round-trip. The per-level skolemization
+  // counter copy collapsed distinct blank nodes into one skolem URN, so the
+  // base proof verified but the derived proof did not.
+  test('id-less credential with multiple anonymous nested nodes round-trips', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+
+    const anonCred = {
+      '@context': [
+        'https://www.w3.org/ns/credentials/v2',
+        { '@vocab': 'https://example.org/vocab#' }
+      ],
+      type: ['VerifiableCredential'],
+      // no top-level `id`: the credential root itself is a blank node
+      issuer: 'did:example:issuer',
+      validFrom: '2024-01-01T00:00:00Z',
+      credentialSubject: {
+        id: 'did:example:subject', // @id-bearing node with anonymous descendants
+        employment: { employer: { name: 'Acme' } }
+      },
+      evidence: { note: 'anonymous sibling branch' }
+    };
+
+    const baseProof = await BBSCryptosuiteManager.createProof(anonCred, {
+      verificationMethod: vm,
+      privateKey: secretKey,
+      publicKey,
+      documentLoader,
+      mandatoryPointers
+    });
+    expect((await BBSCryptosuiteManager.verifyProof(anonCred, baseProof, { documentLoader })).verified).toBe(true);
+
+    const { document: revealed, proof: derivedProof } = await BBSCryptosuiteManager.deriveProof(
+      { ...anonCred, proof: baseProof },
+      baseProof,
+      { documentLoader, selectivePointers: ['/credentialSubject/employment'] }
+    );
+    expect(revealed.credentialSubject.employment.employer.name).toBe('Acme');
+    expect(revealed.evidence).toBeUndefined();
+
+    const result = await BBSCryptosuiteManager.verifyDerivedProof(
+      { ...revealed, proof: derivedProof },
+      { documentLoader }
+    );
+    expect(result.errors).toBeUndefined();
+    expect(result.verified).toBe(true);
+  });
+
+  // Regression (issue #315): the verification method must be controlled by the
+  // credential issuer. An attacker signing with their own key while naming a
+  // trusted issuer must be rejected on both the base and derived paths.
+  test('rejects issuer impersonation via an attacker-controlled verificationMethod', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const attackerVm = 'did:example:attacker#bbs-key-1';
+    const publicKeyMultibase = multikey.encodePublicKey(publicKey, 'Bls12381G2');
+    const documentLoader = async (url: string) => {
+      const ctx = (PRELOADED_CONTEXTS as Record<string, unknown>)[url];
+      if (ctx) return { document: ctx, documentUrl: url, contextUrl: null };
+      if (url === attackerVm) {
+        return {
+          document: {
+            id: attackerVm,
+            type: 'Multikey',
+            controller: 'did:example:attacker',
+            publicKeyMultibase
+          },
+          documentUrl: url,
+          contextUrl: null
+        };
+      }
+      throw new Error(`Unexpected document load: ${url}`);
+    };
+
+    // Attacker signs a credential whose `issuer` names the victim, using the
+    // attacker's own key and verificationMethod.
+    const forgedProof = await BBSCryptosuiteManager.createProof(credential, {
+      verificationMethod: attackerVm,
+      privateKey: secretKey,
+      publicKey,
+      documentLoader,
+      mandatoryPointers
+    });
+
+    const baseResult = await BBSCryptosuiteManager.verifyProof(credential, forgedProof, { documentLoader });
+    expect(baseResult.verified).toBe(false);
+    expect(baseResult.errors?.[0]).toContain('does not match issuer');
+
+    const { document: revealed, proof: derivedProof } = await BBSCryptosuiteManager.deriveProof(
+      { ...credential, proof: forgedProof },
+      forgedProof,
+      { documentLoader, selectivePointers: ['/credentialSubject/name'] }
+    );
+    const derivedResult = await BBSCryptosuiteManager.verifyDerivedProof(
+      { ...revealed, proof: derivedProof },
+      { documentLoader }
+    );
+    expect(derivedResult.verified).toBe(false);
+    expect(derivedResult.errors?.[0]).toContain('does not match issuer');
+
+    const derivedViaVerifyProof = await BBSCryptosuiteManager.verifyProof(revealed, derivedProof, { documentLoader });
+    expect(derivedViaVerifyProof.verified).toBe(false);
+    expect(derivedViaVerifyProof.errors?.[0]).toContain('does not match issuer');
+  });
+
+  // Issue #315: verification fails closed when the document names no issuer or
+  // holder; expectedController is the explicit escape hatch.
+  test('fails closed without an issuer/holder unless expectedController is supplied', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+    const { issuer: _issuer, ...issuerlessCred } = credential as any;
+
+    const baseProof = await BBSCryptosuiteManager.createProof(issuerlessCred, {
+      verificationMethod: vm,
+      privateKey: secretKey,
+      publicKey,
+      documentLoader,
+      mandatoryPointers: ['/credentialSubject/id']
+    });
+
+    const failClosed = await BBSCryptosuiteManager.verifyProof(issuerlessCred, baseProof, { documentLoader });
+    expect(failClosed.verified).toBe(false);
+    expect(failClosed.errors?.[0]).toContain('no issuer or holder');
+
+    const bound = await BBSCryptosuiteManager.verifyProof(issuerlessCred, baseProof, {
+      documentLoader,
+      expectedController: 'did:example:issuer'
+    });
+    expect(bound.verified).toBe(true);
+
+    const wrongController = await BBSCryptosuiteManager.verifyProof(issuerlessCred, baseProof, {
+      documentLoader,
+      expectedController: 'did:example:other'
+    });
+    expect(wrongController.verified).toBe(false);
+  });
+
+  // Issue #315 (related): a verifier that supplies challenge/domain
+  // expectations must reject a replayed proof carrying different values.
+  test('expectedChallenge/expectedDomain mismatches are rejected (anti-replay)', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+
+    const baseProof = await BBSCryptosuiteManager.createProof(credential, {
+      verificationMethod: vm,
+      privateKey: secretKey,
+      publicKey,
+      documentLoader,
+      mandatoryPointers,
+      challenge: 'nonce-123',
+      domain: 'https://verifier.example'
+    });
+
+    const ok = await BBSCryptosuiteManager.verifyProof(credential, baseProof, {
+      documentLoader,
+      expectedChallenge: 'nonce-123',
+      expectedDomain: 'https://verifier.example'
+    });
+    expect(ok.verified).toBe(true);
+
+    const staleChallenge = await BBSCryptosuiteManager.verifyProof(credential, baseProof, {
+      documentLoader,
+      expectedChallenge: 'nonce-456'
+    });
+    expect(staleChallenge.verified).toBe(false);
+    expect(staleChallenge.errors?.[0]).toContain('challenge mismatch');
+
+    const { document: revealed, proof: derivedProof } = await BBSCryptosuiteManager.deriveProof(
+      { ...credential, proof: baseProof },
+      baseProof,
+      { documentLoader, selectivePointers: ['/credentialSubject/name'] }
+    );
+    const replayed = await BBSCryptosuiteManager.verifyDerivedProof(
+      { ...revealed, proof: derivedProof },
+      { documentLoader, expectedChallenge: 'nonce-456' }
+    );
+    expect(replayed.verified).toBe(false);
+    expect(replayed.errors?.[0]).toContain('challenge mismatch');
+
+    const wrongDomain = await BBSCryptosuiteManager.verifyDerivedProof(
+      { ...revealed, proof: derivedProof },
+      { documentLoader, expectedDomain: 'https://other.example' }
+    );
+    expect(wrongDomain.verified).toBe(false);
+    expect(wrongDomain.errors?.[0]).toContain('domain mismatch');
+  });
+
   // Regression: a string value that looks like a blank node ("_:...") must not
   // corrupt canonicalization (PR #219 review).
   test('a credential value that looks like a blank node still round-trips', async () => {

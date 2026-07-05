@@ -24,6 +24,14 @@ export class DataIntegrityProofManager {
   }
 
   static async verifyProof(document: any, proof: DataIntegrityProof, options: any): Promise<VerificationResult> {
+    // Route bbs-2023 through the same hardened path as eddsa-rdfc-2022 so
+    // Verifier's issuer-binding, proofPurpose, validity-period, and status
+    // checks apply to BBS credentials too (issue #315). Dynamically imported,
+    // like CredentialManager, to keep the BBS backend lazy.
+    if (proof.cryptosuite === 'bbs-2023') {
+      const { BBSCryptosuiteManager } = await import('../cryptosuites/bbsCryptosuite.js');
+      return await BBSCryptosuiteManager.verifyProof(document, proof, options);
+    }
     if (proof.cryptosuite !== 'eddsa-rdfc-2022') {
       return { verified: false, errors: [`Unsupported cryptosuite: ${proof.cryptosuite}`] };
     }
