@@ -63,8 +63,22 @@ export interface BBSVerifyOptions {
   expectedController?: string;
   /** When set, the proof's challenge must match exactly (anti-replay). */
   expectedChallenge?: string;
-  /** When set, the proof's domain must match exactly. */
+  /**
+   * When set, the proof's `domain` must match. `domain` may be a single string
+   * or an array of strings (both valid per VC Data Integrity); the expectation
+   * matches if it equals the string or is contained in the array.
+   */
   expectedDomain?: string;
+  /**
+   * When set, a derived proof's cryptographically-bound `presentationHeader`
+   * must equal these bytes. This is the freshness channel for selective
+   * disclosure: a verifier issues a per-session nonce, the holder derives with
+   * `presentationHeader` set to it, and the verifier supplies the same value
+   * here so an observed presentation cannot be replayed. (`challenge`/`domain`
+   * on a derived proof are inherited from issuance time and cannot be varied
+   * per presentation.)
+   */
+  expectedPresentationHeader?: Uint8Array;
 }
 
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -152,7 +166,14 @@ export class BBSCryptosuiteManager {
    * disclose them via {@link deriveProof}.
    */
   static async createProof(document: any, options: BBSProofOptions): Promise<DataIntegrityProof> {
-    const mandatoryPointers = options.mandatoryPointers || [];
+    // Default to making the issuer mandatory so that derived proofs remain
+    // bound to their issuer out of the box: verifyDerivedProof fails closed
+    // when the revealed document has no issuer/holder (issue #315), so a base
+    // proof created with no mandatory pointers would otherwise yield derived
+    // proofs that cannot be verified. `/issuer` is present on both VC 1.1 and
+    // VC 2.0 credentials; callers signing non-credential documents (or wanting
+    // a different mandatory set) pass `mandatoryPointers` explicitly.
+    const mandatoryPointers = options.mandatoryPointers ?? ['/issuer'];
 
     const privateKey = resolveKey(options.privateKey, true);
     if (!privateKey) throw new Error('Private key required for BBS+ proof creation');
@@ -280,12 +301,11 @@ export class BBSCryptosuiteManager {
 
     const bbsMessages = [...mandatoryNonMatch.values()].map(str => new TextEncoder().encode(str));
 
-    const parsedBaseProof = BBSCryptosuiteUtils.parseBaseProofValue(proof.proofValue);
     const bbsProof = toUint8(await bbs.deriveProof({
       ciphersuite: CIPHERSUITE,
-      publicKey: parsedBaseProof.publicKey,
-      signature: parsedBaseProof.bbsSignature,
-      header: parsedBaseProof.bbsHeader,
+      publicKey: parsed.publicKey,
+      signature: parsed.bbsSignature,
+      header: parsed.bbsHeader,
       presentationHeader,
       messages: bbsMessages,
       disclosedMessageIndexes: selectiveIndexes
@@ -499,14 +519,60 @@ export class BBSCryptosuiteManager {
     proof: DataIntegrityProof,
     options: BBSVerifyOptions
   ): string | null {
-    const proofRecord = proof as unknown as { challenge?: string; domain?: string };
+    const proofRecord = proof as unknown as { challenge?: string; domain?: string | string[] };
     if (options.expectedChallenge !== undefined && proofRecord.challenge !== options.expectedChallenge) {
       return 'Proof challenge mismatch (possible replay)';
     }
-    if (options.expectedDomain !== undefined && proofRecord.domain !== options.expectedDomain) {
-      return 'Proof domain mismatch';
+    if (options.expectedDomain !== undefined) {
+      // `domain` may be a single string or an array of strings.
+      const domain = proofRecord.domain;
+      const domainMatches = Array.isArray(domain)
+        ? domain.includes(options.expectedDomain)
+        : domain === options.expectedDomain;
+      if (!domainMatches) {
+        return 'Proof domain mismatch';
+      }
     }
     return null;
+  }
+
+  /**
+   * Core derived-proof signature verification. Assumes the caller has already
+   * run the binding and expectation checks and resolved `publicKey` from the
+   * DID document — shared by {@link verifyDerivedProof} and {@link verifyProof}
+   * so those checks are not duplicated (or allowed to drift) between the two.
+   */
+  private static async verifyDerivedCore(
+    unsecuredDocument: any,
+    proof: DataIntegrityProof,
+    options: BBSVerifyOptions,
+    publicKey: Uint8Array
+  ): Promise<{ verified: boolean; verifiedDocument: any; errors?: string[] }> {
+    const { bbsProof, proofHash, mandatoryHash, selectiveIndexes, presentationHeader, nonMandatory } =
+      await BBSCryptosuiteManager.createVerifyData(unsecuredDocument, proof, options);
+
+    // Anti-replay for presentations: when the verifier supplies an expected
+    // presentation header (its per-session nonce), reject a proof whose bound
+    // header does not match, before spending a pairing check on it.
+    if (options.expectedPresentationHeader !== undefined &&
+        !bytesEqual(presentationHeader, options.expectedPresentationHeader)) {
+      return { verified: false, verifiedDocument: null, errors: ['Proof presentation header mismatch (possible replay)'] };
+    }
+
+    const bbsHeader = concatBytes(proofHash, mandatoryHash);
+    const verified = await bbs.verifyProof({
+      ciphersuite: CIPHERSUITE,
+      publicKey,
+      proof: bbsProof,
+      header: bbsHeader,
+      presentationHeader,
+      disclosedMessages: nonMandatory,
+      disclosedMessageIndexes: selectiveIndexes
+    });
+
+    return verified
+      ? { verified: true, verifiedDocument: unsecuredDocument }
+      : { verified: false, verifiedDocument: null, errors: ['BBS+ derived proof verification failed'] };
   }
 
   /**
@@ -536,23 +602,7 @@ export class BBSCryptosuiteManager {
         proof.verificationMethod,
         options.documentLoader
       );
-      const { bbsProof, proofHash, mandatoryHash, selectiveIndexes, presentationHeader, nonMandatory } =
-        await BBSCryptosuiteManager.createVerifyData(unsecuredDocument, proof, options);
-
-      const bbsHeader = concatBytes(proofHash, mandatoryHash);
-      const verified = await bbs.verifyProof({
-        ciphersuite: CIPHERSUITE,
-        publicKey,
-        proof: bbsProof,
-        header: bbsHeader,
-        presentationHeader,
-        disclosedMessages: nonMandatory,
-        disclosedMessageIndexes: selectiveIndexes
-      });
-
-      return verified
-        ? { verified: true, verifiedDocument: unsecuredDocument }
-        : { verified: false, verifiedDocument: null, errors: ['BBS+ derived proof verification failed'] };
+      return await BBSCryptosuiteManager.verifyDerivedCore(unsecuredDocument, proof, options, publicKey);
     } catch (e: any) {
       // Surface the underlying error: swallowing it makes internal failures
       // (e.g. canonicalization bugs) indistinguishable from a bad signature.
@@ -585,6 +635,11 @@ export class BBSCryptosuiteManager {
       // an embedded proof must never be canonicalized into the verified data.
       const { proof: _docProof, ...unsecuredDocument } = document ?? {};
 
+      // Run the binding + expectation checks and resolve the verification key
+      // once, up front, for both proof kinds. The base/derived paths below then
+      // share this work via verifyDerivedCore instead of re-running the
+      // security-critical logic (which would let the two copies drift and would
+      // resolve the DID key twice for derived proofs).
       const bindingError = BBSCryptosuiteManager.checkProofBinding(
         unsecuredDocument,
         proof,
@@ -598,13 +653,6 @@ export class BBSCryptosuiteManager {
         return { verified: false, errors: [expectationError] };
       }
 
-      const decoded = decodeMultibaseB64url(proof.proofValue);
-      // W3C vc-di-bbs CBOR headers (0xd9 0x5d <tag>): base proofs use 0x02
-      // (baseline) / 0x04 / 0x06 / 0x08; derived (disclosure) proofs use 0x03
-      // (baseline) / 0x05 / 0x07. Match the tag explicitly rather than by parity.
-      const BASE_PROOF_TAGS = [0x02, 0x04, 0x06, 0x08];
-      const isBaseProof = decoded[0] === 0xd9 && decoded[1] === 0x5d && BASE_PROOF_TAGS.includes(decoded[2]);
-
       let publicKey: Uint8Array;
       try {
         publicKey = await BBSCryptosuiteManager.resolveVerificationKey(proof.verificationMethod, options.documentLoader);
@@ -612,18 +660,23 @@ export class BBSCryptosuiteManager {
         return { verified: false, errors: [e?.message ?? 'Failed to resolve verification method'] };
       }
 
+      // Route on the proof-value header.
+      const decoded = decodeMultibaseB64url(proof.proofValue);
+      // W3C vc-di-bbs CBOR headers (0xd9 0x5d <tag>): base proofs use 0x02
+      // (baseline) / 0x04 / 0x06 / 0x08; derived (disclosure) proofs use 0x03
+      // (baseline) / 0x05 / 0x07. Match the tag explicitly rather than by parity.
+      const BASE_PROOF_TAGS = [0x02, 0x04, 0x06, 0x08];
+      const isBaseProof = decoded[0] === 0xd9 && decoded[1] === 0x5d && BASE_PROOF_TAGS.includes(decoded[2]);
+
       if (!isBaseProof) {
-        const result = await BBSCryptosuiteManager.verifyDerivedProof(
-          { ...unsecuredDocument, proof },
-          options
-        );
+        const result = await BBSCryptosuiteManager.verifyDerivedCore(unsecuredDocument, proof, options, publicKey);
         return result.verified
           ? { verified: true }
           : { verified: false, errors: result.errors ?? ['BBS+ derived proof verification failed'] };
       }
 
-      // Base proof: bind the embedded public key to the resolved DID key before
-      // any signature check, rejecting key substitution.
+      // Bind the embedded public key to the resolved DID key before any
+      // signature check, rejecting key substitution.
       const parsed = BBSCryptosuiteUtils.parseBaseProofValue(proof.proofValue);
       if (parsed.publicKey && !bytesEqual(toUint8(parsed.publicKey), publicKey)) {
         return { verified: false, errors: ['Proof public key does not match verification method'] };

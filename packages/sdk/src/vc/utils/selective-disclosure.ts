@@ -217,7 +217,7 @@ export function skolemizeExpandedJsonLd(
   const skolemizedExpandedDocument: unknown[] = [];
 
   for (const element of expanded) {
-    if (typeof element !== 'object' || (element as any)['@value'] !== undefined) {
+    if (element === null || typeof element !== 'object' || (element as any)['@value'] !== undefined) {
       skolemizedExpandedDocument.push(JSON.parse(JSON.stringify(element)));
       continue;
     }
@@ -322,8 +322,13 @@ export function jsonPointerToPaths(pointer: string): string[] {
 
   for (const path of splitPath) {
     if (!path.includes('~')) {
+      // Only normalize a segment that is already a canonical non-negative
+      // integer (e.g. an array index). Guarding on the round-trip avoids
+      // corrupting object keys that merely look numeric — '007' would otherwise
+      // become '7' (and '1e5' -> '1'), so a valid pointer like '/foo/007' would
+      // no longer match document.foo['007'].
       const parsed = parseInt(path, 10);
-      paths.push(isNaN(parsed) ? path : parsed.toString());
+      paths.push(!isNaN(parsed) && String(parsed) === path ? parsed.toString() : path);
     } else {
       paths.push(path.replace(/~1/g, '/').replace(/~0/g, '~'));
     }

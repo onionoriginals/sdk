@@ -346,6 +346,106 @@ describe('BBS+ bbs-2023 selective disclosure round-trip', () => {
     expect(boundWithFragment.verified).toBe(true);
   });
 
+  // Default mandatoryPointers make '/issuer' mandatory, so a base proof created
+  // with no explicit pointers still yields derived proofs that stay issuer-bound
+  // and verify (rather than losing the issuer and failing the fail-closed
+  // binding check).
+  test('default mandatoryPointers keep derived proofs issuer-bound', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+
+    // No mandatoryPointers supplied → defaults to ['/issuer'].
+    const baseProof = await BBSCryptosuiteManager.createProof(credential, {
+      verificationMethod: vm,
+      proofPurpose: 'assertionMethod',
+      privateKey: secretKey,
+      publicKey,
+      documentLoader
+    });
+    expect((await BBSCryptosuiteManager.verifyProof(credential, baseProof, { documentLoader })).verified).toBe(true);
+
+    // Disclose only a selective field; issuer must survive via the default.
+    const { document: revealed, proof: derivedProof } = await BBSCryptosuiteManager.deriveProof(
+      { ...credential, proof: baseProof },
+      baseProof,
+      { documentLoader, selectivePointers: ['/credentialSubject/name'] }
+    );
+    expect(revealed.issuer).toBe('did:example:issuer');
+    const result = await BBSCryptosuiteManager.verifyDerivedProof({ ...revealed, proof: derivedProof }, { documentLoader });
+    expect(result.verified).toBe(true);
+  });
+
+  // A verifier-supplied expectedPresentationHeader is the freshness/anti-replay
+  // channel for presentations: the derived proof's bound header must match.
+  test('expectedPresentationHeader binds a derived presentation (anti-replay)', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+    const nonce = new TextEncoder().encode('verifier-session-nonce-123');
+
+    const baseProof = await BBSCryptosuiteManager.createProof(credential, {
+      verificationMethod: vm,
+      proofPurpose: 'assertionMethod',
+      privateKey: secretKey,
+      publicKey,
+      documentLoader,
+      mandatoryPointers
+    });
+
+    const { document: revealed, proof: derivedProof } = await BBSCryptosuiteManager.deriveProof(
+      { ...credential, proof: baseProof },
+      baseProof,
+      { documentLoader, selectivePointers: ['/credentialSubject/name'], presentationHeader: nonce }
+    );
+
+    // Matching nonce verifies.
+    const ok = await BBSCryptosuiteManager.verifyDerivedProof(
+      { ...revealed, proof: derivedProof },
+      { documentLoader, expectedPresentationHeader: nonce }
+    );
+    expect(ok.verified).toBe(true);
+
+    // A different expected nonce is rejected as a replay.
+    const replayed = await BBSCryptosuiteManager.verifyDerivedProof(
+      { ...revealed, proof: derivedProof },
+      { documentLoader, expectedPresentationHeader: new TextEncoder().encode('different-nonce') }
+    );
+    expect(replayed.verified).toBe(false);
+    expect(replayed.errors?.[0]).toContain('presentation header mismatch');
+  });
+
+  // domain may be a string OR an array of strings per VC Data Integrity;
+  // expectedDomain must match either form.
+  test('expectedDomain matches when the proof domain is an array', async () => {
+    const { secretKey, publicKey } = await bbs.generateKeyPair({ ciphersuite: CIPHERSUITE });
+    const documentLoader = await makeLoader(publicKey);
+
+    // Sign with an array-valued domain so the domain is part of the signed
+    // proof configuration (mirrors an externally-produced multi-domain proof).
+    const baseProof = await BBSCryptosuiteManager.createProof(credential, {
+      verificationMethod: vm,
+      proofPurpose: 'assertionMethod',
+      privateKey: secretKey,
+      publicKey,
+      documentLoader,
+      mandatoryPointers,
+      domain: ['https://verifier.example', 'https://other.example'] as any
+    });
+    expect(Array.isArray((baseProof as any).domain)).toBe(true);
+
+    const matched = await BBSCryptosuiteManager.verifyProof(credential, baseProof, {
+      documentLoader,
+      expectedDomain: 'https://verifier.example'
+    });
+    expect(matched.verified).toBe(true);
+
+    const notMatched = await BBSCryptosuiteManager.verifyProof(credential, baseProof, {
+      documentLoader,
+      expectedDomain: 'https://absent.example'
+    });
+    expect(notMatched.verified).toBe(false);
+    expect(notMatched.errors?.[0]).toContain('domain mismatch');
+  });
+
   // Issue #315 (related): a verifier that supplies challenge/domain
   // expectations must reject a replayed proof carrying different values.
   test('expectedChallenge/expectedDomain mismatches are rejected (anti-replay)', async () => {

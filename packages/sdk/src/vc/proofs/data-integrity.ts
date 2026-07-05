@@ -13,10 +13,21 @@ export interface ProofOptions {
   previousProof?: string | string[];
   challenge?: string;
   domain?: string;
+  /** BBS+ (bbs-2023) base-proof creation: pointers to make mandatory. */
+  mandatoryPointers?: string[];
+  /** BBS+ (bbs-2023): optional public key (derived from privateKey if omitted). */
+  publicKey?: Uint8Array | string;
 }
 
 export class DataIntegrityProofManager {
   static async createProof(document: any, options: ProofOptions): Promise<DataIntegrityProof> {
+    // Route bbs-2023 through the BBS backend so createProof is symmetric with
+    // verifyProof (which already dispatches bbs-2023). Lazily imported to keep
+    // the BBS backend out of the eddsa-only path.
+    if (options.cryptosuite === 'bbs-2023') {
+      const { BBSCryptosuiteManager } = await import('../cryptosuites/bbsCryptosuite.js');
+      return await BBSCryptosuiteManager.createProof(document, options);
+    }
     if (options.cryptosuite !== 'eddsa-rdfc-2022') {
       throw new Error(`Unsupported cryptosuite: ${options.cryptosuite}`);
     }

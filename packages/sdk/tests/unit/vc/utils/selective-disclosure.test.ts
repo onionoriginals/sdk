@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { skolemizeExpandedJsonLd } from '../../../../src/vc/utils/selective-disclosure';
+import { skolemizeExpandedJsonLd, jsonPointerToPaths } from '../../../../src/vc/utils/selective-disclosure';
 
 /**
  * Regression tests for issue #316: the skolemization counter must be threaded
@@ -72,5 +72,23 @@ describe('skolemizeExpandedJsonLd anonymous-node counter (issue #316)', () => {
     expect(result[0]['@id']).toBe('urn:custom-scheme:b99');
     const ids = collectGeneratedIds(result, 'R');
     expect(ids).toEqual(['urn:custom-scheme:_R_0']);
+  });
+});
+
+describe('jsonPointerToPaths', () => {
+  test('normalizes canonical array indices but preserves numeric-looking keys', () => {
+    // Canonical integer segments (array indices) are kept as-is.
+    expect(jsonPointerToPaths('/credentialSubject/0/id')).toEqual(['credentialSubject', '0', 'id']);
+    // Object keys that merely look numeric must NOT be coerced: '007' -> '7'
+    // (or '1e5' -> '1') would make a valid pointer stop matching the document.
+    expect(jsonPointerToPaths('/foo/007')).toEqual(['foo', '007']);
+    expect(jsonPointerToPaths('/foo/1e5')).toEqual(['foo', '1e5']);
+    // Escaped segments (~1 -> /, ~0 -> ~) still decode.
+    expect(jsonPointerToPaths('/a~1b/c~0d')).toEqual(['a/b', 'c~d']);
+  });
+
+  test('does not throw on a null element (skolemizeExpandedJsonLd)', () => {
+    // A null in a value array must be passed through, not dereferenced.
+    expect(() => skolemizeExpandedJsonLd([null as any], { randomString: 'X', count: 0 })).not.toThrow();
   });
 });
