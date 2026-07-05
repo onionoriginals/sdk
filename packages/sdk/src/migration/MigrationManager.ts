@@ -482,10 +482,16 @@ export class MigrationManager {
 
     const runOne = async (did: string): Promise<void> => {
       try {
+        // Spread the shared options FIRST so the per-item fields always win.
+        // BatchMigrationOptions extends MigrationOptions, where sourceDid is
+        // REQUIRED — spreading `options` last let a type-correct options
+        // object clobber every item's sourceDid/targetLayer, migrating one
+        // asset N times and never touching the rest.
         const migrationOptions: MigrationOptions = {
+          ...options,
           sourceDid: did,
-          targetLayer: targetLayer as any,
-          ...options
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+          targetLayer: targetLayer as any
         };
         const result = await this.migrate(migrationOptions);
         results.set(did, result);
@@ -493,6 +499,25 @@ export class MigrationManager {
           completed++;
         } else {
           failed++;
+          // Fail-fast (item: continueOnError=false didn't stop): migrate()
+          // converts operational failures into a RETURNED unsuccessful result
+          // via handleMigrationFailure and almost never rejects, so the catch
+          // below was effectively dead and the batch kept spending through
+          // every remaining item. Treat a returned failure as a stop trigger.
+          if (!options?.continueOnError) {
+            stopped = true;
+            if (result.error) {
+              errors.push(result.error);
+            } else {
+              errors.push({
+                type: MigrationErrorType.UNKNOWN_ERROR,
+                code: 'BATCH_MIGRATION_ERROR',
+                message: `Migration of ${did} failed; stopping batch (continueOnError is not set)`,
+                sourceDid: did,
+                timestamp: Date.now()
+              });
+            }
+          }
         }
       } catch (error) {
         failed++;
