@@ -462,7 +462,11 @@ export class DIDManager {
                 : 'mainnet';
             const client = new OrdinalsClient(rpcUrl, network);
             const adapter = new OrdinalsClientProviderAdapter(client, rpcUrl);
-            const resolver = new BtcoDidResolver({ provider: adapter });
+            // fetchContent pins content retrieval to the rpcUrl origin and
+            // refuses redirects. Without it the resolver would fetch whatever
+            // content_url the (untrusted) ord server returned via global
+            // fetch — any scheme/host, redirects followed (SSRF).
+            const resolver = new BtcoDidResolver({ provider: adapter, fetchFn: adapter.fetchContent });
             const resolved = await resolver.resolve(did);
             result = resolved.didDocument || null;
           } else {
