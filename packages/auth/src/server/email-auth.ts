@@ -248,6 +248,11 @@ export async function verifyEmailAuth(
       otpId: session.otpId,
       encryptedOtpBundle,
       expirationSeconds: '900', // 15 minutes
+      // Route the VERIFY_OTP_V2 activity under the user's sub-organization,
+      // mirroring the client-side completeOtp path. subOrgId is validated
+      // non-null above; without it Turnkey v6 can reject the activity for
+      // missing org context.
+      organizationId: session.subOrgId,
     });
 
     if (!verifyResult.verificationToken) {

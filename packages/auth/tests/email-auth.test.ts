@@ -430,6 +430,9 @@ describe('email-auth', () => {
           otpId: 'otp_123',
           encryptedOtpBundle: expect.any(String),
           expirationSeconds: '900',
+          // Activity must be routed under the user's sub-organization,
+          // mirroring the client-side completeOtp path.
+          organizationId: 'sub_org_existing',
         })
       );
 
