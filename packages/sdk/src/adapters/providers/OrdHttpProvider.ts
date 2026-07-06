@@ -1,5 +1,6 @@
 /* istanbul ignore file */
 import type { OrdinalsProvider } from '../types.js';
+import { StructuredError } from '../../utils/telemetry.js';
 
 interface HttpProviderOptions {
   baseUrl: string;
@@ -132,52 +133,68 @@ export class OrdHttpProvider implements OrdinalsProvider {
     return ids.map((inscriptionId) => ({ inscriptionId }));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async broadcastTransaction(_txHexOrObj: unknown): Promise<string> {
-    // For example purposes only, return a placeholder
-    return 'broadcast-txid';
+  // Transaction submission, status, fee estimation and inscription
+  // creation/transfer are NOT implemented against a real ord endpoint yet.
+  // These methods used to return fabricated success values (the literal
+  // 'broadcast-txid', random insc-*/tx-* ids, a hardcoded fee, an invented
+  // vin/vout/fee for transfers), which silently corrupted provenance for
+  // anyone enabling USE_LIVE_ORD_PROVIDER=true. They now fail loudly,
+  // mirroring the OrdinalsClient hardening (#248). Use a provider with real
+  // broadcast support or an OrdinalsProvider backed by your own
+  // infrastructure.
+
+  broadcastTransaction(_txHexOrObj: unknown): Promise<string> {
+    return Promise.reject(new StructuredError(
+      'ORD_BROADCAST_NOT_IMPLEMENTED',
+      'OrdHttpProvider.broadcastTransaction is not implemented: no transaction was broadcast. Configure an OrdinalsProvider with real broadcast support.'
+    ));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async getTransactionStatus(_txid: string) {
-    return { confirmed: false };
+  getTransactionStatus(_txid: string): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }> {
+    return Promise.reject(new StructuredError(
+      'ORD_TX_STATUS_NOT_IMPLEMENTED',
+      'OrdHttpProvider.getTransactionStatus is not implemented: transaction status cannot be determined. Configure an OrdinalsProvider with real status support.'
+    ));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async estimateFee(blocks: number = 1): Promise<number> {
-    // Basic fallback: some providers expose fee estimates; for example purposes, return linear estimate
-    return 5 * Math.max(1, blocks);
+  estimateFee(_blocks: number = 1): Promise<number> {
+    return Promise.reject(new StructuredError(
+      'ORD_FEE_ESTIMATE_NOT_IMPLEMENTED',
+      'OrdHttpProvider.estimateFee is not implemented: refusing to return a hardcoded fee rate. Configure a FeeOracleAdapter or an OrdinalsProvider with real fee estimation.'
+    ));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async createInscription(params: { data: any; contentType: string; feeRate?: number; }) {
-    // Example placeholder: a real implementation would POST to a service
-    // Here we return a deterministic mock-like result to avoid network coupling in code
-    const inscriptionId = `insc-${Math.random().toString(36).slice(2)}`;
-    const txid = `tx-${Math.random().toString(36).slice(2)}`;
-    return {
-      inscriptionId,
-      revealTxId: txid,
-      txid,
-      vout: 0,
-      blockHeight: undefined,
-      content: params.data,
-      contentType: params.contentType,
-      feeRate: params.feeRate
-    };
+  createInscription(_params: { data: Buffer; contentType: string; feeRate?: number; }): Promise<{
+    inscriptionId: string;
+    revealTxId: string;
+    commitTxId?: string;
+    satoshi?: string;
+    txid?: string;
+    vout?: number;
+    blockHeight?: number;
+    content?: Buffer;
+    contentType?: string;
+    feeRate?: number;
+  }> {
+    return Promise.reject(new StructuredError(
+      'ORD_CREATE_INSCRIPTION_NOT_IMPLEMENTED',
+      'OrdHttpProvider.createInscription is not implemented: no inscription was created and no transaction was broadcast. Configure an OrdinalsProvider with real inscription support.'
+    ));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async transferInscription(inscriptionId: string, _toAddress: string, _options?: { feeRate?: number }) {
-    if (!inscriptionId) throw new Error('inscriptionId required');
-    const txid = `tx-${Math.random().toString(36).slice(2)}`;
-    return {
-      txid,
-      vin: [{ txid: 'prev', vout: 0 }],
-      vout: [{ value: 546, scriptPubKey: 'script' }],
-      fee: 100,
-      confirmations: 0
-    };
+  transferInscription(_inscriptionId: string, _toAddress: string, _options?: { feeRate?: number }): Promise<{
+    txid: string;
+    vin: Array<{ txid: string; vout: number }>;
+    vout: Array<{ value: number; scriptPubKey: string; address?: string }>;
+    fee: number;
+    blockHeight?: number;
+    confirmations?: number;
+    satoshi?: string;
+  }> {
+    return Promise.reject(new StructuredError(
+      'ORD_TRANSFER_NOT_IMPLEMENTED',
+      'OrdHttpProvider.transferInscription is not implemented: no transfer was broadcast. Configure an OrdinalsProvider with real transfer support.'
+    ));
   }
 }
 

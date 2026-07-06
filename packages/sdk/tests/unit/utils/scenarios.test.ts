@@ -401,9 +401,8 @@ describe('UTILS-VERIFY-020: OrdHttpProvider URL construction', () => {
     expect(fetchedUrls[0]).toBe('http://ord.local/inscription/xyz');
   });
 
-  test('estimateFee does not make network calls and returns positive value', async () => {
+  test('estimateFee throws NOT_IMPLEMENTED instead of returning a fabricated rate (#318)', async () => {
     const provider = new OrdHttpProvider({ baseUrl: 'http://ord.local' });
-    const fee = await provider.estimateFee(6);
-    expect(fee).toBeGreaterThan(0);
+    await expect(provider.estimateFee(6)).rejects.toThrow(/not implemented/i);
   });
 });

@@ -49,10 +49,8 @@ describeSignet('OrdHttpProvider against signet', () => {
     expect(() => new OrdHttpProvider({ baseUrl: 'ftp://bad' })).toThrow();
   });
 
-  test('estimateFee returns a positive number', async () => {
-    const fee = await provider.estimateFee(1);
-    expect(typeof fee).toBe('number');
-    expect(fee).toBeGreaterThan(0);
+  test('estimateFee throws NOT_IMPLEMENTED instead of returning a fabricated rate (#318)', async () => {
+    await expect(provider.estimateFee(1)).rejects.toThrow(/not implemented/i);
   });
 
   test('getInscriptionById returns null for nonexistent inscription', async () => {
@@ -83,9 +81,10 @@ describeSignet('OrdHttpProvider against signet', () => {
     });
   }
 
-  test('getTransactionStatus returns status object', async () => {
-    const status = await provider.getTransactionStatus('0000000000000000000000000000000000000000000000000000000000000000');
-    expect(typeof status.confirmed).toBe('boolean');
+  test('getTransactionStatus throws NOT_IMPLEMENTED instead of reporting unconfirmed (#318)', async () => {
+    await expect(
+      provider.getTransactionStatus('0000000000000000000000000000000000000000000000000000000000000000')
+    ).rejects.toThrow(/not implemented/i);
   });
 });
 
