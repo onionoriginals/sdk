@@ -3,6 +3,7 @@ import { Nav } from './components/Nav';
 import { Hero } from './components/Hero';
 import { Why } from './components/Why';
 import { Demo } from './components/Demo';
+import { RealExample } from './components/RealExample';
 import { Protocol } from './components/Protocol';
 import { Developers } from './components/Developers';
 import { Footer } from './components/Footer';
@@ -18,6 +19,7 @@ export function App() {
         <Hero />
         <Why />
         <Demo />
+        <RealExample />
         <Protocol />
         <Developers />
       </main>

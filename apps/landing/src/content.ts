@@ -149,6 +149,37 @@ export const demo = {
   reset: 'Start over with a new asset'
 };
 
+export const realExample = {
+  id: 'example',
+  eyebrow: 'A real Original',
+  headline: 'Don’t take our word for it.',
+  subhead:
+    '“First Light” is a genuine Original, minted with this SDK: real keys, a real did:webvh identity with a signed version history, and a signed publication credential. Your browser is re-verifying every signature right now — the checks below run locally, not on a server.',
+  checkLabels: {
+    hash: 'Artwork bytes match their declared sha-256',
+    log: 'did:webvh log — SCID and Ed25519 proof chain verify',
+    credential: 'Publication credential signature verifies'
+  },
+  pendingLabel: 'Verifying in your browser…',
+  checkFailDetails: {
+    log: 'DID log did not verify',
+    credential: 'Credential signature did not verify'
+  },
+  verifiedBadge: 'Verified in this tab',
+  failedBadge: 'Verification incomplete',
+  failNote:
+    'Some checks could not complete in this environment. The raw artifacts are in the repository — verify them yourself with the SDK.',
+  artifactsLabel: 'Raw artifacts',
+  artifactsHref:
+    'https://github.com/onionoriginals/sdk/tree/main/apps/landing/public/example',
+  fields: {
+    identity: 'Identity',
+    published: 'Published as',
+    credential: 'Credential',
+    issued: 'Issued'
+  }
+};
+
 export const protocol = {
   id: 'protocol',
   eyebrow: 'The protocol',

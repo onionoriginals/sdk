@@ -3,7 +3,35 @@
 Status board for the landing page at `apps/landing/`. Updated every
 build→grade cycle. Craft bar and grading protocol: see `GRADING.md`.
 
-## Current status — cycle 7: hero halo synced to the demo's asset
+## Current status — cycle 8: a real Original, verified live in the browser
+
+User steering: “it would be great to have a real example instead of a fake
+one.” The live network domains are unreachable from this container (proxy),
+so the strongest available “real” was chosen: a genuine Original minted
+once with the real SDK and re-verified cryptographically by every visitor.
+- `scripts/make-example.ts` mints “First Light”: real Ed25519 keys, real
+  did:peer, a real did:webvh identity created through an external signer
+  with the VM pinned to `#key-0` (the SDK's emitted
+  authentication/assertionMethod arrays reference `#key-0`, but the default
+  path lets didwebvh-ts assign a key-derived VM id — an upstream
+  inconsistency that breaks third-party proof-purpose checks; pinning the
+  id at creation makes the log self-consistent without touching
+  packages/sdk), plus a signed ResourceMigrated publication credential.
+  Artifacts shipped in `public/example/` (artwork.svg, metadata.json,
+  credential.json, did-log.jsonl, manifest.json).
+- New “A real Original” section (after the demo): the browser re-verifies
+  everything locally via the lazy SDK chunk — sha-256 recomputed from the
+  artwork bytes, the did:webvh log's SCID + Ed25519 proof chain via
+  didwebvh-ts `resolveDIDFromLog` + the SDK's Ed25519Verifier, and the
+  credential signature via `CredentialManager.verifyCredential` against the
+  log-derived DID document. Checks render as a live checklist
+  (pending → ✓), badge “Verified in this tab”; artifacts bundled (no
+  runtime fetch), GitHub link to the raw files; graceful failure panel if
+  verification ever throws.
+- Verified: all three checks green at 1440 and 375, zero console errors,
+  throttled TTI unchanged.
+
+## Cycle 7 — hero halo synced to the demo's asset
 
 User steering: random hero artworks read as disconnected (“they should be
 synced with the one being created”). Now there is exactly one artwork per
@@ -234,3 +262,4 @@ all fixed and re-verified in-browser. Cycle 2 grading next.
 | 5 | 2026-07-05 | user steering: “show a real asset, not JSON” | demo now generates a real SVG artwork whose bytes are hashed/published/inscribed; asset card + layer badge; mobile field overflow fixed |
 | 6 | 2026-07-05 | user steering: artwork as hero visual | fresh generative halo per page load, ring-masked behind the headline |
 | 7 | 2026-07-06 | user steering: halo must be the asset being created | shared seed store; hero + demo render the same artwork, live-synced |
+| 8 | 2026-07-06 | user steering: real example, not a fake one | “First Light”: SDK-minted Original shipped with the page and cryptographically re-verified in every visitor's browser |

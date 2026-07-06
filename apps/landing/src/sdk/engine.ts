@@ -12,6 +12,8 @@
  * work while they click through the demo.
  */
 import '../shims/buffer-global';
+import { short } from './format';
+export { short };
 import {
   OriginalsSDK,
   OrdMockProvider,
@@ -301,11 +303,6 @@ export class DemoEngine {
   }
 }
 
-export function short(did: string, head = 24, tail = 6): string {
-  return did.length <= head + tail + 1
-    ? did
-    : `${did.slice(0, head)}…${did.slice(-tail)}`;
-}
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
