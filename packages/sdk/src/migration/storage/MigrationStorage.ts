@@ -48,6 +48,13 @@ interface CanonicalAdapterShape {
     options?: { contentType?: string }
   ) => Promise<string>;
   getObject?: (domain: string, path: string) => Promise<unknown>;
+  /**
+   * Optional native enumeration — an extra capability on concrete adapters
+   * (both shipped adapters implement it), detected by duck-typing exactly
+   * like the legacy `list` hook. NOT part of the public StorageAdapter
+   * interface. Returns stored paths under the domain matching the prefix.
+   */
+  listObjects?: (domain: string, prefix: string) => Promise<string[]>;
 }
 
 interface LegacyAdapterShape {
@@ -71,10 +78,18 @@ export interface MigrationStorage {
    */
   deleteNative(key: string): Promise<boolean>;
   /**
-   * Natively list keys under a prefix when the adapter supports it (legacy
-   * `list`). Returns null when unsupported — callers must then use an index.
+   * Natively list keys under a prefix when the adapter supports it
+   * (canonical `listObjects` — both shipped adapters — or legacy `list`).
+   * Returns the same bare key strings callers pass to putText. Returns null
+   * when unsupported — callers must then use an index.
    */
   listNative(prefix: string): Promise<string[] | null>;
+  /**
+   * Whether listNative can enumerate (cheap capability check, no I/O).
+   * When true, callers need no discovery index: every key written through
+   * putText is discoverable via listNative.
+   */
+  canList(): boolean;
 }
 
 /**
@@ -94,6 +109,14 @@ export function resolveMigrationStorage(config: OriginalsConfig): MigrationStora
   const hasLegacy = typeof legacy.put === 'function' && typeof legacy.get === 'function';
 
   if (!hasCanonical && !hasLegacy) return null;
+
+  // Native enumeration capability. Canonical adapters read/write under
+  // MIGRATION_STORAGE_DOMAIN, so only a domain-aware listObjects can
+  // enumerate them; a hybrid adapter's legacy raw-key list() would miss the
+  // canonical objects (same mismatch deleteNative guards against), so it is
+  // honored only on pure-legacy adapters, whose writes it actually sees.
+  const hasCanonicalList = hasCanonical && typeof canonical.listObjects === 'function';
+  const hasLegacyList = !hasCanonical && typeof legacy.list === 'function';
 
   return {
     async putText(key: string, text: string): Promise<void> {
@@ -131,10 +154,19 @@ export function resolveMigrationStorage(config: OriginalsConfig): MigrationStora
     },
 
     async listNative(prefix: string): Promise<string[] | null> {
-      if (typeof legacy.list === 'function') {
-        return await legacy.list(prefix);
+      if (hasCanonicalList) {
+        // Paths returned by listObjects are the same bare key strings passed
+        // to putText (putText writes putObject(MIGRATION_STORAGE_DOMAIN, key)).
+        return await canonical.listObjects!(MIGRATION_STORAGE_DOMAIN, prefix);
+      }
+      if (hasLegacyList) {
+        return await legacy.list!(prefix);
       }
       return null;
+    },
+
+    canList(): boolean {
+      return hasCanonicalList || hasLegacyList;
     }
   };
 }

@@ -10,30 +10,38 @@ import { encodeBase64UrlMultibase, base58, MULTIBASE_BASE58BTC_HEADER } from '..
 import { resolveMigrationStorage, MigrationStorage } from '../storage/MigrationStorage.js';
 
 /**
- * Index object listing every persisted audit-record key. The canonical
- * StorageAdapter interface has no list(); the index makes persisted records
- * discoverable again after a restart.
+ * Index object listing every persisted audit-record key. FALLBACK ONLY: it
+ * is written solely for adapters that cannot enumerate natively (neither a
+ * canonical `listObjects` nor a legacy `list`), to make persisted records
+ * discoverable again after a restart. The shipped adapters
+ * (MemoryStorageAdapter, LocalStorageAdapter) expose `listObjects`, so with
+ * them NO index object is ever written — records live at unique immutable
+ * keys and are discovered by enumeration, leaving no shared mutable object
+ * to race on.
  */
 const AUDIT_INDEX_KEY = 'audit/migrations/index.json';
 
 /**
  * Per-adapter locks serializing read-modify-write updates of the persisted
- * audit index. Keyed by the storage-adapter INSTANCE (module-level, not
- * per-AuditLogger) so that multiple AuditLogger instances sharing one adapter
- * in the same process cannot interleave a read-read-write-write and drop each
- * other's index entries — the shipped/canonical adapters have no native
- * list(), so a lost index entry makes that audit record undiscoverable after
- * a restart.
+ * audit index — used ONLY on the index-fallback path (adapters with no
+ * native enumeration; see AUDIT_INDEX_KEY). Keyed by the storage-adapter
+ * INSTANCE (module-level, not per-AuditLogger) so that multiple AuditLogger
+ * instances sharing one adapter in the same process cannot interleave a
+ * read-read-write-write and drop each other's index entries — a lost index
+ * entry makes that audit record undiscoverable after a restart.
  *
- * RESIDUAL LIMITATION: this only serializes writers within a single process.
- * Two separate processes sharing one storage backend can still race the
- * read-modify-write (the StorageAdapter interface offers no atomic
- * compare-and-swap or list()). Each writer re-reads and MERGES (union) the
- * freshest persisted index immediately before writing — including every key
- * it has ever appended itself — so a clobbered entry is restored by that
- * writer's next append, but a cross-process lost update remains possible
- * until then. Deploy one writer per storage backend, or use an adapter with
- * a native list(), if multi-process durability of the index is required.
+ * RESIDUAL LIMITATION (index-fallback adapters only): this only serializes
+ * writers within a single process. Two separate processes sharing one
+ * storage backend can still race the read-modify-write (the StorageAdapter
+ * interface offers no atomic compare-and-swap). Each writer re-reads and
+ * MERGES (union) the freshest persisted index immediately before writing —
+ * including every key it has ever appended itself — so a clobbered entry is
+ * restored by that writer's next append, but a cross-process lost update
+ * remains possible until then. This does NOT apply to the shipped adapters
+ * or any adapter exposing `listObjects`/`list`: those never write the index
+ * at all. Third-party canonical adapters that need multi-process durability
+ * should implement `listObjects(domain, prefix)`; otherwise deploy one
+ * writer per storage backend.
  */
 const indexLocks = new WeakMap<object, Promise<void>>();
 
@@ -216,18 +224,26 @@ export class AuditLogger implements IAuditLogger {
     // Use unique key to prevent overwriting: migrationId/timestamp-state
     const key = `audit/migrations/${record.migrationId}/${record.timestamp}-${record.finalState}.json`;
     await storage.putText(key, JSON.stringify(record));
-    await this.appendToIndex(storage, key);
+
+    // Records at unique immutable keys are already discoverable when the
+    // adapter enumerates natively (shipped adapters do, via listObjects).
+    // Maintain the discovery index ONLY for adapters that cannot enumerate —
+    // for enumerable adapters no shared mutable object is ever written, so
+    // the cross-process index read-modify-write race cannot occur.
+    if (!storage.canList()) {
+      await this.appendToIndex(storage, key);
+    }
   }
 
   /**
-   * Record a persisted key in the audit index. The read-modify-write is
-   * serialized through a PER-ADAPTER lock shared by all AuditLogger
-   * instances in this process, and the freshest persisted index is re-read
-   * inside the lock immediately before writing and MERGED (union) with the
-   * new key plus every key this instance has appended — never blindly
-   * overwritten. See indexLocks for the residual cross-process limitation.
-   * Only needed for canonical adapters, which cannot list; kept for legacy
-   * adapters too so the index stays complete.
+   * Record a persisted key in the audit index. FALLBACK PATH: only invoked
+   * for adapters with no native enumeration (persistAuditRecord skips it
+   * whenever storage.canList()). The read-modify-write is serialized through
+   * a PER-ADAPTER lock shared by all AuditLogger instances in this process,
+   * and the freshest persisted index is re-read inside the lock immediately
+   * before writing and MERGED (union) with the new key plus every key this
+   * instance has appended — never blindly overwritten. See indexLocks for
+   * the residual cross-process limitation of this fallback.
    */
   private appendToIndex(storage: MigrationStorage, key: string): Promise<void> {
     // resolveMigrationStorage only returns non-null for object adapters, so
@@ -273,9 +289,9 @@ export class AuditLogger implements IAuditLogger {
     }
 
     try {
-      // Prefer a native list() when the (legacy) adapter offers one;
-      // otherwise fall back to the persisted index maintained by
-      // persistAuditRecord (the canonical StorageAdapter cannot list).
+      // Prefer native enumeration (canonical listObjects — both shipped
+      // adapters — or legacy list); only adapters that support neither fall
+      // back to the persisted index maintained by persistAuditRecord.
       const files = (await storage.listNative('audit/migrations/')) ?? (await this.readIndex(storage));
 
       for (const file of files) {

@@ -38,6 +38,30 @@ export class MemoryStorageAdapter implements StorageAdapter {
     return Promise.resolve(globalStore.has(key(domain, objectPath)));
   }
 
+  /**
+   * Enumerate stored object paths under a domain matching a prefix.
+   *
+   * Extra capability on this concrete class — deliberately NOT part of the
+   * public StorageAdapter interface. The backing Map is fully enumerable, and
+   * exposing that lets consumers (e.g. MigrationStorage/AuditLogger) discover
+   * persisted keys natively instead of maintaining a shared mutable index
+   * object, which was a cross-process read-modify-write race.
+   *
+   * Returned paths are the normalized paths as stored by putObject (leading
+   * slashes stripped) and round-trip through getObject.
+   */
+  listObjects(domain: string, prefix: string): Promise<string[]> {
+    const domainPrefix = `${encodeURIComponent(domain)}::`;
+    const cleanPrefix = prefix.replace(/^\/+/, '');
+    const results: string[] = [];
+    for (const storedKey of globalStore.keys()) {
+      if (!storedKey.startsWith(domainPrefix)) continue;
+      const objectPath = decodeURIComponent(storedKey.slice(domainPrefix.length));
+      if (objectPath.startsWith(cleanPrefix)) results.push(objectPath);
+    }
+    return Promise.resolve(results);
+  }
+
   /** Remove every stored object (all instances share one store). */
   static clear(): void {
     globalStore.clear();
