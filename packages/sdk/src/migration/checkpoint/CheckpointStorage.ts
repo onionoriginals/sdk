@@ -21,9 +21,10 @@ export { storedDataToString };
 /**
  * Marker object written in place of a deleted checkpoint on adapters without
  * a native delete (the canonical StorageAdapter has none). A tombstoned key
- * reads back as "not found".
+ * reads back as "not found". Exported so CheckpointManager can tombstone its
+ * pending-deletion markers with the same convention.
  */
-const TOMBSTONE_MARKER = '__originals_deleted__';
+export const TOMBSTONE_MARKER = '__originals_deleted__';
 
 function checkpointKey(checkpointId: string): string {
   return `checkpoints/${checkpointId}.json`;
