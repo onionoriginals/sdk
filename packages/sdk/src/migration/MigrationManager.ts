@@ -40,6 +40,26 @@ export class MigrationManager {
    */
   private inFlightSourceDids = new Set<string>();
 
+  /**
+   * Monotonic timestamp of the last opportunistic checkpoint cleanup sweep.
+   * The per-migration 24h cleanup timer dies with the process, so a checkpoint
+   * stranded by a delete that failed during a storage outage (its in-memory
+   * timer and pending-marker lost on restart) would otherwise never be
+   * reclaimed until an application manually called cleanupOldCheckpoints().
+   * Running the sweep opportunistically at the start of a migration reclaims
+   * such orphans on the next activity after a restart; the throttle below
+   * bounds its cost so it does not enumerate storage on every migrate() call.
+   */
+  private lastOpportunisticCleanupAt = 0;
+
+  /**
+   * Minimum spacing between opportunistic checkpoint cleanup sweeps. Stale
+   * checkpoints only become eligible after CHECKPOINT_RETENTION_MS (24h), so
+   * sweeping at most hourly reclaims post-restart orphans promptly without
+   * enumerating storage on every migration under high volume.
+   */
+  private static readonly OPPORTUNISTIC_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
   private validationPipeline: ValidationPipeline;
   private checkpointManager: CheckpointManager;
   private rollbackManager: RollbackManager;
@@ -225,6 +245,12 @@ export class MigrationManager {
         };
       }
       this.inFlightSourceDids.add(options.sourceDid);
+      // Opportunistic, throttled self-heal (best-effort, never awaited): reclaim
+      // checkpoints a prior process may have stranded when a delete failed
+      // during a storage outage and its retry timer/marker were lost on
+      // restart. cleanupOldCheckpoints never throws (GC path), so this cannot
+      // delay or break the migration about to run.
+      this.maybeCleanupStaleCheckpoints();
     }
 
     try {
@@ -372,9 +398,23 @@ export class MigrationManager {
       // Clean up checkpoint after successful migration. unref() the timer so
       // a successful migration does not pin the process alive for 24 hours
       // (CLI scripts and tests would otherwise hang until the timer fired).
+      //
+      // Run the FULL cleanup (cleanupOldCheckpoints), not just a one-shot
+      // deleteCheckpoint of this id: a targeted delete alone can fail to write
+      // both the tombstone AND the pending-deletion marker during a storage
+      // outage, and once this timer fires there is nothing left to retry it.
+      // cleanupOldCheckpoints additionally retries any previously-stranded
+      // deletions and sweeps storage-truth on enumerable adapters, so a
+      // checkpoint left behind by a failed delete is still reclaimed here. The
+      // targeted delete runs first to guarantee THIS checkpoint is removed
+      // regardless of the exact retention boundary.
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+      const cleanupCheckpointId: string = checkpoint.checkpointId;
       const cleanupTimer = setTimeout(() => {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-floating-promises
-        this.checkpointManager.deleteCheckpoint(checkpoint.checkpointId);
+        void (async () => {
+          await this.checkpointManager.deleteCheckpoint(cleanupCheckpointId);
+          await this.checkpointManager.cleanupOldCheckpoints();
+        })();
       }, 24 * 60 * 60 * 1000); // Delete after 24 hours
       cleanupTimer.unref?.();
 
@@ -477,6 +517,28 @@ export class MigrationManager {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getMigrationHistory(did: string): Promise<any[]> {
     return this.auditLogger.getMigrationHistory(did);
+  }
+
+  /**
+   * Best-effort, throttled trigger for the checkpoint cleanup sweep. Fire-and-
+   * forget: cleanupOldCheckpoints retries previously-stranded deletions and, on
+   * enumerable adapters, sweeps the actual checkpoint objects in storage — so a
+   * checkpoint orphaned by a delete that failed during an outage (with its
+   * per-migration timer and pending-marker lost on restart) is reclaimed on the
+   * next activity, without waiting for an application to call cleanup manually.
+   * Throttled to at most once per OPPORTUNISTIC_CLEANUP_INTERVAL_MS so it never
+   * enumerates storage on every migration; never throws.
+   */
+  private maybeCleanupStaleCheckpoints(): void {
+    const now = Date.now();
+    if (
+      now - this.lastOpportunisticCleanupAt <
+      MigrationManager.OPPORTUNISTIC_CLEANUP_INTERVAL_MS
+    ) {
+      return;
+    }
+    this.lastOpportunisticCleanupAt = now;
+    void this.checkpointManager.cleanupOldCheckpoints();
   }
 
   /**
