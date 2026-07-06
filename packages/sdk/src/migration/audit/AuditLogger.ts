@@ -17,6 +17,27 @@ import { resolveMigrationStorage, MigrationStorage } from '../storage/MigrationS
 const AUDIT_INDEX_KEY = 'audit/migrations/index.json';
 
 /**
+ * Per-adapter locks serializing read-modify-write updates of the persisted
+ * audit index. Keyed by the storage-adapter INSTANCE (module-level, not
+ * per-AuditLogger) so that multiple AuditLogger instances sharing one adapter
+ * in the same process cannot interleave a read-read-write-write and drop each
+ * other's index entries — the shipped/canonical adapters have no native
+ * list(), so a lost index entry makes that audit record undiscoverable after
+ * a restart.
+ *
+ * RESIDUAL LIMITATION: this only serializes writers within a single process.
+ * Two separate processes sharing one storage backend can still race the
+ * read-modify-write (the StorageAdapter interface offers no atomic
+ * compare-and-swap or list()). Each writer re-reads and MERGES (union) the
+ * freshest persisted index immediately before writing — including every key
+ * it has ever appended itself — so a clobbered entry is restored by that
+ * writer's next append, but a cross-process lost update remains possible
+ * until then. Deploy one writer per storage backend, or use an adapter with
+ * a native list(), if multi-process durability of the index is required.
+ */
+const indexLocks = new WeakMap<object, Promise<void>>();
+
+/**
  * Key material for signing audit records with Ed25519. When omitted, the
  * AuditLogger falls back to a keyless SHA-256 integrity hash (integrity-only:
  * anyone can recompute it; it does not authenticate the signer).
@@ -30,10 +51,12 @@ export interface AuditSignerConfig {
 export class AuditLogger implements IAuditLogger {
   private auditRecords: Map<string, MigrationAuditRecord[]>;
   /**
-   * Serializes read-modify-write updates of the persisted audit index so
-   * concurrent migrations in one process cannot drop each other's entries.
+   * Every index key this instance has ever appended. Unioned into each index
+   * write so an entry clobbered by an out-of-band writer (e.g. another
+   * process — see the residual limitation on indexLocks) is restored on this
+   * instance's next append.
    */
-  private indexLock: Promise<void> = Promise.resolve();
+  private appendedKeys = new Set<string>();
 
   constructor(
     private config: OriginalsConfig,
@@ -197,22 +220,35 @@ export class AuditLogger implements IAuditLogger {
   }
 
   /**
-   * Record a persisted key in the audit index (read-modify-write, serialized
-   * through indexLock). Only needed for canonical adapters, which cannot
-   * list; kept for legacy adapters too so the index stays complete.
+   * Record a persisted key in the audit index. The read-modify-write is
+   * serialized through a PER-ADAPTER lock shared by all AuditLogger
+   * instances in this process, and the freshest persisted index is re-read
+   * inside the lock immediately before writing and MERGED (union) with the
+   * new key plus every key this instance has appended — never blindly
+   * overwritten. See indexLocks for the residual cross-process limitation.
+   * Only needed for canonical adapters, which cannot list; kept for legacy
+   * adapters too so the index stays complete.
    */
   private appendToIndex(storage: MigrationStorage, key: string): Promise<void> {
-    const update = this.indexLock.then(async () => {
-      const keys = await this.readIndex(storage);
-      if (!keys.includes(key)) {
-        keys.push(key);
-        await storage.putText(AUDIT_INDEX_KEY, JSON.stringify(keys));
+    // resolveMigrationStorage only returns non-null for object adapters, so
+    // the adapter is always a valid WeakMap key here.
+    const adapter = (this.config as { storageAdapter?: unknown }).storageAdapter as object;
+    const previous = indexLocks.get(adapter) ?? Promise.resolve();
+    const update = previous.then(async () => {
+      // Re-read inside the lock, immediately before writing.
+      const persisted = await this.readIndex(storage);
+      const merged = new Set(persisted);
+      for (const appended of this.appendedKeys) merged.add(appended);
+      merged.add(key);
+      if (merged.size !== persisted.length) {
+        await storage.putText(AUDIT_INDEX_KEY, JSON.stringify([...merged]));
       }
+      this.appendedKeys.add(key);
     });
     // Keep the chain alive even if this update fails, but propagate the
     // failure to THIS caller (a broken index means the record is not
     // discoverable after a restart — that is a persistence failure).
-    this.indexLock = update.catch(() => undefined);
+    indexLocks.set(adapter, update.catch(() => undefined));
     return update;
   }
 
