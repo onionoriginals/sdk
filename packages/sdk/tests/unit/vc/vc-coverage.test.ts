@@ -611,34 +611,33 @@ describe('VC-011/boundary – deriveSelectiveProof with only mandatory fields (e
 // ─── VC-013 ──────────────────────────────────────────────────────────────────
 
 describe('VC-013/happy – BBSCryptosuiteManager.createProof (selective-disclosure baseline)', () => {
-  // NOTE: BbsSimple.sign is not yet implemented ("BbsSimple.sign is not implemented").
-  // This test documents the ACTUAL behavior: createProof throws "not implemented"
-  // when a real BLS12-381 key pair is supplied. The test also verifies correct
-  // error handling for missing private key.
-
-  test('createProof with Uint8Array BLS12-381 key pair throws "not implemented" (BbsSimple stub)', async () => {
+  test('createProof with a real BLS12-381 key produces a bbs-2023 base proof', async () => {
     const sk = bls.utils.randomSecretKey();
-    const pk = bls.shortSignatures.getPublicKey(sk).toBytes();
 
-    await expect(
-      BBSCryptosuiteManager.createProof(
-        {
-          '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
-          type: ['VerifiableCredential'],
-          issuer: 'did:peer:issuer',
-          issuanceDate: '2024-01-01T00:00:00Z',
-          credentialSubject: { id: 'did:peer:subject' },
-        },
-        {
-          verificationMethod: 'did:peer:issuer#bbs-1',
-          proofPurpose: 'assertionMethod',
-          privateKey: sk,
-          publicKey: pk,
-          documentLoader: preloadedLoader,
-          mandatoryPointers: ['/issuer', '/issuanceDate'],
-        }
-      )
-    ).rejects.toThrow(/not implemented/i);
+    const proof = await BBSCryptosuiteManager.createProof(
+      {
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
+        type: ['VerifiableCredential'],
+        issuer: 'did:peer:issuer',
+        issuanceDate: '2024-01-01T00:00:00Z',
+        credentialSubject: { id: 'did:peer:subject' },
+      },
+      {
+        verificationMethod: 'did:peer:issuer#bbs-1',
+        proofPurpose: 'assertionMethod',
+        // public key is derived from the secret key when omitted
+        privateKey: sk,
+        documentLoader: preloadedLoader,
+        mandatoryPointers: ['/issuer', '/issuanceDate'],
+      }
+    );
+
+    expect(proof.type).toBe('DataIntegrityProof');
+    expect(proof.cryptosuite).toBe('bbs-2023');
+    expect(proof.proofPurpose).toBe('assertionMethod');
+    expect(typeof proof.proofValue).toBe('string');
+    // multibase-base64url-no-pad base proof
+    expect(proof.proofValue.startsWith('u')).toBe(true);
   });
 
   test('createProof without private key throws "Private key required"', async () => {
