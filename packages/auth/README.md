@@ -14,16 +14,31 @@ Requires Node.js `>=20.10.0` (or Bun). Published as ESM. `express` is an optiona
 
 ## Usage
 
-Server-side:
+The supported flow is server-driven email OTP: your server holds the Turnkey API keys and exposes send/verify endpoints; the client calls those endpoints.
+
+Server-side — create the Turnkey client and handle the OTP endpoints:
 
 ```typescript
-import { createAuthMiddleware, initiateEmailAuth, verifyEmailAuth } from '@originals/auth/server';
+import {
+  createTurnkeyClient,
+  initiateEmailAuth,
+  verifyEmailAuth,
+  createAuthMiddleware,
+} from '@originals/auth/server';
+
+// In your send-OTP endpoint: initiateEmailAuth(...)
+// In your verify-OTP endpoint: verifyEmailAuth(...)
+// Protect routes with createAuthMiddleware(...)
 ```
 
-Client-side (pure functions, no React):
+Client-side (pure functions, no React) — call your server's OTP endpoints:
 
 ```typescript
-import { initializeTurnkeyClient, initOtp, completeOtp, fetchWallets } from '@originals/auth/client';
+import { sendOtp, verifyOtp } from '@originals/auth/client';
+
+const { sessionId } = await sendOtp('user@example.com');
+// ...user enters the code from their inbox...
+const { verified } = await verifyOtp(sessionId, '123456');
 ```
 
 Types:
@@ -32,7 +47,7 @@ Types:
 import type { AuthUser, TokenPayload, TurnkeyWallet } from '@originals/auth/types';
 ```
 
-Import client utilities from `@originals/auth/client` (not the package root) to avoid pulling server code into browser bundles.
+Import client utilities from `@originals/auth/client` (not the package root) to avoid pulling server code into browser bundles. Turnkey API keys are server-only: initialize Turnkey with `createTurnkeyClient` from `@originals/auth/server` — there is no client-side Turnkey initializer.
 
 ## Documentation
 

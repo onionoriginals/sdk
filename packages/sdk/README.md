@@ -41,7 +41,13 @@ const asset = await sdk.lifecycle.createAsset([
 ]);
 
 // 2. Publish it for discovery (did:webvh)
-const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
+//    The second argument identifies the publisher: a did:webvh DID string
+//    (or an ExternalSigner bound to one). A bare domain like 'example.com'
+//    is also accepted and expands to did:webvh:example.com:user.
+const published = await sdk.lifecycle.publishToWeb(
+  asset,
+  'did:webvh:example.com:user',
+);
 
 // 3. Inscribe it on Bitcoin for transferable ownership (did:btco)
 //    Requires an ordinalsProvider in the SDK config.

@@ -537,5 +537,19 @@ describe('Logger', () => {
       expect(JSON.parse(content.trim()).message).toBe('timed');
     });
   });
+
+  describe('bundler safety', () => {
+    test('Logger module has no top-level node: imports (browser/edge bundle safe)', async () => {
+      // Logger is re-exported from the SDK root and constructed by
+      // OriginalsSDK, so any static `import ... from 'node:...'` here is
+      // evaluated the moment `@originals/sdk` is imported and breaks
+      // browser/edge bundles even when FileLogOutput is never used.
+      // The fs dependency must be loaded lazily inside FileLogOutput.
+      const loggerSourcePath = join(import.meta.dir, '../../../src/utils/Logger.ts');
+      const source = await readFile(loggerSourcePath, 'utf8');
+      expect(source).not.toMatch(/^\s*import\s[^;]*from\s+['"]node:/m);
+      expect(source).not.toMatch(/^\s*import\s+['"]node:/m);
+    });
+  });
 });
 
