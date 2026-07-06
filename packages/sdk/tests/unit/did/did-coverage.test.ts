@@ -270,7 +270,7 @@ describe('DID-006 — createDIDWebVH with external signer', () => {
   });
   afterEach(async () => cleanup());
 
-  test('external signer is invoked; returned keyPair is empty (no leaked internal key)', async () => {
+  test('external signer is invoked; no keyPair is returned (no leaked internal key)', async () => {
     const km = new KeyManager();
     const { signer, verifier, keyPair, signCallCount } = await buildMockExternalSigner(km);
 
@@ -291,12 +291,9 @@ describe('DID-006 — createDIDWebVH with external signer', () => {
     // External signer was actually called
     expect(signCallCount()).toBeGreaterThan(0);
 
-    // No internal key is present — both fields are empty strings
-    expect(result.keyPair.publicKey).toBe('');
-    expect(result.keyPair.privateKey).toBe('');
-
-    // The external public key is NOT stored in keyPair (it would be wrong to expose it there)
-    expect(result.keyPair.publicKey).not.toBe(keyPair.publicKey);
+    // No internal key is present — the field is omitted entirely (no fake
+    // empty keyPair a caller might dutifully "persist")
+    expect(result.keyPair).toBeUndefined();
   }, 20000);
 
   test('external signer without verificationMethods → throws', async () => {

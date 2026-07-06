@@ -46,6 +46,60 @@ describe('DIDManager additional branches', () => {
     expect(doc2.id).toBe('did:btco:7');
   });
 
+  test('migrateToDIDBTCO throws BTCO_MIGRATION_KEY_DECODE_FAILED when the first VM multikey cannot be decoded (issue #318)', async () => {
+    // Regression: a decode failure used to warn-and-continue, silently producing
+    // a KEYLESS did:btco document — callers believed they migrated an identity
+    // they control, but the resulting DID had no usable verification method.
+    const dm = new DIDManager({ network: 'mainnet' } as any);
+    const docWithBadKey = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:webvh:example.com:x',
+      verificationMethod: [{
+        id: 'did:webvh:example.com:x#keys-0',
+        type: 'Multikey',
+        controller: 'did:webvh:example.com:x',
+        publicKeyMultibase: 'z-not-a-valid-multikey', // undecodable
+      }],
+    } as any;
+
+    let thrown: unknown;
+    try {
+      await dm.migrateToDIDBTCO(docWithBadKey, '123');
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeDefined();
+    expect((thrown as any).name).toBe('StructuredError');
+    expect((thrown as any).code).toBe('BTCO_MIGRATION_KEY_DECODE_FAILED');
+    expect((thrown as any).message).toContain('did:btco');
+  });
+
+  test('migrateToDIDBTCO throws when the first VM has no publicKeyMultibase (key cannot be carried)', async () => {
+    // A VM that exists but has no multikey encoding also cannot be carried;
+    // silently dropping it would be the same keyless-DID downgrade.
+    const dm = new DIDManager({ network: 'mainnet' } as any);
+    const docWithNonMultikeyVm = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:webvh:example.com:y',
+      verificationMethod: [{
+        id: 'did:webvh:example.com:y#keys-0',
+        type: 'JsonWebKey2020',
+        controller: 'did:webvh:example.com:y',
+        // no publicKeyMultibase
+      }],
+    } as any;
+
+    let thrown: unknown;
+    try {
+      await dm.migrateToDIDBTCO(docWithNonMultikeyVm, '123');
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeDefined();
+    expect((thrown as any).name).toBe('StructuredError');
+    expect((thrown as any).code).toBe('BTCO_MIGRATION_KEY_DECODE_FAILED');
+  });
+
   test('migrateToDIDBTCO uses first VM when present', async () => {
     const dm = new DIDManager({ network: 'mainnet' } as any);
     const pubDoc = createBtcoDidDocument('1', 'mainnet', { publicKey: new Uint8Array(32).fill(1), keyType: 'Ed25519' });
