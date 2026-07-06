@@ -11,7 +11,7 @@ import {
 import { OriginalsConfig } from '../../types/index.js';
 import { DIDManager } from '../../did/DIDManager.js';
 import { CredentialManager } from '../../vc/CredentialManager.js';
-import { CheckpointStorage, TOMBSTONE_MARKER } from './CheckpointStorage.js';
+import { CheckpointStorage, TOMBSTONE_MARKER, CHECKPOINT_KEY_PREFIX } from './CheckpointStorage.js';
 import { resolveMigrationStorage } from '../storage/MigrationStorage.js';
 import { Logger } from '../../utils/Logger.js';
 import { emitTelemetry, emitError, StructuredError } from '../../utils/telemetry.js';
@@ -25,6 +25,12 @@ import { emitTelemetry, emitError, StructuredError } from '../../utils/telemetry
  * shipped adapters support.
  */
 export const PENDING_DELETION_PREFIX = 'checkpoints/pending-deletion/';
+
+/**
+ * Retention window for checkpoints of completed migrations: checkpoints older
+ * than this are garbage-collected by cleanupOldCheckpoints.
+ */
+export const CHECKPOINT_RETENTION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function pendingDeletionKey(checkpointId: string): string {
   return `${PENDING_DELETION_PREFIX}${checkpointId}.json`;
@@ -124,6 +130,15 @@ export class CheckpointManager implements ICheckpointManager {
    *      later explicit deleteCheckpoint of the same id — retries and clears
    *      on success. The leaked checkpoint is therefore bounded: it lingers
    *      only until storage recovers, not forever.
+   *
+   * The marker is a best-effort FAST PATH, not the retry handle of last
+   * resort: during a total outage the marker write can fail too. On
+   * enumerable adapters (MigrationStorage.canList() — both shipped adapters)
+   * the durable checkpoint object ITSELF is the handle: cleanupOldCheckpoints
+   * additionally sweeps the actual objects under checkpoints/ by native
+   * enumeration, so a checkpoint left behind with no marker and no in-memory
+   * entry (e.g. after a restart) is still found and deleted once it passes
+   * the retention cutoff.
    */
   async deleteCheckpoint(checkpointId: string): Promise<void> {
     try {
@@ -157,12 +172,21 @@ export class CheckpointManager implements ICheckpointManager {
   }
 
   /**
-   * Clean up old checkpoints (older than 24 hours for successful migrations),
-   * then retry any deletions that previously failed durably.
+   * Clean up old checkpoints (older than CHECKPOINT_RETENTION_MS for
+   * successful migrations), then retry any deletions that previously failed
+   * durably, then — on enumerable adapters — sweep the ACTUAL checkpoint
+   * objects in storage against the same cutoff.
+   *
+   * The final sweep is what makes cleanup independent of any secondary
+   * durable handle: even if a checkpoint's tombstone write AND its
+   * pending-deletion marker write both failed during a total storage outage,
+   * and the process restarted (empty in-memory map), the checkpoint's own
+   * durable presence under checkpoints/ is rediscovered by enumeration and
+   * deleted here. Never throws (GC path).
    */
   async cleanupOldCheckpoints(): Promise<void> {
+    const cutoffTime = Date.now() - CHECKPOINT_RETENTION_MS;
     try {
-      const cutoffTime = Date.now() - (24 * 60 * 60 * 1000); // 24 hours
       await this.storage.deleteOlderThan(cutoffTime);
     } catch (error) {
       this.logger.error(
@@ -171,6 +195,7 @@ export class CheckpointManager implements ICheckpointManager {
       );
     }
     await this.retryPendingDeletions();
+    await this.sweepStoredCheckpoints(cutoffTime);
   }
 
   /**
@@ -181,6 +206,11 @@ export class CheckpointManager implements ICheckpointManager {
    * opaque adapters that cannot enumerate, this degrades gracefully to a
    * no-op: the marker still exists and is retried/cleared by the next
    * explicit deleteCheckpoint of that id. Never throws.
+   *
+   * Markers are a FAST PATH only: on enumerable adapters,
+   * sweepStoredCheckpoints (also run by cleanupOldCheckpoints) reclaims
+   * stale checkpoints directly from storage even when no marker was ever
+   * written, so a lost marker cannot strand a checkpoint.
    *
    * @returns ids whose deletion was retried successfully, and ids that are
    * still failing (their markers are kept for a later pass).
@@ -241,6 +271,82 @@ export class CheckpointManager implements ICheckpointManager {
     }
 
     return { retried, failed };
+  }
+
+  /**
+   * STORAGE-TRUTH sweep: enumerate the ACTUAL checkpoint objects under
+   * checkpoints/ and durably delete any older than the retention cutoff —
+   * independent of the in-memory map AND of pending-deletion markers.
+   *
+   * This makes the durable checkpoint object itself the retry handle on
+   * enumerable adapters: even if BOTH the tombstone/native delete and the
+   * pending-marker write failed during a total storage outage (so no marker
+   * exists) and the process restarted (so no in-memory entry exists), the
+   * next sweep rediscovers the stale checkpoint by its own key and deletes
+   * it. There is no secondary durable handle left to "lose".
+   *
+   * For opaque adapters (!canList()) this is a no-op — they keep the
+   * documented degraded path (in-memory sweep + markers + explicit
+   * deleteCheckpoint retries). Never throws (GC path): a per-key failure
+   * falls back to recording the pending marker (fast path) and continues;
+   * the checkpoint remains enumerable and is retried on the NEXT sweep
+   * regardless.
+   */
+  private async sweepStoredCheckpoints(cutoffTime: number): Promise<void> {
+    const migrationStorage = resolveMigrationStorage(this.config);
+    if (!migrationStorage || !migrationStorage.canList()) return;
+
+    let keys: string[] | null = null;
+    try {
+      keys = await migrationStorage.listNative(CHECKPOINT_KEY_PREFIX);
+    } catch (error) {
+      this.logger.warn('Could not enumerate stored checkpoints for cleanup sweep', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return;
+    }
+    if (!keys) return;
+
+    for (const key of keys) {
+      // Pending-deletion markers live under a subprefix of checkpoints/ —
+      // they are retry handles, not checkpoints (retryPendingDeletions owns
+      // them), so they must not be parsed as checkpoints here.
+      if (key.startsWith(PENDING_DELETION_PREFIX)) continue;
+      let checkpointId: string | null = null;
+      try {
+        const text = await migrationStorage.getText(key);
+        if (!text) continue;
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        // Tombstoned = already durably deleted; inert, skip.
+        if (parsed[TOMBSTONE_MARKER] === true) continue;
+        // Only sweep objects with a readable timestamp past the cutoff.
+        if (typeof parsed.timestamp !== 'number' || parsed.timestamp >= cutoffTime) continue;
+        checkpointId =
+          typeof parsed.checkpointId === 'string'
+            ? parsed.checkpointId
+            : key.slice(CHECKPOINT_KEY_PREFIX.length).replace(/\.json$/, '');
+        if (!checkpointId) continue;
+
+        await this.storage.delete(checkpointId);
+        await this.clearPendingDeletionMarker(checkpointId);
+        this.logger.info(`Swept stale checkpoint ${checkpointId} from storage`, { checkpointId });
+        emitTelemetry(this.config.telemetry, {
+          name: 'migration.checkpoint.cleanup_swept',
+          attributes: { checkpointId }
+        });
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.logger.warn(`Cleanup sweep could not delete stale checkpoint object ${key}`, {
+          key,
+          error: err.message
+        });
+        // Fast-path fallback; even if THIS write also fails, the checkpoint
+        // stays enumerable and the next sweep retries it.
+        if (checkpointId) {
+          await this.recordPendingDeletion(checkpointId, err);
+        }
+      }
+    }
   }
 
   /**

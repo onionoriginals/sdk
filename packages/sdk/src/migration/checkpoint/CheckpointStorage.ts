@@ -26,8 +26,16 @@ export { storedDataToString };
  */
 export const TOMBSTONE_MARKER = '__originals_deleted__';
 
+/**
+ * Prefix under which durable checkpoint objects live. Exported so
+ * CheckpointManager's storage-truth cleanup sweep can enumerate the actual
+ * checkpoint objects (via MigrationStorage.listNative) instead of relying on
+ * in-memory state or secondary markers.
+ */
+export const CHECKPOINT_KEY_PREFIX = 'checkpoints/';
+
 function checkpointKey(checkpointId: string): string {
-  return `checkpoints/${checkpointId}.json`;
+  return `${CHECKPOINT_KEY_PREFIX}${checkpointId}.json`;
 }
 
 export class CheckpointStorage {
