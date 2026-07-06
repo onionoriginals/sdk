@@ -171,6 +171,8 @@ export { OrdMockProvider } from './adapters/providers/OrdMockProvider.js';
 export { FeeOracleMock } from './adapters/FeeOracleMock.js';
 export { SignetProvider } from './bitcoin/providers/SignetProvider.js';
 export type { SignetProviderOptions } from './bitcoin/providers/SignetProvider.js';
+export { QuickNodeProvider } from './adapters/providers/QuickNodeProvider.js';
+export type { QuickNodeProviderOptions } from './adapters/providers/QuickNodeProvider.js';
 export type { OrdinalsProvider, FeeOracleAdapter, StorageAdapter } from './adapters/types.js';
 
 // CEL (Cryptographic Event Log) exports
