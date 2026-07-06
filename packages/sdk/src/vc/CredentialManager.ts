@@ -1124,13 +1124,20 @@ export class CredentialManager {
         }
       );
 
+      // The BBS derive reveals the base proof's mandatory pointers in ADDITION
+      // to the requested selective fields (e.g. a mandatory '/issuer'), so the
+      // disclosed/hidden accounting must reflect what actually ended up in the
+      // revealed document, not just `fieldsToDisclose`. Compute it from the
+      // derived document so mandatory fields aren't mislabeled as hidden.
+      const revealedFields = this.extractFieldPaths(derived.document as Record<string, unknown>);
+      const revealedSet = new Set(revealedFields);
       return {
         credential: {
           ...derived.document,
           proof: derived.proof,
         } as VerifiableCredential,
-        disclosedFields: fieldsToDisclose,
-        hiddenFields,
+        disclosedFields: revealedFields.filter(f => f !== '/proof' && !f.startsWith('/proof/')),
+        hiddenFields: allFields.filter(f => !revealedSet.has(f)),
       };
     }
 
