@@ -47,6 +47,13 @@ export class MigrationManager {
   private auditLogger: AuditLogger;
   private eventEmitter: EventEmitter;
 
+  /**
+   * Guards the one-time, process-lifetime checkpoint reclaim run lazily on the
+   * first migration (see maybeRunStartupReclaim). The MigrationManager is a
+   * per-process singleton, so this fires once per process.
+   */
+  private startupReclaimDone = false;
+
   // Migration operation handlers
   private peerToWebvh: PeerToWebvhMigration;
   private webvhToBtco: WebvhToBtcoMigration;
@@ -172,10 +179,33 @@ export class MigrationManager {
   }
 
   /**
+   * Run the checkpoint self-healing sweep once per process, lazily on the first
+   * real migration. Fire-and-forget and never throws (cleanupOldCheckpoints is
+   * a GC path that swallows per-key failures), so it cannot delay or fail a
+   * migration. Idempotent: subsequent migrations are no-ops.
+   */
+  private maybeRunStartupReclaim(): void {
+    if (this.startupReclaimDone) return;
+    this.startupReclaimDone = true;
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    void this.checkpointManager.cleanupOldCheckpoints();
+  }
+
+  /**
    * Main migration method
    */
   async migrate(options: MigrationOptions): Promise<MigrationResult> {
     const startTime = Date.now();
+
+    // Reclaim checkpoints stranded by a previous process/crash. The per-migration
+    // 24h cleanup timer (and its self-healing sweep) is lost on restart, so
+    // without this a checkpoint whose durable delete AND pending-marker write
+    // both failed before a restart would only be reclaimed if the application
+    // called cleanupOldCheckpoints() by hand. Running it lazily on the first
+    // real migration re-arms the self-healing sweep as part of normal operation.
+    if (!options.estimateCostOnly) {
+      this.maybeRunStartupReclaim();
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let migrationState: any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -373,9 +403,15 @@ export class MigrationManager {
       // a successful migration does not pin the process alive for 24 hours
       // (CLI scripts and tests would otherwise hang until the timer fired).
       const cleanupTimer = setTimeout(() => {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-floating-promises
-        this.checkpointManager.deleteCheckpoint(checkpoint.checkpointId);
-      }, 24 * 60 * 60 * 1000); // Delete after 24 hours
+        // Run the full cleanup sweep rather than a one-shot delete of only this
+        // checkpoint. cleanupOldCheckpoints() reclaims this migration's
+        // checkpoint via the retention GC AND runs the self-healing paths
+        // (retryPendingDeletions + storage-truth enumeration sweep), so a
+        // checkpoint stranded by a delete whose tombstone and pending-marker
+        // writes both failed is reclaimed here too. Fire-and-forget; never throws.
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+        void this.checkpointManager.cleanupOldCheckpoints();
+      }, 24 * 60 * 60 * 1000); // Sweep after 24 hours
       cleanupTimer.unref?.();
 
       return {
