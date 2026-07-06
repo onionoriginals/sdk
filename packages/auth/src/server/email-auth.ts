@@ -174,6 +174,10 @@ export interface VerifyEmailAuthOptions {
  * Implements the Turnkey v6 encrypted-bundle flow: the OTP code is encrypted
  * to the `otpEncryptionTargetBundle` captured during {@link initiateEmailAuth}
  * and submitted as `encryptedOtpBundle` to Turnkey's `verifyOtp` activity.
+ *
+ * Returns the `verificationToken` together with the ephemeral P-256 keypair
+ * it is bound to (`publicKey`/`privateKey`), which the caller needs to
+ * complete a subsequent `otpLogin`.
  */
 export async function verifyEmailAuth(
   sessionId: string,
@@ -218,10 +222,15 @@ export async function verifyEmailAuth(
 
   // Encrypt the OTP code (plus an ephemeral client public key) to the target
   // encryption bundle. Turnkey v6 verifyOtp only accepts encrypted bundles.
-  // This also verifies the enclave signature on the target bundle.
+  // This also verifies the enclave signature on the target bundle. The
+  // verification token Turnkey issues is BOUND to the ephemeral public key
+  // embedded in the bundle, so the keypair must be surfaced to the caller
+  // for a subsequent otpLogin.
   let encryptedOtpBundle: string;
+  let publicKey: string;
+  let privateKey: string | undefined;
   try {
-    ({ encryptedOtpBundle } = await encryptOtpCode({
+    ({ encryptedOtpBundle, publicKey, privateKey } = await encryptOtpCode({
       otpCode: code,
       otpEncryptionTargetBundle: session.otpEncryptionTargetBundle,
       dangerouslyOverrideSignerPublicKey: options?.dangerouslyOverrideSignerPublicKey,
@@ -256,6 +265,8 @@ export async function verifyEmailAuth(
       email: session.email,
       subOrgId: session.subOrgId,
       verificationToken: verifyResult.verificationToken,
+      publicKey,
+      privateKey,
     };
   } catch (error) {
     console.error('❌ OTP verification failed:', error);

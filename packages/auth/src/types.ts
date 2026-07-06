@@ -92,6 +92,17 @@ export interface VerifyAuthResult {
    * requests to create an authenticated session.
    */
   verificationToken?: string;
+  /**
+   * Compressed P-256 public key (hex) that the verification token is bound
+   * to. Pass this as `publicKey` to a subsequent `otpLogin` activity.
+   */
+  publicKey?: string;
+  /**
+   * Private key (hex) for the ephemeral key pair generated during OTP
+   * encryption. Needed to prove possession of the bound key in subsequent
+   * requests. Sensitive: never log or persist insecurely.
+   */
+  privateKey?: string;
 }
 
 /**

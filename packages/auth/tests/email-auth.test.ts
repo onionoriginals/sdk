@@ -388,6 +388,34 @@ describe('email-auth', () => {
       );
     });
 
+    test('returns the ephemeral keypair that the verification token is bound to', async () => {
+      const verifyOtp = mock(() =>
+        Promise.resolve({ verificationToken: 'token_bound' })
+      );
+      const client = createMockTurnkeyClient({ verifyOtp });
+      const sessionId = await setupSession(client);
+
+      const result = await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+
+      expect(result.verificationToken).toBe('token_bound');
+      // The ephemeral P-256 keypair generated during encryption must surface
+      // so callers can complete a subsequent otpLogin bound to the same key.
+      expect(result.publicKey).toMatch(/^0[23][0-9a-f]{64}$/);
+      expect(result.privateKey).toMatch(/^[0-9a-f]{64}$/);
+
+      // The returned public key must be the exact key embedded in the
+      // encrypted bundle submitted to Turnkey (the key the token is bound to).
+      const callArg = verifyOtp.mock.calls[0][0] as Record<string, unknown>;
+      const plaintext = decryptOtpBundle(
+        callArg.encryptedOtpBundle as string,
+        otpFixture.targetPrivateKey
+      );
+      expect(result.publicKey).toBe(plaintext.public_key);
+
+      // The plaintext OTP code must NOT leak into the result
+      expect(Object.values(result)).not.toContain('123456');
+    });
+
     test('calls Turnkey verifyOtp with an encrypted OTP bundle (v6 flow)', async () => {
       const verifyOtp = mock(() =>
         Promise.resolve({ verificationToken: 'token_xyz' })
