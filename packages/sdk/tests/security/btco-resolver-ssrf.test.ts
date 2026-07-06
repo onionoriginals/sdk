@@ -111,6 +111,79 @@ describe('OrdinalsClientProviderAdapter content_url origin pinning', () => {
   });
 });
 
+describe('OrdinalsClientProviderAdapter same-origin RELATIVE content_url canonicalization', () => {
+  test('resolveInscription resolves a relative same-origin content_url to an absolute URL that fetchContent accepts', async () => {
+    const fetched: string[] = [];
+    installFetch(async (url) => {
+      fetched.push(url);
+      if (url.includes('/inscription/')) {
+        return jsonResponse({
+          inscription_id: 'i1', sat: 1, content_type: 'text/plain',
+          // Valid, same-origin, but RELATIVE — ord servers commonly return this
+          // form. It must be stored resolved against baseUrl, because Node/Bun
+          // fetch() rejects relative URLs outright.
+          content_url: '/content/i1'
+        });
+      }
+      return textResponse('content');
+    });
+    const client = new OrdinalsClient(BASE, 'mainnet');
+    const adapter = new OrdinalsClientProviderAdapter(client as any, BASE);
+
+    const info = await adapter.resolveInscription('i1');
+    expect(info.content_url).toBe(`${BASE}/content/i1`);
+
+    const res = await adapter.fetchContent(info.content_url);
+    expect(res.ok).toBe(true);
+    expect(await res.text()).toBe('content');
+    // The content request went to the absolute same-origin URL.
+    expect(fetched).toContain(`${BASE}/content/i1`);
+  });
+
+  test('fetchContent canonicalizes a relative same-origin URL before fetching (never passes a relative URL to fetch)', async () => {
+    const fetched: string[] = [];
+    installFetch(async (url) => { fetched.push(url); return textResponse('content'); });
+    const client = new OrdinalsClient(BASE, 'mainnet');
+    const adapter = new OrdinalsClientProviderAdapter(client as any, BASE);
+
+    const res = await adapter.fetchContent('/content/i1');
+    expect(res.ok).toBe(true);
+    expect(fetched).toEqual([`${BASE}/content/i1`]);
+  });
+
+  test('end to end: a relative same-origin content_url still resolves the DID document (no unresolvable)', async () => {
+    const fetched: string[] = [];
+    const didDoc = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:btco:123456'
+    };
+    installFetch(async (url) => {
+      fetched.push(url);
+      if (url === `${BASE}/sat/123456`) {
+        return jsonResponse({ inscription_ids: ['i1'] });
+      }
+      if (url === `${BASE}/inscription/i1`) {
+        return jsonResponse({
+          inscription_id: 'i1', sat: 123456, content_type: 'application/json',
+          content_url: '/content/i1'
+        });
+      }
+      if (url === `${BASE}/content/i1`) {
+        return textResponse(JSON.stringify(didDoc));
+      }
+      return { ok: false, status: 404, statusText: 'Not Found', async text() { return ''; }, async json() { return {}; } };
+    });
+
+    const sdk = OriginalsSDK.create({ network: 'mainnet', bitcoinRpcUrl: BASE });
+    const resolved = await sdk.did.resolveDID('did:btco:123456');
+
+    expect(resolved).not.toBeNull();
+    expect(resolved?.id).toBe('did:btco:123456');
+    // Every request the resolver made was an absolute same-origin URL.
+    expect(fetched.every((u) => u.startsWith(`${BASE}/`))).toBe(true);
+  });
+});
+
 describe('DIDManager bitcoinRpcUrl resolution path (end to end)', () => {
   test('a hostile content_url from the ord server is never fetched during resolveDID', async () => {
     const fetched: string[] = [];

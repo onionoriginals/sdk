@@ -9,14 +9,18 @@ export interface OrdinalsClientProviderConfig {
 
 /**
  * Reject a candidate URL whose scheme is not http(s) or whose origin differs
- * from baseUrl's. The ord endpoint's JSON is attacker-controllable (a
- * compromised/malicious indexer), so a `content_url` it returns must never be
- * followed to an arbitrary host or scheme — that is a Server-Side Request
- * Forgery vector (e.g. http://169.254.169.254/… cloud metadata, file:///…).
- * Relative URLs resolve against baseUrl and stay same-origin. Mirrors the
- * #265 hardening in OrdHttpProvider.
+ * from baseUrl's, and return its RESOLVED ABSOLUTE form. The ord endpoint's
+ * JSON is attacker-controllable (a compromised/malicious indexer), so a
+ * `content_url` it returns must never be followed to an arbitrary host or
+ * scheme — that is a Server-Side Request Forgery vector (e.g.
+ * http://169.254.169.254/… cloud metadata, file:///…). Relative URLs resolve
+ * against baseUrl and stay same-origin; the resolved absolute string is
+ * returned so callers store/fetch that — server-side fetch() (Node/Bun)
+ * rejects relative URLs outright, so storing the raw relative form would make
+ * a perfectly valid inscription unreadable. Mirrors the #265 hardening in
+ * OrdHttpProvider.
  */
-function assertSameOrigin(candidate: string, baseUrl: string): void {
+function resolveSameOrigin(candidate: string, baseUrl: string): string {
   let parsed: URL;
   try {
     parsed = new URL(candidate, baseUrl);
@@ -35,6 +39,7 @@ function assertSameOrigin(candidate: string, baseUrl: string): void {
       `which differs from baseUrl origin ${baseOrigin} (possible SSRF)`
     );
   }
+  return parsed.toString();
 }
 
 export class OrdinalsClientProviderAdapter implements ResourceProviderLike {
@@ -79,9 +84,15 @@ export class OrdinalsClientProviderAdapter implements ResourceProviderLike {
 
       const info: any = await res.json();
       // content_url comes from the (untrusted) ord response: pin it to the
-      // configured endpoint's origin before anyone fetches it (SSRF guard).
-      const contentUrl = info.content_url || `${base}/content/${inscriptionId}`;
-      assertSameOrigin(contentUrl, base);
+      // configured endpoint's origin before anyone fetches it (SSRF guard),
+      // and store the RESOLVED ABSOLUTE form — a same-origin RELATIVE URL
+      // (e.g. '/content/i1') is valid but server-side fetch() rejects it, so
+      // storing it verbatim would make the inscription unreadable and (with
+      // the fail-closed resolver) the DID unresolvable.
+      const contentUrl = resolveSameOrigin(
+        info.content_url || `${base}/content/${inscriptionId}`,
+        base
+      );
       return {
         id: info.inscription_id || inscriptionId,
         sat: typeof info.sat === 'number' ? info.sat : Number(info.sat || 0),
@@ -107,8 +118,9 @@ export class OrdinalsClientProviderAdapter implements ResourceProviderLike {
    * Off-origin or non-http(s) URLs fail closed without any network request.
    */
   fetchContent = async (url: string, init?: { signal?: AbortSignal }): Promise<Response> => {
+    let resolvedUrl: string;
     try {
-      assertSameOrigin(url, (this.config.baseUrl || '').replace(/\/$/, ''));
+      resolvedUrl = resolveSameOrigin(url, (this.config.baseUrl || '').replace(/\/$/, ''));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
@@ -119,7 +131,9 @@ export class OrdinalsClientProviderAdapter implements ResourceProviderLike {
       } as unknown as Response;
     }
     const fetchFn = this.config.fetchFn || fetch;
-    return fetchFn(url, { redirect: 'error', signal: init?.signal });
+    // Fetch the resolved absolute form: server-side fetch() rejects relative
+    // URLs, and resolveSameOrigin has already pinned it to baseUrl's origin.
+    return fetchFn(resolvedUrl, { redirect: 'error', signal: init?.signal });
   };
 }
 
