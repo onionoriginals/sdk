@@ -1,24 +1,25 @@
-import { useState } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import { hero } from '../content';
 import { generateArtwork } from '../sdk/artwork';
+import { getArtSeed, subscribeArtSeed } from '../sdk/artwork-sync';
 import { InstallCommand } from './InstallCommand';
 import { Pipeline } from './Pipeline';
 import './hero.css';
 
 export function Hero() {
-  // A fresh original on every visit: the hero halo is the same generative
-  // artwork the demo inscribes, seeded randomly once per page load.
-  const [art] = useState(() =>
-    generateArtwork('Originals', 'Artwork', Math.floor(Math.random() * 1e9), {
-      transparent: true
-    })
+  // The halo IS the demo's asset: same seed the demo will hash and inscribe,
+  // fresh per visit, live-updated as the visitor edits it in the demo.
+  const seed = useSyncExternalStore(subscribeArtSeed, getArtSeed);
+  const art = useMemo(
+    () => generateArtwork(seed.title, seed.medium, seed.nonce, { transparent: true }),
+    [seed]
   );
 
   return (
     <section className="hero" id="top">
       <div className="hero-glow" aria-hidden="true" />
       <div className="hero-art" aria-hidden="true">
-        <img src={art.dataUri} alt="" />
+        <img key={art.dataUri} src={art.dataUri} alt="" />
       </div>
       <div className="container">
         <p className="hero-eyebrow">{hero.eyebrow}</p>

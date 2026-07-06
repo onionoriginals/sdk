@@ -3,7 +3,20 @@
 Status board for the landing page at `apps/landing/`. Updated every
 build→grade cycle. Craft bar and grading protocol: see `GRADING.md`.
 
-## Current status — cycle 6: generative artwork in the hero
+## Current status — cycle 7: hero halo synced to the demo's asset
+
+User steering: random hero artworks read as disconnected (“they should be
+synced with the one being created”). Now there is exactly one artwork per
+visit: a shared seed store (`src/sdk/artwork-sync.ts`) is initialized with
+a random nonce per page load; the demo's asset card and the hero halo both
+render that seed (the halo in the transparent strokes-only variant). Typing
+a title, switching medium, regenerating, or starting over updates both —
+the thing glowing behind the headline is the exact asset the demo will
+hash and inscribe. Crossfade (700ms) on change. Verified in-browser:
+hero strokes are byte-identical to the demo card's on load and after
+typing; zero console errors; throttled TTI unchanged.
+
+## Cycle 6 — generative artwork in the hero (superseded by cycle 7 sync)
 
 Follow-up steering (“yeah do it”): the hero now renders a fresh generative
 artwork on every page load — same generator the demo inscribes, seeded
@@ -220,3 +233,4 @@ all fixed and re-verified in-browser. Cycle 2 grading next.
 | 4 | 2026-07-05 | **NO DONE-BAR FAILURE FOUND** (all five tests pass, incl. direct-SDK kill-shot verification) | nitpick polish: selected-tab hover, note width; caret idiom documented |
 | 5 | 2026-07-05 | user steering: “show a real asset, not JSON” | demo now generates a real SVG artwork whose bytes are hashed/published/inscribed; asset card + layer badge; mobile field overflow fixed |
 | 6 | 2026-07-05 | user steering: artwork as hero visual | fresh generative halo per page load, ring-masked behind the headline |
+| 7 | 2026-07-06 | user steering: halo must be the asset being created | shared seed store; hero + demo render the same artwork, live-synced |

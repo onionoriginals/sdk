@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine, DemoEvent } from '../sdk/engine';
 import { generateArtwork } from '../sdk/artwork';
+import { getArtSeed, setArtSeed } from '../sdk/artwork-sync';
 import { Pipeline } from './Pipeline';
 import { Reveal } from './Reveal';
 import './demo.css';
@@ -64,13 +65,18 @@ export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [medium, setMedium] = useState(demo.form.mediums[0]);
-  const [nonce, setNonce] = useState(1);
+  const [nonce, setNonce] = useState(() => getArtSeed().nonce);
   // The artwork is the asset: regenerated live from title/medium/nonce while
   // idle, frozen the moment it's created (its bytes are hashed by the SDK).
   const artwork = useMemo(
     () => generateArtwork(title.trim() || demo.form.defaultTitle, medium, nonce),
     [title, medium, nonce]
   );
+
+  // Keep the hero halo in sync: it renders this exact seed.
+  useEffect(() => {
+    setArtSeed({ title: title.trim() || demo.form.defaultTitle, medium, nonce });
+  }, [title, medium, nonce]);
   const [events, setEvents] = useState<DemoEvent[]>([]);
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -146,6 +152,7 @@ export function Demo() {
     setAsset(null);
     setError(null);
     setTab('events');
+    setNonce(Math.floor(Math.random() * 1e9)); // fresh artwork for the next run
     // Next run gets a fresh engine — fresh keys, fresh DIDs, fresh publisher.
     // window.__originalsDemo keeps pointing at the old engine until the new
     // one constructs and re-registers itself, so the hook is never dangling.
