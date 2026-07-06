@@ -150,20 +150,39 @@ export class StateTracker implements IStateTracker {
   }
 
   /**
-   * Clean up old completed migrations
+   * Clean up old terminal migrations.
+   *
+   * Successfully-terminal entries (COMPLETED / ROLLED_BACK /
+   * PARTIALLY_ROLLED_BACK) are reclaimed after `olderThanMs` (default 7
+   * days). Failure-terminal entries (FAILED / QUARANTINED) are ALSO
+   * reclaimed — previously they were excluded entirely and accumulated
+   * unboundedly — but with a separate, longer retention
+   * (`failedOlderThanMs`, default 30 days) since they may still be under
+   * manual review.
    */
   // eslint-disable-next-line @typescript-eslint/require-await
-  async cleanupOldStates(olderThanMs: number = 7 * 24 * 60 * 60 * 1000): Promise<void> {
-    const cutoffTime = Date.now() - olderThanMs;
+  async cleanupOldStates(
+    olderThanMs: number = 7 * 24 * 60 * 60 * 1000,
+    failedOlderThanMs: number = 30 * 24 * 60 * 60 * 1000
+  ): Promise<void> {
+    const now = Date.now();
+    const cutoffTime = now - olderThanMs;
+    const failedCutoffTime = now - failedOlderThanMs;
     const toDelete: string[] = [];
 
     for (const [id, state] of this.states.entries()) {
+      if (!state.endTime) continue;
+      const isSuccessTerminal =
+        state.state === MigrationStateEnum.COMPLETED ||
+        state.state === MigrationStateEnum.ROLLED_BACK ||
+        state.state === MigrationStateEnum.PARTIALLY_ROLLED_BACK;
+      const isFailureTerminal =
+        state.state === MigrationStateEnum.FAILED ||
+        state.state === MigrationStateEnum.QUARANTINED;
+
       if (
-        state.endTime &&
-        state.endTime < cutoffTime &&
-        (state.state === MigrationStateEnum.COMPLETED ||
-          state.state === MigrationStateEnum.ROLLED_BACK ||
-          state.state === MigrationStateEnum.PARTIALLY_ROLLED_BACK)
+        (isSuccessTerminal && state.endTime < cutoffTime) ||
+        (isFailureTerminal && state.endTime < failedCutoffTime)
       ) {
         toDelete.push(id);
       }

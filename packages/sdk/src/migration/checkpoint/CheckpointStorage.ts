@@ -1,21 +1,41 @@
 /**
  * CheckpointStorage - Persists checkpoints to storage
+ *
+ * Persistence goes through resolveMigrationStorage, which speaks BOTH the
+ * canonical StorageAdapter interface (putObject/getObject — the only shape
+ * the shipped Memory/Local adapters implement) and legacy duck-typed
+ * put/get/delete adapters. Previously only the legacy shape was probed, so
+ * with every shipped adapter the guards silently skipped and checkpoints
+ * were never persisted — after a crash, rollback() found nothing and
+ * quarantined the migration.
  */
 
 import { MigrationCheckpoint } from '../types.js';
 import { OriginalsConfig } from '../../types/index.js';
+import { resolveMigrationStorage, storedDataToString } from '../storage/MigrationStorage.js';
+
+// Re-exported for backward compatibility (AuditLogger and external callers
+// historically imported this from CheckpointStorage).
+export { storedDataToString };
 
 /**
- * Normalize the possible shapes a storage adapter may return
- * (StorageGetResult, Buffer/Uint8Array, or a raw string) to utf8 text.
+ * Marker object written in place of a deleted checkpoint on adapters without
+ * a native delete (the canonical StorageAdapter has none). A tombstoned key
+ * reads back as "not found". Exported so CheckpointManager can tombstone its
+ * pending-deletion markers with the same convention.
  */
-export function storedDataToString(data: unknown): string {
-  if (typeof data === 'string') return data;
-  if (data instanceof Uint8Array) return Buffer.from(data).toString('utf8');
-  const content = (data as { content?: Buffer | Uint8Array | string }).content;
-  if (typeof content === 'string') return content;
-  if (content instanceof Uint8Array) return Buffer.from(content).toString('utf8');
-  throw new Error('Unsupported storage adapter result shape');
+export const TOMBSTONE_MARKER = '__originals_deleted__';
+
+/**
+ * Prefix under which durable checkpoint objects live. Exported so
+ * CheckpointManager's storage-truth cleanup sweep can enumerate the actual
+ * checkpoint objects (via MigrationStorage.listNative) instead of relying on
+ * in-memory state or secondary markers.
+ */
+export const CHECKPOINT_KEY_PREFIX = 'checkpoints/';
+
+function checkpointKey(checkpointId: string): string {
+  return `${CHECKPOINT_KEY_PREFIX}${checkpointId}.json`;
 }
 
 export class CheckpointStorage {
@@ -34,13 +54,12 @@ export class CheckpointStorage {
     }
     this.checkpoints.set(checkpoint.checkpointId, checkpoint);
 
-    // Optionally persist to configured storage adapter
-    const storageAdapter = (this.config as any).storageAdapter;
-    if (storageAdapter && typeof storageAdapter.put === 'function') {
+    // Persist through whatever storage adapter is configured (canonical
+    // StorageAdapter or legacy duck-typed adapter).
+    const storage = resolveMigrationStorage(this.config);
+    if (storage) {
       try {
-        const data = JSON.stringify(checkpoint);
-        const key = `checkpoints/${checkpoint.checkpointId}.json`;
-        await storageAdapter.put(key, Buffer.from(data), { contentType: 'application/json' });
+        await storage.putText(checkpointKey(checkpoint.checkpointId), JSON.stringify(checkpoint));
       } catch (error) {
         console.error('Failed to persist checkpoint to storage:', error);
         // Continue - in-memory checkpoint is still available
@@ -58,17 +77,23 @@ export class CheckpointStorage {
       return memoryCheckpoint;
     }
 
-    // Try loading from storage adapter
-    const storageAdapter = (this.config as any).storageAdapter;
-    if (storageAdapter && typeof storageAdapter.get === 'function') {
+    // Try loading from the configured storage adapter (crash recovery path)
+    const storage = resolveMigrationStorage(this.config);
+    if (storage) {
       try {
-        const key = `checkpoints/${checkpointId}.json`;
-        const data = await storageAdapter.get(key);
-        if (data) {
-          // StorageAdapter.get returns { content, contentType }; calling
-          // toString() on that object yielded "[object Object]" and made
-          // every persisted checkpoint unreadable after a restart.
-          const checkpoint = JSON.parse(storedDataToString(data));
+        const text = await storage.getText(checkpointKey(checkpointId));
+        if (text) {
+          const parsed: unknown = JSON.parse(text);
+          // A tombstoned checkpoint was deleted on an adapter without native
+          // delete support; treat it as absent.
+          if (
+            parsed &&
+            typeof parsed === 'object' &&
+            (parsed as Record<string, unknown>)[TOMBSTONE_MARKER] === true
+          ) {
+            return null;
+          }
+          const checkpoint = parsed as MigrationCheckpoint;
           this.checkpoints.set(checkpointId, checkpoint);
           return checkpoint;
         }
@@ -81,19 +106,28 @@ export class CheckpointStorage {
   }
 
   /**
-   * Delete a checkpoint
+   * Delete a checkpoint.
+   *
+   * The in-memory entry is always removed, but callers treat a resolved
+   * delete() as "durably deleted" — so failures on the persistent path
+   * (a native delete throwing, or the tombstone write failing) MUST
+   * propagate. Swallowing them would report success while the checkpoint
+   * survives in storage, letting a fresh CheckpointStorage after restart
+   * "recover" a checkpoint the caller was told was gone.
    */
   async delete(checkpointId: string): Promise<void> {
     this.checkpoints.delete(checkpointId);
 
-    // Also delete from storage adapter
-    const storageAdapter = (this.config as any).storageAdapter;
-    if (storageAdapter && typeof storageAdapter.delete === 'function') {
-      try {
-        const key = `checkpoints/${checkpointId}.json`;
-        await storageAdapter.delete(key);
-      } catch (error) {
-        // Ignore deletion errors
+    // Also delete from persistent storage. The canonical StorageAdapter has
+    // no delete, so fall back to overwriting with a tombstone that get()
+    // treats as absent. The tombstone is the ONLY durable deletion marker on
+    // such adapters — if writing it fails, this method must reject.
+    const storage = resolveMigrationStorage(this.config);
+    if (storage) {
+      const key = checkpointKey(checkpointId);
+      const deletedNatively = await storage.deleteNative(key);
+      if (!deletedNatively) {
+        await storage.putText(key, JSON.stringify({ [TOMBSTONE_MARKER]: true }));
       }
     }
   }

@@ -152,13 +152,24 @@ export class BatchOperationExecutor {
     
     const successful: BatchResult<R>['successful'] = [];
     const failed: BatchResult<R>['failed'] = [];
-    
+
+    // Fail-fast abort flag: set as soon as any item exhausts its attempts in
+    // fail-fast mode. Sibling operations already in flight cannot be
+    // cancelled, but this prevents (a) sibling RETRIES from re-executing a
+    // paid/non-idempotent operation after the batch has already failed and
+    // (b) any not-yet-started item from starting.
+    let aborted = false;
+
     // Process items with concurrency control
     const processItem = async (item: T, index: number): Promise<void> => {
+      // Another item already failed the batch in fail-fast mode: do not start.
+      if (aborted && !continueOnError) {
+        return;
+      }
       const itemStartTime = Date.now();
       let lastError: Error | null = null;
       let attempts = 0;
-      
+
       for (let attempt = 0; attempt <= retryCount; attempt++) {
         attempts = attempt + 1;
         try {
@@ -188,14 +199,28 @@ export class BatchOperationExecutor {
             break;
           }
 
+          // The batch has been aborted by a sibling failure while this
+          // attempt was in flight: stop retrying (each retry could
+          // re-broadcast a paid operation for a batch that already failed).
+          if (aborted && !continueOnError) {
+            break;
+          }
+
           // If not last attempt, wait with exponential backoff
           if (attempt < retryCount) {
             const delay = this.calculateRetryDelay(attempt, retryDelay);
             await this.sleep(delay);
+            // Re-check AFTER the sleep: a sibling may have failed the batch
+            // while this item was in backoff. Without this check the item
+            // would wake and start another attempt — re-running a paid /
+            // non-idempotent operation for a batch that already failed.
+            if (aborted && !continueOnError) {
+              break;
+            }
           }
         }
       }
-      
+
       // All retries failed
       const duration = Date.now() - itemStartTime;
       failed.push({
@@ -204,13 +229,14 @@ export class BatchOperationExecutor {
         duration,
         retryAttempts: attempts - 1
       });
-      
-      // If fail-fast mode, throw error
+
+      // If fail-fast mode, abort the batch and throw error
       if (!continueOnError) {
+        aborted = true;
         throw lastError!;
       }
     };
-    
+
     // Process items in batches based on maxConcurrent
     try {
       if (maxConcurrent === 1) {
@@ -219,16 +245,26 @@ export class BatchOperationExecutor {
           await processItem(items[i], i);
         }
       } else {
-        // Concurrent processing with limit
-        const chunks = this.chunkArray(items, maxConcurrent);
-        for (const chunk of chunks) {
-          await Promise.all(
-            chunk.map((item, chunkIndex) => {
-              const globalIndex = chunks.slice(0, chunks.indexOf(chunk))
-                .reduce((acc, c) => acc + c.length, 0) + chunkIndex;
-              return processItem(item, globalIndex);
-            })
+        // Concurrent processing with limit. Wait for the WHOLE chunk to
+        // settle (allSettled, not all) before surfacing a fail-fast error:
+        // with Promise.all the throw propagated while sibling operations
+        // were still running, so the BatchError's partial result kept
+        // mutating after being handed to the caller and sibling outcomes
+        // were unaccounted for.
+        for (const [chunkStart, chunk] of this.chunkArray(items, maxConcurrent).map(
+          (c, ci) => [ci * maxConcurrent, c] as const
+        )) {
+          const settled = await Promise.allSettled(
+            chunk.map((item, chunkIndex) => processItem(item, chunkStart + chunkIndex))
           );
+          if (!continueOnError) {
+            const firstRejection = settled.find(
+              (s): s is PromiseRejectedResult => s.status === 'rejected'
+            );
+            if (firstRejection) {
+              throw firstRejection.reason;
+            }
+          }
         }
       }
     } catch (error) {
@@ -238,9 +274,12 @@ export class BatchOperationExecutor {
       // callers — and the batch:failed event — can see what already ran.
       if (!continueOnError) {
         const message = error instanceof Error ? error.message : String(error);
+        // Snapshot the arrays: every scheduled sibling has settled by now
+        // (allSettled above), and copying guarantees the reported result can
+        // never mutate under the caller.
         const partial: BatchResult<R> = {
-          successful,
-          failed,
+          successful: [...successful],
+          failed: [...failed],
           totalProcessed: successful.length + failed.length,
           totalDuration: Date.now() - startTime,
           batchId,
@@ -429,6 +468,12 @@ export class BatchValidator {
    * Validate batch of transfer operations
    */
   validateBatchTransfer(transfers: Array<{ asset: OriginalsAsset; to: string }>): ValidationResult[] {
+    // Detect duplicates across the whole batch (same rationale as
+    // validateBatchInscription, issue #243): each per-item check runs against
+    // pre-batch state, so the same asset listed twice would pass both checks
+    // independently and then be transferred twice — broadcasting two paid
+    // transactions where the second races the first's UTXO state.
+    const seenIds = new Map<string, number>();
     return transfers.map((transfer, index) => {
       const errors: string[] = [];
 
@@ -440,6 +485,14 @@ export class BatchValidator {
       if (!transfer.asset || typeof transfer.asset !== 'object') {
         errors.push(`Item ${index}: Invalid asset`);
       } else {
+        const assetId = transfer.asset.id;
+        if (assetId && typeof assetId === 'string') {
+          if (seenIds.has(assetId)) {
+            errors.push(`Item ${index}: Duplicate asset in batch (same id as item ${seenIds.get(assetId)}): ${assetId}`);
+          } else {
+            seenIds.set(assetId, index);
+          }
+        }
         const currentLayer = transfer.asset.currentLayer;
         if (currentLayer !== 'did:btco') {
           errors.push(`Item ${index}: Asset must be inscribed on Bitcoin before transfer`);
