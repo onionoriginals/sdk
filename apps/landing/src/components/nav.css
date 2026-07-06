@@ -1,0 +1,140 @@
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--dur) var(--ease);
+}
+
+.nav[data-scrolled] {
+  border-bottom-color: var(--border);
+}
+
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+  gap: var(--sp-6);
+}
+
+.nav-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 620;
+  font-size: var(--text-md);
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.nav-wordmark svg {
+  width: 20px;
+  height: 20px;
+}
+
+.nav-wordmark {
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.nav-wordmark:hover {
+  opacity: 0.82;
+}
+
+.nav-links {
+  display: none;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.nav-links a {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.nav-links a:hover {
+  color: var(--text-primary);
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.nav-github {
+  display: none;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.nav-github:hover {
+  color: var(--text-primary);
+}
+
+.nav-github svg {
+  width: 16px;
+  height: 16px;
+}
+
+.nav-cta {
+  height: 34px;
+  padding: 0 var(--sp-4);
+  font-size: var(--text-sm);
+  border-radius: 8px;
+}
+
+.nav-menu-btn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+}
+
+.nav-menu-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.nav-mobile {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-2) var(--gutter) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.nav-mobile a {
+  padding: var(--sp-3) 0;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-mobile a:last-child {
+  border-bottom: none;
+}
+
+@media (min-width: 900px) {
+  .nav-links {
+    display: flex;
+  }
+  .nav-github {
+    display: inline-flex;
+  }
+  .nav-menu-btn,
+  .nav-mobile {
+    display: none;
+  }
+}

@@ -236,8 +236,9 @@ describe('[UTILS-VERIFY-009] utf8 encode/decode Unicode roundtrip', () => {
 // ────────────────────────────────────────────────────────────────────────────
 // UTILS-VERIFY-017: OrdHttpProvider — fetch is stubbed; URL + response parsed
 //
-// NOTE: OrdHttpProvider.estimateFee() is a pure calculation (5 * max(1, blocks))
-// and does NOT call fetch.  The fetch-stub scenario is instead exercised via
+// NOTE: OrdHttpProvider.estimateFee() is NOT implemented (it used to return a
+// fabricated 5 * max(1, blocks) estimate; it now throws NOT_IMPLEMENTED — see
+// #318).  The fetch-stub scenario is instead exercised via
 // getInscriptionsBySatoshi(), which is the only read-path that hits the
 // configured baseUrl and parses a structured JSON response.  We assert both:
 //   (a) the constructed request URL
@@ -258,21 +259,17 @@ describe('[UTILS-VERIFY-017] OrdHttpProvider — fetch stub; URL + parsed result
     (globalThis as Record<string, unknown>).fetch = originalFetch as typeof fetch;
   });
 
-  test('estimateFee returns 5 * max(1, blocks) without network call (pure calc)', async () => {
-    // Confirm the pure-calculation path: any fetch stub should never be called.
+  test('estimateFee throws NOT_IMPLEMENTED without network call (#318: no fabricated rate)', async () => {
+    // The method must fail loudly, and any fetch stub should never be called.
     let fetchCalled = false;
     (globalThis as Record<string, unknown>).fetch = async () => {
       fetchCalled = true;
       throw new Error('unexpected network call');
     };
 
-    const fee1 = await provider.estimateFee(1);
-    const fee3 = await provider.estimateFee(3);
-    const fee0 = await provider.estimateFee(0); // blocks=0 → max(1,0)=1
-
-    expect(fee1).toBe(5);   // 5 * 1
-    expect(fee3).toBe(15);  // 5 * 3
-    expect(fee0).toBe(5);   // 5 * max(1,0) = 5
+    await expect(provider.estimateFee(1)).rejects.toThrow(/not implemented/i);
+    await expect(provider.estimateFee(3)).rejects.toThrow(/not implemented/i);
+    await expect(provider.estimateFee(0)).rejects.toThrow(/not implemented/i);
     expect(fetchCalled).toBe(false);
   });
 

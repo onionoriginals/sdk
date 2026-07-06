@@ -96,5 +96,47 @@ export class LocalStorageAdapter implements StorageAdapter {
       return false;
     }
   }
+
+  /**
+   * Enumerate stored object paths under a domain matching a prefix.
+   *
+   * Extra capability on this concrete class — deliberately NOT part of the
+   * public StorageAdapter interface. The filesystem backing is fully
+   * enumerable, and exposing that lets consumers (e.g.
+   * MigrationStorage/AuditLogger) discover persisted keys natively instead of
+   * maintaining a shared mutable index object, which was a cross-process
+   * read-modify-write race.
+   *
+   * Returned paths are '/'-separated, relative to the domain directory
+   * (matching the paths passed to putObject, minus leading slashes), and
+   * round-trip through getObject. A never-written domain yields [].
+   */
+  async listObjects(domain: string, prefix: string): Promise<string[]> {
+    // Reuse resolvePath's traversal containment for the domain directory.
+    const base = this.resolvePath(domain, '');
+    const cleanPrefix = prefix.replace(/^\/+/, '');
+    const results: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch (e: unknown) {
+        const error = e as { code?: string };
+        if (error && error.code === 'ENOENT') return; // domain never written
+        throw e;
+      }
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(fullPath);
+        } else if (entry.isFile()) {
+          const relative = path.relative(base, fullPath).split(path.sep).join('/');
+          if (relative.startsWith(cleanPrefix)) results.push(relative);
+        }
+      }
+    };
+    await walk(base);
+    return results;
+  }
 }
 

@@ -1,0 +1,43 @@
+.why-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-4);
+}
+
+@media (min-width: 760px) {
+  .why-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--sp-5);
+  }
+}
+
+.why-card {
+  height: 100%;
+  padding: var(--sp-6);
+}
+
+.why-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  margin-bottom: var(--sp-5);
+}
+
+.why-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.why-card h3 {
+  font-size: var(--text-md);
+  margin-bottom: var(--sp-2);
+}
+
+.why-card p {
+  font-size: var(--text-base);
+  line-height: 1.65;
+}

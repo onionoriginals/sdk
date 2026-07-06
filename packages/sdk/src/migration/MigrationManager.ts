@@ -47,6 +47,13 @@ export class MigrationManager {
   private auditLogger: AuditLogger;
   private eventEmitter: EventEmitter;
 
+  /**
+   * Guards the one-time, process-lifetime checkpoint reclaim run lazily on the
+   * first migration (see maybeRunStartupReclaim). The MigrationManager is a
+   * per-process singleton, so this fires once per process.
+   */
+  private startupReclaimDone = false;
+
   // Migration operation handlers
   private peerToWebvh: PeerToWebvhMigration;
   private webvhToBtco: WebvhToBtcoMigration;
@@ -172,10 +179,33 @@ export class MigrationManager {
   }
 
   /**
+   * Run the checkpoint self-healing sweep once per process, lazily on the first
+   * real migration. Fire-and-forget and never throws (cleanupOldCheckpoints is
+   * a GC path that swallows per-key failures), so it cannot delay or fail a
+   * migration. Idempotent: subsequent migrations are no-ops.
+   */
+  private maybeRunStartupReclaim(): void {
+    if (this.startupReclaimDone) return;
+    this.startupReclaimDone = true;
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    void this.checkpointManager.cleanupOldCheckpoints();
+  }
+
+  /**
    * Main migration method
    */
   async migrate(options: MigrationOptions): Promise<MigrationResult> {
     const startTime = Date.now();
+
+    // Reclaim checkpoints stranded by a previous process/crash. The per-migration
+    // 24h cleanup timer (and its self-healing sweep) is lost on restart, so
+    // without this a checkpoint whose durable delete AND pending-marker write
+    // both failed before a restart would only be reclaimed if the application
+    // called cleanupOldCheckpoints() by hand. Running it lazily on the first
+    // real migration re-arms the self-healing sweep as part of normal operation.
+    if (!options.estimateCostOnly) {
+      this.maybeRunStartupReclaim();
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let migrationState: any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -187,25 +217,42 @@ export class MigrationManager {
     // Concurrency guard (issue #255): reject a second migration of the same
     // DID while one is in flight. The set is mutated synchronously (before
     // any await), so concurrent callers cannot interleave past this check.
-    // The rejected caller gets the same structured MigrationResult
-    // (success: false, code MIGRATION_IN_PROGRESS) every other operational
-    // failure produces — and because the guard returns here, the finally
-    // block below only ever runs for the call that actually claimed the
-    // lock. estimateCostOnly requests are read-only and exempt.
+    // The rejected caller gets a structured MigrationResult (success: false,
+    // code MIGRATION_IN_PROGRESS) — and because the guard returns here, the
+    // finally block below only ever runs for the call that actually claimed
+    // the lock. estimateCostOnly requests are read-only and exempt.
+    //
+    // The rejection is returned INLINE rather than via
+    // handleMigrationFailure: no migration ever started, so routing it
+    // through the failure handler emitted a migration:failed event and wrote
+    // a signed audit record for a phantom migration (a mig_failed_* id with
+    // no matching migration:started and nothing on disk to roll back) —
+    // pure noise in the audit trail.
     if (!options.estimateCostOnly) {
       if (this.inFlightSourceDids.has(options.sourceDid)) {
-        return await this.handleMigrationFailure(
-          this.createMigrationError(
-            MigrationErrorType.VALIDATION_ERROR,
-            'MIGRATION_IN_PROGRESS',
-            `A migration for ${options.sourceDid} is already in progress; concurrent migrations of the same DID would double-pay for duplicate inscriptions`,
-            'not-started'
-          ),
-          options,
-          undefined,
-          undefined,
-          startTime
-        );
+        let sourceLayer: 'peer' | 'webvh' | 'btco';
+        try {
+          sourceLayer = this.extractLayer(options.sourceDid);
+        } catch {
+          sourceLayer = 'peer';
+        }
+        return {
+          migrationId: `mig_rejected_${Date.now()}`,
+          success: false,
+          sourceDid: options.sourceDid,
+          sourceLayer,
+          targetLayer: options.targetLayer,
+          state: MigrationStateEnum.FAILED,
+          duration: Date.now() - startTime,
+          cost: { storageCost: 0, networkFees: 0, totalCost: 0, currency: 'sats' },
+          error: {
+            type: MigrationErrorType.VALIDATION_ERROR,
+            code: 'MIGRATION_IN_PROGRESS',
+            message: `A migration for ${options.sourceDid} is already in progress; concurrent migrations of the same DID would double-pay for duplicate inscriptions`,
+            sourceDid: options.sourceDid,
+            timestamp: Date.now()
+          }
+        };
       }
       this.inFlightSourceDids.add(options.sourceDid);
     }
@@ -356,9 +403,15 @@ export class MigrationManager {
       // a successful migration does not pin the process alive for 24 hours
       // (CLI scripts and tests would otherwise hang until the timer fired).
       const cleanupTimer = setTimeout(() => {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-floating-promises
-        this.checkpointManager.deleteCheckpoint(checkpoint.checkpointId);
-      }, 24 * 60 * 60 * 1000); // Delete after 24 hours
+        // Run the full cleanup sweep rather than a one-shot delete of only this
+        // checkpoint. cleanupOldCheckpoints() reclaims this migration's
+        // checkpoint via the retention GC AND runs the self-healing paths
+        // (retryPendingDeletions + storage-truth enumeration sweep), so a
+        // checkpoint stranded by a delete whose tombstone and pending-marker
+        // writes both failed is reclaimed here too. Fire-and-forget; never throws.
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+        void this.checkpointManager.cleanupOldCheckpoints();
+      }, 24 * 60 * 60 * 1000); // Sweep after 24 hours
       cleanupTimer.unref?.();
 
       return {
@@ -482,10 +535,16 @@ export class MigrationManager {
 
     const runOne = async (did: string): Promise<void> => {
       try {
+        // Spread the shared options FIRST so the per-item fields always win.
+        // BatchMigrationOptions extends MigrationOptions, where sourceDid is
+        // REQUIRED — spreading `options` last let a type-correct options
+        // object clobber every item's sourceDid/targetLayer, migrating one
+        // asset N times and never touching the rest.
         const migrationOptions: MigrationOptions = {
+          ...options,
           sourceDid: did,
-          targetLayer: targetLayer as any,
-          ...options
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+          targetLayer: targetLayer as any
         };
         const result = await this.migrate(migrationOptions);
         results.set(did, result);
@@ -493,6 +552,25 @@ export class MigrationManager {
           completed++;
         } else {
           failed++;
+          // Fail-fast (item: continueOnError=false didn't stop): migrate()
+          // converts operational failures into a RETURNED unsuccessful result
+          // via handleMigrationFailure and almost never rejects, so the catch
+          // below was effectively dead and the batch kept spending through
+          // every remaining item. Treat a returned failure as a stop trigger.
+          if (!options?.continueOnError) {
+            stopped = true;
+            if (result.error) {
+              errors.push(result.error);
+            } else {
+              errors.push({
+                type: MigrationErrorType.UNKNOWN_ERROR,
+                code: 'BATCH_MIGRATION_ERROR',
+                message: `Migration of ${did} failed; stopping batch (continueOnError is not set)`,
+                sourceDid: did,
+                timestamp: Date.now()
+              });
+            }
+          }
         }
       } catch (error) {
         failed++;

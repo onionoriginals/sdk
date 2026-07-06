@@ -1,4 +1,5 @@
-import type { ResourceProvider, LinkedResource, ResourceInfo, Inscription, ResourceCrawlOptions } from './types.js';
+import type { ResourceProvider, LinkedResource, ResourceInfo, Inscription, ResourceCrawlOptions, InscriptionRefWithLocation } from './types.js';
+import { StructuredError } from '../../utils/telemetry.js';
 
 export interface OrdNodeProviderOptions {
   nodeUrl: string;
@@ -6,6 +7,17 @@ export interface OrdNodeProviderOptions {
   network?: 'mainnet' | 'testnet' | 'signet';
 }
 
+/**
+ * Placeholder ResourceProvider for a self-hosted ord node.
+ *
+ * NOT IMPLEMENTED: this class performs no network I/O against the configured
+ * node yet. It used to silently fabricate resolution results — getSatInfo
+ * always returned { inscription_ids: [] }, resolveInscription returned
+ * sat:0/text-plain, getOutputDetails returned value:0 with no inscriptions —
+ * which made every did:btco look uninscribed while reporting success. Every
+ * method now fails loudly (mirroring the OrdinalsClient hardening, #248)
+ * until a real ord-node integration exists.
+ */
 export class OrdNodeProvider implements ResourceProvider {
   private readonly nodeUrl: string;
   private readonly timeout: number;
@@ -17,88 +29,60 @@ export class OrdNodeProvider implements ResourceProvider {
     this.network = options.network || 'mainnet';
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async resolve(resourceId: string): Promise<LinkedResource> {
-    return {
-      id: resourceId,
-      type: 'Unknown',
-      contentType: 'application/octet-stream',
-      content_url: `${this.nodeUrl}/content/${resourceId}`
-    };
+  private notImplemented(method: string, consequence: string): StructuredError {
+    return new StructuredError(
+      'ORD_NODE_NOT_IMPLEMENTED',
+      `OrdNodeProvider.${method} is not implemented: ${consequence} Use a ResourceProvider backed by a real ord endpoint.`
+    );
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async resolveInscription(inscriptionId: string): Promise<Inscription> {
-    return {
-      id: inscriptionId,
-      sat: 0,
-      content_type: 'text/plain',
-      content_url: `${this.nodeUrl}/content/${inscriptionId}`
-    };
+  resolve(_resourceId: string): Promise<LinkedResource> {
+    return Promise.reject(this.notImplemented('resolve', 'refusing to fabricate resource data.'));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async resolveInfo(resourceId: string): Promise<ResourceInfo> {
-    return {
-      id: resourceId,
-      type: 'Unknown',
-      contentType: 'application/octet-stream',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      content_url: `${this.nodeUrl}/content/${resourceId}`
-    };
+  resolveInscription(_inscriptionId: string): Promise<Inscription> {
+    return Promise.reject(this.notImplemented('resolveInscription', 'refusing to fabricate inscription data (sat, content type).'));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async resolveCollection(did: string, _options: { type?: string; limit?: number; offset?: number } = {}): Promise<LinkedResource[]> {
-    return [];
+  resolveInfo(_resourceId: string): Promise<ResourceInfo> {
+    return Promise.reject(this.notImplemented('resolveInfo', 'refusing to fabricate resource metadata.'));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async getSatInfo(_satNumber: string): Promise<{ inscription_ids: string[] }> {
-    return { inscription_ids: [] };
+  resolveCollection(_did: string, _options: { type?: string; limit?: number; offset?: number } = {}): Promise<LinkedResource[]> {
+    return Promise.reject(this.notImplemented('resolveCollection', 'refusing to report an empty collection as if resolved.'));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async getMetadata(_inscriptionId: string): Promise<any> {
-    return null;
+  getSatInfo(_satNumber: string): Promise<{ inscription_ids: string[] }> {
+    return Promise.reject(this.notImplemented('getSatInfo', 'refusing to report a satoshi as having no inscriptions.'));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await, require-yield
+  getMetadata(_inscriptionId: string): Promise<unknown> {
+    return Promise.reject(this.notImplemented('getMetadata', 'refusing to report missing metadata as if resolved.'));
+  }
+
+  // eslint-disable-next-line require-yield
   async *getAllResources(_options: ResourceCrawlOptions = {}): AsyncGenerator<LinkedResource[]> {
-    // no-op generator yields nothing
-    return;
+    throw this.notImplemented('getAllResources', 'refusing to report an empty resource set as if crawled.');
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await, require-yield
+  // eslint-disable-next-line require-yield
   async *getAllResourcesChronological(_options: ResourceCrawlOptions = {}): AsyncGenerator<LinkedResource[]> {
-    // no-op generator yields nothing
-    return;
+    throw this.notImplemented('getAllResourcesChronological', 'refusing to report an empty resource set as if crawled.');
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async getInscriptionLocationsByAddress(_address: string): Promise<{ id: string; location: string }[]> {
-    return [];
+  getInscriptionLocationsByAddress(_address: string): Promise<InscriptionRefWithLocation[]> {
+    return Promise.reject(this.notImplemented('getInscriptionLocationsByAddress', 'refusing to report an address as holding no inscriptions.'));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async getInscriptionByNumber(_inscriptionNumber: number): Promise<Inscription> {
-    return {
-      id: '0',
-      sat: 0,
-      content_type: 'text/plain',
-      content_url: `${this.nodeUrl}/content/0`
-    };
+  getInscriptionByNumber(_inscriptionNumber: number): Promise<Inscription> {
+    return Promise.reject(this.notImplemented('getInscriptionByNumber', 'refusing to fabricate inscription data.'));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async getAddressOutputs(_address: string): Promise<string[]> {
-    return [];
+  getAddressOutputs(_address: string): Promise<string[]> {
+    return Promise.reject(this.notImplemented('getAddressOutputs', 'refusing to report an address as having no outputs.'));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async getOutputDetails(_outpoint: string): Promise<{ value: number; script_pubkey: string; spent: boolean; inscriptions: string[] }> {
-    return { value: 0, script_pubkey: '', spent: false, inscriptions: [] };
+  getOutputDetails(_outpoint: string): Promise<{ value: number; script_pubkey: string; spent: boolean; inscriptions: string[] }> {
+    return Promise.reject(this.notImplemented('getOutputDetails', 'refusing to fabricate output value and inscription list.'));
   }
 }
-

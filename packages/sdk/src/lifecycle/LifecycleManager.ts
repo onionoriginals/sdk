@@ -116,7 +116,16 @@ export interface LifecycleOperationOptions {
   feeRate?: number;
   /** Progress callback for operation updates */
   onProgress?: ProgressCallback;
-  /** Enable atomic rollback on failure (default: true) */
+  /**
+   * Enable atomic rollback on failure (default: true).
+   *
+   * Applies to web publication (publish/publishToWeb): when a later step
+   * fails, resource.url mutations from already-published resources are
+   * reverted and the written storage objects are best-effort deleted (when
+   * the adapter supports deletion; otherwise the orphaned objects are
+   * content-addressed and simply overwritten on retry). Bitcoin operations
+   * are irreversible by nature and are NOT affected by this flag.
+   */
   atomicRollback?: boolean;
 }
 
@@ -126,10 +135,11 @@ export class LifecycleManager {
   private logger: Logger;
   private metrics: MetricsCollector;
   /**
-   * Assets with an inscription or publication currently in flight, keyed by
-   * asset id. Mutated synchronously before the first await so concurrent
-   * calls for the same asset cannot both pass the layer guard and double-pay
-   * for two inscriptions (issue #255).
+   * Assets with an inscription, publication, or ownership transfer currently
+   * in flight, keyed by asset id. Mutated synchronously before the first
+   * await so concurrent calls for the same asset cannot both pass the layer
+   * guard and double-pay for two inscriptions or broadcast duplicate
+   * transfers (issue #255).
    */
   private inFlightAssets = new Set<string>();
 
@@ -555,7 +565,8 @@ export class LifecycleManager {
 
   async publishToWeb(
     asset: OriginalsAsset,
-    publisherDidOrSigner: string | ExternalSigner
+    publisherDidOrSigner: string | ExternalSigner,
+    options?: LifecycleOperationOptions
   ): Promise<OriginalsAsset> {
     const stopTimer = this.logger.startTimer('publishToWeb');
     const metricsStart = performance.now();
@@ -578,22 +589,41 @@ export class LifecycleManager {
       try {
       const { publisherDid, signer } = this.extractPublisherInfo(publisherDidOrSigner);
       const { domain, userPath } = this.parseWebVHDid(publisherDid);
-      
+
       this.logger.info('Publishing asset to web', { assetId: asset.id, publisherDid });
-      
-      // Publish resources to storage
-      await this.publishResources(asset, publisherDid, domain, userPath);
-      
-      // Store the original did:peer ID before migration
-      const originalPeerDid = asset.id;
-      
-      // Migrate asset to did:webvh layer
-      await asset.migrate('did:webvh');
-      asset.bindings = { ...(asset.bindings || {}), 'did:peer': originalPeerDid, 'did:webvh': publisherDid };
-      
+
+      // atomicRollback (default: true — the option was documented but never
+      // consumed): capture pre-publish resource urls and track written
+      // objects so a mid-publish failure does not leave the asset
+      // half-published (some resources with url set + orphaned storage
+      // writes) while the caller sees a plain failure.
+      const atomicRollback = options?.atomicRollback !== false;
+      const urlSnapshots = asset.resources.map((resource: { url?: string }) => ({
+        resource,
+        url: resource.url
+      }));
+      const writtenObjects: Array<{ domain: string; relativePath: string }> = [];
+
+      try {
+        // Publish resources to storage
+        await this.publishResources(asset, publisherDid, domain, userPath, writtenObjects);
+
+        // Store the original did:peer ID before migration
+        const originalPeerDid = asset.id;
+
+        // Migrate asset to did:webvh layer
+        await asset.migrate('did:webvh');
+        asset.bindings = { ...(asset.bindings || {}), 'did:peer': originalPeerDid, 'did:webvh': publisherDid };
+      } catch (publishError) {
+        if (atomicRollback) {
+          await this.rollbackPartialPublish(asset, urlSnapshots, writtenObjects);
+        }
+        throw publishError;
+      }
+
       // Issue publication credential (best-effort)
       await this.issuePublicationCredential(asset, publisherDid, signer);
-      
+
       stopTimer();
       this.logger.info('Asset published to web successfully', { 
         assetId: asset.id, 
@@ -707,11 +737,67 @@ export class LifecycleManager {
     return { domain: normalizedDomain, userPath };
   }
 
+  /**
+   * Best-effort undo of a partially completed publish (atomicRollback):
+   * restores the pre-publish resource.url values and deletes written storage
+   * objects when the adapter supports deletion (deleteObject(domain, path) or
+   * legacy delete(key)). Shipped adapters have no delete — their orphaned
+   * objects are content-addressed under deterministic keys, so a retry simply
+   * overwrites them; only the in-memory url reverts matter for consistency.
+   */
+  private async rollbackPartialPublish(
+    asset: OriginalsAsset,
+    urlSnapshots: Array<{ resource: { url?: string }; url?: string }>,
+    writtenObjects: Array<{ domain: string; relativePath: string }>
+  ): Promise<void> {
+    for (const { resource, url } of urlSnapshots) {
+      if (url === undefined) {
+        delete resource.url;
+      } else {
+        resource.url = url;
+      }
+    }
+
+    if (writtenObjects.length === 0) return;
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter as
+      | {
+          deleteObject?: (domain: string, path: string) => Promise<unknown>;
+          delete?: (key: string) => Promise<unknown>;
+        }
+      | undefined;
+    if (!storage) return;
+
+    for (const { domain, relativePath } of writtenObjects) {
+      try {
+        if (typeof storage.deleteObject === 'function') {
+          await storage.deleteObject(domain, relativePath);
+        } else if (typeof storage.delete === 'function') {
+          await storage.delete(`${domain}/${relativePath}`);
+        } else {
+          this.logger.warn('atomicRollback: storage adapter has no delete; leaving orphaned object (overwritten on retry)', {
+            assetId: asset.id,
+            domain,
+            path: relativePath
+          });
+          break; // same adapter for every object: no point iterating further
+        }
+      } catch (deleteError) {
+        this.logger.warn('atomicRollback: failed to delete partially published object', {
+          assetId: asset.id,
+          domain,
+          path: relativePath,
+          error: (deleteError as Error)?.message ?? String(deleteError)
+        });
+      }
+    }
+  }
+
   private async publishResources(
     asset: OriginalsAsset,
     publisherDid: string,
     domain: string,
-    userPath: string
+    userPath: string,
+    writtenObjects?: Array<{ domain: string; relativePath: string }>
   ): Promise<void> {
     // Publication must actually host content somewhere. Falling back to a
     // method-local MemoryStorageAdapter (whose contents are garbage-collected
@@ -772,8 +858,10 @@ export class LifecycleManager {
 
       if (typeof storageWithPut.put === 'function') {
         await storageWithPut.put(`${domain}/${relativePath}`, data, { contentType: resource.contentType });
+        writtenObjects?.push({ domain, relativePath });
       } else if (typeof storageWithPutObject.putObject === 'function') {
         await storageWithPutObject.putObject(domain, relativePath, new TextEncoder().encode(resource.content));
+        writtenObjects?.push({ domain, relativePath });
       }
 
       (resource as { url?: string }).url = resourceUrl;
@@ -1118,6 +1206,19 @@ export class LifecycleManager {
     if (asset.currentLayer !== 'did:btco') {
       throw new StructuredError('INVALID_STATE', 'Asset must be inscribed on Bitcoin before transfer. Migrate to did:btco first.');
     }
+    // Concurrency guard (issue #255, same pattern as publishToWeb/
+    // inscribeOnBitcoin): the checks above are check-then-act across the
+    // awaits below — two overlapping transfers of the same asset would both
+    // pass them and both broadcast paid transactions. Claim the asset
+    // synchronously before the first await.
+    if (this.inFlightAssets.has(asset.id)) {
+      throw new StructuredError(
+        'OPERATION_IN_PROGRESS',
+        `An operation for asset ${asset.id} is already in progress; concurrent transfers of the same asset would broadcast duplicate paid transactions.`
+      );
+    }
+    this.inFlightAssets.add(asset.id);
+    try {
     const bm = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const provenance = asset.getProvenance();
     const latestMigration = provenance.migrations[provenance.migrations.length - 1];
@@ -1188,6 +1289,9 @@ export class LifecycleManager {
     this.metrics.recordTransfer();
 
     return tx;
+    } finally {
+      this.inFlightAssets.delete(asset.id);
+    }
     } catch (error) {
       stopTimer();
       this.logger.error('Ownership transfer failed', error as Error, { assetId: asset.id, newOwner });
@@ -1366,7 +1470,7 @@ export class LifecycleManager {
         message: 'Finalizing publication...'
       });
       
-      const published = await this.publishToWeb(asset, publisherDidOrSigner);
+      const published = await this.publishToWeb(asset, publisherDidOrSigner, options);
       
       onProgress?.({
         phase: 'complete',

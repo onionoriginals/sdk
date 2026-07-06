@@ -2,6 +2,7 @@ import { KeyManager } from './KeyManager.js';
 import { multikey } from '../crypto/Multikey.js';
 import { Ed25519Signer } from '../crypto/Signer.js';
 import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier } from '../types/index.js';
+import { StructuredError } from '../utils/telemetry.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { base58 } from '@scure/base';
 import * as fs from 'fs';
@@ -210,7 +211,13 @@ export interface CreateWebVHResult {
   did: string;
   didDocument: DIDDocument;
   log: DIDLog;
-  keyPair: KeyPair;
+  /**
+   * The generated (or caller-provided) update key pair. MUST be persisted —
+   * it authorizes future updates/rotations. Absent when an `externalSigner`
+   * was used: the external system holds the key material, so no fake
+   * placeholder is returned.
+   */
+  keyPair?: KeyPair;
   logPath?: string; // Path where the DID log was saved
   /**
    * Present only when `prerotation: true` was passed to `createDIDWebVH`.
@@ -372,6 +379,17 @@ export class WebVHManager {
       throw new Error('prerotation is not supported with externalSigner; manage nextKeyHashes externally');
     }
 
+    // keyPair and externalSigner are mutually exclusive (CLAUDE.md gotcha #7).
+    // Accepting both would silently ignore the keyPair, leaving the caller
+    // believing the key they persisted controls the DID when it does not.
+    if (providedKeyPair && externalSigner) {
+      throw new StructuredError(
+        'KEYPAIR_AND_EXTERNAL_SIGNER',
+        'Provide either keyPair OR externalSigner, not both. With an externalSigner the external ' +
+        'system holds the key material; a supplied keyPair would be silently ignored.'
+      );
+    }
+
     // Use external signer if provided (e.g., Turnkey integration)
     if (externalSigner) {
       if (!providedVerificationMethods || providedVerificationMethods.length === 0) {
@@ -483,7 +501,10 @@ export class WebVHManager {
       did: result.did,
       didDocument: result.doc,
       log: result.log,
-      keyPair: keyPair || { publicKey: '', privateKey: '' }, // Return empty keypair if using external signer
+      // With an externalSigner there is no internal key pair; omit the field
+      // entirely rather than fabricating an empty one that a caller might
+      // dutifully "persist".
+      ...(keyPair ? { keyPair } : {}),
       logPath,
       ...(nextKeyPairForPrerotation ? { nextKeyPair: nextKeyPairForPrerotation } : {}),
     };

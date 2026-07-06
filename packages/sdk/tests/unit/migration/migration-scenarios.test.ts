@@ -373,11 +373,13 @@ describe('CORE-MIG-EVENTS-034: StorageValidator', () => {
     expect(warnCodes).toContain('NO_STORAGE_ADAPTER');
   });
 
-  test('[boundary] warns about lack of chunked upload support for partialMode', async () => {
+  test('[boundary] partialMode passes with an adapter that can persist objects (no phantom putChunk probe)', async () => {
+    // Issue #318: the validator used to probe `putChunk`, a method no shipped
+    // StorageAdapter has, and misreported capable adapters. It now validates
+    // the real persistence capabilities (putObject/getObject or legacy put/get).
     const configWithBasicStorage: OriginalsConfig = {
       ...baseConfig,
       storageAdapter: {
-        // No putChunk method — basic adapter
         get: async () => null,
         put: async () => {},
         delete: async () => {},
@@ -394,8 +396,9 @@ describe('CORE-MIG-EVENTS-034: StorageValidator', () => {
     });
 
     expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
     const warnCodes = result.warnings.map(w => w.code);
-    expect(warnCodes).toContain('NO_CHUNKED_UPLOAD_SUPPORT');
+    expect(warnCodes).not.toContain('NO_CHUNKED_UPLOAD_SUPPORT');
   });
 });
 

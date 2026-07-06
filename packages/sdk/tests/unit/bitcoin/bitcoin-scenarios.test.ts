@@ -543,10 +543,11 @@ describe('BITCOIN-025: OrdNodeProvider resource resolution by satoshi', () => {
     expect(found!.contentType).toBe('application/json');
   });
 
-  test('OrdNodeProvider getSatInfo returns empty inscription_ids (stub)', async () => {
+  test('OrdNodeProvider getSatInfo throws NOT_IMPLEMENTED instead of reporting no inscriptions (#318)', async () => {
     const { OrdNodeProvider } = require('../../../src/bitcoin/providers/OrdNodeProvider');
     const p = new OrdNodeProvider({ nodeUrl: 'http://ord.example' });
-    const info = await p.getSatInfo('123456789');
-    expect(info).toEqual({ inscription_ids: [] });
+    // The stub used to return { inscription_ids: [] }, silently reporting
+    // every did:btco as uninscribed. It must now fail loudly.
+    await expect(p.getSatInfo('123456789')).rejects.toThrow(/not implemented/i);
   });
 });
