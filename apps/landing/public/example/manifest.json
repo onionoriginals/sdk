@@ -1,0 +1,40 @@
+{
+  "title": "First Light",
+  "medium": "Artwork",
+  "dids": {
+    "did:peer": "did:peer:4zQmPARJeBYboHHyW4XfcDocFJqARed2wfyewTPDdZyK8U51:z2E3ApMRVSzHJcKffrpLi1ex4H6YDtwSuhNERf4QcAFcSQEZ2CA8o3wuTuHDhk1qPmXof4zgH9LtPMY1FhMT5yBjiSUQgDRrcC35e4HTG3YgWZ4Et8w19JAHuHQxsk9WkoshRpCj5MfTXwtbSSwH8LfwFAMHsAYfAbidTBaeRmNKFDTmUE42Y4rygYHXKHTJqPdczvk9SBoExqtEsAHprvPNWqtWcAU5CVzv1S6sc3yjbEa4wgY9zMRRYV9S5cBufvL8DPw6n1NJTmMseUMW6NWJEXPDpTWx1KJydAEMn62dzVbWHdTSZwDHaD5LnMVMhoPEnpRMjknVqmv",
+    "did:webvh": "did:webvh:QmX38NGfM2hZMEjbvyHM6Cg1v3i45EBoYxTiuDqyzsVZh9:magby.originals.build:examples:first-light"
+  },
+  "resources": [
+    {
+      "id": "artwork.svg",
+      "contentType": "image/svg+xml",
+      "hash": "eae362c6d1475379930b62bb1c92a477b27ec308866e015ea79caae7d753605a"
+    },
+    {
+      "id": "metadata.json",
+      "contentType": "application/json",
+      "hash": "18b1ea736d1ad8b6a0af2aa74a244896c6cfa94f17f3cd5f40a5091cbcfb88e4"
+    }
+  ],
+  "provenance": {
+    "createdAt": "2026-07-06T06:42:31.256Z",
+    "creator": "did:peer:4zQmPARJeBYboHHyW4XfcDocFJqARed2wfyewTPDdZyK8U51:z2E3ApMRVSzHJcKffrpLi1ex4H6YDtwSuhNERf4QcAFcSQEZ2CA8o3wuTuHDhk1qPmXof4zgH9LtPMY1FhMT5yBjiSUQgDRrcC35e4HTG3YgWZ4Et8w19JAHuHQxsk9WkoshRpCj5MfTXwtbSSwH8LfwFAMHsAYfAbidTBaeRmNKFDTmUE42Y4rygYHXKHTJqPdczvk9SBoExqtEsAHprvPNWqtWcAU5CVzv1S6sc3yjbEa4wgY9zMRRYV9S5cBufvL8DPw6n1NJTmMseUMW6NWJEXPDpTWx1KJydAEMn62dzVbWHdTSZwDHaD5LnMVMhoPEnpRMjknVqmv",
+    "migrations": [
+      {
+        "from": "did:peer",
+        "to": "did:webvh",
+        "timestamp": "2026-07-06T06:42:31.276Z"
+      }
+    ],
+    "transfers": [],
+    "resourceUpdates": []
+  },
+  "generator": {
+    "seed": {
+      "title": "First Light",
+      "medium": "Artwork",
+      "nonce": 20260706
+    }
+  }
+}

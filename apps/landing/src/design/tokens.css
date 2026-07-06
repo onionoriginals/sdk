@@ -1,0 +1,80 @@
+/*
+ * Originals landing — design tokens.
+ * Dark, quiet, precise. One warm accent (Bitcoin amber), three layer hues.
+ * Spacing sits on a 4px grid; type on a ~1.25 modular scale.
+ */
+:root {
+  /* Surfaces */
+  --bg: #08090c;
+  --bg-raised: #0d0f14;
+  --bg-overlay: #12151c;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
+
+  /* Text */
+  --text-primary: #f4f5f7;
+  --text-secondary: #9da4b0;
+  --text-tertiary: #828a9a;
+
+  /* Accent — Bitcoin amber, used sparingly */
+  --accent: #f7931a;
+  --accent-soft: rgba(247, 147, 26, 0.14);
+  --accent-text: #ffb04d;
+
+  /* Layer hues */
+  --peer: #a78bfa;
+  --peer-soft: rgba(167, 139, 250, 0.14);
+  --webvh: #4cc2ff;
+  --webvh-soft: rgba(76, 194, 255, 0.13);
+  --btco: #f7931a;
+  --btco-soft: rgba(247, 147, 26, 0.14);
+
+  /* Status */
+  --ok: #3fdd9d;
+
+  /* Type */
+  --font-sans: 'Inter Variable', 'Inter', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code',
+    Menlo, monospace;
+
+  --text-xs: 0.75rem;    /* 12 */
+  --text-sm: 0.8125rem;  /* 13 */
+  --text-base: 0.9375rem;/* 15 */
+  --text-md: 1.0625rem;  /* 17 */
+  --text-lg: 1.3125rem;  /* 21 */
+  --text-xl: 1.75rem;    /* 28 */
+  --text-2xl: 2.25rem;   /* 36 */
+  --text-3xl: 3rem;      /* 48 */
+  --text-4xl: 3.75rem;   /* 60 */
+
+  /* Space (4px grid) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  --sp-20: 80px;
+  --sp-24: 96px;
+  --sp-32: 128px;
+
+  /* Radii */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-full: 999px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --dur-fast: 150ms;
+  --dur: 220ms;
+  --dur-slow: 420ms;
+
+  /* Layout */
+  --container: 1120px;
+  --gutter: 24px;
+}
