@@ -97,24 +97,28 @@ export class CheckpointStorage {
   }
 
   /**
-   * Delete a checkpoint
+   * Delete a checkpoint.
+   *
+   * The in-memory entry is always removed, but callers treat a resolved
+   * delete() as "durably deleted" — so failures on the persistent path
+   * (a native delete throwing, or the tombstone write failing) MUST
+   * propagate. Swallowing them would report success while the checkpoint
+   * survives in storage, letting a fresh CheckpointStorage after restart
+   * "recover" a checkpoint the caller was told was gone.
    */
   async delete(checkpointId: string): Promise<void> {
     this.checkpoints.delete(checkpointId);
 
     // Also delete from persistent storage. The canonical StorageAdapter has
     // no delete, so fall back to overwriting with a tombstone that get()
-    // treats as absent.
+    // treats as absent. The tombstone is the ONLY durable deletion marker on
+    // such adapters — if writing it fails, this method must reject.
     const storage = resolveMigrationStorage(this.config);
     if (storage) {
-      try {
-        const key = checkpointKey(checkpointId);
-        const deletedNatively = await storage.deleteNative(key);
-        if (!deletedNatively) {
-          await storage.putText(key, JSON.stringify({ [TOMBSTONE_MARKER]: true }));
-        }
-      } catch (error) {
-        // Ignore deletion errors
+      const key = checkpointKey(checkpointId);
+      const deletedNatively = await storage.deleteNative(key);
+      if (!deletedNatively) {
+        await storage.putText(key, JSON.stringify({ [TOMBSTONE_MARKER]: true }));
       }
     }
   }

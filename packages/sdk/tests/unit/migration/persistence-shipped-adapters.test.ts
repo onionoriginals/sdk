@@ -157,6 +157,75 @@ describe('CheckpointStorage persists through the shipped StorageAdapter interfac
     expect(await storageC.get('chk_hybrid')).toBeNull();
   });
 
+  it('delete REJECTS when the tombstone write fails (canonical adapter without native delete)', async () => {
+    // The tombstone putText is the ONLY durable marker that the checkpoint
+    // was deleted on canonical adapters. If it fails, delete() must reject —
+    // resolving would tell the caller "durably deleted" while a fresh
+    // CheckpointStorage after restart can still load the checkpoint.
+    let failWrites = false;
+    const objects = new Map<string, string>();
+    const adapter = {
+      async putObject(domain: string, p: string, content: Uint8Array | string) {
+        if (failWrites) throw new Error('disk full: tombstone write failed');
+        objects.set(`${domain}/${p}`, typeof content === 'string' ? content : Buffer.from(content).toString('utf8'));
+        return `${domain}/${p}`;
+      },
+      async getObject(domain: string, p: string) {
+        const text = objects.get(`${domain}/${p}`);
+        return text === undefined ? null : { content: Buffer.from(text, 'utf8'), contentType: 'application/json' };
+      }
+    };
+
+    const config = makeConfig(adapter);
+    const storageA = new CheckpointStorage(config);
+    await storageA.save(makeCheckpoint('chk_tombstone_fail'));
+
+    failWrites = true;
+    await expect(storageA.delete('chk_tombstone_fail')).rejects.toThrow('disk full: tombstone write failed');
+
+    // The checkpoint genuinely survived in durable storage — which is exactly
+    // why delete() must not have reported success.
+    failWrites = false;
+    const fresh = new CheckpointStorage(config);
+    expect(await fresh.get('chk_tombstone_fail')).not.toBeNull();
+  });
+
+  it('delete REJECTS when a legacy native delete throws', async () => {
+    const objects = new Map<string, Buffer>();
+    const legacyAdapter = {
+      async put(key: string, data: Buffer | string) {
+        objects.set(key, Buffer.from(data));
+        return key;
+      },
+      async get(key: string) {
+        const content = objects.get(key);
+        return content ? { content, contentType: 'application/json' } : null;
+      },
+      async delete(_key: string) {
+        throw new Error('native delete failed');
+      }
+    };
+
+    const config = makeConfig(legacyAdapter);
+    const storage = new CheckpointStorage(config);
+    await storage.save(makeCheckpoint('chk_native_del_fail'));
+
+    await expect(storage.delete('chk_native_del_fail')).rejects.toThrow('native delete failed');
+  });
+
+  it('successful delete resolves and the checkpoint is durably gone', async () => {
+    const config = makeConfig(new MemoryStorageAdapter());
+    const storage = new CheckpointStorage(config);
+    await storage.save(makeCheckpoint('chk_happy_delete'));
+
+    await expect(storage.delete('chk_happy_delete')).resolves.toBeUndefined();
+
+    expect(await storage.get('chk_happy_delete')).toBeNull();
+    // Fresh instance (restart simulation) sees the tombstone, not the checkpoint.
+    const fresh = new CheckpointStorage(config);
+    expect(await fresh.get('chk_happy_delete')).toBeNull();
+  });
+
   it('still supports legacy duck-typed put/get adapters', async () => {
     const objects = new Map<string, Buffer>();
     const legacyAdapter = {
