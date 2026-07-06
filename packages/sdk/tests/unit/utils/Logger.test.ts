@@ -1,4 +1,7 @@
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Logger, ConsoleLogOutput, FileLogOutput, type LogEntry, type LogOutput } from '../../../src/utils/Logger';
 import type { OriginalsConfig } from '../../../src/types';
 
@@ -467,6 +470,85 @@ describe('Logger', () => {
       expect(output).toHaveBeenCalledTimes(1);
       const entry = output.mock.calls[0][0] as LogEntry;
       expect(entry.context).toBe('');
+    });
+  });
+
+  describe('FileLogOutput', () => {
+    let dir: string;
+
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), 'originals-logger-test-'));
+    });
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    const makeEntry = (message: string): LogEntry => ({
+      timestamp: '2026-01-01T00:00:00.000Z',
+      level: 'info',
+      context: 'FileTest',
+      message
+    });
+
+    test('creates the log file and writes entries as JSON lines (Node fs path)', async () => {
+      const filePath = join(dir, 'app.log');
+      const fileOutput = new FileLogOutput(filePath);
+
+      fileOutput.write(makeEntry('first'));
+      fileOutput.write(makeEntry('second'));
+      // Flush buffered entries immediately instead of waiting for the timer
+      await (fileOutput as unknown as { flush(): Promise<void> }).flush();
+
+      const content = await readFile(filePath, 'utf8');
+      const lines = content.trim().split('\n');
+      expect(lines).toHaveLength(2);
+      expect(JSON.parse(lines[0]).message).toBe('first');
+      expect(JSON.parse(lines[1]).message).toBe('second');
+    });
+
+    test('appends to an existing file across flushes without clobbering', async () => {
+      const filePath = join(dir, 'append.log');
+      const fileOutput = new FileLogOutput(filePath);
+      const flush = () => (fileOutput as unknown as { flush(): Promise<void> }).flush();
+
+      fileOutput.write(makeEntry('one'));
+      await flush();
+      fileOutput.write(makeEntry('two'));
+      await flush();
+      fileOutput.write(makeEntry('three'));
+      await flush();
+
+      const content = await readFile(filePath, 'utf8');
+      const lines = content.trim().split('\n');
+      expect(lines).toHaveLength(3);
+      expect(lines.map(l => JSON.parse(l).message)).toEqual(['one', 'two', 'three']);
+    });
+
+    test('flushes automatically via the timer after write()', async () => {
+      const filePath = join(dir, 'timer.log');
+      const fileOutput = new FileLogOutput(filePath);
+
+      fileOutput.write(makeEntry('timed'));
+      // Flush interval is 1 second; wait slightly longer
+      await new Promise(resolve => setTimeout(resolve, 1200));
+
+      const content = await readFile(filePath, 'utf8');
+      expect(JSON.parse(content.trim()).message).toBe('timed');
+    });
+  });
+
+  describe('bundler safety', () => {
+    test('Logger module has no top-level node: imports (browser/edge bundle safe)', async () => {
+      // Logger is re-exported from the SDK root and constructed by
+      // OriginalsSDK, so any static `import ... from 'node:...'` here is
+      // evaluated the moment `@originals/sdk` is imported and breaks
+      // browser/edge bundles even when FileLogOutput is never used.
+      // The fs dependency must be loaded lazily inside FileLogOutput.
+      const loggerSourcePath = join(import.meta.dir, '../../../src/utils/Logger.ts');
+      const source = await readFile(loggerSourcePath, 'utf8');
+      expect(source).not.toMatch(/^\s*import\s[^;]*from\s+['"]node:/m);
+      expect(source).not.toMatch(/^\s*import\s+['"]node:/m);
     });
   });
 });

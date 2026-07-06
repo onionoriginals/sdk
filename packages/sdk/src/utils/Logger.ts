@@ -69,7 +69,27 @@ export class ConsoleLogOutput implements LogOutput {
 }
 
 /**
+ * Memoized loader for node:fs/promises appendFile.
+ *
+ * Loaded lazily (and only once) inside the Node-only file-logging path so
+ * that importing `@originals/sdk` — which re-exports Logger and constructs
+ * it in OriginalsSDK — never evaluates a Node built-in at module load time.
+ * Browser/edge bundlers therefore don't need to resolve `node:fs/promises`
+ * unless FileLogOutput is actually used.
+ */
+type AppendFileFn = (typeof import('node:fs/promises'))['appendFile'];
+let appendFilePromise: Promise<AppendFileFn> | null = null;
+function loadAppendFile(): Promise<AppendFileFn> {
+  if (!appendFilePromise) {
+    appendFilePromise = import('node:fs/promises').then((fs) => fs.appendFile);
+  }
+  return appendFilePromise;
+}
+
+/**
  * File log output implementation (async)
+ *
+ * Node/Bun only: lazily loads `node:fs/promises` on first flush.
  */
 export class FileLogOutput implements LogOutput {
   private buffer: string[] = [];
@@ -101,18 +121,12 @@ export class FileLogOutput implements LogOutput {
     this.flushTimeout = null;
     
     try {
-      // Use Bun's file API for efficient file writing
-      const file = Bun.file(this.filePath);
-      const exists = await file.exists();
-      
-      if (exists) {
-        // Append to existing file
-        const content = await file.text();
-        await Bun.write(this.filePath, content + lines);
-      } else {
-        // Create new file
-        await Bun.write(this.filePath, lines);
-      }
+      // Append via node:fs/promises so file logging works under both Node and Bun.
+      // appendFile creates the file if it does not exist and avoids the
+      // read-whole-file-then-rewrite pattern. The module is imported lazily
+      // (memoized) so non-Node bundles never evaluate it.
+      const appendFile = await loadAppendFile();
+      await appendFile(this.filePath, lines, 'utf8');
     } catch (err) {
       // Fallback to console on file write error
       console.error('Failed to write log file:', err);
