@@ -16,6 +16,42 @@
   pointer-events: none;
 }
 
+.hero-art {
+  position: absolute;
+  top: -120px;
+  left: 50%;
+  width: 1060px;
+  margin-left: -530px;
+  aspect-ratio: 1;
+  pointer-events: none;
+  opacity: 0;
+  animation: hero-art-in 900ms var(--ease) 200ms forwards;
+  /* ring mask: hide the artwork's center so the headline sits on clean
+     ground, let the orbital strokes emerge around it */
+  -webkit-mask-image: radial-gradient(closest-side, transparent 34%, #000 58%, transparent 96%);
+  mask-image: radial-gradient(closest-side, transparent 34%, #000 58%, transparent 96%);
+}
+
+.hero-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@keyframes hero-art-in {
+  to {
+    opacity: 0.5;
+  }
+}
+
+@media (max-width: 900px) {
+  .hero-art {
+    width: 640px;
+    margin-left: -320px;
+    top: -60px;
+  }
+}
+
 .hero .container {
   position: relative;
   display: flex;

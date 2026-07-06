@@ -3,7 +3,18 @@
 Status board for the landing page at `apps/landing/`. Updated every
 build→grade cycle. Craft bar and grading protocol: see `GRADING.md`.
 
-## Current status — cycle 5: demo redesigned around a real, visible asset
+## Current status — cycle 6: generative artwork in the hero
+
+Follow-up steering (“yeah do it”): the hero now renders a fresh generative
+artwork on every page load — same generator the demo inscribes, seeded
+randomly per visit, drawn in a transparent strokes-only variant behind the
+headline with a ring mask (center hidden so the type sits on clean ground,
+orbitals emerge around it, fading in at 0→0.5 opacity over 900ms).
+Reduced-motion shows it statically; pointer-events none; decorative
+aria-hidden. Verified: zero console errors at 375/1440, throttled
+interactive 1.4s unchanged.
+
+## Cycle 5 — demo redesigned around a real, visible asset
 
 Direct user steering: “I want to see a real asset, not just a bunch of
 JSON.” The demo now creates one:
@@ -208,3 +219,4 @@ all fixed and re-verified in-browser. Cycle 2 grading next.
 | 3 | 2026-07-05 | grader killed by API limit after re-confirming demo authenticity; checklist finished inline | anchor links no longer bury headings under sticky nav; explicit badge colors |
 | 4 | 2026-07-05 | **NO DONE-BAR FAILURE FOUND** (all five tests pass, incl. direct-SDK kill-shot verification) | nitpick polish: selected-tab hover, note width; caret idiom documented |
 | 5 | 2026-07-05 | user steering: “show a real asset, not JSON” | demo now generates a real SVG artwork whose bytes are hashed/published/inscribed; asset card + layer badge; mobile field overflow fixed |
+| 6 | 2026-07-05 | user steering: artwork as hero visual | fresh generative halo per page load, ring-masked behind the headline |
