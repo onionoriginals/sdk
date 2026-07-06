@@ -29,7 +29,16 @@ export {
   ensureWalletWithAccounts,
   TurnkeySessionExpiredError,
   withTokenExpiration,
+  type InitOtpResult,
+  type CompleteOtpOptions,
+  type CompleteOtpResult,
 } from './turnkey-client.js';
+
+export {
+  encryptOtpCode,
+  type EncryptOtpCodeParams,
+  type EncryptOtpCodeResult,
+} from '../otp-encryption.js';
 
 export { TurnkeyDIDSigner, createDIDWithTurnkey } from './turnkey-did-signer.js';
 

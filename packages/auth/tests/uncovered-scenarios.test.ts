@@ -21,6 +21,13 @@ import {
 } from '../src/client/turnkey-client';
 import { TurnkeyDIDSigner, createDIDWithTurnkey } from '../src/client/turnkey-did-signer';
 import type { Request, Response, NextFunction } from 'express';
+import { createOtpTargetBundle } from './helpers/otp-test-utils';
+
+// Validly-signed (with test keys) OTP target bundle for the v6 flow.
+const otpFixture = createOtpTargetBundle();
+const verifyOptions = {
+  dangerouslyOverrideSignerPublicKey: otpFixture.signerPublicKey,
+};
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -57,7 +64,13 @@ function createEmailAuthMockClient(overrides?: {
   return {
     apiClient: () => ({
       initOtp:
-        overrides?.initOtp ?? mock(() => Promise.resolve({ otpId: 'otp_123' })),
+        overrides?.initOtp ??
+        mock(() =>
+          Promise.resolve({
+            otpId: 'otp_123',
+            otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
+          })
+        ),
       verifyOtp:
         overrides?.verifyOtp ??
         mock(() => Promise.resolve({ verificationToken: 'token_abc' })),
@@ -302,9 +315,9 @@ describe('[AUTH-008] verifyEmailAuth – error paths', () => {
       verifyOtp: mock(() => Promise.reject(new Error('OTP code incorrect'))),
     });
     const sessionId = await setupSession(client);
-    await expect(verifyEmailAuth(sessionId, '999999', client, storage)).rejects.toThrow(
-      'Invalid verification code'
-    );
+    await expect(
+      verifyEmailAuth(sessionId, '999999', client, storage, verifyOptions)
+    ).rejects.toThrow('Invalid verification code');
   });
 
   test('empty OTP code → rejected with format error BEFORE calling Turnkey', async () => {

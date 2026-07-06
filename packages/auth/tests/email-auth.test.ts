@@ -8,6 +8,15 @@ import {
   createInMemorySessionStorage,
   type SessionStorage,
 } from '../src/server/email-auth';
+import { createOtpTargetBundle, decryptOtpBundle } from './helpers/otp-test-utils';
+
+// Shared OTP target-bundle fixture: a validly-signed (with test keys)
+// otpEncryptionTargetBundle mirroring what Turnkey v6 initOtp returns.
+// Turnkey itself is always MOCKED at the client boundary in these tests.
+const otpFixture = createOtpTargetBundle();
+const verifyOptions = {
+  dangerouslyOverrideSignerPublicKey: otpFixture.signerPublicKey,
+};
 
 // Mock Turnkey client
 function createMockTurnkeyClient(overrides?: {
@@ -17,7 +26,14 @@ function createMockTurnkeyClient(overrides?: {
   getWallets?: () => Promise<unknown>;
   createSubOrganization?: () => Promise<unknown>;
 }) {
-  const initOtp = overrides?.initOtp ?? mock(() => Promise.resolve({ otpId: 'otp_123' }));
+  const initOtp =
+    overrides?.initOtp ??
+    mock(() =>
+      Promise.resolve({
+        otpId: 'otp_123',
+        otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
+      })
+    );
   const verifyOtp =
     overrides?.verifyOtp ??
     mock(() => Promise.resolve({ verificationToken: 'token_abc' }));
@@ -133,6 +149,7 @@ describe('email-auth', () => {
       expect(session).toBeDefined();
       expect(session!.email).toBe('user@example.com');
       expect(session!.otpId).toBe('otp_123');
+      expect(session!.otpEncryptionTargetBundle).toBe(otpFixture.otpEncryptionTargetBundle);
       expect(session!.verified).toBe(false);
       expect(session!.subOrgId).toBe('sub_org_existing');
     });
@@ -160,8 +177,24 @@ describe('email-auth', () => {
       );
     });
 
+    test('throws when no OTP encryption target bundle returned', async () => {
+      // Turnkey v6 initOtp must return the target-encryption bundle; without
+      // it the OTP code cannot be encrypted for verification.
+      const client = createMockTurnkeyClient({
+        initOtp: mock(() => Promise.resolve({ otpId: 'otp_123' })),
+      });
+      await expect(initiateEmailAuth('user@example.com', client, storage)).rejects.toThrow(
+        'no OTP encryption target bundle returned'
+      );
+    });
+
     test('calls Turnkey initOtp with correct parameters', async () => {
-      const initOtp = mock(() => Promise.resolve({ otpId: 'otp_456' }));
+      const initOtp = mock(() =>
+        Promise.resolve({
+          otpId: 'otp_456',
+          otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
+        })
+      );
       const client = createMockTurnkeyClient({ initOtp });
       await initiateEmailAuth('test@example.com', client, storage);
 
@@ -208,16 +241,17 @@ describe('email-auth', () => {
       const client = createMockTurnkeyClient();
       const sessionId = await setupSession(client);
 
-      const result = await verifyEmailAuth(sessionId, '123456', client, storage);
+      const result = await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
       expect(result.verified).toBe(true);
       expect(result.email).toBe('user@example.com');
       expect(result.subOrgId).toBe('sub_org_existing');
+      expect(result.verificationToken).toBe('token_abc');
     });
 
     test('marks session as verified', async () => {
       const client = createMockTurnkeyClient();
       const sessionId = await setupSession(client);
-      await verifyEmailAuth(sessionId, '123456', client, storage);
+      await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
 
       const session = storage.get(sessionId);
       expect(session!.verified).toBe(true);
@@ -239,9 +273,9 @@ describe('email-auth', () => {
       session.timestamp = Date.now() - 16 * 60 * 1000; // 16 minutes ago
       storage.set(sessionId, session);
 
-      await expect(verifyEmailAuth(sessionId, '123456', client, storage)).rejects.toThrow(
-        'Session expired'
-      );
+      await expect(
+        verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions)
+      ).rejects.toThrow('Session expired');
     });
 
     test('throws when OTP ID missing in session', async () => {
@@ -272,15 +306,57 @@ describe('email-auth', () => {
       ).rejects.toThrow('Sub-organization ID not found');
     });
 
+    test('throws when OTP encryption target bundle missing in session', async () => {
+      // e.g. a session created before the v6 encrypted-bundle flow
+      const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token' }));
+      const client = createMockTurnkeyClient({ verifyOtp });
+      storage.set('session_no_bundle', {
+        email: 'user@example.com',
+        subOrgId: 'sub_123',
+        otpId: 'otp_123',
+        timestamp: Date.now(),
+        verified: false,
+      });
+
+      await expect(
+        verifyEmailAuth('session_no_bundle', '123456', client, storage, verifyOptions)
+      ).rejects.toThrow('OTP encryption target bundle not found');
+      expect(verifyOtp).not.toHaveBeenCalled();
+    });
+
+    test('throws without calling Turnkey when the target bundle signature is untrusted', async () => {
+      // Without the test signer override, the bundle must be signed by
+      // Turnkey's production enclave key - our test bundle is not.
+      const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token' }));
+      const client = createMockTurnkeyClient({ verifyOtp });
+      const sessionId = await setupSession(client);
+
+      await expect(
+        verifyEmailAuth(sessionId, '123456', client, storage) // no override
+      ).rejects.toThrow('Failed to encrypt OTP code');
+      expect(verifyOtp).not.toHaveBeenCalled();
+    });
+
     test('throws when verification token not returned', async () => {
       const client = createMockTurnkeyClient({
         verifyOtp: mock(() => Promise.resolve({ verificationToken: null })),
       });
       const sessionId = await setupSession(client);
 
-      await expect(verifyEmailAuth(sessionId, '123456', client, storage)).rejects.toThrow(
-        'Invalid verification code'
-      );
+      await expect(
+        verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions)
+      ).rejects.toThrow('Invalid verification code');
+    });
+
+    test('throws when Turnkey verifyOtp rejects', async () => {
+      const client = createMockTurnkeyClient({
+        verifyOtp: mock(() => Promise.reject(new Error('OTP code invalid'))),
+      });
+      const sessionId = await setupSession(client);
+
+      await expect(
+        verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions)
+      ).rejects.toThrow('Invalid verification code');
     });
 
     test('rejects code shorter than 4 characters', async () => {
@@ -312,22 +388,66 @@ describe('email-auth', () => {
       );
     });
 
-    test('calls Turnkey verifyOtp with correct parameters', async () => {
+    test('returns the ephemeral keypair that the verification token is bound to', async () => {
+      const verifyOtp = mock(() =>
+        Promise.resolve({ verificationToken: 'token_bound' })
+      );
+      const client = createMockTurnkeyClient({ verifyOtp });
+      const sessionId = await setupSession(client);
+
+      const result = await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+
+      expect(result.verificationToken).toBe('token_bound');
+      // The ephemeral P-256 keypair generated during encryption must surface
+      // so callers can complete a subsequent otpLogin bound to the same key.
+      expect(result.publicKey).toMatch(/^0[23][0-9a-f]{64}$/);
+      expect(result.privateKey).toMatch(/^[0-9a-f]{64}$/);
+
+      // The returned public key must be the exact key embedded in the
+      // encrypted bundle submitted to Turnkey (the key the token is bound to).
+      const callArg = verifyOtp.mock.calls[0][0] as Record<string, unknown>;
+      const plaintext = decryptOtpBundle(
+        callArg.encryptedOtpBundle as string,
+        otpFixture.targetPrivateKey
+      );
+      expect(result.publicKey).toBe(plaintext.public_key);
+
+      // The plaintext OTP code must NOT leak into the result
+      expect(Object.values(result)).not.toContain('123456');
+    });
+
+    test('calls Turnkey verifyOtp with an encrypted OTP bundle (v6 flow)', async () => {
       const verifyOtp = mock(() =>
         Promise.resolve({ verificationToken: 'token_xyz' })
       );
       const client = createMockTurnkeyClient({ verifyOtp });
       const sessionId = await setupSession(client);
 
-      await verifyEmailAuth(sessionId, '654321', client, storage);
+      await verifyEmailAuth(sessionId, '654321', client, storage, verifyOptions);
 
       expect(verifyOtp).toHaveBeenCalledWith(
         expect.objectContaining({
           otpId: 'otp_123',
-          otpCode: '654321',
+          encryptedOtpBundle: expect.any(String),
           expirationSeconds: '900',
+          // Activity must be routed under the user's sub-organization,
+          // mirroring the client-side completeOtp path.
+          organizationId: 'sub_org_existing',
         })
       );
+
+      // The plaintext OTP code must never be sent to Turnkey
+      const callArg = verifyOtp.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg.otpCode).toBeUndefined();
+
+      // The encrypted bundle must decrypt (with the target key) to the code
+      // plus an ephemeral client public key
+      const plaintext = decryptOtpBundle(
+        callArg.encryptedOtpBundle as string,
+        otpFixture.targetPrivateKey
+      );
+      expect(plaintext.otp_code).toBe('654321');
+      expect(plaintext.public_key).toMatch(/^0[23][0-9a-f]{64}$/);
     });
   });
 

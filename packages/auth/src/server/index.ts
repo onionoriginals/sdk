@@ -23,8 +23,14 @@ export {
   cleanupSession,
   getSession,
   type SessionStorage,
+  type VerifyEmailAuthOptions,
   createInMemorySessionStorage,
 } from './email-auth.js';
+export {
+  encryptOtpCode,
+  type EncryptOtpCodeParams,
+  type EncryptOtpCodeResult,
+} from '../otp-encryption.js';
 export {
   signToken,
   verifyToken,

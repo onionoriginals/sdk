@@ -56,6 +56,11 @@ export interface EmailAuthSession {
   subOrgId?: string;
   /** Turnkey OTP ID */
   otpId?: string;
+  /**
+   * Signed target-encryption bundle returned by Turnkey's initOtp (v6).
+   * The OTP code must be encrypted to this bundle during verification.
+   */
+  otpEncryptionTargetBundle?: string;
   /** Session creation timestamp */
   timestamp: number;
   /** Whether the session has been verified */
@@ -82,6 +87,22 @@ export interface VerifyAuthResult {
   email: string;
   /** Turnkey sub-organization ID */
   subOrgId: string;
+  /**
+   * Verification token issued by Turnkey. Consumed by subsequent OTP_LOGIN
+   * requests to create an authenticated session.
+   */
+  verificationToken?: string;
+  /**
+   * Compressed P-256 public key (hex) that the verification token is bound
+   * to. Pass this as `publicKey` to a subsequent `otpLogin` activity.
+   */
+  publicKey?: string;
+  /**
+   * Private key (hex) for the ephemeral key pair generated during OTP
+   * encryption. Needed to prove possession of the bound key in subsequent
+   * requests. Sensitive: never log or persist insecurely.
+   */
+  privateKey?: string;
 }
 
 /**
