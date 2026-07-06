@@ -74,7 +74,7 @@ describe('BBSCryptosuiteManager.verifyProof key binding', () => {
     expect(result.errors?.[0]).not.toMatch(/not implemented/i);
   });
 
-  test('matching key proceeds to signature verification (reaches BbsSimple.verify)', async () => {
+  test('matching key proceeds past the binding check to signature verification', async () => {
     const key = blsKey(0xcc);
     const proof = buildBaseProof(key, vm);
 
@@ -89,10 +89,12 @@ describe('BBSCryptosuiteManager.verifyProof key binding', () => {
 
     const result = await BBSCryptosuiteManager.verifyProof(document, proof, { documentLoader });
 
-    // Keys match, so it progresses past the binding check to the signature
-    // check, which currently throws "not implemented".
+    // Keys match, so it progresses past the binding check. The forged signature
+    // (random bytes) then fails real BBS verification — it must NOT be accepted
+    // and must NOT short-circuit on the old "not implemented" stub.
     expect(result.verified).toBe(false);
-    expect(result.errors?.[0]).toMatch(/not implemented/i);
+    expect(result.errors?.[0]).not.toMatch(/not implemented/i);
+    expect(result.errors?.[0]).not.toMatch(/does not match/i);
   });
 
   test('fails closed when no documentLoader is supplied', async () => {
