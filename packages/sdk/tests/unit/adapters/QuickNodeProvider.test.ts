@@ -113,6 +113,41 @@ describe('getInscriptionById', () => {
     expect(result!.vout).toBe(3);
   });
 
+  test('keeps a short base64-shaped text inscription literal ("text" stays "text")', async () => {
+    mockRpc('ord_getInscription', { id: INSCRIPTION_ID, sat: 1, satpoint: `${TXID}:0:0`, content_type: 'text/plain;charset=utf-8' });
+    // "text" passes the base64 charset/length checks but decodes to invalid
+    // UTF-8 — for a text-typed inscription it must be kept as the literal string.
+    mockRpc('ord_getContent', 'text');
+    const result = await provider().getInscriptionById(INSCRIPTION_ID);
+    expect(result!.content.toString('utf8')).toBe('text');
+  });
+
+  test('base64-decodes text content when the decoded bytes are valid UTF-8', async () => {
+    mockRpc('ord_getInscription', { id: INSCRIPTION_ID, sat: 1, satpoint: `${TXID}:0:0`, content_type: 'text/plain' });
+    mockRpc('ord_getContent', Buffer.from('hello world', 'utf8').toString('base64'));
+    const result = await provider().getInscriptionById(INSCRIPTION_ID);
+    expect(result!.content.toString('utf8')).toBe('hello world');
+  });
+
+  test('always base64-decodes binary content types, even short strings', async () => {
+    mockRpc('ord_getInscription', { id: INSCRIPTION_ID, sat: 1, satpoint: `${TXID}:0:0`, content_type: 'image/png' });
+    // 'text' as base64 decodes to bytes b5 eb 2d — a binary inscription must
+    // never be kept as the literal string.
+    mockRpc('ord_getContent', 'text');
+    const result = await provider().getInscriptionById(INSCRIPTION_ID);
+    expect([...result!.content]).toEqual([...Buffer.from('text', 'base64')]);
+  });
+
+  test('propagates auth/routing errors that merely contain "not found"', async () => {
+    mockRpcError('ord_getInscription', { code: -32000, message: 'API key not found' });
+    await expect(provider().getInscriptionById(INSCRIPTION_ID)).rejects.toThrow(/API key not found/);
+  });
+
+  test('propagates endpoint routing errors containing "not found"', async () => {
+    mockRpcError('ord_getInscription', { code: -32601, message: 'Endpoint not found in routing table' });
+    await expect(provider().getInscriptionById(INSCRIPTION_ID)).rejects.toThrow(/routing table/);
+  });
+
   test('treats non-base64 content as literal UTF-8 text', async () => {
     mockRpc('ord_getInscription', { id: INSCRIPTION_ID, sat: 1, satpoint: `${TXID}:0:0`, content_type: 'text/plain' });
     // '{"p":"x"}' is not valid base64 (contains '{', '"', ':')
@@ -178,6 +213,17 @@ describe('getInscriptionsBySatoshi', () => {
 
   test('returns [] when the sat has no inscriptions', async () => {
     mockRpc('ord_getSat', { number: 123, rarity: 'common', inscriptions: [] });
+    const result = await provider().getInscriptionsBySatoshi('123');
+    expect(result).toEqual([]);
+  });
+
+  test('propagates auth errors containing "not found" instead of returning []', async () => {
+    mockRpcError('ord_getSat', { code: -32000, message: 'API key not found' });
+    await expect(provider().getInscriptionsBySatoshi('123')).rejects.toThrow(/API key not found/);
+  });
+
+  test('returns [] for an ord-style "sat not found" error', async () => {
+    mockRpcError('ord_getSat', { code: -32000, message: 'sat not found' });
     const result = await provider().getInscriptionsBySatoshi('123');
     expect(result).toEqual([]);
   });

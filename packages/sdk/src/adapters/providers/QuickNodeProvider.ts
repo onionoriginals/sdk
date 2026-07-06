@@ -137,7 +137,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
       throw new StructuredError(
         'QUICKNODE_RPC_ERROR',
         `QuickNodeProvider: ${method} RPC error: ${data.error.message ?? JSON.stringify(data.error)}`,
-        { rpcCode: data.error.code, method }
+        { rpcCode: data.error.code, rpcMessage: data.error.message, method }
       );
     }
     if (!res.ok) {
@@ -149,11 +149,21 @@ export class QuickNodeProvider implements OrdinalsProvider {
     return data.result as T;
   }
 
-  /** True for RPC failures that mean "this thing does not exist" rather than a transport/config fault. */
+  /**
+   * True for RPC failures that mean "this thing does not exist" rather than a
+   * transport/config fault. Only Bitcoin Core's -5 code and ord-style
+   * "<resource> not found" messages qualify; the match is anchored to the raw
+   * RPC error message and to known resource nouns so infrastructure errors
+   * that merely contain "not found" (e.g. "API key not found", "Endpoint not
+   * found in routing table") propagate instead of masquerading as an empty
+   * data source.
+   */
   private static isNotFound(err: unknown): boolean {
     if (!(err instanceof StructuredError) || err.code !== 'QUICKNODE_RPC_ERROR') return false;
     if (err.details?.rpcCode === RPC_INVALID_ADDRESS_OR_KEY) return true;
-    return /not found/i.test(err.message);
+    const rpcMessage = err.details?.rpcMessage;
+    if (typeof rpcMessage !== 'string') return false;
+    return /^(?:inscription|sat(?:oshi)?|output|content|transaction|tx)\b[^]*\bnot found\.?$/i.test(rpcMessage.trim());
   }
 
   /**
@@ -162,8 +172,15 @@ export class QuickNodeProvider implements OrdinalsProvider {
    * a bare string or wrapped in an object). Content that doesn't decode as
    * base64 is treated as literal UTF-8 text — some gateways return text
    * inscriptions unencoded.
+   *
+   * A short alphanumeric text inscription (e.g. "text") is shape-ambiguous:
+   * it passes the base64 charset/length checks but is far more likely to be
+   * the literal content. For text-typed inscriptions the base64 reading is
+   * only trusted when the decoded bytes are themselves valid UTF-8 — literal
+   * words almost never decode to valid UTF-8, while genuinely base64-encoded
+   * text content always does. Binary content types are always base64.
    */
-  private decodeContent(result: unknown): Buffer {
+  private decodeContent(result: unknown, contentType?: string): Buffer {
     let raw: unknown = result;
     if (raw && typeof raw === 'object') {
       const obj = raw as Record<string, unknown>;
@@ -175,13 +192,15 @@ export class QuickNodeProvider implements OrdinalsProvider {
         'QuickNodeProvider: ord_getContent returned no decodable content'
       );
     }
-    let buf: Buffer;
+    let buf: Buffer | undefined;
     const compact = raw.replace(/\s+/g, '');
     if (compact.length > 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(compact) && compact.length % 4 === 0) {
-      buf = Buffer.from(compact, 'base64');
-    } else {
-      buf = Buffer.from(raw, 'utf8');
+      const decoded = Buffer.from(compact, 'base64');
+      if (!QuickNodeProvider.isTextContentType(contentType) || QuickNodeProvider.isValidUtf8(decoded)) {
+        buf = decoded;
+      }
     }
+    buf ??= Buffer.from(raw, 'utf8');
     if (buf.byteLength > this.maxContentBytes) {
       throw new StructuredError(
         'QUICKNODE_CONTENT_TOO_LARGE',
@@ -189,6 +208,26 @@ export class QuickNodeProvider implements OrdinalsProvider {
       );
     }
     return buf;
+  }
+
+  private static isTextContentType(contentType?: string): boolean {
+    if (!contentType) return false;
+    const mime = contentType.split(';')[0].trim().toLowerCase();
+    return mime.startsWith('text/')
+      || mime === 'application/json'
+      || mime.endsWith('+json')
+      || mime.endsWith('+xml')
+      || mime === 'application/javascript'
+      || mime === 'image/svg+xml';
+  }
+
+  private static isValidUtf8(bytes: Buffer): boolean {
+    try {
+      new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async getInscriptionById(id: string) {
@@ -220,7 +259,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
     let content: Buffer;
     try {
       const contentResult = await this.rpcCall<unknown>('ord_getContent', [id], contentJsonCap);
-      content = this.decodeContent(contentResult);
+      content = this.decodeContent(contentResult, info.content_type || info.effective_content_type);
     } catch (err) {
       if (QuickNodeProvider.isNotFound(err)) return null;
       throw err;
