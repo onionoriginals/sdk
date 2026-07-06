@@ -95,6 +95,43 @@ describe('BatchOperationExecutor fail-fast', () => {
     expect(attempts[1]).toBe(1);
   });
 
+  test('an item sleeping in retry backoff does not start another attempt after the batch aborts', async () => {
+    const executor = new BatchOperationExecutor();
+    const attempts: Record<number, number> = { 0: 0, 1: 0 };
+
+    // Timeline (retryCount=1, retryDelay=100):
+    //  - item 0 fails instantly on every attempt: attempt 1 at t≈0, backoff
+    //    100ms, attempt 2 at t≈100 -> exhausted -> aborts the batch at t≈100.
+    //  - item 1 fails at t≈40 and enters its 100ms backoff sleep. The abort
+    //    check BEFORE the sleep passes (nothing aborted yet at t≈40); the
+    //    abort lands at t≈100 WHILE item 1 sleeps. On wake (t≈140) item 1
+    //    must re-check the abort flag and NOT start attempt 2 — a retry here
+    //    would re-run a paid/non-idempotent operation for a batch that has
+    //    already failed.
+    const operation = async (item: number): Promise<number> => {
+      attempts[item]++;
+      if (item === 0) {
+        throw new Error('sibling fast failure');
+      }
+      await sleep(40);
+      throw new Error('item 1 failure');
+    };
+
+    await expect(
+      executor.execute([0, 1], operation, {
+        continueOnError: false,
+        maxConcurrent: 2,
+        retryCount: 1,
+        retryDelay: 100
+      })
+    ).rejects.toThrow(BatchError);
+
+    // Wait past when item 1's retry WOULD have run had it been scheduled.
+    await sleep(300);
+    expect(attempts[0]).toBe(2);
+    expect(attempts[1]).toBe(1);
+  });
+
   test('continueOnError=true is unaffected: all items run, retries happen', async () => {
     const executor = new BatchOperationExecutor();
     const attempts: Record<number, number> = { 0: 0, 1: 0, 2: 0 };

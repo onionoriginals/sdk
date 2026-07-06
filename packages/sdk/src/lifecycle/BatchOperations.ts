@@ -210,6 +210,13 @@ export class BatchOperationExecutor {
           if (attempt < retryCount) {
             const delay = this.calculateRetryDelay(attempt, retryDelay);
             await this.sleep(delay);
+            // Re-check AFTER the sleep: a sibling may have failed the batch
+            // while this item was in backoff. Without this check the item
+            // would wake and start another attempt — re-running a paid /
+            // non-idempotent operation for a batch that already failed.
+            if (aborted && !continueOnError) {
+              break;
+            }
           }
         }
       }
