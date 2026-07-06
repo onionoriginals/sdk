@@ -318,12 +318,12 @@ export class QuickNodeProvider implements OrdinalsProvider {
       );
     }
     const result = await this.rpcCall<unknown>('sendrawtransaction', [txHexOrObj]);
-    // A response with neither result nor error must not become a "successful"
-    // empty txid that downstream code records as provenance.
-    if (typeof result !== 'string' || result.length === 0) {
+    // A malformed or empty result must not become a "successful" txid that
+    // downstream code records as provenance — require a real 64-char hex txid.
+    if (typeof result !== 'string' || !/^[0-9a-fA-F]{64}$/.test(result)) {
       throw new StructuredError(
         'QUICKNODE_BROADCAST_NO_TXID',
-        'QuickNodeProvider: sendrawtransaction returned no txid'
+        'QuickNodeProvider: sendrawtransaction did not return a valid 64-character hex txid'
       );
     }
     return result;

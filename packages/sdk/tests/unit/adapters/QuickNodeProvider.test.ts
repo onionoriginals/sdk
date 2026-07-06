@@ -264,7 +264,12 @@ describe('broadcastTransaction', () => {
 
   test('refuses an empty txid result instead of reporting success', async () => {
     mockRpc('sendrawtransaction', '');
-    await expect(provider().broadcastTransaction('0200aabb')).rejects.toThrow(/no txid/);
+    await expect(provider().broadcastTransaction('0200aabb')).rejects.toThrow(/txid/);
+  });
+
+  test('refuses a malformed (non-64-hex) txid result', async () => {
+    mockRpc('sendrawtransaction', 'ok');
+    await expect(provider().broadcastTransaction('0200aabb')).rejects.toThrow(/64-character hex txid/);
   });
 });
 
