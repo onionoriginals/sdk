@@ -349,7 +349,7 @@ const sdk = OriginalsSDK.create({
 });
 ```
 
-**Critical**: Bitcoin operations (inscribe, transfer) require `ordinalsProvider` to be configured. Use `OrdMockProvider` for testing, `OrdinalsClient` for production.
+**Critical**: Bitcoin operations (inscribe, transfer) require `ordinalsProvider` to be configured. Use `OrdMockProvider` for testing, `QuickNodeProvider` for production reads/broadcast/status/fees (QuickNode Bitcoin endpoint with the Ordinals & Runes add-on; `createOrdinalsProviderFromEnv()` selects it when `QUICKNODE_ENDPOINT` is set). Inscription construction/signing stays local — QuickNodeProvider's `createInscription`/`transferInscription` fail loudly by design; build the transaction locally and submit via `broadcastTransaction`.
 
 ## Development Workflow
 

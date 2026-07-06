@@ -199,6 +199,13 @@ export class OrdHttpProvider implements OrdinalsProvider {
 }
 
 export async function createOrdinalsProviderFromEnv(): Promise<OrdinalsProvider> {
+  // A configured QuickNode endpoint takes precedence: it is the only
+  // env-selectable provider with real broadcast/status/fee support.
+  const quickNodeEndpoint = ((globalThis as any).process?.env?.QUICKNODE_ENDPOINT) || '';
+  if (quickNodeEndpoint) {
+    const mod = await import('./QuickNodeProvider.js');
+    return new mod.QuickNodeProvider({ endpoint: quickNodeEndpoint });
+  }
   const useLive = String(((globalThis as any).process?.env?.USE_LIVE_ORD_PROVIDER) || '').toLowerCase() === 'true';
   if (useLive) {
     const baseUrl = ((globalThis as any).process?.env?.ORD_PROVIDER_BASE_URL) || 'https://ord.example.com/api';
