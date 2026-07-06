@@ -562,18 +562,55 @@ export class CredentialManager {
       return null;
     }
 
+    // Fail closed on retired keys, mirroring assertNotRetired on the Data
+    // Integrity path (documentLoader.ts): a verification method that has been
+    // revoked (rotated out) or marked compromised must never resolve as a
+    // usable verification key on the legacy path either — otherwise an
+    // attacker holding the old private key could mint a fresh legacy-format
+    // proof (no `cryptosuite`) and defeat key rotation / compromise recovery.
+    const isRetired = (vm: { revoked?: unknown; compromised?: unknown }): boolean =>
+      Boolean(vm && (vm.revoked || vm.compromised));
+    const isRetirementRefusal = (err: unknown): boolean => {
+      // Match the document loader's EXACT retirement refusal (documentLoader.ts
+      // throws `Verification method is retired (revoked or compromised): <didUrl>`).
+      // A loose keyword match here would misclassify benign resolver errors
+      // whose text merely contains e.g. "revoked" ("TLS certificate revoked")
+      // as security refusals and wrongly fail valid legacy credentials.
+      const msg = err instanceof Error ? err.message : String(err);
+      return /^Verification method is retired \(revoked or compromised\):/i.test(msg);
+    };
+
     const loader = createDocumentLoader(this.didManager);
     try {
       const { document } = await loader(verificationMethod);
       interface DocWithKey {
         publicKeyMultibase?: unknown;
+        revoked?: unknown;
+        compromised?: unknown;
       }
       const docWithKey = document as DocWithKey;
+      // Defense in depth: the loader already throws for retired VMs, but if a
+      // retirement marker ever reaches this point the key must still be
+      // rejected rather than returned.
+      if (docWithKey && isRetired(docWithKey)) {
+        return null;
+      }
       if (docWithKey && typeof docWithKey.publicKeyMultibase === 'string') {
         return docWithKey.publicKeyMultibase;
       }
     } catch (err) {
-      // Document loader failed; will try alternative resolution method
+      // A retirement refusal from the loader is a SECURITY decision, not a
+      // resolution failure. Falling through to resolveDID here would return
+      // the retired key from the raw DID document and reopen the bypass this
+      // guard exists to close — so fail closed instead.
+      if (isRetirementRefusal(err)) {
+        if (this.config.enableLogging) {
+          console.warn('Refusing retired (revoked/compromised) verification method:', err);
+        }
+        return null;
+      }
+      // Document loader failed for a non-security reason; will try
+      // alternative resolution method
       if (this.config.enableLogging) {
         console.warn('Failed to load verification method via document loader:', err);
       }
@@ -586,7 +623,12 @@ export class CredentialManager {
       }
       const didDoc = await this.didManager.resolveDID(did);
       interface DIDDocWithVMs {
-        verificationMethod?: Array<{ id?: string; publicKeyMultibase?: unknown }>;
+        verificationMethod?: Array<{
+          id?: string;
+          publicKeyMultibase?: unknown;
+          revoked?: unknown;
+          compromised?: unknown;
+        }>;
       }
       const docWithVMs = didDoc as DIDDocWithVMs;
       const vms = docWithVMs?.verificationMethod;
@@ -608,6 +650,12 @@ export class CredentialManager {
             ? vms.find((m) => typeof m?.id === 'string' && m.id.split('#')[1] === fragment)
             : undefined);
         if (vm && typeof vm.publicKeyMultibase === 'string') {
+          // Reject retired keys on the fallback path too — the DID document
+          // keeps the VM published precisely so verifiers can recognise it as
+          // retired, not so it keeps verifying signatures.
+          if (isRetired(vm)) {
+            return null;
+          }
           return vm.publicKeyMultibase;
         }
       }
