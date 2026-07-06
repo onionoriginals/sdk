@@ -1,11 +1,21 @@
-// Browser shim for node `crypto`, covering the one call the demo path
-// actually exercises: @aviarytech/did-peer hashes the encoded DID document
-// with createHash('sha256').update(data).digest().
-import { sha256 } from '@noble/hashes/sha2.js';
+// Browser shim for node `crypto`, covering the hash algorithms the SDK's
+// dependency graph can reach in the browser: @aviarytech/did-peer hashes the
+// encoded DID document with createHash('sha256'); sha512 is included so any
+// other bundled path that needs it fails soft instead of hard.
+import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { Buffer } from 'buffer';
+
+const algorithms: Record<string, (data: Uint8Array) => Uint8Array> = {
+  sha256,
+  'sha-256': sha256,
+  sha512,
+  'sha-512': sha512
+};
 
 class Hash {
   private chunks: Uint8Array[] = [];
+
+  constructor(private digestFn: (data: Uint8Array) => Uint8Array) {}
 
   update(data: string | Uint8Array): this {
     this.chunks.push(
@@ -22,16 +32,19 @@ class Hash {
       joined.set(c, offset);
       offset += c.length;
     }
-    const out = Buffer.from(sha256(joined));
+    const out = Buffer.from(this.digestFn(joined));
     return encoding === 'hex' ? out.toString('hex') : out;
   }
 }
 
 export function createHash(algorithm: string): Hash {
-  if (algorithm !== 'sha256') {
-    throw new Error(`crypto shim only supports sha256, got ${algorithm}`);
+  const digestFn = algorithms[algorithm.toLowerCase()];
+  if (!digestFn) {
+    throw new Error(
+      `crypto shim (apps/landing/src/shims/crypto.ts): unsupported hash algorithm "${algorithm}" — supported: ${Object.keys(algorithms).join(', ')}`
+    );
   }
-  return new Hash();
+  return new Hash(digestFn);
 }
 
 export default { createHash };

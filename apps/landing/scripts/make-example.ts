@@ -53,6 +53,11 @@ const sdk = OriginalsSDK.create({
 const TITLE = 'First Light';
 const MEDIUM = 'Artwork';
 const NONCE = 20260706;
+// Pinned so re-runs produce byte-identical metadata (and therefore the same
+// resource hash). Keys and DIDs are still freshly generated on every run —
+// this script is a minting operation, not a reproducible build; regenerate
+// all artifacts together and commit them together.
+const MINTED_AT = '2026-07-06T06:42:31.217Z';
 
 // 1 · The artwork — same generator the interactive demo uses.
 const art = generateArtwork(TITLE, MEDIUM, NONCE);
@@ -64,7 +69,7 @@ const metadata = JSON.stringify(
     title: TITLE,
     medium: MEDIUM,
     creator: 'Originals SDK',
-    created: new Date().toISOString(),
+    created: MINTED_AT,
     artwork: { file: 'artwork.svg', sha256: svgHash }
   },
   null,

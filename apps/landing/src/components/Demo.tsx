@@ -109,6 +109,10 @@ export function Demo() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [events]);
 
+  // Detach the engine listener if the component ever unmounts (e.g. under
+  // client-side routing), so no state updates target an unmounted tree.
+  useEffect(() => () => unsubscribe.current?.(), []);
+
   const run = async (
     from: Phase,
     working: Phase,

@@ -2,9 +2,12 @@
 // 1.6 Mbps down / 150ms RTT. Passes if first paint happens and the hero CTA
 // is clickable in under 3s.
 import { chromium } from 'playwright-core';
+import { chromiumExecutablePath } from './browser.mjs';
 
 const url = process.argv[2] ?? 'http://localhost:4173/';
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch({
+  executablePath: chromiumExecutablePath()
+});
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
 const cdp = await page.context().newCDPSession(page);

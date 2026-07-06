@@ -1,9 +1,12 @@
 // Capture full-page + section screenshots at desktop and mobile widths.
 import { chromium } from 'playwright-core';
+import { chromiumExecutablePath } from './browser.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:4173/';
 const outDir = process.argv[3] ?? 'shots';
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch({
+  executablePath: chromiumExecutablePath()
+});
 
 const consoleErrors = [];
 for (const [name, viewport] of [

@@ -1,10 +1,11 @@
 // Browser smoke test: loads the page with ?smoke=1 which runs the full
 // real-SDK lifecycle (create → publish → inscribe) in Chromium.
 import { chromium } from 'playwright-core';
+import { chromiumExecutablePath } from './browser.mjs';
 
 const url = process.argv[2] ?? 'http://localhost:4173/?smoke=1';
 const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium'
+  executablePath: chromiumExecutablePath()
 });
 const page = await browser.newPage();
 const consoleErrors = [];
