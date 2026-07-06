@@ -116,6 +116,7 @@
   },
   "dependencies": {
     "@aviarytech/did-peer": "^1.1.2",
+    "@digitalbazaar/bbs-signatures": "^3.1.0",
     "@noble/curves": "^2.2.0",
     "@noble/ed25519": "^3.1.0",
     "@noble/hashes": "^2.0.1",
