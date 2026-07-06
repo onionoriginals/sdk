@@ -119,6 +119,44 @@ describe('CheckpointStorage persists through the shipped StorageAdapter interfac
     expect(await storageC.get('chk_deleted')).toBeNull();
   });
 
+  it('hybrid adapter (canonical + legacy delete): delete tombstones instead of hitting the raw legacy key', async () => {
+    // Adapter exposing BOTH the canonical StorageAdapter interface and a
+    // legacy delete(). Writes/reads go through the canonical domain-scoped
+    // keys, so a legacy raw-key delete would miss the canonical object: the
+    // "deleted" checkpoint would survive and a fresh reader could recover it.
+    const objects = new Map<string, string>();
+    const legacyDeletedKeys: string[] = [];
+    const hybridAdapter = {
+      async putObject(domain: string, p: string, content: Uint8Array | string) {
+        objects.set(`${domain}/${p}`, typeof content === 'string' ? content : Buffer.from(content).toString('utf8'));
+        return `${domain}/${p}`;
+      },
+      async getObject(domain: string, p: string) {
+        const text = objects.get(`${domain}/${p}`);
+        return text === undefined ? null : { content: Buffer.from(text, 'utf8'), contentType: 'application/json' };
+      },
+      async delete(key: string) {
+        legacyDeletedKeys.push(key);
+        objects.delete(key); // raw key — never matches the canonical domain-scoped key
+      }
+    };
+
+    const config = makeConfig(hybridAdapter);
+    const storageA = new CheckpointStorage(config);
+    await storageA.save(makeCheckpoint('chk_hybrid'));
+
+    const storageB = new CheckpointStorage(config);
+    expect(await storageB.get('chk_hybrid')).not.toBeNull();
+    await storageB.delete('chk_hybrid');
+
+    // The legacy raw-key delete must NOT have been used for canonical writes.
+    expect(legacyDeletedKeys).toHaveLength(0);
+
+    // A completely fresh reader must not recover the deleted checkpoint.
+    const storageC = new CheckpointStorage(config);
+    expect(await storageC.get('chk_hybrid')).toBeNull();
+  });
+
   it('still supports legacy duck-typed put/get adapters', async () => {
     const objects = new Map<string, Buffer>();
     const legacyAdapter = {
@@ -195,6 +233,32 @@ describe('AuditLogger persists through the shipped StorageAdapter interface', ()
     await loggerB.loadAuditRecords('did:peer:z6MkAuditPersist');
     const history = await loggerB.getMigrationHistory('did:peer:z6MkAuditPersist');
     expect(history.length).toBe(3);
+  });
+
+  it('two AuditLogger instances sharing one adapter do not lose each other\'s index entries', async () => {
+    const config = makeConfig(new MemoryStorageAdapter());
+    const did = 'did:peer:z6MkConcurrentIndex';
+    const loggerA = new AuditLogger(config);
+    const loggerB = new AuditLogger(config);
+
+    // Concurrent read-modify-write of the shared audit index: without
+    // cross-instance serialization/merging, both loggers read the same index
+    // snapshot and the later write silently drops the earlier key, making
+    // that record undiscoverable after restart.
+    await Promise.all([
+      loggerA.logMigration(makeAuditRecord({
+        migrationId: 'mig_conc_a', sourceDid: did, targetDid: null, timestamp: 1700000000101
+      })),
+      loggerB.logMigration(makeAuditRecord({
+        migrationId: 'mig_conc_b', sourceDid: did, targetDid: null, timestamp: 1700000000102
+      }))
+    ]);
+
+    // Fresh logger = restart simulation: both records must be discoverable.
+    const fresh = new AuditLogger(config);
+    await fresh.loadAuditRecords(did);
+    const history = await fresh.getMigrationHistory(did);
+    expect(history.map(r => r.migrationId).sort()).toEqual(['mig_conc_a', 'mig_conc_b']);
   });
 
   it('audit persistence failures propagate so callers can surface auditPersisted:false', async () => {

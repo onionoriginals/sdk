@@ -115,6 +115,14 @@ export function resolveMigrationStorage(config: OriginalsConfig): MigrationStora
     },
 
     async deleteNative(key: string): Promise<boolean> {
+      // Hybrid adapters (canonical putObject/getObject PLUS a legacy delete)
+      // write and read through the canonical MIGRATION_STORAGE_DOMAIN keys,
+      // so the legacy raw-key delete would miss the canonical object: the
+      // data would survive, no tombstone would be written, and a fresh
+      // reader could "recover" deleted state. Report no native delete so
+      // callers take the tombstone path — the reliable one for canonical
+      // storage.
+      if (hasCanonical) return false;
       if (typeof legacy.delete === 'function') {
         await legacy.delete(key);
         return true;
