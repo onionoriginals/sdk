@@ -23,20 +23,27 @@ export class DataIntegrityProofManager {
   static async createProof(document: any, options: ProofOptions): Promise<DataIntegrityProof> {
     // Runtime guard: ProofOptions types `type` as the literal
     // 'DataIntegrityProof', but callers routinely cast, so enforce it here.
-    if ((options as { type?: unknown }).type !== 'DataIntegrityProof') {
-      throw new Error(`Unsupported proof type: ${String((options as { type?: unknown }).type)}`);
+    // A MISSING type is defaulted rather than rejected — the cryptosuite
+    // managers have always synthesized type: 'DataIntegrityProof' on the
+    // created proof, so callers omitting `type` are valid. Only a WRONG
+    // explicit type is an error. (verifyProof stays strict: it must validate
+    // the actual proof's declared type.)
+    const declaredType = (options as { type?: unknown }).type;
+    if (declaredType !== undefined && declaredType !== 'DataIntegrityProof') {
+      throw new Error(`Unsupported proof type: ${String(declaredType)}`);
     }
+    const opts: ProofOptions = { ...options, type: 'DataIntegrityProof' };
     // Route bbs-2023 through the BBS backend so createProof is symmetric with
     // verifyProof (which already dispatches bbs-2023). Lazily imported to keep
     // the BBS backend out of the eddsa-only path.
-    if (options.cryptosuite === 'bbs-2023') {
+    if (opts.cryptosuite === 'bbs-2023') {
       const { BBSCryptosuiteManager } = await import('../cryptosuites/bbsCryptosuite.js');
-      return await BBSCryptosuiteManager.createProof(document, options);
+      return await BBSCryptosuiteManager.createProof(document, opts);
     }
-    if (options.cryptosuite !== 'eddsa-rdfc-2022') {
-      throw new Error(`Unsupported cryptosuite: ${options.cryptosuite}`);
+    if (opts.cryptosuite !== 'eddsa-rdfc-2022') {
+      throw new Error(`Unsupported cryptosuite: ${opts.cryptosuite}`);
     }
-    return await EdDSACryptosuiteManager.createProof(document, options);
+    return await EdDSACryptosuiteManager.createProof(document, opts);
   }
 
   static async verifyProof(document: any, proof: DataIntegrityProof, options: any): Promise<VerificationResult> {

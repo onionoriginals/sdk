@@ -159,6 +159,42 @@ describe('legacy verification path must reject retired keys', () => {
     expect(resolved).toBeNull();
   });
 
+  test('valid key still verifies when the loader fails with a benign error that merely mentions "revoked"', async () => {
+    // Regression (#320 review): isRetirementRefusal matched ANY error message
+    // containing "retired|revoked|compromised", so a benign resolver/TLS
+    // failure like "TLS certificate revoked" was misclassified as a
+    // retirement refusal and a VALID legacy credential failed to verify.
+    // Only the loader's exact retirement message
+    // ("Verification method is retired (revoked or compromised): <didUrl>")
+    // may fail closed; other errors must fall through to the resolveDID
+    // fallback, which here resolves the valid, non-retired key.
+    const didManager = new DIDManager(config);
+    let calls = 0;
+    (didManager as any).resolveDID = async (did: string) => {
+      calls += 1;
+      // First call happens inside the document loader: fail with a benign
+      // error whose text contains the word "revoked".
+      if (calls === 1) throw new Error('TLS certificate revoked while fetching DID document');
+      if (did !== issuerDid) return null;
+      return {
+        '@context': ['https://www.w3.org/ns/did/v1'],
+        id: issuerDid,
+        verificationMethod: [
+          {
+            id: vmId,
+            type: 'Multikey',
+            controller: issuerDid,
+            publicKeyMultibase
+          }
+        ]
+      };
+    };
+    const cm = new CredentialManager(config, didManager);
+    const credential = makeCredential();
+    const signed = { ...credential, proof: await mintLegacyProof(credential) };
+    expect(await cm.verifyCredential(signed)).toBe(true);
+  });
+
   test('resolveVerificationMethodMultibase returns null for a revoked VM (direct unit check)', async () => {
     const cm = new CredentialManager(
       config,

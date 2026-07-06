@@ -571,8 +571,13 @@ export class CredentialManager {
     const isRetired = (vm: { revoked?: unknown; compromised?: unknown }): boolean =>
       Boolean(vm && (vm.revoked || vm.compromised));
     const isRetirementRefusal = (err: unknown): boolean => {
+      // Match the document loader's EXACT retirement refusal (documentLoader.ts
+      // throws `Verification method is retired (revoked or compromised): <didUrl>`).
+      // A loose keyword match here would misclassify benign resolver errors
+      // whose text merely contains e.g. "revoked" ("TLS certificate revoked")
+      // as security refusals and wrongly fail valid legacy credentials.
       const msg = err instanceof Error ? err.message : String(err);
-      return /retired|revoked|compromised/i.test(msg);
+      return /^Verification method is retired \(revoked or compromised\):/i.test(msg);
     };
 
     const loader = createDocumentLoader(this.didManager);
