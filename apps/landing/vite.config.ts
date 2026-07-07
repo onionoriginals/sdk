@@ -35,11 +35,18 @@ function injectSiteMeta(): Plugin {
   return {
     name: 'originals:inject-site-meta',
     buildStart() {
-      for (const file of ['robots.txt', 'sitemap.xml']) {
+      // Match the actual directives, not just any occurrence of the URL —
+      // both files also mention the domain in comments.
+      const url = site.url.replace(/\/$/, '');
+      const checks = [
+        { file: 'robots.txt', needle: `Sitemap: ${url}/sitemap.xml` },
+        { file: 'sitemap.xml', needle: `<loc>${url}/</loc>` }
+      ];
+      for (const { file, needle } of checks) {
         const path = fileURLToPath(new URL(`./public/${file}`, import.meta.url));
-        if (!readFileSync(path, 'utf8').includes(site.url.replace(/\/$/, ''))) {
+        if (!readFileSync(path, 'utf8').includes(needle)) {
           throw new Error(
-            `public/${file} does not reference ${site.url} — when swapping the ` +
+            `public/${file} does not contain "${needle}" — when swapping the ` +
               `production domain, update site.url in src/content.ts AND the ` +
               `absolute URLs in public/robots.txt and public/sitemap.xml.`
           );

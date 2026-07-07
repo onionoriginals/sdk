@@ -50,6 +50,16 @@ const stopServer = () => {
   if (!server.killed) server.kill('SIGTERM');
 };
 process.on('exit', stopServer);
+// 'exit' does not fire on signals — clean up the preview server on Ctrl+C
+// and CI job-timeout kills too.
+process.on('SIGINT', () => {
+  stopServer();
+  process.exit(130);
+});
+process.on('SIGTERM', () => {
+  stopServer();
+  process.exit(143);
+});
 
 const base = `http://localhost:${port}/`;
 let ready = false;

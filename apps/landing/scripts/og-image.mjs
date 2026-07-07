@@ -38,12 +38,18 @@ const fontUrl = (pkg, file) =>
 const interUrl = fontUrl('@fontsource-variable/inter', 'inter-latin-wght-normal.woff2');
 const monoUrl = fontUrl('@fontsource/jetbrains-mono', 'jetbrains-mono-latin-400-normal.woff2');
 
+// Content strings are interpolated into the HTML template — escape them the
+// same way vite.config.ts does for index.html, so future copy edits with
+// &/</> render as text instead of silently breaking the markup.
+const esc = (s) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 // footer.bottomRight is the canonical "did:peer → did:webvh → did:btco"
 // string; color each layer with its hue from the site's palette.
 const layerHues = ['#a78bfa', '#4cc2ff', '#f7931a'];
 const chain = footer.bottomRight
   .split(' → ')
-  .map((seg, i) => `<span style="color:${layerHues[i] ?? '#828a9a'}">${seg}</span>`)
+  .map((seg, i) => `<span style="color:${layerHues[i] ?? '#828a9a'}">${esc(seg)}</span>`)
   .join('<span class="arrow"> → </span>');
 
 const html = `<!doctype html>
@@ -111,9 +117,9 @@ const html = `<!doctype html>
         <circle cx="10" cy="10" r="7.25" fill="none" stroke="#f7931a" stroke-width="2.5"/>
         <circle cx="10" cy="10" r="2" fill="#f4f5f7"/>
       </svg>
-      <span>${site.wordmark}</span>
+      <span>${esc(site.wordmark)}</span>
     </div>
-    <div class="tagline">${site.tagline}</div>
+    <div class="tagline">${esc(site.tagline)}</div>
     <div class="chain">${chain}</div>
   </div>
 </body>`;
