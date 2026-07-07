@@ -18,6 +18,41 @@ export class TurnkeySessionExpiredError extends Error {
 }
 
 /**
+ * Collect searchable text from an error: its message, its JSON
+ * serialization, and the same for every error in its `cause` chain.
+ *
+ * `JSON.stringify` alone is not enough — for a plain `Error` it yields
+ * `"{}"` because `message`/`stack` are non-enumerable, and the wrapped
+ * client functions rethrow plain `Error`s around the original
+ * `TurnkeyRequestError`.
+ */
+function collectErrorText(error: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current !== null && current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error) {
+      parts.push(current.message);
+      try {
+        parts.push(JSON.stringify(current));
+      } catch {
+        // circular structure - message already captured
+      }
+      current = current.cause;
+    } else {
+      try {
+        parts.push(typeof current === 'string' ? current : JSON.stringify(current) ?? '');
+      } catch {
+        // circular structure
+      }
+      break;
+    }
+  }
+  return parts.join(' ').toLowerCase();
+}
+
+/**
  * Wrapper to handle token expiration errors
  */
 export async function withTokenExpiration<T>(
@@ -27,11 +62,11 @@ export async function withTokenExpiration<T>(
   try {
     return await fn();
   } catch (error) {
-    const errorStr = JSON.stringify(error);
+    const errorStr = collectErrorText(error);
     if (
-      errorStr.toLowerCase().includes('api_key_expired') ||
-      errorStr.toLowerCase().includes('expired api key') ||
-      errorStr.toLowerCase().includes('"code":16')
+      errorStr.includes('api_key_expired') ||
+      errorStr.includes('expired api key') ||
+      errorStr.includes('"code":16')
     ) {
       console.warn('Detected expired API key, calling onExpired');
       if (onExpired) {
@@ -87,6 +122,13 @@ export interface CompleteOtpOptions {
    */
   publicKey?: string;
   /**
+   * Organization ID to run the verifyOtp activity under. Must match the org
+   * context that ran {@link initOtp} — Turnkey scopes the OTP flow to the
+   * initiating organization. Leave unset (parent org, the client's default)
+   * unless `initOtp` was explicitly routed to another organization.
+   */
+  organizationId?: string;
+  /**
    * Override for the enclave signing key used to verify the target bundle's
    * signature. ONLY for tests or non-production Turnkey environments.
    */
@@ -120,6 +162,12 @@ export interface CompleteOtpResult {
  * Returns the OTP ID together with the `otpEncryptionTargetBundle`, which is
  * required by {@link completeOtp} to encrypt the OTP code (Turnkey v6 no
  * longer accepts plaintext OTP codes on verification).
+ *
+ * Turnkey's documented flow runs initOtp/verifyOtp under the parent
+ * organization (the client's default org) and uses the sub-org only for the
+ * subsequent `otpLogin`; leave `subOrgId` unset unless you know the flow
+ * must be scoped otherwise, and mirror whatever org context you use here in
+ * {@link completeOtp} via `options.organizationId`.
  */
 export async function initOtp(
   turnkeyClient: Turnkey,
@@ -148,7 +196,8 @@ export async function initOtp(
   } catch (error) {
     console.error('Error initializing OTP:', error);
     throw new Error(
-      `Failed to send OTP: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to send OTP: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
     );
   }
 }
@@ -162,6 +211,13 @@ export async function initOtp(
  *
  * Returns the verification token, the sub-org ID, and the key pair the token
  * is bound to (for use with a subsequent `otpLogin`).
+ *
+ * The verifyOtp activity runs under the same org context as {@link initOtp}
+ * (the parent org by default). `subOrgId` identifies the user's
+ * sub-organization for the subsequent `otpLogin` and is echoed back in the
+ * result; it is NOT used to route the verification itself — pass
+ * `options.organizationId` only if `initOtp` was explicitly scoped to a
+ * different organization.
  */
 export async function completeOtp(
   turnkeyClient: Turnkey,
@@ -183,7 +239,9 @@ export async function completeOtp(
       otpId,
       encryptedOtpBundle,
       expirationSeconds: '900',
-      organizationId: subOrgId,
+      // Align org context with initOtp (Turnkey scopes otpId to the
+      // initiating org). Defaults to the client's default (parent) org.
+      ...(options?.organizationId ? { organizationId: options.organizationId } : {}),
     });
 
     if (!result.verificationToken) {
@@ -199,7 +257,8 @@ export async function completeOtp(
   } catch (error) {
     console.error('Error completing OTP:', error);
     throw new Error(
-      `Failed to complete OTP: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to complete OTP: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
     );
   }
 }
@@ -222,7 +281,8 @@ export async function fetchUser(
     } catch (error) {
       console.error('Error fetching user:', error);
       throw new Error(
-        `Failed to fetch user: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to fetch user: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
     }
   }, onExpired);
@@ -268,7 +328,8 @@ export async function fetchWallets(
     } catch (error) {
       console.error('Error fetching wallets:', error);
       throw new Error(
-        `Failed to fetch wallets: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to fetch wallets: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
     }
   }, onExpired);
@@ -345,7 +406,8 @@ export async function createWalletWithAccounts(
     } catch (error) {
       console.error('Error creating wallet:', error);
       throw new Error(
-        `Failed to create wallet: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to create wallet: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
     }
   }, onExpired);
@@ -423,7 +485,8 @@ export async function ensureWalletWithAccounts(
     } catch (error) {
       console.error('Error ensuring wallet with accounts:', error);
       throw new Error(
-        `Failed to ensure wallet with accounts: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to ensure wallet with accounts: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
     }
   }, onExpired);

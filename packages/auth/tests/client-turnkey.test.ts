@@ -103,6 +103,34 @@ describe('client/turnkey-client', () => {
       ).rejects.toThrow('other');
       expect(onExpired).not.toHaveBeenCalled();
     });
+
+    test('detects expiry in a plain Error message (JSON.stringify of Error is "{}")', async () => {
+      // Regression: Error.message is non-enumerable, so stringify-based
+      // detection alone never matched rethrown plain Errors.
+      const error = new Error('Failed to fetch user: api_key_expired');
+      await expect(
+        withTokenExpiration(() => Promise.reject(error))
+      ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
+    });
+
+    test('detects expiry by walking the error cause chain', async () => {
+      const original = Object.assign(new Error('unauthenticated'), { code: 16 });
+      const wrapped = new Error('Failed to fetch wallets: unauthenticated', {
+        cause: original,
+      });
+      const onExpired = mock(() => {});
+      await expect(
+        withTokenExpiration(() => Promise.reject(wrapped), onExpired)
+      ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
+      expect(onExpired).toHaveBeenCalled();
+    });
+
+    test('handles circular error causes without hanging', async () => {
+      const a = new Error('some failure');
+      const b = new Error('other failure', { cause: a });
+      (a as Error & { cause?: unknown }).cause = b;
+      await expect(withTokenExpiration(() => Promise.reject(b))).rejects.toBe(b);
+    });
   });
 
   describe('initializeTurnkeyClient', () => {
@@ -225,9 +253,14 @@ describe('client/turnkey-client', () => {
           otpId: 'otp_id_1',
           encryptedOtpBundle: expect.any(String),
           expirationSeconds: '900',
-          organizationId: 'sub_org_1',
         })
       );
+
+      // verifyOtp runs under the same org context as initOtp (parent org by
+      // default) - Turnkey scopes otpId to the initiating organization.
+      expect(
+        (verifyOtpFn.mock.calls[0][0] as Record<string, unknown>).organizationId
+      ).toBeUndefined();
 
       // The plaintext OTP code must never be sent to Turnkey
       const callArg = verifyOtpFn.mock.calls[0][0] as Record<string, unknown>;
@@ -241,6 +274,23 @@ describe('client/turnkey-client', () => {
       );
       expect(plaintext.otp_code).toBe('111222');
       expect(plaintext.public_key).toBe(result.publicKey);
+    });
+
+    test('routes verifyOtp to an explicit organizationId when supplied', async () => {
+      const verifyOtpFn = mock(() => Promise.resolve({ verificationToken: 'tok' }));
+      const client = createMockClient(verifyOtpFn);
+      await completeOtp(
+        client,
+        'otp_id_1',
+        '111222',
+        'sub_org_1',
+        otpFixture.otpEncryptionTargetBundle,
+        { ...completeOtpOptions, organizationId: 'explicit_org' }
+      );
+
+      expect(verifyOtpFn).toHaveBeenCalledWith(
+        expect.objectContaining({ organizationId: 'explicit_org' })
+      );
     });
 
     test('uses a caller-provided public key when supplied', async () => {
@@ -344,6 +394,24 @@ describe('client/turnkey-client', () => {
     test('throws on API error', async () => {
       const client = createMockClient(mock(() => Promise.reject(new Error('Network'))));
       await expect(fetchUser(client, 'sub_org_123')).rejects.toThrow('Failed to fetch user');
+    });
+
+    test('expired-session errors surface as TurnkeySessionExpiredError through the wrapper', async () => {
+      // Regression for the dead expiry-detection path: fetchUser catches the
+      // original Turnkey error and rethrows a plain Error, which
+      // JSON.stringify serializes to "{}". Detection must work on the
+      // rethrown error's message/cause.
+      const turnkeyError = Object.assign(
+        new Error('Turnkey error 16: expired api key (this API key is past its expiry)'),
+        { code: 16, details: null }
+      );
+      const client = createMockClient(mock(() => Promise.reject(turnkeyError)));
+      const onExpired = mock(() => {});
+
+      await expect(fetchUser(client, 'sub_org_123', onExpired)).rejects.toBeInstanceOf(
+        TurnkeySessionExpiredError
+      );
+      expect(onExpired).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -24,6 +24,7 @@ function createMockTurnkeyClient(overrides?: {
   verifyOtp?: () => Promise<unknown>;
   getSubOrgIds?: () => Promise<unknown>;
   getWallets?: () => Promise<unknown>;
+  createWallet?: () => Promise<unknown>;
   createSubOrganization?: () => Promise<unknown>;
 }) {
   const initOtp =
@@ -43,6 +44,8 @@ function createMockTurnkeyClient(overrides?: {
   const getWallets =
     overrides?.getWallets ??
     mock(() => Promise.resolve({ wallets: [{ walletId: 'w1' }] }));
+  const createWallet =
+    overrides?.createWallet ?? mock(() => Promise.resolve({ walletId: 'w_new' }));
   const createSubOrganization =
     overrides?.createSubOrganization ??
     mock(() =>
@@ -61,6 +64,7 @@ function createMockTurnkeyClient(overrides?: {
       verifyOtp,
       getSubOrgIds,
       getWallets,
+      createWallet,
       createSubOrganization,
     }),
   } as unknown as import('@turnkey/sdk-server').Turnkey;
@@ -141,7 +145,7 @@ describe('email-auth', () => {
       storage2.cleanup();
     });
 
-    test('stores session in storage with correct data', async () => {
+    test('stores session in storage with correct data (no subOrgId before verification)', async () => {
       const client = createMockTurnkeyClient();
       const result = await initiateEmailAuth('user@example.com', client, storage);
 
@@ -151,7 +155,24 @@ describe('email-auth', () => {
       expect(session!.otpId).toBe('otp_123');
       expect(session!.otpEncryptionTargetBundle).toBe(otpFixture.otpEncryptionTargetBundle);
       expect(session!.verified).toBe(false);
-      expect(session!.subOrgId).toBe('sub_org_existing');
+      // Sub-org provisioning is deferred until the email is proven
+      expect(session!.subOrgId).toBeUndefined();
+    });
+
+    test('normalizes the email before sending the OTP and storing the session', async () => {
+      const initOtp = mock(() =>
+        Promise.resolve({
+          otpId: 'otp_123',
+          otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
+        })
+      );
+      const client = createMockTurnkeyClient({ initOtp });
+      const result = await initiateEmailAuth('  User@Example.COM ', client, storage);
+
+      expect(initOtp).toHaveBeenCalledWith(
+        expect.objectContaining({ contact: 'user@example.com' })
+      );
+      expect(storage.get(result.sessionId)!.email).toBe('user@example.com');
     });
 
     test('rejects invalid email format', async () => {
@@ -209,25 +230,23 @@ describe('email-auth', () => {
       );
     });
 
-    test('creates new sub-org when none exists', async () => {
-      const createSubOrganization = mock(() =>
-        Promise.resolve({
-          activity: {
-            result: {
-              createSubOrganizationResultV7: { subOrganizationId: 'new_sub_org' },
-            },
-          },
-        })
-      );
+    test('does not touch Turnkey sub-org APIs before the email is proven', async () => {
+      // Unauthenticated initiation must not create billable resources
+      // (sub-orgs, wallets) for unproven email addresses.
+      const getSubOrgIds = mock(() => Promise.resolve({ organizationIds: [] }));
+      const createSubOrganization = mock(() => Promise.resolve({}));
+      const createWallet = mock(() => Promise.resolve({}));
       const client = createMockTurnkeyClient({
-        getSubOrgIds: mock(() => Promise.resolve({ organizationIds: [] })),
-        getWallets: mock(() => Promise.resolve({ wallets: [] })),
+        getSubOrgIds,
         createSubOrganization,
+        createWallet,
       });
 
-      const result = await initiateEmailAuth('new@example.com', client, storage);
-      const session = storage.get(result.sessionId);
-      expect(session!.subOrgId).toBe('new_sub_org');
+      await initiateEmailAuth('new@example.com', client, storage);
+
+      expect(getSubOrgIds).not.toHaveBeenCalled();
+      expect(createSubOrganization).not.toHaveBeenCalled();
+      expect(createWallet).not.toHaveBeenCalled();
     });
   });
 
@@ -248,13 +267,64 @@ describe('email-auth', () => {
       expect(result.verificationToken).toBe('token_abc');
     });
 
-    test('marks session as verified', async () => {
+    test('marks session as verified and records the provisioned subOrgId', async () => {
       const client = createMockTurnkeyClient();
       const sessionId = await setupSession(client);
       await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
 
       const session = storage.get(sessionId);
       expect(session!.verified).toBe(true);
+      expect(session!.subOrgId).toBe('sub_org_existing');
+    });
+
+    test('provisions a new sub-org after successful verification when none exists', async () => {
+      const createSubOrganization = mock(() =>
+        Promise.resolve({
+          activity: {
+            result: {
+              createSubOrganizationResultV7: { subOrganizationId: 'new_sub_org' },
+            },
+          },
+        })
+      );
+      const client = createMockTurnkeyClient({
+        getSubOrgIds: mock(() => Promise.resolve({ organizationIds: [] })),
+        createSubOrganization,
+      });
+      const sessionId = await setupSession(client);
+
+      const result = await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+      expect(result.subOrgId).toBe('new_sub_org');
+      expect(createSubOrganization).toHaveBeenCalledTimes(1);
+      expect(storage.get(sessionId)!.subOrgId).toBe('new_sub_org');
+    });
+
+    test('does not provision a sub-org when OTP verification fails', async () => {
+      const getSubOrgIds = mock(() => Promise.resolve({ organizationIds: [] }));
+      const createSubOrganization = mock(() => Promise.resolve({}));
+      const client = createMockTurnkeyClient({
+        verifyOtp: mock(() => Promise.reject(new Error('OTP code invalid'))),
+        getSubOrgIds,
+        createSubOrganization,
+      });
+      const sessionId = await setupSession(client);
+
+      await expect(
+        verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions)
+      ).rejects.toThrow('Invalid verification code');
+      expect(getSubOrgIds).not.toHaveBeenCalled();
+      expect(createSubOrganization).not.toHaveBeenCalled();
+    });
+
+    test('reports provisioning failure distinctly from an invalid code', async () => {
+      const client = createMockTurnkeyClient({
+        getSubOrgIds: mock(() => Promise.reject(new Error('Turnkey is down'))),
+      });
+      const sessionId = await setupSession(client);
+
+      await expect(
+        verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions)
+      ).rejects.toThrow('provisioning the Turnkey sub-organization failed');
     });
 
     test('throws for invalid session ID', async () => {
@@ -292,18 +362,25 @@ describe('email-auth', () => {
       ).rejects.toThrow('OTP ID not found');
     });
 
-    test('throws when subOrgId missing in session', async () => {
+    test('verifies a session without subOrgId (provisioning happens after verification)', async () => {
       const client = createMockTurnkeyClient();
       storage.set('session_no_org', {
         email: 'user@example.com',
         otpId: 'otp_123',
+        otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
         timestamp: Date.now(),
         verified: false,
       });
 
-      await expect(
-        verifyEmailAuth('session_no_org', '123456', client, storage)
-      ).rejects.toThrow('Sub-organization ID not found');
+      const result = await verifyEmailAuth(
+        'session_no_org',
+        '123456',
+        client,
+        storage,
+        verifyOptions
+      );
+      expect(result.verified).toBe(true);
+      expect(result.subOrgId).toBe('sub_org_existing');
     });
 
     test('throws when OTP encryption target bundle missing in session', async () => {
@@ -430,14 +507,18 @@ describe('email-auth', () => {
           otpId: 'otp_123',
           encryptedOtpBundle: expect.any(String),
           expirationSeconds: '900',
-          // Activity must be routed under the user's sub-organization,
-          // mirroring the client-side completeOtp path.
-          organizationId: 'sub_org_existing',
         })
       );
 
-      // The plaintext OTP code must never be sent to Turnkey
       const callArg = verifyOtp.mock.calls[0][0] as Record<string, unknown>;
+
+      // The activity must run under the same org context as initOtp (the
+      // parent organization, i.e. no organizationId override): Turnkey
+      // scopes the otpId to the initiating org, and the sub-org may not
+      // even exist yet at verification time.
+      expect(callArg.organizationId).toBeUndefined();
+
+      // The plaintext OTP code must never be sent to Turnkey
       expect(callArg.otpCode).toBeUndefined();
 
       // The encrypted bundle must decrypt (with the target key) to the code
@@ -448,6 +529,115 @@ describe('email-auth', () => {
       );
       expect(plaintext.otp_code).toBe('654321');
       expect(plaintext.public_key).toMatch(/^0[23][0-9a-f]{64}$/);
+    });
+
+    test('binds the token to a client-supplied publicKey and returns no private key', async () => {
+      const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token_bound' }));
+      const client = createMockTurnkeyClient({ verifyOtp });
+      const sessionId = await setupSession(client);
+
+      const clientPublicKey = '02' + 'ab'.repeat(32);
+      const result = await verifyEmailAuth(sessionId, '123456', client, storage, {
+        ...verifyOptions,
+        publicKey: clientPublicKey,
+      });
+
+      // The client's key is embedded in the encrypted bundle...
+      const callArg = verifyOtp.mock.calls[0][0] as Record<string, unknown>;
+      const plaintext = decryptOtpBundle(
+        callArg.encryptedOtpBundle as string,
+        otpFixture.targetPrivateKey
+      );
+      expect(plaintext.public_key).toBe(clientPublicKey);
+
+      // ...and echoed in the result, with NO private key: the private key
+      // never has to leave the client.
+      expect(result.publicKey).toBe(clientPublicKey);
+      expect(result.privateKey).toBeUndefined();
+    });
+
+    describe('OTP attempt limiting', () => {
+      test('failed attempts are counted in the session', async () => {
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(() => Promise.reject(new Error('OTP code invalid'))),
+        });
+        const sessionId = await setupSession(client);
+
+        await expect(
+          verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+        ).rejects.toThrow('Invalid verification code');
+        expect(storage.get(sessionId)!.otpAttempts).toBe(1);
+
+        await expect(
+          verifyEmailAuth(sessionId, '222222', client, storage, verifyOptions)
+        ).rejects.toThrow('Invalid verification code');
+        expect(storage.get(sessionId)!.otpAttempts).toBe(2);
+      });
+
+      test('session is destroyed after 5 failed attempts', async () => {
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(() => Promise.reject(new Error('OTP code invalid'))),
+        });
+        const sessionId = await setupSession(client);
+
+        for (let i = 1; i <= 4; i++) {
+          await expect(
+            verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+          ).rejects.toThrow('Invalid verification code');
+        }
+
+        // 5th failure destroys the session
+        await expect(
+          verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+        ).rejects.toThrow('Too many failed verification attempts');
+        expect(storage.get(sessionId)).toBeUndefined();
+
+        // Subsequent attempts fail as an invalid session, so the otpId can
+        // no longer be brute-forced
+        await expect(
+          verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+        ).rejects.toThrow('Invalid or expired session');
+      });
+
+      test('a correct code within the attempt budget still succeeds', async () => {
+        let calls = 0;
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(() => {
+            calls += 1;
+            return calls <= 2
+              ? Promise.reject(new Error('OTP code invalid'))
+              : Promise.resolve({ verificationToken: 'token_after_retries' });
+          }),
+        });
+        const sessionId = await setupSession(client);
+
+        await expect(
+          verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+        ).rejects.toThrow('Invalid verification code');
+        await expect(
+          verifyEmailAuth(sessionId, '222222', client, storage, verifyOptions)
+        ).rejects.toThrow('Invalid verification code');
+
+        const result = await verifyEmailAuth(
+          sessionId,
+          '333333',
+          client,
+          storage,
+          verifyOptions
+        );
+        expect(result.verified).toBe(true);
+        expect(result.verificationToken).toBe('token_after_retries');
+      });
+
+      test('malformed codes rejected before Turnkey do not consume attempts', async () => {
+        const client = createMockTurnkeyClient();
+        const sessionId = await setupSession(client);
+
+        await expect(verifyEmailAuth(sessionId, '!!', client, storage)).rejects.toThrow(
+          'Invalid verification code format'
+        );
+        expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
+      });
     });
   });
 

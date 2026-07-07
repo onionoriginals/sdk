@@ -1,5 +1,9 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
-import { createTurnkeyClient, getOrCreateTurnkeySubOrg } from '../src/server/turnkey-client';
+import {
+  createTurnkeyClient,
+  getOrCreateTurnkeySubOrg,
+  normalizeEmail,
+} from '../src/server/turnkey-client';
 
 describe('turnkey-client', () => {
   const originalEnv = { ...process.env };
@@ -82,10 +86,21 @@ describe('turnkey-client', () => {
     });
   });
 
+  describe('normalizeEmail', () => {
+    test('trims whitespace and lowercases', () => {
+      expect(normalizeEmail('  Alice@Example.COM  ')).toBe('alice@example.com');
+    });
+
+    test('leaves already-normalized emails unchanged', () => {
+      expect(normalizeEmail('user+tag.name@example.org')).toBe('user+tag.name@example.org');
+    });
+  });
+
   describe('getOrCreateTurnkeySubOrg', () => {
     function createMockClient(overrides?: {
       getSubOrgIds?: () => Promise<unknown>;
       getWallets?: () => Promise<unknown>;
+      createWallet?: () => Promise<unknown>;
       createSubOrganization?: () => Promise<unknown>;
     }) {
       const getSubOrgIds =
@@ -94,6 +109,8 @@ describe('turnkey-client', () => {
       const getWallets =
         overrides?.getWallets ??
         mock(() => Promise.resolve({ wallets: [{ walletId: 'w1' }] }));
+      const createWallet =
+        overrides?.createWallet ?? mock(() => Promise.resolve({ walletId: 'w_new' }));
       const createSubOrganization =
         overrides?.createSubOrganization ??
         mock(() =>
@@ -110,6 +127,7 @@ describe('turnkey-client', () => {
         apiClient: () => ({
           getSubOrgIds,
           getWallets,
+          createWallet,
           createSubOrganization,
         }),
       } as unknown as import('@turnkey/sdk-server').Turnkey;
@@ -145,7 +163,10 @@ describe('turnkey-client', () => {
       expect(createSubOrganization).toHaveBeenCalled();
     });
 
-    test('creates new sub-org when existing has no wallet', async () => {
+    test('repairs walletless sub-org in place instead of minting a new identity', async () => {
+      // The sub-org ID is the user's stable identity; a missing wallet must
+      // be fixed by creating the wallet under the EXISTING sub-org.
+      const createWallet = mock(() => Promise.resolve({ walletId: 'w_repaired' }));
       const createSubOrganization = mock(() =>
         Promise.resolve({
           activity: {
@@ -160,11 +181,61 @@ describe('turnkey-client', () => {
           Promise.resolve({ organizationIds: ['existing_no_wallet'] })
         ),
         getWallets: mock(() => Promise.resolve({ wallets: [] })),
+        createWallet,
         createSubOrganization,
       });
 
       const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
-      expect(result).toBe('rebuilt_org');
+      expect(result).toBe('existing_no_wallet');
+      expect(createSubOrganization).not.toHaveBeenCalled();
+      expect(createWallet).toHaveBeenCalledTimes(1);
+
+      // Wallet is created under the existing sub-org with the same account
+      // layout the creation path uses.
+      const callArgs = (createWallet as any).mock.calls[0][0];
+      expect(callArgs.organizationId).toBe('existing_no_wallet');
+      expect(callArgs.walletName).toBe('default-wallet');
+      expect(callArgs.accounts).toHaveLength(3);
+      expect(callArgs.accounts[0].curve).toBe('CURVE_SECP256K1');
+      expect(callArgs.accounts[1].curve).toBe('CURVE_ED25519');
+      expect(callArgs.accounts[2].curve).toBe('CURVE_ED25519');
+    });
+
+    test('propagates wallet-repair failure instead of minting a new sub-org', async () => {
+      const client = createMockClient({
+        getSubOrgIds: mock(() =>
+          Promise.resolve({ organizationIds: ['existing_no_wallet'] })
+        ),
+        getWallets: mock(() => Promise.resolve({ wallets: [] })),
+        createWallet: mock(() => Promise.reject(new Error('createWallet exploded'))),
+      });
+
+      await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+        'createWallet exploded'
+      );
+    });
+
+    test('picks deterministically (sorted) when multiple sub-orgs exist', async () => {
+      const createSubOrganization = mock(() => Promise.resolve({}));
+      const client = createMockClient({
+        // Unsorted response order must not affect the selection
+        getSubOrgIds: mock(() =>
+          Promise.resolve({ organizationIds: ['org_charlie', 'org_alpha', 'org_bravo'] })
+        ),
+        createSubOrganization,
+      });
+
+      const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+      expect(result).toBe('org_alpha');
+      expect(createSubOrganization).not.toHaveBeenCalled();
+
+      // Same result regardless of the order Turnkey returns
+      const client2 = createMockClient({
+        getSubOrgIds: mock(() =>
+          Promise.resolve({ organizationIds: ['org_bravo', 'org_charlie', 'org_alpha'] })
+        ),
+      });
+      expect(await getOrCreateTurnkeySubOrg('user@example.com', client2)).toBe('org_alpha');
     });
 
     test('returns existing sub-org when wallet check fails', async () => {
@@ -256,7 +327,37 @@ describe('turnkey-client', () => {
       expect(callArgs.rootUsers[0].userEmail).toBe('alice@example.com');
     });
 
-    test('handles getSubOrgIds failure gracefully (creates new)', async () => {
+    test('rethrows transient getSubOrgIds errors instead of creating a duplicate', async () => {
+      // A network blip / 429 / auth misconfig during lookup must NOT be
+      // treated as "no existing sub-org" - that would fork the identity.
+      const createSubOrganization = mock(() => Promise.resolve({}));
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.reject(new Error('Network error'))),
+        createSubOrganization,
+      });
+
+      await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+        'Failed to look up existing Turnkey sub-organization'
+      );
+      expect(createSubOrganization).not.toHaveBeenCalled();
+    });
+
+    test('rethrows rate-limit errors from getSubOrgIds', async () => {
+      const rateLimited = Object.assign(new Error('rate limit exceeded'), { code: 8 });
+      const createSubOrganization = mock(() => Promise.resolve({}));
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.reject(rateLimited)),
+        createSubOrganization,
+      });
+
+      await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+        'rate limit exceeded'
+      );
+      expect(createSubOrganization).not.toHaveBeenCalled();
+    });
+
+    test('creates new sub-org when lookup fails with definitive not-found (gRPC code 5)', async () => {
+      const notFound = Object.assign(new Error('resource not found'), { code: 5 });
       const createSubOrganization = mock(() =>
         Promise.resolve({
           activity: {
@@ -267,12 +368,50 @@ describe('turnkey-client', () => {
         })
       );
       const client = createMockClient({
-        getSubOrgIds: mock(() => Promise.reject(new Error('Network error'))),
+        getSubOrgIds: mock(() => Promise.reject(notFound)),
         createSubOrganization,
       });
 
       const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
       expect(result).toBe('fallback_new');
+    });
+
+    test('normalizes email before the Turnkey lookup filter', async () => {
+      const getSubOrgIds = mock(() =>
+        Promise.resolve({ organizationIds: ['existing_sub_org'] })
+      );
+      const client = createMockClient({ getSubOrgIds });
+
+      await getOrCreateTurnkeySubOrg('  MixedCase@Example.COM ', client);
+
+      expect(getSubOrgIds).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filterType: 'EMAIL',
+          filterValue: 'mixedcase@example.com',
+        })
+      );
+    });
+
+    test('normalizes email in the created root user', async () => {
+      const createSubOrganization = mock(() =>
+        Promise.resolve({
+          activity: {
+            result: {
+              createSubOrganizationResultV7: { subOrganizationId: 'new_org' },
+            },
+          },
+        })
+      );
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.resolve({ organizationIds: [] })),
+        createSubOrganization,
+      });
+
+      await getOrCreateTurnkeySubOrg(' Bob@Example.COM ', client);
+
+      const callArgs = (createSubOrganization as any).mock.calls[0][0];
+      expect(callArgs.rootUsers[0].userName).toBe('bob@example.com');
+      expect(callArgs.rootUsers[0].userEmail).toBe('bob@example.com');
     });
   });
 });

@@ -50,9 +50,13 @@ export interface AuthMiddlewareOptions {
  * Email authentication session
  */
 export interface EmailAuthSession {
-  /** User's email address */
+  /** User's email address (normalized: trimmed + lowercased) */
   email: string;
-  /** Turnkey sub-organization ID */
+  /**
+   * Turnkey sub-organization ID. Only populated after successful OTP
+   * verification — sub-org provisioning is deferred until the caller has
+   * proven control of the email address.
+   */
   subOrgId?: string;
   /** Turnkey OTP ID */
   otpId?: string;
@@ -65,6 +69,11 @@ export interface EmailAuthSession {
   timestamp: number;
   /** Whether the session has been verified */
   verified: boolean;
+  /**
+   * Number of failed OTP verification attempts for this session. The
+   * session is destroyed once the attempt budget is exhausted.
+   */
+  otpAttempts?: number;
 }
 
 /**
@@ -99,8 +108,11 @@ export interface VerifyAuthResult {
   publicKey?: string;
   /**
    * Private key (hex) for the ephemeral key pair generated during OTP
-   * encryption. Needed to prove possession of the bound key in subsequent
-   * requests. Sensitive: never log or persist insecurely.
+   * encryption. Only present when the server generated the keypair (no
+   * client `publicKey` was supplied) — prefer client-generated keypairs so
+   * this never has to transit an HTTP response. Needed to prove possession
+   * of the bound key in subsequent requests. Sensitive: never log or
+   * persist insecurely.
    */
   privateKey?: string;
 }

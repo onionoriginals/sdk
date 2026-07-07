@@ -25,6 +25,21 @@ export interface ServerAuthOptions {
 }
 
 /**
+ * Options for {@link verifyOtp}
+ */
+export interface VerifyOtpClientOptions extends ServerAuthOptions {
+  /**
+   * Compressed P-256 public key (hex) generated in the browser (e.g. with
+   * `generateP256KeyPair` from `@turnkey/crypto`). The server binds the
+   * Turnkey verification token to this key, so the matching private key
+   * never leaves the browser and the verify response carries no private
+   * key material. Strongly recommended — without it, the server generates
+   * the keypair and must return the private key over HTTP.
+   */
+  publicKey?: string;
+}
+
+/**
  * Send OTP via your server endpoint
  * Server should call initiateEmailAuth() from @originals/auth/server
  *
@@ -67,15 +82,24 @@ export async function sendOtp(
  * @param sessionId - Session ID from sendOtp result
  * @param code - OTP code entered by user
  * @param endpoint - Server endpoint URL (default: '/api/auth/verify-otp')
- * @param options - Optional configuration
+ * @param options - Optional configuration; pass `publicKey` (generated in
+ *   the browser) so the verification-token private key never leaves the
+ *   client. The server endpoint should forward it to `verifyEmailAuth`.
  * @returns Promise with verification result
  *
  * @example
  * ```typescript
- * const { verified, email, subOrgId } = await verifyOtp(sessionId, '123456');
+ * import { generateP256KeyPair } from '@turnkey/crypto';
+ *
+ * const keyPair = generateP256KeyPair(); // private key stays in the browser
+ * const { verified, email, subOrgId } = await verifyOtp(
+ *   sessionId,
+ *   '123456',
+ *   undefined,
+ *   { publicKey: keyPair.publicKey }
+ * );
  * if (verified) {
  *   // User is authenticated
- *   console.log(`Authenticated: ${email}`);
  * }
  * ```
  */
@@ -83,13 +107,17 @@ export async function verifyOtp(
   sessionId: string,
   code: string,
   endpoint = '/api/auth/verify-otp',
-  options?: ServerAuthOptions
+  options?: VerifyOtpClientOptions
 ): Promise<VerifyAuthResult> {
   const fetchFn = options?.fetch ?? fetch;
   const response = await fetchFn(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, code }),
+    body: JSON.stringify({
+      sessionId,
+      code,
+      ...(options?.publicKey ? { publicKey: options.publicKey } : {}),
+    }),
   });
 
   if (!response.ok) {
