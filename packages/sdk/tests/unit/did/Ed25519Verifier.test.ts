@@ -59,12 +59,13 @@ describe('Ed25519Verifier', () => {
       expect(result).toBe(true);
     });
 
-    test('verifies valid signature with 33-byte public key (slices off version byte)', async () => {
+    test('rejects a 33-byte public key instead of guessing at a prefix (issue #352)', async () => {
+      // 33 bytes is the shape of a compressed secp256k1 key, not a "prefixed
+      // Ed25519 key" (Ed25519 multicodec prefixes are 2 bytes → 34 bytes).
       const verifier = new Ed25519Verifier();
       const signature = await signAsync(message, privateKey);
-      // Pass the 33-byte key - verifier should slice off first byte
       const result = await verifier.verify(signature, message, publicKey33Bytes);
-      expect(result).toBe(true);
+      expect(result).toBe(false);
     });
 
     test('rejects invalid signature', async () => {
@@ -155,6 +156,11 @@ describe('Ed25519Verifier', () => {
     test('returns undefined when only verificationMethodId is set', () => {
       const verifier = new Ed25519Verifier(verificationMethodId);
       expect(verifier.getPublicKeyMultibase()).toBeUndefined();
+    });
+
+    test('throws for a wrong-length key instead of minting a wrong multikey (issue #352)', () => {
+      const verifier = new Ed25519Verifier(verificationMethodId, publicKey33Bytes);
+      expect(() => verifier.getPublicKeyMultibase()).toThrow(/expected 32 bytes/);
     });
   });
 });

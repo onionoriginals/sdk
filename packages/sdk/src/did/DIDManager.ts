@@ -389,8 +389,49 @@ export class DIDManager {
     }); // end track did.migrateToDIDBTCO
   }
 
+  /**
+   * Cross-network did:btco guard (issue #267). The configured ordinalsProvider
+   * is pinned to one Bitcoin network, so a DID whose encoded network differs
+   * must be rejected — otherwise an attacker can inscribe "did:btco:reg:N"
+   * content on mainnet sat N and have it resolve as the regtest DID. This runs
+   * BEFORE the cache lookup: DIDCache supports a pluggable persistent storage
+   * adapter that may be shared between SDK instances on different networks (or
+   * populated via the bitcoinRpcUrl branch, which deliberately resolves any
+   * network), so a cached cross-network document must not bypass the guard
+   * (issue #312). It is a prefix parse of the DID string — no provider query.
+   */
+  private assertBtcoNetworkMatchesProvider(did: string): void {
+    if (!did.startsWith('did:btco:') || !this.config.ordinalsProvider) return;
+    const btcoNetworkPrefix = did.match(/^did:btco:(reg|sig|test):/)?.[1];
+    // 'test' (testnet) has no OrdinalsClient/config counterpart; preserve
+    // existing pass-through behavior for it.
+    //
+    // Only reject when the SDK's network is actually known. If neither
+    // `network` nor `webvhNetwork` is configured, the provider's chain is
+    // genuinely unknown, so defaulting to mainnet and rejecting a reg/sig DID
+    // would be a false positive — fall through and let the provider answer
+    // (its own resolution still validates the DID).
+    const providerNetwork = this.getConfiguredBitcoinNetwork();
+    if (btcoNetworkPrefix === 'test' || !providerNetwork) return;
+    const didNetwork: 'mainnet' | 'regtest' | 'signet' =
+      btcoNetworkPrefix === 'reg' ? 'regtest'
+      : btcoNetworkPrefix === 'sig' ? 'signet'
+      : 'mainnet';
+    if (didNetwork !== providerNetwork) {
+      throw new StructuredError(
+        'BTCO_NETWORK_MISMATCH',
+        `Cannot resolve ${did}: the DID targets the ${didNetwork} network but the configured ` +
+        `ordinalsProvider serves ${providerNetwork}. Configure an SDK instance for ${didNetwork} ` +
+        'to resolve this DID.'
+      );
+    }
+  }
+
   async resolveDID(did: string, options?: { skipCache?: boolean }): Promise<DIDDocument | null> {
     return this.track('did.resolveDID', async () => {
+      // Network guard must precede the cache read (issue #312).
+      this.assertBtcoNetworkMatchesProvider(did);
+
       // Check cache first (unless skipCache is set). The read is best-effort:
       // a throwing storage adapter must not crash resolution — treat it as a miss.
       if (!options?.skipCache) {
@@ -423,35 +464,9 @@ export class DIDManager {
           }
         } else if (did.startsWith('did:btco:')) {
           if (this.config.ordinalsProvider) {
-            // The configured ordinalsProvider is pinned to one Bitcoin
-            // network, so a DID whose encoded network differs must be
-            // rejected before querying (issue #267): otherwise an attacker
-            // can inscribe "did:btco:reg:N" content on mainnet sat N and have
-            // it resolve — and be cached — as the regtest DID.
-            const btcoNetworkPrefix = did.match(/^did:btco:(reg|sig|test):/)?.[1];
-            // 'test' (testnet) has no OrdinalsClient/config counterpart;
-            // preserve existing pass-through behavior for it.
+            // Cross-network guard already enforced pre-cache by
+            // assertBtcoNetworkMatchesProvider (issues #267/#312).
             //
-            // Only reject when the SDK's network is actually known. If neither
-            // `network` nor `webvhNetwork` is configured, the provider's chain
-            // is genuinely unknown, so defaulting to mainnet and rejecting a
-            // reg/sig DID would be a false positive — fall through and let the
-            // provider answer (its own resolution still validates the DID).
-            const providerNetwork = this.getConfiguredBitcoinNetwork();
-            if (btcoNetworkPrefix !== 'test' && providerNetwork) {
-              const didNetwork: 'mainnet' | 'regtest' | 'signet' =
-                btcoNetworkPrefix === 'reg' ? 'regtest'
-                : btcoNetworkPrefix === 'sig' ? 'signet'
-                : 'mainnet';
-              if (didNetwork !== providerNetwork) {
-                throw new StructuredError(
-                  'BTCO_NETWORK_MISMATCH',
-                  `Cannot resolve ${did}: the DID targets the ${didNetwork} network but the configured ` +
-                  `ordinalsProvider serves ${providerNetwork}. Configure an SDK instance for ${didNetwork} ` +
-                  'to resolve this DID.'
-                );
-              }
-            }
             // The configured ordinalsProvider is the source of truth for
             // Bitcoin state (it performed the inscriptions), so resolution
             // must go through it — not through a freshly constructed HTTP

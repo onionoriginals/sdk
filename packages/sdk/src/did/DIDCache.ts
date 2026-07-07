@@ -100,7 +100,7 @@ export class DIDCache {
       entry = await this.storage.get(did);
       if (entry) {
         if (!this.cache.has(did) && this.cache.size >= this.maxEntries) {
-          await this.evictLRU();
+          this.evictLRU();
         }
         this.cache.set(did, entry);
       }
@@ -143,7 +143,7 @@ export class DIDCache {
 
     // Check if we need to evict before adding
     if (!this.cache.has(did) && this.cache.size >= this.maxEntries) {
-      await this.evictLRU();
+      this.evictLRU();
     }
 
     this.cache.set(did, entry);
@@ -171,7 +171,7 @@ export class DIDCache {
     };
 
     if (!this.cache.has(did) && this.cache.size >= this.maxEntries) {
-      await this.evictLRU();
+      this.evictLRU();
     }
 
     this.cache.set(did, entry);
@@ -272,15 +272,21 @@ export class DIDCache {
   }
 
   /**
-   * Evict the least recently used unpinned entry.
+   * Evict the least recently used unpinned entry from MEMORY ONLY.
+   *
+   * LRU eviction bounds the in-memory map; it must not delete from the
+   * persistent store. Deleting there meant every hydrating get() on a store
+   * larger than maxEntries permanently removed some other entry, so reads
+   * shrank the persistent cache and it could never usefully hold more than
+   * maxEntries (issue #313). Storage deletion is reserved for explicit
+   * invalidation paths (delete/clear) and TTL expiry.
    */
-  private async evictLRU(): Promise<void> {
+  private evictLRU(): void {
     for (const did of this.accessOrder) {
       const entry = this.cache.get(did);
       if (entry && !entry.pinned) {
         this.cache.delete(did);
         this.removeFromAccessOrder(did);
-        if (this.storage) await this.storage.delete(did);
         return;
       }
     }

@@ -267,3 +267,28 @@ describe('Multicodec private-key headers match the multicodec registry', () => {
     }
   });
 });
+
+describe('decode length validation (issue #352)', () => {
+  test('decodePublicKey rejects wrong-length key bodies', () => {
+    const short = 'z' + base58.encode(concatBytes(MULTICODEC_ED25519_PUB_HEADER, new Uint8Array(16).fill(1)));
+    expect(() => multikey.decodePublicKey(short)).toThrow(/32 bytes/);
+
+    const long = 'z' + base58.encode(concatBytes(MULTICODEC_SECP256K1_PUB_HEADER, new Uint8Array(64).fill(1)));
+    expect(() => multikey.decodePublicKey(long)).toThrow(/33 bytes/);
+  });
+
+  test('decodePrivateKey rejects wrong-length key bodies', () => {
+    const short = 'z' + base58.encode(concatBytes(MULTICODEC_ED25519_PRIV_HEADER, new Uint8Array(31).fill(2)));
+    expect(() => multikey.decodePrivateKey(short)).toThrow(/32 bytes/);
+
+    const legacyLong = 'z' + base58.encode(concatBytes(new Uint8Array([0x13, 0x01]), new Uint8Array(40).fill(3)));
+    expect(() => multikey.decodePrivateKey(legacyLong)).toThrow(/32 bytes/);
+  });
+
+  test('correct-length keys still decode for every type', () => {
+    expect(multikey.decodePublicKey(multikey.encodePublicKey(new Uint8Array(32).fill(1), 'Ed25519')).type).toBe('Ed25519');
+    expect(multikey.decodePublicKey(multikey.encodePublicKey(new Uint8Array(33).fill(1), 'Secp256k1')).type).toBe('Secp256k1');
+    expect(multikey.decodePublicKey(multikey.encodePublicKey(new Uint8Array(33).fill(1), 'P256')).type).toBe('P256');
+    expect(multikey.decodePublicKey(multikey.encodePublicKey(new Uint8Array(96).fill(1), 'Bls12381G2')).type).toBe('Bls12381G2');
+  });
+});

@@ -142,11 +142,13 @@ describe('Network Configuration', () => {
     });
 
     it('should handle pre-release versions', () => {
-      // Pre-release should still follow the same rules for the base version
-      expect(validateVersionForNetwork('1.0.0-beta.1', 'pichu')).toBe(true);
+      // A prerelease is NOT a release (issue #352): only magby (all versions)
+      // accepts prerelease builds, regardless of the numeric part.
+      expect(validateVersionForNetwork('1.0.0-beta.1', 'pichu')).toBe(false);
       expect(validateVersionForNetwork('1.1.0-alpha', 'pichu')).toBe(false);
-      expect(validateVersionForNetwork('1.1.0-beta.1', 'cleffa')).toBe(true);
+      expect(validateVersionForNetwork('1.1.0-beta.1', 'cleffa')).toBe(false);
       expect(validateVersionForNetwork('1.1.1-rc.1', 'cleffa')).toBe(false);
+      expect(validateVersionForNetwork('1.0.0-beta.1', 'magby')).toBe(true);
     });
 
     it('should throw error for invalid version format', () => {
@@ -176,8 +178,10 @@ describe('Network Configuration', () => {
     });
 
     it('should handle pre-release versions correctly', () => {
-      expect(getRecommendedNetworkForVersion('1.0.0-beta')).toBe('pichu');
-      expect(getRecommendedNetworkForVersion('1.1.0-alpha')).toBe('cleffa');
+      // Prereleases only pass the magby gate (issue #352), so magby is the
+      // most restrictive network that accepts any prerelease build.
+      expect(getRecommendedNetworkForVersion('1.0.0-beta')).toBe('magby');
+      expect(getRecommendedNetworkForVersion('1.1.0-alpha')).toBe('magby');
       expect(getRecommendedNetworkForVersion('1.1.1-rc.1')).toBe('magby');
     });
   });
@@ -251,5 +255,21 @@ describe('Network Configuration', () => {
         expect(getBitcoinNetworkForWebVH('pichu')).toBe('mainnet');
       });
     });
+  });
+});
+
+describe('prerelease versions and network gates (issue #352)', () => {
+  it('rejects prereleases on pichu even when the numeric part is a major release', () => {
+    expect(validateVersionForNetwork('2.0.0-rc.1', 'pichu')).toBe(false);
+    expect(validateVersionForNetwork('1.0.0-beta', 'pichu')).toBe(false);
+  });
+
+  it('rejects prereleases on cleffa', () => {
+    expect(validateVersionForNetwork('1.1.0-rc.2', 'cleffa')).toBe(false);
+  });
+
+  it('accepts prereleases on magby (all versions)', () => {
+    expect(validateVersionForNetwork('2.0.0-rc.1', 'magby')).toBe(true);
+    expect(validateVersionForNetwork('1.2.3-alpha.4', 'magby')).toBe(true);
   });
 });

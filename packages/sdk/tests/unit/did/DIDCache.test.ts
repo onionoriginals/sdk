@@ -522,3 +522,63 @@ describe('DIDCache', () => {
     });
   });
 });
+
+describe('LRU eviction is memory-only (issue #313)', () => {
+  test('hydrating reads beyond maxEntries do not delete entries from persistent storage', async () => {
+    const storageMap = new Map<string, DIDCacheEntry>();
+    const storage: DIDCacheStorage = {
+      get: async (key: string) => storageMap.get(key) ?? null,
+      set: async (key: string, entry: DIDCacheEntry) => { storageMap.set(key, entry); },
+      delete: async (key: string) => { storageMap.delete(key); },
+      keys: async () => Array.from(storageMap.keys()),
+      clear: async () => { storageMap.clear(); },
+    };
+
+    // Persistent store holds more entries than the memory cap.
+    const dids = ['did:peer:a', 'did:peer:b', 'did:peer:c', 'did:peer:d'];
+    for (const did of dids) {
+      storageMap.set(did, {
+        did,
+        document: makeDIDDoc(did),
+        resolvedAt: Date.now(),
+        ttlMs: 60_000,
+        pinned: false,
+      });
+    }
+
+    const cache = new DIDCache({ storage, maxEntries: 2 });
+    // Each get() hydrates from storage; beyond maxEntries this triggers LRU
+    // eviction, which previously ALSO deleted the evicted entry from the
+    // persistent store — reads shrank the persistent cache.
+    for (const did of dids) {
+      expect(await cache.get(did)).not.toBeNull();
+    }
+
+    // Every entry is still in persistent storage and still resolvable.
+    expect(storageMap.size).toBe(4);
+    for (const did of dids) {
+      expect(await cache.get(did)).not.toBeNull();
+    }
+  });
+
+  test('set() eviction keeps the evicted entry in persistent storage', async () => {
+    const storageMap = new Map<string, DIDCacheEntry>();
+    const storage: DIDCacheStorage = {
+      get: async (key: string) => storageMap.get(key) ?? null,
+      set: async (key: string, entry: DIDCacheEntry) => { storageMap.set(key, entry); },
+      delete: async (key: string) => { storageMap.delete(key); },
+      keys: async () => Array.from(storageMap.keys()),
+      clear: async () => { storageMap.clear(); },
+    };
+
+    const cache = new DIDCache({ storage, maxEntries: 2 });
+    await cache.set('did:peer:a', makeDIDDoc('did:peer:a'));
+    await cache.set('did:peer:b', makeDIDDoc('did:peer:b'));
+    await cache.set('did:peer:c', makeDIDDoc('did:peer:c')); // evicts 'a' from memory
+
+    expect(storageMap.has('did:peer:a')).toBe(true);
+    // Explicit invalidation still deletes from storage.
+    await cache.delete('did:peer:a');
+    expect(storageMap.has('did:peer:a')).toBe(false);
+  });
+});

@@ -329,20 +329,20 @@ export class OriginalsSDK {
   ): Promise<boolean> {
     // Dynamically import @noble/ed25519 to avoid module resolution issues
     const ed25519Mod = await import('@noble/ed25519');
-    
-    // Ed25519 public keys must be exactly 32 bytes
-    // Some keys may have a version byte prefix, so remove it if present
-    let ed25519PublicKey = publicKey;
-    if (publicKey.length === 33) {
-      ed25519PublicKey = publicKey.slice(1);
-    } else if (publicKey.length !== 32) {
+
+    // Ed25519 public keys must be exactly 32 bytes. A 33-byte input is NOT a
+    // "prefixed Ed25519 key": Ed25519 multicodec prefixes are 2 bytes
+    // (0xed 0x01 → 34 bytes), while 33 bytes is the shape of a compressed
+    // secp256k1 key. Stripping one byte and verifying against the remainder
+    // verified against garbage — reject instead of guessing (issue #352).
+    if (publicKey.length !== 32) {
       throw new Error(`Invalid Ed25519 public key length: ${publicKey.length} (expected 32 bytes)`);
     }
-    
+
     // Verify using @noble/ed25519 with Uint8Array (browser-compatible)
     // ed25519.verifyAsync accepts Uint8Array directly
     try {
-      return await ed25519Mod.verifyAsync(signature, message, ed25519PublicKey);
+      return await ed25519Mod.verifyAsync(signature, message, publicKey);
     } catch (_error) {
       // Verification failed or error occurred
       return false;
