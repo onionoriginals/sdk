@@ -628,7 +628,22 @@ export class LifecycleManager {
         await this.eventEmitter.emit({
           type: 'asset:migrated',
           timestamp: new Date().toISOString(),
+        // Capture the layer before migration (always 'did:peer' here due to
+        // the guard above, but captured dynamically for correctness).
+        const priorLayer = asset.currentLayer;
+
+        // Migrate asset to did:webvh layer
+        await asset.migrate('did:webvh');
+        asset.bindings = { ...(asset.bindings || {}), 'did:peer': originalPeerDid, 'did:webvh': publisherDid };
+
+        // Mirror onto the manager emitter: asset.migrate emits only on the
+        // asset's private emitter, so sdk.lifecycle.on('asset:migrated', ...)
+        // subscriptions (and the built-in EventLogger) never fired (issue #346).
+        await this.eventEmitter.emit({
+          type: 'asset:migrated',
+          timestamp: new Date().toISOString(),
           asset: { id: asset.id, fromLayer: priorLayer, toLayer: 'did:webvh' }
+        });
         });
       } catch (publishError) {
         if (atomicRollback) {
