@@ -11,6 +11,7 @@
   "scripts": {
     "build": "turbo run build --filter='./packages/*'",
     "landing": "turbo run build --filter='./packages/*' && cd apps/landing && bunx vite build && bunx vite preview",
+    "landing:ci": "bun apps/landing/scripts/ci.mjs",
     "verify:esm": "node scripts/verify-esm.mjs",
     "test": "turbo run test --filter='./packages/*'",
     "typecheck": "turbo run typecheck --filter='./packages/*'",

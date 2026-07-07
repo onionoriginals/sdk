@@ -1,7 +1,9 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { site } from './src/content';
 
 // Resolve polyfill packages to absolute paths so the aliases also apply to
 // imports coming from the SDK's own dist files (outside this app's root).
@@ -14,8 +16,52 @@ const require = createRequire(import.meta.url);
 const shim = (name: string) =>
   fileURLToPath(new URL(`./src/shims/${name}.ts`, import.meta.url));
 
+const escapeAttr = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+// Injects title/description/URL from src/content.ts into index.html so page
+// copy stays in the single content file, and guards the one production-URL
+// constant (site.url): robots.txt and sitemap.xml are static files in
+// public/ that must reference the same origin, so a mismatch fails the build
+// instead of shipping a half-swapped domain (see issue #330).
+function injectSiteMeta(): Plugin {
+  const tokens: Record<string, string> = {
+    '%SITE_TITLE%': site.title,
+    '%SITE_DESCRIPTION%': site.description,
+    '%SITE_URL%': site.url.replace(/\/$/, ''),
+    '%SITE_WORDMARK%': site.wordmark,
+    '%SITE_OG_IMAGE_ALT%': site.ogImageAlt
+  };
+  return {
+    name: 'originals:inject-site-meta',
+    buildStart() {
+      for (const file of ['robots.txt', 'sitemap.xml']) {
+        const path = fileURLToPath(new URL(`./public/${file}`, import.meta.url));
+        if (!readFileSync(path, 'utf8').includes(site.url.replace(/\/$/, ''))) {
+          throw new Error(
+            `public/${file} does not reference ${site.url} — when swapping the ` +
+              `production domain, update site.url in src/content.ts AND the ` +
+              `absolute URLs in public/robots.txt and public/sitemap.xml.`
+          );
+        }
+      }
+    },
+    transformIndexHtml: {
+      order: 'pre',
+      handler: (html) =>
+        html.replace(/%SITE_[A-Z_]+%/g, (token) => {
+          const value = tokens[token];
+          if (value === undefined) {
+            throw new Error(`index.html uses unknown token ${token}`);
+          }
+          return escapeAttr(value);
+        })
+    }
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), injectSiteMeta()],
   resolve: {
     alias: [
       { find: /^(node:)?fs\/promises$/, replacement: shim('fs-promises') },
