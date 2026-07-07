@@ -60,6 +60,16 @@ export interface BatchOperationOptions {
 }
 
 /**
+ * Progress snapshot reported after each batch item settles (succeeds or
+ * exhausts its retries). Used to emit 'batch:progress' events (issue #352).
+ */
+export interface BatchProgressSnapshot {
+  completed: number;
+  failed: number;
+  total: number;
+}
+
+/**
  * Options for batch inscription operations with Bitcoin-specific settings
  */
 export interface BatchInscriptionOptions extends BatchOperationOptions {
@@ -135,7 +145,8 @@ export class BatchOperationExecutor {
     items: T[],
     operation: (item: T, index: number) => Promise<R>,
     options?: BatchOperationOptions,
-    predeterminedBatchId?: string
+    predeterminedBatchId?: string,
+    onItemSettled?: (progress: BatchProgressSnapshot) => void | Promise<void>
   ): Promise<BatchResult<R>> {
     const opts = { ...this.defaultOptions, ...options };
     const {
@@ -152,6 +163,17 @@ export class BatchOperationExecutor {
     
     const successful: BatchResult<R>['successful'] = [];
     const failed: BatchResult<R>['failed'] = [];
+
+    // Report progress after each settled item; a throwing progress callback
+    // must never fail the batch itself.
+    const reportProgress = async (): Promise<void> => {
+      if (!onItemSettled) return;
+      try {
+        await onItemSettled({ completed: successful.length, failed: failed.length, total: items.length });
+      } catch {
+        // progress reporting is best-effort
+      }
+    };
 
     // Fail-fast abort flag: set as soon as any item exhausts its attempts in
     // fail-fast mode. Sibling operations already in flight cannot be
@@ -181,6 +203,7 @@ export class BatchOperationExecutor {
 
           const duration = Date.now() - itemStartTime;
           successful.push({ index, result, duration });
+          await reportProgress();
           return;
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error));
@@ -229,6 +252,7 @@ export class BatchOperationExecutor {
         duration,
         retryAttempts: attempts - 1
       });
+      await reportProgress();
 
       // If fail-fast mode, abort the batch and throw error
       if (!continueOnError) {

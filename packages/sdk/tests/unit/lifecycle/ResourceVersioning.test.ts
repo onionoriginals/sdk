@@ -392,7 +392,9 @@ describe('OriginalsAsset - Resource Versioning', () => {
     const buffer2 = Buffer.from('binary content 2', 'utf-8');
     // Buffer content used to be accepted but only its hash was stored — the
     // bytes were unrecoverably lost. It now throws so the loss is impossible.
-    expect(() => asset.addResourceVersion('res1', buffer2, 'application/octet-stream'))
+    // The parameter is declared `string` since issue #311, so JS callers
+    // (modelled with the cast) still hit the runtime guard.
+    expect(() => asset.addResourceVersion('res1', buffer2 as unknown as string, 'application/octet-stream'))
       .toThrow(/binary \(Buffer\) content/);
   });
 

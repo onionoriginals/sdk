@@ -7,7 +7,7 @@ import {
   VerifiableCredential,
   LayerType
 } from '../types/index.js';
-import { BitcoinManager } from '../bitcoin/BitcoinManager.js';
+import { BitcoinManager, MAX_REASONABLE_FEE_RATE } from '../bitcoin/BitcoinManager.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { CredentialManager } from '../vc/CredentialManager.js';
 import { OriginalsAsset } from './OriginalsAsset.js';
@@ -527,22 +527,22 @@ export class LifecycleManager {
     if (!effectiveFeeRate) {
       if (this.config.feeOracle) {
         try {
-          effectiveFeeRate = await this.config.feeOracle.estimateFeeRate(1);
+          effectiveFeeRate = this.capEstimatedFeeRate(await this.config.feeOracle.estimateFeeRate(1));
           confidence = 'high';
         } catch {
           // Fallback to default
         }
       }
-      
+
       if (!effectiveFeeRate && this.config.ordinalsProvider) {
         try {
-          effectiveFeeRate = await this.config.ordinalsProvider.estimateFee(1);
+          effectiveFeeRate = this.capEstimatedFeeRate(await this.config.ordinalsProvider.estimateFee(1));
           confidence = 'medium';
         } catch {
           // Fallback to default
         }
       }
-      
+
       if (!effectiveFeeRate) {
         effectiveFeeRate = 10;
         confidence = 'low';
@@ -621,6 +621,15 @@ export class LifecycleManager {
         // Migrate asset to did:webvh layer
         await asset.migrate('did:webvh');
         asset.bindings = { ...(asset.bindings || {}), 'did:peer': originalPeerDid, 'did:webvh': publisherDid };
+
+        // Mirror onto the manager emitter: asset.migrate emits only on the
+        // asset's private emitter, so sdk.lifecycle.on('asset:migrated', ...)
+        // subscriptions (and the built-in EventLogger) never fired (issue #346).
+        await this.eventEmitter.emit({
+          type: 'asset:migrated',
+          timestamp: new Date().toISOString(),
+          asset: { id: asset.id, fromLayer: 'did:peer', toLayer: 'did:webvh' }
+        });
       } catch (publishError) {
         if (atomicRollback) {
           await this.rollbackPartialPublish(asset, urlSnapshots, writtenObjects);
@@ -1181,13 +1190,24 @@ export class LifecycleManager {
     // Capture the layer before migration for accurate metrics
     const fromLayer = asset.currentLayer;
 
-    await asset.migrate('did:btco', {
+    const migrationDetails = {
       transactionId: revealTxId,
       inscriptionId: inscription.inscriptionId,
       satoshi: inscription.satoshi,
       commitTxId,
       revealTxId,
       feeRate: usedFeeRate
+    };
+    await asset.migrate('did:btco', migrationDetails);
+
+    // Mirror onto the manager emitter: asset.migrate emits only on the
+    // asset's private emitter, so sdk.lifecycle.on('asset:migrated', ...)
+    // subscriptions (and the built-in EventLogger) never fired (issue #346).
+    await this.eventEmitter.emit({
+      type: 'asset:migrated',
+      timestamp: new Date().toISOString(),
+      asset: { id: asset.id, fromLayer, toLayer: 'did:btco' },
+      details: migrationDetails
     });
 
     // The binding must be network-prefixed: a regtest/signet satoshi recorded
@@ -1320,7 +1340,19 @@ export class LifecycleManager {
       ? priorTransfers[priorTransfers.length - 1].to
       : asset.id;
     await asset.recordTransfer(currentOwner, newOwner, tx.txid);
-    
+
+    // Mirror onto the manager emitter: asset.recordTransfer emits only on the
+    // asset's private emitter, so sdk.lifecycle.on('asset:transferred', ...)
+    // subscriptions (and the built-in EventLogger) never fired (issue #346).
+    await this.eventEmitter.emit({
+      type: 'asset:transferred',
+      timestamp: new Date().toISOString(),
+      asset: { id: asset.id, layer: asset.currentLayer },
+      from: currentOwner,
+      to: newOwner,
+      transactionId: tx.txid
+    });
+
     stopTimer();
     this.logger.info('Asset ownership transferred successfully', { 
       assetId: asset.id, 
@@ -1719,6 +1751,27 @@ export class LifecycleManager {
   // ===== Cost Estimation =====
 
   /**
+   * Reject absurd estimator output on quote-only paths, mirroring
+   * BitcoinManager's MAX_REASONABLE_FEE_RATE cap on spend paths: a compromised
+   * fee oracle/provider must not be able to show users an arbitrary quote
+   * (issue #351). Returning undefined lets the caller fall through to the
+   * next fee source, matching BitcoinManager.resolveFeeRate's skip semantics.
+   */
+  private capEstimatedFeeRate(estimated: number): number | undefined {
+    if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
+      return undefined;
+    }
+    if (estimated > MAX_REASONABLE_FEE_RATE) {
+      this.logger.warn('Ignoring absurd estimated fee rate for cost quote', {
+        estimated,
+        max: MAX_REASONABLE_FEE_RATE
+      });
+      return undefined;
+    }
+    return estimated;
+  }
+
+  /**
    * Estimate the cost of migrating an asset to a target layer
    * 
    * Returns a detailed breakdown of expected costs for Bitcoin operations.
@@ -1779,17 +1832,17 @@ export class LifecycleManager {
         // Try to get from fee oracle
         if (this.config.feeOracle) {
           try {
-            effectiveFeeRate = await this.config.feeOracle.estimateFeeRate(1);
+            effectiveFeeRate = this.capEstimatedFeeRate(await this.config.feeOracle.estimateFeeRate(1));
             confidence = 'high';
           } catch {
             // Fallback to default
           }
         }
-        
+
         // Try ordinals provider
         if (!effectiveFeeRate && this.config.ordinalsProvider) {
           try {
-            effectiveFeeRate = await this.config.ordinalsProvider.estimateFee(1);
+            effectiveFeeRate = this.capEstimatedFeeRate(await this.config.ordinalsProvider.estimateFee(1));
             confidence = 'medium';
           } catch {
             // Fallback to default

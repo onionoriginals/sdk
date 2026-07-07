@@ -265,6 +265,23 @@ export class OriginalsAsset {
     credentialManager?: CredentialManager;
     fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
   }): Promise<boolean> {
+    const result = await this.runVerificationChecks(deps);
+    // 'verification:completed' is part of the public EventTypeMap and is
+    // subscribed by EventLogger; it was declared but never emitted (issue #352).
+    await this.eventEmitter.emit({
+      type: 'verification:completed',
+      timestamp: new Date().toISOString(),
+      asset: { id: this.id },
+      result
+    });
+    return result;
+  }
+
+  private async runVerificationChecks(deps?: {
+    didManager?: DIDManager;
+    credentialManager?: CredentialManager;
+    fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
+  }): Promise<boolean> {
     try {
       // 1) DID Document validation (structure + supported method via validateDID)
       if (!validateDIDDocument(this.did)) {
@@ -402,14 +419,15 @@ export class OriginalsAsset {
    */
   addResourceVersion(
     resourceId: string,
-    newContent: string | Buffer,
+    newContent: string,
     contentType: string,
     changes?: string
   ): AssetResource {
     // AssetResource.content is a string; a Buffer used to be silently dropped
     // (only its hash was stored), unrecoverably losing the binary content
-    // while the caller believed it was versioned (issue #276). Fail loudly
-    // instead.
+    // while the caller believed it was versioned (issue #276). The parameter
+    // is now declared `string` so TypeScript callers get a compile-time error
+    // (issue #311); the runtime guard stays for JS callers.
     if (typeof newContent !== 'string') {
       throw new StructuredError(
         'BINARY_CONTENT_UNSUPPORTED',
