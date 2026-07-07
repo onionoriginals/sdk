@@ -229,17 +229,11 @@ describeSignet('SignetProvider against signet', () => {
     expect(Array.isArray(results)).toBe(true);
   });
 
-  test('estimateFee returns a positive number', async () => {
-    const fee = await provider.estimateFee(1);
-    expect(typeof fee).toBe('number');
-    expect(fee).toBeGreaterThan(0);
-  });
-
-  test('estimateFee uses Bitcoin Core RPC when configured', async () => {
+  test('estimateFee uses Bitcoin Core RPC when configured, throws without it (#351)', async () => {
     if (!BITCOIN_SIGNET_RPC_URL) {
-      // Without RPC, falls back to default
-      const fee = await provider.estimateFee(6);
-      expect(fee).toBeGreaterThan(0);
+      // Without RPC there is no real fee source; fabricating a rate is
+      // forbidden (issue #351), so the provider must fail loudly.
+      await expect(provider.estimateFee(6)).rejects.toThrow(/bitcoinRpcUrl/);
       return;
     }
     // With RPC, should get a real fee estimate

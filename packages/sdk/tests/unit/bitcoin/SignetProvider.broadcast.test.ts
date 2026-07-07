@@ -68,3 +68,34 @@ describe('SignetProvider.broadcastTransaction (issue #272)', () => {
     expect(seenAuth).toBe('Basic ' + Buffer.from('user:pass').toString('base64'));
   });
 });
+
+describe('SignetProvider.estimateFee fail-loud policy (issue #351)', () => {
+  test('throws without bitcoinRpcUrl instead of fabricating a rate', async () => {
+    const provider = new SignetProvider({ ordUrl: 'http://ord' });
+    await expect(provider.estimateFee(6)).rejects.toThrow(/bitcoinRpcUrl/);
+  });
+
+  test('throws when the RPC returns no feerate instead of inventing one', async () => {
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ result: { errors: ['Insufficient data or no feerate found'] } }),
+      { status: 200 }
+    )) as typeof fetch;
+    const provider = new SignetProvider({ ordUrl: 'http://ord', bitcoinRpcUrl: 'http://rpc' });
+    await expect(provider.estimateFee(1)).rejects.toThrow(/no feerate/i);
+  });
+
+  test('propagates RPC transport failures instead of swallowing them', async () => {
+    globalThis.fetch = (async () => { throw new Error('connection refused'); }) as typeof fetch;
+    const provider = new SignetProvider({ ordUrl: 'http://ord', bitcoinRpcUrl: 'http://rpc' });
+    await expect(provider.estimateFee(1)).rejects.toThrow(/connection refused/);
+  });
+
+  test('converts a real BTC/kB feerate to sat/vB', async () => {
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ result: { feerate: 0.00012 } }),
+      { status: 200 }
+    )) as typeof fetch;
+    const provider = new SignetProvider({ ordUrl: 'http://ord', bitcoinRpcUrl: 'http://rpc' });
+    await expect(provider.estimateFee(1)).resolves.toBe(12);
+  });
+});

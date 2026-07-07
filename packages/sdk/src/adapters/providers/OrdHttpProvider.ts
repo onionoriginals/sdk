@@ -198,13 +198,21 @@ export class OrdHttpProvider implements OrdinalsProvider {
   }
 }
 
-export async function createOrdinalsProviderFromEnv(): Promise<OrdinalsProvider> {
+export async function createOrdinalsProviderFromEnv(
+  options?: { network?: 'mainnet' | 'testnet' | 'signet' | 'regtest' }
+): Promise<OrdinalsProvider> {
   // A configured QuickNode endpoint takes precedence: it is the only
   // env-selectable provider with real broadcast/status/fee support.
   const quickNodeEndpoint = ((globalThis as any).process?.env?.QUICKNODE_ENDPOINT) || '';
   if (quickNodeEndpoint) {
     const mod = await import('./QuickNodeProvider.js');
-    return new mod.QuickNodeProvider({ endpoint: quickNodeEndpoint });
+    // Pass the SDK's network through so the provider verifies the endpoint's
+    // chain on first RPC use (issue #350). Falls back to BITCOIN_NETWORK; when
+    // neither is set, no chain check is performed (unchanged behavior).
+    const envNetworkRaw = String(((globalThis as any).process?.env?.BITCOIN_NETWORK) || '');
+    const envNetwork = (['mainnet', 'testnet', 'signet', 'regtest'] as const).find((n) => n === envNetworkRaw);
+    const expectedNetwork = options?.network ?? envNetwork;
+    return new mod.QuickNodeProvider({ endpoint: quickNodeEndpoint, expectedNetwork });
   }
   const useLive = String(((globalThis as any).process?.env?.USE_LIVE_ORD_PROVIDER) || '').toLowerCase() === 'true';
   if (useLive) {
