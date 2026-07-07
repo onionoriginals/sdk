@@ -200,13 +200,17 @@ describe('BatchOperations', () => {
         maxConcurrent: 1
       });
 
-      expect(result.totalDuration).toBeGreaterThanOrEqual(60); // At least 60ms (3 * 20ms)
+      // 3 sequential 20ms sleeps ≈ 60ms, but setTimeout can fire fractionally
+      // early relative to Date/ISO-millisecond truncation on loaded CI
+      // runners; 55ms still proves sequential execution (concurrent ≈ 20ms)
+      // without flaking on 59.x measurements.
+      expect(result.totalDuration).toBeGreaterThanOrEqual(55);
       expect(result.startedAt).toBeDefined();
       expect(result.completedAt).toBeDefined();
-      
+
       const startTime = new Date(result.startedAt).getTime();
       const endTime = new Date(result.completedAt).getTime();
-      expect(endTime - startTime).toBeGreaterThanOrEqual(60);
+      expect(endTime - startTime).toBeGreaterThanOrEqual(55);
     });
 
     test('should track individual operation durations', async () => {
