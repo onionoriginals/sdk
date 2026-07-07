@@ -951,11 +951,15 @@ export class WebVHManager {
     const invocation = inRelationship(doc.capabilityInvocation);
     const delegation = inRelationship(doc.capabilityDelegation);
     if (invocation && delegation) {
+      // Path-neutral error code: this helper is reached from update AND from
+      // rotation/recovery (via buildRotationDocumentOptions), so the code
+      // must describe the unexpressible document shape, not one entry path.
       throw new StructuredError(
-        'WEBVH_UNSUPPORTED_UPDATE_FIELD',
+        'WEBVH_UNSUPPORTED_DOCUMENT_SHAPE',
         `Verification method ${vm.id} is in both capabilityInvocation and capabilityDelegation; ` +
         'didwebvh-ts expresses capability relationships through a single per-VM purpose, so this ' +
-        'document shape cannot be written without silently dropping one relationship.'
+        'document shape cannot be written (on update, rotation, or recovery) without silently ' +
+        'dropping one relationship.'
       );
     }
     const purpose = invocation ? 'capabilityInvocation'

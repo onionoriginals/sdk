@@ -306,6 +306,37 @@ describe('#339 — rotation/recovery preserve carried verification methods and r
     expect(referencesFragment(resolvedDoc.keyAgreement, 'key-agreement-1')).toBe(true);
   }, 30000);
 
+  test('rotation on a doc whose carried VM is in BOTH capability relationships fails loudly (not a silent drop)', async () => {
+    const manager = new WebVHManager();
+    const keyManager = new KeyManager();
+    const carried = await keyManager.generateKeyPair('Ed25519');
+
+    const created = await manager.createDIDWebVH({
+      domain: 'example.com',
+      additionalVerificationMethods: [
+        { id: '#capability-1', type: 'Multikey', publicKeyMultibase: carried.publicKey, purpose: 'capabilityInvocation' },
+      ],
+    });
+
+    // This SDK cannot author dual capability membership, but a log written by
+    // another didwebvh-ts client can carry it. Simulate that shape in the
+    // latest entry's state: didwebvh-ts's per-VM single `purpose` cannot
+    // express it, so rotation must throw a clear error BEFORE signing rather
+    // than silently dropping one relationship.
+    const log = structuredClone(created.log);
+    const state = log[log.length - 1].state as {
+      capabilityInvocation?: string[];
+      capabilityDelegation?: string[];
+    };
+    state.capabilityDelegation = [...(state.capabilityInvocation ?? [])];
+
+    await expect(manager.rotateDIDWebVHKeys({
+      did: created.did,
+      currentLog: log,
+      currentKeyPair: created.keyPair!,
+    })).rejects.toThrow(/both capabilityInvocation and capabilityDelegation/);
+  }, 30000);
+
   test('rotation rejects a non-Ed25519 replacement key instead of bricking the DID', async () => {
     const manager = new WebVHManager();
     const keyManager = new KeyManager();
