@@ -461,6 +461,12 @@ describe('DID-007 — updateDIDWebVH adds new service endpoint with signed log e
     expect(typeof proof.proofValue).toBe('string');
     expect((proof.proofValue as string).length).toBeGreaterThan(0);
 
+    // The update must actually be APPLIED — not a signed no-op re-stating the
+    // previous document (issue #338): the service must appear both in the
+    // returned document and in the new log entry's state.
+    expect(updated.didDocument.service).toEqual([newService]);
+    expect((newEntry.state as { service?: unknown }).service).toEqual([newService]);
+
     // DID id must be unchanged
     expect(updated.didDocument.id).toBe(created.did);
   }, 30000);
@@ -503,10 +509,11 @@ describe('DID-007 — updateDIDWebVH adds new service endpoint with signed log e
       },
     };
 
+    const extService = { id: `${created.did}#svc`, type: 'ExampleService', serviceEndpoint: 'https://svc.example.com' };
     const updated = await manager.updateDIDWebVH({
       did: created.did,
       currentLog: created.log,
-      updates: { service: [{ id: `${created.did}#svc`, type: 'ExampleService', serviceEndpoint: 'https://svc.example.com' }] },
+      updates: { service: [extService] },
       signer: authorizedSigner,
       verifier: authorizedVerifier,
     });
@@ -514,6 +521,12 @@ describe('DID-007 — updateDIDWebVH adds new service endpoint with signed log e
     expect(updated.log.length).toBe(created.log.length + 1);
     expect(updateCalls).toBeGreaterThan(0);
     expect(updated.didDocument.id).toBe(created.did);
+
+    // The update must actually be applied (issue #338), in both the returned
+    // document and the appended log entry's state.
+    expect(updated.didDocument.service).toEqual([extService]);
+    const lastEntry = updated.log[updated.log.length - 1];
+    expect((lastEntry.state as { service?: unknown }).service).toEqual([extService]);
   }, 30000);
 });
 

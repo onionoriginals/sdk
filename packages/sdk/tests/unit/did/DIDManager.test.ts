@@ -55,9 +55,11 @@ describe('DIDManager', () => {
     // The peer verification method is carried over (verification-only)
     const carried = (web.verificationMethod || []).map(vm => vm.publicKeyMultibase);
     expect(carried).toContain(peer.verificationMethod![0].publicKeyMultibase);
-    // All VM ids/controllers are rooted at the new did:webvh
+    // All VM ids/controllers are rooted at the new did:webvh. A relative
+    // fragment id (e.g. the signing key's '#key-0', issue #334) resolves
+    // against the document id per DID Core, so it is equally rooted.
     for (const vm of web.verificationMethod || []) {
-      expect(vm.id!.startsWith(web.id)).toBe(true);
+      expect(vm.id!.startsWith(web.id) || vm.id!.startsWith('#')).toBe(true);
       expect(vm.controller).toBe(web.id);
     }
     // Services preserved, old DID recorded in alsoKnownAs
@@ -88,9 +90,11 @@ describe('DIDManager', () => {
       assertionMethod: ['did:peer:abc123#0']
     };
     const web = (await sdk.did.migrateToDIDWebVH(peer, 'example.com')).didDocument;
-    // No reference to the retired did:peer remains outside alsoKnownAs
+    // No reference to the retired did:peer remains outside alsoKnownAs.
+    // Relative fragment ids ('#key-0') resolve against the document id per
+    // DID Core, so they carry no did:peer reference either (issue #334).
     for (const vm of web.verificationMethod || []) {
-      expect(vm.id!.startsWith(web.id)).toBe(true);
+      expect(vm.id!.startsWith(web.id) || vm.id!.startsWith('#')).toBe(true);
       expect(vm.controller).toBe(web.id);
     }
     const rels = ([] as unknown[]).concat(web.authentication || [], web.assertionMethod || []);
