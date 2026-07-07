@@ -273,6 +273,10 @@ describe('DID-007 — update did:webvh', () => {
     expect(Array.isArray(newEntry.proof)).toBe(true);
     const proof = (newEntry.proof as Record<string, unknown>[])[0];
     expect(typeof proof.proofValue).toBe('string');
+
+    // The new entry's state must actually contain the update (issue #338).
+    expect((newEntry.state as { service?: unknown }).service).toEqual([newService]);
+    expect(updated.didDocument.service).toEqual([newService]);
   }, 20000);
 
   test('update preserves DID identity (id constant across updates)', async () => {
@@ -301,21 +305,22 @@ describe('DID-007 — update did:webvh', () => {
     const extraKey = await keyManager.generateKeyPair('Ed25519');
 
     // Add a service referencing new key as a proxy for injecting new VM info
+    const extraService = {
+      id: `${created.did}#extra`,
+      type: 'ExtraService',
+      serviceEndpoint: `did:key:${extraKey.publicKey}`,
+    };
     const updated = await manager.updateDIDWebVH({
       did: created.did,
       currentLog: created.log,
-      updates: {
-        service: [{
-          id: `${created.did}#extra`,
-          type: 'ExtraService',
-          serviceEndpoint: `did:key:${extraKey.publicKey}`,
-        }],
-      },
+      updates: { service: [extraService] },
       signer: created.keyPair,
     });
 
     expect(updated.didDocument).toBeDefined();
     expect(updated.log.length).toBeGreaterThan(created.log.length);
+    // The service must actually be applied (issue #338).
+    expect(updated.didDocument.service).toEqual([extraService]);
   }, 20000);
 });
 
