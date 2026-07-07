@@ -227,10 +227,22 @@ export class OrdinalsClient {
       return null;
     }
     assertContentLengthWithin(res, this.maxJsonBytes);
-    let text = (await res.text()).trim();
-    if (text.length > this.maxJsonBytes) {
-      return null;
+    // Materialize bytes when possible so the cap counts BYTES: text.length
+    // counts UTF-16 code units, so multi-byte content could consume up to 4x
+    // the cap when a malicious indexer omits/understates Content-Length.
+    let rawText: string;
+    if (typeof (res as { arrayBuffer?: unknown }).arrayBuffer === 'function') {
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.byteLength > this.maxJsonBytes) {
+        return null;
+      }
+      rawText = new TextDecoder().decode(bytes);
+    } else {
+      // Test doubles may implement only text(); the Content-Length check
+      // above is the only cap available in that case.
+      rawText = await res.text();
     }
+    let text = rawText.trim();
     if (text.startsWith('"') && text.endsWith('"')) {
       try {
         text = JSON.parse(text);
