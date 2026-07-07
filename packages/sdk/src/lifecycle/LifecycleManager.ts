@@ -628,7 +628,7 @@ export class LifecycleManager {
         await this.eventEmitter.emit({
           type: 'asset:migrated',
           timestamp: new Date().toISOString(),
-          asset: { id: asset.id, fromLayer: 'did:peer', toLayer: 'did:webvh' }
+          asset: { id: asset.id, fromLayer: priorLayer, toLayer: 'did:webvh' }
         });
       } catch (publishError) {
         if (atomicRollback) {
