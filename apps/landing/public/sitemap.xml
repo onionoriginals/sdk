@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Single-page sitemap for the Originals SDK landing page.
+     The <loc> URL must match site.url in src/content.ts (the single
+     production-URL constant, placeholder until issue #330 picks the
+     domain). The vite build fails if the two drift. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://originals.example.com/</loc>
+    <changefreq>monthly</changefreq>
+  </url>
+</urlset>

@@ -7,6 +7,17 @@ export const site = {
   title: 'Originals SDK — Provenance that survives the internet',
   description:
     'Create, publish, and inscribe digital assets with cryptographically verifiable provenance. did:peer → did:webvh → did:btco.',
+  /**
+   * PLACEHOLDER — production URL, pending the hosting decision in issue #330.
+   * This is the single constant to swap once the domain is chosen. It is
+   * injected into index.html (canonical, og:url, og:image, twitter:image) at
+   * build time; public/robots.txt and public/sitemap.xml must carry the same
+   * origin — the build fails with a pointed error if they drift.
+   */
+  url: 'https://originals.example.com',
+  tagline: 'Provenance that survives the internet.',
+  ogImageAlt:
+    'Generative orbital artwork beside the Originals wordmark and the tagline “Provenance that survives the internet.”',
   wordmark: 'Originals',
   github: 'https://github.com/onionoriginals/sdk',
   install: 'npm install @originals/sdk'

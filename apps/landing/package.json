@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
+    "ci": "bun scripts/ci.mjs",
+    "icons": "bun scripts/icons.mjs",
+    "og": "bun scripts/og-image.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
