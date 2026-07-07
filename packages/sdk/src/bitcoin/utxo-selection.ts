@@ -15,7 +15,7 @@ import {
   ResourceUtxoSelectionResult 
 } from '../types/bitcoin.js';
 import { calculateFee } from './fee-calculation.js';
-import { carriesOrdinal, isProtectedUtxo, inputVBytesForScriptPubKey } from './utxo.js';
+import { carriesOrdinal, isProtectedUtxo, inputVBytesForScriptPubKey, WITNESS_32B_OUTPUT_VBYTES } from './utxo.js';
 
 // Minimum dust limit for Bitcoin outputs (546 satoshis)
 const MIN_DUST_LIMIT = DUST_LIMIT_SATS;
@@ -43,7 +43,11 @@ export function estimateTransactionSize(inputCount: number, outputCount: number)
  * Estimates transaction size in vbytes for a concrete set of funding UTXOs,
  * sizing each input by its scriptPubKey's script class (P2WPKH 68, P2TR 57.5,
  * P2WSH conservative 120; inputs without a scriptPubKey are charged at
- * conservative legacy width so the quote never underpays).
+ * conservative legacy width so the quote never underpays). Output addresses
+ * are not known at this call site, so each output is charged the largest
+ * standard output size (43 vB, P2TR/P2WSH) — same safe direction: a P2WPKH
+ * output merely overpays 12 vB, whereas charging 31 vB would underpay the
+ * requested rate for P2TR/P2WSH destinations.
  *
  * @param inputs UTXOs funding the transaction
  * @param outputCount Number of outputs in the transaction
@@ -51,7 +55,7 @@ export function estimateTransactionSize(inputCount: number, outputCount: number)
  */
 export function estimateTransactionSizeForUtxos(inputs: Utxo[], outputCount: number): number {
   const inputSize = inputs.reduce((sum, u) => sum + inputVBytesForScriptPubKey(u.scriptPubKey), 0);
-  return Math.ceil(10 + inputSize + (outputCount * 31));
+  return Math.ceil(10 + inputSize + (outputCount * WITNESS_32B_OUTPUT_VBYTES));
 }
 
 /**
