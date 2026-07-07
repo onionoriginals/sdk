@@ -934,6 +934,15 @@ export class WebVHManager {
    * by explicit options wherever this is used, but capabilityInvocation and
    * capabilityDelegation have NO option override in didwebvh-ts — they are
    * expressible solely via a VM's purpose.
+   *
+   * CALLER CONTRACT: every call site MUST also pass explicit
+   * `authentication`, `assertionMethod`, and `keyAgreement` options to
+   * updateDID/createDID. `authentication` is deliberately absent from the
+   * purpose chain below (didwebvh-ts already defaults purposeless VMs into
+   * `authentication`), so without the explicit override a VM that is in
+   * `authentication` AND another relationship (e.g. keyAgreement) would get
+   * the other purpose and silently drop out of the rebuilt `authentication`
+   * array.
    */
   private toWebVHVerificationMethod(vm: DidDocVerificationMethod, doc: DIDDocument): VerificationMethod {
     const inRelationship = (rel?: (string | DidDocVerificationMethod)[]): boolean =>
@@ -983,6 +992,18 @@ export class WebVHManager {
           'corresponding option, so the change would be silently discarded.'
         );
       }
+    }
+
+    // `id` is accepted only so callers may spread an existing document into
+    // `updates`; the DID identifier itself is immutable through this API
+    // (mergedDoc.id is pinned to the DID before this runs). An attempt to
+    // CHANGE it must fail loudly rather than be silently pinned back.
+    if (updates.id !== undefined && updates.id !== mergedDoc.id) {
+      throw new StructuredError(
+        'WEBVH_UNSUPPORTED_UPDATE_FIELD',
+        `updateDIDWebVH cannot change the DID id (got "${updates.id}"): the identifier is ` +
+        'immutable; moving a portable DID is not supported through this API.'
+      );
     }
 
     const options: Record<string, unknown> = {};

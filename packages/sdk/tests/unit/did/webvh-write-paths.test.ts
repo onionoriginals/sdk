@@ -147,6 +147,29 @@ describe('#338 — updateDIDWebVH applies updates through the options didwebvh-t
       signer: created.keyPair!,
     })).rejects.toThrow(/cannot apply updates to "controller"/);
   }, 30000);
+
+  test('rejects an attempted id change; accepts a spread document carrying the same id', async () => {
+    const manager = new WebVHManager();
+    const created = await manager.createDIDWebVH({ domain: 'example.com' });
+
+    // Changing the DID id must fail loudly, not be silently pinned back.
+    await expect(manager.updateDIDWebVH({
+      did: created.did,
+      currentLog: created.log,
+      updates: { id: 'did:webvh:xyz:elsewhere.example.com' },
+      signer: created.keyPair!,
+    })).rejects.toThrow(/cannot change the DID id/);
+
+    // But spreading the current document (same id) into updates is fine.
+    const svc = { id: `${created.did}#spread`, type: 'Svc', serviceEndpoint: 'https://spread.example.com' };
+    const updated = await manager.updateDIDWebVH({
+      did: created.did,
+      currentLog: created.log,
+      updates: { id: created.did, service: [svc] },
+      signer: created.keyPair!,
+    });
+    expect(updated.didDocument.service).toEqual([svc]);
+  }, 30000);
 });
 
 describe('#339 — rotation/recovery preserve carried verification methods and relationships', () => {
