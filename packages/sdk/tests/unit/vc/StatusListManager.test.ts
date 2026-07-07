@@ -855,12 +855,13 @@ describe('StatusListManager', () => {
       expect(mismatch.verified).toBe(false);
       expect(mismatch.errors.some(e => e.includes('Status check error'))).toBe(true);
 
-      // Determinable revocation still leaves the signature valid: `revoked`
-      // carries the status, `verified` stays true (the signature is genuine).
+      // Determinable revocation fails verification (issue #345): a caller
+      // gating on `verified` alone must not accept a revoked credential, so
+      // `revoked` carries the status AND `verified` flips to false.
       const revokedList = sdk.statusList.setStatus(statusListVC, 7, true);
       const revoked = await sdk.credentials.verifyCredentialWithStatus(signed, revokedList);
       expect(revoked.revoked).toBe(true);
-      expect(revoked.verified).toBe(true);
+      expect(revoked.verified).toBe(false);
     });
 
     test('SDK exposes statusList on top-level instance', async () => {

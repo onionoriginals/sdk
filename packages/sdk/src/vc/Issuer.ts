@@ -3,6 +3,31 @@ import { multikey, MultikeyType } from '../crypto/Multikey.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { createDocumentLoader } from './documentLoader.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
+import { StructuredError } from '../utils/telemetry.js';
+
+/**
+ * True when the error is a SECURITY refusal that must fail closed (never fall
+ * back to a more permissive signing path): an issuer-binding mismatch or a
+ * retired (revoked/compromised) verification method. Matched by typed
+ * StructuredError code, with the legacy message patterns kept as a
+ * defense-in-depth fallback for errors raised outside this SDK (issue #309).
+ */
+export function isSecuritySigningRefusal(e: unknown): boolean {
+  if (e instanceof StructuredError && (e.code === 'ISSUER_BINDING_MISMATCH' || e.code === 'VM_RETIRED')) {
+    return true;
+  }
+  const msg = e instanceof Error ? e.message : String(e);
+  return (
+    msg.includes('does not match the verification method controller') ||
+    /retired|revoked|compromised/i.test(msg)
+  );
+}
+
+/** True when the error marks a retired (revoked/compromised) verification method. */
+function isRetiredVmError(e: unknown): boolean {
+  if (e instanceof StructuredError && e.code === 'VM_RETIRED') return true;
+  return e instanceof Error && /retired/i.test(e.message);
+}
 
 export interface IssueOptions {
   proofPurpose: 'assertionMethod' | 'authentication';
@@ -70,7 +95,7 @@ export class Issuer {
     try {
       await documentLoader(this.verificationMethod.id);
     } catch (e) {
-      if (e instanceof Error && /retired/i.test(e.message)) throw e;
+      if (isRetiredVmError(e)) throw e;
       // otherwise proceed with the self-provided verification method
     }
 
@@ -81,7 +106,10 @@ export class Issuer {
     // Fail closed: refuse to sign when the stated issuer doesn't own the key.
     const keyController = this.verificationMethod.controller || this.verificationMethod.id.split('#')[0];
     if (issuerId && issuerId !== keyController) {
-      throw new Error(
+      // Typed ISSUER_BINDING_MISMATCH code: CredentialManager.signCredential
+      // fails closed on this error by CODE, not by message wording (issue #309).
+      throw new StructuredError(
+        'ISSUER_BINDING_MISMATCH',
         `Issuer DID (${issuerId}) does not match the verification method controller (${keyController})`
       );
     }
@@ -122,7 +150,7 @@ export class Issuer {
     try {
       await documentLoader(this.verificationMethod.id);
     } catch (e) {
-      if (e instanceof Error && /retired/i.test(e.message)) throw e;
+      if (isRetiredVmError(e)) throw e;
       // otherwise proceed with the self-provided verification method
     }
 

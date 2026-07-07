@@ -1,6 +1,7 @@
 import { DIDManager } from '../did/DIDManager.js';
 import { PRELOADED_CONTEXTS } from '../utils/serialization.js';
 import { multikey } from '../crypto/Multikey.js';
+import { StructuredError } from '../utils/telemetry.js';
 
 type LoadedDocument = { document: unknown; documentUrl: string; contextUrl: string | null };
 
@@ -52,7 +53,9 @@ export class DocumentLoader {
         const cached = verificationMethodRegistry.get(didUrl);
         if (cached && ((cached as { revoked?: string; compromised?: string }).revoked ||
                        (cached as { revoked?: string; compromised?: string }).compromised)) {
-          throw new Error(`Verification method is retired (revoked or compromised): ${didUrl}`);
+          // Typed VM_RETIRED code: signing paths fail closed on this error by
+          // CODE, not by message wording (issue #309).
+          throw new StructuredError('VM_RETIRED', `Verification method is retired (revoked or compromised): ${didUrl}`);
         }
       }
       if (fragment && did.startsWith('did:key:')) {
@@ -104,7 +107,9 @@ export class DocumentLoader {
     // the DID document precisely so verifiers can recognise it as retired.
     const assertNotRetired = (vm: { revoked?: string; compromised?: string }): void => {
       if (vm.revoked || vm.compromised) {
-        throw new Error(`Verification method is retired (revoked or compromised): ${didUrl}`);
+        // Typed VM_RETIRED code: signing paths fail closed on this error by
+        // CODE, not by message wording (issue #309).
+        throw new StructuredError('VM_RETIRED', `Verification method is retired (revoked or compromised): ${didUrl}`);
       }
     };
 

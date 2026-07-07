@@ -5,6 +5,7 @@ import { createDocumentLoader } from './documentLoader.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
 import { StatusListManager } from './StatusListManager.js';
+import { validateStatusListCredentialTrust } from './statusListTrust.js';
 
 export type VerificationResult = { verified: boolean; errors: string[] };
 
@@ -308,56 +309,20 @@ export class Verifier {
   }
 
   /**
-   * Trust checks for a resolved status list credential (issue #238):
-   * 1. its `id` must equal the entry's `statusListCredential` URL (any list
-   *    with a matching statusPurpose would otherwise be accepted),
-   * 2. its own proof must verify (an entirely unsigned list must not decide
-   *    revocation),
-   * 3. its issuer must equal the issuer of the credential being checked —
-   *    revocation authority lies with the credential's issuer.
+   * Trust checks for a resolved status list credential (issue #238), shared
+   * with CredentialManager.verifyCredentialWithStatus via
+   * validateStatusListCredentialTrust (issue #301). The list's own proof is
+   * verified with checkStatus: false because the list's own status (if any)
+   * is out of scope here and would recurse.
    */
   private async validateStatusListCredential(
     vc: VerifiableCredential,
     entry: BitstringStatusListEntry,
     statusListVC: VerifiableCredential
   ): Promise<VerificationResult> {
-    if (!statusListVC.id || statusListVC.id !== entry.statusListCredential) {
-      return {
-        verified: false,
-        errors: [
-          `Status list credential id (${String(statusListVC.id)}) does not match the credential's ` +
-          `statusListCredential reference (${entry.statusListCredential})`
-        ]
-      };
-    }
-
-    const issuerOf = (c: VerifiableCredential): string | undefined =>
-      typeof c.issuer === 'string' ? c.issuer : (c.issuer as { id?: string } | undefined)?.id;
-
-    // Verify the status list credential's own proof. Status lists must carry
-    // a Data Integrity (eddsa-rdfc-2022) proof — the only proof format this
-    // SDK supports. checkStatus: false because the list's own status (if any)
-    // is out of scope here and would recurse.
-    const proofResult = await this.verifyCredential(statusListVC, { checkStatus: false });
-    if (!proofResult.verified) {
-      return {
-        verified: false,
-        errors: ['Status list credential proof verification failed', ...proofResult.errors]
-      };
-    }
-    const credentialIssuer = issuerOf(vc);
-    const listIssuer = issuerOf(statusListVC);
-    if (!credentialIssuer || !listIssuer || credentialIssuer !== listIssuer) {
-      return {
-        verified: false,
-        errors: [
-          `Status list credential issuer (${String(listIssuer)}) does not match the ` +
-          `checked credential's issuer (${String(credentialIssuer)})`
-        ]
-      };
-    }
-
-    return { verified: true, errors: [] };
+    return validateStatusListCredentialTrust(vc, entry, statusListVC, (listVC) =>
+      this.verifyCredential(listVC, { checkStatus: false })
+    );
   }
 
   /**
@@ -463,6 +428,38 @@ export class Verifier {
         result.errors.push(
           `Threshold not met: ${result.validSignatures}/${policy.required} valid signatures`
         );
+      }
+
+      // Enforce the credential's validity window. A valid m-of-n proof set
+      // over an expired (or not-yet-valid) credential must not verify — the
+      // single-sig path and MultiSigManager.verifyMultiSig both enforce this
+      // window; skipping it here let multi-sig credentials verified through
+      // the Verifier bypass expiration entirely (issue #340).
+      const validity = checkCredentialValidityPeriod(vc);
+      if (!validity.verified) {
+        result.verified = false;
+        result.errors.push(...validity.errors);
+      }
+
+      // Enforce revocation. When this verifier has a status list resolver,
+      // check the declared status like the single-sig path does; without one,
+      // fail closed on a declared BitstringStatusListEntry rather than
+      // silently accepting a possibly-revoked credential (issue #340).
+      const statusType = (vc.credentialStatus as BitstringStatusListEntry | undefined)?.type;
+      if (statusType === 'BitstringStatusListEntry') {
+        if (this.statusListResolver) {
+          const statusResult = await this.checkCredentialStatus(vc);
+          if (!statusResult.verified) {
+            result.verified = false;
+            result.errors.push(...statusResult.errors);
+          }
+        } else {
+          result.verified = false;
+          result.errors.push(
+            'Credential declares credentialStatus but no statusListResolver is configured. ' +
+            'Provide a statusListResolver to check revocation for multi-sig credentials.'
+          );
+        }
       }
 
       // Check timelock
