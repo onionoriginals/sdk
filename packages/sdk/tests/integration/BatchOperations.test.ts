@@ -16,6 +16,11 @@ import { StorageAdapter as ConfigStorageAdapter } from '../../src/adapters/types
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import type { BatchResult } from '../../src/lifecycle/BatchOperations';
 import { KeyManager } from '../../src/did/KeyManager';
+import { createHash as __cryptoCreateHash } from 'crypto';
+// Real content hash — createAsset/publish now verify content against the
+// declared hash (issue #347), so fixtures must declare the true sha256.
+const contentHash = (c: string) => __cryptoCreateHash('sha256').update(c, 'utf8').digest('hex');
+
 
 function makeHash(prefix: string): string {
   const hexOnly = prefix.split('').map(c => {
@@ -91,13 +96,13 @@ describe('Batch Operations Integration', () => {
     test('should create multiple assets successfully', async () => {
       const resourcesList = [
         [
-          { id: 'res1', type: 'image', contentType: 'image/png', hash: makeHash('img1'), content: 'image1' }
+          { id: 'res1', type: 'image', contentType: 'image/png', hash: contentHash('image1'), content: 'image1' }
         ],
         [
-          { id: 'res2', type: 'text', contentType: 'text/plain', hash: makeHash('txt1'), content: 'text1' }
+          { id: 'res2', type: 'text', contentType: 'text/plain', hash: contentHash('text1'), content: 'text1' }
         ],
         [
-          { id: 'res3', type: 'data', contentType: 'application/json', hash: makeHash('json1'), content: '{"key":"value"}' }
+          { id: 'res3', type: 'data', contentType: 'application/json', hash: contentHash('{"key":"value"}'), content: '{"key":"value"}' }
         ]
       ];
 
@@ -131,11 +136,11 @@ describe('Batch Operations Integration', () => {
     test('should continue on error when specified', async () => {
       const resourcesList = [
         [
-          { id: 'res1', type: 'image', contentType: 'image/png', hash: makeHash('img1'), content: 'image1' }
+          { id: 'res1', type: 'image', contentType: 'image/png', hash: contentHash('image1'), content: 'image1' }
         ],
         [], // This will fail validation at runtime
         [
-          { id: 'res3', type: 'text', contentType: 'text/plain', hash: makeHash('txt1'), content: 'text1' }
+          { id: 'res3', type: 'text', contentType: 'text/plain', hash: contentHash('text1'), content: 'text1' }
         ]
       ];
 
@@ -159,7 +164,7 @@ describe('Batch Operations Integration', () => {
       });
 
       const resourcesList = [
-        [{ id: 'res1', type: 'image', contentType: 'image/png', hash: makeHash('img1'), content: 'image1' }]
+        [{ id: 'res1', type: 'image', contentType: 'image/png', hash: contentHash('image1'), content: 'image1' }]
       ];
 
       await sdk.lifecycle.batchCreateAssets(resourcesList);
@@ -182,7 +187,7 @@ describe('Batch Operations Integration', () => {
       const assets: OriginalsAsset[] = [];
       for (let i = 0; i < 3; i++) {
         const asset = await sdk.lifecycle.createAsset([
-          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
         ]);
         assets.push(asset);
       }
@@ -202,7 +207,7 @@ describe('Batch Operations Integration', () => {
 
     test('should validate domain format', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'res1', type: 'text', contentType: 'text/plain', hash: makeHash('txt1'), content: 'text1' }
+        { id: 'res1', type: 'text', contentType: 'text/plain', hash: contentHash('text1'), content: 'text1' }
       ]);
 
       await expect(
@@ -220,7 +225,7 @@ describe('Batch Operations Integration', () => {
       });
 
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'res1', type: 'text', contentType: 'text/plain', hash: makeHash('txt1'), content: 'text1' }
+        { id: 'res1', type: 'text', contentType: 'text/plain', hash: contentHash('text1'), content: 'text1' }
       ]);
 
       await sdk.lifecycle.batchPublishToWeb([asset], 'example.com');
@@ -235,7 +240,7 @@ describe('Batch Operations Integration', () => {
       const assets: OriginalsAsset[] = [];
       for (let i = 0; i < 3; i++) {
         const asset = await sdk.lifecycle.createAsset([
-          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
         ]);
         assets.push(asset);
       }
@@ -264,7 +269,7 @@ describe('Batch Operations Integration', () => {
       const assets: OriginalsAsset[] = [];
       for (let i = 0; i < 3; i++) {
         const asset = await sdk.lifecycle.createAsset([
-          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
         ]);
         assets.push(asset);
       }
@@ -294,7 +299,7 @@ describe('Batch Operations Integration', () => {
       const assets: OriginalsAsset[] = [];
       for (let i = 0; i < 3; i++) {
         const asset = await sdk.lifecycle.createAsset([
-          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
         ]);
         const inscribed = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
         assets.push(inscribed);
@@ -320,7 +325,7 @@ describe('Batch Operations Integration', () => {
 
     test('should validate Bitcoin addresses', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'res1', type: 'text', contentType: 'text/plain', hash: makeHash('txt1'), content: 'text1' }
+        { id: 'res1', type: 'text', contentType: 'text/plain', hash: contentHash('text1'), content: 'text1' }
       ]);
       const inscribed = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
 
@@ -335,7 +340,7 @@ describe('Batch Operations Integration', () => {
 
     test('should validate assets are inscribed', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'res1', type: 'text', contentType: 'text/plain', hash: makeHash('txt1'), content: 'text1' }
+        { id: 'res1', type: 'text', contentType: 'text/plain', hash: contentHash('text1'), content: 'text1' }
       ]);
 
       const transfers = [
@@ -352,7 +357,7 @@ describe('Batch Operations Integration', () => {
     test('should execute full lifecycle with batch operations', async () => {
       // Phase 1: Batch create
       const resourcesList = Array.from({ length: 5 }, (_, i) => [
-        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
       ]);
 
       const createResult = await sdk.lifecycle.batchCreateAssets(resourcesList);
@@ -399,7 +404,7 @@ describe('Batch Operations Integration', () => {
   describe('Performance and Scalability', () => {
     test('should handle large batches efficiently', async () => {
       const resourcesList = Array.from({ length: 50 }, (_, i) => [
-        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
       ]);
 
       const startTime = Date.now();
@@ -419,7 +424,7 @@ describe('Batch Operations Integration', () => {
       const assets: OriginalsAsset[] = [];
       for (let i = 0; i < 20; i++) {
         const asset = await sdk.lifecycle.createAsset([
-          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
         ]);
         assets.push(asset);
       }

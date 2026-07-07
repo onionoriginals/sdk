@@ -13,7 +13,7 @@ import { schnorr } from '@noble/curves/secp256k1.js';
 import { Utxo, ResourceUtxo } from '../../types/bitcoin.js';
 import { calculateFee } from '../fee-calculation.js';
 import { selectUtxos, SimpleUtxoSelectionOptions } from '../utxo-selection.js';
-import { isSegwitScriptPubKey } from '../utxo.js';
+import { isSegwitScriptPubKey, inputVBytesForScriptPubKey, outputVBytesForAddress } from '../utxo.js';
 import { validateBitcoinAddress } from '../../utils/bitcoin-address.js';
 
 // Define minimum dust limit (satoshis)
@@ -117,22 +117,28 @@ export interface CommitTransactionResult {
 }
 
 /**
- * Estimates the size of a commit transaction
+ * Estimates the size of a commit transaction.
  *
- * @param inputCount - Number of transaction inputs
+ * Inputs are sized by script class (P2WPKH 68 vB, P2TR 57.5 vB, P2WSH a
+ * conservative 120 vB) rather than assuming P2WPKH for every segwit input —
+ * a 2-of-3 P2WSH input is ~105 vB, so the old flat 68 vB built commits that
+ * paid below the requested fee rate and could stall in the mempool with the
+ * reveal key stranded in memory (issue #344). When uncertain, overestimate.
+ *
+ * @param inputs - The UTXOs funding the transaction
  * @param outputCount - Number of transaction outputs (including commit and change)
+ * @param changeOutputVBytes - Size of one change output, per the change address's script class
  * @returns Estimated transaction size in virtual bytes
  */
-function estimateCommitTxSize(inputCount: number, outputCount: number): number {
+function estimateCommitTxSize(inputs: Utxo[], outputCount: number, changeOutputVBytes: number): number {
   // Transaction overhead
   const overhead = 10.5;
 
-  // P2WPKH inputs (assuming most common case)
-  const inputSize = 68 * inputCount;
+  const inputSize = inputs.reduce((sum, u) => sum + inputVBytesForScriptPubKey(u.scriptPubKey), 0);
 
-  // P2TR output for commit and P2WPKH for change
+  // P2TR output for commit; change output sized by the change address type
   const commitOutputSize = 43; // P2TR output
-  const changeOutputSize = outputCount > 1 ? 31 * (outputCount - 1) : 0; // P2WPKH outputs for change
+  const changeOutputSize = outputCount > 1 ? changeOutputVBytes * (outputCount - 1) : 0;
 
   return Math.ceil(overhead + inputSize + commitOutputSize + changeOutputSize);
 }
@@ -414,8 +420,17 @@ export async function createCommitTransaction(
   let estimatedFee = 0;
   let iteration = 0;
 
-  // Start with initial estimate (1 input, 2 outputs)
-  let targetAmount = commitOutputValue + Number(calculateFee(estimateCommitTxSize(1, 2), feeRate));
+  // Change output sized by the change address's script class (P2WPKH 31 vB,
+  // P2TR/P2WSH 43 vB) instead of a flat P2WPKH assumption.
+  const changeOutputVBytes = outputVBytesForAddress(changeAddress);
+
+  // Start with initial estimate (1 input, 2 outputs). The input is not known
+  // yet, so seed with the widest input class present among the candidates —
+  // a conservative seed only affects the first selection pass; the loop
+  // below re-estimates from the actually selected UTXOs.
+  const widestInputVBytes = Math.max(...validUtxos.map(u => inputVBytesForScriptPubKey(u.scriptPubKey)));
+  const initialVBytes = Math.ceil(10.5 + widestInputVBytes + 43 + changeOutputVBytes);
+  let targetAmount = commitOutputValue + Number(calculateFee(initialVBytes, feeRate));
 
   while (iteration < MAX_SELECTION_ITERATIONS) {
     iteration++;
@@ -437,10 +452,10 @@ export async function createCommitTransaction(
       );
     }
 
-    // Calculate accurate fee based on actual selected input count
-    // Assume 2 outputs (commit + change) for now - we'll adjust later if no change
-    const actualInputCount = selectedUtxos.length;
-    const estimatedVBytes = estimateCommitTxSize(actualInputCount, 2);
+    // Calculate accurate fee based on the actually selected inputs (sized by
+    // script class). Assume 2 outputs (commit + change) for now - we'll
+    // adjust later if no change
+    const estimatedVBytes = estimateCommitTxSize(selectedUtxos, 2, changeOutputVBytes);
     estimatedFee = Number(calculateFee(estimatedVBytes, feeRate));
 
     // Check if we need to account for no change output
@@ -450,7 +465,7 @@ export async function createCommitTransaction(
     if (potentialChange < MIN_DUST_LIMIT) {
       // No change output, recalculate fee with 1 output
       finalOutputCount = 1;
-      const adjustedVBytes = estimateCommitTxSize(actualInputCount, finalOutputCount);
+      const adjustedVBytes = estimateCommitTxSize(selectedUtxos, finalOutputCount, changeOutputVBytes);
       estimatedFee = Number(calculateFee(adjustedVBytes, feeRate));
     }
 
@@ -521,7 +536,6 @@ export async function createCommitTransaction(
   }
 
   // Step 8: Calculate final fee based on actual transaction structure
-  const actualInputCount = tx.inputsLength;
 
   // Determine if we'll have a change output
   const preliminaryChange = totalInputValue - commitOutputValue - estimatedFee;
@@ -529,7 +543,7 @@ export async function createCommitTransaction(
   const finalOutputCount = willHaveChange ? 2 : 1;
 
   // Calculate final fee with correct output count
-  const finalVBytes = estimateCommitTxSize(actualInputCount, finalOutputCount);
+  const finalVBytes = estimateCommitTxSize(selectedUtxos, finalOutputCount, changeOutputVBytes);
   const finalFee = Number(calculateFee(finalVBytes, feeRate));
 
   // CRITICAL: Final validation that inputs cover outputs + fees

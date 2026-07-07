@@ -11,7 +11,7 @@ const resources = [
     type: 'text',
     content: 'hello world',
     contentType: 'text/plain',
-    hash: 'deadbeef'
+    hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
   }
 ];
 
@@ -380,7 +380,8 @@ describe('LifecycleManager - Migration Validation', () => {
         type: 'text',
         content: 'x'.repeat(200),
         contentType: 'text/plain',
-        hash: 'a'.repeat(64)
+        // Real sha256 of the content — createAsset now rejects mismatches (issue #347)
+        hash: 'aa20c23e3201834050679e1d88941b9a6fed0557c9a705cb2c315e2e63fd486d'
       }));
       
       const draft = await sdk.lifecycle.createDraft(manyResources);

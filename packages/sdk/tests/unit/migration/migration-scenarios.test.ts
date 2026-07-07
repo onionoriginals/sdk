@@ -48,7 +48,7 @@ const baseConfig: OriginalsConfig = {
 };
 
 const sampleResources = [
-  { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'aabbcc', content: 'data' },
+  { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -788,8 +788,8 @@ describe('CORE-MIG-EVENTS-039: Peer→WebVH migration preserves asset resources'
   test('[happy] LifecycleManager.publishToWeb preserves all asset resources after migration', async () => {
     const sdk = OriginalsSDK.create({ ...baseConfig });
     const resources = [
-      { id: 'img-1', type: 'Image', contentType: 'image/png', hash: 'aabbccdd', content: 'imgdata' },
-      { id: 'doc-1', type: 'Document', contentType: 'application/pdf', hash: 'deadbeef', content: 'docdata' },
+      { id: 'img-1', type: 'Image', contentType: 'image/png', hash: 'a5c741c7dea3a96944022b4b9a0b1480cfbeef5f4cc934850e8afacb48e18c5e', content: 'imgdata' },
+      { id: 'doc-1', type: 'Document', contentType: 'application/pdf', hash: 'aef55fef7217f696b6624c1770f9e955a4d9f90d9e9261119e301c1309e2fd99', content: 'docdata' },
     ];
 
     const asset = await sdk.lifecycle.createAsset(resources);

@@ -135,7 +135,7 @@ async function makeHarness(adapter: unknown): Promise<{
 
 async function createCheckpointFor(sdk: OriginalsSDK, manager: CheckpointManager, migrationId: string) {
   const peerDid = await sdk.did.createDIDPeer([
-    { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+    { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
   ]);
   return manager.createCheckpoint(migrationId, {
     sourceDid: peerDid.id,

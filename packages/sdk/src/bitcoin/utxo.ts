@@ -70,6 +70,90 @@ export const DEFAULT_FEE_ESTIMATE: Required<FeeEstimateOptions> = {
  */
 export const UNCLASSIFIED_INPUT_VBYTES = 148;
 
+/** Script classes the fee estimators can size. */
+export type ScriptClass = 'p2wpkh' | 'p2wsh' | 'p2tr' | 'segwit-other' | 'legacy' | 'unknown';
+
+/** P2WPKH input: 41 vB base + ~107-byte witness (sig + pubkey) / 4 ≈ 68 vB. */
+export const P2WPKH_INPUT_VBYTES = 68;
+/** P2TR key-path input: 41 vB base + 66-byte witness (schnorr sig) / 4 = 57.5 vB. */
+export const P2TR_INPUT_VBYTES = 57.5;
+/**
+ * P2WSH input, sized conservatively. The witness carries the full witness
+ * script plus its stack arguments, so the true size depends on the script: a
+ * 2-of-3 CHECKMULTISIG spend is ~105 vB (2×72-byte sigs + 105-byte script,
+ * witness-discounted). 120 vB covers that common worst case with margin —
+ * underestimating here builds transactions that pay BELOW the requested fee
+ * rate and stall in the mempool (issue #344), so when uncertain we overpay.
+ */
+export const P2WSH_INPUT_VBYTES = 120;
+
+/** P2WPKH output: 8 (value) + 1 (script len) + 22 (script) = 31 vB. */
+export const P2WPKH_OUTPUT_VBYTES = 31;
+/** P2WSH / P2TR output: 8 + 1 + 34 = 43 vB. Also the conservative default. */
+export const WITNESS_32B_OUTPUT_VBYTES = 43;
+/** Legacy P2PKH output: 8 + 1 + 25 = 34 vB. */
+export const P2PKH_OUTPUT_VBYTES = 34;
+/** Legacy P2SH output: 8 + 1 + 23 = 32 vB. */
+export const P2SH_OUTPUT_VBYTES = 32;
+
+/**
+ * Classify a scriptPubKey by script class so fee estimators can size the
+ * input's witness correctly instead of assuming P2WPKH for every segwit
+ * program (issue #344 — that assumption underpays for P2WSH).
+ */
+export function classifyScriptPubKey(scriptPubKeyHex?: string): ScriptClass {
+  if (!scriptPubKeyHex) return 'unknown';
+  if (!isSegwitScriptPubKey(scriptPubKeyHex)) return 'legacy';
+  const hex = scriptPubKeyHex.toLowerCase();
+  const versionByte = parseInt(hex.slice(0, 2), 16);
+  const pushLength = parseInt(hex.slice(2, 4), 16);
+  if (versionByte === 0x00 && pushLength === 20) return 'p2wpkh';
+  if (versionByte === 0x00 && pushLength === 32) return 'p2wsh';
+  if (versionByte === 0x51 && pushLength === 32) return 'p2tr';
+  return 'segwit-other';
+}
+
+/**
+ * Virtual size to charge for spending an input with the given scriptPubKey.
+ * Sizes are per script class; anything unclassifiable is charged at the
+ * largest plausible width so the resulting fee never pays below the
+ * requested rate (an overpay is bounded; an underpay strands the tx).
+ */
+export function inputVBytesForScriptPubKey(scriptPubKeyHex?: string): number {
+  switch (classifyScriptPubKey(scriptPubKeyHex)) {
+    case 'p2wpkh': return P2WPKH_INPUT_VBYTES;
+    case 'p2tr': return P2TR_INPUT_VBYTES;
+    case 'p2wsh': return P2WSH_INPUT_VBYTES;
+    // Future witness versions / non-standard v0 programs: witness shape is
+    // unknown, so charge the conservative P2WSH width.
+    case 'segwit-other': return P2WSH_INPUT_VBYTES;
+    default: return UNCLASSIFIED_INPUT_VBYTES;
+  }
+}
+
+/**
+ * Virtual size of an output paying the given address, classified by address
+ * form (bech32 witness version + program length, or base58 prefix). Unknown
+ * or unparseable addresses are charged at the largest standard output size
+ * (43 vB) so the estimate errs toward overpaying rather than underpaying.
+ */
+export function outputVBytesForAddress(address?: string): number {
+  if (!address) return WITNESS_32B_OUTPUT_VBYTES;
+  const addr = address.toLowerCase();
+  const sep = addr.lastIndexOf('1');
+  if (/^(bc1|tb1|bcrt1)/.test(addr) && sep > 0) {
+    const data = addr.slice(sep + 1);
+    // bech32 data part: 1 version char + program (20 bytes → 32 chars,
+    // 32 bytes → 52 chars) + 6 checksum chars.
+    if (data.length === 39 && data.startsWith('q')) return P2WPKH_OUTPUT_VBYTES;
+    return WITNESS_32B_OUTPUT_VBYTES;
+  }
+  // Base58: mainnet P2PKH '1', testnet P2PKH 'm'/'n'; mainnet P2SH '3', testnet P2SH '2'.
+  if (/^[1mn]/.test(addr)) return P2PKH_OUTPUT_VBYTES;
+  if (/^[32]/.test(addr)) return P2SH_OUTPUT_VBYTES;
+  return WITNESS_32B_OUTPUT_VBYTES;
+}
+
 /**
  * True when a scriptPubKey hex string is a segwit witness program
  * (v0 P2WPKH/P2WSH, v1 P2TR, or any future v2–v16 program): a version opcode
@@ -153,20 +237,30 @@ export function selectUtxos(utxos: Utxo[], options: SelectionOptions): Selection
   // Sort largest first to reduce change outputs and input count
   candidateUtxos.sort((a, b) => b.value - a.value);
 
-  // Per-input sizing: verified segwit inputs use the (possibly overridden)
-  // bytesPerInput; unclassified inputs (no scriptPubKey) are priced at
-  // conservative legacy width unless the caller explicitly overrode
-  // bytesPerInput (an explicit override applies to every input).
+  // Per-input sizing: verified segwit inputs are priced by script class
+  // (P2WPKH 68, P2TR 57.5, P2WSH conservative 120 — issue #344: charging
+  // P2WPKH width for a P2WSH input underpays the requested fee rate);
+  // unclassified inputs (no scriptPubKey) are priced at conservative legacy
+  // width. An explicit bytesPerInput override applies to every input.
   const est = { ...DEFAULT_FEE_ESTIMATE, ...feeEstimate };
   const perInputOverridden = feeEstimate?.bytesPerInput !== undefined;
   const inputVBytes = (u: Utxo): number =>
-    perInputOverridden || (u.scriptPubKey && isSegwitScriptPubKey(u.scriptPubKey))
-      ? est.bytesPerInput
-      : UNCLASSIFIED_INPUT_VBYTES;
+    perInputOverridden ? est.bytesPerInput : inputVBytesForScriptPubKey(u.scriptPubKey);
+  // The change output is sized by the change address's script class when one
+  // is provided (a P2TR/P2WSH change output is 43 vB, not the P2WPKH-ish
+  // default); an explicit bytesPerOutput override applies to every output.
+  const perOutputOverridden = feeEstimate?.bytesPerOutput !== undefined;
+  const changeOutputVBytes = !perOutputOverridden && options.changeAddress
+    ? outputVBytesForAddress(options.changeAddress)
+    : est.bytesPerOutput;
   const feeForSelection = (numOutputs: number): number => {
+    // numOutputs is 1 (recipient only) or 2 (recipient + change).
+    const outputBytes = numOutputs >= 2
+      ? (numOutputs - 1) * est.bytesPerOutput + changeOutputVBytes
+      : numOutputs * est.bytesPerOutput;
     const bytes = est.baseTxBytes
       + selected.reduce((sum, u) => sum + inputVBytes(u), 0)
-      + numOutputs * est.bytesPerOutput;
+      + outputBytes;
     return Math.ceil(bytes * feeRateSatsPerVb);
   };
 

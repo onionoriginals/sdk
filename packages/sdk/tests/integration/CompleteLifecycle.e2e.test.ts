@@ -28,6 +28,11 @@ import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { StorageAdapter as ConfigStorageAdapter } from '../../src/adapters/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import { KeyManager } from '../../src/did/KeyManager';
+import { createHash as __cryptoCreateHash } from 'crypto';
+// Real content hash — createAsset/publish now verify content against the
+// declared hash (issue #347), so fixtures must declare the true sha256.
+const contentHash = (c: string) => __cryptoCreateHash('sha256').update(c, 'utf8').digest('hex');
+
 
 /**
  * Helper to generate valid SHA-256 hashes (64 hex characters)
@@ -128,14 +133,14 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'resource-1',
           type: 'image',
           contentType: 'image/png',
-          hash: 'deadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678',
+          hash: 'cef9d30aa874f055b67820f138fe0efc59511dfd10e16dfd187611f202ce4420',
           content: 'mock-image-data'
         },
         {
           id: 'resource-2',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'cafebabe1234567890abcdef1234567890abcdef1234567890abcdef12345678',
+          hash: 'b5434f89a784a99900d2c801ad5988cfe8bee61fbc98c44577f8f8d8fe4b0d94',
           content: 'Hello, Originals Protocol!'
         }
       ];
@@ -293,7 +298,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'resource-direct',
           type: 'data',
           contentType: 'application/json',
-          hash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+          hash: '40b61fe1b15af0a4d5402735b26343e8cf8a045f4d81710e6108a21d91eaf366',
           content: '{"test": "data"}'
         }
       ];
@@ -393,7 +398,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       
       // Verify fee oracle is used in lifecycle
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'fee-test', type: 'data', contentType: 'text/plain', hash: makeHash('fee123'), content: 'test' }
+        { id: 'fee-test', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
       
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(asset, undefined);
@@ -447,7 +452,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'adapter-integration',
           type: 'text',
           contentType: 'text/html',
-          hash: makeHash('html123456789abcdef1234567890abcdef1234567890abcdef12'),
+          hash: contentHash('<html><body>Test</body></html>'),
           content: '<html><body>Test</body></html>'
         }
       ]);
@@ -470,7 +475,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
     test('adapters work together in inscribeOnBitcoin', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'btc-test', type: 'data', contentType: 'application/json', hash: makeHash('btc123'), content: '{}' }
+        { id: 'btc-test', type: 'data', contentType: 'application/json', hash: contentHash('{}'), content: '{}' }
       ]);
 
       // Inscribe without specifying fee rate - should use oracle
@@ -490,7 +495,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
   describe('Error Handling and Edge Cases', () => {
     test('throws error when transferring non-btco asset', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'error-test', type: 'data', contentType: 'text/plain', hash: makeHash('err123'), content: 'test' }
+        { id: 'error-test', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
 
       // Try to transfer peer layer asset
@@ -507,7 +512,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
     test('handles multiple transfers correctly', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'multi-transfer', type: 'data', contentType: 'text/plain', hash: makeHash('multi123'), content: 'test' }
+        { id: 'multi-transfer', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
 
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
@@ -538,10 +543,10 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
     test('handles multiple resources with different content types', async () => {
       const resources: AssetResource[] = [
-        { id: 'img', type: 'image', contentType: 'image/jpeg', hash: makeHash('img123'), content: 'jpeg-data' },
-        { id: 'txt', type: 'text', contentType: 'text/plain', hash: makeHash('txt123'), content: 'text-data' },
-        { id: 'json', type: 'data', contentType: 'application/json', hash: makeHash('json123'), content: '{"key":"value"}' },
-        { id: 'html', type: 'document', contentType: 'text/html', hash: makeHash('html123'), content: '<div>test</div>' }
+        { id: 'img', type: 'image', contentType: 'image/jpeg', hash: contentHash('jpeg-data'), content: 'jpeg-data' },
+        { id: 'txt', type: 'text', contentType: 'text/plain', hash: contentHash('text-data'), content: 'text-data' },
+        { id: 'json', type: 'data', contentType: 'application/json', hash: contentHash('{"key":"value"}'), content: '{"key":"value"}' },
+        { id: 'html', type: 'document', contentType: 'text/html', hash: contentHash('<div>test</div>'), content: '<div>test</div>' }
       ];
 
       const asset = await sdk.lifecycle.createAsset(resources);
@@ -568,7 +573,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
     test('preserves bindings throughout lifecycle', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'binding-test', type: 'data', contentType: 'text/plain', hash: makeHash('bind123'), content: 'test' }
+        { id: 'binding-test', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
 
       // After webvh
@@ -600,7 +605,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'large-resource',
           type: 'data',
           contentType: 'application/octet-stream',
-          hash: makeHash('large123456789abcdef1234567890abcdef1234567890abcdef1'),
+          hash: contentHash(largeContent),
           content: largeContent
         }
       ];
@@ -626,7 +631,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
         id: `resource-${i}`,
         type: 'data',
         contentType: 'text/plain',
-        hash: makeHash(`res${i}`),
+        hash: contentHash(`Content ${i}`),
         content: `Content ${i}`
       }));
 
@@ -660,7 +665,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
   describe('Provenance Chain Validation', () => {
     test('maintains complete audit trail with all metadata', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'audit-test', type: 'data', contentType: 'text/plain', hash: makeHash('audit123'), content: 'test' }
+        { id: 'audit-test', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
 
       const startTime = Date.now();
@@ -706,7 +711,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
     test('timestamps are monotonically increasing', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'time-test', type: 'data', contentType: 'text/plain', hash: makeHash('time123'), content: 'test' }
+        { id: 'time-test', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
 
       await new Promise(resolve => setTimeout(resolve, 10)); // Small delay

@@ -34,7 +34,7 @@ function makeSdk() {
 // Helper to create a fresh peer DID
 async function makePeerDid(sdk: OriginalsSDK, id = 'res-1') {
   return sdk.did.createDIDPeer([
-    { id, type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'test-data' }
+    { id, type: 'Image', contentType: 'image/png', hash: 'a186000422feab857329c684e9fe91412b1a5db084100b37a98cfc95b62aa867', content: 'test-data' }
   ]);
 }
 
@@ -517,7 +517,7 @@ describe('CORE-MIG-EVENTS-012 — batch:failed event emitted with error and part
     // Provide resources that pass validation but an operation that will fail
     // by creating assets with valid resource list, then calling batchPublishToWeb with bad domain
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'res-pub', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+      { id: 'res-pub', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
     ]);
 
     lifecycle.on('batch:failed', (e: any) => {

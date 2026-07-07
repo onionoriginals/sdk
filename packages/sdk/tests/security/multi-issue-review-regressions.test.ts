@@ -201,7 +201,7 @@ describe('publishToWeb rejects path-traversal in did:webvh (issue #274)', () => 
     const { MemoryStorageAdapter } = await import('../../src/storage/MemoryStorageAdapter');
     const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'a'.repeat(64) },
+      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824' },
     ]);
 
     // A crafted SCID-form DID with traversal segments after the domain.
@@ -214,7 +214,7 @@ describe('publishToWeb rejects path-traversal in did:webvh (issue #274)', () => 
     const { MemoryStorageAdapter } = await import('../../src/storage/MemoryStorageAdapter');
     const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'a'.repeat(64) },
+      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824' },
     ]);
 
     // did:webvh:{SCID}:{domain} where the domain decodes to '../../etc'.

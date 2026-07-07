@@ -14,7 +14,7 @@ describe('WebVH publish end-to-end', () => {
 
   test('createAsset → publishToWeb yields did:webvh and provenance event', async () => {
     const resources: AssetResource[] = [
-      { id: 'r1', type: 'data', contentType: 'text/plain', hash: 'abc123', content: 'hello' }
+      { id: 'r1', type: 'data', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', content: 'hello' }
     ];
 
     const asset = await sdk.lifecycle.createAsset(resources);

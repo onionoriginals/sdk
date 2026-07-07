@@ -65,7 +65,7 @@ describe('Telemetry Integration', () => {
           id: 'test-resource',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'abc123',
+          hash: 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e',
           content: 'Hello World'
         }
       ];
@@ -101,7 +101,7 @@ describe('Telemetry Integration', () => {
           id: 'test-resource',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'abc123',
+          hash: 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e',
           content: 'Hello World'
         }
       ];
@@ -142,7 +142,7 @@ describe('Telemetry Integration', () => {
           id: 'test-resource',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'abc123',
+          hash: 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e',
           content: 'Hello World'
         }
       ];
@@ -175,7 +175,7 @@ describe('Telemetry Integration', () => {
           id: 'test-resource',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'abc123',
+          hash: 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e',
           content: 'Hello World'
         }
       ];
@@ -200,7 +200,7 @@ describe('Telemetry Integration', () => {
           id: 'test-resource',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'abc123',
+          hash: 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e',
           content: 'Hello World'
         }
       ];
@@ -227,7 +227,7 @@ describe('Telemetry Integration', () => {
           id: 'test-resource',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'abc123',
+          hash: 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e',
           content: 'Hello World'
         }
       ];
@@ -348,7 +348,7 @@ describe('Telemetry Integration', () => {
           id: 'test-resource',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'abc123',
+          hash: 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e',
           content: 'Hello World'
         }
       ];

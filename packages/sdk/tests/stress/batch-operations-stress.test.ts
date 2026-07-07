@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'bun:test';
+import { createHash } from 'crypto';
 import { OriginalsSDK } from '../../src/core/OriginalsSDK';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { BatchOperationExecutor } from '../../src/lifecycle/BatchOperations';
@@ -470,15 +471,20 @@ describe('Batch Operations Stress Tests', () => {
 // Helper functions
 
 function createTestResourcesList(count: number): AssetResource[][] {
-  return Array.from({ length: count }, (_, i) => [
-    {
-      id: `resource-${i}-${Date.now()}`,
-      type: 'DigitalArt',
-      contentType: 'application/json',
-      hash: Buffer.from(`hash-${i}`).toString('hex'),
-      content: JSON.stringify({ test: `data-${i}` })
-    }
-  ]);
+  return Array.from({ length: count }, (_, i) => {
+    // Real content hash — createAsset now verifies content against the
+    // declared hash (issue #347).
+    const content = JSON.stringify({ test: `data-${i}` });
+    return [
+      {
+        id: `resource-${i}-${Date.now()}`,
+        type: 'DigitalArt',
+        contentType: 'application/json',
+        hash: createHash('sha256').update(content, 'utf8').digest('hex'),
+        content
+      }
+    ];
+  });
 }
 
 interface ConcurrencyResult {

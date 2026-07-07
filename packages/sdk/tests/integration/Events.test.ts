@@ -13,6 +13,11 @@ import { MockKeyStore } from '../mocks/MockKeyStore';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { KeyManager } from '../../src/did/KeyManager';
+import { createHash as __cryptoCreateHash } from 'crypto';
+// Real content hash — createAsset/publish now verify content against the
+// declared hash (issue #347), so fixtures must declare the true sha256.
+const contentHash = (c: string) => __cryptoCreateHash('sha256').update(c, 'utf8').digest('hex');
+
 
 // Helper to create a valid hash
 function makeHash(prefix: string): string {
@@ -82,7 +87,7 @@ describe('Integration: Event System', () => {
           id: 'resource-1',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('deadbeef'),
+          hash: contentHash('Hello, World!'),
           content: 'Hello, World!'
         }
       ];
@@ -116,7 +121,7 @@ describe('Integration: Event System', () => {
 
     test('asset:created reaches pre-subscribed lifecycle handlers; asset-level post-await does not (#293)', async () => {
       const resources: AssetResource[] = [
-        { id: 'resource-1', type: 'text', contentType: 'text/plain', hash: makeHash('cafe01'), content: 'x' }
+        { id: 'resource-1', type: 'text', contentType: 'text/plain', hash: contentHash('x'), content: 'x' }
       ];
       const lifecycleEvents: string[] = [];
       // Supported path: subscribe on the LifecycleManager emitter before creating.
@@ -144,14 +149,14 @@ describe('Integration: Event System', () => {
           id: 'resource-1',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('abc123'),
+          hash: contentHash('Test'),
           content: 'Test'
         },
         {
           id: 'resource-2',
           type: 'image',
           contentType: 'image/png',
-          hash: makeHash('def456'),
+          hash: contentHash('Image data'),
           content: 'Image data'
         }
       ];
@@ -174,7 +179,7 @@ describe('Integration: Event System', () => {
           id: 'resource-1',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('migrate'),
+          hash: contentHash('Migrate test'),
           content: 'Migrate test'
         }
       ];
@@ -205,7 +210,7 @@ describe('Integration: Event System', () => {
           id: 'resource-1',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('btco'),
+          hash: contentHash('Bitcoin test'),
           content: 'Bitcoin test'
         }
       ];
@@ -240,7 +245,7 @@ describe('Integration: Event System', () => {
           id: 'resource-1',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('transfer'),
+          hash: contentHash('Transfer test'),
           content: 'Transfer test'
         }
       ];
@@ -275,14 +280,14 @@ describe('Integration: Event System', () => {
           id: 'resource-1',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('pub1'),
+          hash: contentHash('Resource 1'),
           content: 'Resource 1'
         },
         {
           id: 'resource-2',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('pub2'),
+          hash: contentHash('Resource 2'),
           content: 'Resource 2'
         }
       ];
@@ -312,7 +317,7 @@ describe('Integration: Event System', () => {
           id: 'resource-1',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('cred'),
+          hash: contentHash('Credential test'),
           content: 'Credential test'
         }
       ];
@@ -343,7 +348,7 @@ describe('Integration: Event System', () => {
           id: 'resource-1',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('complete'),
+          hash: contentHash('Complete lifecycle'),
           content: 'Complete lifecycle'
         }
       ];
@@ -379,7 +384,7 @@ describe('Integration: Event System', () => {
           id: 'resource-1',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('cleanup'),
+          hash: contentHash('Cleanup test'),
           content: 'Cleanup test'
         }
       ];
@@ -406,7 +411,7 @@ describe('Integration: Event System', () => {
           id: 'resource-1',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('once'),
+          hash: contentHash('Once test'),
           content: 'Once test'
         }
       ];
@@ -433,7 +438,7 @@ describe('Integration: Event System', () => {
           id: 'resource-1',
           type: 'text',
           contentType: 'text/plain',
-          hash: makeHash('timing'),
+          hash: contentHash('Timing test'),
           content: 'Timing test'
         }
       ];
