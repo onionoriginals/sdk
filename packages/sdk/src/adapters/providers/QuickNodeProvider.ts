@@ -149,7 +149,11 @@ export class QuickNodeProvider implements OrdinalsProvider {
           );
         }
       })().catch((err) => {
-        this.networkCheck = null;
+        // Only reset for transient errors so a permanent QUICKNODE_NETWORK_MISMATCH
+        // doesn't cause a redundant getblockchaininfo call on every subsequent retry.
+        if (!(err instanceof StructuredError) || err.code !== 'QUICKNODE_NETWORK_MISMATCH') {
+          this.networkCheck = null;
+        }
         throw err;
       });
     }
