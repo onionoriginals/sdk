@@ -3,11 +3,99 @@ import { decode as decodeCbor } from '../utils/cbor.js';
 import { hexToBytes } from '../utils/encoding.js';
 import { StructuredError } from '../utils/telemetry.js';
 
+/** Max bytes accepted for a JSON indexer response (default 1 MiB). */
+const DEFAULT_MAX_JSON_BYTES = 1 * 1024 * 1024;
+/** Max bytes accepted for fetched inscription content (default 5 MiB). */
+const DEFAULT_MAX_CONTENT_BYTES = 5 * 1024 * 1024;
+/** Per-request timeout (default 10 s). */
+const DEFAULT_TIMEOUT_MS = 10_000;
+/** Max inscriptions resolved (content downloaded) per satoshi (default 100). */
+const DEFAULT_MAX_INSCRIPTIONS_PER_SAT = 100;
+/** Content downloads per batch when resolving a satoshi's inscriptions. */
+const SAT_RESOLVE_BATCH_SIZE = 8;
+
+export interface OrdinalsClientOptions {
+  /** Per-request timeout in milliseconds. */
+  timeoutMs?: number;
+  /** Max bytes accepted for a JSON indexer response. */
+  maxJsonBytes?: number;
+  /** Max bytes accepted for fetched inscription content. */
+  maxContentBytes?: number;
+  /** Max inscriptions resolved per satoshi before failing loudly. */
+  maxInscriptionsPerSat?: number;
+}
+
+/**
+ * Reject a candidate URL whose scheme is not http(s) or whose origin differs
+ * from the configured endpoint's, and return its RESOLVED ABSOLUTE form. The
+ * ord endpoint's JSON is attacker-controllable (a compromised/malicious
+ * indexer), so a `content_url` it returns must never be followed to an
+ * arbitrary host or scheme — that is a Server-Side Request Forgery vector
+ * (e.g. http://169.254.169.254/… cloud metadata, file:///…). Relative URLs
+ * resolve against the endpoint and stay same-origin. Mirrors the #265/#322
+ * hardening in OrdHttpProvider and OrdinalsClientProviderAdapter, which
+ * protected the adapter but left this client exposed on the SignetProvider
+ * read path (issue #343).
+ */
+function resolveSameOrigin(candidate: string, baseUrl: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate, baseUrl);
+  } catch {
+    throw new Error(`OrdinalsClient: malformed content_url '${candidate}'`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(
+      `OrdinalsClient: refusing non-http(s) content_url scheme '${parsed.protocol}' (possible SSRF)`
+    );
+  }
+  const baseOrigin = new URL(baseUrl).origin;
+  if (parsed.origin !== baseOrigin) {
+    throw new Error(
+      `OrdinalsClient: refusing to fetch content_url from origin ${parsed.origin}, ` +
+      `which differs from the configured endpoint origin ${baseOrigin} (possible SSRF)`
+    );
+  }
+  return parsed.toString();
+}
+
+/** Early reject via the Content-Length header when the server declares one. */
+function assertContentLengthWithin(res: { headers?: { get?: (name: string) => string | null } }, maxBytes: number): void {
+  const lenHeader = res.headers?.get?.('content-length');
+  if (lenHeader && Number(lenHeader) > maxBytes) {
+    throw new Error(`OrdinalsClient: response exceeds ${maxBytes} bytes (Content-Length ${lenHeader})`);
+  }
+}
+
 export class OrdinalsClient {
+  private readonly timeoutMs: number;
+  private readonly maxJsonBytes: number;
+  private readonly maxContentBytes: number;
+  private readonly maxInscriptionsPerSat: number;
+
   constructor(
     private rpcUrl: string,
-    private network: 'mainnet' | 'regtest' | 'signet'
-  ) {}
+    private network: 'mainnet' | 'regtest' | 'signet',
+    options: OrdinalsClientOptions = {}
+  ) {
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.maxJsonBytes = options.maxJsonBytes ?? DEFAULT_MAX_JSON_BYTES;
+    this.maxContentBytes = options.maxContentBytes ?? DEFAULT_MAX_CONTENT_BYTES;
+    this.maxInscriptionsPerSat = options.maxInscriptionsPerSat ?? DEFAULT_MAX_INSCRIPTIONS_PER_SAT;
+  }
+
+  /**
+   * Hardened fetch defaults: never follow a redirect (a same-origin URL must
+   * not 30x resolution off the pinned origin) and bound the request time so a
+   * stalling endpoint cannot hang resolution indefinitely.
+   */
+  private fetchInit(extra?: RequestInit): RequestInit {
+    return {
+      redirect: 'error',
+      signal: AbortSignal.timeout(this.timeoutMs),
+      ...(extra ?? {})
+    };
+  }
 
   async getInscriptionById(id: string): Promise<OrdinalsInscription | null> {
     if (!id) return null;
@@ -17,7 +105,25 @@ export class OrdinalsClient {
   async getInscriptionsBySatoshi(satoshi: string): Promise<OrdinalsInscription[]> {
     const info = await this.getSatInfo(satoshi);
     if (!info.inscription_ids.length) return [];
-    const inscriptions = await Promise.all(info.inscription_ids.map(id => this.resolveInscription(id)));
+    // Resolving an inscription downloads its full content, so a heavily
+    // reinscribed satoshi must not translate into unbounded downloads
+    // (memory DoS — issue #343). Fail loudly above the cap rather than
+    // silently truncating, which could hide the inscription a caller is
+    // looking for; raise maxInscriptionsPerSat to opt into more.
+    if (info.inscription_ids.length > this.maxInscriptionsPerSat) {
+      throw new StructuredError(
+        'ORD_TOO_MANY_INSCRIPTIONS',
+        `Satoshi ${satoshi} carries ${info.inscription_ids.length} inscriptions, above the configured ` +
+        `cap of ${this.maxInscriptionsPerSat}. Raise maxInscriptionsPerSat to resolve this satoshi.`
+      );
+    }
+    // Bounded concurrency: download content in small batches instead of one
+    // Promise.all over every inscription on the sat.
+    const inscriptions: Array<OrdinalsInscription | null> = [];
+    for (let i = 0; i < info.inscription_ids.length; i += SAT_RESOLVE_BATCH_SIZE) {
+      const batch = info.inscription_ids.slice(i, i + SAT_RESOLVE_BATCH_SIZE);
+      inscriptions.push(...await Promise.all(batch.map(id => this.resolveInscription(id))));
+    }
     return inscriptions.filter((x): x is OrdinalsInscription => x !== null);
   }
 
@@ -68,11 +174,21 @@ export class OrdinalsClient {
     const info = await this.fetchJson<any>(`/inscription/${identifier}`);
     if (!info) return null;
 
-    // Fetch content bytes
-    const contentUrl = info.content_url || `${this.rpcUrl}/content/${identifier}`;
-    const contentRes = await fetch(String(contentUrl));
+    // Fetch content bytes. content_url comes from the (untrusted) indexer
+    // response: pin it to the configured endpoint's origin before fetching
+    // (SSRF guard), refuse redirects, bound the request time, and cap the
+    // downloaded size.
+    const contentUrl = resolveSameOrigin(
+      String(info.content_url || `${this.rpcUrl}/content/${identifier}`),
+      this.rpcUrl
+    );
+    const contentRes = await fetch(contentUrl, this.fetchInit());
     if (!contentRes.ok) throw new Error(`Failed to fetch inscription content: ${contentRes.status}`);
+    assertContentLengthWithin(contentRes, this.maxContentBytes);
     const contentArrayBuf = await contentRes.arrayBuffer();
+    if (contentArrayBuf.byteLength > this.maxContentBytes) {
+      throw new Error(`OrdinalsClient: inscription content exceeds ${this.maxContentBytes} bytes`);
+    }
     const content = Buffer.from(new Uint8Array(contentArrayBuf));
 
     // owner_output may be 'txid:vout'
@@ -103,11 +219,18 @@ export class OrdinalsClient {
   async getMetadata(inscriptionId: string): Promise<Record<string, unknown> | null> {
     if (!inscriptionId) return null;
     const base = this.rpcUrl.replace(/\/$/, '');
-    const res = await fetch(`${base}/r/metadata/${inscriptionId}`, { headers: { 'Accept': 'application/json' } });
+    const res = await fetch(
+      `${base}/r/metadata/${inscriptionId}`,
+      this.fetchInit({ headers: { 'Accept': 'application/json' } })
+    );
     if (!res.ok) {
       return null;
     }
+    assertContentLengthWithin(res, this.maxJsonBytes);
     let text = (await res.text()).trim();
+    if (text.length > this.maxJsonBytes) {
+      return null;
+    }
     if (text.startsWith('"') && text.endsWith('"')) {
       try {
         text = JSON.parse(text);
@@ -125,12 +248,27 @@ export class OrdinalsClient {
 
   private async fetchJson<T>(path: string): Promise<T | null> {
     const url = `${this.rpcUrl.replace(/\/$/, '')}${path}`;
-    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    // The JSON response is as attacker-controllable as the content fetch:
+    // refuse redirects, bound the request time, and cap the accepted size.
+    const res = await fetch(url, this.fetchInit({ headers: { 'Accept': 'application/json' } }));
     if (!res.ok) return null;
-    const body: any = await res.json();
+    assertContentLengthWithin(res, this.maxJsonBytes);
+    let body: any;
+    if (typeof (res as { arrayBuffer?: unknown }).arrayBuffer === 'function') {
+      // Materialize the bytes so the cap holds even when the server omits or
+      // understates Content-Length.
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.byteLength > this.maxJsonBytes) {
+        throw new Error(`OrdinalsClient: JSON response exceeds ${this.maxJsonBytes} bytes`);
+      }
+      body = JSON.parse(new TextDecoder().decode(bytes));
+    } else {
+      // Test doubles may implement only json(); the Content-Length check
+      // above is the only cap available in that case.
+      body = await res.json();
+    }
     // Accept { data: T } or T
     return (body && typeof body === 'object' && 'data' in body) ? body.data : body;
   }
 }
-
 

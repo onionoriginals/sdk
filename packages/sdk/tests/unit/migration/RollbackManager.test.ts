@@ -28,7 +28,7 @@ describe('RollbackManager', () => {
       const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
 
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
 
       const migrationId = 'mig_rollback_happy';
@@ -53,7 +53,7 @@ describe('RollbackManager', () => {
       const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
 
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
 
       const migrationId = 'mig_chkid_in_result';
@@ -87,7 +87,7 @@ describe('RollbackManager', () => {
       const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
 
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
 
       // Create checkpoint for migrationA
@@ -113,7 +113,7 @@ describe('RollbackManager', () => {
       const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
 
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
 
       const migrationId = 'mig_peer_rollback';
@@ -141,7 +141,7 @@ describe('RollbackManager', () => {
       const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
 
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
 
       const migrationId = 'mig_btco_src_rollback';
@@ -173,7 +173,7 @@ describe('RollbackManager', () => {
       const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
 
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
 
       const migrationId = 'mig_btco_preanchor_rollback';
@@ -198,7 +198,7 @@ describe('RollbackManager', () => {
       const { sdk, config, checkpointManager, rollbackManager } = makeRollbackSetup();
 
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
 
       const migrationId = 'mig_storage_refs';
@@ -222,7 +222,7 @@ describe('RollbackManager', () => {
       const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
 
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
       const migrationId = 'mig_can_rollback';
       const checkpoint = await checkpointManager.createCheckpoint(migrationId, {
@@ -243,7 +243,7 @@ describe('RollbackManager', () => {
       const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
 
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
       const checkpoint = await checkpointManager.createCheckpoint('mig_owner', {
         sourceDid: peerDid.id,

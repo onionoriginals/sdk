@@ -35,14 +35,14 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'resource-1',
         type: 'data',
         contentType: 'text/plain',
-        hash: 'abc123def456',
+        hash: '86c08faf3a17b36d3922b3b012d0b9188724aef3356336e0fc518c1f04bac2af',
         content: 'Hello, World! This is test content.'
       },
       {
         id: 'resource-2',
         type: 'metadata',
         contentType: 'application/json',
-        hash: 'aea789ab',
+        hash: '84560ef4bdb3414957ce03b69503ff86804fed1ba7e71cd76008134b35c737fb',
         content: JSON.stringify({ title: 'Test Asset', version: '1.0' })
       }
     ];
@@ -186,7 +186,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'res-format-test',
         type: 'data',
         contentType: 'application/octet-stream',
-        hash: 'e5a1234560',
+        hash: '81303f93ff97cf116ed9b3343e7b5029c5ed9aa3151f9be8adfa0fd53dfc764b',
         content: 'test data for URL format verification'
       }
     ];
@@ -221,7 +221,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'binding-test',
         type: 'data',
         contentType: 'text/plain',
-        hash: 'b1d1234560',
+        hash: '0508c90ba760ab4f833db3263ec28084a2ff11ed9b78b3069b6100366c5ca7fa',
         content: 'binding test content'
       }
     ];
@@ -254,28 +254,28 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'multi-1',
         type: 'data',
         contentType: 'text/plain',
-        hash: 'a51001',
+        hash: 'd1988cd3019824f075f61677e1a6f54b16035868488e4051757dde53adeef80f',
         content: 'content 1'
       },
       {
         id: 'multi-2',
         type: 'data',
         contentType: 'application/json',
-        hash: 'a51002',
+        hash: '9724c1e20e6e3e4d7f57ed25f9d4efb006e508590d528c90da597f6a775c13e5',
         content: '{"key": "value"}'
       },
       {
         id: 'multi-3',
         type: 'metadata',
         contentType: 'text/html',
-        hash: 'a51003',
+        hash: '5f1abb282216d522dc687b9b43746439b6f1702f800316a47cb306396fe8039c',
         content: '<html><body>test</body></html>'
       },
       {
         id: 'multi-4',
         type: 'data',
         contentType: 'image/svg+xml',
-        hash: 'a51004',
+        hash: 'b12e0d83ce2357d80b89c57694814d0a3abdaf8c40724f2049af8b7f01b7812b',
         content: '<svg></svg>'
       }
     ];
@@ -305,7 +305,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'preserve-test',
         type: 'data',
         contentType: 'text/markdown',
-        hash: 'e5e1ea00',
+        hash: 'cc56914595e92466c95951c3f888fbf7f9fc43b0d13bcd2e9bcb4ecf4993008c',
         content: '# Test Document\nThis should be preserved.'
       }
     ];

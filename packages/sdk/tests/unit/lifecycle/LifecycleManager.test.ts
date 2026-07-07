@@ -8,7 +8,7 @@ const resources = [
     type: 'text',
     content: 'hello world',
     contentType: 'text/plain',
-    hash: 'deadbeef'
+    hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
   }
 ];
 
@@ -158,7 +158,7 @@ describe('LifecycleManager additional branch coverage', () => {
     const asset: any = { 
       currentLayer: 'did:peer',
       id: 'did:peer:test',
-      resources: [{ id: 'r1', type: 'data', contentType: 'text/plain', hash: 'deadbeef', content: 'test' }],
+      resources: [{ id: 'r1', type: 'data', contentType: 'text/plain', hash: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08', content: 'test' }],
       migrate: undefined  // This should cause an error when called
     };
     await expect(lm.publishToWeb(asset, 'example.com')).rejects.toThrow();
@@ -240,7 +240,7 @@ describe('publishToWeb storage requirement (issue #244)', () => {
   test('throws STORAGE_REQUIRED when no storageAdapter is configured', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'ff00', url: undefined as any }
+      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', url: undefined as any }
     ] as any);
     await expect(sdk.lifecycle.publishToWeb(asset, 'example.com'))
       .rejects.toThrow(/storageAdapter must be configured/);
@@ -251,7 +251,7 @@ describe('publishToWeb storage requirement (issue #244)', () => {
   test('throws STORAGE_REQUIRED when the adapter implements neither put nor putObject', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest', storageAdapter: { get: async () => null } as any });
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'ff00', url: undefined as any }
+      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', url: undefined as any }
     ] as any);
     await expect(sdk.lifecycle.publishToWeb(asset, 'example.com'))
       .rejects.toThrow(/neither put\(\) nor putObject\(\)/);

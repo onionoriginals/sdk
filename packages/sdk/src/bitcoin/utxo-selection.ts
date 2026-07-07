@@ -15,15 +15,18 @@ import {
   ResourceUtxoSelectionResult 
 } from '../types/bitcoin.js';
 import { calculateFee } from './fee-calculation.js';
-import { carriesOrdinal, isProtectedUtxo } from './utxo.js';
+import { carriesOrdinal, isProtectedUtxo, inputVBytesForScriptPubKey } from './utxo.js';
 
 // Minimum dust limit for Bitcoin outputs (546 satoshis)
 const MIN_DUST_LIMIT = DUST_LIMIT_SATS;
 
 /**
- * Estimates transaction size in vbytes based on input and output counts
- * This is a simplified calculation, and actual size may vary based on script types
- * 
+ * Estimates transaction size in vbytes based on input and output counts.
+ * This is a simplified COUNT-BASED calculation that assumes P2WPKH for every
+ * input; prefer estimateTransactionSizeForUtxos when the funding UTXOs are
+ * available, since a P2WSH input is ~105 vB and charging it at 68 vB builds
+ * transactions that pay below the requested fee rate (issue #344).
+ *
  * @param inputCount Number of inputs in the transaction
  * @param outputCount Number of outputs in the transaction
  * @returns Estimated transaction size in vbytes
@@ -34,6 +37,21 @@ export function estimateTransactionSize(inputCount: number, outputCount: number)
   // Each input: ~68 vbytes (P2WPKH)
   // Each output: ~31 vbytes
   return 10 + (inputCount * 68) + (outputCount * 31);
+}
+
+/**
+ * Estimates transaction size in vbytes for a concrete set of funding UTXOs,
+ * sizing each input by its scriptPubKey's script class (P2WPKH 68, P2TR 57.5,
+ * P2WSH conservative 120; inputs without a scriptPubKey are charged at
+ * conservative legacy width so the quote never underpays).
+ *
+ * @param inputs UTXOs funding the transaction
+ * @param outputCount Number of outputs in the transaction
+ * @returns Estimated transaction size in vbytes
+ */
+export function estimateTransactionSizeForUtxos(inputs: Utxo[], outputCount: number): number {
+  const inputSize = inputs.reduce((sum, u) => sum + inputVBytesForScriptPubKey(u.scriptPubKey), 0);
+  return Math.ceil(10 + inputSize + (outputCount * 31));
 }
 
 /**
@@ -276,20 +294,20 @@ export function selectResourceUtxos(
     eligibleUtxos.sort((a, b) => b.value - a.value);
   }
 
-  // Initial fee estimation (1 input, 2 outputs - payment and change)
-  let estimatedVbytes = estimateTransactionSize(1, 2);
-  let estimatedFee = calculateFee(estimatedVbytes, feeRate);
-  
-  // Target amount including estimated fee
-  let targetAmount = requiredAmountBigInt + estimatedFee;
-  
-  // Select UTXOs
+  // Select UTXOs. Fees are estimated from the concrete UTXOs being
+  // considered, sized by script class (issue #344): a flat P2WPKH assumption
+  // underpays the requested rate for P2WSH-funded wallets.
   const selectedUtxos: ResourceUtxo[] = [];
   let totalSelectedValue = 0n;
-  
-  // First pass: try to find a single UTXO that covers the amount
-  const singleUtxo = eligibleUtxos.find(utxo => BigInt(utxo.value) >= targetAmount);
-  
+
+  // First pass: try to find a single UTXO that covers the amount plus the
+  // fee that spending that specific UTXO would incur (2 outputs: payment + change)
+  const singleUtxo = eligibleUtxos.find(utxo =>
+    BigInt(utxo.value) >= requiredAmountBigInt + calculateFee(estimateTransactionSizeForUtxos([utxo], 2), feeRate)
+  );
+
+  let estimatedVbytes: number;
+  let estimatedFee: bigint;
   if (singleUtxo) {
     selectedUtxos.push(singleUtxo);
     totalSelectedValue = BigInt(singleUtxo.value);
@@ -298,20 +316,20 @@ export function selectResourceUtxos(
     for (const utxo of eligibleUtxos) {
       selectedUtxos.push(utxo);
       totalSelectedValue += BigInt(utxo.value);
-      
+
       // Recalculate fee as we add more inputs
-      estimatedVbytes = estimateTransactionSize(selectedUtxos.length, 2);
+      estimatedVbytes = estimateTransactionSizeForUtxos(selectedUtxos, 2);
       estimatedFee = calculateFee(estimatedVbytes, feeRate);
-      targetAmount = requiredAmountBigInt + estimatedFee;
-      
+      const targetAmount = requiredAmountBigInt + estimatedFee;
+
       if (totalSelectedValue >= targetAmount) {
         break;
       }
     }
   }
-  
-  // Final fee calculation based on actual number of inputs
-  estimatedVbytes = estimateTransactionSize(selectedUtxos.length, 2);
+
+  // Final fee calculation based on the actually selected inputs
+  estimatedVbytes = estimateTransactionSizeForUtxos(selectedUtxos, 2);
   estimatedFee = calculateFee(estimatedVbytes, feeRate);
   
   // Check if we have enough funds

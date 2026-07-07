@@ -1,5 +1,11 @@
 import type { Utxo } from '../types/bitcoin.js';
-import { isSegwitScriptPubKey, isProtectedUtxo } from './utxo.js';
+import {
+  isSegwitScriptPubKey,
+  isProtectedUtxo,
+  inputVBytesForScriptPubKey,
+  outputVBytesForAddress,
+  P2WPKH_INPUT_VBYTES
+} from './utxo.js';
 
 export interface PsbtOutput {
   address: string;
@@ -29,21 +35,22 @@ export interface BuildPsbtResult {
   changeOutput?: PsbtOutput;
 }
 
-function estimateVBytes(inputs: Utxo[], outputs: number): number {
-  const overhead = 10;       // base tx overhead
-  const segwitInSize = 68;   // rough P2WPKH/any-segwit input size
-  const legacyInSize = 148;  // legacy P2PKH sizing
-  const outSize = 31;        // P2WPKH output size
-  // build() rejects UTXOs with a KNOWN non-segwit scriptPubKey up front, so
-  // an input without a scriptPubKey is assumed segwit here — charging it at
-  // legacy width would over-estimate fees and spuriously fail (or over-fund)
-  // selections made from valid segwit UTXOs that simply omit the field. The
-  // legacy size is only applied defensively if a non-segwit script slips in.
+function estimateVBytes(inputs: Utxo[], outputVBytes: number[]): number {
+  const overhead = 10; // base tx overhead
+  // Inputs are sized by script class (P2WPKH 68, P2TR 57.5, P2WSH a
+  // conservative 120) — a flat P2WPKH assumption underpays the requested fee
+  // rate for P2WSH inputs (issue #344). build() rejects UTXOs with a KNOWN
+  // non-segwit scriptPubKey up front, so an input without a scriptPubKey is
+  // assumed P2WPKH here — charging it at legacy width would over-estimate
+  // fees and spuriously fail (or over-fund) selections made from valid
+  // segwit UTXOs that simply omit the field. The legacy size is only applied
+  // defensively if a non-segwit script slips in.
   const inputSize = inputs.reduce(
-    (sum, u) => sum + (!u.scriptPubKey || isSegwitScriptPubKey(u.scriptPubKey) ? segwitInSize : legacyInSize),
+    (sum, u) => sum + (u.scriptPubKey ? inputVBytesForScriptPubKey(u.scriptPubKey) : P2WPKH_INPUT_VBYTES),
     0
   );
-  return Math.ceil(overhead + inputSize + outputs * outSize);
+  const outputSize = outputVBytes.reduce((sum, v) => sum + v, 0);
+  return Math.ceil(overhead + inputSize + outputSize);
 }
 
 export class PSBTBuilder {
@@ -78,6 +85,11 @@ export class PSBTBuilder {
     // Sort UTXOs ascending by value for simple greedy selection
     const sorted = [...spendable].sort((a, b) => a.value - b.value);
 
+    // Outputs (and the potential change output) are sized by their address's
+    // script class — a P2TR/P2WSH output is 43 vB, not the 31 vB of P2WPKH.
+    const outputSizes = outputs.map(o => outputVBytesForAddress(o.address));
+    const changeSize = outputVBytesForAddress(changeAddress);
+
     // Start with smallest set to cover target + estimated fee; refine iteratively
     const targetValue = outputs.reduce((s, o) => s + o.value, 0);
     let selected: Utxo[] = [];
@@ -89,7 +101,7 @@ export class PSBTBuilder {
       for (const u of sorted) {
         selected.push(u);
         total += u.value;
-        const vbytes = estimateVBytes(selected, outputs.length + 1); // +1 potential change
+        const vbytes = estimateVBytes(selected, [...outputSizes, changeSize]); // + potential change
         const fee = Math.ceil(vbytes * feeRate);
         if (total >= targetValue + fee) break;
       }
@@ -97,13 +109,13 @@ export class PSBTBuilder {
     };
 
     pick();
-    const initialVBytes = estimateVBytes(selected, outputs.length + 1);
+    const initialVBytes = estimateVBytes(selected, [...outputSizes, changeSize]);
     let fee = Math.ceil(initialVBytes * feeRate);
     let change = total - targetValue - fee;
     let includeChange = change >= this.dustLimit;
 
     // Re-estimate once we know whether change is included
-    const finalVBytes = estimateVBytes(selected, outputs.length + (includeChange ? 1 : 0));
+    const finalVBytes = estimateVBytes(selected, includeChange ? [...outputSizes, changeSize] : outputSizes);
     fee = Math.ceil(finalVBytes * feeRate);
     change = total - targetValue - fee;
     includeChange = change >= this.dustLimit;

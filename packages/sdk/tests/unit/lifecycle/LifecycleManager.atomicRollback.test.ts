@@ -15,8 +15,8 @@ import type { AssetResource } from '../../../src/types';
 // mutations between tests.
 function makeResources(): AssetResource[] {
   return [
-    { id: 'r1', type: 'text', contentType: 'text/plain', hash: 'aa01', content: 'first resource' },
-    { id: 'r2', type: 'text', contentType: 'text/plain', hash: 'aa02', content: 'second resource' }
+    { id: 'r1', type: 'text', contentType: 'text/plain', hash: '1974d92bd968cd5723d7eafd3c5ed66642777c6119fbf81ef42e0cb6af6bc405', content: 'first resource' },
+    { id: 'r2', type: 'text', contentType: 'text/plain', hash: 'a7562edd17428eec751400f3389675e0195f7fb31cd54730cd6cafa8cc26566c', content: 'second resource' }
   ];
 }
 

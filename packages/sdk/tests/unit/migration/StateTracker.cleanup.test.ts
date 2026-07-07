@@ -115,7 +115,7 @@ describe('MIGRATION_IN_PROGRESS rejection produces no audit/event noise (item 6,
     );
 
     const peerDid = await sdk.did.createDIDPeer([
-      { id: 'res-noise', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+      { id: 'res-noise', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
     ]);
 
     const failedEvents: unknown[] = [];

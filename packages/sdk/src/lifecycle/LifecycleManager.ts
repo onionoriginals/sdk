@@ -12,6 +12,7 @@ import { DIDManager } from '../did/DIDManager.js';
 import { CredentialManager } from '../vc/CredentialManager.js';
 import { OriginalsAsset } from './OriginalsAsset.js';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
+import { hashResource } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix } from '../cel/btcoDid.js';
@@ -249,6 +250,12 @@ export class LifecycleManager {
         if (!/^[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]{0,126}\/[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]{0,126}$/.test(resource.contentType)) {
           throw new StructuredError('INVALID_RESOURCE', `Invalid resource: invalid contentType MIME format: ${resource.contentType}`);
         }
+        // Inline content must actually match its declared hash: everything
+        // downstream (publication credentials, resource URLs, inscription
+        // manifests) attests the DECLARED hash, so accepting mismatched
+        // content here would let a signed attestation claim integrity that
+        // was never true (issue #347).
+        this.assertContentMatchesDeclaredHash(resource, 'createAsset');
       }
     
     // Create a proper DID:peer document with verification methods
@@ -792,6 +799,29 @@ export class LifecycleManager {
     }
   }
 
+  /**
+   * Verify that a resource's inline content actually hashes to its declared
+   * hash. The SDK's integrity semantics (OriginalsAsset.verify,
+   * addResourceVersion) define a resource hash as sha256 over the UTF-8
+   * bytes of `content`. Publication writes content to a key derived from the
+   * DECLARED hash, sets resource.url, and mints a signed ResourceMigrated
+   * credential — none of which is sound if the bytes don't match (issue
+   * #347). Hash-only resources (no inline content) are not checkable here
+   * and are skipped.
+   */
+  private assertContentMatchesDeclaredHash(resource: AssetResource, operation: string): void {
+    if (typeof resource.content !== 'string') return;
+    const computed = hashResource(Buffer.from(resource.content, 'utf8'));
+    if (computed.toLowerCase() !== resource.hash.toLowerCase()) {
+      throw new StructuredError(
+        'RESOURCE_HASH_MISMATCH',
+        `Resource ${resource.id}: content does not match its declared hash ` +
+        `(declared ${resource.hash}, computed ${computed}). Refusing to ${operation}: ` +
+        `attesting a hash the bytes do not match would break provenance.`
+      );
+    }
+  }
+
   private async publishResources(
     asset: OriginalsAsset,
     publisherDid: string,
@@ -850,6 +880,12 @@ export class LifecycleManager {
         });
         continue;
       }
+
+      // Verify the bytes against the declared hash BEFORE writing anything or
+      // attesting anything: the storage key, resource.url, resource:published
+      // event and the ResourceMigrated credential all assert the declared
+      // hash (issue #347).
+      this.assertContentMatchesDeclaredHash(resource, 'publish');
 
       const data = Buffer.from(resource.content);
 
@@ -1106,6 +1142,12 @@ export class LifecycleManager {
     this.inFlightAssets.add(asset.id);
     try {
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+    // The manifest permanently records each resource's declared hash on
+    // Bitcoin; verify inline content against it first so a mismatched hash
+    // is never inscribed (issue #347).
+    for (const res of asset.resources) {
+      this.assertContentMatchesDeclaredHash(res, 'inscribe on Bitcoin');
+    }
     const manifest = {
       assetId: asset.id,
       resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),

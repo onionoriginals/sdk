@@ -11,6 +11,7 @@
  */
 
 import { describe, it, test, expect, beforeEach, afterEach, beforeAll } from 'bun:test';
+import { createHash } from 'crypto';
 import * as ed25519 from '@noble/ed25519';
 
 import { OriginalsSDK } from '../../../src';
@@ -40,7 +41,7 @@ const baseConfig: OriginalsConfig = {
 };
 
 const sampleResources = [
-  { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'aabbcc0011223344', content: 'data' },
+  { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' },
 ];
 
 function makeSdk(extra: Partial<OriginalsConfig> = {}) {
@@ -105,7 +106,8 @@ describe('CORE-MIG-EVENTS-002/performance: createAsset with large resource set',
       id: `res-${i}`,
       type: 'Image',
       contentType: 'image/png',
-      hash: `aabb${i.toString(16).padStart(8, '0')}ccdd`,
+      // Real sha256 of the content — createAsset now rejects mismatches (issue #347)
+      hash: createHash('sha256').update(`data-${i}`, 'utf8').digest('hex'),
       content: `data-${i}`,
     }));
 
