@@ -114,7 +114,7 @@ describe('jwt', () => {
       const token = signToken('sub_org_123', 'user@example.com', undefined, {
         secret: TEST_SECRET,
       });
-      expect(() => verifyToken(token, { secret: 'wrong-secret' })).toThrow('Invalid token');
+      expect(() => verifyToken(token, { secret: 'wrong-secret-that-is-long-enough-for-hs256' })).toThrow('Invalid token');
     });
 
     test('throws for token with wrong issuer', () => {

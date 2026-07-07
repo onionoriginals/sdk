@@ -133,15 +133,16 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
     publicKey: Uint8Array
   ): Promise<boolean> {
     try {
-      // Ed25519 public keys must be exactly 32 bytes
-      let ed25519PublicKey = publicKey;
-      if (publicKey.length === 33) {
-        ed25519PublicKey = publicKey.slice(1);
-      } else if (publicKey.length !== 32) {
+      // Ed25519 public keys must be exactly 32 bytes. A 33-byte input is NOT
+      // a "prefixed Ed25519 key": Ed25519 multicodec prefixes are 2 bytes
+      // (0xed 0x01 → 34 bytes), while 33 bytes is the shape of a compressed
+      // secp256k1 key. Stripping one byte verified against garbage — reject
+      // instead of guessing (issue #352).
+      if (publicKey.length !== 32) {
         return false;
       }
 
-      return await ed25519.verifyAsync(signature, message, ed25519PublicKey);
+      return await ed25519.verifyAsync(signature, message, publicKey);
     } catch (error) {
       console.error('Error verifying signature:', error);
       return false;
