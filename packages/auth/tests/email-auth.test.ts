@@ -316,7 +316,7 @@ describe('email-auth', () => {
       expect(createSubOrganization).not.toHaveBeenCalled();
     });
 
-    test('reports provisioning failure distinctly from an invalid code', async () => {
+    test('reports provisioning failure distinctly and destroys the session', async () => {
       const client = createMockTurnkeyClient({
         getSubOrgIds: mock(() => Promise.reject(new Error('Turnkey is down'))),
       });
@@ -325,6 +325,11 @@ describe('email-auth', () => {
       await expect(
         verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions)
       ).rejects.toThrow('provisioning the Turnkey sub-organization failed');
+
+      // The OTP is already consumed, so the session can never complete;
+      // keeping it alive would let retries burn the attempt budget against
+      // the consumed otpId and mask this error.
+      expect(storage.get(sessionId)).toBeUndefined();
     });
 
     test('throws for invalid session ID', async () => {
@@ -436,12 +441,26 @@ describe('email-auth', () => {
       ).rejects.toThrow('Invalid verification code');
     });
 
-    test('rejects code shorter than 4 characters', async () => {
+    test('rejects code shorter than 6 digits', async () => {
       const client = createMockTurnkeyClient();
       const sessionId = await setupSession(client);
       await expect(verifyEmailAuth(sessionId, '123', client, storage)).rejects.toThrow(
         'Invalid verification code format'
       );
+    });
+
+    test('rejects non-numeric code without calling Turnkey', async () => {
+      // initiateEmailAuth requests a 6-digit numeric OTP, so alphabetic
+      // codes are definitely wrong and must not consume an attempt.
+      const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token' }));
+      const client = createMockTurnkeyClient({ verifyOtp });
+      const sessionId = await setupSession(client);
+
+      await expect(verifyEmailAuth(sessionId, 'ABCDEF', client, storage)).rejects.toThrow(
+        'Invalid verification code format'
+      );
+      expect(verifyOtp).not.toHaveBeenCalled();
+      expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
     });
 
     test('rejects oversized code without calling Turnkey', async () => {

@@ -249,8 +249,11 @@ export async function verifyEmailAuth(
     );
   }
 
-  // Reject malformed or oversized codes before hitting Turnkey
-  if (!/^[A-Za-z0-9]{4,10}$/.test(code)) {
+  // Reject malformed codes before hitting Turnkey (and before they consume
+  // an attempt): initiateEmailAuth always requests a 6-digit numeric OTP
+  // (otpLength: 6, alphanumeric: false), so anything else is definitely
+  // wrong. Keep in sync with the initOtp configuration above.
+  if (!/^\d{6}$/.test(code)) {
     throw new Error('Invalid verification code format');
   }
 
@@ -333,6 +336,12 @@ export async function verifyEmailAuth(
   try {
     subOrgId = await getOrCreateTurnkeySubOrg(session.email, turnkeyClient);
   } catch (error) {
+    // The OTP was already consumed by the successful verifyOtp above, so
+    // this session can never complete: destroy it. Leaving it alive would
+    // make retries re-submit the consumed otpId to Turnkey, burning the
+    // attempt budget and eventually masking this error with a misleading
+    // "too many failed attempts".
+    storage.delete(sessionId);
     throw new Error(
       `Email verified, but provisioning the Turnkey sub-organization failed: ${
         error instanceof Error ? error.message : String(error)

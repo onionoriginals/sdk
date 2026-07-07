@@ -80,17 +80,24 @@ const DEFAULT_WALLET_ACCOUNTS = [
 /**
  * Whether an error from the Turnkey API definitively means the queried
  * resource does not exist (as opposed to a transient/network/auth failure).
- * gRPC status code 5 is NOT_FOUND.
+ * gRPC status code 5 is NOT_FOUND. Walks the `cause` chain (cycle-safe) in
+ * case the original Turnkey error arrives wrapped.
  */
 function isDefinitiveNotFound(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (typeof current === 'object' && current !== null && !seen.has(current)) {
+    seen.add(current);
+    const { code, message } = current as { code?: unknown; message?: unknown };
+    if (code === 5) {
+      return true;
+    }
+    if (typeof message === 'string' && /not[ _-]?found|does not exist/i.test(message)) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
   }
-  const { code, message } = error as { code?: unknown; message?: unknown };
-  if (code === 5) {
-    return true;
-  }
-  return typeof message === 'string' && /not[ _-]?found|does not exist/i.test(message);
+  return false;
 }
 
 /**

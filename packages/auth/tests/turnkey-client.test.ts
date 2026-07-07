@@ -356,6 +356,27 @@ describe('turnkey-client', () => {
       expect(createSubOrganization).not.toHaveBeenCalled();
     });
 
+    test('detects a definitive not-found wrapped in a cause chain', async () => {
+      const notFound = Object.assign(new Error('resource not found'), { code: 5 });
+      const wrapped = new Error('lookup failed', { cause: notFound });
+      const createSubOrganization = mock(() =>
+        Promise.resolve({
+          activity: {
+            result: {
+              createSubOrganizationResultV7: { subOrganizationId: 'created_after_wrapped_404' },
+            },
+          },
+        })
+      );
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.reject(wrapped)),
+        createSubOrganization,
+      });
+
+      const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+      expect(result).toBe('created_after_wrapped_404');
+    });
+
     test('creates new sub-org when lookup fails with definitive not-found (gRPC code 5)', async () => {
       const notFound = Object.assign(new Error('resource not found'), { code: 5 });
       const createSubOrganization = mock(() =>

@@ -321,7 +321,7 @@ describe('[AUTH-008] verifyEmailAuth – error paths', () => {
   });
 
   test('empty OTP code → rejected with format error BEFORE calling Turnkey', async () => {
-    // verifyEmailAuth validates code with /^[A-Za-z0-9]{4,10}$/ before calling Turnkey.
+    // verifyEmailAuth validates code with /^\d{6}$/ before calling Turnkey.
     // Empty string ('') fails this regex → throws 'Invalid verification code format'
     const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'tok' }));
     const client = createEmailAuthMockClient({ verifyOtp });
