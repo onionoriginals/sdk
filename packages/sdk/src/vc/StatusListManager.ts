@@ -52,6 +52,35 @@ function toV2Context(context: unknown): string[] {
   return withoutV1.includes(VCDM_V2_CONTEXT) ? withoutV1 : [VCDM_V2_CONTEXT, ...withoutV1];
 }
 
+/**
+ * Re-issue a status-list credential after mutating its bitstring (#300). The
+ * result is always a valid VCDM 2.0 document regardless of the input's vintage:
+ * the @context is normalized to 2.0, a fresh `validFrom` is written, and the
+ * deprecated 1.1 date fields are removed so a genuinely legacy input (created
+ * with `issuanceDate`/`expirationDate`) cannot leave those terms on a v2
+ * document — the v2 context does not define them, which breaks safe-mode JSON-LD
+ * canonicalization. `expirationDate` is migrated to `validUntil` to preserve any
+ * expiry. The now-stale proof is stripped so the caller must re-sign.
+ */
+function reissueStatusList(
+  base: VerifiableCredential,
+  newSubject: BitstringStatusListSubject
+): VerifiableCredential {
+  const result = {
+    ...base,
+    '@context': toV2Context(base['@context']),
+    credentialSubject: newSubject,
+    validFrom: new Date().toISOString(),
+  } as VerifiableCredential & Record<string, unknown>;
+  if (result.expirationDate && !result.validUntil) {
+    result.validUntil = result.expirationDate;
+  }
+  delete result.issuanceDate;
+  delete result.expirationDate;
+  delete result.proof;
+  return result;
+}
+
 // Upper bound for decompressed encodedList payloads. A legitimate status list
 // is a few MiB at most (the spec minimum is 16 KiB); 16 MiB covers 134M
 // entries while keeping a hostile gzip bomb from exhausting memory.
@@ -220,14 +249,7 @@ export class StatusListManager {
     // the stale proof intact would let a publisher host an unverifiable list
     // (every credential in it then fails a proof-checking verifier). Forcing a
     // re-sign is the only safe contract.
-    const result = {
-      ...statusListCredential,
-      '@context': toV2Context(statusListCredential['@context']),
-      credentialSubject: newSubject,
-      validFrom: new Date().toISOString(),
-    } as VerifiableCredential & { proof?: unknown };
-    delete result.proof;
-    return result;
+    return reissueStatusList(statusListCredential, newSubject);
   }
 
   /**
@@ -317,14 +339,7 @@ export class StatusListManager {
 
     // Strip any existing proof — see setStatus: the mutated bitstring
     // invalidates the prior signature, so the caller must re-sign.
-    const result = {
-      ...statusListCredential,
-      '@context': toV2Context(statusListCredential['@context']),
-      credentialSubject: newSubject,
-      validFrom: new Date().toISOString(),
-    } as VerifiableCredential & { proof?: unknown };
-    delete result.proof;
-    return result;
+    return reissueStatusList(statusListCredential, newSubject);
   }
 
   /**

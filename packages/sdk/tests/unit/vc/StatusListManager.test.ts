@@ -219,31 +219,44 @@ describe('StatusListManager', () => {
       expect(typeof updated.validFrom).toBe('string');
     });
 
-    // Regression (#300 review): updating a legacy VCDM 1.1 status list must
-    // upgrade its @context to 2.0, not silently produce a 1.1 credential that
-    // the SDK's own validateCredential gate rejects.
-    test('upgrades a legacy v1-context status list to VCDM 2.0 on update', async () => {
+    // Regression (#300 review): updating a genuinely legacy VCDM 1.1 status
+    // list (1.1 context + issuanceDate, no validFrom) must yield a valid 2.0
+    // credential — upgrade @context to 2.0 AND strip the deprecated 1.1 date
+    // fields, which the v2 context does not define (leaving them would break
+    // safe-mode canonicalization and the validateCredential gate).
+    test('upgrades a legacy v1/issuanceDate status list to VCDM 2.0 on update', async () => {
       const { validateCredential } = await import('../../../src/utils/validation');
       const v2 = manager.createStatusListCredential({
         id: 'https://example.com/status/legacy',
         issuer: 'did:peer:issuer',
         statusPurpose: 'revocation',
       });
-      // Simulate a status list minted before the 2.0 standardization.
-      const legacyV1 = {
+      // Simulate a status list minted before the 2.0 standardization: 1.1
+      // context, issuanceDate present, validFrom absent, and a legacy
+      // expirationDate to prove expiry semantics are preserved.
+      const legacy = {
         ...v2,
         '@context': ['https://www.w3.org/2018/credentials/v1'],
-      } as typeof v2;
+        issuanceDate: '2020-01-01T00:00:00Z',
+        expirationDate: '2999-01-01T00:00:00Z',
+      } as Record<string, unknown>;
+      delete legacy.validFrom;
 
-      const setUpdated = manager.setStatus(legacyV1, 0, true);
-      expect(setUpdated['@context']).toContain('https://www.w3.org/ns/credentials/v2');
-      expect(setUpdated['@context']).not.toContain('https://www.w3.org/2018/credentials/v1');
-      expect(validateCredential(setUpdated)).toBe(true);
-
-      const batchUpdated = manager.batchSetStatus(legacyV1, [[1, true]]);
-      expect(batchUpdated['@context']).toContain('https://www.w3.org/ns/credentials/v2');
-      expect(batchUpdated['@context']).not.toContain('https://www.w3.org/2018/credentials/v1');
-      expect(validateCredential(batchUpdated)).toBe(true);
+      for (const updated of [
+        manager.setStatus(legacy as never, 0, true),
+        manager.batchSetStatus(legacy as never, [[1, true]]),
+      ]) {
+        const u = updated as Record<string, unknown>;
+        expect((u['@context'] as string[])).toContain('https://www.w3.org/ns/credentials/v2');
+        expect((u['@context'] as string[])).not.toContain('https://www.w3.org/2018/credentials/v1');
+        expect(u.validFrom).toBeDefined();
+        // Deprecated 1.1 terms must not survive onto the v2 document.
+        expect(u.issuanceDate).toBeUndefined();
+        expect(u.expirationDate).toBeUndefined();
+        // expirationDate migrated to validUntil (expiry preserved).
+        expect(u.validUntil).toBe('2999-01-01T00:00:00Z');
+        expect(validateCredential(updated)).toBe(true);
+      }
     });
 
     test('returns a new credential (immutable)', () => {
