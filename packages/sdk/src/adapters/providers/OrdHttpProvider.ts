@@ -230,10 +230,13 @@ export async function createOrdinalsProviderFromEnv(
     // misconfiguration surfaces at startup rather than mid-lifecycle (#328).
     const baseUrl = String(((globalThis as any).process?.env?.ORD_PROVIDER_BASE_URL) || '').trim();
     if (!baseUrl || baseUrl === PLACEHOLDER_ORD_BASE_URL) {
+      const reason = !baseUrl
+        ? 'it is not set or is blank'
+        : `it is left at the documentation placeholder ${PLACEHOLDER_ORD_BASE_URL}`;
       throw new StructuredError(
         'ORD_PROVIDER_BASE_URL_REQUIRED',
         'USE_LIVE_ORD_PROVIDER=true requires ORD_PROVIDER_BASE_URL to be set to a real ord ' +
-        `server URL; refusing to fall back to the placeholder ${PLACEHOLDER_ORD_BASE_URL}.`
+        `server URL, but ${reason}.`
       );
     }
     return new OrdHttpProvider({ baseUrl });
