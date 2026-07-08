@@ -338,6 +338,114 @@ describe('CLI Verify Command', () => {
     });
   });
   
+  describe('controller-key TOFU authorization', () => {
+    it('returns verified: false when a later event is signed by a key not authorized by the create event', async () => {
+      // Event 0 establishes the trust-on-first-use controller key (signer A).
+      // A subsequent event signed by a *different* did:key (signer B) is
+      // cryptographically valid on its own, but is not authorized by the log's
+      // create event, so the CLI must fail closed.
+      const signerA = await createRealDidKeySigner();
+      const signerB = await createRealDidKeySigner();
+      expect(signerA.verificationMethod).not.toBe(signerB.verificationMethod);
+
+      let log = await createEventLog({ name: 'TOFU Asset' }, {
+        signer: signerA.signer,
+        verificationMethod: signerA.verificationMethod,
+        proofPurpose: 'assertionMethod',
+      });
+      log = await updateEventLog(log, { description: 'Rogue update' }, {
+        signer: signerB.signer,
+        verificationMethod: signerB.verificationMethod,
+        proofPurpose: 'assertionMethod',
+      });
+
+      const filePath = path.join(tempDir, 'tofu-unauthorized.cel.json');
+      fs.writeFileSync(filePath, serializeEventLogJson(log));
+
+      const result = await verifyCommand({ log: filePath });
+
+      expect(result.success).toBe(true);
+      expect(result.verified).toBe(false);
+      // The second event's controller proof is rejected as unauthorized.
+      expect(result.result?.events[1]?.proofValid).toBe(false);
+      expect(
+        result.result?.errors?.some((e) =>
+          e.includes("is not authorized by the log's create event")
+        )
+      ).toBe(true);
+    });
+
+    it('returns verified: true when every event is signed by the create-event controller key', async () => {
+      // Control case: the same signer authorizes every event, so TOFU passes.
+      const signer = await createRealDidKeySigner();
+      const options = {
+        signer: signer.signer,
+        verificationMethod: signer.verificationMethod,
+        proofPurpose: 'assertionMethod',
+      };
+
+      let log = await createEventLog({ name: 'TOFU Asset' }, options);
+      log = await updateEventLog(log, { description: 'Authorized update' }, options);
+
+      const filePath = path.join(tempDir, 'tofu-authorized.cel.json');
+      fs.writeFileSync(filePath, serializeEventLogJson(log));
+
+      const result = await verifyCommand({ log: filePath });
+
+      expect(result.success).toBe(true);
+      expect(result.verified).toBe(true);
+    });
+  });
+
+  describe('btco-anchor gating', () => {
+    it('fails closed on a bitcoin-ordinals witness proof because the CLI wires no ordinalsProvider', async () => {
+      // A `bitcoin-ordinals-2024` witness proof defines a btco log's resolvable
+      // on-chain identity, so it GATES the result. The CLI does not supply an
+      // ordinalsProvider, so the anchor cannot be confirmed and verification
+      // must fail closed rather than trusting attacker-editable satoshi fields.
+      const { signer, verificationMethod } = await createRealDidKeySigner();
+      const log = await createEventLog({ name: 'Anchored Asset' }, {
+        signer,
+        verificationMethod,
+        proofPurpose: 'assertionMethod',
+      });
+
+      const bitcoinWitnessProof = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'bitcoin-ordinals-2024',
+        created: new Date().toISOString(),
+        verificationMethod: 'did:btco:1066296127976657#0',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'zBitcoinAnchorProof',
+        witnessedAt: '2026-01-20T12:00:00Z',
+        satoshi: '1066296127976657',
+        inscriptionId: 'abc123i0',
+        txid: 'abc123',
+      } as unknown as WitnessProof;
+
+      const anchoredLog: EventLog = {
+        events: [{
+          ...log.events[0],
+          proof: [...log.events[0].proof, bitcoinWitnessProof],
+        }],
+      };
+
+      const filePath = path.join(tempDir, 'btco-anchored.cel.json');
+      fs.writeFileSync(filePath, serializeEventLogJson(anchoredLog));
+
+      const result = await verifyCommand({ log: filePath });
+
+      expect(result.success).toBe(true);
+      // Bitcoin-anchor failure gates the result — unlike ordinary witnesses.
+      expect(result.verified).toBe(false);
+      expect(
+        result.result?.errors?.some((e) =>
+          e.includes('cannot be verified without an ordinalsProvider')
+        )
+      ).toBe(true);
+    });
+  });
+
   describe('error handling', () => {
     it('handles invalid JSON gracefully', async () => {
       const filePath = path.join(tempDir, 'invalid.cel.json');
