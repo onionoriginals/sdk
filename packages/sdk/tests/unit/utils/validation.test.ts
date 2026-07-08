@@ -27,6 +27,65 @@ describe('validation utils', () => {
     expect(validateCredential(vc)).toBe(true);
   });
 
+  test('validateCredential accepts a VC 2.0 credential using validFrom', () => {
+    // VCDM 2.0 replaces issuanceDate with validFrom (#259–#264). The credential
+    // below carries *only* validFrom — no legacy issuanceDate — and must pass.
+    const vc: any = {
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:peer:abc',
+      validFrom: new Date().toISOString(),
+      credentialSubject: { id: 'did:peer:abc', foo: 'bar' }
+    };
+    expect(validateCredential(vc)).toBe(true);
+  });
+
+  test('validateCredential rejects a VC 2.0 credential with no validFrom or issuanceDate', () => {
+    const vc: any = {
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:peer:abc',
+      credentialSubject: { id: 'did:peer:abc' }
+    };
+    expect(validateCredential(vc)).toBe(false);
+  });
+
+  test('validateCredential rejects a VC 2.0 credential whose validFrom is not a valid ISO timestamp', () => {
+    const vc: any = {
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:peer:abc',
+      validFrom: 'not-a-date',
+      credentialSubject: { id: 'did:peer:abc' }
+    };
+    expect(validateCredential(vc)).toBe(false);
+  });
+
+  test('validateCredential rejects a credential missing the VCDM 2.0 context even when validFrom is present', () => {
+    const vc: any = {
+      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:peer:abc',
+      validFrom: new Date().toISOString(),
+      credentialSubject: { id: 'did:peer:abc' }
+    };
+    expect(validateCredential(vc)).toBe(false);
+  });
+
+  test('validateCredential prefers validFrom when both validFrom and issuanceDate are present', () => {
+    const vc: any = {
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:peer:abc',
+      validFrom: new Date().toISOString(),
+      issuanceDate: 'not-a-date',
+      credentialSubject: { id: 'did:peer:abc' }
+    };
+    // validFrom takes precedence over issuanceDate, so the invalid legacy field
+    // is ignored and the credential validates.
+    expect(validateCredential(vc)).toBe(true);
+  });
+
   test('validateCredential accepts issuer object with DID id', () => {
     const vc: any = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],

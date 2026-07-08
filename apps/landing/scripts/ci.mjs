@@ -79,9 +79,24 @@ const smoke = spawnSync(
   [fileURLToPath(new URL('./smoke.mjs', import.meta.url)), `${base}?smoke=1`],
   { cwd: appDir, stdio: 'inherit' }
 );
-stopServer();
 if (smoke.status !== 0) {
+  stopServer();
   console.error('[landing-ci] FAILED: smoke test');
   process.exit(smoke.status ?? 1);
 }
-console.log('\n[landing-ci] PASS — build clean, lifecycle ran, zero console errors');
+
+// Throttled-network TTI budget check (tti.mjs). Runs against the same preview
+// server as the smoke test so the CI gate actually enforces the interactivity
+// floor (issue #362 / LANDING-011) instead of the script only existing on disk.
+console.log('\n[landing-ci] throttled-network TTI budget check');
+const tti = spawnSync(
+  process.execPath,
+  [fileURLToPath(new URL('./tti.mjs', import.meta.url)), base],
+  { cwd: appDir, stdio: 'inherit' }
+);
+stopServer();
+if (tti.status !== 0) {
+  console.error('[landing-ci] FAILED: TTI budget check');
+  process.exit(tti.status ?? 1);
+}
+console.log('\n[landing-ci] PASS — build clean, lifecycle ran, zero console errors, TTI within budget');

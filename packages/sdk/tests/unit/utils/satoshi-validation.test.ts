@@ -1,9 +1,10 @@
 import { describe, test, expect } from 'bun:test';
-import { 
-  validateSatoshiNumber, 
-  parseSatoshiIdentifier, 
+import {
+  validateSatoshiNumber,
+  parseSatoshiIdentifier,
   assertValidSatoshi,
-  MAX_SATOSHI_SUPPLY 
+  canonicalizeSatoshi,
+  MAX_SATOSHI_SUPPLY
 } from '../../../src/utils/satoshi-validation';
 import { StructuredError } from '../../../src/utils/telemetry';
 
@@ -348,6 +349,67 @@ describe('satoshi-validation', () => {
       const result = validateSatoshiNumber(-5);
       expect(result.valid).toBe(false);
       expect(result.error).toBeDefined();
+    });
+  });
+
+  describe('canonicalizeSatoshi', () => {
+    test('returns the canonical decimal string for a plain number', () => {
+      expect(canonicalizeSatoshi(42)).toBe('42');
+    });
+
+    test('returns the canonical decimal string for a numeric string', () => {
+      expect(canonicalizeSatoshi('42')).toBe('42');
+    });
+
+    test('strips leading zeros', () => {
+      expect(canonicalizeSatoshi('007')).toBe('7');
+    });
+
+    test('strips surrounding whitespace', () => {
+      expect(canonicalizeSatoshi(' 42 ')).toBe('42');
+    });
+
+    test('canonicalizes zero', () => {
+      expect(canonicalizeSatoshi('0')).toBe('0');
+      expect(canonicalizeSatoshi('000')).toBe('0');
+      expect(canonicalizeSatoshi(0)).toBe('0');
+    });
+
+    test('canonicalizes the maximum supply value', () => {
+      expect(canonicalizeSatoshi(MAX_SATOSHI_SUPPLY)).toBe(String(MAX_SATOSHI_SUPPLY));
+      expect(canonicalizeSatoshi(String(MAX_SATOSHI_SUPPLY))).toBe(String(MAX_SATOSHI_SUPPLY));
+    });
+
+    test('produces identical output for whitespace/leading-zero variants of the same satoshi', () => {
+      const forms = ['42', ' 42', '42 ', '042', ' 042 '];
+      for (const form of forms) {
+        expect(canonicalizeSatoshi(form)).toBe('42');
+      }
+    });
+
+    test('throws INVALID_SATOSHI for an out-of-range value', () => {
+      expect(() => canonicalizeSatoshi(MAX_SATOSHI_SUPPLY + 1)).toThrow();
+    });
+
+    test('throws INVALID_SATOSHI for a non-numeric string', () => {
+      expect(() => canonicalizeSatoshi('not-a-number')).toThrow();
+    });
+
+    test('throws INVALID_SATOSHI for a negative value', () => {
+      expect(() => canonicalizeSatoshi(-1)).toThrow();
+    });
+
+    test('throws INVALID_SATOSHI for a decimal value', () => {
+      expect(() => canonicalizeSatoshi('1.5')).toThrow();
+    });
+
+    test('thrown error carries the INVALID_SATOSHI code', () => {
+      try {
+        canonicalizeSatoshi('bad');
+        throw new Error('expected canonicalizeSatoshi to throw');
+      } catch (e) {
+        expect((e as StructuredError).code).toBe('INVALID_SATOSHI');
+      }
     });
   });
 
