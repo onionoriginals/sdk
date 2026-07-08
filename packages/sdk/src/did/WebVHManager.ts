@@ -281,12 +281,12 @@ export interface RecoverWebVHOptions {
   outputDir?: string;
 }
 
-/** Minimal W3C VC documenting a key-compromise recovery. */
+/** Minimal W3C VCDM 2.0 VC documenting a key-compromise recovery. */
 export interface KeyRecoveryCredential {
   '@context': string[];
   type: string[];
   issuer: string;
-  issuanceDate: string;
+  validFrom: string;
   credentialSubject: {
     id: string;
     recoveredAt: string;
@@ -871,12 +871,12 @@ export class WebVHManager {
     const now = new Date().toISOString();
     const recoveryCredential: KeyRecoveryCredential = {
       '@context': [
-        'https://www.w3.org/2018/credentials/v1',
+        'https://www.w3.org/ns/credentials/v2',
         'https://w3id.org/security/multikey/v1'
       ],
       type: ['VerifiableCredential', 'KeyRecoveryCredential'],
       issuer: did,
-      issuanceDate: now,
+      validFrom: now,
       credentialSubject: {
         id: did,
         recoveredAt: now,

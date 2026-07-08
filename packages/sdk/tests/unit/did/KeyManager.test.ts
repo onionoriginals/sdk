@@ -258,12 +258,12 @@ describe('KeyManager', () => {
     const credential = result.recoveryCredential;
 
     // Verify credential structure
-    expect(credential['@context']).toContain('https://www.w3.org/2018/credentials/v1');
+    expect(credential['@context']).toContain('https://www.w3.org/ns/credentials/v2');
     expect(credential['@context']).toContain('https://w3id.org/security/v1');
     expect(credential.type).toContain('VerifiableCredential');
     expect(credential.type).toContain('KeyRecoveryCredential');
     expect(credential.issuer).toBe('did:peer:recovery-test');
-    expect(credential.issuanceDate).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(credential.validFrom).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
     // Verify credential subject
     expect(credential.credentialSubject.id).toBe('did:peer:recovery-test');

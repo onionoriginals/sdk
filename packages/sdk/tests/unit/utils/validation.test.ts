@@ -18,7 +18,7 @@ describe('validation utils', () => {
 
   test('validateCredential basic VC shape', () => {
     const vc: any = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential', 'Test'],
       issuer: 'did:peer:abc',
       issuanceDate: new Date().toISOString(),
@@ -29,7 +29,7 @@ describe('validation utils', () => {
 
   test('validateCredential accepts issuer object with DID id', () => {
     const vc: any = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
       issuer: { id: 'did:webvh:example.com:abc' },
       issuanceDate: new Date().toISOString(),
@@ -40,7 +40,7 @@ describe('validation utils', () => {
 
   test('validateCredential returns false when issuer object has no id', () => {
     const vc: any = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
       issuer: { name: 'Test Issuer' },
       issuanceDate: new Date().toISOString(),
@@ -52,21 +52,21 @@ describe('validation utils', () => {
   test('validateCredential negative cases', () => {
     expect(validateCredential({} as any)).toBe(false);
     // Fails on missing type array
-    expect(validateCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: undefined, issuer: 'did:peer:x', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: undefined, issuer: 'did:peer:x', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
     // Fails on missing VerifiableCredential type
-    expect(validateCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['Other'], issuer: 'did:peer:x', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['Other'], issuer: 'did:peer:x', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
     // Fails on missing issuanceDate
-    expect(validateCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:peer:x', credentialSubject: {} } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:peer:x', credentialSubject: {} } as any)).toBe(false);
     // Fails on missing credentialSubject
-    expect(validateCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:peer:x', issuanceDate: new Date().toISOString() } as any)).toBe(false);
-    // Fails when VC v1 context missing
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:peer:x', issuanceDate: new Date().toISOString() } as any)).toBe(false);
+    // Fails when the VCDM 2.0 credentials context is missing
     expect(validateCredential({ '@context': ['https://example.com/ctx'], type: ['VerifiableCredential'], issuer: 'did:peer:x', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
     // Fails when issuer is not DID
-    expect(validateCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'https://example.com', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'https://example.com', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
     // Fails when issuer object has non-DID id
-    expect(validateCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: { id: 'example.com' }, issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: { id: 'example.com' }, issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
     // Fails when issuanceDate is not valid ISO
-    expect(validateCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:peer:x', issuanceDate: 'not-a-date', credentialSubject: {} } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:peer:x', issuanceDate: 'not-a-date', credentialSubject: {} } as any)).toBe(false);
   });
 
   test('validateDIDDocument shape', () => {

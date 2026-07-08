@@ -177,7 +177,9 @@ Pluggable storage via StorageAdapter interface:
 - `LocalStorageAdapter` - Browser localStorage
 - Custom adapters can be implemented for databases, IPFS, etc.
 
-### Migration System (src/migration/)
+### Migration System (src/migration/) — EXPERIMENTAL, not the production path
+
+> **Note:** This subsystem is **experimental and unused in production.** `OriginalsSDK`/`LifecycleManager` run their own migrate/publish/inscribe flow with independent validation and never instantiate `MigrationManager`, so the checkpoint/rollback/audit/state-machine machinery below protects no production code path (issue #279). `MigrationManager` is intentionally **not** exported from the package entry point. Do not treat it as the supported migration API; use `LifecycleManager` (`sdk.lifecycle`) for real migrations.
 
 State machine-driven asset migration with validation:
 - **StateMachine (migration/state/StateMachine.ts)** - Enforces lifecycle rules

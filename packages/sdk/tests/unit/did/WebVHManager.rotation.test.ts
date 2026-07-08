@@ -319,7 +319,7 @@ describe('WebVHManager - Key Recovery', () => {
       expect(cred.credentialSubject.id).toBeDefined();
       expect(cred.credentialSubject.previousVerificationMethods.length).toBeGreaterThan(0);
       expect(cred.credentialSubject.newVerificationMethod).toBeDefined();
-      expect(cred.issuanceDate).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(cred.validFrom).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     }, 15000);
 
     test('can rotate keys after recovery', async () => {
