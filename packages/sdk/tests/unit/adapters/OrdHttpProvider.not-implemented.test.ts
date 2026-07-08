@@ -103,12 +103,21 @@ describe('OrdHttpProvider write-path methods fail loudly instead of fabricating 
 describe('createOrdinalsProviderFromEnv with USE_LIVE_ORD_PROVIDER=true (#318)', () => {
   const savedUseLive = process.env.USE_LIVE_ORD_PROVIDER;
   const savedBaseUrl = process.env.ORD_PROVIDER_BASE_URL;
+  const savedQuickNode = process.env.QUICKNODE_ENDPOINT;
+
+  beforeEach(() => {
+    // QuickNode takes precedence over the live HTTP provider; clear it so these
+    // tests exercise the USE_LIVE_ORD_PROVIDER branch deterministically.
+    delete process.env.QUICKNODE_ENDPOINT;
+  });
 
   afterEach(() => {
     if (savedUseLive === undefined) delete process.env.USE_LIVE_ORD_PROVIDER;
     else process.env.USE_LIVE_ORD_PROVIDER = savedUseLive;
     if (savedBaseUrl === undefined) delete process.env.ORD_PROVIDER_BASE_URL;
     else process.env.ORD_PROVIDER_BASE_URL = savedBaseUrl;
+    if (savedQuickNode === undefined) delete process.env.QUICKNODE_ENDPOINT;
+    else process.env.QUICKNODE_ENDPOINT = savedQuickNode;
   });
 
   test('live provider broadcast throws rather than returning a fake txid', async () => {
@@ -146,5 +155,51 @@ describe('createOrdinalsProviderFromEnv with USE_LIVE_ORD_PROVIDER=true (#318)',
     // The mock is allowed to simulate inscriptions — that is its entire job.
     const created = await provider.createInscription({ data: Buffer.from('x'), contentType: 'text/plain' });
     expect(created.inscriptionId).toBeTruthy();
+  });
+
+  // Regression for #328: enabling the live provider without a real base URL used
+  // to silently fall back to the placeholder https://ord.example.com/api, aiming
+  // every read at a nonexistent host. It must now fail fast at construction.
+  test('throws when ORD_PROVIDER_BASE_URL is unset', async () => {
+    process.env.USE_LIVE_ORD_PROVIDER = 'true';
+    delete process.env.ORD_PROVIDER_BASE_URL;
+
+    let caught: unknown;
+    try {
+      await createOrdinalsProviderFromEnv();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(StructuredError);
+    expect((caught as StructuredError).code).toBe('ORD_PROVIDER_BASE_URL_REQUIRED');
+  });
+
+  test('throws when ORD_PROVIDER_BASE_URL is blank/whitespace', async () => {
+    process.env.USE_LIVE_ORD_PROVIDER = 'true';
+    process.env.ORD_PROVIDER_BASE_URL = '   ';
+
+    await expect(createOrdinalsProviderFromEnv()).rejects.toThrow(/ORD_PROVIDER_BASE_URL/);
+  });
+
+  test('throws when ORD_PROVIDER_BASE_URL is left at the documentation placeholder', async () => {
+    process.env.USE_LIVE_ORD_PROVIDER = 'true';
+    process.env.ORD_PROVIDER_BASE_URL = 'https://ord.example.com/api';
+
+    let caught: unknown;
+    try {
+      await createOrdinalsProviderFromEnv();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(StructuredError);
+    expect((caught as StructuredError).code).toBe('ORD_PROVIDER_BASE_URL_REQUIRED');
+  });
+
+  test('builds an OrdHttpProvider when a real base URL is supplied', async () => {
+    process.env.USE_LIVE_ORD_PROVIDER = 'true';
+    process.env.ORD_PROVIDER_BASE_URL = 'https://ord.live.example';
+
+    const provider = await createOrdinalsProviderFromEnv();
+    expect(provider).toBeInstanceOf(OrdHttpProvider);
   });
 });

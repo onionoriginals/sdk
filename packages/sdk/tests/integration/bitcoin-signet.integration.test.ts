@@ -95,10 +95,11 @@ describeSignet('OrdinalsClient against signet', () => {
     client = new OrdinalsClient(ORD_SIGNET_URL!, 'signet');
   });
 
-  test('estimateFee returns a positive number', async () => {
-    const fee = await client.estimateFee(1);
-    expect(typeof fee).toBe('number');
-    expect(fee).toBeGreaterThan(0);
+  test('estimateFee throws NOT_IMPLEMENTED instead of returning a hardcoded rate (#318/#328)', async () => {
+    // OrdinalsClient.estimateFee was hardened in #248/#318 to refuse to return
+    // a fabricated fee rate. Until real fee estimation lands (#328) this must
+    // assert the fail-loud behavior, not a positive number.
+    await expect(client.estimateFee(1)).rejects.toThrow(/not implemented/i);
   });
 
   test('getSatInfo returns inscription_ids array for unknown sat', async () => {
