@@ -15,6 +15,7 @@ import { calculateFee } from '../fee-calculation.js';
 import { selectUtxos, SimpleUtxoSelectionOptions } from '../utxo-selection.js';
 import { isSegwitScriptPubKey, inputVBytesForScriptPubKey, outputVBytesForAddress } from '../utxo.js';
 import { validateBitcoinAddress } from '../../utils/bitcoin-address.js';
+import { scriptPubKeyForAddress } from '../transfer.js';
 
 // Define minimum dust limit (satoshis)
 const MIN_DUST_LIMIT = 546;
@@ -566,13 +567,19 @@ export async function createCommitTransaction(
     scureNetwork
   );
 
-  // Step 10: Add change output if above dust limit
+  // Step 10: Add change output if above dust limit. The change script is
+  // derived via scriptPubKeyForAddress rather than tx.addOutputAddress:
+  // validateBitcoinAddress deliberately accepts testnet-format (`tb1…`)
+  // change addresses on regtest, but addOutputAddress decodes strictly
+  // against `bcrt` and would throw a cryptic @scure error here — after all
+  // the keygen/selection/fee work the early validation exists to protect
+  // (issue #351). scriptPubKeyForAddress carries the same regtest→testnet
+  // decode fallback transfer.ts already uses.
   if (finalChange >= MIN_DUST_LIMIT) {
-    tx.addOutputAddress(
-      changeAddress,
-      BigInt(finalChange),
-      scureNetwork
-    );
+    tx.addOutput({
+      script: Buffer.from(scriptPubKeyForAddress(changeAddress, network), 'hex'),
+      amount: BigInt(finalChange)
+    });
   } else if (finalChange > 0) {
     // If change is below dust limit, it's effectively added to the fee
     console.log(

@@ -553,3 +553,92 @@ describe('Logger', () => {
   });
 });
 
+
+describe('Logger.sanitize cycle safety (issue #349)', () => {
+  const makeConfig = (): OriginalsConfig => ({
+    network: 'mainnet',
+    defaultKeyType: 'ES256K',
+    logging: { level: 'info', sanitizeLogs: true }
+  });
+
+  test('logging a circular object does not throw and marks the cycle', () => {
+    const output = mock(() => {});
+    const config = makeConfig();
+    config.logging!.outputs = [{ write: output }];
+    const logger = new Logger('Test', config);
+
+    // Shape of a typical HTTP client error: request/response reference each other
+    const request: Record<string, unknown> = { url: 'https://x' };
+    const response: Record<string, unknown> = { status: 500, request };
+    request.response = response;
+
+    expect(() => logger.error('boom', undefined, { request })).not.toThrow();
+    const entry = output.mock.calls[0][0] as LogEntry;
+    const data = entry.data as { request: { response: { request: unknown } } };
+    expect(data.request.response.request).toBe('[Circular]');
+  });
+
+  test('shared (non-circular) references are sanitized normally, not marked circular', () => {
+    const output = mock(() => {});
+    const config = makeConfig();
+    config.logging!.outputs = [{ write: output }];
+    const logger = new Logger('Test', config);
+
+    const shared = { privateKey: 'z6Mk...', name: 'k' };
+    logger.info('msg', { a: shared, b: shared });
+
+    const entry = output.mock.calls[0][0] as LogEntry;
+    const data = entry.data as { a: Record<string, unknown>; b: Record<string, unknown> };
+    expect(data.a.privateKey).toBe('[REDACTED]');
+    expect(data.b.privateKey).toBe('[REDACTED]');
+  });
+
+  test('Date and Uint8Array values pass through instead of flattening to {}', () => {
+    const output = mock(() => {});
+    const config = makeConfig();
+    config.logging!.outputs = [{ write: output }];
+    const logger = new Logger('Test', config);
+
+    const when = new Date('2026-01-01T00:00:00Z');
+    const bytes = new Uint8Array([1, 2, 3]);
+    logger.info('msg', { when, bytes });
+
+    const entry = output.mock.calls[0][0] as LogEntry;
+    const data = entry.data as { when: unknown; bytes: unknown };
+    expect(data.when).toBe(when);
+    expect(data.bytes).toBe(bytes);
+  });
+});
+
+describe('FileLogOutput write-failure retention (issue #352)', () => {
+  test('a failed write retains the batch for the next flush instead of dropping it', async () => {
+    const entry: LogEntry = {
+      timestamp: '2026-01-01T00:00:00.000Z',
+      level: 'info',
+      context: 'RetentionTest',
+      message: 'keep-me'
+    };
+    // A path whose parent directory does not exist makes appendFile fail.
+    const badPath = join(tmpdir(), 'originals-logger-nonexistent-dir', 'deep', 'app.log');
+    const fileOutput = new FileLogOutput(badPath);
+    const internals = fileOutput as unknown as { buffer: string[]; flush(): Promise<void>; filePath: string };
+
+    fileOutput.write(entry);
+    await internals.flush();
+    // The batch survived the failed write...
+    expect(internals.buffer.length).toBe(1);
+    expect(internals.buffer[0]).toContain('keep-me');
+
+    // ...and lands in the file once the destination becomes writable.
+    const dir = await mkdtemp(join(tmpdir(), 'originals-logger-retry-'));
+    try {
+      internals.filePath = join(dir, 'app.log');
+      await internals.flush();
+      const content = await readFile(join(dir, 'app.log'), 'utf8');
+      expect(JSON.parse(content.trim()).message).toBe('keep-me');
+      expect(internals.buffer.length).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -186,10 +186,13 @@ describe('OriginalsSDK', () => {
       expect(result).toBe(true);
     });
 
-    test('verifies valid signature with 33-byte public key (slices off version byte)', async () => {
+    test('rejects a 33-byte public key instead of guessing at a prefix (issue #352)', async () => {
+      // 33 bytes is the shape of a compressed secp256k1 key, not a "prefixed
+      // Ed25519 key" (Ed25519 multicodec prefixes are 2 bytes → 34 bytes).
+      // Stripping one byte verified against garbage; it must throw instead.
       const signature = await signAsync(message, privateKey);
-      const result = await OriginalsSDK.verifyDIDSignature(signature, message, publicKey33);
-      expect(result).toBe(true);
+      await expect(OriginalsSDK.verifyDIDSignature(signature, message, publicKey33))
+        .rejects.toThrow('Invalid Ed25519 public key length: 33');
     });
 
     test('returns false for invalid signature', async () => {

@@ -169,7 +169,7 @@ describe('[AUTH-009] TurnkeyWebVHSigner – happy paths', () => {
     expect(resultWrong).toBe(false);
   });
 
-  test('verify → handles 33-byte prefixed public key (strips first byte, succeeds)', async () => {
+  test('verify → rejects a 33-byte public key instead of guessing at a prefix (issue #352)', async () => {
     const ed25519 = await import('@noble/ed25519');
 
     const privKey = new Uint8Array(32).fill(5);
@@ -191,9 +191,11 @@ describe('[AUTH-009] TurnkeyWebVHSigner – happy paths', () => {
       'did:key:z6MkTest#z6MkTest'
     );
 
-    // Signer strips the prefix byte → verification should succeed
+    // 33 bytes is the shape of a compressed secp256k1 key, not a "prefixed
+    // Ed25519 key" (Ed25519 multicodec prefixes are 2 bytes → 34 bytes).
+    // Stripping one byte verified against garbage — it must reject instead.
     const result = await signer.verify(signature, message, pubKey33);
-    expect(result).toBe(true);
+    expect(result).toBe(false);
   });
 });
 

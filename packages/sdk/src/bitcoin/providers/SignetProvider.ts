@@ -140,30 +140,38 @@ export class SignetProvider implements OrdinalsProvider {
   }
 
   async estimateFee(blocks: number = 1): Promise<number> {
-    if (this.bitcoinRpcUrl) {
-      try {
-        const res = await fetch(this.bitcoinRpcUrl, {
-          method: 'POST',
-          headers: this.rpcHeaders(),
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'estimatesmartfee',
-            params: [blocks],
-          }),
-          signal: AbortSignal.timeout(this.timeout),
-        });
-        const data = await res.json() as { result?: { feerate?: number } };
-        if (data.result?.feerate) {
-          // Convert BTC/kB to sat/vB
-          return Math.ceil(data.result.feerate * 1e5);
-        }
-      } catch {
-        // Fall through to default
-      }
+    // Fail loudly instead of fabricating a rate: the old fallback returned
+    // `Math.max(1, blocks) * 2`, an invented value that *increased* with the
+    // confirmation target (real fee curves go the other way) and silently
+    // swallowed RPC errors — contradicting the fail-loud fee policy of the
+    // other providers (OrdinalsClient/OrdHttpProvider/QuickNodeProvider).
+    // Issue #351.
+    if (!this.bitcoinRpcUrl) {
+      throw new Error(
+        'SignetProvider.estimateFee requires bitcoinRpcUrl to be configured. ' +
+        'Configure a bitcoinRpcUrl (or a FeeOracleAdapter) instead of relying on a fabricated rate.'
+      );
     }
-    // Signet has low fees; return a sensible default
-    return Math.max(1, blocks) * 2;
+    const res = await fetch(this.bitcoinRpcUrl, {
+      method: 'POST',
+      headers: this.rpcHeaders(),
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'estimatesmartfee',
+        params: [blocks],
+      }),
+      signal: AbortSignal.timeout(this.timeout),
+    });
+    const data = await res.json() as { result?: { feerate?: number } };
+    if (typeof data.result?.feerate !== 'number' || !(data.result.feerate > 0)) {
+      throw new Error(
+        'SignetProvider: estimatesmartfee returned no feerate. ' +
+        'Configure a FeeOracleAdapter or retry with a higher block target.'
+      );
+    }
+    // Convert BTC/kB to sat/vB
+    return Math.ceil(data.result.feerate * 1e5);
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await

@@ -22,7 +22,9 @@ describe('KeyManager', () => {
   });
 
   test('encode/decode multibase roundtrip', () => {
-    const pub = Buffer.from('hello');
+    // A compressed secp256k1 public key is 33 bytes; decode validates length
+    // since issue #352, so the roundtrip fixture must be a plausible key.
+    const pub = Buffer.alloc(33, 7);
     const encoded = km.encodePublicKeyMultibase(pub, 'ES256K' as KeyType);
     const decoded = km.decodePublicKeyMultibase(encoded);
     expect(Buffer.from(decoded.key)).toEqual(Buffer.from(pub));
@@ -30,11 +32,19 @@ describe('KeyManager', () => {
   });
 
   test('decodePublicKeyMultibase handles Ed25519 multikey values', () => {
-    const pub = Buffer.from([0, 255, 1, 2, 3, 4, 5]);
+    // Ed25519 public keys are exactly 32 bytes (length-checked on decode).
+    const pub = Buffer.alloc(32, 9);
     const encoded = km.encodePublicKeyMultibase(pub, 'Ed25519' as KeyType);
     const decoded = km.decodePublicKeyMultibase(encoded);
     expect(Buffer.from(decoded.key)).toEqual(Buffer.from(pub));
     expect(decoded.type).toBe('Ed25519');
+  });
+
+  test('decodePublicKeyMultibase rejects wrong-length key bodies (issue #352)', () => {
+    // KeyManager wraps multikey decode errors in 'Invalid multibase string';
+    // the underlying length check comes from multikey.decodePublicKey.
+    const encodedShort = km.encodePublicKeyMultibase(Buffer.from('hello'), 'Ed25519' as KeyType);
+    expect(() => km.decodePublicKeyMultibase(encodedShort)).toThrow('Invalid multibase string');
   });
 
   test('rotateKeys updates DID document keys', async () => {

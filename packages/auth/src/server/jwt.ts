@@ -9,6 +9,10 @@ import type { TokenPayload, AuthCookieConfig } from '../types.js';
 // 7 days in seconds
 const DEFAULT_JWT_EXPIRES_IN = 7 * 24 * 60 * 60;
 
+// HS256 keys shorter than the hash output (32 bytes) weaken the MAC and are
+// trivially brute-forceable; RFC 7518 §3.2 requires >= 256 bits.
+const MIN_JWT_SECRET_LENGTH = 32;
+
 /**
  * Get JWT secret from config or environment
  */
@@ -16,6 +20,9 @@ function getJwtSecret(configSecret?: string): string {
   const secret = configSecret ?? process.env.JWT_SECRET;
   if (!secret) {
     throw new Error('JWT_SECRET environment variable is required');
+  }
+  if (secret.length < MIN_JWT_SECRET_LENGTH) {
+    throw new Error(`JWT secret must be at least ${MIN_JWT_SECRET_LENGTH} characters`);
   }
   return secret;
 }
@@ -84,6 +91,11 @@ export function verifyToken(
     const payload = jwt.verify(token, secret, {
       issuer: options?.issuer ?? 'originals-auth',
       audience: options?.audience ?? 'originals-api',
+      // Pin the algorithm family: signing uses HS256 (jsonwebtoken's default
+      // for string secrets), and leaving verify unpinned invites algorithm
+      // confusion/downgrade if the library or key handling ever changes
+      // (issue #352).
+      algorithms: ['HS256'],
     }) as TokenPayload;
 
     if (!payload.sub) {

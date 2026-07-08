@@ -198,10 +198,13 @@ describe('getInscriptionById', () => {
 describe('getInscriptionsBySatoshi', () => {
   const provider = () => new QuickNodeProvider({ endpoint: ENDPOINT });
 
-  test('sends the sat as a JSON number and maps the inscriptions array', async () => {
+  test('sends the sat as a JSON number and maps the inscriptions array, dropping malformed ids (issue #350)', async () => {
+    // 'otherI0id' is not a valid inscription id (64-hex txid + 'i' + index);
+    // server-substitutable strings must not flow into DID resolution or
+    // provenance, so the shape gate drops it.
     mockRpc('ord_getSat', { number: 125866034480298, rarity: 'common', inscriptions: [INSCRIPTION_ID, 'otherI0id'] });
     const result = await provider().getInscriptionsBySatoshi('125866034480298');
-    expect(result).toEqual([{ inscriptionId: INSCRIPTION_ID }, { inscriptionId: 'otherI0id' }]);
+    expect(result).toEqual([{ inscriptionId: INSCRIPTION_ID }]);
     expect(requests[0]).toMatchObject({ method: 'ord_getSat', params: [125866034480298] });
   });
 
@@ -383,5 +386,100 @@ describe('response hardening', () => {
     ) as any;
     const provider = new QuickNodeProvider({ endpoint: ENDPOINT });
     await expect(provider.broadcastTransaction('0200aabb')).rejects.toThrow(/txn-mempool-conflict/);
+  });
+});
+
+describe('QuickNodeProvider hardening (issue #350)', () => {
+  test('constructor does not echo the endpoint (embedded token) into error text', () => {
+    try {
+      new QuickNodeProvider({ endpoint: 'not-a-url/super-secret-token' });
+      throw new Error('expected constructor to throw');
+    } catch (err) {
+      expect((err as Error).message).not.toContain('super-secret-token');
+    }
+  });
+
+  describe('expectedNetwork chain check', () => {
+    test('fails loudly when the endpoint serves a different chain', async () => {
+      mockRpc('getblockchaininfo', { chain: 'test' });
+      const provider = new QuickNodeProvider({ endpoint: ENDPOINT, expectedNetwork: 'mainnet' });
+      await expect(provider.getInscriptionsBySatoshi('123')).rejects.toThrow(/configured for mainnet/);
+      // The check runs BEFORE the real RPC: no ord_getSat request was made.
+      expect(requests.filter((r) => r.method === 'ord_getSat').length).toBe(0);
+    });
+
+    test('passes on a matching chain and only checks once', async () => {
+      mockRpc('getblockchaininfo', { chain: 'main' });
+      mockRpc('ord_getSat', { inscriptions: [] });
+      const provider = new QuickNodeProvider({ endpoint: ENDPOINT, expectedNetwork: 'mainnet' });
+      await provider.getInscriptionsBySatoshi('123');
+      await provider.getInscriptionsBySatoshi('456');
+      expect(requests.filter((r) => r.method === 'getblockchaininfo').length).toBe(1);
+    });
+
+    test('performs no chain check when expectedNetwork is not set', async () => {
+      mockRpc('ord_getSat', { inscriptions: [] });
+      await new QuickNodeProvider({ endpoint: ENDPOINT }).getInscriptionsBySatoshi('123');
+      expect(requests.filter((r) => r.method === 'getblockchaininfo').length).toBe(0);
+    });
+  });
+
+  describe('explicit contentEncoding', () => {
+    test("'base64' rejects non-base64 content instead of silently keeping it literal", async () => {
+      mockRpc('ord_getInscription', { id: INSCRIPTION_ID, sat: 1, satpoint: `${TXID}:0:0`, content_type: 'text/plain' });
+      mockRpc('ord_getContent', '{"p":"x"}');
+      const provider = new QuickNodeProvider({ endpoint: ENDPOINT, contentEncoding: 'base64' });
+      await expect(provider.getInscriptionById(INSCRIPTION_ID)).rejects.toThrow(/not base64/);
+    });
+
+    test("'utf8' keeps base64-shaped literal content literal (no heuristic)", async () => {
+      mockRpc('ord_getInscription', { id: INSCRIPTION_ID, sat: 1, satpoint: `${TXID}:0:0`, content_type: 'text/plain' });
+      // 'aGVsbG8h' is base64 for 'hello!' — the auto heuristic would decode it,
+      // but an explicit utf8 pin must return the literal characters.
+      mockRpc('ord_getContent', 'aGVsbG8h');
+      const provider = new QuickNodeProvider({ endpoint: ENDPOINT, contentEncoding: 'utf8' });
+      const result = await provider.getInscriptionById(INSCRIPTION_ID);
+      expect(result!.content.toString('utf8')).toBe('aGVsbG8h');
+    });
+  });
+
+  describe('server-data validation before provenance', () => {
+    test('content-lookup not-found on an EXISTING inscription throws (not "nonexistent")', async () => {
+      mockRpc('ord_getInscription', { id: INSCRIPTION_ID, sat: 1, satpoint: `${TXID}:0:0`, content_type: 'text/plain' });
+      mockRpcError('ord_getContent', { code: -32000, message: 'content not found' });
+      const err = await new QuickNodeProvider({ endpoint: ENDPOINT })
+        .getInscriptionById(INSCRIPTION_ID)
+        .then(() => null, (e) => e as StructuredError);
+      expect(err).not.toBeNull();
+      expect(err!.code).toBe('QUICKNODE_CONTENT_UNAVAILABLE');
+    });
+
+    test('throws instead of fabricating txid "unknown" when the location is missing', async () => {
+      mockRpc('ord_getInscription', { id: INSCRIPTION_ID, sat: 1, content_type: 'text/plain' });
+      mockRpc('ord_getContent', Buffer.from('x').toString('base64'));
+      await expect(new QuickNodeProvider({ endpoint: ENDPOINT }).getInscriptionById(INSCRIPTION_ID))
+        .rejects.toThrow(/satpoint\/output/);
+    });
+
+    test('rejects a malformed (non-64-hex) location txid', async () => {
+      mockRpc('ord_getInscription', { id: INSCRIPTION_ID, sat: 1, satpoint: 'evil-txid:0:0', content_type: 'text/plain' });
+      mockRpc('ord_getContent', Buffer.from('x').toString('base64'));
+      await expect(new QuickNodeProvider({ endpoint: ENDPOINT }).getInscriptionById(INSCRIPTION_ID))
+        .rejects.toThrow(/satpoint\/output/);
+    });
+
+    test('rejects a server-substituted malformed inscription id', async () => {
+      mockRpc('ord_getInscription', { id: 'evil-id', sat: 1, satpoint: `${TXID}:0:0`, content_type: 'text/plain' });
+      mockRpc('ord_getContent', Buffer.from('x').toString('base64'));
+      await expect(new QuickNodeProvider({ endpoint: ENDPOINT }).getInscriptionById(INSCRIPTION_ID))
+        .rejects.toThrow(/malformed inscription id/);
+    });
+
+    test('rejects an out-of-range sat number from the server', async () => {
+      mockRpc('ord_getInscription', { id: INSCRIPTION_ID, sat: '2100000000000000', satpoint: `${TXID}:0:0`, content_type: 'text/plain' });
+      mockRpc('ord_getContent', Buffer.from('x').toString('base64'));
+      await expect(new QuickNodeProvider({ endpoint: ENDPOINT }).getInscriptionById(INSCRIPTION_ID))
+        .rejects.toThrow(/invalid sat number/);
+    });
   });
 });

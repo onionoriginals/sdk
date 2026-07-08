@@ -11,9 +11,11 @@ import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
 /**
  * Upper bound on any fee rate the SDK will use, whether caller-provided or
  * returned by a fee oracle / ordinals provider. Guards against a misbehaving or
- * compromised estimator draining funds via an absurd sat/vB value.
+ * compromised estimator draining funds via an absurd sat/vB value. Exported so
+ * quote-only paths (LifecycleManager.estimateCost) apply the same cap
+ * (issue #351).
  */
-const MAX_REASONABLE_FEE_RATE = 10_000; // sat/vB
+export const MAX_REASONABLE_FEE_RATE = 10_000; // sat/vB
 
 export class BitcoinManager {
   private readonly feeOracle?: FeeOracleAdapter;

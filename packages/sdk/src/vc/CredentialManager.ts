@@ -21,9 +21,10 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { signerForKeyType } from '../crypto/Signer.js';
 import { multikey } from '../crypto/Multikey.js';
 import { DIDManager } from '../did/DIDManager.js';
-import { Issuer, VerificationMethodLike } from './Issuer.js';
+import { Issuer, VerificationMethodLike, isSecuritySigningRefusal } from './Issuer.js';
 import { createDocumentLoader } from './documentLoader.js';
 import { Verifier, checkCredentialValidityPeriod } from './Verifier.js';
+import { validateStatusListCredentialTrust } from './statusListTrust.js';
 import { MultiSigManager } from './MultiSigManager.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
 
@@ -242,18 +243,17 @@ export class CredentialManager {
         // SECURITY refusals must fail closed — never fall through to the
         // legacy local signer, which would sign the credential the Data
         // Integrity path just refused. Two conditions are security refusals:
-        //   1. issuer-binding mismatch — a key for did:me minting a
-        //      credential that claims issuer did:victim;
-        //   2. a retired (revoked/compromised) verification method.
-        // Every OTHER error (the loader can't resolve this VM, the key is not
-        // Ed25519, the VM doc is incomplete) is a legitimate reason to fall
-        // back to the legacy signer, which supports ES256K/ES256 did:key
-        // signing that eddsa-rdfc-2022 cannot.
-        const msg = e instanceof Error ? e.message : String(e);
-        const isSecurityRefusal =
-          msg.includes('does not match the verification method controller') ||
-          /retired|revoked|compromised/i.test(msg);
-        if (isSecurityRefusal) {
+        //   1. issuer-binding mismatch (ISSUER_BINDING_MISMATCH) — a key for
+        //      did:me minting a credential that claims issuer did:victim;
+        //   2. a retired (revoked/compromised) verification method (VM_RETIRED).
+        // Both are matched by typed StructuredError code (with the legacy
+        // message patterns as fallback), so rewording an error message cannot
+        // silently reopen the fall-through (issue #309). Every OTHER error
+        // (the loader can't resolve this VM, the key is not Ed25519, the VM
+        // doc is incomplete) is a legitimate reason to fall back to the
+        // legacy signer, which supports ES256K/ES256 did:key signing that
+        // eddsa-rdfc-2022 cannot.
+        if (isSecuritySigningRefusal(e)) {
           throw e;
         }
         // fall through to legacy signing
@@ -401,6 +401,10 @@ export class CredentialManager {
    * If the credential has a `credentialStatus` of type `BitstringStatusListEntry`,
    * the status is checked against the provided status list credential.
    *
+   * A revoked or suspended credential is NOT verified: `verified` is false
+   * whenever `revoked` or `suspended` is true (issue #345), so callers gating
+   * on `verified` alone cannot accept a revoked credential.
+   *
    * @param credential - The credential to verify
    * @param statusListCredential - The resolved status list credential (required if credential has credentialStatus)
    * @returns Result with signature validity and revocation status
@@ -444,34 +448,33 @@ export class CredentialManager {
         errors.push('Credential has a BitstringStatusListEntry but no status list credential was provided');
       } else {
         try {
-          // Trust checks (issue #238): the supplied status list credential
-          // must be the referenced one, must carry a valid proof, and must be
-          // issued by the checked credential's issuer — otherwise a holder
-          // can hand the verifier a fabricated all-zeros list and bypass
-          // revocation.
-          if (!statusListCredential.id || statusListCredential.id !== status.statusListCredential) {
-            throw new Error(
-              `Status list credential id (${String(statusListCredential.id)}) does not match the ` +
-              `credential's statusListCredential reference (${status.statusListCredential})`
-            );
-          }
-          const listProofValid = await this.verifyCredential(statusListCredential);
-          if (!listProofValid) {
-            throw new Error('Status list credential proof verification failed');
-          }
-          const issuerOf = (c: VerifiableCredential): string | undefined =>
-            typeof c.issuer === 'string' ? c.issuer : (c.issuer as { id?: string } | undefined)?.id;
-          const credentialIssuer = issuerOf(credential);
-          const listIssuer = issuerOf(statusListCredential);
-          if (!credentialIssuer || !listIssuer || credentialIssuer !== listIssuer) {
-            throw new Error(
-              `Status list credential issuer (${String(listIssuer)}) does not match the ` +
-              `checked credential's issuer (${String(credentialIssuer)})`
-            );
+          // Trust checks (issue #238, shared with Verifier via
+          // validateStatusListCredentialTrust — issue #301): the supplied
+          // status list credential must be the referenced one, must carry a
+          // valid proof, and must be issued by the checked credential's
+          // issuer — otherwise a holder can hand the verifier a fabricated
+          // all-zeros list and bypass revocation.
+          const trust = await validateStatusListCredentialTrust(
+            credential,
+            status,
+            statusListCredential,
+            async (listVC) => {
+              const ok = await this.verifyCredential(listVC);
+              return { verified: ok, errors: [] };
+            }
+          );
+          if (!trust.verified) {
+            throw new Error(trust.errors.join('; '));
           }
 
           const result = this.statusList.checkStatus(status, statusListCredential);
           if (result.isSet) {
+            // A determinate revoked/suspended state must fail verification:
+            // a caller gating on `verified` alone would otherwise accept a
+            // revoked credential (issue #345). This aligns with
+            // Verifier.checkCredentialStatus, which returns verified: false
+            // for the same state.
+            verified = false;
             if (result.statusPurpose === 'revocation') {
               revoked = true;
               errors.push('Credential has been revoked');
@@ -483,8 +486,7 @@ export class CredentialManager {
         } catch (err) {
           // Fail closed: a status entry that cannot be evaluated (purpose
           // mismatch, out-of-range index, corrupt encodedList) must not be
-          // treated as "not revoked". Determinable states (revoked/suspended)
-          // are reported via their own flags and leave `verified` untouched.
+          // treated as "not revoked".
           verified = false;
           errors.push(`Status check error: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -1327,6 +1329,17 @@ export class CredentialManager {
   /**
    * Check the revocation or suspension status of a credential.
    *
+   * SECURITY: this is a LOW-LEVEL bitstring lookup that TRUSTS THE CALLER to
+   * have established the supplied status list credential is authentic — it
+   * does NOT verify the list's proof or its issuer (issue #345). The only
+   * trust check performed here is that the list's `id` matches the
+   * credential's `statusListCredential` reference (a mismatched list is
+   * always a caller bug or a substitution attack, so it throws). An attacker
+   * who can substitute a fabricated same-id list can still fake "not
+   * revoked" through this method: for untrusted inputs use
+   * `verifyCredentialWithStatus`, which verifies the list's proof and
+   * issuer before consulting its bits.
+   *
    * @param credential - The credential to check (must have credentialStatus)
    * @param statusListCredential - The resolved status list credential
    * @returns Status check result with isSet, statusPurpose, and statusListIndex
@@ -1336,6 +1349,12 @@ export class CredentialManager {
     statusListCredential: VerifiableCredential
   ): StatusCheckResult {
     const entry = this.extractStatusEntry(credential);
+    if (!statusListCredential.id || statusListCredential.id !== entry.statusListCredential) {
+      throw new Error(
+        `Status list credential id (${String(statusListCredential.id)}) does not match the ` +
+        `credential's statusListCredential reference (${entry.statusListCredential})`
+      );
+    }
     const manager = new StatusListManager();
     return manager.checkStatus(entry, statusListCredential);
   }
@@ -1345,6 +1364,10 @@ export class CredentialManager {
    *
    * Convenience method that returns a simple boolean. The credential must have
    * a credentialStatus with statusPurpose 'revocation'.
+   *
+   * SECURITY: like `checkRevocationStatus`, this trusts the caller-supplied
+   * status list (no proof/issuer verification beyond the id match). Use
+   * `verifyCredentialWithStatus` for untrusted inputs.
    *
    * @param credential - The credential to check
    * @param statusListCredential - The resolved status list credential
