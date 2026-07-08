@@ -13,6 +13,12 @@ interface HttpProviderOptions {
 const DEFAULT_MAX_JSON_BYTES = 1 * 1024 * 1024;
 const DEFAULT_MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
+/**
+ * Documentation placeholder — never a reachable host. createOrdinalsProviderFromEnv
+ * refuses to build a live provider pointed at it (issue #328).
+ */
+const PLACEHOLDER_ORD_BASE_URL = 'https://ord.example.com/api';
+
 function buildUrl(baseUrl: string, path: string): string {
   const base = baseUrl.replace(/\/$/, '');
   return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
@@ -216,7 +222,20 @@ export async function createOrdinalsProviderFromEnv(
   }
   const useLive = String(((globalThis as any).process?.env?.USE_LIVE_ORD_PROVIDER) || '').toLowerCase() === 'true';
   if (useLive) {
-    const baseUrl = ((globalThis as any).process?.env?.ORD_PROVIDER_BASE_URL) || 'https://ord.example.com/api';
+    // USE_LIVE_ORD_PROVIDER opts into real network I/O, so the base URL must
+    // point at a real ord server. Previously this silently defaulted to the
+    // placeholder https://ord.example.com/api when ORD_PROVIDER_BASE_URL was
+    // unset — quietly aiming every read at a nonexistent host and risking
+    // failures/garbage being written into provenance. Fail fast instead so
+    // misconfiguration surfaces at startup rather than mid-lifecycle (#328).
+    const baseUrl = String(((globalThis as any).process?.env?.ORD_PROVIDER_BASE_URL) || '').trim();
+    if (!baseUrl || baseUrl === PLACEHOLDER_ORD_BASE_URL) {
+      throw new StructuredError(
+        'ORD_PROVIDER_BASE_URL_REQUIRED',
+        'USE_LIVE_ORD_PROVIDER=true requires ORD_PROVIDER_BASE_URL to be set to a real ord ' +
+        `server URL; refusing to fall back to the placeholder ${PLACEHOLDER_ORD_BASE_URL}.`
+      );
+    }
     return new OrdHttpProvider({ baseUrl });
   }
   const mod = await import('./OrdMockProvider.js');
