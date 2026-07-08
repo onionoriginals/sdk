@@ -65,16 +65,29 @@ export class Verifier {
 
   /**
    * Memoizes the expensive proof verification of resolved status list
-   * credentials (issue #304). Keyed by the list's `id` + its `proofValue`(s):
-   * a status list credential is immutable for a given proofValue, so this key
-   * is exact and carries no staleness risk. Verifying N credentials that share
-   * one status list (the normal deployment — one list covers up to 131,072
-   * credentials) otherwise re-runs RDF canonicalization + issuer DID
-   * resolution + signature verification of the same (often tens-of-KB)
-   * document N times. The stored promise also collapses concurrent checks.
+   * credentials (issue #304). Verifying N credentials that share one status
+   * list (the normal deployment — one list covers up to 131,072 credentials)
+   * otherwise re-runs RDF canonicalization + issuer DID resolution + signature
+   * verification of the same (often tens-of-KB) document N times.
+   *
+   * Security-critical keying (see the #304 self-review): the cache MUST key on
+   * the FULL resolved document, not on `id + proofValue`. The stored verdict is
+   * a property of the entire (body + proof) credential; the caller reads the
+   * revocation bits from the PRESENTED document. Keying on `id + proofValue`
+   * let a poisoned resolver / holder swap a forged all-zeros body under a
+   * legitimate `id + proofValue` (both are public) and reuse a cached
+   * "verified" verdict without the proof ever being checked against that body —
+   * a revocation bypass (#238). A full-document key collides only on
+   * byte-identical content, so reusing the verdict is sound.
+   *
+   * Only VERIFIED (`true`) verdicts are cached: a `false` result may be a
+   * transient issuer-DID-resolution failure, and caching it would fail-closed a
+   * legitimate list until eviction. A short TTL bounds staleness (e.g. a signer
+   * key revoked after a positive verdict was cached).
    */
-  private statusListProofCache = new Map<string, Promise<VerificationResult>>();
+  private statusListProofCache = new Map<string, { at: number; result: VerificationResult }>();
   private static readonly STATUS_LIST_PROOF_CACHE_MAX = 256;
+  private static readonly STATUS_LIST_PROOF_CACHE_TTL_MS = 5 * 60 * 1000;
 
   constructor(private didManager: DIDManager, options?: { statusListResolver?: StatusListResolver }) {
     this.statusListResolver = options?.statusListResolver;
@@ -340,53 +353,52 @@ export class Verifier {
   }
 
   /**
-   * Verify a status list credential's own proof, memoized per (id, proofValue)
-   * so repeated status checks against the same immutable list don't re-run the
-   * expensive canonicalization + signature verification (issue #304). Only the
-   * list-only proof verification is cached; the id-match and issuer-equality
-   * trust checks (which depend on the credential being checked) still run every
-   * call in validateStatusListCredentialTrust.
+   * Verify a status list credential's own proof, memoized on the FULL resolved
+   * document so repeated status checks against the same immutable list don't
+   * re-run the expensive canonicalization + signature verification (issue
+   * #304). Only the list-only proof verification is cached; the id-match and
+   * issuer-equality trust checks (which depend on the credential being checked)
+   * still run every call in validateStatusListCredentialTrust.
    */
-  private verifyStatusListProofCached(listVC: VerifiableCredential): Promise<VerificationResult> {
+  private async verifyStatusListProofCached(listVC: VerifiableCredential): Promise<VerificationResult> {
     const key = this.statusListCacheKey(listVC);
-    if (key === null) {
-      // No stable (id + proofValue) identity to key on — verify without
-      // caching. An unsigned or id-less list also fails the surrounding trust
-      // checks, so this path is not a bypass.
-      return this.verifyCredential(listVC, { checkStatus: false });
+    if (key !== null) {
+      const cached = this.statusListProofCache.get(key);
+      if (cached) {
+        if (Date.now() - cached.at < Verifier.STATUS_LIST_PROOF_CACHE_TTL_MS) {
+          return cached.result;
+        }
+        this.statusListProofCache.delete(key); // expired
+      }
     }
-    let pending = this.statusListProofCache.get(key);
-    if (!pending) {
-      pending = this.verifyCredential(listVC, { checkStatus: false });
-      // Bound the cache: evict oldest insertion when over the cap.
+    const result = await this.verifyCredential(listVC, { checkStatus: false });
+    // Cache ONLY verified lists (see the field docstring): a false verdict may
+    // be a transient issuer-resolution failure, and the document key already
+    // guarantees a cached true corresponds to this exact body.
+    if (key !== null && result.verified) {
       if (this.statusListProofCache.size >= Verifier.STATUS_LIST_PROOF_CACHE_MAX) {
         const oldest = this.statusListProofCache.keys().next().value;
         if (oldest !== undefined) this.statusListProofCache.delete(oldest);
       }
-      this.statusListProofCache.set(key, pending);
-      // verifyCredential resolves (never rejects) with a VerificationResult,
-      // but guard against an unexpected rejection poisoning the cache.
-      pending.catch(() => this.statusListProofCache.delete(key));
+      this.statusListProofCache.set(key, { at: Date.now(), result });
     }
-    return pending;
+    return result;
   }
 
   /**
-   * Cache key for a resolved status list credential: its `id` joined with its
-   * `proofValue`(s). Returns null when either is missing so such lists are not
-   * cached (they also fail the trust checks). The list is immutable for a given
-   * proofValue, so this key is exact.
+   * Cache key for a resolved status list credential: a serialization of the
+   * ENTIRE document. Two documents collide only when byte-identical, so a
+   * cached verdict is only ever reused for the exact body it was computed over
+   * -- a forged body (even with a matching id/proofValue) serializes
+   * differently and is re-verified. Returns null if the credential is not
+   * serializable (then it is never cached).
    */
   private statusListCacheKey(listVC: VerifiableCredential): string | null {
-    const id = (listVC as { id?: unknown }).id;
-    if (typeof id !== 'string' || id.length === 0) return null;
-    const rawProof = (listVC as { proof?: unknown }).proof;
-    const proofs = Array.isArray(rawProof) ? rawProof : rawProof ? [rawProof] : [];
-    const proofValues = proofs
-      .map(p => (p as { proofValue?: unknown })?.proofValue)
-      .filter((v): v is string => typeof v === 'string' && v.length > 0);
-    if (proofValues.length === 0) return null;
-    return `${id} ${proofValues.join(' ')}`;
+    try {
+      return JSON.stringify(listVC);
+    } catch {
+      return null;
+    }
   }
 
   /**

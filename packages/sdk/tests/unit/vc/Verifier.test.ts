@@ -295,10 +295,10 @@ describe('diwings Verifier', () => {
 
   test('#304 caches the status list proof verification across credentials sharing the list', async () => {
     const listId = 'https://issuer.example/status/304/1';
-    // A resolved, all-zeros status list with a (stable) proofValue so the
-    // cache can key on (id + proofValue). The proof's actual cryptographic
-    // validity is exercised elsewhere; here we assert the EXPENSIVE proof
-    // verification is invoked once and reused.
+    // A resolved status list; the SAME immutable document is returned every
+    // call, so the content-keyed cache verifies its proof once and reuses it.
+    // The proof's actual cryptographic validity is exercised elsewhere; here we
+    // assert the EXPENSIVE proof verification is invoked once and reused.
     const statusListVC = new StatusListManager().createStatusListCredential({
       id: listId,
       issuer: did,
@@ -350,39 +350,60 @@ describe('diwings Verifier', () => {
     expect(resolverCalls).toBe(3);
   });
 
-  test('#304 does not cache when the status list has no (id + proofValue) identity', async () => {
-    // A list without a proofValue cannot be safely keyed (and also fails the
-    // trust checks), so it must be re-verified each time — never a silent
-    // bypass that reuses a stale result.
-    const listId = 'https://issuer.example/status/304/unsigned';
-    const statusListVC = new StatusListManager().createStatusListCredential({
-      id: listId,
-      issuer: did,
-      statusPurpose: 'revocation',
-    });
-    const verifier = new Verifier(didManager, {
-      statusListResolver: async () => statusListVC as any,
-    });
-    let listVerifyCount = 0;
+  test('#304 does NOT reuse a cached verdict for a different list body with the same id+proofValue (revocation-bypass guard, #238)', async () => {
+    // The self-review caught a revocation bypass in a naive (id + proofValue)
+    // cache: an attacker/poisoned resolver could swap a forged all-zeros body
+    // under a legitimate id+proofValue (both public) and reuse the cached
+    // "verified" verdict without the proof ever being checked against the
+    // forged body. The cache MUST key on the full document, so a swapped body
+    // is re-verified (and, having a proof that does not sign it, rejected).
+    const slm = new StatusListManager();
+    const listId = 'https://issuer.example/status/304/bypass';
+    const base = slm.createStatusListCredential({ id: listId, issuer: did, statusPurpose: 'revocation' });
+    // legit: bit 5 SET (revoked). forged: bit 5 CLEAR (all zeros). Only the
+    // encodedList differs — same id, same public proofValue, same issuanceDate.
+    const legit = slm.setStatus(base, 5, true) as any;
+    const forged = slm.setStatus(base, 5, false) as any;
+    for (const l of [legit, forged]) {
+      l.issuanceDate = '2026-01-01T00:00:00Z';
+      l.proof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zSharedPublicProof' };
+    }
+
+    // Only the legit body's proof "verifies" (the forged body was never signed).
+    const legitEncoded = legit.credentialSubject.encodedList;
+    const verifyCalls: any[] = [];
+    const queue = [legit, forged, legit];
+    let i = 0;
+    const verifier = new Verifier(didManager, { statusListResolver: async () => queue[i++] });
     (verifier as any).verifyCredential = async (c: any) => {
-      if (c === statusListVC) listVerifyCount++;
-      return { verified: true, errors: [] };
+      verifyCalls.push(c);
+      return { verified: c.credentialSubject.encodedList === legitEncoded, errors: [] };
     };
-    const mkCred = (index: number) => ({
+
+    const mkCred = () => ({
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
       issuer: did,
-      credentialSubject: { id: 'did:peer:subject-304u' },
+      credentialSubject: { id: 'did:peer:subject-304b' },
       credentialStatus: {
         type: 'BitstringStatusListEntry',
         statusPurpose: 'revocation',
-        statusListIndex: String(index),
+        statusListIndex: '5',
         statusListCredential: listId,
       },
     } as any);
-    await verifier.checkCredentialStatus(mkCred(1));
-    await verifier.checkCredentialStatus(mkCred(2));
-    expect(listVerifyCount).toBe(2);
+
+    const rLegit = await verifier.checkCredentialStatus(mkCred());   // legit → bit5 set → revoked
+    const rForged = await verifier.checkCredentialStatus(mkCred());  // forged → MUST re-verify, proof fails
+    await verifier.checkCredentialStatus(mkCred());                  // legit again → cache hit
+
+    // The forged body was verified independently (NOT served from legit's
+    // cache entry) and, failing its proof check, could not clear the revocation.
+    expect(verifyCalls.length).toBe(2);
+    expect(verifyCalls[0]).toBe(legit);
+    expect(verifyCalls[1]).toBe(forged);
+    expect(rLegit.verified).toBe(false);   // legit list: credential is revoked
+    expect(rForged.verified).toBe(false);  // forged list: rejected (proof does not sign it) — no bypass
   });
 
   test('verifyPresentation validates expectedChallenge and expectedDomain', async () => {
