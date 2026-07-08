@@ -353,6 +353,20 @@ describe('satoshi-validation', () => {
   });
 
   describe('canonicalizeSatoshi', () => {
+    // Assert both that the call throws AND that it throws the INVALID_SATOSHI
+    // structured error — a bare toThrow() would let an unrelated failure (e.g.
+    // a TypeError) satisfy a test named for INVALID_SATOSHI.
+    const expectInvalidSatoshi = (fn: () => unknown) => {
+      let caught: unknown;
+      try {
+        fn();
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeDefined();
+      expect((caught as StructuredError).code).toBe('INVALID_SATOSHI');
+    };
+
     test('returns the canonical decimal string for a plain number', () => {
       expect(canonicalizeSatoshi(42)).toBe('42');
     });
@@ -388,30 +402,23 @@ describe('satoshi-validation', () => {
     });
 
     test('throws INVALID_SATOSHI for an out-of-range value', () => {
-      expect(() => canonicalizeSatoshi(MAX_SATOSHI_SUPPLY + 1)).toThrow();
+      expectInvalidSatoshi(() => canonicalizeSatoshi(MAX_SATOSHI_SUPPLY + 1));
     });
 
     test('throws INVALID_SATOSHI for a non-numeric string', () => {
-      expect(() => canonicalizeSatoshi('not-a-number')).toThrow();
+      expectInvalidSatoshi(() => canonicalizeSatoshi('not-a-number'));
     });
 
     test('throws INVALID_SATOSHI for a negative value', () => {
-      expect(() => canonicalizeSatoshi(-1)).toThrow();
+      expectInvalidSatoshi(() => canonicalizeSatoshi(-1));
     });
 
     test('throws INVALID_SATOSHI for a decimal value', () => {
-      expect(() => canonicalizeSatoshi('1.5')).toThrow();
+      expectInvalidSatoshi(() => canonicalizeSatoshi('1.5'));
     });
 
     test('thrown error carries the INVALID_SATOSHI code', () => {
-      let caught: unknown;
-      try {
-        canonicalizeSatoshi('bad');
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).toBeDefined();
-      expect((caught as StructuredError).code).toBe('INVALID_SATOSHI');
+      expectInvalidSatoshi(() => canonicalizeSatoshi('bad'));
     });
   });
 
