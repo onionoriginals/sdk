@@ -369,7 +369,7 @@ describe('CLI Verify Command', () => {
       // The second event's controller proof is rejected as unauthorized.
       expect(result.result?.events[1].proofValid).toBe(false);
       expect(
-        result.result?.errors.some((e) =>
+        result.result?.errors?.some((e) =>
           e.includes("is not authorized by the log's create event")
         )
       ).toBe(true);
@@ -439,7 +439,7 @@ describe('CLI Verify Command', () => {
       // Bitcoin-anchor failure gates the result — unlike ordinary witnesses.
       expect(result.verified).toBe(false);
       expect(
-        result.result?.errors.some((e) =>
+        result.result?.errors?.some((e) =>
           e.includes('cannot be verified without an ordinalsProvider')
         )
       ).toBe(true);
