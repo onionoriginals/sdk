@@ -5,6 +5,7 @@ import * as ed25519 from '@noble/ed25519';
 import { multikey } from '../../../src/crypto/Multikey';
 import { registerVerificationMethod, verificationMethodRegistry } from '../../../src/vc/documentLoader';
 import { DIDManager } from '../../../src/did/DIDManager';
+import { StatusListManager } from '../../../src/vc/StatusListManager';
 
 describe('diwings Verifier', () => {
   const didManager = new DIDManager({} as any);
@@ -290,6 +291,98 @@ describe('diwings Verifier', () => {
     // Explicit opt-out still verifies
     const skipped = await verifier.verifyCredential(vc, { checkStatus: false });
     expect(skipped.verified).toBe(true);
+  });
+
+  test('#304 caches the status list proof verification across credentials sharing the list', async () => {
+    const listId = 'https://issuer.example/status/304/1';
+    // A resolved, all-zeros status list with a (stable) proofValue so the
+    // cache can key on (id + proofValue). The proof's actual cryptographic
+    // validity is exercised elsewhere; here we assert the EXPENSIVE proof
+    // verification is invoked once and reused.
+    const statusListVC = new StatusListManager().createStatusListCredential({
+      id: listId,
+      issuer: did,
+      statusPurpose: 'revocation',
+    });
+    (statusListVC as any).proof = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-rdfc-2022',
+      proofValue: 'zStableStatusListProofValue',
+    };
+
+    let resolverCalls = 0;
+    const verifier = new Verifier(didManager, {
+      statusListResolver: async () => { resolverCalls++; return statusListVC as any; },
+    });
+
+    // Stand in for the expensive verifyCredential(list) call and count it. The
+    // cache must collapse three status checks into a single list verification.
+    let listVerifyCount = 0;
+    (verifier as any).verifyCredential = async (c: any) => {
+      if (c === statusListVC) listVerifyCount++;
+      return { verified: true, errors: [] };
+    };
+
+    const mkCred = (index: number) => ({
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      type: ['VerifiableCredential'],
+      issuer: did,
+      credentialSubject: { id: 'did:peer:subject-304' },
+      credentialStatus: {
+        type: 'BitstringStatusListEntry',
+        statusPurpose: 'revocation',
+        statusListIndex: String(index),
+        statusListCredential: listId,
+      },
+    } as any);
+
+    const r1 = await verifier.checkCredentialStatus(mkCred(1));
+    const r2 = await verifier.checkCredentialStatus(mkCred(2));
+    const r3 = await verifier.checkCredentialStatus(mkCred(3));
+
+    expect(r1.verified).toBe(true);
+    expect(r2.verified).toBe(true);
+    expect(r3.verified).toBe(true);
+    // With the cache, the immutable list's proof is verified exactly once for
+    // all three checks (issue #304) instead of three times.
+    expect(listVerifyCount).toBe(1);
+    // The resolver fetch itself is intentionally still per-call.
+    expect(resolverCalls).toBe(3);
+  });
+
+  test('#304 does not cache when the status list has no (id + proofValue) identity', async () => {
+    // A list without a proofValue cannot be safely keyed (and also fails the
+    // trust checks), so it must be re-verified each time — never a silent
+    // bypass that reuses a stale result.
+    const listId = 'https://issuer.example/status/304/unsigned';
+    const statusListVC = new StatusListManager().createStatusListCredential({
+      id: listId,
+      issuer: did,
+      statusPurpose: 'revocation',
+    });
+    const verifier = new Verifier(didManager, {
+      statusListResolver: async () => statusListVC as any,
+    });
+    let listVerifyCount = 0;
+    (verifier as any).verifyCredential = async (c: any) => {
+      if (c === statusListVC) listVerifyCount++;
+      return { verified: true, errors: [] };
+    };
+    const mkCred = (index: number) => ({
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      type: ['VerifiableCredential'],
+      issuer: did,
+      credentialSubject: { id: 'did:peer:subject-304u' },
+      credentialStatus: {
+        type: 'BitstringStatusListEntry',
+        statusPurpose: 'revocation',
+        statusListIndex: String(index),
+        statusListCredential: listId,
+      },
+    } as any);
+    await verifier.checkCredentialStatus(mkCred(1));
+    await verifier.checkCredentialStatus(mkCred(2));
+    expect(listVerifyCount).toBe(2);
   });
 
   test('verifyPresentation validates expectedChallenge and expectedDomain', async () => {

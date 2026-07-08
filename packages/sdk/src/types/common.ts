@@ -70,7 +70,24 @@ export interface ExternalSigner {
    * @returns The proof value (typically multibase-encoded signature)
    */
   sign(input: { document: Record<string, unknown>; proof: Record<string, unknown> }): Promise<{ proofValue: string }>;
-  
+
+  /**
+   * OPTIONAL: sign pre-canonicalized, pre-hashed bytes (issue #310).
+   *
+   * Required for multi-sig `eddsa-rdfc-2022` contributions
+   * (`MultiSigManager.signWithExternalSigner`), where the SDK — not the signer
+   * — canonicalizes and hashes with RDFC-2022, and the signer must sign
+   * exactly those bytes. The document-level {@link ExternalSigner.sign} above
+   * lets the signer choose its own canonicalization (didwebvh-ts signers use
+   * JCS), which does NOT match multi-sig verification; a `sign()`-only signer's
+   * multi-sig contribution can never verify. Signers that back multi-sig must
+   * implement this and return the raw signature bytes.
+   *
+   * @param data - The exact bytes to sign (already canonicalized + hashed).
+   * @returns The raw signature bytes.
+   */
+  signBytes?(data: Uint8Array): Promise<{ signature: Uint8Array }>;
+
   /**
    * Get the verification method ID for this signer
    * @returns The verification method ID (e.g., "did:key:z6Mk...")
