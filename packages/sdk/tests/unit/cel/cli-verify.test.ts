@@ -367,7 +367,7 @@ describe('CLI Verify Command', () => {
       expect(result.success).toBe(true);
       expect(result.verified).toBe(false);
       // The second event's controller proof is rejected as unauthorized.
-      expect(result.result?.events[1].proofValid).toBe(false);
+      expect(result.result?.events[1]?.proofValid).toBe(false);
       expect(
         result.result?.errors?.some((e) =>
           e.includes("is not authorized by the log's create event")
