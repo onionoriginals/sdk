@@ -7,6 +7,8 @@ import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
 import { StatusListManager } from './StatusListManager.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 
 export type VerificationResult = { verified: boolean; errors: string[] };
 
@@ -366,7 +368,9 @@ export class Verifier {
       const cached = this.statusListProofCache.get(key);
       if (cached) {
         if (Date.now() - cached.at < Verifier.STATUS_LIST_PROOF_CACHE_TTL_MS) {
-          return cached.result;
+          // Return a fresh copy so a caller mutating `errors` cannot corrupt the
+          // cached entry (and vice-versa).
+          return { verified: cached.result.verified, errors: [...cached.result.errors] };
         }
         this.statusListProofCache.delete(key); // expired
       }
@@ -380,25 +384,31 @@ export class Verifier {
         const oldest = this.statusListProofCache.keys().next().value;
         if (oldest !== undefined) this.statusListProofCache.delete(oldest);
       }
-      this.statusListProofCache.set(key, { at: Date.now(), result });
+      // Store a snapshot, not the returned reference, so post-return mutation of
+      // `result.errors` cannot pollute the cache.
+      this.statusListProofCache.set(key, { at: Date.now(), result: { verified: result.verified, errors: [...result.errors] } });
     }
     return result;
   }
 
   /**
-   * Cache key for a resolved status list credential: a serialization of the
-   * ENTIRE document. Two documents collide only when byte-identical, so a
-   * cached verdict is only ever reused for the exact body it was computed over
-   * -- a forged body (even with a matching id/proofValue) serializes
-   * differently and is re-verified. Returns null if the credential is not
-   * serializable (then it is never cached).
+   * Cache key for a resolved status list credential: a SHA-256 hash of the
+   * serialization of the ENTIRE document. Two documents collide only on a
+   * SHA-256 collision (i.e. never in practice), so a cached verdict is only
+   * ever reused for the exact body it was computed over -- a forged body (even
+   * with a matching id/proofValue) hashes differently and is re-verified. The
+   * fixed-length hash keeps the cache small regardless of the list's
+   * `encodedList` size. Returns null if the credential is not serializable
+   * (then it is never cached).
    */
   private statusListCacheKey(listVC: VerifiableCredential): string | null {
+    let serialized: string;
     try {
-      return JSON.stringify(listVC);
+      serialized = JSON.stringify(listVC);
     } catch {
       return null;
     }
+    return bytesToHex(sha256(new TextEncoder().encode(serialized)));
   }
 
   /**

@@ -375,6 +375,26 @@ describe('MultiSigManager', () => {
       ).rejects.toThrow(/issue #310/);
     });
 
+    test('#310 external signer returning a wrong-length (non-64-byte) signature is rejected at sign time', async () => {
+      const policy: MultiSigPolicy = {
+        required: 1,
+        total: 1,
+        signerVerificationMethods: [vms[0]],
+      };
+      const badLengthSigner: ExternalSigner = {
+        getVerificationMethodId: () => vms[0],
+        sign: async () => { throw new Error('unused'); },
+        // 32 bytes — a plausible mistake (e.g. returning a hash/seed) that would
+        // otherwise base58-encode into a syntactically valid, never-verifiable proof.
+        signBytes: async () => ({ signature: new Uint8Array(32) }),
+      };
+      const externalSigners = new Map([[vms[0], badLengthSigner]]);
+
+      await expect(
+        manager.signCredentialMultiSig(baseVC, { policy, externalSigners })
+      ).rejects.toThrow(/64 bytes/);
+    });
+
     test('#310 a contribution signed over the WRONG bytes (JCS-style) fails verification', async () => {
       const policy: MultiSigPolicy = {
         required: 1,

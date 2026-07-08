@@ -686,10 +686,15 @@ export class MultiSigManager {
 
     const signResult = await signer.signBytes(hashData);
     const signature = signResult?.signature;
-    if (!(signature instanceof Uint8Array) || signature.length === 0) {
+    // eddsa-rdfc-2022 is Ed25519-only, so a valid signature is exactly 64
+    // bytes. Reject a wrong-length return here (mirrors the sign() guard in
+    // EdDSACryptosuiteManager) instead of base58-encoding it into a
+    // syntactically valid but never-verifiable proofValue.
+    if (!(signature instanceof Uint8Array) || signature.length !== 64) {
       throw new Error(
         `External signer for ${verificationMethod} returned an invalid signBytes result ` +
-        `(expected { signature: Uint8Array }).`
+        `(expected { signature: Uint8Array } of 64 bytes for Ed25519, got ` +
+        `${signature instanceof Uint8Array ? `${signature.length} bytes` : typeof signature}).`
       );
     }
 
