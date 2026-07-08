@@ -184,13 +184,13 @@ export class CredentialManager {
   ): VerifiableCredential {
     return {
       '@context': [
-        'https://www.w3.org/2018/credentials/v1',
+        'https://www.w3.org/ns/credentials/v2',
         'https://w3id.org/security/data-integrity/v2',
         'https://originals.build/context'
       ],
       type: ['VerifiableCredential', type],
       issuer,
-      issuanceDate: new Date().toISOString(),
+      validFrom: new Date().toISOString(),
       credentialSubject: subject
     };
   }
@@ -501,7 +501,7 @@ export class CredentialManager {
     holder: string
   ): VerifiablePresentation {
     return {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiablePresentation'],
       holder,
       verifiableCredential: credentials
@@ -926,20 +926,20 @@ export class CredentialManager {
   ): VerifiableCredential {
     const credential: VerifiableCredential = {
       '@context': [
-        'https://www.w3.org/2018/credentials/v1',
+        'https://www.w3.org/ns/credentials/v2',
         'https://w3id.org/security/data-integrity/v2',
         'https://originals.build/context'
       ],
       type: ['VerifiableCredential', type],
       id: this.generateCredentialId(),
       issuer,
-      issuanceDate: new Date().toISOString(),
+      validFrom: new Date().toISOString(),
       credentialSubject: subject
     };
 
-    // Add expiration if specified
+    // Add expiration if specified (VCDM 2.0 validUntil)
     if (chainOptions?.expirationDate) {
-      credential.expirationDate = chainOptions.expirationDate;
+      credential.validUntil = chainOptions.expirationDate;
     }
 
     // Add credential status if specified

@@ -1981,7 +1981,8 @@ export class LifecycleManager {
     if (asset.credentials.length > 0) {
       let credentialsValid = true;
       for (const cred of asset.credentials) {
-        if (!cred.type || !cred.issuer || !cred.issuanceDate) {
+        // VCDM 2.0 credentials carry validFrom; accept legacy issuanceDate too (#300).
+        if (!cred.type || !cred.issuer || !(cred.validFrom || cred.issuanceDate)) {
           credentialsValid = false;
           warnings.push('Asset has credentials with missing fields');
         }

@@ -32,7 +32,7 @@ describe('StatusListManager', () => {
       expect(vc.type).toContain('BitstringStatusListCredential');
       expect(vc.id).toBe('https://example.com/status/1');
       expect(vc.issuer).toBe('did:example:issuer');
-      expect(vc.issuanceDate).toBeDefined();
+      expect(vc.validFrom).toBeDefined();
 
       const subject = vc.credentialSubject as BitstringStatusListSubject;
       expect(subject.type).toBe('BitstringStatusList');
@@ -207,7 +207,7 @@ describe('StatusListManager', () => {
       expect(manager.checkStatus(entry43, updated).isSet).toBe(false);
     });
 
-    test('sets issuanceDate on update', () => {
+    test('sets validFrom on update', () => {
       const vc = manager.createStatusListCredential({
         id: 'https://example.com/status/1',
         issuer: 'did:example:issuer',
@@ -215,8 +215,8 @@ describe('StatusListManager', () => {
       });
 
       const updated = manager.setStatus(vc, 0, true);
-      expect(updated.issuanceDate).toBeDefined();
-      expect(typeof updated.issuanceDate).toBe('string');
+      expect(updated.validFrom).toBeDefined();
+      expect(typeof updated.validFrom).toBe('string');
     });
 
     test('returns a new credential (immutable)', () => {

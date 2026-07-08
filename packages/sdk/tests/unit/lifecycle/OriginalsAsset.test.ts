@@ -93,10 +93,10 @@ describe('OriginalsAsset', () => {
 
   test('verify with credentialManager performs cryptographic verification', async () => {
     const goodVc: any = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
       issuer: 'did:peer:issuer',
-      issuanceDate: new Date().toISOString(),
+      validFrom: new Date().toISOString(),
       credentialSubject: { id: 'did:peer:xyz' },
       proof: { type: 'DataIntegrityProof', created: new Date().toISOString(), verificationMethod: 'did:peer:issuer#key', proofPurpose: 'assertionMethod', proofValue: 'zabc' }
     };
@@ -112,10 +112,10 @@ describe('OriginalsAsset', () => {
 
   test('verify returns false when credentialManager verification fails', async () => {
     const goodVc: any = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
       issuer: 'did:peer:issuer',
-      issuanceDate: new Date().toISOString(),
+      validFrom: new Date().toISOString(),
       credentialSubject: { id: 'did:peer:xyz' },
       proof: { type: 'DataIntegrityProof', created: new Date().toISOString(), verificationMethod: 'did:peer:issuer#key', proofPurpose: 'assertionMethod', proofValue: 'zabc' }
     };

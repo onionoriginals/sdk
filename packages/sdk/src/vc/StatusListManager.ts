@@ -118,7 +118,7 @@ export class StatusListManager {
       type: ['VerifiableCredential', 'BitstringStatusListCredential'],
       id: options.id,
       issuer: options.issuer,
-      issuanceDate: new Date().toISOString(),
+      validFrom: new Date().toISOString(),
       credentialSubject: {
         type: 'BitstringStatusList',
         statusPurpose: options.statusPurpose,
@@ -198,7 +198,7 @@ export class StatusListManager {
       encodedList: StatusListManager.encodeBitstring(updated),
     };
 
-    // Strip any existing proof: the bitstring (and issuanceDate) just changed,
+    // Strip any existing proof: the bitstring (and validFrom) just changed,
     // so the prior signature no longer covers this document. Returning it with
     // the stale proof intact would let a publisher host an unverifiable list
     // (every credential in it then fails a proof-checking verifier). Forcing a
@@ -206,7 +206,7 @@ export class StatusListManager {
     const result = {
       ...statusListCredential,
       credentialSubject: newSubject,
-      issuanceDate: new Date().toISOString(),
+      validFrom: new Date().toISOString(),
     } as VerifiableCredential & { proof?: unknown };
     delete result.proof;
     return result;
@@ -302,7 +302,7 @@ export class StatusListManager {
     const result = {
       ...statusListCredential,
       credentialSubject: newSubject,
-      issuanceDate: new Date().toISOString(),
+      validFrom: new Date().toISOString(),
     } as VerifiableCredential & { proof?: unknown };
     delete result.proof;
     return result;

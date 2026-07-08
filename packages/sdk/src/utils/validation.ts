@@ -31,12 +31,12 @@ export function validateCredential(vc: VerifiableCredential): boolean {
     return false;
   }
 
-  // Require the VC v1 or v2 credentials context. The SDK itself issues
-  // v2-context credentials (Issuer, StatusListManager), so v2 must validate.
+  // Require the W3C VCDM 2.0 credentials context. The SDK standardizes on
+  // VCDM 2.0 and no longer accepts the 1.1 (`2018/credentials/v1`) context
+  // (issue #300). A credential presenting only the 1.1 context is rejected.
   const contextValues = vc['@context'];
-  const hasVcV1 = contextValues.includes('https://www.w3.org/2018/credentials/v1');
   const hasVcV2 = contextValues.includes('https://www.w3.org/ns/credentials/v2');
-  if (!hasVcV1 && !hasVcV2) {
+  if (!hasVcV2) {
     return false;
   }
 
@@ -48,10 +48,10 @@ export function validateCredential(vc: VerifiableCredential): boolean {
     return false;
   }
 
-  // v1 mandates issuanceDate; VC 2.0 replaced it with validFrom, so under the
-  // v2 context accept either property as the issuance timestamp.
+  // VC 2.0 uses validFrom; still accept a legacy issuanceDate when reading
+  // previously-issued credentials.
   const issuanceTimestamp =
-    vc.issuanceDate ?? (hasVcV2 ? (vc as { validFrom?: unknown }).validFrom : undefined);
+    (vc as { validFrom?: unknown }).validFrom ?? vc.issuanceDate;
   if (!vc.issuer || issuanceTimestamp === undefined) {
     return false;
   }

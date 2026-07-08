@@ -92,9 +92,18 @@ export type { MultikeyType } from './crypto/Multikey.js';
 // Event system exports
 export * from './events/index.js';
 
-// Migration system exports
-export { MigrationManager } from './migration/index.js';
-export * from './migration/types.js';
+// Migration system (EXPERIMENTAL — intentionally NOT part of the public API).
+//
+// The `MigrationManager` subsystem (validation pipeline, checkpoints, rollback,
+// audit log, state machine) is experimental and is NOT the migration path used
+// in production: `OriginalsSDK`/`LifecycleManager` run their own
+// migrate/publish/inscribe flow and never instantiate `MigrationManager`
+// (issue #279). Re-exporting it from the package entry point advertised unused
+// machinery as a supported API, so it is deliberately not exported here. It
+// remains importable from its module path for experimentation, at the caller's
+// own risk. Only `MigrationError` is surfaced, because the public event API
+// (`MigrationFailedEvent.error`) references it.
+export type { MigrationError } from './migration/types.js';
 
 // Batch operations exports
 export {

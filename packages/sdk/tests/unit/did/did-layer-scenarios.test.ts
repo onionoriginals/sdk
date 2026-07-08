@@ -429,7 +429,7 @@ describe('DID-009 — recovery credential is tamper-evident (W3C VC)', () => {
     const cred = result.recoveryCredential;
 
     // Verify the credential has the expected W3C VC shape
-    expect(cred['@context']).toContain('https://www.w3.org/2018/credentials/v1');
+    expect(cred['@context']).toContain('https://www.w3.org/ns/credentials/v2');
     expect(cred.type).toContain('VerifiableCredential');
     expect(cred.type).toContain('KeyRecoveryCredential');
     expect(cred.issuer).toBe('did:peer:test-recovery-tamper');
@@ -462,7 +462,7 @@ describe('DID-009 — recovery credential is tamper-evident (W3C VC)', () => {
     expect(tamperResult).toBe(false);
   });
 
-  test('mutating issuanceDate of recovery credential invalidates signature', async () => {
+  test('mutating validFrom of recovery credential invalidates signature', async () => {
     const km = new KeyManager();
     const kp = await km.generateKeyPair('Ed25519');
 
@@ -483,8 +483,8 @@ describe('DID-009 — recovery credential is tamper-evident (W3C VC)', () => {
     const originalBytes = Buffer.from(JSON.stringify(cred), 'utf8');
     const sig: Buffer = await signer.sign(originalBytes, signerKP.privateKey);
 
-    // Tamper: change issuanceDate
-    const tampered = { ...cred, issuanceDate: '1970-01-01T00:00:00Z' };
+    // Tamper: change validFrom
+    const tampered = { ...cred, validFrom: '1970-01-01T00:00:00Z' };
     const tamperedBytes = Buffer.from(JSON.stringify(tampered), 'utf8');
 
     expect(await signer.verify(tamperedBytes, sig, signerKP.publicKey)).toBe(false);
@@ -711,8 +711,8 @@ describe('DID-013 — recovery marks compromised key with ISO-8601 timestamp', (
 
     // recoveredAt on the credential subject must be ISO-8601
     expect(cred.credentialSubject.recoveredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    // issuanceDate must also be ISO-8601
-    expect(cred.issuanceDate).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // validFrom must also be ISO-8601
+    expect(cred.validFrom).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 });
 
