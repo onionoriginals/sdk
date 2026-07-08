@@ -404,12 +404,14 @@ describe('satoshi-validation', () => {
     });
 
     test('thrown error carries the INVALID_SATOSHI code', () => {
+      let caught: unknown;
       try {
         canonicalizeSatoshi('bad');
-        throw new Error('expected canonicalizeSatoshi to throw');
       } catch (e) {
-        expect((e as StructuredError).code).toBe('INVALID_SATOSHI');
+        caught = e;
       }
+      expect(caught).toBeDefined();
+      expect((caught as StructuredError).code).toBe('INVALID_SATOSHI');
     });
   });
 
