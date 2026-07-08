@@ -1,11 +1,14 @@
 import { VerifiableCredential, VerifiablePresentation, BitstringStatusListEntry, MultiSigPolicy } from '../types/index.js';
 import type { MultiSigVerificationResult } from '../types/index.js';
+import { describeMultiSigProofFailure } from './multiSigProofFormat.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { createDocumentLoader } from './documentLoader.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
 import { StatusListManager } from './StatusListManager.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 
 export type VerificationResult = { verified: boolean; errors: string[] };
 
@@ -61,6 +64,32 @@ export type StatusListResolver = (url: string) => Promise<VerifiableCredential |
 
 export class Verifier {
   private statusListResolver?: StatusListResolver;
+
+  /**
+   * Memoizes the expensive proof verification of resolved status list
+   * credentials (issue #304). Verifying N credentials that share one status
+   * list (the normal deployment — one list covers up to 131,072 credentials)
+   * otherwise re-runs RDF canonicalization + issuer DID resolution + signature
+   * verification of the same (often tens-of-KB) document N times.
+   *
+   * Security-critical keying (see the #304 self-review): the cache MUST key on
+   * the FULL resolved document, not on `id + proofValue`. The stored verdict is
+   * a property of the entire (body + proof) credential; the caller reads the
+   * revocation bits from the PRESENTED document. Keying on `id + proofValue`
+   * let a poisoned resolver / holder swap a forged all-zeros body under a
+   * legitimate `id + proofValue` (both are public) and reuse a cached
+   * "verified" verdict without the proof ever being checked against that body —
+   * a revocation bypass (#238). A full-document key collides only on
+   * byte-identical content, so reusing the verdict is sound.
+   *
+   * Only VERIFIED (`true`) verdicts are cached: a `false` result may be a
+   * transient issuer-DID-resolution failure, and caching it would fail-closed a
+   * legitimate list until eviction. A short TTL bounds staleness (e.g. a signer
+   * key revoked after a positive verdict was cached).
+   */
+  private statusListProofCache = new Map<string, { at: number; result: VerificationResult }>();
+  private static readonly STATUS_LIST_PROOF_CACHE_MAX = 256;
+  private static readonly STATUS_LIST_PROOF_CACHE_TTL_MS = 5 * 60 * 1000;
 
   constructor(private didManager: DIDManager, options?: { statusListResolver?: StatusListResolver }) {
     this.statusListResolver = options?.statusListResolver;
@@ -321,8 +350,65 @@ export class Verifier {
     statusListVC: VerifiableCredential
   ): Promise<VerificationResult> {
     return validateStatusListCredentialTrust(vc, entry, statusListVC, (listVC) =>
-      this.verifyCredential(listVC, { checkStatus: false })
+      this.verifyStatusListProofCached(listVC)
     );
+  }
+
+  /**
+   * Verify a status list credential's own proof, memoized on the FULL resolved
+   * document so repeated status checks against the same immutable list don't
+   * re-run the expensive canonicalization + signature verification (issue
+   * #304). Only the list-only proof verification is cached; the id-match and
+   * issuer-equality trust checks (which depend on the credential being checked)
+   * still run every call in validateStatusListCredentialTrust.
+   */
+  private async verifyStatusListProofCached(listVC: VerifiableCredential): Promise<VerificationResult> {
+    const key = this.statusListCacheKey(listVC);
+    if (key !== null) {
+      const cached = this.statusListProofCache.get(key);
+      if (cached) {
+        if (Date.now() - cached.at < Verifier.STATUS_LIST_PROOF_CACHE_TTL_MS) {
+          // Return a fresh copy so a caller mutating `errors` cannot corrupt the
+          // cached entry (and vice-versa).
+          return { verified: cached.result.verified, errors: [...cached.result.errors] };
+        }
+        this.statusListProofCache.delete(key); // expired
+      }
+    }
+    const result = await this.verifyCredential(listVC, { checkStatus: false });
+    // Cache ONLY verified lists (see the field docstring): a false verdict may
+    // be a transient issuer-resolution failure, and the document key already
+    // guarantees a cached true corresponds to this exact body.
+    if (key !== null && result.verified) {
+      if (this.statusListProofCache.size >= Verifier.STATUS_LIST_PROOF_CACHE_MAX) {
+        const oldest = this.statusListProofCache.keys().next().value;
+        if (oldest !== undefined) this.statusListProofCache.delete(oldest);
+      }
+      // Store a snapshot, not the returned reference, so post-return mutation of
+      // `result.errors` cannot pollute the cache.
+      this.statusListProofCache.set(key, { at: Date.now(), result: { verified: result.verified, errors: [...result.errors] } });
+    }
+    return result;
+  }
+
+  /**
+   * Cache key for a resolved status list credential: a SHA-256 hash of the
+   * serialization of the ENTIRE document. Two documents collide only on a
+   * SHA-256 collision (i.e. never in practice), so a cached verdict is only
+   * ever reused for the exact body it was computed over -- a forged body (even
+   * with a matching id/proofValue) hashes differently and is re-verified. The
+   * fixed-length hash keeps the cache small regardless of the list's
+   * `encodedList` size. Returns null if the credential is not serializable
+   * (then it is never cached).
+   */
+  private statusListCacheKey(listVC: VerifiableCredential): string | null {
+    let serialized: string;
+    try {
+      serialized = JSON.stringify(listVC);
+    } catch {
+      return null;
+    }
+    return bytesToHex(sha256(new TextEncoder().encode(serialized)));
   }
 
   /**
@@ -368,17 +454,21 @@ export class Verifier {
         : [String(vcContext)];
       for (const c of ctxs) await loader(c);
 
-      // Verify each proof, counting each authorized signer at most once so a
-      // replicated proof cannot satisfy the threshold on its own.
-      const seenSigners = new Set<string>();
-      for (const proof of proofs) {
+      // Verify the proofs concurrently, then account for them in a
+      // deterministic post-collection pass (issue #305). The independent
+      // per-proof verifications — RDF canonicalization + a possibly-networked
+      // signer DID resolution — previously ran strictly in sequence, so
+      // wall-clock latency was the SUM of the signer resolutions instead of
+      // the MAX. The shared `loader` (built once above) is reused across all
+      // proofs, and the seen-signer dedupe / threshold accounting runs below
+      // over results in original order, so the outcome is identical and
+      // order-independent. Only authorized, correct-purpose proofs incur the
+      // expensive verification, exactly as the sequential path did.
+      const evaluations = await Promise.all(proofs.map(async (proof) => {
         const vm = proof.verificationMethod;
         if (!policy.signerVerificationMethods.includes(vm)) {
-          result.invalidSigners.push(vm);
-          result.errors.push(`Signer ${vm} is not authorized by the policy`);
-          continue;
+          return { kind: 'unauthorized' as const, vm };
         }
-
         // A multi-sig member proof is an ASSERTION (issuance assent). Without
         // this check, a signature an authorized signer produced for another
         // purpose (e.g. `authentication`) would count toward the assertion
@@ -386,11 +476,8 @@ export class Verifier {
         // into the signed proof-config hash, so it cannot be flipped after
         // signing; rejecting the wrong purpose here refuses the reuse.
         if ((proof as { proofPurpose?: unknown }).proofPurpose !== 'assertionMethod') {
-          result.invalidSigners.push(vm);
-          result.errors.push(`Proof from ${vm} has proofPurpose ${String((proof as { proofPurpose?: unknown }).proofPurpose)}, expected assertionMethod`);
-          continue;
+          return { kind: 'wrong-purpose' as const, vm, proof };
         }
-
         try {
           // Every proof this SDK emits is a Data Integrity eddsa-rdfc-2022
           // proof; there is no legacy proof format. Anything else fails
@@ -400,25 +487,40 @@ export class Verifier {
             proof as unknown as DataIntegrityProof,
             { documentLoader: loader }
           );
-          const proofVerified = proofResult.verified === true;
-          if (proofVerified) {
-            // Dedupe only after successful verification: an invalid proof
-            // must not consume the signer's slot and suppress a later valid
-            // proof from the same signer.
-            if (seenSigners.has(vm)) {
-              result.errors.push(`Duplicate proof from ${vm} (ignored)`);
-              continue;
-            }
-            seenSigners.add(vm);
-            result.validSignatures++;
-            result.validSigners.push(vm);
-          } else {
-            result.invalidSigners.push(vm);
-            result.errors.push(`Invalid signature from ${vm}`);
-          }
+          return { kind: proofResult.verified === true ? ('verified' as const) : ('invalid' as const), vm, proof };
         } catch (e) {
+          return { kind: 'error' as const, vm, error: (e as Error).message };
+        }
+      }));
+
+      const seenSigners = new Set<string>();
+      for (const ev of evaluations) {
+        const vm = ev.vm;
+        if (ev.kind === 'unauthorized') {
           result.invalidSigners.push(vm);
-          result.errors.push(`Verification error for ${vm}: ${(e as Error).message}`);
+          result.errors.push(`Signer ${vm} is not authorized by the policy`);
+        } else if (ev.kind === 'wrong-purpose') {
+          result.invalidSigners.push(vm);
+          result.errors.push(`Proof from ${vm} has proofPurpose ${String((ev.proof as { proofPurpose?: unknown }).proofPurpose)}, expected assertionMethod`);
+        } else if (ev.kind === 'verified') {
+          // Dedupe only after successful verification: an invalid proof must
+          // not consume the signer's slot and suppress a later valid proof
+          // from the same signer.
+          if (seenSigners.has(vm)) {
+            result.errors.push(`Duplicate proof from ${vm} (ignored)`);
+            continue;
+          }
+          seenSigners.add(vm);
+          result.validSignatures++;
+          result.validSigners.push(vm);
+        } else if (ev.kind === 'invalid') {
+          result.invalidSigners.push(vm);
+          // Distinguish a legacy/unsupported proof format from a genuine bad
+          // signature (issue #306).
+          result.errors.push(describeMultiSigProofFailure(ev.proof, vm));
+        } else {
+          result.invalidSigners.push(vm);
+          result.errors.push(`Verification error for ${vm}: ${ev.error}`);
         }
       }
 

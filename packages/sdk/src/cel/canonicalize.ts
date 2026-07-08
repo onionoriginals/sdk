@@ -38,6 +38,35 @@ export function canonicalizeEvent(data: unknown): Uint8Array {
 }
 
 /**
+ * Returns the exact bytes a witness must sign when attesting to a CEL event
+ * (issue #314). `witnessEvent` hands `witness.witness(digestMultibase)` only
+ * the Multibase digest *string* (from `computeDigestMultibase`), and
+ * verification (`verifyEventLog` → `dispatchVerify`) checks the witness
+ * signature against `canonicalizeEvent(digestMultibase)` — i.e. the UTF-8
+ * bytes of the JSON-*quoted* digest (`"uEiD…"`, surrounding quotes INCLUDED),
+ * not the raw digest bytes.
+ *
+ * This convention is easy to get subtly wrong: a third-party witness that
+ * signs the decoded digest bytes, or the unquoted string, produces a proof
+ * that fails verification with no hint why. Expose the contract as a helper so
+ * external witness implementations can sign the correct preimage:
+ *
+ * @example
+ * ```typescript
+ * const message = witnessSigningBytes(digestMultibase); // bytes to sign
+ * const proofValue = multibaseEncode(await ed25519.sign(message, privateKey));
+ * ```
+ *
+ * @param digestMultibase - The Multibase-encoded event digest to attest to
+ *   (exactly the value passed to `WitnessService.witness`).
+ * @returns UTF-8 bytes of the canonical (JSON-quoted) digest — the witness
+ *   signature preimage.
+ */
+export function witnessSigningBytes(digestMultibase: string): Uint8Array {
+  return canonicalizeEvent(digestMultibase);
+}
+
+/**
  * Extracts the *committed* fields of a log entry — exactly the message the
  * signer signs (`{ type, data, previousEvent? }`) — and canonicalizes them for
  * use as the hash-chain preimage.

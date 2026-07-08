@@ -211,6 +211,7 @@ export {
   decodeDigestMultibase,
   digestMultibaseEquals,
 } from './cel/hash.js';
+export { witnessSigningBytes } from './cel/canonicalize.js';
 export {
   createExternalReference,
   verifyExternalReference,

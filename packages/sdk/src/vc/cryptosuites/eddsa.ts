@@ -16,9 +16,7 @@ export interface VerificationResult {
 export class EdDSACryptosuiteManager {
 
   static async createProof(document: any, options: any): Promise<DataIntegrityProof> {
-    const proofConfig = await this.createProofConfiguration(options, document?.['@context']);
-    const transformedData = await this.transform(document, options);
-    const hashData = await this.hash(transformedData, proofConfig, options);
+    const { hashData, proofConfig } = await this.computeSigningInput(document, options);
     let privateKey: Uint8Array;
     if (typeof options.privateKey === 'string') {
       const dec = multikey.decodePrivateKey(options.privateKey);
@@ -32,7 +30,29 @@ export class EdDSACryptosuiteManager {
     const proofValueBytes = await this.sign({ data: hashData, privateKey });
     delete (proofConfig)['@context'];
     // proofValue is multibase base58btc per the Data Integrity spec
-    return { ...proofConfig, proofValue: `z${base58.encode(proofValueBytes)}` } as DataIntegrityProof;
+    return { ...proofConfig, proofValue: this.encodeProofValue(proofValueBytes) } as DataIntegrityProof;
+  }
+
+  /**
+   * Compute the eddsa-rdfc-2022 signing input so an EXTERNAL signer can sign
+   * pre-canonicalized, pre-hashed bytes (issue #310). The SDK canonicalizes
+   * (RDFC-2022) and hashes; the signer only signs the returned `hashData`. The
+   * returned `proofConfig` (minus its `@context`) must be emitted verbatim as
+   * the proof so verification reconstructs and hashes identical bytes.
+   *
+   * This is the SAME construction `createProof` uses, factored out so the
+   * local-key and external-signer paths cannot drift.
+   */
+  static async computeSigningInput(document: any, options: any): Promise<{ hashData: Uint8Array; proofConfig: Record<string, unknown> }> {
+    const proofConfig = await this.createProofConfiguration(options, document?.['@context']);
+    const transformedData = await this.transform(document, options);
+    const hashData = await this.hash(transformedData, proofConfig, options);
+    return { hashData, proofConfig: proofConfig as Record<string, unknown> };
+  }
+
+  /** Encode a raw Ed25519 signature as a multibase base58btc (`z…`) proofValue. */
+  static encodeProofValue(signatureBytes: Uint8Array): string {
+    return `z${base58.encode(signatureBytes)}`;
   }
 
   static async verifyProof(document: any, proof: DataIntegrityProof, options: any): Promise<VerificationResult> {

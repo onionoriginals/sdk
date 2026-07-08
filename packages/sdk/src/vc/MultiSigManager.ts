@@ -16,7 +16,9 @@ import { checkCredentialValidityPeriod } from './Verifier.js';
 import { withSecuringContext } from './Issuer.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import { createDocumentLoader } from './documentLoader.js';
-import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
+import { EdDSACryptosuiteManager, type DataIntegrityProof } from './cryptosuites/eddsa.js';
+import { multikey } from '../crypto/Multikey.js';
+import { describeMultiSigProofFailure } from './multiSigProofFormat.js';
 
 /**
  * MultiSigManager handles m-of-n multi-signature operations for verifiable credentials.
@@ -229,17 +231,29 @@ export class MultiSigManager {
       return result;
     }
 
-    // Verify each proof individually, tracking unique signers
-    const seenSigners = new Set<string>();
-    for (const proof of proofs) {
+    // Verify the proofs concurrently (issue #305). The independent per-proof
+    // verifications — each an RDF canonicalization plus a possibly-networked
+    // signer DID resolution — no longer run in sequence (wall-clock was the
+    // SUM of the resolutions instead of the MAX). The document loader is built
+    // ONCE and shared, and the signer-dedupe/threshold accounting runs in a
+    // deterministic post-collection pass below, so results stay identical and
+    // order-independent (only authorized proofs incur the expensive verify,
+    // exactly as the sequential path did).
+    const loader = this.didManager ? createDocumentLoader(this.didManager) : undefined;
+    const evaluations = await Promise.all(proofs.map(async (proof) => {
       const vm = proof.verificationMethod;
-      if (!policy.signerVerificationMethods.includes(vm)) {
+      const authorized = policy.signerVerificationMethods.includes(vm);
+      const valid = authorized ? await this.verifyProof(credential, proof, loader) : false;
+      return { proof, vm, authorized, valid };
+    }));
+
+    const seenSigners = new Set<string>();
+    for (const { proof, vm, authorized, valid } of evaluations) {
+      if (!authorized) {
         result.invalidSigners.push(vm);
         result.errors.push(`Signer ${vm} is not authorized by the policy`);
         continue;
       }
-
-      const valid = await this.verifyProof(credential, proof);
       if (valid) {
         // Reject duplicate proofs from the same signer. Dedupe only after
         // successful verification so an invalid proof cannot consume the
@@ -253,7 +267,10 @@ export class MultiSigManager {
         result.validSigners.push(vm);
       } else {
         result.invalidSigners.push(vm);
-        result.errors.push(`Invalid signature from ${vm}`);
+        // Distinguish a legacy/unsupported proof format from a bad signature
+        // so callers holding pre-Data-Integrity proofs get actionable guidance
+        // (issue #306) instead of a misleading "Invalid signature".
+        result.errors.push(describeMultiSigProofFailure(proof, vm));
       }
     }
 
@@ -567,6 +584,30 @@ export class MultiSigManager {
 
   // === Private helpers ===
 
+  /**
+   * Throw a clear, actionable error when a multi-sig signer key is not
+   * Ed25519 (issue #306). eddsa-rdfc-2022 is the only Data Integrity
+   * cryptosuite implemented and it is Ed25519-only; a secp256k1 (ES256K, the
+   * SDK's default) or ES256 key would otherwise fail with the opaque
+   * `Invalid key type for EdDSA` thrown from inside the cryptosuite.
+   */
+  private assertEd25519SignerKey(privateKeyMultibase: string, verificationMethod: string): void {
+    let keyType: string;
+    try {
+      keyType = multikey.decodePrivateKey(privateKeyMultibase).type;
+    } catch (e) {
+      throw new Error(
+        `Multi-sig signer key for ${verificationMethod} is not a valid Multikey private key: ${(e as Error).message}`
+      );
+    }
+    if (keyType !== 'Ed25519') {
+      throw new Error(
+        `Multi-sig signing requires an Ed25519 signer key; the key for ${verificationMethod} is ${keyType}. ` +
+        `eddsa-rdfc-2022 is the only Data Integrity cryptosuite implemented (no ECDSA suite yet — see issue #306).`
+      );
+    }
+  }
+
   private async signWithPrivateKey(
     credential: VerifiableCredential,
     privateKeyMultibase: string,
@@ -581,6 +622,14 @@ export class MultiSigManager {
         'MultiSigManager requires a DIDManager to create Data Integrity proofs; pass one to the constructor'
       );
     }
+    // Multi-sig proofs are eddsa-rdfc-2022 — the only Data Integrity
+    // cryptosuite implemented — which is Ed25519-only. Reject a non-Ed25519
+    // signer key here with a clear, actionable message instead of letting it
+    // fall through to the low-level `Invalid key type for EdDSA` thrown deep
+    // inside EdDSACryptosuiteManager (issue #306). An ECDSA cryptosuite
+    // (ecdsa-rdfc-2019) would be required to sign multi-sig with ES256K/ES256
+    // keys; until it exists, this is a hard, well-labelled limitation.
+    this.assertEd25519SignerKey(privateKeyMultibase, verificationMethod);
     const documentLoader = createDocumentLoader(this.didManager);
     const unsigned: Record<string, unknown> = { ...credential };
     delete unsigned.proof;
@@ -601,23 +650,63 @@ export class MultiSigManager {
     signer: ExternalSigner,
     verificationMethod: string
   ): Promise<Proof> {
-    const proofBase = {
-      type: 'DataIntegrityProof',
-      cryptosuite: 'eddsa-rdfc-2022',
-      created: new Date().toISOString(),
-      verificationMethod,
-      proofPurpose: 'assertionMethod',
-    };
+    if (!this.didManager) {
+      throw new Error(
+        'MultiSigManager requires a DIDManager to create Data Integrity proofs; pass one to the constructor'
+      );
+    }
+    // The SDK canonicalizes and hashes (RDFC-2022); the external signer signs
+    // ONLY those bytes (issue #310). Handing the raw {document, proof} to the
+    // document-level sign() delegated canonicalization to the signer — and
+    // shipped signers (e.g. Turnkey via didwebvh-ts) canonicalize with JCS,
+    // so the signature was over JCS bytes while multi-sig verification hashes
+    // RDFC bytes. Every such contribution failed verification and could never
+    // count toward the threshold. Require the byte-level signBytes capability
+    // and fail loudly for signers that only implement document-level sign().
+    if (typeof signer.signBytes !== 'function') {
+      throw new Error(
+        `External signer for ${verificationMethod} must implement signBytes(data) to contribute an ` +
+        `eddsa-rdfc-2022 multi-sig proof. The SDK canonicalizes and hashes (RDFC-2022) and the signer ` +
+        `signs those bytes; a signer implementing only the document-level sign() canonicalizes ` +
+        `differently (e.g. JCS) and its contribution can never verify (issue #310).`
+      );
+    }
 
+    const documentLoader = createDocumentLoader(this.didManager);
     const unsignedCredential: Record<string, unknown> = { ...credential };
     delete unsignedCredential.proof;
 
-    const { proofValue } = await signer.sign({
-      document: unsignedCredential,
-      proof: proofBase,
+    const { hashData, proofConfig } = await EdDSACryptosuiteManager.computeSigningInput(unsignedCredential, {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-rdfc-2022',
+      verificationMethod,
+      proofPurpose: 'assertionMethod',
+      documentLoader,
     });
 
-    return { ...proofBase, proofValue };
+    const signResult = await signer.signBytes(hashData);
+    const signature = signResult?.signature;
+    // eddsa-rdfc-2022 is Ed25519-only, so a valid signature is exactly 64
+    // bytes. Reject a wrong-length return here (mirrors the sign() guard in
+    // EdDSACryptosuiteManager) instead of base58-encoding it into a
+    // syntactically valid but never-verifiable proofValue.
+    if (!(signature instanceof Uint8Array) || signature.length !== 64) {
+      throw new Error(
+        `External signer for ${verificationMethod} returned an invalid signBytes result ` +
+        `(expected { signature: Uint8Array } of 64 bytes for Ed25519, got ` +
+        `${signature instanceof Uint8Array ? `${signature.length} bytes` : typeof signature}).`
+      );
+    }
+
+    const proof: Record<string, unknown> = {
+      ...proofConfig,
+      proofValue: EdDSACryptosuiteManager.encodeProofValue(signature),
+    };
+    // computeSigningInput's proofConfig carries the @context used for hashing;
+    // it must not appear on the emitted proof (verify re-attaches the
+    // credential's @context, exactly as createProof does).
+    delete proof['@context'];
+    return proof as unknown as Proof;
   }
 
   /**
@@ -629,7 +718,8 @@ export class MultiSigManager {
    */
   private async verifyProof(
     credential: VerifiableCredential,
-    proof: Proof
+    proof: Proof,
+    sharedLoader?: (iri: string) => Promise<unknown>
   ): Promise<boolean> {
     try {
       const { proofValue, verificationMethod } = proof;
@@ -645,7 +735,9 @@ export class MultiSigManager {
       if ((proof as { proofPurpose?: unknown }).proofPurpose !== 'assertionMethod') {
         return false;
       }
-      const loader = createDocumentLoader(this.didManager);
+      // Reuse the caller's loader when verifying a batch of proofs (issue
+      // #305) so N proofs share one loader instead of constructing one each.
+      const loader = sharedLoader ?? createDocumentLoader(this.didManager);
       const result = await DataIntegrityProofManager.verifyProof(
         credential,
         proof as unknown as DataIntegrityProof,

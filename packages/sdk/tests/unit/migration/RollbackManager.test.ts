@@ -192,6 +192,43 @@ describe('RollbackManager', () => {
       expect(result.irreversibleArtifacts).toBeUndefined();
     });
 
+    // Issue #302 — the positive broadcast signal must win over the negative
+    // pre-anchoring state inference. A migration whose tracked state at
+    // failure is IN_PROGRESS (a "pre-anchoring" state that the choreography
+    // heuristic alone would treat as never-broadcast) but whose error carries
+    // on-chain artifacts (a txid) provably DID broadcast — rollback must
+    // report PARTIALLY_ROLLED_BACK, not a clean success that invites a
+    // fee-paying retry (regression against a broadcast-before-ANCHORING op).
+    it('btco migration with broadcast artifacts reports PARTIALLY_ROLLED_BACK even when stateAtFailure looks pre-anchoring', async () => {
+      const { sdk, checkpointManager, rollbackManager } = makeRollbackSetup();
+
+      const peerDid = await sdk.did.createDIDPeer([
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
+      ]);
+
+      const migrationId = 'mig_btco_broadcast_in_progress';
+      const checkpoint = await checkpointManager.createCheckpoint(migrationId, {
+        sourceDid: peerDid.id,
+        targetLayer: 'btco',
+      });
+
+      const failureError = Object.assign(new Error('reveal broadcast then indexer timeout'), {
+        details: { txid: 'broadcasted-txid', revealTxId: 'reveal-abc' }
+      });
+      const result = await rollbackManager.rollback(migrationId, checkpoint.checkpointId!, {
+        error: failureError,
+        stateAtFailure: MigrationStateEnum.IN_PROGRESS
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.restoredState).toBe(MigrationStateEnum.PARTIALLY_ROLLED_BACK);
+      expect(result.irreversibleArtifacts).toBeDefined();
+      expect(result.irreversibleArtifacts![0].details).toMatchObject({
+        txid: 'broadcasted-txid',
+        revealTxId: 'reveal-abc'
+      });
+    });
+
 
     // CORE-MIG-EVENTS-024/happy — rollback restores storage references (checkpoint contains them)
     it('rollback captures storageReferences from checkpoint', async () => {
