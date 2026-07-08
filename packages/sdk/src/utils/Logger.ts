@@ -91,6 +91,30 @@ function loadAppendFile(): Promise<AppendFileFn> {
 }
 
 /**
+ * All live FileLogOutput instances, flushed by ONE shared pair of process
+ * exit hooks. Per-instance listeners would accumulate on `process` (listener
+ * leak + MaxListenersExceeded warnings) for apps or test suites that create
+ * many file outputs.
+ */
+const fileOutputRegistry = new Set<FileLogOutput>();
+let exitHooksInstalled = false;
+function registerFileOutputForExitFlush(output: FileLogOutput): void {
+  fileOutputRegistry.add(output);
+  if (exitHooksInstalled) return;
+  const proc = (globalThis as { process?: { on?: (event: string, listener: () => void) => unknown } }).process;
+  if (!proc || typeof proc.on !== 'function') return;
+  exitHooksInstalled = true;
+  // beforeExit can run async work; 'exit' cannot, so it uses the sync fs
+  // module (loaded on first flush) as a last resort for hard exits.
+  proc.on('beforeExit', () => {
+    for (const out of fileOutputRegistry) void out.flushForExit();
+  });
+  proc.on('exit', () => {
+    for (const out of fileOutputRegistry) out.flushSyncForExit();
+  });
+}
+
+/**
  * File log output implementation (async)
  *
  * Node/Bun only: lazily loads `node:fs/promises` on first flush.
@@ -99,7 +123,6 @@ export class FileLogOutput implements LogOutput {
   private buffer: string[] = [];
   private flushTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly flushInterval = 1000; // Flush every 1 second
-  private exitHooksInstalled = false;
   // Bound on lines retained across failed writes so an unwritable file
   // cannot grow the buffer without limit.
   private static readonly MAX_BUFFERED_LINES = 10_000;
@@ -110,7 +133,11 @@ export class FileLogOutput implements LogOutput {
     // Format as JSON line
     const line = JSON.stringify(entry) + '\n';
     this.buffer.push(line);
-    this.installExitHooks();
+    // Flush trailing buffered lines at process exit: without this, up to
+    // flushInterval worth of the most recent (often most important) log
+    // lines was always lost on shutdown (issue #352). Browser/edge runtimes
+    // have no `process`, so this is a no-op there.
+    registerFileOutputForExitFlush(this);
 
     // Schedule flush
     if (!this.flushTimeout) {
@@ -120,24 +147,13 @@ export class FileLogOutput implements LogOutput {
     }
   }
 
-  /**
-   * Flush trailing buffered lines at process exit: without this, up to
-   * flushInterval worth of the most recent (often most important) log lines
-   * was always lost on shutdown (issue #352). Browser/edge runtimes have no
-   * `process`, so this is a no-op there.
-   */
-  private installExitHooks(): void {
-    if (this.exitHooksInstalled) return;
-    const proc = (globalThis as { process?: { on?: (event: string, listener: () => void) => unknown } }).process;
-    if (!proc || typeof proc.on !== 'function') return;
-    this.exitHooksInstalled = true;
-    // beforeExit can run async work; 'exit' cannot, so it uses the sync fs
-    // module (loaded on first flush) as a last resort for hard exits.
-    proc.on('beforeExit', () => { void this.flush(); });
-    proc.on('exit', () => { this.flushSync(); });
+  /** @internal Called by the shared 'beforeExit' hook. */
+  flushForExit(): Promise<void> {
+    return this.flush();
   }
 
-  private flushSync(): void {
+  /** @internal Called by the shared 'exit' hook, which cannot await. */
+  flushSyncForExit(): void {
     if (this.buffer.length === 0 || !fsSyncModule) return;
     try {
       fsSyncModule.appendFileSync(this.filePath, this.buffer.join(''), 'utf8');
