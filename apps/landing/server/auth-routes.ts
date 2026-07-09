@@ -45,7 +45,8 @@ export function createAuthRoutes(deps: {
       const result = await initiateEmailAuth(normalized, deps.turnkey, deps.sessions);
       return json(result); // { sessionId, message }
     } catch (e) {
-      return json({ message: e instanceof Error ? e.message : 'Failed to send code' }, 500);
+      console.error('[auth] send-otp failed:', e); // log cause; don't leak upstream errors to clients
+      return json({ message: 'Failed to send verification code. Please try again.' }, 500);
     }
   };
 
@@ -70,7 +71,8 @@ export function createAuthRoutes(deps: {
         { 'Set-Cookie': cookie }
       );
     } catch (e) {
-      return json({ message: e instanceof Error ? e.message : 'Verification failed' }, 400);
+      console.error('[auth] verify-otp failed:', e); // log cause; generic message so Turnkey internals don't leak
+      return json({ message: 'Verification failed. Please check the code or request a new one.' }, 400);
     }
   };
 
