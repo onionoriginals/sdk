@@ -1,0 +1,12 @@
+.otp-input { display: flex; flex-direction: column; gap: 0.75rem; align-items: center; }
+.otp-input .otp-row { display: flex; gap: 0.5rem; }
+.otp-digit {
+  width: 2.75rem; height: 3.25rem; text-align: center;
+  font-size: 1.4rem; font-variant-numeric: tabular-nums;
+  border: 1px solid var(--border, #33333a); border-radius: 8px;
+  background: var(--surface, #16151c); color: inherit;
+}
+.otp-digit:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.otp-error { color: #ff6b6b; font-size: 0.85rem; }
+.otp-resend { background: none; border: none; color: var(--accent); cursor: pointer; font: inherit; }
+.otp-resend:disabled { opacity: 0.5; cursor: default; }
