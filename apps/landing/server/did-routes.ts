@@ -1,6 +1,6 @@
 import { verifyToken, TurnkeyWebVHSigner, type SessionStorage } from '@originals/auth/server';
 import type { Turnkey } from '@turnkey/sdk-server';
-import { createDID } from 'didwebvh-ts';
+import { OriginalsSDK } from '@originals/sdk';
 import { json, type Handler } from './router';
 import { extractToken } from './cookies';
 import { getEd25519Account } from './turnkey';
@@ -38,7 +38,11 @@ export function createDidRoutes(deps: {
       );
 
       const slug = `user-${subOrgId.slice(0, 16)}`;
-      const result = await createDID({
+      // createDIDOriginal (not raw createDID): it normalizes did:key-prefixed
+      // updateKeys to bare multikeys (didwebvh-ts 2.8 self-verification requires
+      // bare form) and accepts an ExternalSigner without a cast.
+      const result = await OriginalsSDK.createDIDOriginal({
+        type: 'did',
         domain,
         signer,
         verifier: signer,
@@ -55,7 +59,8 @@ export function createDidRoutes(deps: {
 
       return json({ did: result.did, didDocument: result.doc, didLog: result.log });
     } catch (e) {
-      return json({ message: e instanceof Error ? e.message : 'DID creation failed' }, 500);
+      console.error('[did] create failed:', e); // log cause; don't leak upstream/didwebvh errors to clients
+      return json({ message: 'DID creation failed' }, 500);
     }
   };
 
