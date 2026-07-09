@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Canonical Specification
+
+The single source of truth for the protocol is **[specs/protocol/originals-protocol-rfc.md](specs/protocol/originals-protocol-rfc.md)** (the normative RFC), with supporting specs in [specs/protocol/](specs/protocol/). The [whitepaper](originals-whitepaper.md) captures the vision. Older root-level specifications and release assessments have been moved to [archive/](archive/) and are **not** authoritative — do not treat them as current.
+
 ## LLM Agent Documentation
 
 For comprehensive API reference optimized for code generation, see:

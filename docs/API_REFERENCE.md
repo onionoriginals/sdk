@@ -513,4 +513,4 @@ try {
 - [README.md](../README.md) - Quick start guide
 - [CLAUDE.md](../CLAUDE.md) - Development guide
 - [LLM_AGENT_GUIDE.md](./LLM_AGENT_GUIDE.md) - Comprehensive LLM reference
-- [ORIGINALS_SPECIFICATION_v1.0.md](../ORIGINALS_SPECIFICATION_v1.0.md) - Protocol specification
+- [Originals Protocol (RFC)](../specs/protocol/originals-protocol-rfc.md) - Canonical protocol specification

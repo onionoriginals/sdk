@@ -15,6 +15,25 @@ The Originals Protocol organizes digital asset lifecycles into three layers:
 
 Assets migrate unidirectionally through these layers, with economic gravity determining when Bitcoin-level security is justified.
 
+## Documentation & Specification
+
+**New here? Start in this order:**
+
+1. **[Originals Whitepaper](./originals-whitepaper.md)** — the vision and the "why" (5-minute read).
+2. **[Getting Started](./docs/GETTING_STARTED.md)** — install and run your first asset.
+3. **[Originals Protocol RFC](./specs/protocol/originals-protocol-rfc.md)** — the **canonical, normative specification**. This is the single source of truth for the data model, lifecycle rules, and cryptography. Supporting specs live alongside it in [`specs/protocol/`](./specs/protocol/) (BTCO DID method, DID-linked resources, verifiable metadata).
+4. **[CLAUDE.md](./CLAUDE.md)** — architecture overview and build/test commands for contributors.
+
+Reference material:
+
+- [API Reference](./docs/API_REFERENCE.md) · [LLM Agent Guide](./docs/LLM_AGENT_GUIDE.md) · [LLM Quick Reference](./docs/LLM_QUICK_REFERENCE.md)
+- Bitcoin: [Integration Guide](./docs/BITCOIN_INTEGRATION_GUIDE.md) · [API Reference](./docs/BITCOIN_API_REFERENCE.md) · [Best Practices](./docs/BITCOIN_BEST_PRACTICES.md) · [Troubleshooting](./docs/BITCOIN_TROUBLESHOOTING.md)
+- CEL (Cryptographic Event Log): [Spec](./docs/ORIGINALS_CEL_SPEC.md) · [Guide](./docs/ORIGINALS_CEL_GUIDE.md)
+
+> Superseded specs, past release assessments, and internal development-process
+> artifacts have been moved to [`archive/`](./archive/). Nothing there is
+> authoritative — always prefer the RFC above.
+
 ## Installation
 
 ```bash
@@ -240,24 +259,9 @@ const result = await sdk.did.updateDIDWebVH({
 });
 ```
 
-For detailed information about the DID:WebVH integration, including Turnkey setup and external signer implementation, see [DIDWEBVH_INTEGRATION.md](./DIDWEBVH_INTEGRATION.md).
+For detailed information about the DID:WebVH integration, including external signer setup, see the [Originals Protocol RFC](./specs/protocol/originals-protocol-rfc.md) and the WebVH sections of [CLAUDE.md](./CLAUDE.md).
 
-## Documentation
-
-### For LLM Agents
-
-If you're an AI/LLM agent working with this SDK, we provide optimized documentation:
-
-- **[docs/LLM_AGENT_GUIDE.md](./docs/LLM_AGENT_GUIDE.md)** - Comprehensive API reference with complete type signatures, method documentation, and working examples
-- **[docs/LLM_QUICK_REFERENCE.md](./docs/LLM_QUICK_REFERENCE.md)** - Compact quick-reference card for rapid lookups
-- **[CLAUDE.md](./CLAUDE.md)** - Development context and project architecture
-
-### Bitcoin Documentation
-
-- **[docs/BITCOIN_INTEGRATION_GUIDE.md](./docs/BITCOIN_INTEGRATION_GUIDE.md)** - Complete guide for Bitcoin integration
-- **[docs/BITCOIN_API_REFERENCE.md](./docs/BITCOIN_API_REFERENCE.md)** - Bitcoin API reference
-- **[docs/BITCOIN_BEST_PRACTICES.md](./docs/BITCOIN_BEST_PRACTICES.md)** - Best practices for production deployments
-- **[docs/BITCOIN_TROUBLESHOOTING.md](./docs/BITCOIN_TROUBLESHOOTING.md)** - Troubleshooting common issues
+_(See [Documentation & Specification](#documentation--specification) above for the full doc map.)_
 
 ## Development
 
