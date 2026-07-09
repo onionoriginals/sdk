@@ -4,6 +4,7 @@ import {
   BitcoinTransaction
 } from '../types/index.js';
 import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters/index.js';
+import type { OperationLock } from '../utils/OperationLock.js';
 import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
@@ -20,10 +21,12 @@ export const MAX_REASONABLE_FEE_RATE = 10_000; // sat/vB
 export class BitcoinManager {
   private readonly feeOracle?: FeeOracleAdapter;
   private readonly ord?: OrdinalsProvider;
+  private readonly operationLock?: OperationLock;
 
   constructor(private config: OriginalsConfig) {
     this.feeOracle = config.feeOracle;
     this.ord = config.ordinalsProvider;
+    this.operationLock = config.operationLock;
   }
 
   /**
@@ -115,7 +118,16 @@ export class BitcoinManager {
     data: any,
     contentType: string,
     feeRate?: number,
-    options?: { targetSatoshi?: string }
+    options?: {
+      targetSatoshi?: string;
+      /**
+       * Canonical DID being inscribed. When provided (and a shared operationLock
+       * is configured), the paid createInscription broadcast is claimed under
+       * this key so a second concurrent inscription of the same DID — even from a
+       * different manager — is rejected rather than double-paying (issue #303).
+       */
+      lockKey?: string;
+    }
   ): Promise<OrdinalsInscription> {
     // Input validation
     if (!data) {
@@ -154,14 +166,18 @@ export class BitcoinManager {
       );
     }
 
+    const ord = this.ord;
+    // Everything from here spends money on-chain; hold the shared lock across it
+    // so a concurrent inscription of the same DID cannot broadcast a duplicate.
+    const performInscription = async (): Promise<OrdinalsInscription> => {
     const creation = typeof data === 'function'
-      ? await this.ord.createInscription({
+      ? await ord.createInscription({
           buildContent: data as (satoshi: string) => Buffer | Promise<Buffer>,
           contentType,
           feeRate: effectiveFeeRate,
           ...(options?.targetSatoshi ? { targetSatoshi: options.targetSatoshi } : {})
         })
-      : await this.ord.createInscription({
+      : await ord.createInscription({
           data,
           contentType,
           feeRate: effectiveFeeRate,
@@ -235,6 +251,13 @@ export class BitcoinManager {
     };
 
     return inscription;
+    };
+
+    const lockKey = options?.lockKey;
+    if (lockKey && this.operationLock) {
+      return this.operationLock.runExclusive(lockKey, performInscription);
+    }
+    return performInscription();
   }
 
   async trackInscription(inscriptionId: string): Promise<OrdinalsInscription | null> {

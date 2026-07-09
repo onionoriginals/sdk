@@ -10,6 +10,7 @@ import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
 import { Logger } from '../utils/Logger.js';
 import { MetricsCollector } from '../utils/MetricsCollector.js';
 import { EventLogger } from '../utils/EventLogger.js';
+import { OperationLock } from '../utils/OperationLock.js';
 import { createDID } from 'didwebvh-ts';
 import { normalizeUpdateKey } from '../did/WebVHManager.js';
 
@@ -166,6 +167,13 @@ export class OriginalsSDK {
     }
     if (config.webvhNetwork !== undefined && !['pichu', 'cleffa', 'magby'].includes(config.webvhNetwork)) {
       throw new Error('Invalid webvhNetwork: must be pichu, cleffa, or magby');
+    }
+
+    // One shared inscription lock for every manager built from this config, so
+    // a LifecycleManager inscribe and a MigrationManager migrate of the same
+    // DID coordinate on the same keyed mutex instead of separate Sets (#303).
+    if (!config.operationLock) {
+      config.operationLock = new OperationLock();
     }
 
     this.config = config;
