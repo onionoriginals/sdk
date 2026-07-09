@@ -67,7 +67,7 @@ export function Nav() {
               >
                 {creating ? 'Creating…' : did ? 'Identity ✓' : 'Create your did:webvh'}
               </button>
-              <button className="nav-signout" onClick={() => signOut()}>Sign out</button>
+              <button className="nav-signout" onClick={() => { setDid(null); signOut(); }}>Sign out</button>
             </div>
           ) : (
             <button className="btn btn-primary nav-cta" onClick={() => setLoginOpen(true)}>
