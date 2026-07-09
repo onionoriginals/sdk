@@ -1,3 +1,6 @@
+// Must be first: sets globalThis.Buffer before the eagerly-imported auth/Turnkey
+// modules (via AuthProvider) evaluate and reference it.
+import './shims/buffer-global';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
