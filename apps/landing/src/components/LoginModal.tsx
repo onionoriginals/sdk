@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useAuth } from '../auth/useAuth';
 import { OtpInput } from './OtpInput';
 import './login-modal.css';
@@ -12,6 +12,16 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Reset to the email step whenever the modal closes, so a reopen never lands
+  // on a stale OTP step with the wrong email.
+  useEffect(() => {
+    if (!open) {
+      setStep('email');
+      setEmail('');
+      setError(null);
+    }
+  }, [open]);
 
   if (!open) return null;
 
