@@ -53,6 +53,7 @@ export interface MigrationOptions {
     resumable: boolean;                 // Support resume
   };
   estimateCostOnly?: boolean;           // Return cost estimate without migrating
+  credentials?: VerifiableCredential[]; // Asset's real credentials to validate before migrating (typed channel; supersedes metadata.credentials)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata?: Record<string, any>;       // Additional migration metadata
   domain?: string;                      // For webvh migrations
