@@ -383,6 +383,145 @@ export class OriginalsAsset {
   }
 
   /**
+   * Reconstruct and cryptographically verify the asset's provenance chain from
+   * its credentials.
+   *
+   * Unlike {@link verify}, which validates each credential in isolation, this
+   * walks the `credentialSubject.previousCredential` links to establish an
+   * ordering, then delegates to {@link CredentialManager.verifyCredentialChain}
+   * to check (a) that every credential verifies against its issuer's key and
+   * (b) that each `previousCredential` id/hash link resolves to the preceding
+   * credential. This closes the gap where provenance existed only as in-memory
+   * session state that `verify()` never checked (#367).
+   *
+   * The returned `chainLinked` flag reports whether the credentials actually
+   * form a linked chain: credentials issued without chaining metadata (the
+   * current production default) verify individually but are reported as
+   * unlinked, so callers can distinguish "cryptographically chained history"
+   * from "a bag of independently-valid credentials."
+   */
+  async verifyProvenance(deps: {
+    credentialManager: CredentialManager;
+  }): Promise<{
+    valid: boolean;
+    errors: string[];
+    verifiedCredentials: number;
+    chainLength: number;
+    chainLinked: boolean;
+  }> {
+    const { credentialManager } = deps;
+    const credentials = this.credentials;
+
+    if (credentials.length === 0) {
+      return { valid: true, errors: [], verifiedCredentials: 0, chainLength: 0, chainLinked: false };
+    }
+
+    // Structural validation first — a malformed credential should not reach the
+    // cryptographic chain check.
+    for (const cred of credentials) {
+      if (!validateCredential(cred)) {
+        return {
+          valid: false,
+          errors: ['One or more credentials failed structural validation'],
+          verifiedCredentials: 0,
+          chainLength: credentials.length,
+          chainLinked: false
+        };
+      }
+    }
+
+    const { ordered, linked, errors: orderErrors } = OriginalsAsset.orderCredentialChain(credentials);
+
+    const chainResult = await credentialManager.verifyCredentialChain(ordered);
+
+    const errors = [...orderErrors, ...chainResult.errors];
+    const verifiedCredentials = credentials.length - chainResult.errors
+      .filter(e => e.startsWith('Credential at index')).length;
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      verifiedCredentials,
+      chainLength: chainResult.chainLength,
+      chainLinked: linked
+    };
+  }
+
+  /**
+   * Order a set of credentials into chain sequence (oldest → newest) by
+   * following `credentialSubject.previousCredential.id` links. Returns the
+   * credentials unchanged (and `linked: false`) when no chaining metadata is
+   * present, and surfaces structural chain problems (multiple roots, cycles,
+   * dangling links) as errors rather than throwing.
+   */
+  private static orderCredentialChain(credentials: VerifiableCredential[]): {
+    ordered: VerifiableCredential[];
+    linked: boolean;
+    errors: string[];
+  } {
+    interface SubjectWithPrevious {
+      previousCredential?: { id?: string; hash?: string };
+    }
+    const prevIdOf = (c: VerifiableCredential): string | undefined =>
+      (c.credentialSubject as (typeof c.credentialSubject) & SubjectWithPrevious)?.previousCredential?.id;
+
+    const anyLinks = credentials.some(c => prevIdOf(c) !== undefined);
+    if (!anyLinks) {
+      return { ordered: credentials, linked: false, errors: [] };
+    }
+
+    const errors: string[] = [];
+    const byId = new Map<string, VerifiableCredential>();
+    for (const c of credentials) {
+      if (typeof c.id === 'string') byId.set(c.id, c);
+    }
+
+    // Roots: credentials with no previousCredential link (or a dangling one).
+    const roots = credentials.filter(c => {
+      const p = prevIdOf(c);
+      return p === undefined || !byId.has(p);
+    });
+    if (roots.length !== 1) {
+      errors.push(`Provenance chain does not have a single root (found ${roots.length})`);
+      return { ordered: credentials, linked: true, errors };
+    }
+
+    // Follow forward links: next is the credential whose previous points at current.
+    const nextOf = new Map<string, VerifiableCredential>();
+    for (const c of credentials) {
+      const p = prevIdOf(c);
+      if (p !== undefined && byId.has(p)) {
+        if (nextOf.has(p)) {
+          errors.push(`Provenance chain forks at credential ${p}`);
+          return { ordered: credentials, linked: true, errors };
+        }
+        nextOf.set(p, c);
+      }
+    }
+
+    const ordered: VerifiableCredential[] = [];
+    const seen = new Set<string>();
+    let cursor: VerifiableCredential | undefined = roots[0];
+    while (cursor) {
+      if (typeof cursor.id === 'string') {
+        if (seen.has(cursor.id)) {
+          errors.push('Provenance chain contains a cycle');
+          return { ordered: credentials, linked: true, errors };
+        }
+        seen.add(cursor.id);
+      }
+      ordered.push(cursor);
+      cursor = typeof cursor.id === 'string' ? nextOf.get(cursor.id) : undefined;
+    }
+
+    if (ordered.length !== credentials.length) {
+      errors.push('Provenance chain is disconnected (not all credentials are reachable from the root)');
+    }
+
+    return { ordered, linked: true, errors };
+  }
+
+  /**
    * Subscribe to an event
    * 
    * @param eventType - The type of event to listen for
