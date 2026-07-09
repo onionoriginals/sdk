@@ -9,6 +9,8 @@
     "ResourceCreated": "Originals:ResourceCreated",
     "ResourceUpdated": "Originals:ResourceUpdated",
     "ResourceMigrated": "Originals:ResourceMigrated",
+    "MigrationCompleted": "Originals:MigrationCompleted",
+    "OwnershipTransferred": "Originals:OwnershipTransferred",
     "attributes": {
       "@id": "Originals:attributes",
       "@container": "@set"
