@@ -16,6 +16,11 @@ const shim = (name: string) =>
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8787',
+    },
+  },
   resolve: {
     alias: [
       { find: /^(node:)?fs\/promises$/, replacement: shim('fs-promises') },
