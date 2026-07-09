@@ -264,6 +264,18 @@ export class OriginalsAsset {
     didManager?: DIDManager;
     credentialManager?: CredentialManager;
     fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
+    /**
+     * When true, every resource must have its content cryptographically verified
+     * against its declared hash. A resource that cannot be content-verified —
+     * URL-only with no `fetch` supplied, or a resource with neither inline
+     * `content` nor a fetchable `url` — causes verification to fail closed.
+     * Defaults to false, which preserves offline/structural verification
+     * (e.g. did:peer assets whose content is transported out of band).
+     * Note: independent of this flag, if a `fetch` IS supplied it is treated as
+     * an opt-in to content verification, so a fetch failure or hash mismatch on
+     * any resource always fails verification.
+     */
+    requireContentVerification?: boolean;
   }): Promise<boolean> {
     const result = await this.runVerificationChecks(deps);
     // 'verification:completed' is part of the public EventTypeMap and is
@@ -281,6 +293,7 @@ export class OriginalsAsset {
     didManager?: DIDManager;
     credentialManager?: CredentialManager;
     fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
+    requireContentVerification?: boolean;
   }): Promise<boolean> {
     try {
       // 1) DID Document validation (structure + supported method via validateDID)
@@ -312,20 +325,39 @@ export class OriginalsAsset {
           continue;
         }
 
-        // If URL present and fetch is provided, attempt to fetch and hash
-        if (typeof res.url === 'string' && deps?.fetch) {
-          try {
-            const response = await deps.fetch(res.url);
-            const buf = Buffer.from(await response.arrayBuffer());
+        // URL-only resource: verify hosted bytes against the declared hash.
+        if (typeof res.url === 'string') {
+          if (deps?.fetch) {
+            // Supplying a fetch is an opt-in to content verification: a fetch
+            // failure or a hash mismatch means the content could not be
+            // confirmed, so fail closed rather than silently passing (#368).
+            let buf: Buffer;
+            try {
+              const response = await deps.fetch(res.url);
+              buf = Buffer.from(await response.arrayBuffer());
+            } catch {
+              return false;
+            }
             const computed = hashResource(buf);
             const expected = (res.hash || '').toLowerCase();
             if (computed.toLowerCase() !== expected) {
               return false;
             }
-          } catch {
-            // On fetch error, treat as unverifiable but do not fail the entire asset
-            // Fall back to structural validation only
+            continue;
           }
+          // No fetch provided: content cannot be verified here. By default we
+          // fall back to structural validation (offline verification). When the
+          // caller requires content verification, this is a failure.
+          if (deps?.requireContentVerification) {
+            return false;
+          }
+          continue;
+        }
+
+        // Resource has neither inline content nor a URL: its content can never
+        // be checked against the hash. Only a hard requirement rejects it.
+        if (deps?.requireContentVerification) {
+          return false;
         }
       }
 

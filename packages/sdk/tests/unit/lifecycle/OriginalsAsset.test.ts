@@ -129,13 +129,54 @@ describe('OriginalsAsset', () => {
     spy.mockRestore();
   });
 
-  test('verify does not fail if fetch throws when URL present', async () => {
+  test('verify fails closed when a provided fetch throws (content unverifiable) (#368)', async () => {
+    // Supplying a fetch is an opt-in to content verification; a fetch failure
+    // means the hosted bytes could not be confirmed, so verification must fail
+    // rather than silently pass.
     const resWithUrl: AssetResource = {
       id: 'r3', type: 'text', url: 'https://example.com/missing', contentType: 'text/plain', hash: resources[0].hash
     };
     const asset = new OriginalsAsset([resWithUrl], buildDid('did:peer:abc'), emptyCreds);
     const failingFetch = async () => { throw new Error('network'); };
-    await expect(asset.verify({ fetch: failingFetch as any })).resolves.toBe(true);
+    await expect(asset.verify({ fetch: failingFetch as any })).resolves.toBe(false);
+  });
+
+  test('verify with requireContentVerification fails a URL-only resource when no fetch is supplied (#368)', async () => {
+    const resWithUrl: AssetResource = {
+      id: 'r-strict',
+      type: 'text',
+      url: 'https://example.com/x',
+      contentType: 'text/plain',
+      hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    };
+    const asset = new OriginalsAsset([resWithUrl], buildDid('did:peer:abc'), emptyCreds);
+    // Default: structural-only, passes (hash is valid hex).
+    await expect(asset.verify()).resolves.toBe(true);
+    // Strict: content must be verified, but no fetch is supplied → fail closed.
+    await expect(asset.verify({ requireContentVerification: true })).resolves.toBe(false);
+  });
+
+  test('verify with requireContentVerification passes when a valid fetch confirms the hash (#368)', async () => {
+    const resWithUrl: AssetResource = {
+      id: 'r-strict-ok',
+      type: 'text',
+      url: 'https://example.com/x',
+      contentType: 'text/plain',
+      hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' // sha256 of empty
+    };
+    const asset = new OriginalsAsset([resWithUrl], buildDid('did:peer:abc'), emptyCreds);
+    const mockFetch = async () => ({ arrayBuffer: async () => new ArrayBuffer(0) }) as any;
+    await expect(asset.verify({ fetch: mockFetch, requireContentVerification: true })).resolves.toBe(true);
+  });
+
+  test('verify with requireContentVerification fails a resource lacking both content and url (#368)', async () => {
+    const hashOnly: AssetResource = {
+      id: 'r-hashonly', type: 'text', contentType: 'text/plain',
+      hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    };
+    const asset = new OriginalsAsset([hashOnly], buildDid('did:peer:abc'), emptyCreds);
+    await expect(asset.verify()).resolves.toBe(true);
+    await expect(asset.verify({ requireContentVerification: true })).resolves.toBe(false);
   });
 
   test('verify returns false when resource has invalid id type', async () => {
