@@ -1,5 +1,6 @@
 import { createTurnkeyClient } from '@originals/auth/server';
 import type { Turnkey } from '@turnkey/sdk-server';
+import { solanaAddressToEd25519Multibase } from './multibase';
 
 let cached: Turnkey | null = null;
 
@@ -35,9 +36,11 @@ export async function getEd25519Account(turnkey: TurnkeyLike, subOrgId: string) 
   if (!ed) throw new Error('No Ed25519 account found in wallet');
 
   const signingOrganizationId = ed.organizationId || subOrgId;
+  const publicKeyMultibase = solanaAddressToEd25519Multibase(ed.address);
   return {
     address: ed.address,
-    verificationMethodId: `did:key:${ed.address}`,
+    publicKeyMultibase,
+    verificationMethodId: `did:key:${publicKeyMultibase}`,
     signingOrganizationId,
   };
 }
