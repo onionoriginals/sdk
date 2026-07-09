@@ -1,0 +1,15 @@
+.login-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,0.55); display: grid; place-items: center; padding: 1rem;
+}
+.login-modal {
+  position: relative; width: min(26rem, 100%);
+  background: var(--surface, #16151c); border: 1px solid var(--border, #2a2933);
+  border-radius: 16px; padding: 2rem;
+}
+.login-close { position: absolute; top: 0.75rem; right: 0.9rem; background: none; border: none; font-size: 1.5rem; color: inherit; cursor: pointer; }
+.login-form { display: flex; flex-direction: column; gap: 0.9rem; }
+.login-form h2 { margin: 0; }
+.login-sub { margin: 0; opacity: 0.7; font-size: 0.9rem; }
+.login-email { padding: 0.7rem 0.9rem; border-radius: 8px; border: 1px solid var(--border, #33333a); background: var(--bg, #0c0b10); color: inherit; font: inherit; }
+.login-error { color: #ff6b6b; font-size: 0.85rem; margin: 0; }
