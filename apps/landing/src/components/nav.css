@@ -126,6 +126,11 @@
   border-bottom: none;
 }
 
+.nav-auth { display: flex; align-items: center; gap: 0.6rem; }
+.nav-email { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.8; font-size: 0.85rem; }
+.nav-signout { background: none; border: none; color: inherit; opacity: 0.7; cursor: pointer; font: inherit; }
+.nav-did { position: absolute; right: 1rem; top: 100%; font-family: var(--mono, monospace); font-size: 0.72rem; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; background: var(--surface,#16151c); padding: 0.3rem 0.6rem; border-radius: 6px; }
+
 @media (min-width: 900px) {
   .nav-links {
     display: flex;
