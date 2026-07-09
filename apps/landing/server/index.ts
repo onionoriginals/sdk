@@ -3,22 +3,22 @@ import type { Turnkey } from '@turnkey/sdk-server';
 import { json, route, type Handler } from './router';
 import { getTurnkey } from './turnkey';
 import { createAuthRoutes } from './auth-routes';
-import { createDidRoutes } from './did-routes'; // added in Phase 2; safe no-op table until then
 
+// did:webvh creation is client-side (browser Ed25519 key, see src/auth/webvh.ts):
+// the parent Turnkey key can't sign for a credential-less sub-org, so there is
+// no server DID route.
 export function buildRoutes(deps: {
   turnkey: Turnkey;
   sessions: SessionStorage;
   jwtSecret: string;
 }): Record<string, Handler> {
   const auth = createAuthRoutes(deps);
-  const did = createDidRoutes(deps);
   return {
     'GET /api/health': () => json({ status: 'ok' }),
     'POST /api/auth/send-otp': auth.sendOtp,
     'POST /api/auth/verify-otp': auth.verifyOtp,
     'GET /api/me': auth.me,
     'POST /api/auth/logout': auth.logout,
-    'POST /api/did/create': did.createDid,
   };
 }
 

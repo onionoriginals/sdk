@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import * as api from './api';
 import type { AuthUser } from './api';
+import { createUserWebVHDid } from './webvh';
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -37,9 +38,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [sessionId]);
 
   const createIdentity = useCallback(async () => {
-    const { did } = await api.createDid();
+    if (!user) throw new Error('Sign in before creating an identity');
+    // Signed in the browser with a real Ed25519 key (see auth/webvh.ts): the
+    // parent Turnkey key can't sign for the credential-less sub-org.
+    const { did } = await createUserWebVHDid({ subOrgId: user.subOrgId, email: user.email });
     return did;
-  }, []);
+  }, [user]);
 
   const signOut = useCallback(async () => {
     await api.logout();

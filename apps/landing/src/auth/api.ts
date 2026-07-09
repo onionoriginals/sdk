@@ -27,12 +27,6 @@ export async function fetchMe(): Promise<AuthUser | null> {
   return (await res.json()) as AuthUser;
 }
 
-export async function createDid(): Promise<{ did: string }> {
-  const res = await fetch('/api/did/create', { method: 'POST', credentials: 'same-origin' });
-  if (!res.ok) throw new Error(((await res.json()) as { message?: string }).message ?? 'DID creation failed');
-  return (await res.json()) as { did: string };
-}
-
 export async function logout(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
 }
