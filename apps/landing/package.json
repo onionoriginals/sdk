@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:server": "bun run --watch server/index.ts",
+    "dev:all": "bun run dev:server & bun run dev",
+    "test": "bun test",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
@@ -13,7 +16,9 @@
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@noble/hashes": "^2.0.1",
+    "@originals/auth": "workspace:*",
     "@originals/sdk": "workspace:*",
+    "@turnkey/crypto": "^2.10.0",
     "didwebvh-ts": "^2.8.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
