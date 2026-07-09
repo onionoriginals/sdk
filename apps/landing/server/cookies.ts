@@ -30,10 +30,12 @@ interface CookieConfig {
   };
 }
 
+// options.maxAge is in MILLISECONDS (Express res.cookie convention, per getAuthCookieConfig).
 export function serializeCookie(cfg: CookieConfig): string {
   const o = cfg.options;
   const parts = [`${cfg.name}=${cfg.value}`];
-  if (o.maxAge != null) parts.push(`Max-Age=${o.maxAge}`);
+  // RFC 6265 Max-Age is in seconds; convert ms→s (0ms logout stays Max-Age=0).
+  if (o.maxAge != null) parts.push(`Max-Age=${Math.floor(o.maxAge / 1000)}`);
   if (o.path) parts.push(`Path=${o.path}`);
   if (o.httpOnly) parts.push('HttpOnly');
   if (o.secure) parts.push('Secure');

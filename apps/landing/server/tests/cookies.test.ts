@@ -27,12 +27,12 @@ describe('cookies', () => {
     const s = serializeCookie({
       name: 'auth_token',
       value: 'v',
-      options: { httpOnly: true, sameSite: 'strict', maxAge: 60, path: '/' },
+      options: { httpOnly: true, sameSite: 'strict', maxAge: 60000, path: '/' },
     });
     expect(s).toContain('auth_token=v');
     expect(s).toContain('HttpOnly');
     expect(s).toContain('SameSite=Strict');
-    expect(s).toContain('Max-Age=60');
+    expect(s).toContain('Max-Age=60'); // 60000ms → 60s (RFC 6265 seconds)
     expect(s).toContain('Path=/');
   });
 });
