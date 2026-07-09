@@ -170,6 +170,20 @@ describe('CredentialValidator (issue #283: vacuous credential check)', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.map(e => e.code)).toContain('CREDENTIAL_VERIFICATION_FAILED');
   });
+
+  test('[fail-closed] a signed credential fails when no CredentialManager is injected to verify it', async () => {
+    // Direct instantiation without a manager must NOT silently pass a proof it
+    // cannot check — otherwise a forged credential slips through (Greptile P2).
+    const validator = new CredentialValidator(baseConfig);
+
+    const result = await validator.validate({
+      ...baseOptions,
+      credentials: [structurallyValidSignedCredential()]
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.map(e => e.code)).toContain('CREDENTIAL_VERIFICATION_UNAVAILABLE');
+  });
 });
 
 describe('ValidationPipeline wires real credential verification (issue #283)', () => {

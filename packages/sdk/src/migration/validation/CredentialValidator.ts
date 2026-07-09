@@ -30,8 +30,10 @@ import { CredentialManager } from '../../vc/CredentialManager.js';
  *     ERROR, so migrating an asset carrying an invalid credential now fails.
  *
  * Levels:
- *  - Hard error  → missing mandatory W3C VC fields, OR a signed credential that
- *                  fails cryptographic verification.
+ *  - Hard error  → missing mandatory W3C VC fields, a signed credential that
+ *                  fails cryptographic verification, OR a signed credential that
+ *                  cannot be verified because no CredentialManager was injected
+ *                  (fail closed rather than accept an unverifiable proof).
  *  - Warning     → a credential with no proof (unsigned; signing may be completed
  *                  post-migration).
  *  - No action   → no credentials attached (valid; issuance happens post-migration),
@@ -105,9 +107,21 @@ export class CredentialValidator implements IValidator {
           continue;
         }
 
+        // Fail closed: a signed credential we cannot verify (no manager injected)
+        // must not pass, or a forged proof would slip through unchecked (#283).
+        if (!this.credentialManager) {
+          errors.push({
+            code: 'CREDENTIAL_VERIFICATION_UNAVAILABLE',
+            message: `Credential at index ${i} carries a proof but no CredentialManager is available to verify it`,
+            field: `credentials[${i}]`,
+            details: { index: i }
+          });
+          continue;
+        }
+
         // Real cryptographic verification — this is what makes the check able to
         // fail on a genuinely-invalid credential rather than passing vacuously.
-        if (this.credentialManager) {
+        {
           let verified = false;
           try {
             verified = await this.credentialManager.verifyCredential(cred as VerifiableCredential);
