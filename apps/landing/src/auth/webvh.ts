@@ -118,7 +118,10 @@ async function getOrCreateBrowserKeyPair(
 ): Promise<{ privateKey: Uint8Array; publicKeyMultibase: string }> {
   const storageKey = `${KEY_STORAGE_PREFIX}:${subOrgId}`;
   const existing = localStorage.getItem(storageKey);
-  const privateKey = existing ? hexToBytes(existing) : ed.utils.randomPrivateKey();
+  // 32 random bytes = an Ed25519 seed. Use WebCrypto rather than
+  // ed.utils.randomPrivateKey (renamed randomSecretKey in @noble/ed25519 v3),
+  // so this works whichever noble version the bundle resolves.
+  const privateKey = existing ? hexToBytes(existing) : crypto.getRandomValues(new Uint8Array(32));
   if (!existing) localStorage.setItem(storageKey, bytesToHex(privateKey));
   const publicKey = await ed.getPublicKeyAsync(privateKey);
   return { privateKey, publicKeyMultibase: ed25519PublicKeyMultibase(publicKey) };

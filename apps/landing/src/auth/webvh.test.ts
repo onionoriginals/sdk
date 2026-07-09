@@ -3,7 +3,7 @@ import * as ed from '@noble/ed25519';
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, buildUserWebVHDid } from './webvh';
 
 async function makeSigner(): Promise<{ signer: BrowserWebVHSigner; priv: Uint8Array; pub: Uint8Array }> {
-  const priv = ed.utils.randomPrivateKey();
+  const priv = crypto.getRandomValues(new Uint8Array(32));
   const pub = await ed.getPublicKeyAsync(priv);
   const signer = new BrowserWebVHSigner(priv, ed25519PublicKeyMultibase(pub));
   return { signer, priv, pub };
