@@ -166,7 +166,7 @@ describe('OriginalsCel', () => {
         },
       ];
 
-      const log = await cel.create('Test Asset', resources);
+      const { log } = await cel.create('Test Asset', resources);
 
       expect(log).toBeDefined();
       expect(log.events).toHaveLength(1);
@@ -174,7 +174,10 @@ describe('OriginalsCel', () => {
       
       const data = log.events[0].data as any;
       expect(data.name).toBe('Test Asset');
-      expect(data.layer).toBe('peer');
+      // De-self-referenced genesis: no embedded did/layer, holder in controller
+      expect(data.did).toBeUndefined();
+      expect(data.layer).toBeUndefined();
+      expect(typeof data.controller).toBe('string');
       expect(data.resources).toHaveLength(1);
     });
 
@@ -194,16 +197,17 @@ describe('OriginalsCel', () => {
       );
     });
 
-    it('generates did:peer DID for new assets', async () => {
+    it('returns a derived did:cel for new assets', async () => {
       const cel = new OriginalsCel({
         layer: 'peer',
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log, did } = await cel.create('Test', []);
       const data = log.events[0].data as any;
 
-      expect(data.did).toMatch(/^did:peer:/);
+      expect(did).toMatch(/^did:cel:u/);
+      expect(data.did).toBeUndefined();
     });
 
     it('includes proof in create event', async () => {
@@ -212,7 +216,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
 
       expect(log.events[0].proof).toHaveLength(1);
       expect(log.events[0].proof[0].type).toBe('DataIntegrityProof');
@@ -238,7 +242,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const updated = await cel.update(log, { description: 'Updated' });
 
       expect(updated.events).toHaveLength(2);
@@ -255,7 +259,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const updated = await cel.update(log, { foo: 'bar' });
 
       expect(updated.events[1].previousEvent).toBeDefined();
@@ -269,7 +273,7 @@ describe('OriginalsCel', () => {
         layer: 'peer',
         signer: mockSigner,
       });
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
 
       for (const badData of [
         { sourceDid: 'did:peer:x', layer: 'peer' },
@@ -292,7 +296,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const updated = await cel.update(log, { foo: 'bar' });
 
       expect(updated.events[0]).toEqual(log.events[0]);
@@ -304,7 +308,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const originalLength = log.events.length;
       
       await cel.update(log, { foo: 'bar' });
@@ -322,7 +326,7 @@ describe('OriginalsCel', () => {
         signer: realSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const result = await cel.verify(log);
 
       expect(result.verified).toBe(true);
@@ -336,7 +340,7 @@ describe('OriginalsCel', () => {
         signer: realSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const updated = await cel.update(log, { foo: 'bar' });
       const result = await cel.verify(updated);
 
@@ -351,7 +355,7 @@ describe('OriginalsCel', () => {
         signer: realSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const result = await cel.verify(log);
 
       expect(result.events).toHaveLength(1);
@@ -381,7 +385,7 @@ describe('OriginalsCel', () => {
         signer: realSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
 
       // Tamper with the proof
       log.events[0].proof[0].proofValue = 'zinvalid';
@@ -397,7 +401,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const customVerifier = vi.fn(async () => true);
 
       const result = await cel.verify(log, { verifier: customVerifier });
@@ -419,7 +423,7 @@ describe('OriginalsCel', () => {
         },
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const migrated = await cel.migrate(log, 'webvh');
 
       expect(migrated.events).toHaveLength(2);
@@ -437,7 +441,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
 
       await expect(cel.migrate(log, 'peer')).rejects.toThrow(
         'Log is already at peer layer'
@@ -459,7 +463,7 @@ describe('OriginalsCel', () => {
         layer: 'peer',
         signer: mockSigner,
       });
-      const log = await peerCel.create('Test', []);
+      const { log } = await peerCel.create('Test', []);
       const webvhLog = await cel.migrate(log, 'webvh');
 
       await expect(cel.migrate(webvhLog, 'peer' as any)).rejects.toThrow(
@@ -478,7 +482,7 @@ describe('OriginalsCel', () => {
         },
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
 
       await expect(cel.migrate(log, 'btco')).rejects.toThrow(
         'Cannot migrate directly from peer to btco'
@@ -491,7 +495,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
 
       await expect(cel.migrate(log, 'webvh')).rejects.toThrow(
         'WebVH operations require a domain'
@@ -504,7 +508,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const migrated = await cel.migrate(log, 'webvh', { domain: 'test.com' });
 
       const data = migrated.events[1].data as any;
@@ -526,7 +530,7 @@ describe('OriginalsCel', () => {
         },
       });
 
-      const peerLog = await cel.create('Test', []);
+      const { log: peerLog } = await cel.create('Test', []);
       const webvhLog = await cel.migrate(peerLog, 'webvh');
       const btcoLog = await cel.migrate(webvhLog, 'btco');
 
@@ -556,7 +560,7 @@ describe('OriginalsCel', () => {
         },
       });
 
-      const peerLog = await cel.create('Test', []);
+      const { log: peerLog } = await cel.create('Test', []);
       const webvhLog = await cel.migrate(peerLog, 'webvh');
       const btcoLog = await cel.migrate(webvhLog, 'btco');
 
@@ -580,7 +584,7 @@ describe('OriginalsCel', () => {
         },
       });
 
-      const peerLog = await cel.create('Test', []);
+      const { log: peerLog } = await cel.create('Test', []);
       const webvhLog = await cel.migrate(peerLog, 'webvh');
       const btcoLog = await cel.migrate(webvhLog, 'btco');
 
@@ -598,7 +602,7 @@ describe('OriginalsCel', () => {
         },
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const webvhLog = await cel.migrate(log, 'webvh');
 
       await expect(cel.migrate(webvhLog, 'btco')).rejects.toThrow(
@@ -614,7 +618,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test Asset', [
+      const { log } = await cel.create('Test Asset', [
         { digestMultibase: 'uXYZ', mediaType: 'image/png' },
       ]);
 
@@ -624,7 +628,7 @@ describe('OriginalsCel', () => {
       expect(state.layer).toBe('peer');
       expect(state.resources).toHaveLength(1);
       expect(state.deactivated).toBe(false);
-      expect(state.did).toMatch(/^did:peer:/);
+      expect(state.did).toMatch(/^did:cel:/);
     });
 
     it('returns updated state after update', async () => {
@@ -633,7 +637,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Original', []);
+      const { log } = await cel.create('Original', []);
       const updated = await cel.update(log, { name: 'Updated Name' });
 
       const state = cel.getCurrentState(updated);
@@ -653,7 +657,7 @@ describe('OriginalsCel', () => {
         },
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const migrated = await cel.migrate(log, 'webvh');
 
       const state = cel.getCurrentState(migrated);
@@ -669,7 +673,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
       });
 
-      const log = await cel.create('Test', []);
+      const { log } = await cel.create('Test', []);
       const updated = await cel.update(log, { 
         customField: 'custom value',
         tags: ['art', 'digital'],
@@ -735,7 +739,7 @@ describe('OriginalsCel', () => {
       };
 
       // Create
-      const peerLog = await cel.create('My Original', [
+      const { log: peerLog } = await cel.create('My Original', [
         { digestMultibase: 'uXYZ', mediaType: 'image/png' },
       ]);
       expect((await cel.verify(peerLog)).verified).toBe(true);

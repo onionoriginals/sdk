@@ -42,7 +42,7 @@ const createFailingBitcoinManager = (): BitcoinManager => ({
 // Helper to create a webvh layer log for testing
 const createWebvhLog = async (): Promise<EventLog> => {
   const peerManager = new PeerCelManager(createMockSigner());
-  const peerLog = await peerManager.create('Test Asset', [
+  const { log: peerLog } = await peerManager.create('Test Asset', [
     { digestMultibase: 'uTestHash123', mediaType: 'image/png' },
   ]);
   
@@ -53,9 +53,9 @@ const createWebvhLog = async (): Promise<EventLog> => {
 // Helper to create a peer layer log for testing
 const createPeerLog = async (): Promise<EventLog> => {
   const peerManager = new PeerCelManager(createMockSigner());
-  return peerManager.create('Test Asset', [
+  return (await peerManager.create('Test Asset', [
     { digestMultibase: 'uTestHash123', mediaType: 'image/png' },
-  ]);
+  ])).log;
 };
 
 
@@ -485,7 +485,7 @@ describe('BtcoCelManager', () => {
     it('should complete full migration cycle', async () => {
       // Create peer asset
       const peerManager = new PeerCelManager(createMockSigner());
-      const peerLog = await peerManager.create('My Artwork', [
+      const { log: peerLog } = await peerManager.create('My Artwork', [
         { digestMultibase: 'uArtworkHash', mediaType: 'image/jpeg' },
       ]);
 
@@ -522,7 +522,7 @@ describe('BtcoCelManager', () => {
         { digestMultibase: 'uHash1', mediaType: 'image/png' },
         { digestMultibase: 'uHash2', mediaType: 'video/mp4' },
       ];
-      const peerLog = await peerManager.create('Multi-Resource', resources);
+      const { log: peerLog } = await peerManager.create('Multi-Resource', resources);
 
       const webvhManager = new WebVHCelManager(createMockSigner(), 'example.com');
       const webvhLog = await webvhManager.migrate(peerLog);

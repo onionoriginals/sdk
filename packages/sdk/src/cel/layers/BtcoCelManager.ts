@@ -18,6 +18,7 @@ import { BitcoinWitness } from '../witnesses/BitcoinWitness.js';
 import type { BitcoinManager } from '../../bitcoin/BitcoinManager.js';
 import type { CelSigner } from './PeerCelManager.js';
 import { btcoDidPrefix } from '../btcoDid.js';
+import { deriveDidCel } from '../celDid.js';
 
 /**
  * Configuration options for BtcoCelManager
@@ -202,7 +203,11 @@ export class BtcoCelManager {
       const eventData = event.data as Record<string, unknown>;
       
       if (event.type === 'create') {
-        currentDid = eventData.did as string;
+        // Dual-read: new-shape genesis (controller present) derives its
+        // identity (did:cel); legacy genesis embeds `did` and is read verbatim.
+        currentDid = eventData.controller !== undefined
+          ? deriveDidCel(webvhLog)
+          : (eventData.did as string);
         currentLayer = eventData.layer as string || 'peer';
       } else if (event.type === 'update' && eventData.sourceDid && eventData.layer && eventData.migratedAt) {
         // This is a migration event. Detect via sourceDid (present on both

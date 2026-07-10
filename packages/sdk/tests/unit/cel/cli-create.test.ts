@@ -181,8 +181,11 @@ describe('CLI create command', () => {
       // Validate asset data
       const data = log.events[0].data as any;
       expect(data.name).toBe('Test JSON Asset');
-      expect(data.layer).toBe('peer');
-      expect(data.did).toMatch(/^did:peer:/);
+      // De-self-referenced genesis: identity is derived (did:cel), not embedded
+      expect(data.did).toBeUndefined();
+      expect(data.layer).toBeUndefined();
+      expect(data.controller).toMatch(/^did:key:/);
+      expect(data.nonce).toMatch(/^u/);
       expect(data.resources).toHaveLength(1);
       expect(data.resources[0].mediaType).toBe('image/png');
       expect(data.resources[0].digestMultibase).toBeDefined();
@@ -230,7 +233,8 @@ describe('CLI create command', () => {
       // Validate asset data
       const data = log.events[0].data as any;
       expect(data.name).toBe('Test CBOR Asset');
-      expect(data.layer).toBe('peer');
+      expect(data.layer).toBeUndefined();
+      expect(data.controller).toMatch(/^did:key:/);
     });
     
     it('CBOR output is smaller than JSON output', async () => {

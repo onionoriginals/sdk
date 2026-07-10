@@ -232,7 +232,12 @@ export {
   createExternalReference,
   verifyExternalReference,
 } from './cel/ExternalReferenceManager.js';
-export { PeerCelManager } from './cel/layers/PeerCelManager.js';
+export {
+  PeerCelManager,
+  type CelAssetData,
+  type PeerAssetData,
+  type PeerCelConfig,
+} from './cel/layers/PeerCelManager.js';
 export { WebVHCelManager } from './cel/layers/WebVHCelManager.js';
 export { BtcoCelManager } from './cel/layers/BtcoCelManager.js';
 export type { WitnessService } from './cel/witnesses/WitnessService.js';

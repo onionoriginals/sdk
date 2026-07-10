@@ -187,19 +187,19 @@ export class OriginalsCel {
    * 
    * @param name - Human-readable name for the asset
    * @param resources - External resources associated with the asset
-   * @returns Promise resolving to an EventLog with the create event
-   * 
+   * @returns The genesis EventLog and the derived did:cel identifier
+   *
    * @throws Error if signer produces invalid proof
    * @throws Error if trying to create at non-peer layer
-   * 
+   *
    * @example
    * ```typescript
-   * const log = await cel.create('My Asset', [
+   * const { log, did } = await cel.create('My Asset', [
    *   createExternalReference(imageData, 'image/png')
    * ]);
    * ```
    */
-  async create(name: string, resources: ExternalReference[]): Promise<EventLog> {
+  async create(name: string, resources: ExternalReference[]): Promise<{ log: EventLog; did: string }> {
     // Assets can only be created at the peer layer
     // Other layers require migration from peer
     if (this.layer !== 'peer') {

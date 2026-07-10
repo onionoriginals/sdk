@@ -40,9 +40,9 @@ const createMockWitness = (): WitnessService => ({
 // Helper to create a peer layer log for testing
 const createPeerLog = async (): Promise<EventLog> => {
   const peerManager = new PeerCelManager(createMockSigner());
-  return peerManager.create('Test Asset', [
+  return (await peerManager.create('Test Asset', [
     { digestMultibase: 'uTestHash123', mediaType: 'image/png' },
-  ]);
+  ])).log;
 };
 
 describe('WebVHCelManager', () => {
@@ -140,7 +140,8 @@ describe('WebVHCelManager', () => {
       const migrationData = webvhLog.events[1].data as Record<string, unknown>;
       expect(migrationData.sourceDid).toBeDefined();
       expect(typeof migrationData.sourceDid).toBe('string');
-      expect((migrationData.sourceDid as string).startsWith('did:peer:')).toBe(true);
+      // New-shape genesis: the source identity is the derived did:cel
+      expect((migrationData.sourceDid as string).startsWith('did:cel:')).toBe(true);
     });
 
     it('should include targetDid with webvh format', async () => {
@@ -453,7 +454,7 @@ describe('WebVHCelManager', () => {
     it('should complete full migration cycle', async () => {
       // Create peer asset
       const peerManager = new PeerCelManager(createMockSigner());
-      const peerLog = await peerManager.create('My Artwork', [
+      const { log: peerLog } = await peerManager.create('My Artwork', [
         { digestMultibase: 'uArtworkHash', mediaType: 'image/jpeg' },
       ]);
 
@@ -485,7 +486,7 @@ describe('WebVHCelManager', () => {
         { digestMultibase: 'uHash1', mediaType: 'image/png' },
         { digestMultibase: 'uHash2', mediaType: 'video/mp4' },
       ];
-      const peerLog = await peerManager.create('Multi-Resource', resources);
+      const { log: peerLog } = await peerManager.create('Multi-Resource', resources);
 
       const webvhManager = new WebVHCelManager(createMockSigner(), 'example.com');
       const webvhLog = await webvhManager.migrate(peerLog);

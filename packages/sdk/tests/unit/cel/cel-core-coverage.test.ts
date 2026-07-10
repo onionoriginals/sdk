@@ -72,7 +72,7 @@ const createMockBitcoinManager = (): BitcoinManager =>
 /** Build a webvh-layer event log (peer → webvh migration). */
 const buildWebvhLog = async (): Promise<EventLog> => {
   const peerMgr = new PeerCelManager(createMockSigner());
-  const peerLog = await peerMgr.create('Coverage Asset', [
+  const { log: peerLog } = await peerMgr.create('Coverage Asset', [
     { digestMultibase: 'uCoverageHash', mediaType: 'image/png' },
   ]);
   const webvhMgr = new WebVHCelManager(createMockSigner(), 'coverage.example.com');

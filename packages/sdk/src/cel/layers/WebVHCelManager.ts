@@ -15,6 +15,7 @@ import { updateEventLog } from '../algorithms/updateEventLog.js';
 import { witnessEvent } from '../algorithms/witnessEvent.js';
 import type { WitnessService } from '../witnesses/WitnessService.js';
 import type { CelSigner } from './PeerCelManager.js';
+import { deriveDidCel } from '../celDid.js';
 
 /**
  * Configuration options for WebVHCelManager
@@ -136,10 +137,14 @@ export class WebVHCelManager {
       throw new Error('First event must be a create event');
     }
 
-    // Extract source data
+    // Extract source data. Dual-read: a new-shape genesis (`controller`
+    // present) derives its identity from the event — the did:cel IS the
+    // source; a legacy genesis embeds `did` and is read verbatim.
     const createData = createEvent.data as Record<string, unknown>;
-    const sourceDid = createData.did as string;
-    
+    const sourceDid = createData.controller !== undefined
+      ? deriveDidCel(peerLog)
+      : (createData.did as string);
+
     if (!sourceDid) {
       throw new Error('Create event must have a did field');
     }

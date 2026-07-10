@@ -256,7 +256,8 @@ export async function createCommand(flags: CreateFlags): Promise<CreateResult> {
   
   let eventLog;
   try {
-    eventLog = await manager.create(flags.name, [resource]);
+    // did:cel surfacing in CLI output is Task 7/8; only the log is used here.
+    ({ log: eventLog } = await manager.create(flags.name, [resource]));
   } catch (e) {
     return {
       success: false,
