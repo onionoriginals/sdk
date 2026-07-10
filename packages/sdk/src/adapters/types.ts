@@ -58,6 +58,13 @@ export interface OrdinalsProvider {
     contentType?: string;
     feeRate?: number;
   }>;
+  /**
+   * Current ownership of the UTXO carrying this satoshi. Optional: providers
+   * without an owner index simply omit it and resolution carries no
+   * ownership metadata. Ownership is resolution METADATA — implementations
+   * must never rewrite the inscribed DID document from it.
+   */
+  getSatOwnership?(satoshi: string): Promise<{ address: string; outpoint: string } | null>;
   transferInscription(
     inscriptionId: string,
     toAddress: string,

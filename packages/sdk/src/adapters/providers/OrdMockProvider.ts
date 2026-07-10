@@ -11,6 +11,7 @@ export interface OrdMockState {
     blockHeight?: number;
   }>;
   inscriptionsBySatoshi: Map<string, string[]>;
+  ownershipBySatoshi: Map<string, { address: string; outpoint: string }>;
   feeRate: number;
 }
 
@@ -21,6 +22,7 @@ export class OrdMockProvider implements OrdinalsProvider {
     this.state = {
       inscriptionsById: new Map(),
       inscriptionsBySatoshi: new Map(),
+      ownershipBySatoshi: new Map(),
       feeRate: 5,
       ...state
     } as OrdMockState;
@@ -85,6 +87,7 @@ export class OrdMockProvider implements OrdinalsProvider {
     const list = this.state.inscriptionsBySatoshi.get(satoshi) || [];
     list.push(inscriptionId);
     this.state.inscriptionsBySatoshi.set(satoshi, list);
+    this.state.ownershipBySatoshi.set(satoshi, { address: 'bcrt1qmockowner', outpoint: `${txid}:${vout}` });
     return {
       inscriptionId,
       revealTxId: txid,
@@ -99,12 +102,20 @@ export class OrdMockProvider implements OrdinalsProvider {
     };
   }
 
-  async transferInscription(inscriptionId: string, _toAddress: string, _options?: { feeRate?: number }) {
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getSatOwnership(satoshi: string): Promise<{ address: string; outpoint: string } | null> {
+    return this.state.ownershipBySatoshi.get(satoshi) ?? null;
+  }
+
+  async transferInscription(inscriptionId: string, toAddress: string, _options?: { feeRate?: number }) {
     const rec = this.state.inscriptionsById.get(inscriptionId);
     if (!rec) {
       return Promise.reject(new Error('inscription not found'));
     }
     const txid = `tx-${Math.random().toString(36).slice(2)}`;
+    if (rec.satoshi) {
+      this.state.ownershipBySatoshi.set(rec.satoshi, { address: toAddress, outpoint: `${txid}:0` });
+    }
     return {
       txid,
       vin: [{ txid: rec.txid, vout: rec.vout }],
