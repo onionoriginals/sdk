@@ -1033,7 +1033,7 @@ export class LifecycleManager {
 
   private async issuePublicationCredential(
     asset: OriginalsAsset,
-    publisherDid: string,
+    migratedTo: string,
     signer?: ExternalSigner
   ): Promise<void> {
     try {
@@ -1044,25 +1044,41 @@ export class LifecycleManager {
         );
       }
 
+      // The cross-layer claim is countersigned by the PREVIOUS layer's key:
+      // issuer = the asset's peer DID (its key was registered in the keyStore
+      // at createAsset). A publisher-self-asserted credential proves nothing
+      // about the asset (#365).
       const subject = {
         id: asset.id,
-        publishedAs: publisherDid,
+        migratedTo,
         resourceId: asset.resources[0].id,
         fromLayer: 'did:peer' as const,
         toLayer: 'did:webvh' as const,
         migratedAt: new Date().toISOString()
       };
-      
+
       const unsigned = this.credentialManager.createResourceCredential(
         'ResourceMigrated',
         subject,
-        publisherDid
+        asset.id
       );
 
-      const signed = signer
-        ? await this.credentialManager.signCredentialWithExternalSigner(unsigned, signer)
-        : await this.signWithKeyStore(unsigned, publisherDid);
-      
+      let signed;
+      try {
+        signed = await this.signWithKeyStore(unsigned, asset.id);
+      } catch (keyStoreErr) {
+        if (signer) {
+          // Fallback: external signer attests the publication when the peer
+          // key is unavailable (issuer becomes the signer's DID — recorded
+          // truthfully rather than pretending the peer key signed).
+          const vmDid = signer.getVerificationMethodId().split('#')[0];
+          const resigned = this.credentialManager.createResourceCredential('ResourceMigrated', subject, vmDid);
+          signed = await this.credentialManager.signCredentialWithExternalSigner(resigned, signer);
+        } else {
+          throw keyStoreErr;
+        }
+      }
+
       asset.credentials.push(signed);
       
       const event = {
