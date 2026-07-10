@@ -503,6 +503,95 @@ describe('PeerCelManager', () => {
       expect(state.creator).toBe(MOCK_CONTROLLER);
     });
 
+    test('state controller is the genesis controller before any rotation', async () => {
+      const { log } = await manager.create('Test Asset', []);
+
+      const state = manager.getCurrentState(log);
+
+      expect(state.controller).toBe(MOCK_CONTROLLER);
+    });
+
+    test('rotateKey replay hands the controller off to the last newController', async () => {
+      const { log } = await manager.create('Test Asset', []);
+      const rotatedLog: EventLog = {
+        events: [
+          ...log.events,
+          {
+            type: 'rotateKey',
+            data: { newController: 'did:key:z6MkFirstRotation', rotatedAt: '2026-01-01T00:00:00.000Z' },
+            previousEvent: 'uRotate1',
+            proof: log.events[0].proof,
+          },
+          {
+            type: 'rotateKey',
+            data: { newController: 'did:key:z6MkSecondRotation', rotatedAt: '2026-02-01T00:00:00.000Z' },
+            previousEvent: 'uRotate2',
+            proof: log.events[0].proof,
+          },
+        ],
+      };
+
+      const state = manager.getCurrentState(rotatedLog);
+
+      expect(state.controller).toBe('did:key:z6MkSecondRotation');
+    });
+
+    test('transfer replay records owners in metadata and bumps updatedAt', async () => {
+      const { log } = await manager.create('Test Asset', []);
+      const transferredLog: EventLog = {
+        events: [
+          ...log.events,
+          {
+            type: 'transfer',
+            data: {
+              previousOwner: MOCK_CONTROLLER,
+              newOwner: 'bc1qnewowner',
+              transferredAt: '2026-03-01T00:00:00.000Z',
+              txid: 'cafebabe',
+            },
+            previousEvent: 'uTransfer',
+            proof: log.events[0].proof,
+          },
+        ],
+      };
+
+      const state = manager.getCurrentState(transferredLog);
+
+      expect(state.metadata?.previousOwner).toBe(MOCK_CONTROLLER);
+      expect(state.metadata?.newOwner).toBe('bc1qnewowner');
+      expect(state.metadata?.txid).toBe('cafebabe');
+      expect(state.updatedAt).toBe('2026-03-01T00:00:00.000Z');
+    });
+
+    test('first-class migrate replay updates layer, did, and migration metadata', async () => {
+      const { log, did } = await manager.create('Test Asset', []);
+      const migratedLog: EventLog = {
+        events: [
+          ...log.events,
+          {
+            type: 'migrate',
+            data: {
+              sourceDid: did,
+              targetDid: 'did:webvh:example.com:abc123',
+              layer: 'webvh',
+              domain: 'example.com',
+              migratedAt: '2026-04-01T00:00:00.000Z',
+            },
+            previousEvent: 'uMigrate',
+            proof: log.events[0].proof,
+          },
+        ],
+      };
+
+      const state = manager.getCurrentState(migratedLog);
+
+      expect(state.layer).toBe('webvh');
+      expect(state.did).toBe('did:webvh:example.com:abc123');
+      expect(state.metadata?.sourceDid).toBe(did);
+      expect(state.metadata?.domain).toBe('example.com');
+      expect(state.updatedAt).toBe('2026-04-01T00:00:00.000Z');
+    });
+
     test('state has createdAt from create event', async () => {
       const { log } = await manager.create('Test Asset', []);
       const createData = log.events[0].data as CelAssetData;

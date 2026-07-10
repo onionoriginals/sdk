@@ -92,13 +92,13 @@ describe('CEL-CORE-012/happy – webvh→btco migration via BtcoCelManager', () 
     btcoLog = await btcoMgr.migrate(webvhLog);
   });
 
-  it('final event has type="update", layer="btco", sourceDid starts with did:webvh:, targetDid starts with did:btco:', () => {
-    // The btco migration appends a third event (create + webvh-update + btco-update).
+  it('final event has type="migrate", layer="btco", sourceDid starts with did:webvh:, targetDid starts with did:btco:', () => {
+    // The btco migration appends a third event (create + webvh-migrate + btco-migrate).
     const finalEvent = btcoLog.events[btcoLog.events.length - 1];
     const data = finalEvent.data as Record<string, unknown>;
 
-    // Event type
-    expect(finalEvent.type).toBe('update');
+    // Event type: migrations are first-class migrate events now
+    expect(finalEvent.type).toBe('migrate');
 
     // Layer label
     expect(data.layer).toBe('btco');

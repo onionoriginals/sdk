@@ -445,11 +445,16 @@ export class OriginalsCel {
       
       if (event.type === 'create') {
         currentLayer = (eventData.layer as CelLayer) || 'peer';
-      } else if (event.type === 'update' && eventData.sourceDid && eventData.layer && eventData.migratedAt) {
-        // This is a migration event. Both webvh and btco migrations carry
-        // {sourceDid, layer}; only webvh additionally carries targetDid, so
-        // keying off targetDid silently skipped btco migrations (added in the
-        // #228 refactor) and left the log detected as still at webvh.
+      } else if (
+        // Type-first: first-class 'migrate' events are migrations by type.
+        (event.type === 'migrate' && eventData?.layer) ||
+        // Legacy sniff kept verbatim: old logs record migrations as 'update'
+        // events. Both webvh and btco migrations carry {sourceDid, layer};
+        // only webvh additionally carries targetDid, so keying off targetDid
+        // silently skipped btco migrations (added in the #228 refactor) and
+        // left the log detected as still at webvh.
+        (event.type === 'update' && eventData.sourceDid && eventData.layer && eventData.migratedAt)
+      ) {
         currentLayer = eventData.layer as CelLayer;
       }
     }

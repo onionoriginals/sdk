@@ -427,12 +427,83 @@ describe('OriginalsCel', () => {
       const migrated = await cel.migrate(log, 'webvh');
 
       expect(migrated.events).toHaveLength(2);
-      expect(migrated.events[1].type).toBe('update');
-      
+      expect(migrated.events[1].type).toBe('migrate');
+
       const data = migrated.events[1].data as any;
       expect(data.layer).toBe('webvh');
       expect(data.targetDid).toMatch(/^did:webvh:/);
       expect(data.domain).toBe('example.com');
+    });
+
+    it('detects the layer from first-class migrate events', async () => {
+      const cel = new OriginalsCel({
+        layer: 'peer',
+        signer: mockSigner,
+        config: { webvh: { domain: 'example.com' } },
+      });
+
+      const { log } = await cel.create('Test', []);
+      const migrated = await cel.migrate(log, 'webvh');
+
+      expect(migrated.events.at(-1)!.type).toBe('migrate');
+      expect(cel.getCurrentState(migrated).layer).toBe('webvh');
+      // getCurrentLayer must read the typed event: already-at guard fires.
+      await expect(cel.migrate(migrated, 'webvh')).rejects.toThrow(
+        'Log is already at webvh layer'
+      );
+    });
+
+    it('still detects the layer from a legacy update-sniffed migration log', async () => {
+      // Old fixture logs record migrations as 'update' events carrying
+      // sourceDid+layer+migratedAt; they must keep reporting their layer.
+      const cel = new OriginalsCel({
+        layer: 'peer',
+        signer: mockSigner,
+        config: { webvh: { domain: 'example.com' } },
+      });
+      const mockProof = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: '2020-01-01T00:00:00.000Z',
+        verificationMethod: 'did:key:zLegacy#key-0',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'zLegacy',
+      };
+      const legacyLog: EventLog = {
+        events: [
+          {
+            type: 'create',
+            data: {
+              name: 'Legacy Asset',
+              did: 'did:peer:4zLegacyDid',
+              layer: 'peer',
+              resources: [],
+              creator: 'did:peer:4zLegacyDid',
+              createdAt: '2020-01-01T00:00:00.000Z',
+            },
+            proof: [mockProof],
+          },
+          {
+            type: 'update',
+            data: {
+              sourceDid: 'did:peer:4zLegacyDid',
+              targetDid: 'did:webvh:example.com:legacy',
+              layer: 'webvh',
+              domain: 'example.com',
+              migratedAt: '2020-01-02T00:00:00.000Z',
+            },
+            previousEvent: 'uLegacyDigest',
+            proof: [mockProof],
+          },
+        ],
+      };
+
+      const state = cel.getCurrentState(legacyLog);
+      expect(state.layer).toBe('webvh');
+      expect(state.did).toBe('did:webvh:example.com:legacy');
+      await expect(cel.migrate(legacyLog, 'webvh')).rejects.toThrow(
+        'Log is already at webvh layer'
+      );
     });
 
     it('throws error for migration to same layer', async () => {

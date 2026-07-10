@@ -196,6 +196,8 @@ export interface AssetState {
   resources: ExternalReference[];
   /** Creator DID */
   creator?: string;
+  /** Current controller key DID: genesis `controller`, handed off by rotateKey */
+  controller?: string;
   /** Creation timestamp */
   createdAt?: string;
   /** Last update timestamp */

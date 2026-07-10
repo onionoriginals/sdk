@@ -167,7 +167,7 @@ describe('Integration: CEL Lifecycle', () => {
       
       // Validate migration event was added
       expect(webvhLog.events).toHaveLength(2);
-      expect(webvhLog.events[1].type).toBe('update'); // Migration is an update event
+      expect(webvhLog.events[1].type).toBe('migrate'); // Migration is a first-class event
       
       const migrationData = webvhLog.events[1].data as Record<string, unknown>;
       expect(migrationData.layer).toBe('webvh');

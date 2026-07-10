@@ -130,7 +130,39 @@ describe('WebVHCelManager', () => {
       const webvhLog = await manager.migrate(peerLog);
 
       const migrationEvent = webvhLog.events[1];
-      expect(migrationEvent.type).toBe('update');
+      expect(migrationEvent.type).toBe('migrate');
+    });
+
+    it('emits a first-class migrate event carrying the migration payload', async () => {
+      const peerLog = await createPeerLog();
+      const webvhLog = await manager.migrate(peerLog);
+
+      const migrationEvent = webvhLog.events.at(-1)!;
+      expect(migrationEvent.type).toBe('migrate');
+
+      const data = migrationEvent.data as Record<string, unknown>;
+      expect(data.sourceDid).toMatch(/^did:cel:/);
+      expect(data.targetDid).toMatch(/^did:webvh:example\.com:/);
+      expect(data.layer).toBe('webvh');
+      expect(data.domain).toBe('example.com');
+      expect(data.migratedAt).toBeDefined();
+      // The entry type carries the discriminator; no inner data.type field.
+      expect((data as { type?: unknown }).type).toBeUndefined();
+    });
+
+    it('derives the webvh id part from the did:cel suffix, truncated like did:peer', async () => {
+      const peerLog = await createPeerLog();
+      const webvhLog = await manager.migrate(peerLog);
+
+      const data = webvhLog.events[1].data as Record<string, unknown>;
+      const sourceDid = data.sourceDid as string;
+      expect(sourceDid.startsWith('did:cel:')).toBe(true);
+
+      const suffix = sourceDid.slice('did:cel:'.length);
+      const expectedId = suffix
+        .substring(0, Math.min(32, suffix.length))
+        .replace(/[^a-zA-Z0-9]/g, '');
+      expect(data.targetDid).toBe(`did:webvh:example.com:${expectedId}`);
     });
 
     it('should include sourceDid in migration data', async () => {
@@ -426,6 +458,105 @@ describe('WebVHCelManager', () => {
       expect(state.deactivated).toBe(false);
     });
 
+    it('replays a legacy update-sniffed migration (old fixture logs)', () => {
+      // Legacy logs record migrations as 'update' events sniffed by
+      // sourceDid+layer+migratedAt — they must keep replaying.
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const mockProof = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: '2020-01-01T00:00:00.000Z',
+        verificationMethod: 'did:key:zLegacy#key-0',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'zLegacy',
+      };
+      const legacyLog: EventLog = {
+        events: [
+          {
+            type: 'create',
+            data: {
+              name: 'Legacy Asset',
+              did: 'did:peer:4zLegacyDid',
+              layer: 'peer',
+              resources: [],
+              creator: 'did:peer:4zLegacyDid',
+              createdAt: '2020-01-01T00:00:00.000Z',
+            },
+            proof: [mockProof],
+          },
+          {
+            type: 'update',
+            data: {
+              sourceDid: 'did:peer:4zLegacyDid',
+              targetDid: 'did:webvh:example.com:legacy',
+              layer: 'webvh',
+              domain: 'example.com',
+              migratedAt: '2020-01-02T00:00:00.000Z',
+            },
+            previousEvent: 'uLegacyDigest',
+            proof: [mockProof],
+          },
+        ],
+      };
+
+      const state = manager.getCurrentState(legacyLog);
+      expect(state.layer).toBe('webvh');
+      expect(state.did).toBe('did:webvh:example.com:legacy');
+      expect(state.metadata?.sourceDid).toBe('did:peer:4zLegacyDid');
+      expect(state.metadata?.domain).toBe('example.com');
+    });
+
+    it('surfaces the controller and applies rotateKey hand-off in replay', async () => {
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const peerLog = await createPeerLog();
+      const webvhLog = await manager.migrate(peerLog);
+
+      const genesisController = (webvhLog.events[0].data as Record<string, unknown>).controller as string;
+      expect(manager.getCurrentState(webvhLog).controller).toBe(genesisController);
+
+      const rotatedLog: EventLog = {
+        events: [
+          ...webvhLog.events,
+          {
+            type: 'rotateKey',
+            data: { newController: 'did:key:z6MkNewController', rotatedAt: '2026-01-01T00:00:00.000Z' },
+            previousEvent: 'uRotate',
+            proof: webvhLog.events[0].proof,
+          },
+        ],
+      };
+      const state = manager.getCurrentState(rotatedLog);
+      expect(state.controller).toBe('did:key:z6MkNewController');
+    });
+
+    it('replays first-class transfer events into owner metadata', async () => {
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const peerLog = await createPeerLog();
+      const webvhLog = await manager.migrate(peerLog);
+
+      const transferredLog: EventLog = {
+        events: [
+          ...webvhLog.events,
+          {
+            type: 'transfer',
+            data: {
+              previousOwner: 'did:key:z6MkOldOwner',
+              newOwner: 'bc1qnewowner',
+              transferredAt: '2026-02-01T00:00:00.000Z',
+              txid: 'feedface',
+            },
+            previousEvent: 'uTransfer',
+            proof: webvhLog.events[0].proof,
+          },
+        ],
+      };
+      const state = manager.getCurrentState(transferredLog);
+      expect(state.metadata?.previousOwner).toBe('did:key:z6MkOldOwner');
+      expect(state.metadata?.newOwner).toBe('bc1qnewowner');
+      expect(state.metadata?.txid).toBe('feedface');
+      expect(state.updatedAt).toBe('2026-02-01T00:00:00.000Z');
+    });
+
     it('should throw for empty log', () => {
       const manager = new WebVHCelManager(createMockSigner(), 'example.com');
       expect(() => manager.getCurrentState({ events: [] })).toThrow(
@@ -504,8 +635,8 @@ describe('WebVHCelManager', () => {
       expect(webvhLog.events[0].type).toBe('create');
       expect(webvhLog.events[0].previousEvent).toBeUndefined();
 
-      // Second event: migration update
-      expect(webvhLog.events[1].type).toBe('update');
+      // Second event: first-class migration event
+      expect(webvhLog.events[1].type).toBe('migrate');
       expect(webvhLog.events[1].previousEvent).toBeDefined();
     });
   });

@@ -319,6 +319,7 @@ export class PeerCelManager {
       layer: isLegacy ? (createData.layer as 'peer') : 'peer',
       resources: [...(createData.resources ?? [])],
       creator: isLegacy ? createData.creator : createData.controller,
+      controller: createData.controller,
       createdAt: createData.createdAt,
       updatedAt: undefined,
       deactivated: false,
@@ -359,9 +360,54 @@ export class PeerCelManager {
             state.metadata[key] = value;
           }
         }
+      } else if (event.type === 'migrate') {
+        // First-class migration event: layer transition with the same payload
+        // fields legacy update-sniffed migrations carried.
+        const migrationData = event.data as Record<string, unknown>;
+        if (migrationData.targetDid !== undefined) {
+          state.did = migrationData.targetDid as string;
+        }
+        if (migrationData.layer !== undefined) {
+          state.layer = migrationData.layer as 'peer' | 'webvh' | 'btco';
+        }
+        if (migrationData.migratedAt !== undefined) {
+          state.updatedAt = migrationData.migratedAt as string;
+        }
+        state.metadata = state.metadata || {};
+        if (migrationData.sourceDid !== undefined) {
+          state.metadata.sourceDid = migrationData.sourceDid;
+        }
+        if (migrationData.domain !== undefined) {
+          state.metadata.domain = migrationData.domain;
+        }
+      } else if (event.type === 'transfer') {
+        // Ownership hand-off: surface the owners; identity (did) is unchanged.
+        const transferData = event.data as Record<string, unknown>;
+        if (transferData.transferredAt !== undefined) {
+          state.updatedAt = transferData.transferredAt as string;
+        }
+        state.metadata = state.metadata || {};
+        if (transferData.previousOwner !== undefined) {
+          state.metadata.previousOwner = transferData.previousOwner;
+        }
+        if (transferData.newOwner !== undefined) {
+          state.metadata.newOwner = transferData.newOwner;
+        }
+        if (transferData.txid !== undefined) {
+          state.metadata.txid = transferData.txid;
+        }
+      } else if (event.type === 'rotateKey') {
+        // Authority hand-off: the last rotation's newController is current.
+        const rotationData = event.data as Record<string, unknown>;
+        if (typeof rotationData?.newController === 'string') {
+          state.controller = rotationData.newController;
+        }
+        if (typeof rotationData?.rotatedAt === 'string') {
+          state.updatedAt = rotationData.rotatedAt;
+        }
       } else if (event.type === 'deactivate') {
         state.deactivated = true;
-        
+
         // Extract deactivation details
         const deactivateData = event.data as Record<string, unknown>;
         if (deactivateData.deactivatedAt !== undefined) {
