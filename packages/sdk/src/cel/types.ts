@@ -107,6 +107,7 @@ export interface VerificationResult {
    * The asset DID this log backs, when derivable from the genesis event:
    * the DERIVED `did:cel:<digest>` for new-shape (`data.controller`) logs, or
    * the declared `data.did` for legacy logs. Absent for shapeless logs.
+   * Informational: it is a trust statement only when `verified` is true.
    */
   assetDid?: string;
 }

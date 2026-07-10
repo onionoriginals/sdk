@@ -177,12 +177,14 @@ async function dispatchVerify(
  * (did:key, or long-form did:peer numalgo-4 which embeds its DID document).
  *
  * Returns:
- * - a Set of hex-encoded keys when the DID is self-certifying and its key
- *   material could be extracted (possibly empty — meaning no Ed25519 key is
- *   embedded, so no Ed25519 controller proof can legitimately bind to it);
- * - null when the DID is not self-certifying or cannot be checked offline
- *   (short-form did:peer:4, other DID methods, resolution failure) — the
- *   caller then falls back to trust-on-first-use.
+ * - a Set of hex-encoded keys when the DID is self-certifying (possibly empty —
+ *   no Ed25519 key is embedded, or a long-form did:peer:4 whose embedded
+ *   document fails to parse — callers MUST fail closed on an empty set);
+ * - null when the DID is not self-certifying / not checkable offline
+ *   (short-form did:peer:4, other DID methods). Caller semantics on null
+ *   differ: the legacy `data.did` path keeps trust-on-first-use, the did:cel
+ *   genesis path falls back to VM-DID equality + resolver vouching, and the
+ *   rotateKey path fails closed (no proof-of-possession design yet).
  */
 async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null> {
   if (typeof did !== 'string') return null;
@@ -220,11 +222,11 @@ async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null>
       }
       return keys;
     } catch {
-      // Resolution failure: cannot check offline — fall back to TOFU rather
-      // than turning a library quirk into a false negative. (The attack this
-      // check blocks — re-signing a copied create event — requires the
-      // victim's DID, which does resolve.)
-      return null;
+      // A LONG-FORM did:peer:4 embeds its own document; if that document
+      // cannot be parsed the DID is malformed. Fail closed (empty set) rather
+      // than returning null and silently degrading to the caller's weaker
+      // fallback branch (TOFU / VM-equality).
+      return new Set();
     }
   }
 
@@ -725,9 +727,10 @@ export async function verifyEventLog(
     );
   }
 
-  // Establish the authorized controller key from the create event (event 0):
-  // the trust-on-first-use root of authority. The current CEL data model has
-  // no in-log key-rotation mechanism, so this key is fixed by the create event.
+  // Establish the INITIAL authorized controller key from the create event
+  // (event 0): the root of authority. The set is not fixed for the life of the
+  // log — a fully valid `rotateKey` event REPLACES it with the new controller's
+  // keys (hand-off semantics; see the rotation arm in the event loop below).
   //
   // SECURITY: the hash chain and the controller signature cover only
   // { type, data, previousEvent } — NOT the proof array. So an attacker can
@@ -755,7 +758,7 @@ export async function verifyEventLog(
     ? genesisData.controller
     : undefined;
 
-  const authorizedKeyIds = new Set<string>();
+  let authorizedKeyIds = new Set<string>();
   let authorityError: string | undefined;
   if (!options?.verifier) {
     // A non-array proof (missing, object, string, …) yields zero controller
@@ -842,11 +845,43 @@ export async function verifyEventLog(
     }
   }
 
-  // Verify each event's proofs and hash chain
+  // Verify each event's proofs and hash chain. The loop is index-ordered and
+  // `authorizedKeyIds` EVOLVES: each event is authorized against the set as it
+  // stood when the event was appended, and a fully valid rotateKey event swaps
+  // the set for subsequent iterations.
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
     const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds, options?.ordinalsProvider);
+
+    // rotateKey hand-off. Order matters: the rotation event must pass ALL its
+    // checks (chain link, signature, CURRENT-set authorization, gating witness
+    // proofs) BEFORE the set is swapped — a failed rotation must not rotate.
+    // Skipped on the custom-verifier path, where the caller owns authorization.
+    if (!options?.verifier && event.type === 'rotateKey' && eventResult.proofValid && eventResult.chainValid) {
+      const rotation = event.data as { newController?: unknown } | null | undefined;
+      const newController = typeof rotation?.newController === 'string' ? rotation.newController : undefined;
+      // v1 requires a SELF-CERTIFYING newController (did:key, or long-form
+      // did:peer:4): its key material is embedded, so the hand-off target is
+      // checkable offline. Resolver-backed newControllers (did:webvh, …) fail
+      // closed — VM-DID equality has no meaning here (nothing is signed by the
+      // new key yet); supporting them needs a proof-of-possession design.
+      const newKeys = newController !== undefined ? await selfCertifyingKeyHexes(newController) : null;
+      if (!newKeys || newKeys.size === 0) {
+        // Unbindable target fails the EVENT (and therefore the log) — an
+        // accepted rotation to nowhere would strand or hijack the log.
+        eventResult.proofValid = false;
+        eventResult.errors.push(
+          `Event ${i}: rotateKey has an unbindable newController (${String(newController)}); ` +
+          `a rotation target must be a self-certifying DID carrying an Ed25519 key`
+        );
+      } else {
+        // REPLACE, not union — hand-off semantics (design spec §2/§5); keeping
+        // the old keys would reopen the stale-key window rotation closes.
+        authorizedKeyIds = newKeys;
+      }
+    }
+
     eventVerifications.push(eventResult);
 
     if (!eventResult.proofValid || !eventResult.chainValid) {
