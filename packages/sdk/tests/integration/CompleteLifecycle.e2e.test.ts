@@ -173,7 +173,8 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify did:webvh binding
       const bindings = (webAsset as any).bindings;
       expect(bindings).toBeDefined();
-      expect(bindings['did:webvh']).toMatch(new RegExp(`^did:webvh:${domain}:`));
+      // Minted DID is did:webvh:{SCID}:{domain}[:slug] — SCID segment now precedes the domain.
+      expect(bindings['did:webvh']).toMatch(new RegExp(`^did:webvh:[^:]+:${domain}:`));
 
       // Verify resources have URLs from storage adapter
       for (const resource of webAsset.resources) {
@@ -185,9 +186,9 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify storage adapter actually stored the resources
       for (const resource of webAsset.resources) {
         const url = resource.url as string;
-        // URL format is: did:webvh:domain:path/resources/hash
+        // URL format is: did:webvh:{SCID}:domain:path/resources/hash
         const urlParts = url.split(':');
-        const path = urlParts.slice(3).join(':');
+        const path = urlParts.slice(4).join(':');
         const stored = await memoryStorage.getObject(domain, path);
         expect(stored).not.toBeNull();
         expect(stored?.content).toBeDefined();
@@ -471,9 +472,9 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(resourceUrl).toMatch(/^did:webvh:/);
 
       // Verify content is retrievable through adapter
-      // URL format is: did:webvh:domain:path/resources/hash
+      // URL format is: did:webvh:{SCID}:domain:path/resources/hash
       const urlParts = (resourceUrl as string).split(':');
-      const pathPart = urlParts.slice(3).join(':');
+      const pathPart = urlParts.slice(4).join(':');
       const stored = await memoryStorage.getObject(domain, pathPart);
       expect(stored).not.toBeNull();
     });
@@ -568,9 +569,9 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify all are stored
       for (const resource of webAsset.resources) {
         const url = resource.url!;
-        // URL format is now: did:webvh:domain:path/resources/hash
+        // URL format is now: did:webvh:{SCID}:domain:path/resources/hash
         const urlParts = url.split(':');
-        const path = urlParts.slice(3).join(':'); // Get everything after did:webvh:domain
+        const path = urlParts.slice(4).join(':'); // Get everything after did:webvh:{SCID}:domain
         const stored = await memoryStorage.getObject('multi-type.test', path);
         expect(stored).not.toBeNull();
       }
@@ -620,9 +621,9 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       
       // Verify storage
       const url = webAsset.resources[0].url!;
-      // URL format is now: did:webvh:domain:path/resources/hash
+      // URL format is now: did:webvh:{SCID}:domain:path/resources/hash
       const urlParts = url.split(':');
-      const path = urlParts.slice(3).join(':'); // Get everything after did:webvh:domain
+      const path = urlParts.slice(4).join(':'); // Get everything after did:webvh:{SCID}:domain
       const stored = await memoryStorage.getObject('large.test', path);
       expect(stored?.content.length).toBeGreaterThan(99000);
 
@@ -651,10 +652,10 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify all are stored
       for (const resource of webAsset.resources) {
         const url = resource.url!;
-        // URL format is now: did:webvh:domain:path/resources/hash
+        // URL format is now: did:webvh:{SCID}:domain:path/resources/hash
         // Extract the path part after the domain
         const urlParts = url.split(':');
-        const pathPart = urlParts.slice(3).join(':'); // Get everything after did:webvh:domain
+        const pathPart = urlParts.slice(4).join(':'); // Get everything after did:webvh:{SCID}:domain
         const stored = await memoryStorage.getObject('many.test', pathPart);
         expect(stored).not.toBeNull();
       }
