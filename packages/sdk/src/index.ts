@@ -222,6 +222,13 @@ export {
 } from './cel/hash.js';
 export { witnessSigningBytes } from './cel/canonicalize.js';
 export {
+  DID_CEL_PREFIX,
+  deriveDidCel,
+  deriveDidCelFromGenesis,
+  isDidCel,
+  didCelMatchesLog,
+} from './cel/celDid.js';
+export {
   createExternalReference,
   verifyExternalReference,
 } from './cel/ExternalReferenceManager.js';
