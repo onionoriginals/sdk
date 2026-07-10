@@ -2,7 +2,9 @@
 export interface OrdinalsInscription {
   satoshi: string; // Unique satoshi identifier
   inscriptionId: string;
-  content: Buffer;
+  // Undefined on the deferred-content path: a provider that builds content
+  // from the satoshi (buildContent) may not echo it back in the response.
+  content?: Buffer;
   contentType: string;
   txid: string;
   vout: number;

@@ -209,4 +209,28 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
     const asset = createAssetAtLayer('did:webvh');
     await expect(sdk.lifecycle.inscribeOnBitcoin(asset, 1000000)).rejects.toThrow();
   });
+
+  // --- Deferred-content provider (buildContent, no `content` in response) ---
+
+  test('sets prefix-derived btco binding when provider omits inscription content', async () => {
+    // Conformant provider: supports buildContent but returns no `content`.
+    // The binding derivation must not choke parsing a missing/function content;
+    // it falls back to the prefix-derived did:btco id without throwing.
+    let sat = 5000;
+    const provider = {
+      async createInscription({ buildContent }: { buildContent: (s: string) => Buffer | Promise<Buffer> }) {
+        const satoshi = String(sat++);
+        await buildContent(satoshi);
+        return { inscriptionId: `insc-${satoshi}`, txid: `tx-${satoshi}`, satoshi };
+      }
+    };
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const asset = createAssetAtLayer('did:webvh');
+    const result = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+
+    expect(result.currentLayer).toBe('did:btco');
+    const binding = asset.bindings?.['did:btco'];
+    expect(binding).toBeDefined();
+    expect(binding!.startsWith('did:btco:reg:')).toBe(true);
+  });
 });

@@ -382,7 +382,7 @@ async function verifyBitcoinWitnessProof(
   // the caller and shared with ordinary witness verification).
   let content: { digestMultibase?: unknown };
   try {
-    content = JSON.parse(inscription.content.toString('utf8')) as { digestMultibase?: unknown };
+    content = JSON.parse(inscription.content?.toString('utf8') ?? '') as { digestMultibase?: unknown };
   } catch {
     return `bitcoin witness inscription ${inscriptionId} content is not valid JSON`;
   }

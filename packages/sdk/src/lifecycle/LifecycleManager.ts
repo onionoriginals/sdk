@@ -16,6 +16,7 @@ import { hashResource } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix } from '../cel/btcoDid.js';
+import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { multikey } from '../crypto/Multikey.js';
 import { createBtcoDidDocument } from '../did/createBtcoDidDocument.js';
 import { EventEmitter } from '../events/EventEmitter.js';
@@ -1343,12 +1344,20 @@ export class LifecycleManager {
     // Single source of truth: the binding IS the inscribed document's id.
     // migrateToDIDBTCO resolves the network prefix (explicit network wins over
     // the webvhNetwork mapping, #247); inheriting its id here removes the old
-    // config.network-vs-webvhNetwork prefix drift.
-    const inscribedDoc = inscription.content
-      ? JSON.parse(inscription.content.toString()) as { id: string }
-      : undefined;
+    // config.network-vs-webvhNetwork prefix drift. A conformant provider may
+    // omit `content` (deferred buildContent path) or return non-JSON bytes —
+    // never let that crash after migrate + payment; fall back to a
+    // prefix-derived id using the SAME network derivation as migrateToDIDBTCO.
+    let inscribedDoc: { id: string } | undefined;
+    if (inscription.content) {
+      try {
+        inscribedDoc = JSON.parse(inscription.content.toString()) as { id: string };
+      } catch {
+        inscribedDoc = undefined;
+      }
+    }
     const bindingValue = inscribedDoc?.id
-      ?? `${btcoDidPrefix(this.config.network || 'mainnet')}:${inscription.satoshi}`;
+      ?? `${btcoDidPrefix(this.getConfiguredBitcoinNetwork())}:${inscription.satoshi}`;
     asset.bindings = Object.assign({}, asset.bindings || {}, { 'did:btco': bindingValue });
     
     stopTimer();
@@ -1537,7 +1546,7 @@ export class LifecycleManager {
     // pop() yields the sat for every prefix form (did:btco:N, :reg:N, :sig:N).
     const satoshi = btcoDid.split(':').pop()!;
     const { key, type } = multikey.decodePublicKey(newVerificationMethod.publicKeyMultibase);
-    const network = (this.config.network || 'mainnet');
+    const network = this.getConfiguredBitcoinNetwork();
     const rotatedDoc = createBtcoDidDocument(satoshi, network, { publicKey: key, keyType: type });
     // createBtcoDidDocument re-derives the prefix from network; the rotated id
     // MUST equal the existing binding or config.network drifted from the DID.
@@ -1583,6 +1592,17 @@ export class LifecycleManager {
   }
 
   /**
+   * The Bitcoin network this SDK is on, using the SAME derivation as
+   * DIDManager.migrateToDIDBTCO (explicit `network` wins over the webvhNetwork
+   * tier mapping, #247). Both the btco binding fallback and rotateBtcoKeys use
+   * this so a tier-only config can never drift into a NETWORK_MISMATCH.
+   */
+  private getConfiguredBitcoinNetwork(): 'mainnet' | 'regtest' | 'signet' {
+    return this.config.network
+      ?? (this.config.webvhNetwork ? getBitcoinNetworkForWebVH(this.config.webvhNetwork) : undefined)
+      ?? 'mainnet';
+  }
+
   /**
    * Create multiple assets in batch
    */

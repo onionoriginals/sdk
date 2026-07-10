@@ -22,4 +22,23 @@ describe('BitcoinManager.inscribeData deferred content', () => {
     });
     expect(second.satoshi).toBe(first.satoshi);
   });
+
+  test('never leaks the content-builder function into inscription.content', async () => {
+    // Conformant provider: supports buildContent but omits `content` in its
+    // response. The builder FUNCTION must not fall through into content.
+    const provider = {
+      async createInscription({ buildContent }: { buildContent: (s: string) => Buffer }) {
+        const satoshi = '1000';
+        buildContent(satoshi); // exercise the builder, discard its output
+        return { inscriptionId: 'insc-1', txid: 'tx-1', satoshi };
+      }
+    };
+    const bm = new BitcoinManager({ ...config, ordinalsProvider: provider } as never);
+    const inscription = await bm.inscribeData(
+      (satoshi: string) => Buffer.from(`sat=${satoshi}`),
+      'text/plain'
+    );
+    expect(typeof (inscription as { content?: unknown }).content).not.toBe('function');
+    expect((inscription as { content?: unknown }).content).toBeUndefined();
+  });
 });

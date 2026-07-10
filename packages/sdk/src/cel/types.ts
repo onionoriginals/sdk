@@ -134,7 +134,8 @@ export type DeactivateOptions = CreateOptions;
 export interface OrdinalsLookup {
   getInscriptionById(id: string): Promise<{
     inscriptionId: string;
-    content: Buffer;
+    // Optional: deferred-content providers may not echo built content back.
+    content?: Buffer;
     contentType: string;
     txid?: string;
     satoshi?: string;

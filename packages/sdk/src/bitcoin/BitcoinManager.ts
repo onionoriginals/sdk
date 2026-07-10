@@ -220,7 +220,11 @@ export class BitcoinManager {
     } = {
       satoshi,
       inscriptionId: creation.inscriptionId,
-      content: creation.content ?? data,
+      // On the deferred path `data` is a content-BUILDER function, never valid
+      // inscription content — only fall back to it when it is a real Buffer,
+      // else leave content undefined (a function here crashes downstream JSON
+      // parsing after migrate + payment).
+      content: creation.content ?? (Buffer.isBuffer(data) ? data : undefined),
       contentType: creation.contentType ?? contentType,
       txid,
       vout: typeof creation.vout === 'number' ? creation.vout : 0,

@@ -45,6 +45,23 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     expect((manifestService as any).serviceEndpoint.resources[0].hash).toBe(asset.resources[0].hash);
   });
 
+  test('derives btco network from webvhNetwork tier when no explicit network is set', async () => {
+    // magby → regtest. With no `network`, the binding is minted did:btco:reg:N;
+    // rotation must derive the same network or it bricks with NETWORK_MISMATCH.
+    const provider = new OrdMockProvider();
+    const sdk = OriginalsSDK.create({ webvhNetwork: 'magby', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '9a'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    const btcoDid = asset.bindings!['did:btco']!;
+    expect(btcoDid.startsWith('did:btco:reg:')).toBe(true);
+
+    const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
+    const rotation = await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey });
+    expect(rotation.did).toBe(btcoDid);
+  });
+
   test('rejects when asset is not on btco layer', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: new OrdMockProvider() });
     const asset = await sdk.lifecycle.createAsset([

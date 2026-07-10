@@ -72,6 +72,9 @@ export class OrdinalsProviderResolverAdapter implements ResourceProviderLike {
     if (!inscription) {
       return respond(false, 404, 'Not Found', `Inscription ${inscriptionId} not found`);
     }
+    if (inscription.content === undefined) {
+      return respond(false, 404, 'Not Found', `Inscription ${inscriptionId} has no content to serve`);
+    }
     return respond(true, 200, 'OK', inscription.content.toString('utf8'));
   };
 }
