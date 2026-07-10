@@ -103,6 +103,12 @@ export interface VerificationResult {
   errors: string[];
   /** Per-event verification details */
   events: EventVerification[];
+  /**
+   * The asset DID this log backs, when derivable from the genesis event:
+   * the DERIVED `did:cel:<digest>` for new-shape (`data.controller`) logs, or
+   * the declared `data.did` for legacy logs. Absent for shapeless logs.
+   */
+  assetDid?: string;
 }
 
 /**
@@ -166,6 +172,13 @@ export interface VerifyOptions {
    * `verifier` path, where the caller owns proof semantics.)
    */
   ordinalsProvider?: OrdinalsLookup;
+  /**
+   * When set, the log must back this exact asset DID or verification fails.
+   * did:cel expected DIDs are compared via suffix derivation
+   * (`didCelMatchesLog`); legacy DIDs by string equality against `data.did`.
+   * Ignored on the custom `verifier` path (which owns proof semantics).
+   */
+  expectedDid?: string;
 }
 
 /**

@@ -20,6 +20,7 @@ import type {
 import { computeDigestMultibase, digestMultibaseEquals } from '../hash.js';
 import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize.js';
 import { multikey } from '../../crypto/Multikey.js';
+import { deriveDidCelFromGenesis, didCelMatchesLog } from '../celDid.js';
 
 /**
  * Validates the structural requirements of a DataIntegrityProof (field presence,
@@ -742,6 +743,18 @@ export async function verifyEventLog(
   // authorization (verifyEvent skips the controller-key binding on that path),
   // so this default authority check is skipped too — consistently.
   const createEvent = log.events[0];
+
+  // Genesis shape discrimination (drives both the authority binding below and
+  // the assetDid/expectedDid semantics). Legacy logs embed the asset DID in
+  // `data.did`; did:cel genesis logs carry the holder's key in `data.controller`
+  // and DERIVE the asset DID from the event (no self-reference). A non-string
+  // `data.did` is malformed and treated as absent.
+  const genesisData = createEvent.data as { did?: unknown; controller?: unknown } | null | undefined;
+  const legacyDid = typeof genesisData?.did === 'string' ? genesisData.did : undefined;
+  const celController = legacyDid === undefined && typeof genesisData?.controller === 'string'
+    ? genesisData.controller
+    : undefined;
+
   const authorizedKeyIds = new Set<string>();
   let authorityError: string | undefined;
   if (!options?.verifier) {
@@ -758,32 +771,63 @@ export async function verifyEventLog(
     } else {
       const rootKeyHex = await resolveControllerKeyHex(createControllerProofs[0].verificationMethod, options?.resolveKey);
       if (rootKeyHex) {
-        // Self-certifying binding: when the create event's `data.did` is a
-        // did:key or long-form did:peer:4, the identifier itself embeds the
-        // controller's key material, so the create-event signing key can be
-        // checked against it offline. Without this, an attacker can copy a
-        // victim's create event `data` verbatim, re-sign event 0 with their
-        // own did:key, and produce a "valid" provenance log for the victim's
-        // DID under the attacker's key.
-        //
-        // The check applies only when the create proof's verificationMethod
-        // is itself a did:key: that is the offline-checkable pattern the SDK
-        // emits (PeerCelManager embeds the signer's key in the generated
-        // did:peer). Resolver-backed verification methods (did:webvh, …)
-        // cannot embed their key in the asset DID at create time, so they
-        // keep trust-on-first-use — their authority is whatever the
-        // verifier's resolveKey vouches for. Non-self-certifying `data.did`
-        // methods also keep trust-on-first-use.
-        const dataDid = (createEvent.data as Record<string, unknown> | null | undefined)?.did;
-        const embeddedKeys = createControllerProofs[0].verificationMethod.startsWith('did:key:')
-          ? await selfCertifyingKeyHexes(dataDid)
-          : null;
-        if (embeddedKeys !== null && !embeddedKeys.has(rootKeyHex)) {
-          authorityError =
-            `Create event controller key (${createControllerProofs[0].verificationMethod}) is not a key ` +
-            `embedded in the self-certifying DID ${String(dataDid)}; the log was not created by that DID's controller.`;
+        if (celController !== undefined) {
+          // did:cel genesis: `data.controller` DEFINES authority — the create
+          // event's signing key MUST be a key of that controller. FAIL CLOSED,
+          // NEVER blind trust-on-first-use: without this an attacker can copy a
+          // victim's genesis `data` verbatim, re-sign event 0 with their own
+          // key, and mint a "valid" log for the victim's derived did:cel under
+          // the attacker's key.
+          //
+          // Two ways to bind, both fail-closed:
+          //  - self-certifying controller (did:key / long-form did:peer:4): its
+          //    key material is embedded, so the root key MUST be one of those
+          //    keys — checked offline, no resolver, no fallback.
+          //  - resolver-backed controller (did:webvh, …): its keys cannot be
+          //    enumerated offline, so the root proof's verificationMethod MUST
+          //    belong to the controller DID (proof VM DID === controller). The
+          //    resolver then vouches for that key and the signature is checked
+          //    downstream. A foreign-DID signer (e.g. a did:key claiming a
+          //    did:webvh controller) is not the controller and fails closed.
+          const controllerKeys = await selfCertifyingKeyHexes(celController);
+          const rootProofVm = createControllerProofs[0].verificationMethod;
+          const bound = controllerKeys !== null
+            ? controllerKeys.has(rootKeyHex)
+            : rootProofVm.split('#')[0] === celController;
+          if (!bound) {
+            authorityError =
+              `Create event proof key (${rootProofVm}) is not a key of ` +
+              `the genesis controller ${celController}; the log was not created by that controller.`;
+          } else {
+            authorizedKeyIds.add(rootKeyHex);
+          }
         } else {
-          authorizedKeyIds.add(rootKeyHex);
+          // Legacy / shapeless self-certifying binding (unchanged): when the
+          // create event's `data.did` is a did:key or long-form did:peer:4, the
+          // identifier itself embeds the controller's key material, so the
+          // create-event signing key can be checked against it offline. Without
+          // this, an attacker can copy a victim's create event `data` verbatim,
+          // re-sign event 0 with their own did:key, and produce a "valid"
+          // provenance log for the victim's DID under the attacker's key.
+          //
+          // The check applies only when the create proof's verificationMethod
+          // is itself a did:key: that is the offline-checkable pattern the SDK
+          // emits (PeerCelManager embeds the signer's key in the generated
+          // did:peer). Resolver-backed verification methods (did:webvh, …)
+          // cannot embed their key in the asset DID at create time, so they
+          // keep trust-on-first-use — their authority is whatever the
+          // verifier's resolveKey vouches for. Non-self-certifying `data.did`
+          // methods and shapeless logs also keep trust-on-first-use.
+          const embeddedKeys = createControllerProofs[0].verificationMethod.startsWith('did:key:')
+            ? await selfCertifyingKeyHexes(legacyDid)
+            : null;
+          if (embeddedKeys !== null && !embeddedKeys.has(rootKeyHex)) {
+            authorityError =
+              `Create event controller key (${createControllerProofs[0].verificationMethod}) is not a key ` +
+              `embedded in the self-certifying DID ${String(legacyDid)}; the log was not created by that DID's controller.`;
+          } else {
+            authorizedKeyIds.add(rootKeyHex);
+          }
         }
       } else {
         // The create event's key could not be resolved (e.g. a transient
@@ -810,6 +854,27 @@ export async function verifyEventLog(
     }
   }
 
+  // assetDid: the DERIVED did:cel for new-shape genesis logs, the declared
+  // data.did for legacy logs, absent for shapeless logs. Pure derivation — no
+  // authority machinery — so it is reported even on the custom-verifier path.
+  let assetDid: string | undefined;
+  if (celController !== undefined) assetDid = deriveDidCelFromGenesis(createEvent);
+  else if (legacyDid !== undefined) assetDid = legacyDid;
+
+  // expectedDid: reject a log that does not back the caller's expected DID.
+  // Scoped to the non-custom-verifier path — that path owns proof semantics and
+  // the authority binding above is skipped there. did:cel is matched by suffix
+  // derivation; legacy by string equality; a shapeless log backs no DID.
+  let expectedDidError: string | undefined;
+  if (options?.expectedDid !== undefined && !options?.verifier) {
+    const matches = celController !== undefined
+      ? didCelMatchesLog(options.expectedDid, log)
+      : options.expectedDid === legacyDid;
+    if (!matches) {
+      expectedDidError = `log does not back expected DID ${options.expectedDid}`;
+    }
+  }
+
   // Determine overall verification status (both proofs AND chain must be valid,
   // and the create event must establish a single unambiguous authority key).
   const allProofsValid = eventVerifications.every(ev => ev.proofValid);
@@ -818,10 +883,14 @@ export async function verifyEventLog(
   if (authorityError) {
     errors.unshift(authorityError);
   }
+  if (expectedDidError) {
+    errors.push(expectedDidError);
+  }
 
   return {
-    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated,
+    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !expectedDidError,
     errors,
     events: eventVerifications,
+    ...(assetDid !== undefined ? { assetDid } : {}),
   };
 }
