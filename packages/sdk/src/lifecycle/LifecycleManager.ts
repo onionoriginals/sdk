@@ -17,6 +17,7 @@ import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix } from '../cel/btcoDid.js';
 import { multikey } from '../crypto/Multikey.js';
+import { createBtcoDidDocument } from '../did/createBtcoDidDocument.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 import { Logger } from '../utils/Logger.js';
@@ -1484,11 +1485,14 @@ export class LifecycleManager {
       asset: { id: asset.id, layer: asset.currentLayer },
       from: currentOwner,
       to: newOwner,
-      transactionId: tx.txid
+      transactionId: tx.txid,
+      // Rotation-first model (#366): the sat moved but the DID document still
+      // carries the previous owner's keys. The recipient must rotateBtcoKeys.
+      keyRotationPending: true
     });
 
     stopTimer();
-    this.logger.info('Asset ownership transferred successfully', { 
+    this.logger.info('Asset ownership transferred successfully', {
       assetId: asset.id, 
       newOwner, 
       transactionId: tx.txid 
@@ -1507,6 +1511,61 @@ export class LifecycleManager {
       this.metrics.recordError('TRANSFER_FAILED', 'transferOwnership');
       throw error;
     }
+  }
+
+  /**
+   * Rotation-first ownership hand-off (#366): reinscribe the did:btco
+   * document — same id, new verification method — on the SAME sat. Only the
+   * current UTXO holder can do this (reinscription spends the output), so a
+   * successful rotation simultaneously proves sat control and announces the
+   * new owner's signing key. The resolver's newest-valid-inscription rule
+   * then serves the rotated document.
+   */
+  async rotateBtcoKeys(
+    asset: OriginalsAsset,
+    newVerificationMethod: { publicKeyMultibase: string },
+    feeRate?: number
+  ): Promise<{ inscriptionId: string; did: string }> {
+    if (asset.currentLayer !== 'did:btco') {
+      throw new StructuredError('INVALID_STATE', 'Key rotation requires the asset to be on the did:btco layer.');
+    }
+    const btcoDid = asset.bindings?.['did:btco'];
+    if (!btcoDid) {
+      throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to rotate.');
+    }
+    // pop() yields the sat for every prefix form (did:btco:N, :reg:N, :sig:N).
+    const satoshi = btcoDid.split(':').pop()!;
+    const { key, type } = multikey.decodePublicKey(newVerificationMethod.publicKeyMultibase);
+    const network = (this.config.network || 'mainnet') as 'mainnet' | 'regtest' | 'signet';
+    const rotatedDoc = createBtcoDidDocument(satoshi, network, { publicKey: key, keyType: type });
+    // createBtcoDidDocument re-derives the prefix from network; the rotated id
+    // MUST equal the existing binding or config.network drifted from the DID.
+    if (rotatedDoc.id !== btcoDid) {
+      throw new StructuredError('NETWORK_MISMATCH', `Rotated document id ${rotatedDoc.id} does not match binding ${btcoDid}; check config.network.`);
+    }
+    // Preserve lineage links across rotations.
+    const backLinks = [asset.id, asset.bindings?.['did:webvh']].filter(
+      (d): d is string => typeof d === 'string'
+    );
+    rotatedDoc.alsoKnownAs = backLinks;
+
+    const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+    const inscription = await bitcoinManager.inscribeData(
+      Buffer.from(JSON.stringify(rotatedDoc)),
+      'application/did+json',
+      feeRate,
+      { targetSatoshi: satoshi }
+    );
+
+    await this.eventEmitter.emit({
+      type: 'key:rotated',
+      timestamp: new Date().toISOString(),
+      asset: { id: asset.id },
+      did: btcoDid,
+      inscriptionId: inscription.inscriptionId
+    });
+
+    return { inscriptionId: inscription.inscriptionId, did: btcoDid };
   }
 
   /**

@@ -40,6 +40,7 @@ export interface EventLoggingConfig {
   'batch:progress'?: LogLevel | false;
   'key:unpersisted'?: LogLevel | false;
   'did:log-unhosted'?: LogLevel | false;
+  'key:rotated'?: LogLevel | false;
 }
 
 /**
@@ -68,7 +69,8 @@ const DEFAULT_EVENT_CONFIG: EventLoggingConfig = {
   'migration:quarantine': 'error',
   'batch:progress': 'debug',
   'key:unpersisted': 'warn',
-  'did:log-unhosted': 'warn'
+  'did:log-unhosted': 'warn',
+  'key:rotated': 'info'
 };
 
 /**
@@ -116,7 +118,8 @@ export class EventLogger {
       'migration:rolledback',
       'migration:quarantine',
       'key:unpersisted',
-      'did:log-unhosted'
+      'did:log-unhosted',
+      'key:rotated'
     ];
     
     for (const eventType of eventTypes) {

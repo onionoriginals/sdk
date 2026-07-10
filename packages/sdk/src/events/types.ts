@@ -68,6 +68,8 @@ export interface AssetTransferredEvent extends BaseEvent {
   from: string;
   to: string;
   transactionId: string;
+  /** True when ownership moved on-chain but the DID document still carries the previous owner's keys (rotation-first model, #366). */
+  keyRotationPending?: boolean;
 }
 
 /**
@@ -322,6 +324,20 @@ export interface DidLogUnhostedEvent extends BaseEvent {
 }
 
 /**
+ * Emitted when a recipient rotates the did:btco keys by reinscribing an
+ * updated document (same id, new verification method) on the same sat —
+ * the recipient-side act of the rotation-first ownership model (#366).
+ */
+export interface KeyRotatedEvent extends BaseEvent {
+  type: 'key:rotated';
+  asset: {
+    id: string;
+  };
+  did: string;
+  inscriptionId: string;
+}
+
+/**
  * Union type of all possible events
  */
 export type OriginalsEvent =
@@ -347,7 +363,8 @@ export type OriginalsEvent =
   | MigrationRolledbackEvent
   | MigrationQuarantineEvent
   | KeyUnpersistedEvent
-  | DidLogUnhostedEvent;
+  | DidLogUnhostedEvent
+  | KeyRotatedEvent;
 
 /**
  * Event handler function type
@@ -381,6 +398,7 @@ export interface EventTypeMap {
   'migration:quarantine': MigrationQuarantineEvent;
   'key:unpersisted': KeyUnpersistedEvent;
   'did:log-unhosted': DidLogUnhostedEvent;
+  'key:rotated': KeyRotatedEvent;
 }
 
 /**
