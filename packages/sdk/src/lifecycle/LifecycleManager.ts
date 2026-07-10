@@ -1474,11 +1474,14 @@ export class LifecycleManager {
     const currentOwner = priorTransfers.length > 0
       ? priorTransfers[priorTransfers.length - 1].to
       : asset.id;
-    await asset.recordTransfer(currentOwner, newOwner, tx.txid);
+    // Rotation-first model (#366): the sat moved but the DID document still
+    // carries the previous owner's keys. The recipient must rotateBtcoKeys.
+    await asset.recordTransfer(currentOwner, newOwner, tx.txid, true);
 
     // Mirror onto the manager emitter: asset.recordTransfer emits only on the
     // asset's private emitter, so sdk.lifecycle.on('asset:transferred', ...)
     // subscriptions (and the built-in EventLogger) never fired (issue #346).
+    // Payload must match the asset-emitted event exactly (keyRotationPending included).
     await this.eventEmitter.emit({
       type: 'asset:transferred',
       timestamp: new Date().toISOString(),
@@ -1486,8 +1489,6 @@ export class LifecycleManager {
       from: currentOwner,
       to: newOwner,
       transactionId: tx.txid,
-      // Rotation-first model (#366): the sat moved but the DID document still
-      // carries the previous owner's keys. The recipient must rotateBtcoKeys.
       keyRotationPending: true
     });
 
@@ -1548,6 +1549,19 @@ export class LifecycleManager {
       (d): d is string => typeof d === 'string'
     );
     rotatedDoc.alsoKnownAs = backLinks;
+    // Resolver serves the newest inscription; without re-embedding the
+    // manifest here, the first rotation would erase it from resolution.
+    rotatedDoc.service = [
+      ...(rotatedDoc.service || []),
+      {
+        id: `${rotatedDoc.id}#resources`,
+        type: 'OriginalsResourceManifest',
+        serviceEndpoint: {
+          resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
+          timestamp: new Date().toISOString()
+        }
+      }
+    ];
 
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const inscription = await bitcoinManager.inscribeData(

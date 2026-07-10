@@ -167,7 +167,7 @@ export class OriginalsAsset {
     return this.provenance;
   }
 
-  async recordTransfer(from: string, to: string, transactionId: string): Promise<void> {
+  async recordTransfer(from: string, to: string, transactionId: string, keyRotationPending?: boolean): Promise<void> {
     this.provenance.transfers.push({
       from,
       to,
@@ -175,7 +175,7 @@ export class OriginalsAsset {
       transactionId
     });
     this.provenance.txid = transactionId;
-    
+
     // Emit transfer event and await handlers
     await this.eventEmitter.emit({
       type: 'asset:transferred',
@@ -186,7 +186,10 @@ export class OriginalsAsset {
       },
       from,
       to,
-      transactionId
+      transactionId,
+      // Keep in sync with the manager's mirror emit (LifecycleManager#366) so
+      // asset.on(...) subscribers see the same flag as sdk.lifecycle.on(...).
+      ...(keyRotationPending !== undefined ? { keyRotationPending } : {})
     });
   }
 

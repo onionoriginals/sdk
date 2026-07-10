@@ -26,6 +26,25 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     expect(doc!.verificationMethod?.[0]?.publicKeyMultibase).toBe(newKey);
   });
 
+  test('rotation preserves the resource manifest in the resolved document', async () => {
+    const provider = new OrdMockProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    const btcoDid = asset.bindings!['did:btco']!;
+
+    const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
+    await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey });
+
+    const doc = await sdk.did.resolveDID(btcoDid, { skipCache: true });
+    expect(doc).not.toBeNull();
+    const manifestService = doc!.service?.find((s: any) => s.type === 'OriginalsResourceManifest');
+    expect(manifestService).toBeDefined();
+    expect((manifestService as any).serviceEndpoint.resources[0].hash).toBe(asset.resources[0].hash);
+  });
+
   test('rejects when asset is not on btco layer', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: new OrdMockProvider() });
     const asset = await sdk.lifecycle.createAsset([
