@@ -597,7 +597,7 @@ export class LifecycleManager {
       const { publisherDid, signer } = this.extractPublisherInfo(publisherDidOrSigner);
       const { domain, userPath } = this.parseWebVHDid(publisherDid);
 
-      this.logger.info('Publishing asset to web', { assetId: asset.id, publisherDid });
+      this.logger.info('Publishing asset to web', { assetId: asset.id, domain });
 
       // atomicRollback (default: true — the option was documented but never
       // consumed): capture pre-publish resource urls and track written
@@ -611,20 +611,53 @@ export class LifecycleManager {
       }));
       const writtenObjects: Array<{ domain: string; relativePath: string }> = [];
 
+      // Capture the layer before migration (always 'did:peer' here due to the
+      // guard above, but captured dynamically for correctness).
+      const priorLayer = asset.currentLayer;
+
       try {
-        // Publish resources to storage
-        await this.publishResources(asset, publisherDid, domain, userPath, writtenObjects);
+        // Mint the asset's OWN did:webvh — genuine SCID, signed genesis log,
+        // alsoKnownAs back-link to the peer DID (#376). The publisher argument
+        // contributes the domain and (optionally) the log-signing authority.
+        const migration = await this.didManager.migrateToDIDWebVH(
+          asset.did,
+          domain,
+          signer ? { externalSigner: signer } : {}
+        );
 
-        // Store the original did:peer ID before migration
+        // Persist the update key so the minted DID stays updatable. Without a
+        // keyStore the DID still exists but cannot be rotated later — surface
+        // that instead of silently dropping the key.
+        const keyStore = this.keyStore;
+        let newVmId = migration.didDocument.verificationMethod?.[0]?.id;
+        // Normalize a fragment id to absolute (mirror createAsset's peer-key registration).
+        if (newVmId && newVmId.startsWith('#')) {
+          newVmId = `${migration.did}${newVmId}`;
+        }
+        if (migration.keyPair && keyStore && newVmId) {
+          await keyStore.setPrivateKey(newVmId, migration.keyPair.privateKey);
+        } else if (migration.keyPair && !keyStore) {
+          await this.eventEmitter.emit({
+            type: 'key:unpersisted',
+            timestamp: new Date().toISOString(),
+            asset: { id: asset.id },
+            did: migration.did
+          } as never);
+        }
+
+        // Host resources under the MINTED DID (urls now belong to the asset).
+        await this.publishResources(asset, migration.did, domain, userPath, writtenObjects);
+
+        // Host the signed DID log so the DID actually resolves (Task 5 helper).
+        await this.hostDIDLog(migration.did, migration.log, writtenObjects);
+
         const originalPeerDid = asset.id;
-
-        // Capture the layer before migration (always 'did:peer' here due to
-        // the guard above, but captured dynamically for correctness).
-        const priorLayer = asset.currentLayer;
-
-        // Migrate asset to did:webvh layer
         await asset.migrate('did:webvh');
-        asset.bindings = { ...(asset.bindings || {}), 'did:peer': originalPeerDid, 'did:webvh': publisherDid };
+        asset.bindings = {
+          ...(asset.bindings || {}),
+          'did:peer': originalPeerDid,
+          'did:webvh': migration.did
+        };
 
         // Mirror onto the manager emitter: asset.migrate emits only on the
         // asset's private emitter, so sdk.lifecycle.on('asset:migrated', ...)
@@ -641,8 +674,8 @@ export class LifecycleManager {
         throw publishError;
       }
 
-      // Issue publication credential (best-effort)
-      await this.issuePublicationCredential(asset, publisherDid, signer);
+      // Issue publication credential (Task 6 changes the issuer).
+      await this.issuePublicationCredential(asset, asset.bindings['did:webvh']!, signer);
 
       stopTimer();
       this.logger.info('Asset published to web successfully', { 
@@ -666,6 +699,9 @@ export class LifecycleManager {
     }
   }
 
+  // NOTE: the fabricated did:webvh:{domain}:user shorthand never leaves this
+  // class anymore — it is parsed for its domain only. The asset's real
+  // did:webvh is minted in publishToWeb via DIDManager.migrateToDIDWebVH (#376).
   private extractPublisherInfo(publisherDidOrSigner: string | ExternalSigner): {
     publisherDid: string;
     signer?: ExternalSigner;
@@ -833,6 +869,14 @@ export class LifecycleManager {
         `attesting a hash the bytes do not match would break provenance.`
       );
     }
+  }
+
+  private async hostDIDLog(
+    _did: string,
+    _log: unknown,
+    _writtenObjects?: Array<{ domain: string; relativePath: string }>
+  ): Promise<void> {
+    // Implemented in the next task (storage-hosted did.jsonl).
   }
 
   private async publishResources(
