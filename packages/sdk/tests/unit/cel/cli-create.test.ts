@@ -189,6 +189,31 @@ describe('CLI create command', () => {
       expect(data.resources).toHaveLength(1);
       expect(data.resources[0].mediaType).toBe('image/png');
       expect(data.resources[0].digestMultibase).toBeDefined();
+
+      // The derived did:cel is surfaced in the command result and printed.
+      expect(result.did).toMatch(/^did:cel:/);
+    });
+
+    it('prints the derived did:cel to stderr', async () => {
+      const outputPath = path.join(tempDir, 'did-print.cel.json');
+
+      const errored: string[] = [];
+      const orig = console.error;
+      console.error = (...args: unknown[]) => errored.push(args.join(' '));
+      let result;
+      try {
+        result = await createCommand({
+          name: 'DID Print Asset',
+          file: testFilePath,
+          output: outputPath,
+        });
+      } finally {
+        console.error = orig;
+      }
+
+      expect(result.success).toBe(true);
+      expect(result.did).toMatch(/^did:cel:/);
+      expect(errored.join('\n')).toContain(result.did!);
     });
     
     it('uses JSON format by default', async () => {
