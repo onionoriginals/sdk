@@ -53,16 +53,28 @@ export class OrdMockProvider implements OrdinalsProvider {
     return Math.max(1, this.state.feeRate - (blocks - 1));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async createInscription(params: { data: Buffer; contentType: string; feeRate?: number; }) {
+  async createInscription(params: {
+    data?: Buffer;
+    buildContent?: (satoshi: string) => Buffer | Promise<Buffer>;
+    contentType: string;
+    feeRate?: number;
+    targetSatoshi?: string;
+  }) {
+    if ((params.data === undefined) === (params.buildContent === undefined)) {
+      throw new Error('createInscription requires exactly one of data or buildContent');
+    }
     const inscriptionId = `insc-${Math.random().toString(36).slice(2)}`;
     const txid = `tx-${Math.random().toString(36).slice(2)}`;
-    // Generate a valid numeric satoshi identifier (not sat-123 format)
-    const satoshi = `${Math.floor(Math.random() * 1e12)}`;
+    // Pin the sat FIRST (mirrors real commit-phase sat assignment), then let
+    // deferred content embed it.
+    const satoshi = params.targetSatoshi ?? `${Math.floor(Math.random() * 1e12)}`;
+    const content = params.buildContent
+      ? Buffer.from(await params.buildContent(satoshi))
+      : params.data!;
     const vout = 0;
     const record = {
       inscriptionId,
-      content: params.data,
+      content,
       contentType: params.contentType,
       txid,
       vout,
@@ -81,7 +93,7 @@ export class OrdMockProvider implements OrdinalsProvider {
       txid,
       vout,
       blockHeight: 1,
-      content: params.data,
+      content,
       contentType: params.contentType,
       feeRate: params.feeRate
     };

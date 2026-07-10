@@ -520,7 +520,13 @@ export class QuickNodeProvider implements OrdinalsProvider {
   // (src/bitcoin/transactions/commit.ts) or transfer (src/bitcoin/transfer.ts)
   // transaction locally, sign it, and submit via broadcastTransaction.
 
-  createInscription(_params: { data: Buffer; contentType: string; feeRate?: number; }): Promise<{
+  createInscription(params: {
+    data?: Buffer;
+    buildContent?: (satoshi: string) => Buffer | Promise<Buffer>;
+    contentType: string;
+    feeRate?: number;
+    targetSatoshi?: string;
+  }): Promise<{
     inscriptionId: string;
     revealTxId: string;
     commitTxId?: string;
@@ -532,6 +538,12 @@ export class QuickNodeProvider implements OrdinalsProvider {
     contentType?: string;
     feeRate?: number;
   }> {
+    if (params.buildContent || params.targetSatoshi) {
+      return Promise.reject(new StructuredError(
+        'ORD_PROVIDER_UNSUPPORTED',
+        'This provider does not support deferred content (buildContent) or sat-targeted reinscription (targetSatoshi). Build the inscription locally and submit via broadcastTransaction.'
+      ));
+    }
     return Promise.reject(new StructuredError(
       'QUICKNODE_CREATE_INSCRIPTION_NOT_IMPLEMENTED',
       'QuickNodeProvider.createInscription is not implemented: QuickNode does not construct or sign transactions, and no inscription was created. Build and sign the commit/reveal transactions locally, then submit them via broadcastTransaction.'

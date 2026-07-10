@@ -34,9 +34,18 @@ export interface OrdinalsProvider {
   getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }>;
   estimateFee(blocks?: number): Promise<number>;
   createInscription(params: {
-    data: Buffer;
+    /** Static content. Provide exactly one of data / buildContent. */
+    data?: Buffer;
+    /**
+     * Deferred content: called with the pinned satoshi between commit and
+     * reveal, so content that must embed its own sat (a did:btco DID
+     * document) can be constructed. Provide exactly one of data / buildContent.
+     */
+    buildContent?: (satoshi: string) => Buffer | Promise<Buffer>;
     contentType: string;
     feeRate?: number;
+    /** Reinscribe on an existing sat (key rotation / DID update). */
+    targetSatoshi?: string;
   }): Promise<{
     inscriptionId: string;
     revealTxId: string;
