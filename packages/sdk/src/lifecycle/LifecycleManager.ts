@@ -901,8 +901,19 @@ export class LifecycleManager {
       ? `${pathParts.join('/')}/did.jsonl`
       : `.well-known/did.jsonl`;
 
-    const entries = Array.isArray(log) ? log : [];
-    const jsonl = entries.map((e) => JSON.stringify(e)).join('\n');
+    // A non-array or empty log would serialize to a zero-byte did.jsonl that
+    // silently serves an unresolvable DID. Surface it via event and write
+    // nothing, mirroring the NO_STORAGE_ADAPTER degraded mode below.
+    if (!Array.isArray(log) || log.length === 0) {
+      await this.eventEmitter.emit({
+        type: 'did:log-unhosted',
+        timestamp: new Date().toISOString(),
+        did,
+        reason: 'EMPTY_LOG'
+      });
+      return;
+    }
+    const jsonl = log.map((e) => JSON.stringify(e)).join('\n');
 
     const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
     const withPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<unknown> } | undefined;
@@ -1341,23 +1352,33 @@ export class LifecycleManager {
       details: migrationDetails
     });
 
-    // Single source of truth: the binding IS the inscribed document's id.
-    // migrateToDIDBTCO resolves the network prefix (explicit network wins over
-    // the webvhNetwork mapping, #247); inheriting its id here removes the old
-    // config.network-vs-webvhNetwork prefix drift. A conformant provider may
-    // omit `content` (deferred buildContent path) or return non-JSON bytes —
-    // never let that crash after migrate + payment; fall back to a
-    // prefix-derived id using the SAME network derivation as migrateToDIDBTCO.
-    let inscribedDoc: { id: string } | undefined;
+    // The binding is ALWAYS computed locally from the configured network +
+    // the real satoshi the provider assigned — never the provider-echoed
+    // document id. A compromised provider that echoes `{"id":"did:btco:…"}`
+    // must not be able to steer the binding. Same network derivation as
+    // migrateToDIDBTCO (explicit network wins over the webvhNetwork mapping,
+    // #247), so a tier-only config can't drift into a prefix mismatch.
+    const bindingValue = `${btcoDidPrefix(this.getConfiguredBitcoinNetwork())}:${inscription.satoshi}`;
+    // Parse the echoed content ONLY as an integrity cross-check: if it parses
+    // and disagrees with the computed binding, the provider may have altered
+    // the inscription — log it (payment already happened, state is migrated;
+    // do NOT throw, the caller has the inscriptionId to investigate). Missing
+    // or non-JSON content is fine — no cross-check possible.
     if (inscription.content) {
+      let inscribedDoc: { id?: unknown } | undefined;
       try {
-        inscribedDoc = JSON.parse(inscription.content.toString()) as { id: string };
+        inscribedDoc = JSON.parse(inscription.content.toString()) as { id?: unknown };
       } catch {
         inscribedDoc = undefined;
       }
+      if (inscribedDoc && inscribedDoc.id !== bindingValue) {
+        this.logger.error(
+          'Inscribed DID document id does not match expected binding — provider may have altered the inscription content',
+          undefined,
+          { expected: bindingValue, inscribed: inscribedDoc.id, inscriptionId: inscription.inscriptionId }
+        );
+      }
     }
-    const bindingValue = inscribedDoc?.id
-      ?? `${btcoDidPrefix(this.getConfiguredBitcoinNetwork())}:${inscription.satoshi}`;
     asset.bindings = Object.assign({}, asset.bindings || {}, { 'did:btco': bindingValue });
     
     stopTimer();

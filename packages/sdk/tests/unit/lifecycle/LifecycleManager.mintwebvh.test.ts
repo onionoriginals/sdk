@@ -85,4 +85,50 @@ describe('publishToWeb mints a real did:webvh (#376)', () => {
     const staleStored = await storage.getObject('example.com', `user/resources/${multibase}`);
     expect(staleStored).toBeNull();
   });
+
+  test('hostDIDLog emits did:log-unhosted (EMPTY_LOG) and writes nothing for an empty log', async () => {
+    const storage = new MemoryStorageAdapter();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'ES256K',
+      storageAdapter: storage
+    });
+
+    const events: Array<{ did: string; reason: string }> = [];
+    sdk.lifecycle.on('did:log-unhosted', (e) => {
+      events.push({ did: e.did, reason: e.reason });
+    });
+
+    const did = 'did:webvh:scid:example.com:slug';
+    // Empty array: a zero-byte did.jsonl would silently serve an unresolvable DID.
+    await (sdk.lifecycle as any).hostDIDLog(did, []);
+
+    expect(events).toHaveLength(1);
+    expect(events[0].reason).toBe('EMPTY_LOG');
+    expect(events[0].did).toBe(did);
+    // Nothing written at the derived resolution path.
+    const stored = await storage.getObject('example.com', 'slug/did.jsonl');
+    expect(stored).toBeNull();
+  });
+
+  test('hostDIDLog emits did:log-unhosted (EMPTY_LOG) for a non-array log', async () => {
+    const storage = new MemoryStorageAdapter();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'ES256K',
+      storageAdapter: storage
+    });
+
+    const events: Array<{ reason: string }> = [];
+    sdk.lifecycle.on('did:log-unhosted', (e) => {
+      events.push({ reason: e.reason });
+    });
+
+    await (sdk.lifecycle as any).hostDIDLog('did:webvh:scid:example.com:slug', {});
+
+    expect(events).toHaveLength(1);
+    expect(events[0].reason).toBe('EMPTY_LOG');
+    const stored = await storage.getObject('example.com', 'slug/did.jsonl');
+    expect(stored).toBeNull();
+  });
 });

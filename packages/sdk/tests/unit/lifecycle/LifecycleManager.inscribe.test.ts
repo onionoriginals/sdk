@@ -233,4 +233,35 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
     expect(binding).toBeDefined();
     expect(binding!.startsWith('did:btco:reg:')).toBe(true);
   });
+
+  // --- Provider-echo integrity: never trust the echoed DID id for the binding ---
+
+  test('ignores tampered echoed content: binding is derivation-computed, not the provider echo', async () => {
+    // Compromised provider echoes a DID id it did not create ("did:btco:999999999")
+    // while the real inscription lands on a different satoshi. The binding must be
+    // computed from the configured network + real satoshi, NOT the echoed id.
+    let sat = 7000;
+    const provider = {
+      async createInscription({ buildContent }: { buildContent: (s: string) => Buffer | Promise<Buffer> }) {
+        const satoshi = String(sat++);
+        // Provider is asked to build honest content but returns tampered bytes.
+        await buildContent(satoshi);
+        return {
+          inscriptionId: `insc-${satoshi}`,
+          txid: `tx-${satoshi}`,
+          satoshi,
+          content: Buffer.from(JSON.stringify({ id: 'did:btco:999999999' })),
+        };
+      }
+    };
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const asset = createAssetAtLayer('did:webvh');
+    const result = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+
+    expect(result.currentLayer).toBe('did:btco');
+    const binding = asset.bindings?.['did:btco'];
+    // The real satoshi assigned was 7000 (first allocation).
+    expect(binding).toBe('did:btco:reg:7000');
+    expect(binding).not.toBe('did:btco:999999999');
+  });
 });

@@ -103,6 +103,34 @@ describe('CEL event-log authorization and btco verifiability', () => {
     expect(/^did:btco:[0-9]+$/.test(state.did)).toBe(true);
   });
 
+  it('reports a clear "content is missing" diagnostic when the witness inscription has no content', async () => {
+    const signer = makeSigner();
+    const peer = new PeerCelManager(signer as any);
+    let log = await peer.create('Asset', [{ digestMultibase: 'uHash', mediaType: 'image/png' }]);
+    log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
+    const { manager } = mockBitcoin();
+    const btcoLog = await new BtcoCelManager(signer as any, manager).migrate(log);
+
+    // Provider finds the inscription but it carries no `content` field: this must
+    // NOT be misreported as "content is not valid JSON" (which implies tampering).
+    const ordinalsProvider = {
+      getInscriptionById: async (id: string) =>
+        id === 'abc123def456i0'
+          ? {
+              inscriptionId: id,
+              contentType: 'application/json',
+              txid: 'abc123def456',
+              satoshi: '1234567890',
+            }
+          : null,
+    };
+
+    const result = await verifyEventLog(btcoLog, { ordinalsProvider });
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /content is missing/.test(e))).toBe(true);
+    expect(result.errors.some(e => /not valid JSON/.test(e))).toBe(false);
+  });
+
   it('rejects a create event re-signed by a different key than the one embedded in the did:peer', async () => {
     // Attack: copy a victim's create event `data` verbatim (including the
     // victim's self-certifying did:peer:4) and re-sign event 0 with the

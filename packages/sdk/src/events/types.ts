@@ -320,7 +320,8 @@ export interface KeyUnpersistedEvent extends BaseEvent {
 export interface DidLogUnhostedEvent extends BaseEvent {
   type: 'did:log-unhosted';
   did: string;
-  reason: string;
+  /** Why the signed log was not hosted: no adapter configured, or the log had no entries to write. */
+  reason: 'NO_STORAGE_ADAPTER' | 'EMPTY_LOG';
 }
 
 /**

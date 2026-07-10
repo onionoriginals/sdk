@@ -380,9 +380,12 @@ async function verifyBitcoinWitnessProof(
   // The inscription content must commit to the event's digest — the exact
   // digest witnessEvent computed over the committed fields (computed once by
   // the caller and shared with ordinary witness verification).
+  if (inscription.content === undefined) {
+    return `bitcoin witness inscription ${inscriptionId} content is missing`;
+  }
   let content: { digestMultibase?: unknown };
   try {
-    content = JSON.parse(inscription.content?.toString('utf8') ?? '') as { digestMultibase?: unknown };
+    content = JSON.parse(inscription.content.toString('utf8')) as { digestMultibase?: unknown };
   } catch {
     return `bitcoin witness inscription ${inscriptionId} content is not valid JSON`;
   }
