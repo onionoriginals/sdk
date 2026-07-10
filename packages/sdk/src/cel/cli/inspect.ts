@@ -240,9 +240,13 @@ function deriveCurrentState(log: EventLog): AssetState {
       if (updateData.name !== undefined) state.name = updateData.name as string;
       if (updateData.resources !== undefined) state.resources = updateData.resources as ExternalReference[];
       if (updateData.updatedAt !== undefined) state.updatedAt = updateData.updatedAt as string;
-      if (updateData.did !== undefined) state.did = updateData.did as string;
-      if (updateData.targetDid !== undefined) state.did = updateData.targetDid as string;
-      if (updateData.layer !== undefined) state.layer = updateData.layer as 'peer' | 'webvh' | 'btco';
+      // Legacy logs only: new-shape did:cel genesis derives identity/layer, so a
+      // stray did/targetDid/layer field on an update event must not clobber it.
+      if (!isNewShapeGenesis) {
+        if (updateData.did !== undefined) state.did = updateData.did as string;
+        if (updateData.targetDid !== undefined) state.did = updateData.targetDid as string;
+        if (updateData.layer !== undefined) state.layer = updateData.layer as 'peer' | 'webvh' | 'btco';
+      }
 
       // Store migration data in metadata (legacy update-sniffed migrations)
       if (isMigrationEvent(updateData)) {

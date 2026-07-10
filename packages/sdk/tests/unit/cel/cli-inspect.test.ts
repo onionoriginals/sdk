@@ -240,8 +240,36 @@ describe('CLI Inspect Command', () => {
       expect(result.state?.name).toBe('Version 3');
       expect(result.state?.metadata?.custom).toBe('value');
     });
+
+    it('does not let a stray did/layer field on an update event clobber a new-shape derived identity', async () => {
+      const signer = createMockSigner();
+      const options = {
+        signer,
+        verificationMethod: 'did:key:z6MkTest#key-1',
+        proofPurpose: 'assertionMethod',
+      };
+
+      const assetData = createCelAssetData('Genesis Asset');
+      let log = await createEventLog(assetData, options);
+      const expectedDid = deriveDidCel(log);
+
+      // Stray did/layer fields on a plain update must be ignored for new-shape logs.
+      log = await updateEventLog(log, {
+        layer: 'btco',
+        did: 'did:btco:999',
+      }, options);
+
+      const filePath = path.join(tempDir, 'new-shape-stray-update.cel.json');
+      fs.writeFileSync(filePath, serializeEventLogJson(log));
+
+      const result = await inspectCommand({ log: filePath });
+
+      expect(result.success).toBe(true);
+      expect(result.state?.did).toBe(expectedDid);
+      expect(result.state?.layer).toBe('peer');
+    });
   });
-  
+
   describe('witness attestations', () => {
     it('extracts witness proofs from events', async () => {
       const signer = createMockSigner();
