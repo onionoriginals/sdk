@@ -81,6 +81,49 @@ describe('did:cel self-certification', () => {
     expect((await verifyEventLog(log, { expectedDid: 'did:cel:uEiAwrong' })).verified).toBe(false);
   });
 
+  test('resolver-backed genesis forgery backstop: attacker key + victim VM string fails against an honest resolver', async () => {
+    // VM-equality (root proof VM === data.controller) alone must never suffice
+    // for a resolver-backed (non-did:key) controller: the resolved key must
+    // also cryptographically verify the signature. An attacker who stamps the
+    // victim's exact VM but signs with their own key must fail closed.
+    const victimPriv = crypto.getRandomValues(new Uint8Array(32));
+    const victimPub = await ed25519.getPublicKeyAsync(victimPriv);
+    const attackerPriv = crypto.getRandomValues(new Uint8Array(32));
+    const victimVm = 'did:webvh:example.com:victim#key-0';
+
+    // Signs with the given private key but stamps an arbitrary claimed VM
+    // (the "different key, claimed VM" pattern from event-log-authorization.test.ts).
+    const vmSigner = (priv: Uint8Array, vm: string) => async (data: unknown) => ({
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: '2020-01-01T00:00:00Z',
+      verificationMethod: vm,
+      proofPurpose: 'assertionMethod',
+      proofValue: multikey.encodeMultibase(
+        new Uint8Array(await ed25519.signAsync(canonicalizeEvent(data), priv))
+      ),
+    });
+
+    // Honest resolver: returns the VICTIM's real key for the victim's VM.
+    const resolveKey = async (vm: string) => (vm === victimVm ? victimPub : null);
+
+    const forgedLog = await createEventLog(
+      { name: 'A', controller: 'did:webvh:example.com:victim', resources: [], createdAt: 'x', nonce: 'uForge1' },
+      { signer: vmSigner(attackerPriv, victimVm) as any, verificationMethod: victimVm }
+    );
+    const forgedResult = await verifyEventLog(forgedLog, { resolveKey });
+    expect(forgedResult.verified).toBe(false);
+
+    // Sibling positive control: same genesis, same VM + resolver, but actually
+    // signed by the victim's own key — must verify.
+    const legitLog = await createEventLog(
+      { name: 'A', controller: 'did:webvh:example.com:victim', resources: [], createdAt: 'x', nonce: 'uForge2' },
+      { signer: vmSigner(victimPriv, victimVm) as any, verificationMethod: victimVm }
+    );
+    const legitResult = await verifyEventLog(legitLog, { resolveKey });
+    expect(legitResult.verified).toBe(true);
+  });
+
   test('legacy data.did logs verify exactly as before and report assetDid', async () => {
     // Legacy shape: the asset DID is embedded in data.did (a self-certifying
     // did:key). This pins the dual-accept contract — legacy must stay green.
