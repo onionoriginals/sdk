@@ -1161,19 +1161,41 @@ export class LifecycleManager {
     for (const res of asset.resources) {
       this.assertContentMatchesDeclaredHash(res, 'inscribe on Bitcoin');
     }
-    const manifest = {
-      assetId: asset.id,
+    // Resource manifest rides INSIDE the DID document as a service entry —
+    // the inscription itself must be the DID document (application/did+json)
+    // or the SDK's own BtcoDidResolver rejects it (#375).
+    const manifestEndpoint = {
       resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
       timestamp: new Date().toISOString()
     };
-    const payload = Buffer.from(JSON.stringify(manifest));
-    const inscription = await bitcoinManager.inscribeData(payload, 'application/json', feeRate) as {
+    const backLinks = [asset.id, asset.bindings?.['did:webvh']].filter(
+      (d): d is string => typeof d === 'string'
+    );
+
+    const inscription = await bitcoinManager.inscribeData(
+      async (satoshi: string) => {
+        const btcoDoc = await this.didManager.migrateToDIDBTCO(asset.did, satoshi);
+        btcoDoc.alsoKnownAs = backLinks;
+        btcoDoc.service = [
+          ...(btcoDoc.service || []),
+          {
+            id: `${btcoDoc.id}#resources`,
+            type: 'OriginalsResourceManifest',
+            serviceEndpoint: manifestEndpoint
+          }
+        ];
+        return Buffer.from(JSON.stringify(btcoDoc));
+      },
+      'application/did+json',
+      feeRate
+    ) as {
       revealTxId?: string;
       txid: string;
       commitTxId?: string;
       inscriptionId: string;
       satoshi?: string;
       feeRate?: number;
+      content?: Buffer;
     };
     const revealTxId = inscription.revealTxId ?? inscription.txid;
     const commitTxId = inscription.commitTxId;
@@ -1214,10 +1236,15 @@ export class LifecycleManager {
       details: migrationDetails
     });
 
-    // The binding must be network-prefixed: a regtest/signet satoshi recorded
-    // in bare mainnet form would collide with (and resolve to) whoever owns
-    // that satoshi on mainnet (issue #247).
-    const bindingValue = `${btcoDidPrefix(this.config.network || 'mainnet')}:${inscription.satoshi}`;
+    // Single source of truth: the binding IS the inscribed document's id.
+    // migrateToDIDBTCO resolves the network prefix (explicit network wins over
+    // the webvhNetwork mapping, #247); inheriting its id here removes the old
+    // config.network-vs-webvhNetwork prefix drift.
+    const inscribedDoc = inscription.content
+      ? JSON.parse(inscription.content.toString()) as { id: string }
+      : undefined;
+    const bindingValue = inscribedDoc?.id
+      ?? `${btcoDidPrefix(this.config.network || 'mainnet')}:${inscription.satoshi}`;
     asset.bindings = Object.assign({}, asset.bindings || {}, { 'did:btco': bindingValue });
     
     stopTimer();

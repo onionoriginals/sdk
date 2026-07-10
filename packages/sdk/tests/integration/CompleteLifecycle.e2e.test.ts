@@ -246,7 +246,12 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const inscription = await ordinalsProvider.getInscriptionById(inscriptionId!);
       expect(inscription).not.toBeNull();
       expect(inscription?.inscriptionId).toBe(inscriptionId);
-      expect(inscription?.contentType).toBe('application/json');
+      // The inscription is now the btco DID document itself (#375), not a bare manifest.
+      expect(inscription?.contentType).toBe('application/did+json');
+      const inscribedDoc = JSON.parse(inscription!.content.toString());
+      expect(inscribedDoc.id).toMatch(/^did:btco:/);
+      const inscribedManifest = inscribedDoc.service.find((s: { type: string }) => s.type === 'OriginalsResourceManifest');
+      expect(inscribedManifest.serviceEndpoint.resources.length).toBeGreaterThan(0);
 
       // ===== PHASE 4: Transfer Ownership =====
       const recipientAddress = 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx';
