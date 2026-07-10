@@ -146,7 +146,7 @@ did:cel: the DID is the hash of the event that *establishes* the key. Given a lo
 - **Transfer does not re-inscribe** (matches whitepaper "ownership moves only on Bitcoin" and the SPECIFICATION's transfer rule). It moves the sat and appends a signed `transfer` event with the txid.
 - **Key hand-off** is the recipient's move: a `rotateKey`/update reinscription they perform once they control the sat (`LifecycleManager.rotateBtcoKeys` primitive), plus the corresponding CEL rotation event. Optional cooperative rotate-then-transfer sugar can come later.
 - Verifiers of ownership-sensitive claims check *sat control at time of issuance* (helper: `verifyOwnership(did)`).
-- Open sub-question deferred to its own design: exact authority rule for who may append CEL events *after* a non-cooperative transfer where the previous controller key hasn't rotated (candidate: transfer event co-attested by the on-chain tx it names; verifier treats tx-backed transfer events as authority hand-offs).
+- **Post-transfer append authority — rotation-first rule (decided):** after a non-cooperative transfer, the log accepts nothing from the new owner until their first act — a rotation reinscription on the sat, which simultaneously proves sat control (only the UTXO holder can reinscribe) and announces their signing key. The corresponding CEL rotation event is signed by that key; the verifier accepts it *because* the on-chain reinscription attests it. Until rotation, the log is frozen for the new owner, and old-key events timestamped after the transfer tx's block are rejected by verifiers (stale-key window closed verifier-side). An owner who hasn't announced keys cannot author history — by design. Tx-backed atomic hand-off (transfer event naming txid + recipient key) may be added later as a cooperative-flow optimization.
 
 ---
 
@@ -179,5 +179,5 @@ Test spine (every phase adds to it): the Phase-3 round-trip is the protocol's pr
 
 ## 8. Out of scope / deferred
 
-- did:cel long form; linked-resources (`did:btco:<sat>/<index>`) content model; IPFS/CID adapter; cooperative rotate-then-transfer; post-transfer append-authority rule (§5); CEL chunking (`previousLog`) for long histories; whitepaper v1.2 errata text (owner).
+- did:cel long form; linked-resources (`did:btco:<sat>/<index>`) content model; IPFS/CID adapter; cooperative rotate-then-transfer (incl. tx-backed atomic hand-off); CEL chunking (`previousLog`) for long histories; whitepaper v1.2 errata text (owner).
 - Backward compatibility for existing did:peer assets: a `migrate`-style adoption event importing a did:peer genesis into a CEL is sketched but not designed here.
