@@ -25,7 +25,7 @@ export class OrdMockProvider implements OrdinalsProvider {
       ownershipBySatoshi: new Map(),
       feeRate: 5,
       ...state
-    } as OrdMockState;
+    };
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await

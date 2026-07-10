@@ -654,7 +654,7 @@ export class LifecycleManager {
         const minted = this.parseWebVHDid(migration.did);
         await this.publishResources(asset, migration.did, minted.domain, minted.userPath, writtenObjects);
 
-        // Host the signed DID log so the DID actually resolves (Task 5 helper).
+        // Host the signed DID log so the DID actually resolves.
         await this.hostDIDLog(migration.did, migration.log, writtenObjects);
 
         const originalPeerDid = asset.id;
@@ -680,8 +680,8 @@ export class LifecycleManager {
         throw publishError;
       }
 
-      // Issue publication credential (Task 6 changes the issuer).
-      await this.issuePublicationCredential(asset, asset.bindings['did:webvh']!, signer);
+      // Issue the peer-key-signed migration credential (best-effort).
+      await this.issuePublicationCredential(asset, asset.bindings['did:webvh'], signer);
 
       stopTimer();
       this.logger.info('Asset published to web successfully', { 
@@ -1537,7 +1537,7 @@ export class LifecycleManager {
     // pop() yields the sat for every prefix form (did:btco:N, :reg:N, :sig:N).
     const satoshi = btcoDid.split(':').pop()!;
     const { key, type } = multikey.decodePublicKey(newVerificationMethod.publicKeyMultibase);
-    const network = (this.config.network || 'mainnet') as 'mainnet' | 'regtest' | 'signet';
+    const network = (this.config.network || 'mainnet');
     const rotatedDoc = createBtcoDidDocument(satoshi, network, { publicKey: key, keyType: type });
     // createBtcoDidDocument re-derives the prefix from network; the rotated id
     // MUST equal the existing binding or config.network drifted from the DID.
