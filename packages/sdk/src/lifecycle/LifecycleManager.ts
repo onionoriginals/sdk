@@ -871,12 +871,50 @@ export class LifecycleManager {
     }
   }
 
+  /**
+   * Hosts the signed did:webvh log as JSONL through the storage adapter,
+   * mirroring the resolution-URL layout WebVHManager.saveDIDLog uses on the
+   * filesystem: did:webvh:{SCID}:{domain}:p1:p2 -> {domain}/p1/p2/did.jsonl,
+   * no-path DIDs -> {domain}/.well-known/did.jsonl. No storage adapter is a
+   * degraded (but allowed) mode: the DID exists and the signed log is
+   * returned to the caller, but nothing hosts it — surfaced via event.
+   */
   private async hostDIDLog(
-    _did: string,
-    _log: unknown,
-    _writtenObjects?: Array<{ domain: string; relativePath: string }>
+    did: string,
+    log: unknown,
+    writtenObjects?: Array<{ domain: string; relativePath: string }>
   ): Promise<void> {
-    // Implemented in the next task (storage-hosted did.jsonl).
+    const parts = did.split(':');
+    if (parts.length < 4 || parts[0] !== 'did' || parts[1] !== 'webvh') {
+      throw new StructuredError('INVALID_DID', `Cannot host log for non-webvh DID: ${did}`);
+    }
+    const domain = decodeURIComponent(parts[3]);
+    const pathParts = parts.slice(4);
+    const relativePath = pathParts.length
+      ? `${pathParts.join('/')}/did.jsonl`
+      : `.well-known/did.jsonl`;
+
+    const entries = Array.isArray(log) ? log : [];
+    const jsonl = entries.map((e) => JSON.stringify(e)).join('\n');
+
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
+    const withPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<unknown> } | undefined;
+    const withPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<unknown> } | undefined;
+
+    if (withPut && typeof withPut.put === 'function') {
+      await withPut.put(`${domain}/${relativePath}`, Buffer.from(jsonl), { contentType: 'application/jsonl' });
+      writtenObjects?.push({ domain, relativePath });
+    } else if (withPutObject && typeof withPutObject.putObject === 'function') {
+      await withPutObject.putObject(domain, relativePath, new TextEncoder().encode(jsonl));
+      writtenObjects?.push({ domain, relativePath });
+    } else {
+      await this.eventEmitter.emit({
+        type: 'did:log-unhosted',
+        timestamp: new Date().toISOString(),
+        did,
+        reason: 'NO_STORAGE_ADAPTER'
+      } as never);
+    }
   }
 
   private async publishResources(

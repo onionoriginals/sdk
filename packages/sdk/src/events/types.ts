@@ -300,6 +300,28 @@ export interface BatchProgressEvent extends BaseEvent {
 }
 
 /**
+ * Emitted when a migration mints a new update key but no keyStore is
+ * configured to persist it: the DID exists but cannot be rotated later.
+ */
+export interface KeyUnpersistedEvent extends BaseEvent {
+  type: 'key:unpersisted';
+  asset: {
+    id: string;
+  };
+  did: string;
+}
+
+/**
+ * Emitted when a did:webvh log is signed but no storage adapter is
+ * configured to host it: the DID exists but does not resolve.
+ */
+export interface DidLogUnhostedEvent extends BaseEvent {
+  type: 'did:log-unhosted';
+  did: string;
+  reason: string;
+}
+
+/**
  * Union type of all possible events
  */
 export type OriginalsEvent =
@@ -323,7 +345,9 @@ export type OriginalsEvent =
   | MigrationCompletedEvent
   | MigrationFailedEvent
   | MigrationRolledbackEvent
-  | MigrationQuarantineEvent;
+  | MigrationQuarantineEvent
+  | KeyUnpersistedEvent
+  | DidLogUnhostedEvent;
 
 /**
  * Event handler function type
@@ -355,6 +379,8 @@ export interface EventTypeMap {
   'migration:failed': MigrationFailedEvent;
   'migration:rolledback': MigrationRolledbackEvent;
   'migration:quarantine': MigrationQuarantineEvent;
+  'key:unpersisted': KeyUnpersistedEvent;
+  'did:log-unhosted': DidLogUnhostedEvent;
 }
 
 /**
