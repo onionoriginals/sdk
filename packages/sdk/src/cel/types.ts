@@ -34,7 +34,7 @@ export interface ExternalReference {
 /**
  * Event type for log entries
  */
-export type EventType = 'create' | 'update' | 'deactivate';
+export type EventType = 'create' | 'update' | 'deactivate' | 'migrate' | 'transfer' | 'rotateKey';
 
 /**
  * Log Entry - a single event in the cryptographic event log
