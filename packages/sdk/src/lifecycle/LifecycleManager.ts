@@ -595,7 +595,9 @@ export class LifecycleManager {
       this.inFlightAssets.add(asset.id);
       try {
       const { publisherDid, signer } = this.extractPublisherInfo(publisherDidOrSigner);
-      const { domain, userPath } = this.parseWebVHDid(publisherDid);
+      // Publisher DID contributes only the domain; the hosting path comes
+      // from the minted DID below.
+      const { domain } = this.parseWebVHDid(publisherDid);
 
       this.logger.info('Publishing asset to web', { assetId: asset.id, domain });
 
@@ -645,8 +647,11 @@ export class LifecycleManager {
           });
         }
 
-        // Host resources under the MINTED DID (urls now belong to the asset).
-        await this.publishResources(asset, migration.did, domain, userPath, writtenObjects);
+        // Host resources under the MINTED DID (urls now belong to the asset):
+        // derive the storage path from migration.did, not the publisher
+        // shorthand, or the URL and the stored bytes diverge (stale ":user").
+        const minted = this.parseWebVHDid(migration.did);
+        await this.publishResources(asset, migration.did, minted.domain, minted.userPath, writtenObjects);
 
         // Host the signed DID log so the DID actually resolves (Task 5 helper).
         await this.hostDIDLog(migration.did, migration.log, writtenObjects);

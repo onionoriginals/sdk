@@ -54,4 +54,35 @@ describe('publishToWeb mints a real did:webvh (#376)', () => {
     const first = JSON.parse(lines[0]);
     expect(first.proof ?? first.parameters).toBeDefined();
   });
+
+  test('hosts resources under the minted-DID slug path, matching resource.url', async () => {
+    const storage = new MemoryStorageAdapter();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'ES256K',
+      storageAdapter: storage
+    });
+    const content = 'host me';
+    const hash = bytesToHex(sha256(new TextEncoder().encode(content)));
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'res-1', type: 'data', contentType: 'text/plain', hash, content }
+    ]);
+    const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    const did = published.bindings!['did:webvh']!;
+    // Regression (#376): the storage key must derive from the MINTED DID's
+    // slug path — not the publisher shorthand's ":user" path — so that
+    // dereferencing resource.url finds the bytes. Mirror the did.jsonl
+    // path derivation above.
+    const url = published.resources[0].url as string;
+    expect(url.startsWith(`${did}/resources/`)).toBe(true);
+    const slugPath = did.split(':').slice(4).join('/');
+    const relativePath = slugPath ? `${slugPath}/resources/` : 'resources/';
+    const multibase = url.split('/resources/')[1];
+    const stored = await storage.getObject('example.com', `${relativePath}${multibase}`);
+    expect(stored).not.toBeNull();
+    expect(Buffer.from(stored!.content).toString('utf8')).toBe(content);
+    // The stale publisher path must NOT be where the bytes live.
+    const staleStored = await storage.getObject('example.com', `user/resources/${multibase}`);
+    expect(staleStored).toBeNull();
+  });
 });
