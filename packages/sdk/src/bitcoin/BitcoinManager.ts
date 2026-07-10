@@ -114,7 +114,8 @@ export class BitcoinManager {
   async inscribeData(
     data: any,
     contentType: string,
-    feeRate?: number
+    feeRate?: number,
+    options?: { targetSatoshi?: string }
   ): Promise<OrdinalsInscription> {
     // Input validation
     if (!data) {
@@ -153,7 +154,19 @@ export class BitcoinManager {
       );
     }
 
-    const creation = await this.ord.createInscription({ data, contentType, feeRate: effectiveFeeRate });
+    const creation = typeof data === 'function'
+      ? await this.ord.createInscription({
+          buildContent: data as (satoshi: string) => Buffer | Promise<Buffer>,
+          contentType,
+          feeRate: effectiveFeeRate,
+          ...(options?.targetSatoshi ? { targetSatoshi: options.targetSatoshi } : {})
+        })
+      : await this.ord.createInscription({
+          data,
+          contentType,
+          feeRate: effectiveFeeRate,
+          ...(options?.targetSatoshi ? { targetSatoshi: options.targetSatoshi } : {})
+        });
     const txid = creation.txid ?? creation.revealTxId;
     if (!creation.inscriptionId || !txid) {
       throw new StructuredError(
