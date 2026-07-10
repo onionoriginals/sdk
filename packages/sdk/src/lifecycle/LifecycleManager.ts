@@ -642,7 +642,7 @@ export class LifecycleManager {
             timestamp: new Date().toISOString(),
             asset: { id: asset.id },
             did: migration.did
-          } as never);
+          });
         }
 
         // Host resources under the MINTED DID (urls now belong to the asset).
@@ -913,7 +913,7 @@ export class LifecycleManager {
         timestamp: new Date().toISOString(),
         did,
         reason: 'NO_STORAGE_ADAPTER'
-      } as never);
+      });
     }
   }
 
