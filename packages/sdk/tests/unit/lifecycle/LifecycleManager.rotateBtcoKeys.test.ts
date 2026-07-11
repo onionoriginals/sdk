@@ -209,6 +209,46 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     expect(unpersisted[0].verificationMethod).toBe(`did:key:${newKey}#${newKey}`);
   });
 
+  test('rejects rotation when privateKey does not derive the announced publicKeyMultibase', async () => {
+    class CountingProvider extends OrdMockProvider {
+      inscribeCalls = 0;
+      async createInscription(params: any): Promise<any> {
+        this.inscribeCalls += 1;
+        return super.createInscription(params);
+      }
+    }
+    const provider = new CountingProvider();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: provider,
+      keyStore: new MockKeyStore()
+    });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    const eventsBefore = asset.celLog!.events.length;
+    const inscribeCallsBefore = provider.inscribeCalls;
+
+    // Two UNRELATED keypairs: announce keypair A's public key but supply
+    // keypair B's private key — a mismatched pair.
+    const kpA = await new KeyManager().generateKeyPair('Ed25519');
+    const kpB = await new KeyManager().generateKeyPair('Ed25519');
+
+    await expect(
+      sdk.lifecycle.rotateBtcoKeys(asset, {
+        publicKeyMultibase: kpA.publicKey,
+        privateKey: kpB.privateKey
+      })
+    ).rejects.toMatchObject({ code: 'INVALID_KEY_PAIR' });
+
+    // No rotation side effects: log unchanged, no reinscription attempted.
+    expect(asset.celLog!.events.length).toBe(eventsBefore);
+    expect(asset.celLog!.events[asset.celLog!.events.length - 1].type).not.toBe('rotateKey');
+    expect(provider.inscribeCalls).toBe(inscribeCallsBefore);
+  });
+
   test('rejects when asset is not on btco layer', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: new OrdMockProvider() });
     const asset = await sdk.lifecycle.createAsset([

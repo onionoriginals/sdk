@@ -27,6 +27,7 @@ import { serializeEventLogJson } from '../cel/serialization/json.js';
 import type { EventLog, ExternalReference, WitnessProof } from '../cel/types.js';
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { multikey } from '../crypto/Multikey.js';
+import { ed25519 } from '@noble/curves/ed25519.js';
 import { createBtcoDidDocument } from '../did/createBtcoDidDocument.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
@@ -1828,6 +1829,19 @@ export class LifecycleManager {
     // event itself is signed by the OUTGOING controller; this key is for what
     // follows.
     if (newVerificationMethod.privateKey && this.keyStore) {
+      // Guard against a caller-supplied privateKey that doesn't derive the
+      // announced publicKeyMultibase: a mismatched pair would silently sign
+      // every subsequent append with a key nobody can verify against.
+      const { key: privBytes, type: privType } = multikey.decodePrivateKey(newVerificationMethod.privateKey);
+      if (privType !== 'Ed25519') {
+        throw new StructuredError('CEL_ED25519_REQUIRED',
+          `CEL events must be signed with Ed25519; got ${privType}. Generate a dedicated Ed25519 controller key.`);
+      }
+      const derivedPub = multikey.encodePublicKey(ed25519.getPublicKey(privBytes), 'Ed25519');
+      if (derivedPub !== newVerificationMethod.publicKeyMultibase) {
+        throw new StructuredError('INVALID_KEY_PAIR',
+          'privateKey does not derive the announced publicKeyMultibase');
+      }
       await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
     }
 
