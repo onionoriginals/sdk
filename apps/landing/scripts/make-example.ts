@@ -172,7 +172,7 @@ writeFileSync(
 );
 
 console.log('Example Original written to public/example/');
-console.log('  did:peer :', asset.bindings?.['did:peer'] ?? asset.id);
+console.log('  did:cel  :', asset.bindings?.['did:cel'] ?? asset.id);
 console.log('  did:webvh:', result.did);
 console.log('  artwork  :', svgHash);
 console.log('  credential types:', asset.credentials[0].type.join(', '));

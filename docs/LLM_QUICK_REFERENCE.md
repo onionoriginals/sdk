@@ -16,7 +16,7 @@ const sdk = OriginalsSDK.create({
 ## Asset Lifecycle (Clean API)
 
 ```typescript
-// Layer 1: Create draft (did:peer)
+// Layer 1: Create draft — asset.id is did:cel:…, currentLayer label 'did:peer'
 const draft = await sdk.lifecycle.createDraft(resources, {
   onProgress: (p) => console.log(`${p.percentage}%: ${p.message}`)
 });
@@ -214,7 +214,7 @@ await sdk.did.createDIDWebVH({
 
 ## Critical Rules
 
-1. **Bitcoin ops need `ordinalsProvider`** - Always configure for inscribe/transfer
+1. **Bitcoin ops need `ordinalsProvider`** - Always configure for inscribe/transfer; also pass it to `asset.verify({ ordinalsProvider })` to verify inscribed (did:btco) assets
 2. **Keys are Multikey, not JWK** - Use `multikey.encode*()` functions
 3. **Migration is one-way** - peer → webvh → btco only
 4. **Max fee rate: 10,000 sat/vB** - Prevents accidental fund loss

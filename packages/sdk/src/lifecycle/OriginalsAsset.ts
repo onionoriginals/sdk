@@ -15,6 +15,7 @@ import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning.js
 import type { EventLog, OrdinalsLookup } from '../cel/types.js';
 import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
+import { hexSha256ToDigestMultibase } from '../cel/signerAdapter.js';
 
 export interface ProvenanceChain {
   createdAt: string;
@@ -326,6 +327,32 @@ export class OriginalsAsset {
         });
         if (!celResult.verified) {
           return false;
+        }
+
+        // Bind the in-memory resources to the verified genesis: every resource
+        // digest recorded at genesis must still be present among the current
+        // resources. Without this, an asset holding the genuine log but swapped
+        // resources passes (the log verifies, the resources don't back it).
+        // Direction is subset (genesis ⊆ current): addResourceVersion may add
+        // MORE, but a genesis entry may never go MISSING.
+        const genesis = this.#celLog.events[0]?.data as
+          { resources?: unknown; did?: unknown } | undefined;
+        const genesisResources = genesis?.resources;
+        if (!Array.isArray(genesisResources)) {
+          // Controller-shaped genesis MUST carry a resources array; a missing/
+          // malformed one fails closed. Only legacy-shaped geneses (data.did) —
+          // which predate this contract — skip the check.
+          if (typeof genesis?.did !== 'string') {
+            return false;
+          }
+        } else {
+          const present = new Set(this.resources.map(r => hexSha256ToDigestMultibase(r.hash)));
+          for (const entry of genesisResources) {
+            const dm = (entry as { digestMultibase?: unknown })?.digestMultibase;
+            if (typeof dm !== 'string' || !present.has(dm)) {
+              return false;
+            }
+          }
         }
       }
 

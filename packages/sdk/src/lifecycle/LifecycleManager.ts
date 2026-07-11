@@ -1350,7 +1350,11 @@ export class LifecycleManager {
     const metricsStart = performance.now();
     this.logger.info('Inscribing asset on Bitcoin', { assetId: asset.id, feeRate });
     // Method-scoped so the outer catch can restore the pre-append log on any
-    // failure after the append (in-memory only; nothing is paid pre-broadcast).
+    // failure after the append (in-memory only). Fires pre-broadcast (nothing
+    // paid) AND post-broadcast — notably ORD_SATOSHI_UNKNOWN, where the
+    // inscription already landed on-chain but anchors a now-rolled-back event;
+    // that orphaned inscription is a harmless dangling anchor by design (see
+    // Task-5 adjudication), so restoring the in-memory log is still correct.
     let celLogBefore: EventLog | undefined;
     let celHeadDigest: string | null = null;
 
@@ -1758,10 +1762,21 @@ export class LifecycleManager {
    * successful rotation simultaneously proves sat control and announces the
    * new owner's signing key. The resolver's newest-valid-inscription rule
    * then serves the rotated document.
+   *
+   * KEY CUSTODY CONTRACT: after rotation the CURRENT controller folds to the
+   * new key, so every subsequent CEL append (transfer, further rotation) signs
+   * with it. The caller MUST make the new controller's PRIVATE key available in
+   * the keyStore under the canonical VM id
+   * `did:key:<publicKeyMultibase>#<publicKeyMultibase>`, or those appends degrade
+   * (cel:append-skipped / NO_SIGNING_KEY). Pass it as `privateKey` here and, when
+   * a keyStore is configured, it is registered under that VM id before the
+   * rotateKey append. If omitted and the key is not already registered, a
+   * `key:unpersisted` event (carrying the new VM) is emitted after the rotation
+   * succeeds to surface the impending degrade.
    */
   async rotateBtcoKeys(
     asset: OriginalsAsset,
-    newVerificationMethod: { publicKeyMultibase: string },
+    newVerificationMethod: { publicKeyMultibase: string; privateKey?: string },
     feeRate?: number
   ): Promise<{ inscriptionId: string; did: string }> {
     if (asset.currentLayer !== 'did:btco') {
@@ -1805,9 +1820,20 @@ export class LifecycleManager {
     // authorized by the outgoing authority). Non-cooperative rotation
     // acceptance (post-transfer stale-key window, design §5) is Phase-3+
     // verifier work; this wires the cooperative path only.
+    // Canonical VM the post-rotation controller will sign appends under.
+    const newController = `did:key:${newVerificationMethod.publicKeyMultibase}`;
+    const newControllerVm = `${newController}#${newVerificationMethod.publicKeyMultibase}`;
+    // Register the incoming controller's private key so post-rotation appends
+    // can sign (key-custody contract). Before the append is fine — the rotateKey
+    // event itself is signed by the OUTGOING controller; this key is for what
+    // follows.
+    if (newVerificationMethod.privateKey && this.keyStore) {
+      await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
+    }
+
     const celLogBefore = asset.celLog;
     const celHeadDigest = await this.appendCelEventOrSkip(asset, 'rotateKey', {
-      newController: `did:key:${newVerificationMethod.publicKeyMultibase}`,
+      newController,
       rotatedAt: new Date().toISOString()
     });
     // Re-embed #cel with the FRESH head (the rotateKey entry): the resolver
@@ -1840,6 +1866,21 @@ export class LifecycleManager {
         asset._replaceCelLog(celLogBefore);
       }
       throw error;
+    }
+
+    // Key-custody probe: no private key was supplied, and a keyStore exists but
+    // doesn't hold the new controller's key. Post-rotation appends will degrade
+    // (nothing was SKIPPED here — the rotation succeeded — so cel:append-skipped
+    // is the wrong signal; key:unpersisted names the unpersisted VM).
+    if (!newVerificationMethod.privateKey && this.keyStore &&
+        !(await this.keyStore.getPrivateKey(newControllerVm))) {
+      await this.eventEmitter.emit({
+        type: 'key:unpersisted',
+        timestamp: new Date().toISOString(),
+        asset: { id: asset.id },
+        did: btcoDid,
+        verificationMethod: newControllerVm
+      });
     }
 
     await this.eventEmitter.emit({

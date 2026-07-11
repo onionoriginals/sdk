@@ -311,6 +311,13 @@ export interface KeyUnpersistedEvent extends BaseEvent {
     id: string;
   };
   did: string;
+  /**
+   * The verification method whose private key is unpersisted. Set by
+   * rotateBtcoKeys when the incoming controller's key is not in the keyStore,
+   * so subsequent CEL appends would degrade (no signing key). Absent for the
+   * webvh migration case, where the DID itself identifies the unpersisted key.
+   */
+  verificationMethod?: string;
 }
 
 /**

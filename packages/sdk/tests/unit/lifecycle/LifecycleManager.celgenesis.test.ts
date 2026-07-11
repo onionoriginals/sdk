@@ -7,6 +7,7 @@ import { OriginalsConfig } from '../../../src/types';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { deriveDidCel } from '../../../src/cel/celDid';
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { OriginalsAsset } from '../../../src/lifecycle/OriginalsAsset';
 
 const config: OriginalsConfig = {
   network: 'regtest',
@@ -54,5 +55,26 @@ describe('createAsset mints did:cel genesis (#Phase2)', () => {
     const didKeyVm = `${genesis.controller}#${genesis.controller.slice('did:key:'.length)}`;
     expect(await keyStore.getPrivateKey(didKeyVm)).toBeTruthy();
     expect(await keyStore.getPrivateKey(`${asset.id}#key-0`)).toBeTruthy();
+  });
+});
+
+describe('verify() binds in-memory resources to the CEL genesis', () => {
+  test('genuine log + swapped resource fails; unswapped passes', async () => {
+    const sdk = makeSdkWithKeyStore();
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'res-1', type: 'data', contentType: 'text/plain', hash: 'ab'.repeat(32) }
+    ]);
+    // Baseline: genuine asset with the resource the genesis committed to.
+    expect(await asset.verify()).toBe(true);
+
+    // Same verified log + facade DID doc, but a DIFFERENT resource (different
+    // hash). The genesis digest is no longer among the current resources → fail.
+    const swapped = new OriginalsAsset(
+      [{ id: 'res-1', type: 'data', contentType: 'text/plain', hash: 'cd'.repeat(32) }],
+      asset.did,
+      [],
+      asset.celLog!
+    );
+    expect(await swapped.verify()).toBe(false);
   });
 });
