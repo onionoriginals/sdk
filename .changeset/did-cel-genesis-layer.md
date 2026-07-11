@@ -1,0 +1,5 @@
+---
+"@originals/sdk": minor
+---
+
+Phase 1 — did:cel genesis layer: identity is now derived from the event log rather than embedded. A new-shape genesis (`controller` present, no self-referential `did`/`layer`) yields a self-certifying `did:cel:` identifier via `deriveDidCel`, and `verifyEventLog` self-certifies it against the log (returning `assetDid`/`expectedDid`); legacy genesis logs continue to read `did`/`layer` verbatim through a dual-read path across `verifyEventLog`, the CEL managers, and the CLI. Adds first-class `migrate`/`transfer`/`rotateKey`/`update`/`deactivate` event types (managers and CLI emit and consume them directly instead of sniffing `update` payloads), a generic `appendEvent` entry point for all non-create events, and evolving authority where `rotateKey` hands off the authorized signing-key set. `appendEvent` requires `verificationMethod` in the proof so an omitting signer fails at construction, and genesis-shape detection is unified on the `controller===undefined && did!==undefined ⇒ legacy` rule across verifier, managers, and `inspect`.
