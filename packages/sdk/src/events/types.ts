@@ -351,6 +351,24 @@ export interface CelAppendSkippedEvent extends BaseEvent {
 }
 
 /**
+ * Emitted when a best-effort CEL hosting write fails: either the
+ * layer-agnostic `cel/<didCelSuffix>.json` copy (written at genesis and after
+ * every successful append) or the refresh of the webvh-hosted `cel.json`.
+ * The lifecycle operation itself still succeeds — only the hosted copy is
+ * stale/missing.
+ */
+export interface CelHostFailedEvent extends BaseEvent {
+  type: 'cel:host-failed';
+  asset: {
+    id: string;
+  };
+  /** Which hosted copy failed: the cel/<suffix>.json copy or the webvh cel.json refresh. */
+  target: 'cel-copy' | 'webvh-cel-json';
+  /** Message of the underlying storage failure. */
+  error: string;
+}
+
+/**
  * Emitted when a recipient rotates the did:btco keys by reinscribing an
  * updated document (same id, new verification method) on the same sat —
  * the recipient-side act of the rotation-first ownership model (#366).
@@ -392,6 +410,7 @@ export type OriginalsEvent =
   | KeyUnpersistedEvent
   | DidLogUnhostedEvent
   | CelAppendSkippedEvent
+  | CelHostFailedEvent
   | KeyRotatedEvent;
 
 /**
@@ -427,6 +446,7 @@ export interface EventTypeMap {
   'key:unpersisted': KeyUnpersistedEvent;
   'did:log-unhosted': DidLogUnhostedEvent;
   'cel:append-skipped': CelAppendSkippedEvent;
+  'cel:host-failed': CelHostFailedEvent;
   'key:rotated': KeyRotatedEvent;
 }
 

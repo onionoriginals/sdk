@@ -26,7 +26,7 @@ import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix } from '../cel/btcoDid.js';
 import { KeyManager } from '../did/KeyManager.js';
 import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
-import { createCelDidDocument, didCelMatchesLog } from '../cel/celDid.js';
+import { createCelDidDocument, didCelMatchesLog, deriveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
 import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
@@ -308,6 +308,10 @@ export class LifecycleManager {
     }
 
     const asset = new OriginalsAsset(resources, didDoc, [], log);
+
+    // Persist the genesis CEL at the conventional cel/<suffix>.json key so
+    // the did:cel resolves from storage immediately (best-effort, never gates).
+    await this.persistCelArtifacts(asset);
 
     // Defer asset:created emission to the next microtask so a handler
     // subscribed on the LifecycleManager emitter immediately before this call
@@ -1293,6 +1297,62 @@ export class LifecycleManager {
     }
   }
 
+  /**
+   * Best-effort persistence of the asset's CEL, called at genesis and after
+   * every successful append (the appendCelEventOrSkip choke point):
+   * 1. the layer-agnostic copy at `cel/<didCelSuffix>.json` — the conventional
+   *    key DIDManager.resolveDID's did:cel branch reads back; and
+   * 2. when the asset is bound to a did:webvh, a refresh of the hosted
+   *    `cel.json` so the published copy is not frozen at publish time.
+   * NEVER gates the lifecycle op: any failure surfaces as a `cel:host-failed`
+   * warn event and nothing is thrown. No storage adapter is a silent no-op
+   * (same contract as hostCelLog).
+   */
+  private async persistCelArtifacts(asset: OriginalsAsset): Promise<void> {
+    const log = asset.celLog;
+    if (!log) return;
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
+    if (!storage) return;
+
+    try {
+      const suffix = deriveDidCel(log).slice(DID_CEL_PREFIX.length);
+      const json = serializeEventLogJson(log);
+      const withPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<unknown> };
+      const withPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<unknown> };
+      if (typeof withPut.put === 'function') {
+        await withPut.put(`cel/${suffix}.json`, Buffer.from(json), { contentType: 'application/json' });
+      } else if (typeof withPutObject.putObject === 'function') {
+        await withPutObject.putObject('cel', `${suffix}.json`, new TextEncoder().encode(json));
+      }
+    } catch (err) {
+      await this.emitCelHostFailed(asset.id, 'cel-copy', err);
+    }
+
+    const webvhDid = asset.bindings?.['did:webvh'];
+    if (webvhDid) {
+      try {
+        await this.hostCelLog(webvhDid, log);
+      } catch (err) {
+        await this.emitCelHostFailed(asset.id, 'webvh-cel-json', err);
+      }
+    }
+  }
+
+  /** cel:host-failed emitter that itself never throws (hosting is best-effort). */
+  private async emitCelHostFailed(assetId: string, target: 'cel-copy' | 'webvh-cel-json', err: unknown): Promise<void> {
+    try {
+      await this.eventEmitter.emit({
+        type: 'cel:host-failed',
+        timestamp: new Date().toISOString(),
+        asset: { id: assetId },
+        target,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    } catch {
+      // best-effort — a throwing emitter must not gate the lifecycle op
+    }
+  }
+
   private async publishResources(
     asset: OriginalsAsset,
     publisherDid: string,
@@ -1612,6 +1672,11 @@ export class LifecycleManager {
         const signer = createKeyStoreCelSigner(this.keyStore, vm);
         const newLog = await appendEvent(logBefore, type, data, { signer, verificationMethod: vm });
         asset._replaceCelLog(newLog);
+        // Keep the hosted CEL copies fresh AFTER the append committed.
+        // Must never throw: transferOwnership converts any throw from this
+        // method into CEL_APPEND_FAILED_POST_TRANSFER, which would misreport
+        // a mere hosting failure as a truncated log.
+        await this.persistCelArtifacts(asset);
         return computeDigestMultibase(canonicalizeEntryForChain(newLog.events[newLog.events.length - 1]));
       }
       skipReason = 'NO_SIGNING_KEY';

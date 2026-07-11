@@ -9,7 +9,7 @@
  * DID (it is derived from the event); the holder's key lives in
  * `data.controller` instead.
  */
-import type { EventLog, LogEntry } from './types.js';
+import type { EventLog, LogEntry, VerifyOptions } from './types.js';
 import type { DIDDocument } from '../types/index.js';
 import { computeDigestMultibase, digestMultibaseEquals } from './hash.js';
 import { canonicalizeEntryForChain } from './canonicalize.js';
@@ -57,17 +57,26 @@ export function didCelMatchesLog(did: string, log: EventLog): boolean {
  * does not verify, does not back `did`, or the current controller is not a
  * did:key (its key material would not be derivable offline).
  *
- * The verify options are deliberately minimal (no resolveKey/ordinalsProvider):
- * this resolver is for genesis-layer logs whose proofs are did:key-based.
- * Logs carrying bitcoin witness proofs fail closed here — verify those via
- * `verifyEventLog` with an ordinalsProvider instead.
+ * By default the verify options are minimal (no resolveKey/ordinalsProvider):
+ * that suffices for genesis-layer logs whose proofs are did:key-based, while
+ * logs carrying bitcoin witness proofs fail closed. Pass `opts` to thread a
+ * key resolver (proofs whose key lives in a remote DID document) and/or an
+ * ordinals provider (btco-anchored logs) so those verify too.
  */
-export async function resolveDidCel(did: string, log: EventLog): Promise<DIDDocument | null> {
+export async function resolveDidCel(
+  did: string,
+  log: EventLog,
+  opts?: Pick<VerifyOptions, 'resolveKey' | 'ordinalsProvider'>
+): Promise<DIDDocument | null> {
   if (!isDidCel(did)) return null;
   // Lazy import: verifyEventLog statically imports this module (derivation
   // helpers), so a static reverse edge would create an import cycle.
   const { verifyEventLog } = await import('./algorithms/verifyEventLog.js');
-  const result = await verifyEventLog(log, { expectedDid: did });
+  const result = await verifyEventLog(log, {
+    expectedDid: did,
+    resolveKey: opts?.resolveKey,
+    ordinalsProvider: opts?.ordinalsProvider
+  });
   if (!result.verified) return null;
   try {
     const controller = currentControllerVm(log).split('#')[0];
