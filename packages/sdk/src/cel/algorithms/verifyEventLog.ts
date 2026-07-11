@@ -443,6 +443,104 @@ function didDocumentCommitsToDigest(content: unknown, expectedDigest: string): b
 }
 
 /**
+ * Returns the `headDigestMultibase` of a DID document's first
+ * `OriginalsCelAnchor` service, or undefined when `content` is not a DID
+ * document carrying such an anchor. Sibling of `didDocumentCommitsToDigest` —
+ * that COMPARES against an expected digest, this EXTRACTS the committed one.
+ */
+function extractCelAnchorHeadDigest(content: unknown): string | undefined {
+  if (!content || typeof content !== 'object') return undefined;
+  const doc = content as { id?: unknown; service?: unknown };
+  if (typeof doc.id !== 'string' || !doc.id.startsWith('did:')) return undefined;
+  if (!Array.isArray(doc.service)) return undefined;
+  for (const entry of doc.service) {
+    if (!entry || typeof entry !== 'object') continue;
+    const svc = entry as { type?: unknown; serviceEndpoint?: unknown };
+    if (svc.type !== 'OriginalsCelAnchor') continue;
+    const ep = svc.serviceEndpoint;
+    if (!ep || typeof ep !== 'object') continue;
+    const head = (ep as { headDigestMultibase?: unknown }).headDigestMultibase;
+    if (typeof head === 'string' && head.length > 0) return head;
+  }
+  return undefined;
+}
+
+/**
+ * Head-freshness check (#366 truncated-log defense): the buyer's guard against
+ * being handed a pre-transfer / pre-rotation prefix that verifies on its own.
+ *
+ * Given the log's anchored satoshi, enumerate its inscriptions (oldest-first by
+ * the OrdinalsLookup contract), take the NEWEST one whose content is a DID
+ * document carrying an `OriginalsCelAnchor`, and REQUIRE its
+ * `headDigestMultibase` to equal the chain digest of SOME event PRESENT in the
+ * log. Present-in-log, not is-the-head: a legitimate holder may have appended
+ * events not yet re-inscribed, so a mid-log match passes; only a head committing
+ * to an event the presented log OMITS (a truncation) fails.
+ *
+ * Fail-closed: the caller ASKED for freshness, so any inability to check — no
+ * provider, no enumeration capability, a lookup that throws, or no anchor
+ * document on the sat — is a `STALE_LOG` failure, never a silent pass.
+ *
+ * Returns a `STALE_LOG`-coded error string on failure, or null when fresh.
+ */
+async function verifyHeadFreshness(
+  log: EventLog,
+  anchoredSat: AnchoredSat,
+  ordinalsProvider: OrdinalsLookup | undefined
+): Promise<string | null> {
+  if (!ordinalsProvider || typeof ordinalsProvider.getInscriptionsBySatoshi !== 'function') {
+    return `STALE_LOG: head freshness was requested but the ordinals provider cannot enumerate inscriptions on satoshi ${anchoredSat.satoshi}; cannot confirm the log is not truncated`;
+  }
+
+  let onSat: Array<{ inscriptionId: string }>;
+  try {
+    onSat = await ordinalsProvider.getInscriptionsBySatoshi(anchoredSat.satoshi);
+  } catch (e) {
+    return `STALE_LOG: failed to enumerate inscriptions on satoshi ${anchoredSat.satoshi} for the head-freshness check: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  // Newest-first walk: the list is oldest-first by contract, so start at the end
+  // and take the first anchor-carrying DID document. Non-anchor inscriptions
+  // (other content on the same sat, or non-JSON) are skipped; a genuine FETCH
+  // failure fails closed rather than silently skipping a real head.
+  let headDigest: string | undefined;
+  for (let idx = onSat.length - 1; idx >= 0; idx--) {
+    const inscriptionId = onSat[idx].inscriptionId;
+    let inscription: Awaited<ReturnType<OrdinalsLookup['getInscriptionById']>>;
+    try {
+      inscription = await ordinalsProvider.getInscriptionById(inscriptionId);
+    } catch (e) {
+      return `STALE_LOG: failed to fetch inscription ${inscriptionId} on satoshi ${anchoredSat.satoshi} during the head-freshness check: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    if (!inscription || inscription.content === undefined) continue;
+    let content: unknown;
+    try {
+      content = JSON.parse(inscription.content.toString('utf8'));
+    } catch {
+      continue;
+    }
+    const digest = extractCelAnchorHeadDigest(content);
+    if (digest !== undefined) {
+      headDigest = digest;
+      break;
+    }
+  }
+
+  if (headDigest === undefined) {
+    return `STALE_LOG: no OriginalsCelAnchor DID document found on satoshi ${anchoredSat.satoshi}; cannot confirm the presented log is current`;
+  }
+
+  const present = log.events.some(
+    (ev) => digestMultibaseEquals(headDigest as string, computeDigestMultibase(canonicalizeEntryForChain(ev)))
+  );
+  if (!present) {
+    return `STALE_LOG: the newest on-chain anchor on satoshi ${anchoredSat.satoshi} commits to head digest ${headDigest}, which is absent from the presented log; the log is truncated or stale`;
+  }
+
+  return null;
+}
+
+/**
  * The log's current on-sat authority anchor: the satoshi a verified migrate
  * event bound the log to, and the inscription that most recently attested
  * authority on it (the migrate inscription, then each accepted non-cooperative
@@ -1180,6 +1278,23 @@ export async function verifyEventLog(
     }
   }
 
+  // Head-freshness (#366): buyer-requested truncated-log defense. Default OFF,
+  // so existing callers see zero behavior change. `anchoredSat` is default-path
+  // authority state that never establishes on the custom-verifier path, so
+  // requesting the check there is a configuration error (it would silently pass)
+  // and instead fails closed. No anchoredSat ⇒ never btco-anchored ⇒ nothing to
+  // be fresh against ⇒ documented no-op.
+  let staleLogError: string | undefined;
+  if (options?.checkHeadFreshness) {
+    if (options?.verifier) {
+      staleLogError =
+        `head-freshness check is incompatible with a custom verifier: the custom path skips the ` +
+        `on-chain authority walk that head freshness is validated against`;
+    } else if (anchoredSat) {
+      staleLogError = await verifyHeadFreshness(log, anchoredSat, options?.ordinalsProvider) ?? undefined;
+    }
+  }
+
   // assetDid: the DERIVED did:cel for new-shape genesis logs, the declared
   // data.did for legacy logs, absent for shapeless logs. Pure derivation — no
   // authority machinery — so it is reported even on the custom-verifier path.
@@ -1212,9 +1327,12 @@ export async function verifyEventLog(
   if (expectedDidError) {
     errors.push(expectedDidError);
   }
+  if (staleLogError) {
+    errors.push(staleLogError);
+  }
 
   return {
-    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !expectedDidError,
+    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !expectedDidError && !staleLogError,
     errors,
     events: eventVerifications,
     ...(assetDid !== undefined ? { assetDid } : {}),

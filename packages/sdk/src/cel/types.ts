@@ -198,6 +198,24 @@ export interface VerifyOptions {
    * Ignored on the custom `verifier` path (which owns proof semantics).
    */
   expectedDid?: string;
+  /**
+   * Truncated-log defense (#366). Default FALSE — pure-algorithm semantics are
+   * preserved for existing callers. When TRUE and the walk anchored the log to
+   * a satoshi, the NEWEST OriginalsCelAnchor DID document on that sat must
+   * commit (via `headDigestMultibase`) to the chain digest of SOME event
+   * PRESENT in the log; otherwise verification fails with a `STALE_LOG`-coded
+   * error. This closes the seller-hands-buyer-a-pre-rotation-prefix attack: the
+   * prefix verifies on its own, but the on-chain head betrays the omission.
+   *
+   * The rule is present-in-log, not is-the-head — a legitimate holder may have
+   * appended events not yet re-inscribed, so a mid-log match passes. Fail-closed
+   * on inability to check (no provider, no enumeration capability, a throwing
+   * lookup, or no anchor doc on the sat): the caller ASKED for freshness. A log
+   * that never anchored to a sat has nothing to be fresh against — the flag is a
+   * no-op. Incompatible with a custom `verifier` (which skips the authority walk
+   * head freshness is checked against): requesting both fails closed.
+   */
+  checkHeadFreshness?: boolean;
 }
 
 /**

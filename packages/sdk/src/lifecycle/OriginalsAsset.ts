@@ -446,7 +446,11 @@ export class OriginalsAsset {
         const celResult = await verifyEventLog(this.#celLog, {
           expectedDid: this.id,
           resolveKey: deps?.didManager ? createDidManagerKeyResolver(deps.didManager) : undefined,
-          ordinalsProvider: deps?.ordinalsProvider
+          ordinalsProvider: deps?.ordinalsProvider,
+          // With a provider we can (and must) reject a truncated pre-rotation
+          // log whose on-chain head betrays the omission (#366). No provider ⇒
+          // the flag is a no-op (btco witnesses fail closed without one anyway).
+          checkHeadFreshness: deps?.ordinalsProvider !== undefined
         });
         if (!celResult.verified) {
           return false;

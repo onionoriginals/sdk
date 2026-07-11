@@ -433,13 +433,16 @@ export class LifecycleManager {
     const folded = replayProvenance(log);
 
     // 3-5) Verification + binding + cross-checks (skipped by skipVerification).
+    const provider = opts?.ordinalsProvider ?? this.config.ordinalsProvider;
     let verification: VerificationResult | undefined;
     if (!opts?.skipVerification) {
-      const provider = opts?.ordinalsProvider ?? this.config.ordinalsProvider;
       verification = await verifyEventLog(log, {
         expectedDid: env.assetDid,
         resolveKey: createDidManagerKeyResolver(this.didManager),
-        ordinalsProvider: provider
+        ordinalsProvider: provider,
+        // A provider lets us reject a truncated pre-rotation log handed off by a
+        // seller (#366); its on-chain head betrays the omission.
+        checkHeadFreshness: provider !== undefined
       });
       if (!verification.verified) {
         throw new StructuredError(
@@ -502,6 +505,15 @@ export class LifecycleManager {
 
     // 6) Assemble provenance from the (verified) log + fold + advisory unverified.
     const warnings: string[] = [];
+    // Freshness could not be checked (#366): a btco-anchored log without a
+    // provider cannot be tested against its on-chain head, so a truncated
+    // pre-rotation hand-off would go undetected. Surface it — do not fail.
+    if (!provider && folded.currentLayer === 'did:btco') {
+      warnings.push(
+        'Loaded a btco-anchored asset without an ordinals provider: head freshness was NOT checked, so a ' +
+        'truncated (pre-rotation/pre-transfer) log cannot be ruled out. Re-load with a provider to verify freshness.'
+      );
+    }
     const provenance = this.buildRestoredProvenance(log, folded, env, warnings);
 
     const asset = OriginalsAsset.restore(
