@@ -443,6 +443,187 @@ function didDocumentCommitsToDigest(content: unknown, expectedDigest: string): b
 }
 
 /**
+ * The log's current on-sat authority anchor: the satoshi a verified migrate
+ * event bound the log to, and the inscription that most recently attested
+ * authority on it (the migrate inscription, then each accepted non-cooperative
+ * rotation's reinscription).
+ */
+interface AnchoredSat {
+  satoshi: string;
+  inscriptionId: string;
+}
+
+/**
+ * Extracts the well-formed `bitcoin-ordinals-2024` witness proofs of an event
+ * (those carrying non-empty string satoshi/inscriptionId). Malformed entries
+ * are skipped here — verifyBitcoinWitnessProof still gates them in the witness
+ * loop, so skipping cannot launder a bad proof.
+ */
+function bitcoinWitnessProofs(
+  event: LogEntry
+): Array<{ proof: DataIntegrityProof; satoshi: string; inscriptionId: string }> {
+  if (!Array.isArray(event.proof)) return [];
+  const out: Array<{ proof: DataIntegrityProof; satoshi: string; inscriptionId: string }> = [];
+  for (const p of event.proof) {
+    if (!p || typeof p !== 'object' || !isWitnessProof(p)) continue;
+    if (p.cryptosuite !== BITCOIN_WITNESS_CRYPTOSUITE) continue;
+    const rec = p as unknown as { satoshi?: unknown; inscriptionId?: unknown };
+    if (
+      typeof rec.satoshi === 'string' && rec.satoshi.length > 0 &&
+      typeof rec.inscriptionId === 'string' && rec.inscriptionId.length > 0
+    ) {
+      out.push({ proof: p, satoshi: rec.satoshi, inscriptionId: rec.inscriptionId });
+    }
+  }
+  return out;
+}
+
+/**
+ * Collects the Ed25519 key hexes announced by a DID document's
+ * `verificationMethod[].publicKeyMultibase` entries. Non-documents,
+ * non-decodable and non-Ed25519 entries are skipped (fail closed at the
+ * caller on an empty set).
+ */
+function ed25519KeyHexesFromDidDocument(content: unknown): Set<string> {
+  const keys = new Set<string>();
+  if (!content || typeof content !== 'object') return keys;
+  const vms = (content as { verificationMethod?: unknown }).verificationMethod;
+  if (!Array.isArray(vms)) return keys;
+  for (const vm of vms) {
+    const pkm = vm && typeof vm === 'object' ? (vm as { publicKeyMultibase?: unknown }).publicKeyMultibase : undefined;
+    if (typeof pkm !== 'string') continue;
+    try {
+      const dec = multikey.decodePublicKey(pkm);
+      if (dec.type === 'Ed25519') keys.add(Buffer.from(dec.key).toString('hex'));
+    } catch {
+      // skip non-decodable verification methods
+    }
+  }
+  return keys;
+}
+
+/**
+ * Non-cooperative rotation candidacy (#366): after a sat transfer the new
+ * owner cannot obtain the old controller's signature, so a rotateKey whose
+ * controller proof is NOT authorized by the current key set is accepted IFF
+ * ALL of the following hold — every unverifiable step fails closed:
+ *
+ *  (a) the event carries a `bitcoin-ordinals-2024` witness proof whose
+ *      `satoshi` equals the anchored sat, and `verifyBitcoinWitnessProof`
+ *      passes IN FULL against THIS event's chain digest (the reinscription
+ *      commits to the rotation itself);
+ *  (b) the inscribed DID document announces an Ed25519 key of
+ *      `data.newController` in its verificationMethod — self-certifying
+ *      newControllers only (did:key / long-form did:peer:4);
+ *  (c) the event's own controller-proof key is itself a key of newController —
+ *      signer ≡ announced ≡ inscribed. This closes the
+ *      wrap-someone-else's-reinscription attack: an attacker cannot take the
+ *      legitimate buyer's on-sat reinscription and wrap it in a rotateKey
+ *      naming (or signed by) themselves;
+ *  (d) on the sat's inscription list, the rotation's inscription appears at a
+ *      STRICTLY LATER index than the current anchor inscription — the
+ *      hand-off must postdate the anchor it supersedes.
+ *
+ * No ordering-vs-transfer-tx check is needed (and none is done): only the
+ * sat's current UTXO holder can reinscribe it, so a reinscription satisfying
+ * (a)–(d) is itself proof of sat control at reinscription time — the sat
+ * enforces control, the verifier only orders inscriptions.
+ */
+async function evaluateNonCooperativeRotation(
+  event: LogEntry,
+  controllerProofs: { proof: DataIntegrityProof; originalIndex: number }[],
+  anchoredSat: AnchoredSat,
+  ordinalsProvider: OrdinalsLookup | undefined,
+  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>
+): Promise<{ accepted: true; inscriptionId: string } | { accepted: false; reason: string }> {
+  // Hand-off target: a self-certifying newController with embedded Ed25519
+  // key material. Resolver-backed targets (did:webvh, …) fail closed — nothing
+  // offline binds their keys, and (b)/(c) below need an enumerable key set.
+  const rotation = event.data as { newController?: unknown } | null | undefined;
+  const newController = typeof rotation?.newController === 'string' ? rotation.newController : undefined;
+  const newKeys = newController !== undefined ? await selfCertifyingKeyHexes(newController) : null;
+  if (!newKeys || newKeys.size === 0) {
+    return { accepted: false, reason: `newController (${String(newController)}) is not a self-certifying DID with an Ed25519 key` };
+  }
+
+  // (c) EVERY controller proof on the event must be signed by a key of
+  // newController — a mixed old/new or foreign co-signer disqualifies.
+  for (const { proof, originalIndex } of controllerProofs) {
+    const keyHex = await resolveControllerKeyHex(proof.verificationMethod, resolveKey);
+    if (keyHex === null || !newKeys.has(keyHex)) {
+      return {
+        accepted: false,
+        reason: `controller proof ${originalIndex} (${proof.verificationMethod}) is not signed by a key of newController — signer must equal the announced new controller`
+      };
+    }
+  }
+
+  // (a) precondition: a bitcoin witness proof ON THE ANCHORED SAT.
+  const candidates = bitcoinWitnessProofs(event).filter(w => w.satoshi === anchoredSat.satoshi);
+  if (candidates.length === 0) {
+    return { accepted: false, reason: `event carries no bitcoin witness proof on the anchored satoshi ${anchoredSat.satoshi}` };
+  }
+
+  const eventDigest = computeDigestMultibase(canonicalizeEntryForChain(event));
+  let reason = 'no witness proof satisfied the reinscription conditions';
+
+  for (const candidate of candidates) {
+    // (a) full on-chain verification against THIS event's chain digest:
+    // inscription exists, is carried by the claimed (= anchored) sat, and its
+    // content commits to the rotation event.
+    const anchorError = await verifyBitcoinWitnessProof(candidate.proof, eventDigest, ordinalsProvider);
+    if (anchorError !== null) {
+      reason = anchorError;
+      continue;
+    }
+
+    // (b) the reinscribed DID document must ANNOUNCE the new controller's key.
+    // verifyBitcoinWitnessProof guaranteed the provider and the inscription
+    // content exist; a lookup failure here still fails closed.
+    let announced: Set<string>;
+    try {
+      const inscription = await (ordinalsProvider as OrdinalsLookup).getInscriptionById(candidate.inscriptionId);
+      if (!inscription || inscription.content === undefined) {
+        reason = `inscription ${candidate.inscriptionId} content is missing`;
+        continue;
+      }
+      announced = ed25519KeyHexesFromDidDocument(JSON.parse(inscription.content.toString('utf8')));
+    } catch (e) {
+      reason = `failed to inspect inscription ${candidate.inscriptionId}: ${e instanceof Error ? e.message : String(e)}`;
+      continue;
+    }
+    if (![...announced].some(k => newKeys.has(k))) {
+      reason = `inscribed DID document does not announce an Ed25519 key of newController ${newController}`;
+      continue;
+    }
+
+    // (d) the reinscription must be STRICTLY LATER on the sat than the current
+    // anchor inscription. Without an inscription-list capability the ordering
+    // is unprovable — fail closed.
+    if (typeof ordinalsProvider?.getInscriptionsBySatoshi !== 'function') {
+      return { accepted: false, reason: `ordinals provider cannot enumerate inscriptions on satoshi ${anchoredSat.satoshi}; reinscription order is unprovable` };
+    }
+    let onSat: Array<{ inscriptionId: string }>;
+    try {
+      onSat = await ordinalsProvider.getInscriptionsBySatoshi(anchoredSat.satoshi);
+    } catch (e) {
+      reason = `failed to list inscriptions on satoshi ${anchoredSat.satoshi}: ${e instanceof Error ? e.message : String(e)}`;
+      continue;
+    }
+    const anchorIdx = onSat.findIndex(i => i.inscriptionId === anchoredSat.inscriptionId);
+    const rotationIdx = onSat.findIndex(i => i.inscriptionId === candidate.inscriptionId);
+    if (anchorIdx === -1 || rotationIdx === -1 || rotationIdx <= anchorIdx) {
+      reason = `rotation inscription ${candidate.inscriptionId} does not appear strictly after anchor inscription ${anchoredSat.inscriptionId} on satoshi ${anchoredSat.satoshi}`;
+      continue;
+    }
+
+    return { accepted: true, inscriptionId: candidate.inscriptionId };
+  }
+
+  return { accepted: false, reason };
+}
+
+/**
  * Resolves a proof's controller PUBLIC KEY, which is the correct unit of
  * authorization: two verification methods identify the same signer iff they
  * resolve to the same key material.
@@ -502,7 +683,8 @@ async function verifyEvent(
   previousEvent: LogEntry | undefined,
   resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>,
   authorizedKeyIds?: Set<string>,
-  ordinalsProvider?: OrdinalsLookup
+  ordinalsProvider?: OrdinalsLookup,
+  anchoredSat?: AnchoredSat
 ): Promise<EventVerification> {
   const errors: string[] = [];
 
@@ -563,13 +745,35 @@ async function verifyEvent(
   // in one DID document nor tripped up by the same key under an equivalent VM
   // id. A custom verifier takes full responsibility for authorization, so this
   // check is skipped there.
+  let nonCooperativeInscriptionId: string | undefined;
   if (!customVerifier && authorizedKeyIds && index > 0) {
     for (const { proof, originalIndex } of controllerProofs) {
       const keyHex = await resolveControllerKeyHex(proof.verificationMethod, resolveKey);
       if (keyHex === null || !authorizedKeyIds.has(keyHex)) {
+        // Non-cooperative rotation (#366): ONLY a rotateKey event — and only
+        // when the log already has a bitcoin-anchored authority — may take the
+        // alternate, reinscription-attested path instead of failing here. The
+        // candidacy re-checks EVERY controller proof against the announced
+        // newController (condition c), so once accepted the remaining
+        // per-proof checks against the OLD set are superseded. Every other
+        // event type, and every failed candidacy, fails exactly as before.
+        let candidacyReason: string | undefined;
+        if (event.type === 'rotateKey' && anchoredSat) {
+          const candidacy = await evaluateNonCooperativeRotation(
+            event, controllerProofs, anchoredSat, ordinalsProvider, resolveKey
+          );
+          if (candidacy.accepted) {
+            nonCooperativeInscriptionId = candidacy.inscriptionId;
+            break;
+          }
+          candidacyReason = candidacy.reason;
+        }
         errors.push(
           `Event ${index}, Proof ${originalIndex}: signer ${proof.verificationMethod} is not authorized by the log's create event`
         );
+        if (candidacyReason !== undefined) {
+          errors.push(`Event ${index}: non-cooperative rotation rejected: ${candidacyReason}`);
+        }
         return {
           index,
           type: event.type,
@@ -662,6 +866,12 @@ async function verifyEvent(
     proofValid: allControllerProofsValid,
     chainValid,
     ...(customVerifier ? {} : { cryptographicallyVerified: allCryptographicallyVerified }),
+    // Report the non-cooperative acceptance only when the event fully
+    // verified — a candidacy followed by a signature/witness failure is not
+    // an accepted rotation.
+    ...(nonCooperativeInscriptionId !== undefined && allControllerProofsValid && chainValid
+      ? { nonCooperativeRotation: { inscriptionId: nonCooperativeInscriptionId } }
+      : {}),
     errors,
   };
 
@@ -889,10 +1099,17 @@ export async function verifyEventLog(
   // `authorizedKeyIds` EVOLVES: each event is authorized against the set as it
   // stood when the event was appended, and a fully valid rotateKey event swaps
   // the set for subsequent iterations.
+  //
+  // `anchoredSat` is companion walk state (#366): once a migrate event's
+  // GATING bitcoin witness proof verifies, the log's authority is anchored to
+  // that satoshi, and the anchoring inscription is the reference point for the
+  // non-cooperative rotation rule (see evaluateNonCooperativeRotation). Both
+  // are default-path machinery; a custom verifier owns proof semantics.
+  let anchoredSat: AnchoredSat | undefined;
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
-    const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds, options?.ordinalsProvider);
+    const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds, options?.ordinalsProvider, anchoredSat);
 
     // rotateKey hand-off. Order matters: the rotation event must pass ALL its
     // checks (chain link, signature, CURRENT-set authorization, gating witness
@@ -919,6 +1136,25 @@ export async function verifyEventLog(
         // REPLACE, not union — hand-off semantics (design spec §2/§5); keeping
         // the old keys would reopen the stale-key window rotation closes.
         authorizedKeyIds = newKeys;
+      }
+    }
+
+    // anchoredSat maintenance (default path; a fully verified event only —
+    // an unverified migrate witness must never anchor authority, guaranteed
+    // because bitcoin witness proofs GATE proofValid).
+    if (!options?.verifier && eventResult.proofValid && eventResult.chainValid) {
+      if (event.type === 'migrate') {
+        // proofValid=true ⇒ every bitcoin witness proof on the event verified,
+        // so its satoshi/inscriptionId are chain-attested. First proof mirrors
+        // replayProvenance/BtcoCelManager's extraction.
+        const witnessed = bitcoinWitnessProofs(event);
+        if (witnessed.length > 0) {
+          anchoredSat = { satoshi: witnessed[0].satoshi, inscriptionId: witnessed[0].inscriptionId };
+        }
+      } else if (event.type === 'rotateKey' && eventResult.nonCooperativeRotation && anchoredSat) {
+        // The accepted reinscription becomes the new anchor, so a CHAINED
+        // non-cooperative rotation must reinscribe strictly after it.
+        anchoredSat = { satoshi: anchoredSat.satoshi, inscriptionId: eventResult.nonCooperativeRotation.inscriptionId };
       }
     }
 

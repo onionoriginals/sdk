@@ -89,6 +89,14 @@ export interface EventVerification {
    * when the event carries no witness proofs.
    */
   witnessProofs?: { verificationMethod: string; verified: boolean }[];
+  /**
+   * Present when this rotateKey event was accepted via the NON-COOPERATIVE
+   * path (#366): its controller proof was not authorized by the current key
+   * set, but a fully verified reinscription on the log's anchored satoshi
+   * attested the authority hand-off. Carries the rotation's inscriptionId
+   * (the new on-sat authority anchor). Absent for cooperative rotations.
+   */
+  nonCooperativeRotation?: { inscriptionId: string };
   /** Any errors encountered during verification */
   errors: string[];
 }
