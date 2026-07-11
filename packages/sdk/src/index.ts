@@ -18,6 +18,8 @@ export { OriginalsAsset } from './lifecycle/OriginalsAsset.js';
 export type { ProvenanceChain } from './lifecycle/OriginalsAsset.js';
 export { replayProvenance, BTCO_SATOSHI_UNKNOWN } from './lifecycle/replayProvenance.js';
 export type { ReplayedProvenance } from './lifecycle/replayProvenance.js';
+export { ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION } from './lifecycle/assetEnvelope.js';
+export type { AssetEnvelope } from './lifecycle/assetEnvelope.js';
 
 // Type exports
 export * from './types/index.js';

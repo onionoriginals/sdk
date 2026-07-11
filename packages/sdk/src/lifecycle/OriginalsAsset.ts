@@ -16,6 +16,13 @@ import type { EventLog, OrdinalsLookup } from '../cel/types.js';
 import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { hexSha256ToDigestMultibase } from '../cel/signerAdapter.js';
+import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
+import { replayProvenance } from './replayProvenance.js';
+import {
+  ASSET_ENVELOPE_FORMAT,
+  ASSET_ENVELOPE_VERSION,
+  type AssetEnvelope
+} from './assetEnvelope.js';
 
 export interface ProvenanceChain {
   createdAt: string;
@@ -62,6 +69,9 @@ export class OriginalsAsset {
   // The CEL event log backing this asset's provenance. Present for assets minted
   // via createAsset (did:cel genesis); undefined for legacy did:peer constructions.
   #celLog?: EventLog;
+  // Per-layer DID documents captured at operation time (publish/inscribe/rotate).
+  // These are discarded by the live flow otherwise; serialize() needs them.
+  #didDocuments: Map<'did:webvh' | 'did:btco', DIDDocument> = new Map();
 
   constructor(
     resources: AssetResource[],
@@ -130,6 +140,85 @@ export class OriginalsAsset {
    */
   _replaceCelLog(log: EventLog): void {
     this.#celLog = log;
+  }
+
+  /**
+   * @internal — LifecycleManager captures the per-layer DID document built at
+   * operation time (publishToWeb, inscribeOnBitcoin, rotateBtcoKeys), which the
+   * live flow otherwise discards. serialize() emits them under `didDocuments`.
+   * A later capture for the SAME layer replaces the earlier one (e.g. a rotate
+   * replaces the inscription-time btco doc).
+   */
+  _captureDidDocument(layer: 'did:webvh' | 'did:btco', doc: DIDDocument): void {
+    this.#didDocuments.set(layer, doc);
+  }
+
+  /**
+   * Serialize this asset into a versioned, JSON-safe {@link AssetEnvelope} (#377).
+   *
+   * Sync and pure: the envelope's provenance IS the CEL (`eventLog`); everything
+   * the log cannot derive (commitTxId, feeRate, post-genesis resource updates, a
+   * btco binding not yet anchored by a witness proof) rides in the `unverified`
+   * honesty section — advisory only, never trusted at load/verify time.
+   *
+   * @throws StructuredError('ASSET_NOT_SERIALIZABLE') for legacy assets that have
+   *   no CEL log (constructed without an eventLog) — there is no provenance to
+   *   encode.
+   */
+  serialize(): AssetEnvelope {
+    if (!this.#celLog) {
+      throw new StructuredError(
+        'ASSET_NOT_SERIALIZABLE',
+        'Asset has no CEL event log to serialize. Only assets minted via ' +
+        'createAsset (did:cel genesis) carry the provenance an envelope encodes.'
+      );
+    }
+
+    // Round-trip through the JSON serialization gate: validates the log and
+    // yields a clean, JSON-safe parsed object (preserving witness-proof
+    // extension fields) decoupled from the live #celLog reference.
+    const eventLog = parseEventLogJson(serializeEventLogJson(this.#celLog));
+
+    const didDocuments: AssetEnvelope['didDocuments'] = { 'did:cel': this.did };
+    const webvhDoc = this.#didDocuments.get('did:webvh');
+    if (webvhDoc) didDocuments['did:webvh'] = webvhDoc;
+    const btcoDoc = this.#didDocuments.get('did:btco');
+    if (btcoDoc) didDocuments['did:btco'] = btcoDoc;
+
+    // Honesty section — assembled from the live in-memory caches only.
+    const unverified: NonNullable<AssetEnvelope['unverified']> = {};
+    // commitTxId / feeRate live only on the ProvenanceChain (never in the log).
+    // The btco migration is the sole carrier of both.
+    const btcoMigration = this.provenance.migrations.find(m => m.to === 'did:btco');
+    if (btcoMigration?.commitTxId) unverified.commitTxId = btcoMigration.commitTxId;
+    if (typeof btcoMigration?.feeRate === 'number') unverified.feeRate = btcoMigration.feeRate;
+    if (this.provenance.resourceUpdates.length > 0) {
+      unverified.resourceUpdates = this.provenance.resourceUpdates.map(u => ({ ...u }));
+    }
+    // Degraded binding: the fold can't derive did:btco (no witness proof in the
+    // log) but the live cache holds it — surface the whole live binding snapshot
+    // as advisory. Do NOT promote it: loadAsset must not trust it.
+    const foldedBtco = replayProvenance(this.#celLog).bindings['did:btco'];
+    const liveBtco = this.bindings?.['did:btco'];
+    if (!foldedBtco && liveBtco) {
+      unverified.bindings = { ...this.bindings };
+    }
+
+    const envelope: AssetEnvelope = {
+      format: ASSET_ENVELOPE_FORMAT,
+      version: ASSET_ENVELOPE_VERSION,
+      assetDid: this.id,
+      eventLog,
+      didDocuments,
+      resources: this.resources.map(r => ({ ...r }))
+    };
+    if (this.credentials.length > 0) {
+      envelope.credentials = this.credentials.map(c => ({ ...c }));
+    }
+    if (Object.keys(unverified).length > 0) {
+      envelope.unverified = unverified;
+    }
+    return envelope;
   }
 
   async migrate(

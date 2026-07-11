@@ -701,6 +701,9 @@ export class LifecycleManager {
           'did:cel': sourceDid,
           'did:webvh': migration.did
         };
+        // Retain the minted webvh DID doc for serialize() (the live flow reads
+        // only its VM id and otherwise discards it).
+        asset._captureDidDocument('did:webvh', migration.didDocument);
 
         // Mirror onto the manager emitter: asset.migrate emits only on the
         // asset's private emitter, so sdk.lifecycle.on('asset:migrated', ...)
@@ -1440,6 +1443,8 @@ export class LifecycleManager {
             serviceEndpoint: { headDigestMultibase: celHeadDigest }
           }] : [])
         ];
+        // Retain the inscribed btco DID doc for serialize() (otherwise discarded).
+        asset._captureDidDocument('did:btco', btcoDoc);
         return Buffer.from(JSON.stringify(btcoDoc));
       },
       'application/did+json',
@@ -1896,6 +1901,10 @@ export class LifecycleManager {
         verificationMethod: newControllerVm
       });
     }
+
+    // Reinscription succeeded — the rotated doc is now the resolvable btco doc;
+    // it REPLACES the inscription-time capture for serialize().
+    asset._captureDidDocument('did:btco', rotatedDoc);
 
     await this.eventEmitter.emit({
       type: 'key:rotated',
