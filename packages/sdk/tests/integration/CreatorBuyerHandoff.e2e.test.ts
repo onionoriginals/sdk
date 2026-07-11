@@ -3,9 +3,17 @@
  * test, driven entirely through REAL flows.
  *
  * A creator (SDK A) mints and publishes an asset, then serializes it into an
- * interchange envelope. A buyer (SDK B) — FRESH: fresh keyStore, fresh storage,
- * but sharing the ONE OrdMock instance that is the "chain" both parties see —
- * loads it, verifies it with NO keys of their own (verification is public-key
+ * interchange envelope. A buyer (SDK B) — FRESH: fresh keyStore (holds NONE of
+ * A's keys), and a fresh MemoryStorageAdapter *instance* — but that adapter's
+ * backing store is process-global, so B's storage instance actually DOES see
+ * A's hosted did:cel/webvh logs (see MemoryStorageAdapter). That's irrelevant
+ * to verification: loadAsset/verify never read storage at all — every CEL
+ * controller proof uses did:key VMs that resolve offline, so the shared
+ * OrdMock ("the chain") is verify's only external dependency. Proved below by
+ * construction with a storage adapter that throws on every read. The only
+ * thing that actually reads the shared host is the separate
+ * sdk.did.resolveDID(did:cel) assertion later in this test. B loads the
+ * envelope, verifies it with NO keys of their own (verification is public-key
  * only), and then, WITHOUT the seller's cooperation, claims ownership by
  * reinscribing the anchor doc on the sat with the buyer's OWN key. A third,
  * independent verifier then verifies the whole log including the
@@ -79,7 +87,11 @@ describe('creator→buyer hand-off end-to-end (#Phase3 Task8)', () => {
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider,
-      storageAdapter: new MemoryStorageAdapter(), // fresh — no hosted copy of A's log
+      storageAdapter: new MemoryStorageAdapter(), // fresh instance, but the store is
+                                                   // process-global — B DOES see A's
+                                                   // hosted logs (see header comment;
+                                                   // verify itself is proved not to
+                                                   // care, below)
       keyStore: new MockKeyStore(),               // fresh — B holds NONE of A's keys
     } as any);
 
@@ -91,6 +103,28 @@ describe('creator→buyer hand-off end-to-end (#Phase3 Task8)', () => {
     expect(loaded.warnings).toEqual([]);
     const bAsset = loaded.asset;
     expect(bAsset.id).toBe(didCel);
+
+    // ---- Proof by construction: verify never reads storage. ----
+    // A SECOND buyer SDK whose storage adapter throws on every read (same
+    // shared OrdMock, same envelope) still verifies successfully — this rules
+    // out ordering flukes and shows loadAsset/verify are storage-independent
+    // by construction, not by accident of what the test happened to populate.
+    const throwingStorage = {
+      putObject: async () => { throw new Error('storage must not be read during verify'); },
+      getObject: async () => { throw new Error('storage must not be read during verify'); },
+      exists: async () => { throw new Error('storage must not be read during verify'); },
+      listObjects: async () => { throw new Error('storage must not be read during verify'); },
+    };
+    const sdkBNoStorage = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider,
+      storageAdapter: throwingStorage,
+      keyStore: new MockKeyStore(),
+    } as any);
+    const loadedNoStorage = await sdkBNoStorage.lifecycle.loadAsset(wire);
+    expect(loadedNoStorage.verification?.verified).toBe(true);
+    expect(loadedNoStorage.verification?.errors ?? []).toEqual([]);
 
     // ---- Fold parity: B's reconstruction matches A's live caches. ----
     const foldedA = replayProvenance(aAsset.celLog!);
