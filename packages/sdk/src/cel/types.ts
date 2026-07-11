@@ -159,6 +159,12 @@ export interface OrdinalsLookup {
     txid?: string;
     satoshi?: string;
   } | null>;
+  /**
+   * MUST return inscription ids oldest-first (on-chain inscription order).
+   * The non-cooperative rotation rule's later-than-anchor check depends on
+   * this ordering; a provider violating it can make that check accept
+   * earlier inscriptions.
+   */
   getInscriptionsBySatoshi?(satoshi: string): Promise<Array<{ inscriptionId: string }>>;
 }
 

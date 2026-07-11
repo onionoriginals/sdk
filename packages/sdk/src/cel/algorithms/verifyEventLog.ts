@@ -567,6 +567,9 @@ async function evaluateNonCooperativeRotation(
   const eventDigest = computeDigestMultibase(canonicalizeEntryForChain(event));
   let reason = 'no witness proof satisfied the reinscription conditions';
 
+  // First-satisfying-candidate wins (unlike the migrate poison rule, which
+  // rejects on >1 passing witness): both candidates here are necessarily
+  // sat-holder-authored, so there's no cross-party escalation to guard against.
   for (const candidate of candidates) {
     // (a) full on-chain verification against THIS event's chain digest:
     // inscription exists, is carried by the claimed (= anchored) sat, and its
@@ -599,7 +602,10 @@ async function evaluateNonCooperativeRotation(
 
     // (d) the reinscription must be STRICTLY LATER on the sat than the current
     // anchor inscription. Without an inscription-list capability the ordering
-    // is unprovable — fail closed.
+    // is unprovable — fail closed. This index comparison trusts
+    // getInscriptionsBySatoshi's documented oldest-first contract (see
+    // OrdinalsLookup); a provider returning newest-first flips this check
+    // fail-open.
     if (typeof ordinalsProvider?.getInscriptionsBySatoshi !== 'function') {
       return { accepted: false, reason: `ordinals provider cannot enumerate inscriptions on satoshi ${anchoredSat.satoshi}; reinscription order is unprovable` };
     }
