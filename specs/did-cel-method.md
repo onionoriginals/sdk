@@ -235,7 +235,8 @@ dual-accept read path:
   equality (versus suffix derivation for `did:cel`).
 - Writers **MUST** emit only the new `CelAssetData` shape (no `data.did`).
 - **Documented behavioral delta:** a genesis whose `data.did` is a *malformed*
-  long-form `did:peer:4` (its embedded document fails to parse) now **fails closed**,
+  long-form `did:peer:4` (its embedded document fails to parse) now **fails closed**
+  (only when the genesis proof's `verificationMethod` is itself a `did:key`),
   where earlier releases fell back to trust-on-first-use.
 
 ---

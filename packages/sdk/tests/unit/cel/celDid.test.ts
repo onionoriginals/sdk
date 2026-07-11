@@ -55,4 +55,11 @@ describe('did:cel derivation', () => {
     expect(isDidCel('did:peer:4zQm')).toBe(false);
     expect(didCelMatchesLog('did:cel:uEiAwrong', log)).toBe(false);
   });
+
+  test('didCelMatchesLog returns false when the first event is not a create', async () => {
+    const log = await makeLog();
+    const did = deriveDidCel(log);
+    const notCreate = { ...log, events: [{ ...log.events[0], type: 'update' as const }] };
+    expect(didCelMatchesLog(did, notCreate as never)).toBe(false);
+  });
 });

@@ -15,7 +15,7 @@
  *   signer: async (data) => createEdDsaProof(data, privateKey),
  * });
  * 
- * const log = await cel.create('My Asset', [
+ * const { log, did } = await cel.create('My Asset', [
  *   { digestMultibase: 'uXYZ...', mediaType: 'image/png' }
  * ]);
  * 

@@ -36,6 +36,7 @@ export function isDidCel(did: string): boolean {
 /** Suffix comparison via digestMultibaseEquals (tolerates legacy bare digests). */
 export function didCelMatchesLog(did: string, log: EventLog): boolean {
   if (!isDidCel(did) || !log.events || log.events.length === 0) return false;
-  const expected = computeDigestMultibase(canonicalizeEntryForChain(log.events[0]));
+  if (log.events[0].type !== 'create') return false; // create-check as guard, not a throw
+  const expected = deriveDidCelFromGenesis(log.events[0]).slice(DID_CEL_PREFIX.length);
   return digestMultibaseEquals(did.slice(DID_CEL_PREFIX.length), expected);
 }

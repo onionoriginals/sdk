@@ -141,6 +141,38 @@ describe('rotateKey authority evolution', () => {
     expect((await verifyEventLog(log)).verified).toBe(false);
   });
 
+  test('oversized newController fails closed (length cap before base58 decode)', async () => {
+    const a = await makeRealSigner();
+    let log = await createEventLog(
+      { name: 'A', controller: a.didKey, resources: [], createdAt: 'x', nonce: 'u8' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+    // A did:key far beyond the 2048-char cap must not be decoded; fail closed.
+    log = await appendEvent(log, 'rotateKey', { newController: 'did:key:z' + 'A'.repeat(500_000), rotatedAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
+    const result = await verifyEventLog(log);
+    expect(result.verified).toBe(false);
+    expect(result.events[1].proofValid).toBe(false);
+    expect(result.errors.some(e => /newController/.test(e))).toBe(true);
+  });
+
+  test('stale OLD key cannot rotate authority to an attacker after being replaced', async () => {
+    const a = await makeRealSigner(); const b = await makeRealSigner(); const mallory = await makeRealSigner();
+    let log = await createEventLog(
+      { name: 'A', controller: a.didKey, resources: [], createdAt: 'x', nonce: 'u8b' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+    // a → b: b now holds authority, a is dead.
+    log = await appendEvent(log, 'rotateKey', { newController: b.didKey, rotatedAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
+    // Stale a signs a rotateKey naming mallory — must fail (a no longer authorized).
+    log = await appendEvent(log, 'rotateKey', { newController: mallory.didKey, rotatedAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
+    expect((await verifyEventLog(log)).verified).toBe(false);
+    // mallory never gained authority: an update she signs still fails.
+    const forged = await appendEvent(log, 'update', { note: 'mallory' }, { signer: mallory.signer, verificationMethod: mallory.vm });
+    const forgedResult = await verifyEventLog(forged);
+    expect(forgedResult.verified).toBe(false);
+    expect(forgedResult.events[3].proofValid).toBe(false);
+  });
+
   test('migrate/transfer cause no authority change (old key keeps working)', async () => {
     const a = await makeRealSigner(); const b = await makeRealSigner();
     let log = await createEventLog(

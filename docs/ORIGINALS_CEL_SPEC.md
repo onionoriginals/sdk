@@ -399,7 +399,8 @@ Logs written by pre-`did:cel` releases embed the asset DID directly:
   the declared `data.did`.
 - Writers MUST NOT emit it; new assets use `CelAssetData` above.
 - Behavioral delta: a genesis whose `data.did` is a *malformed* long-form
-  `did:peer:4` now fails closed (previously trust-on-first-use).
+  `did:peer:4` now fails closed — only when the genesis proof's `verificationMethod`
+  is itself a `did:key` (previously trust-on-first-use).
 
 ### 5.2 Update Event
 

@@ -189,6 +189,15 @@ async function dispatchVerify(
 async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null> {
   if (typeof did !== 'string') return null;
 
+  // Cap before base58 decode (O(n²), per-event amplifiable via rotateKey): over
+  // the bound, fail closed (empty) for the prefixes we'd otherwise decode; null
+  // for everything else, matching this function's null-vs-empty semantics.
+  if (did.length > 2048) {
+    const selfCertifying = did.startsWith('did:key:')
+      || (did.startsWith('did:peer:4') && did.split(':').length >= 4);
+    return selfCertifying ? new Set() : null;
+  }
+
   if (did.startsWith('did:key:')) {
     // Pure local decode — a did:key IS its key, so a decode failure or a
     // non-Ed25519 key means no Ed25519 proof can be bound to it (empty set →
