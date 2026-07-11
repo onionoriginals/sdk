@@ -507,6 +507,16 @@ export class LifecycleManager {
       { currentLayer: folded.currentLayer, bindings: folded.bindings, provenance }
     );
 
+    // Repopulate captured DID docs so re-serializing a loaded asset is
+    // lossless. Only for layers cross-checked against the fold in step 5
+    // above; a degraded/absent binding must not be backfilled here either.
+    for (const layer of ['did:webvh', 'did:btco'] as const) {
+      const doc = env.didDocuments[layer];
+      if (folded.bindings[layer] && doc) {
+        asset._captureDidDocument(layer, doc);
+      }
+    }
+
     return { asset, verification, warnings };
   }
 

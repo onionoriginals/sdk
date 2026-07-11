@@ -202,6 +202,47 @@ describe('loadAsset — skipVerification', () => {
   });
 });
 
+describe('loadAsset — captured DID document repopulation', () => {
+  test('re-serializing a loaded asset carries forward the same webvh and btco docs', async () => {
+    const { sdk } = makeSDK();
+    const asset = await createGenesisAsset(sdk);
+    await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+
+    const envelope = asset.serialize();
+    const { asset: loaded } = await sdk.lifecycle.loadAsset(envelope);
+    const reserialized = loaded.serialize();
+
+    expect(reserialized.didDocuments['did:webvh']).toEqual(envelope.didDocuments['did:webvh']);
+    expect(reserialized.didDocuments['did:btco']).toEqual(envelope.didDocuments['did:btco']);
+  });
+
+  test('degraded btco binding (no witness proof) is not repopulated on re-serialize', async () => {
+    // No keyStore → the btco migrate event never lands in the log, so the fold
+    // can't derive did:btco even though the live cache (and envelope) has it.
+    const ordinalsProvider = new OrdMockProvider();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider,
+      storageAdapter: new MemoryStorageAdapter()
+    });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+
+    const envelope = asset.serialize();
+    expect(envelope.didDocuments['did:btco']).toBeDefined();
+    expect(envelope.unverified?.bindings?.['did:btco']).toBeDefined();
+
+    const { asset: loaded } = await sdk.lifecycle.loadAsset(envelope);
+    const reserialized = loaded.serialize();
+
+    expect(reserialized.didDocuments['did:btco']).toBeUndefined();
+  });
+});
+
 describe('checkGenesisResourceBinding (extracted pure helper)', () => {
   test('returns true when every genesis digest is present among resources', async () => {
     const { sdk } = makeSDK();
