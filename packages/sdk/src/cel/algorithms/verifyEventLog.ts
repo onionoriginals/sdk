@@ -395,20 +395,51 @@ async function verifyBitcoinWitnessProof(
   if (inscription.content === undefined) {
     return `bitcoin witness inscription ${inscriptionId} content is missing`;
   }
-  let content: { digestMultibase?: unknown };
+  let content: unknown;
   try {
-    content = JSON.parse(inscription.content.toString('utf8')) as { digestMultibase?: unknown };
+    content = JSON.parse(inscription.content.toString('utf8'));
   } catch {
     return `bitcoin witness inscription ${inscriptionId} content is not valid JSON`;
   }
-  if (
-    typeof content?.digestMultibase !== 'string' ||
-    !digestMultibaseEquals(content.digestMultibase, expectedDigest)
-  ) {
+  // Two accepted commitment shapes, each requiring an exact digest match:
+  //  (a) witness attestation JSON with a top-level `digestMultibase`
+  //      (BitcoinWitness / BtcoCelManager inscribe this), or
+  //  (b) the asset's own inscribed DID document carrying an OriginalsCelAnchor
+  //      service whose headDigestMultibase is this event's chain digest
+  //      (LifecycleManager.inscribeOnBitcoin — the DID-doc inscription IS the
+  //      witness artifact, #367).
+  // Anything else fails closed.
+  const attested = (content as { digestMultibase?: unknown } | null)?.digestMultibase;
+  const commits =
+    (typeof attested === 'string' && digestMultibaseEquals(attested, expectedDigest)) ||
+    didDocumentCommitsToDigest(content, expectedDigest);
+  if (!commits) {
     return `bitcoin witness inscription ${inscriptionId} does not commit to this event's digest`;
   }
 
   return null;
+}
+
+/**
+ * True when `content` parses as a DID document whose `OriginalsCelAnchor`
+ * service commits to `expectedDigest` (the event's chain digest). Strictly
+ * structural and fail-closed: a missing/malformed id, service array, anchor
+ * entry, or headDigestMultibase — or a digest mismatch — all return false.
+ */
+function didDocumentCommitsToDigest(content: unknown, expectedDigest: string): boolean {
+  if (!content || typeof content !== 'object') return false;
+  const doc = content as { id?: unknown; service?: unknown };
+  if (typeof doc.id !== 'string' || !doc.id.startsWith('did:')) return false;
+  if (!Array.isArray(doc.service)) return false;
+  return doc.service.some((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const svc = entry as { type?: unknown; serviceEndpoint?: unknown };
+    if (svc.type !== 'OriginalsCelAnchor') return false;
+    const ep = svc.serviceEndpoint;
+    if (!ep || typeof ep !== 'object') return false;
+    const head = (ep as { headDigestMultibase?: unknown }).headDigestMultibase;
+    return typeof head === 'string' && digestMultibaseEquals(head, expectedDigest);
+  });
 }
 
 /**

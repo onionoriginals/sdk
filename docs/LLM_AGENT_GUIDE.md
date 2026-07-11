@@ -491,6 +491,8 @@ const asset = await sdk.lifecycle.createAsset(
 ): Promise<OriginalsAsset>
 ```
 
+> The created asset's `id` is a `did:cel:…` derived from its signed CEL genesis event, while `asset.currentLayer` reports the `'did:peer'` layer label (did:cel is the genesis-layer synonym).
+
 **AssetResource interface:**
 ```typescript
 interface AssetResource {
@@ -710,8 +712,11 @@ await asset.verify(deps?: {
   didManager?: DIDManager;
   credentialManager?: CredentialManager;
   fetch?: (url: string) => Promise<Response>;
+  ordinalsProvider?: OrdinalsProvider;  // Required to verify inscribed (did:btco) assets
 }): Promise<boolean>
 ```
+
+> Inscribed assets carry a Bitcoin witness proof in their CEL log; verifying one **requires** passing `{ ordinalsProvider }`, or verification fails closed.
 
 ### ProvenanceChain Structure
 
@@ -1178,9 +1183,9 @@ const resources = [{
   size: contentBuffer.length,
 }];
 
-// 3. Create asset (did:peer layer)
+// 3. Create asset (genesis layer; currentLayer label is 'did:peer')
 const asset = await sdk.lifecycle.createAsset(resources);
-console.log('Created:', asset.id); // did:peer:4z...
+console.log('Created:', asset.id); // did:cel:u...
 
 // 4. Subscribe to events
 asset.on('asset:migrated', (event) => {

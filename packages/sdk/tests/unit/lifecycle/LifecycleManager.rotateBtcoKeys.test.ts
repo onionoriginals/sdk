@@ -2,6 +2,11 @@ import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { multikey } from '../../../src/crypto/Multikey';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
+import { computeDigestMultibase } from '../../../src/cel/hash';
+import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
+import { KeyManager } from '../../../src/did/KeyManager';
+import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
 
 describe('rotateBtcoKeys (#366 rotation-first)', () => {
   test('reinscribes same-id document with the new key; resolver serves it', async () => {
@@ -60,6 +65,188 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
     const rotation = await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey });
     expect(rotation.did).toBe(btcoDid);
+  });
+
+  test('appends rotateKey signed by the current controller; rotated doc re-embeds #cel + #resources (#365)', async () => {
+    const provider = new OrdMockProvider();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: provider,
+      keyStore: new MockKeyStore()
+    });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    const btcoDid = asset.bindings!['did:btco']!;
+
+    const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
+    await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey });
+
+    // The rotateKey event is the new head, naming the incoming controller.
+    const last = asset.celLog!.events[asset.celLog!.events.length - 1];
+    expect(last.type).toBe('rotateKey');
+    expect((last.data as any).newController).toBe(`did:key:${newKey}`);
+    // Cooperative rotation: signed by the OUTGOING (current) controller.
+    const proofVm = (last.proof as any)[0].verificationMethod as string;
+    expect(proofVm.startsWith(`did:key:${newKey}`)).toBe(false);
+
+    // The rotated on-chain doc carries a FRESH #cel (digest of the rotateKey
+    // entry) AND the re-embedded resource manifest.
+    const doc = await sdk.did.resolveDID(btcoDid, { skipCache: true });
+    const anchor = doc!.service?.find((s: any) => s.type === 'OriginalsCelAnchor');
+    expect(anchor).toBeDefined();
+    expect(anchor!.id).toBe(`${btcoDid}#cel`);
+    expect((anchor!.serviceEndpoint as any).headDigestMultibase)
+      .toBe(computeDigestMultibase(canonicalizeEntryForChain(last)));
+    expect(doc!.service?.some((s: any) => s.type === 'OriginalsResourceManifest')).toBe(true);
+  });
+
+  test('keyStore-less rotation degrades: no rotateKey event, no #cel in the rotated doc', async () => {
+    const provider = new OrdMockProvider();
+    const sdk = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
+    const skipped: string[] = [];
+    sdk.lifecycle.on('cel:append-skipped', (e) => { skipped.push(e.reason); });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '34'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    const btcoDid = asset.bindings!['did:btco']!;
+    const logBefore = asset.celLog;
+    skipped.length = 0; // ignore the inscribe-time skip
+
+    const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
+    await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey });
+
+    expect(skipped).toEqual(['NO_KEYSTORE']);
+    expect(asset.celLog).toBe(logBefore);
+    const doc = await sdk.did.resolveDID(btcoDid, { skipCache: true });
+    expect(doc!.service?.some((s: any) => s.type === 'OriginalsCelAnchor') ?? false).toBe(false);
+    expect(doc!.service?.some((s: any) => s.type === 'OriginalsResourceManifest')).toBe(true);
+  });
+
+  test('rotation inscription failure restores the pre-append CEL log', async () => {
+    class FailSecondProvider extends OrdMockProvider {
+      calls = 0;
+      async createInscription(params: any): Promise<any> {
+        this.calls += 1;
+        if (this.calls > 1) throw new Error('rotation broadcast failed');
+        return super.createInscription(params);
+      }
+    }
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: new FailSecondProvider(),
+      keyStore: new MockKeyStore()
+    });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '78'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    const logBefore = asset.celLog;
+
+    const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
+    await expect(
+      sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey })
+    ).rejects.toThrow('rotation broadcast failed');
+    expect(asset.celLog).toBe(logBefore);
+    const events = asset.celLog!.events;
+    expect(events[events.length - 1].type).not.toBe('rotateKey');
+  });
+
+  test('rotate with privateKey: subsequent transfer append is signed by the NEW controller', async () => {
+    const provider = new OrdMockProvider();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: provider,
+      keyStore: new MockKeyStore()
+    });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+
+    // A REAL Ed25519 keypair so the new controller can actually sign appends
+    // (fill(7) fakes have no matching secret — verifyEventLog would reject).
+    const newKp = await new KeyManager().generateKeyPair('Ed25519');
+    await sdk.lifecycle.rotateBtcoKeys(asset, {
+      publicKeyMultibase: newKp.publicKey,
+      privateKey: newKp.privateKey
+    });
+
+    // Post-rotation the current controller folds to the new key; the transfer
+    // append signs with it and the whole log verifies.
+    await sdk.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
+    const last = asset.celLog!.events[asset.celLog!.events.length - 1];
+    expect(last.type).toBe('transfer');
+    expect(((last.proof as any)[0].verificationMethod as string).startsWith(`did:key:${newKp.publicKey}`)).toBe(true);
+    const result = await verifyEventLog(asset.celLog!, { expectedDid: asset.id, ordinalsProvider: provider });
+    expect(result.verified).toBe(true);
+  });
+
+  test('rotate without privateKey emits key:unpersisted naming the new controller VM', async () => {
+    const provider = new OrdMockProvider();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: provider,
+      keyStore: new MockKeyStore()
+    });
+    const unpersisted: any[] = [];
+    sdk.lifecycle.on('key:unpersisted', (e) => { unpersisted.push(e); });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+
+    const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
+    await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey });
+
+    expect(unpersisted.length).toBe(1);
+    expect(unpersisted[0].verificationMethod).toBe(`did:key:${newKey}#${newKey}`);
+  });
+
+  test('rejects rotation when privateKey does not derive the announced publicKeyMultibase', async () => {
+    class CountingProvider extends OrdMockProvider {
+      inscribeCalls = 0;
+      async createInscription(params: any): Promise<any> {
+        this.inscribeCalls += 1;
+        return super.createInscription(params);
+      }
+    }
+    const provider = new CountingProvider();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: provider,
+      keyStore: new MockKeyStore()
+    });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    const eventsBefore = asset.celLog!.events.length;
+    const inscribeCallsBefore = provider.inscribeCalls;
+
+    // Two UNRELATED keypairs: announce keypair A's public key but supply
+    // keypair B's private key — a mismatched pair.
+    const kpA = await new KeyManager().generateKeyPair('Ed25519');
+    const kpB = await new KeyManager().generateKeyPair('Ed25519');
+
+    await expect(
+      sdk.lifecycle.rotateBtcoKeys(asset, {
+        publicKeyMultibase: kpA.publicKey,
+        privateKey: kpB.privateKey
+      })
+    ).rejects.toMatchObject({ code: 'INVALID_KEY_PAIR' });
+
+    // No rotation side effects: log unchanged, no reinscription attempted.
+    expect(asset.celLog!.events.length).toBe(eventsBefore);
+    expect(asset.celLog!.events[asset.celLog!.events.length - 1].type).not.toBe('rotateKey');
+    expect(provider.inscribeCalls).toBe(inscribeCallsBefore);
   });
 
   test('rejects when asset is not on btco layer', async () => {

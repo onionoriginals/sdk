@@ -141,16 +141,20 @@ Key files: `src/types/common.ts`, `src/did/WebVHManager.ts`
 
 ### Lifecycle Management (src/lifecycle/)
 
-**LifecycleManager (LifecycleManager.ts)** - Orchestrates asset migration
-- `createAsset()` - Creates did:peer asset with resources
-- `publishToWeb()` - Migrates to did:webvh
-- `inscribeOnBitcoin()` - Migrates to did:btco
-- Event-driven architecture via EventEmitter
+An Original asset **IS a CEL** (Cryptographic Event Log, src/cel/): every lifecycle operation appends a signed event to `asset.celLog`, and the log — not the in-memory caches — is the source of provenance truth.
+
+**LifecycleManager (LifecycleManager.ts)** - Orchestrates asset migration; each op appends a signed CEL event
+- `createAsset()` - Mints a `did:cel` genesis (`create` event); `asset.id` is the derived did:cel, while `currentLayer` label stays `'did:peer'`
+- `publishToWeb()` - Migrates to did:webvh (`migrate` event)
+- `inscribeOnBitcoin()` - Migrates to did:btco (`migrate` event); the on-chain DID doc carries an `OriginalsCelAnchor` (`#cel` service) committing to the log head at inscription time, and IS the witness artifact for the event's bitcoin proof
+- `transferOwnership()` - Moves the sat (`transfer` event); `rotateBtcoKeys()` reinscribes same-id doc with a new key (`rotateKey` event), re-embedding a fresher `#cel`
+- Event-driven architecture via EventEmitter; when no keyStore is available, appends degrade with a `cel:append-skipped` event
 - Batch operations support for multiple assets
 
-**OriginalsAsset (OriginalsAsset.ts)** - Asset representation
+**OriginalsAsset (OriginalsAsset.ts)** - Asset representation, backed by its CEL log
 - Encapsulates resources, credentials, and provenance
-- Tracks migration state across layers
+- Tracks migration state across layers; `replayProvenance` folds the log to reconstruct it
+- `verify()` delegates to `verifyEventLog` — gating on the whole signed chain (btco anchoring needs an `ordinalsProvider` to check the witness proof)
 - Version management for resource updates
 
 **BatchOperations (BatchOperations.ts)**

@@ -150,7 +150,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify asset creation
       expect(asset).toBeInstanceOf(OriginalsAsset);
       expect(asset.currentLayer).toBe('did:peer');
-      expect(asset.id).toMatch(/^did:peer:/);
+      expect(asset.id).toMatch(/^did:cel:/);
       expect(asset.resources).toHaveLength(2);
       expect(asset.resources[0].id).toBe('resource-1');
       expect(asset.resources[1].id).toBe('resource-2');
@@ -342,7 +342,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'integrity-test',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'aaaa5678901234567890abcdef1234567890abcdef1234567890abcdef1234'
+          hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
           // No content property - verify will skip content hash check
         }
       ];
@@ -355,11 +355,13 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const webAsset = await sdk.lifecycle.publishToWeb(asset, 'integrity.test');
       expect(await webAsset.verify()).toBe(true);
 
+      // Post-inscription the CEL log carries a bitcoin witness proof (#367):
+      // verify() now gates on the chain, so the ordinals provider is required.
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
-      expect(await btcoAsset.verify()).toBe(true);
+      expect(await btcoAsset.verify({ ordinalsProvider })).toBe(true);
 
       await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
-      expect(await btcoAsset.verify()).toBe(true);
+      expect(await btcoAsset.verify({ ordinalsProvider })).toBe(true);
     });
   });
 

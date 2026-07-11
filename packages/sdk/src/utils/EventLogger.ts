@@ -40,6 +40,7 @@ export interface EventLoggingConfig {
   'batch:progress'?: LogLevel | false;
   'key:unpersisted'?: LogLevel | false;
   'did:log-unhosted'?: LogLevel | false;
+  'cel:append-skipped'?: LogLevel | false;
   'key:rotated'?: LogLevel | false;
 }
 
@@ -70,6 +71,7 @@ const DEFAULT_EVENT_CONFIG: EventLoggingConfig = {
   'batch:progress': 'debug',
   'key:unpersisted': 'warn',
   'did:log-unhosted': 'warn',
+  'cel:append-skipped': 'warn',
   'key:rotated': 'info'
 };
 
@@ -119,6 +121,7 @@ export class EventLogger {
       'migration:quarantine',
       'key:unpersisted',
       'did:log-unhosted',
+      'cel:append-skipped',
       'key:rotated'
     ];
     
@@ -232,6 +235,14 @@ export class EventLogger {
           assetId: event.asset.id,
           reason: event.reason,
           detail: event.message
+        };
+        break;
+
+      case 'cel:append-skipped':
+        message = 'CEL append skipped';
+        data = {
+          assetId: event.asset.id,
+          reason: event.reason
         };
         break;
         

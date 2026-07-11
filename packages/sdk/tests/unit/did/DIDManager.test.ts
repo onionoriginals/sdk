@@ -364,3 +364,32 @@ describe('DIDManager.validateDIDDocument false branch', () => {
     expect(res).toBe(false);
   });
 });
+
+
+import { createCelDidDocument } from '../../../src/cel/celDid';
+
+describe('DIDManager.resolveDID did:cel branch (#Phase2 Task 8)', () => {
+  test('returns null on a cache miss — no fake resolution', async () => {
+    const dm = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: false } as any);
+    expect(await dm.resolveDID('did:cel:uEiUnknownDigest')).toBeNull();
+  });
+
+  test('returns a cached did:cel document (cache-only resolution)', async () => {
+    const dm = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: false } as any);
+    const did = 'did:cel:uEiCachedDigest';
+    const doc = createCelDidDocument(did, 'z6MkfakePublicKey');
+    await dm.cache.set(did, doc);
+    expect(await dm.resolveDID(did)).toEqual(doc);
+  });
+
+  test('warns naming resolveDidCel(did, log) when logging is enabled', async () => {
+    const dm = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: true } as any);
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(await dm.resolveDID('did:cel:uEiUnknownDigest')).toBeNull();
+      expect(warnSpy.mock.calls.some(args => args.join(' ').includes('resolveDidCel'))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});

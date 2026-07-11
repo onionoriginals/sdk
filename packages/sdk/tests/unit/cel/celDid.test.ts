@@ -1,8 +1,14 @@
 import { describe, test, expect } from 'bun:test';
-import { deriveDidCel, deriveDidCelFromGenesis, isDidCel, didCelMatchesLog, DID_CEL_PREFIX } from '../../../src/cel/celDid';
+import * as ed25519 from '@noble/ed25519';
+import { deriveDidCel, deriveDidCelFromGenesis, isDidCel, didCelMatchesLog, DID_CEL_PREFIX, createCelDidDocument, resolveDidCel } from '../../../src/cel/celDid';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
+import { appendEvent } from '../../../src/cel/algorithms/appendEvent';
+import { canonicalizeEvent } from '../../../src/cel/canonicalize';
+import { PeerCelManager } from '../../../src/cel/layers/PeerCelManager';
+import { multikey } from '../../../src/crypto/Multikey';
 import type { DataIntegrityProof } from '../../../src/cel/types';
+import { validateDIDDocument } from '../../../src/utils/validation';
 
 const fakeSigner = async (_data: unknown): Promise<DataIntegrityProof> => ({
   type: 'DataIntegrityProof',
@@ -61,5 +67,112 @@ describe('did:cel derivation', () => {
     const did = deriveDidCel(log);
     const notCreate = { ...log, events: [{ ...log.events[0], type: 'update' as const }] };
     expect(didCelMatchesLog(did, notCreate as never)).toBe(false);
+  });
+});
+
+describe('createCelDidDocument', () => {
+  const did = 'did:cel:uEiAabc123';
+  const pubKey = 'z6MkfakePublicKey';
+
+  test('produces a Multikey #key-0 VM with authentication/assertionMethod/alsoKnownAs', () => {
+    const doc = createCelDidDocument(did, pubKey);
+
+    expect(doc['@context']).toEqual([
+      'https://www.w3.org/ns/did/v1',
+      'https://w3id.org/security/multikey/v1',
+    ]);
+    expect(doc.id).toBe(did);
+    expect(doc.verificationMethod).toEqual([
+      {
+        id: `${did}#key-0`,
+        type: 'Multikey',
+        controller: did,
+        publicKeyMultibase: pubKey,
+      },
+    ]);
+    expect(doc.authentication).toEqual([`${did}#key-0`]);
+    expect(doc.assertionMethod).toEqual([`${did}#key-0`]);
+    expect(doc.alsoKnownAs).toEqual([`did:key:${pubKey}`]);
+  });
+
+  test('the produced document passes validateDIDDocument', () => {
+    const doc = createCelDidDocument(did, pubKey);
+    expect(validateDIDDocument(doc)).toBe(true);
+  });
+});
+
+describe('resolveDidCel (#Phase2 Task 8)', () => {
+  // Real Ed25519 signing so verifyEventLog's cryptographic path is exercised.
+  function realKey() {
+    const priv = crypto.getRandomValues(new Uint8Array(32));
+    let pubMb: string | undefined;
+    const getPubMb = async () => {
+      if (!pubMb) pubMb = multikey.encodePublicKey(await ed25519.getPublicKeyAsync(priv), 'Ed25519');
+      return pubMb;
+    };
+    const signer = async (data: unknown): Promise<DataIntegrityProof> => {
+      const mb = await getPubMb();
+      const sig = await ed25519.signAsync(canonicalizeEvent(data), priv);
+      return {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: '2026-07-10T00:00:00Z',
+        verificationMethod: `did:key:${mb}#${mb}`,
+        proofPurpose: 'assertionMethod',
+        proofValue: multikey.encodeMultibase(new Uint8Array(sig)),
+      };
+    };
+    return { signer, getPubMb };
+  }
+
+  async function makeVerifiedLog() {
+    const { signer, getPubMb } = realKey();
+    const { log, did } = await new PeerCelManager(signer).create('Asset', []);
+    return { log, did, signer, pubMb: await getPubMb() };
+  }
+
+  test('verified log resolves to a DID document for the genesis controller', async () => {
+    const { log, did, pubMb } = await makeVerifiedLog();
+    const doc = await resolveDidCel(did, log);
+    expect(doc).not.toBeNull();
+    expect(doc!.id).toBe(did);
+    expect(doc!.verificationMethod?.[0]?.publicKeyMultibase).toBe(pubMb);
+    expect(validateDIDDocument(doc!)).toBe(true);
+  });
+
+  test('a DID the log does not back resolves to null', async () => {
+    const { log } = await makeVerifiedLog();
+    const { did: otherDid } = await makeVerifiedLog();
+    expect(await resolveDidCel(otherDid, log)).toBeNull();
+  });
+
+  test('a tampered log resolves to null', async () => {
+    const { log, did } = await makeVerifiedLog();
+    const tampered = {
+      ...log,
+      events: [{ ...log.events[0], data: { ...(log.events[0].data as object), name: 'tampered' } }],
+    };
+    expect(await resolveDidCel(did, tampered)).toBeNull();
+  });
+
+  test('a non-did:cel identifier resolves to null', async () => {
+    const { log } = await makeVerifiedLog();
+    expect(await resolveDidCel('did:peer:4zQmWhatever', log)).toBeNull();
+  });
+
+  test('rotateKey hands the resolved document to the NEW controller key', async () => {
+    const { log, did, signer } = await makeVerifiedLog();
+    const { getPubMb: getNewPubMb } = realKey();
+    const newPubMb = await getNewPubMb();
+    const rotated = await appendEvent(
+      log,
+      'rotateKey',
+      { newController: `did:key:${newPubMb}`, rotatedAt: '2026-07-10T00:01:00Z' },
+      { signer, verificationMethod: 'ignored' }
+    );
+    const doc = await resolveDidCel(did, rotated);
+    expect(doc).not.toBeNull();
+    expect(doc!.verificationMethod?.[0]?.publicKeyMultibase).toBe(newPubMb);
+    expect(doc!.alsoKnownAs).toEqual([`did:key:${newPubMb}`]);
   });
 });

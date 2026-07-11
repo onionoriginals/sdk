@@ -311,6 +311,13 @@ export interface KeyUnpersistedEvent extends BaseEvent {
     id: string;
   };
   did: string;
+  /**
+   * The verification method whose private key is unpersisted. Set by
+   * rotateBtcoKeys when the incoming controller's key is not in the keyStore,
+   * so subsequent CEL appends would degrade (no signing key). Absent for the
+   * webvh migration case, where the DID itself identifies the unpersisted key.
+   */
+  verificationMethod?: string;
 }
 
 /**
@@ -322,6 +329,25 @@ export interface DidLogUnhostedEvent extends BaseEvent {
   did: string;
   /** Why the signed log was not hosted: no adapter configured, or the log had no entries to write. */
   reason: 'NO_STORAGE_ADAPTER' | 'EMPTY_LOG';
+}
+
+/**
+ * Emitted when a lifecycle append (e.g. the publish migrate event) is skipped
+ * because no keyStore is configured to sign it, or the asset has no CEL log
+ * (legacy 3-arg construction). The lifecycle transition still succeeds; only
+ * the CEL provenance append is omitted.
+ */
+export interface CelAppendSkippedEvent extends BaseEvent {
+  type: 'cel:append-skipped';
+  asset: {
+    id: string;
+  };
+  /**
+   * NO_KEYSTORE: no keyStore configured. NO_CEL_LOG: legacy asset with no CEL
+   * log. NO_SIGNING_KEY: keyStore present but the current controller's key is
+   * absent (e.g. asset minted by a different, keyStore-less manager).
+   */
+  reason: 'NO_KEYSTORE' | 'NO_CEL_LOG' | 'NO_SIGNING_KEY';
 }
 
 /**
@@ -365,6 +391,7 @@ export type OriginalsEvent =
   | MigrationQuarantineEvent
   | KeyUnpersistedEvent
   | DidLogUnhostedEvent
+  | CelAppendSkippedEvent
   | KeyRotatedEvent;
 
 /**
@@ -399,6 +426,7 @@ export interface EventTypeMap {
   'migration:quarantine': MigrationQuarantineEvent;
   'key:unpersisted': KeyUnpersistedEvent;
   'did:log-unhosted': DidLogUnhostedEvent;
+  'cel:append-skipped': CelAppendSkippedEvent;
   'key:rotated': KeyRotatedEvent;
 }
 

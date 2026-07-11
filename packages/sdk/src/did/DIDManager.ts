@@ -532,6 +532,17 @@ export class DIDManager {
               console.warn('Failed to resolve did:webvh:', err);
             }
           }
+        } else if (did.startsWith('did:cel:')) {
+          // did:cel is derived from a CEL event log, which resolveDID has no
+          // access to — only a previously cached document (checked above) can
+          // be returned. Be honest: no fabricated resolution. Callers holding
+          // the log should use resolveDidCel(did, log) from src/cel;
+          // persistence-backed lookup lands in Phase 3.
+          if (this.config.enableLogging) {
+            console.warn(
+              `did:cel cannot be resolved without its event log; use resolveDidCel(did, log) from the cel module. Returning null for ${did}`
+            );
+          }
         } else if (this.config.enableLogging) {
           console.warn(`Unsupported DID method for resolution: ${did}`);
         }

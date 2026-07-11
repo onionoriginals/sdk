@@ -12,6 +12,10 @@ import { ProvenanceQuery, Migration, Transfer } from './ProvenanceQuery.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning.js';
+import type { EventLog, OrdinalsLookup } from '../cel/types.js';
+import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
+import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
+import { hexSha256ToDigestMultibase } from '../cel/signerAdapter.js';
 
 export interface ProvenanceChain {
   createdAt: string;
@@ -55,13 +59,18 @@ export class OriginalsAsset {
   private provenance: ProvenanceChain;
   private eventEmitter: EventEmitter;
   private versionManager: ResourceVersionManager;
+  // The CEL event log backing this asset's provenance. Present for assets minted
+  // via createAsset (did:cel genesis); undefined for legacy did:peer constructions.
+  #celLog?: EventLog;
 
   constructor(
     resources: AssetResource[],
     did: DIDDocument,
-    credentials: VerifiableCredential[]
+    credentials: VerifiableCredential[],
+    eventLog?: EventLog
   ) {
     this.id = did.id;
+    this.#celLog = eventLog;
     this.resources = resources;
     this.did = did;
     this.credentials = credentials;
@@ -108,6 +117,19 @@ export class OriginalsAsset {
         );
       }
     }
+  }
+
+  /** The CEL event log backing this asset, if minted via createAsset. */
+  get celLog(): EventLog | undefined {
+    return this.#celLog;
+  }
+
+  /**
+   * @internal — LifecycleManager owns appends. Swaps the attached CEL log
+   * (e.g. after appending a migrate/transfer event).
+   */
+  _replaceCelLog(log: EventLog): void {
+    this.#celLog = log;
   }
 
   async migrate(
@@ -267,6 +289,12 @@ export class OriginalsAsset {
     didManager?: DIDManager;
     credentialManager?: CredentialManager;
     fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
+    /**
+     * Required to verify `bitcoin-ordinals-2024` witness proofs in the CEL log
+     * (btco-anchored assets). Without it, a log carrying a bitcoin witness
+     * proof fails closed — see VerifyOptions.ordinalsProvider.
+     */
+    ordinalsProvider?: OrdinalsLookup;
   }): Promise<boolean> {
     const result = await this.runVerificationChecks(deps);
     // 'verification:completed' is part of the public EventTypeMap and is
@@ -284,8 +312,51 @@ export class OriginalsAsset {
     didManager?: DIDManager;
     credentialManager?: CredentialManager;
     fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
+    ordinalsProvider?: OrdinalsLookup;
   }): Promise<boolean> {
     try {
+      // 0) GATING: whole-chain CEL verification. `expectedDid: this.id` is the
+      // binding check for _replaceCelLog — a swapped-in foreign log (even one
+      // valid on its own terms) does not back this asset's DID and fails here.
+      // Assets without a celLog (legacy constructions) skip this entirely.
+      if (this.#celLog) {
+        const celResult = await verifyEventLog(this.#celLog, {
+          expectedDid: this.id,
+          resolveKey: deps?.didManager ? createDidManagerKeyResolver(deps.didManager) : undefined,
+          ordinalsProvider: deps?.ordinalsProvider
+        });
+        if (!celResult.verified) {
+          return false;
+        }
+
+        // Bind the in-memory resources to the verified genesis: every resource
+        // digest recorded at genesis must still be present among the current
+        // resources. Without this, an asset holding the genuine log but swapped
+        // resources passes (the log verifies, the resources don't back it).
+        // Direction is subset (genesis ⊆ current): addResourceVersion may add
+        // MORE, but a genesis entry may never go MISSING.
+        const genesis = this.#celLog.events[0]?.data as
+          { resources?: unknown; did?: unknown } | undefined;
+        const genesisResources = genesis?.resources;
+        if (!Array.isArray(genesisResources) || genesisResources.length === 0) {
+          // Controller-shaped genesis MUST carry a NON-EMPTY resources array;
+          // missing, malformed, or empty fails closed (an empty array would
+          // pass the subset check vacuously, binding nothing). Only legacy-
+          // shaped geneses (data.did) — predating this contract — skip it.
+          if (typeof genesis?.did !== 'string') {
+            return false;
+          }
+        } else {
+          const present = new Set(this.resources.map(r => hexSha256ToDigestMultibase(r.hash)));
+          for (const entry of genesisResources) {
+            const dm = (entry as { digestMultibase?: unknown })?.digestMultibase;
+            if (typeof dm !== 'string' || !present.has(dm)) {
+              return false;
+            }
+          }
+        }
+      }
+
       // 1) DID Document validation (structure + supported method via validateDID)
       if (!validateDIDDocument(this.did)) {
         return false;
@@ -561,6 +632,8 @@ export class OriginalsAsset {
 
   private determineCurrentLayer(didId: string): LayerType {
     if (didId.startsWith('did:peer:')) return 'did:peer';
+    // did:cel is the genesis-layer synonym for did:peer (Phase-4 may introduce a dedicated layer).
+    if (didId.startsWith('did:cel:')) return 'did:peer';
     if (didId.startsWith('did:webvh:')) return 'did:webvh';
     if (didId.startsWith('did:btco:')) return 'did:btco';
     throw new Error('Unknown DID method');

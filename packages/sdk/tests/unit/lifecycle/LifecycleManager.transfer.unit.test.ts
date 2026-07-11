@@ -2,6 +2,13 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK, OriginalsAsset } from '../../../src';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
+import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
+import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { deriveDidCel } from '../../../src/cel/celDid';
+import { currentControllerVm } from '../../../src/cel/signerAdapter';
+
+const TO_ADDRESS = 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7';
 
 describe('LifecycleManager.transferOwnership unit edge cases', () => {
   const provider = new MockOrdinalsProvider();
@@ -93,6 +100,91 @@ describe('LifecycleManager.transferOwnership unit edge cases', () => {
     await expect(
       s.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7')
     ).rejects.toThrow('no inscription found on satoshi');
+  });
+});
+
+describe('transferOwnership appends signed CEL transfer event (#Phase2 task 6)', () => {
+  const makeSdk = (keyStore?: MockKeyStore, provider: OrdMockProvider = new OrdMockProvider()) =>
+    OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: provider,
+      ...(keyStore ? { keyStore } : {})
+    } as any);
+
+  // did:cel asset carried all the way to did:btco so a transfer can append.
+  const inscribedCelAsset = async (sdk: OriginalsSDK) => {
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    return asset;
+  };
+
+  test('appends a transfer event: last event type=transfer, data.txid=tx.txid, data.newOwner=address, log verifies', async () => {
+    const provider = new OrdMockProvider();
+    const sdk = makeSdk(new MockKeyStore(), provider);
+    const asset = await inscribedCelAsset(sdk);
+
+    const tx = await sdk.lifecycle.transferOwnership(asset, TO_ADDRESS);
+
+    const events = asset.celLog!.events;
+    const last = events[events.length - 1];
+    expect(last.type).toBe('transfer');
+    expect((last.data as any).txid).toBe(tx.txid);
+    expect((last.data as any).newOwner).toBe(TO_ADDRESS);
+    // previousOwner is the outgoing controller's did:key (pre-#), folded from the log.
+    expect(String((last.data as any).previousOwner).startsWith('did:key:')).toBe(true);
+
+    // The btco migrate event carries a bitcoin witness proof (#367), so the
+    // log verifies only against the chain — the provider is required.
+    const result = await verifyEventLog(asset.celLog!, {
+      expectedDid: deriveDidCel(asset.celLog!),
+      ordinalsProvider: provider
+    });
+    expect(result.verified).toBe(true);
+  });
+
+  test('keyStore-less asset: transfer succeeds, cel:append-skipped emitted, no throw, provenance recorded', async () => {
+    const sdk = makeSdk(); // no keyStore
+    const skipped: string[] = [];
+    sdk.lifecycle.on('cel:append-skipped', (e: any) => { skipped.push(e.reason); });
+    const asset = await inscribedCelAsset(sdk);
+    skipped.length = 0; // ignore the inscribe-time skip
+
+    const before = asset.getProvenance().transfers.length;
+    const tx = await sdk.lifecycle.transferOwnership(asset, TO_ADDRESS);
+
+    expect(typeof tx.txid).toBe('string');
+    expect(skipped).toEqual(['NO_KEYSTORE']);
+    expect(asset.getProvenance().transfers.length).toBe(before + 1);
+    // Degrade path leaves the log untouched (no transfer event appended).
+    const events = asset.celLog!.events;
+    expect(events[events.length - 1].type).not.toBe('transfer');
+  });
+
+  test('signer throws mid-append after the sat moved → CEL_APPEND_FAILED_POST_TRANSFER with txid; provenance not lost', async () => {
+    const keyStore = new MockKeyStore();
+    const sdk = makeSdk(keyStore);
+    const asset = await inscribedCelAsset(sdk);
+
+    // Corrupt the OUTGOING controller's key so the transfer append's signer
+    // throws mid-sign (passes the never-had-it guard, then fails for real).
+    const vm = currentControllerVm(asset.celLog!);
+    await keyStore.setPrivateKey(vm, 'z-not-a-valid-multikey-private-key');
+
+    const before = asset.getProvenance().transfers.length;
+    let err: any;
+    try {
+      await sdk.lifecycle.transferOwnership(asset, TO_ADDRESS);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(err.code).toBe('CEL_APPEND_FAILED_POST_TRANSFER');
+    expect(err.details?.txid).toBeTruthy();
+    // The tx happened, so in-memory provenance must still record the transfer.
+    expect(asset.getProvenance().transfers.length).toBe(before + 1);
   });
 });
 

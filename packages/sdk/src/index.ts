@@ -16,6 +16,8 @@ export type {
 } from './core/OriginalsSDK.js';
 export { OriginalsAsset } from './lifecycle/OriginalsAsset.js';
 export type { ProvenanceChain } from './lifecycle/OriginalsAsset.js';
+export { replayProvenance, BTCO_SATOSHI_UNKNOWN } from './lifecycle/replayProvenance.js';
+export type { ReplayedProvenance } from './lifecycle/replayProvenance.js';
 
 // Type exports
 export * from './types/index.js';
@@ -227,6 +229,8 @@ export {
   deriveDidCelFromGenesis,
   isDidCel,
   didCelMatchesLog,
+  createCelDidDocument,
+  resolveDidCel,
 } from './cel/celDid.js';
 export {
   createExternalReference,
@@ -251,6 +255,11 @@ export {
   serializeEventLogCbor,
   parseEventLogCbor,
 } from './cel/serialization/cbor.js';
+export {
+  celSignerFromKeyPair,
+  createKeyStoreCelSigner,
+  hexSha256ToDigestMultibase,
+} from './cel/signerAdapter.js';
 
 // Default export
 export default OriginalsSDK;

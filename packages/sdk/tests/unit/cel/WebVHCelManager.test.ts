@@ -579,6 +579,32 @@ describe('WebVHCelManager', () => {
         'First event must be a create event'
       );
     });
+
+    it('throws for a shapeless genesis (neither controller nor did) instead of minting an unbacked did:cel', () => {
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const shapelessLog: EventLog = {
+        events: [
+          {
+            type: 'create',
+            data: {
+              name: 'Shapeless Asset',
+              resources: [],
+              createdAt: '2020-01-01T00:00:00.000Z',
+            },
+            proof: [{
+              type: 'DataIntegrityProof',
+              cryptosuite: 'eddsa-jcs-2022',
+              created: '2020-01-01T00:00:00.000Z',
+              verificationMethod: 'did:key:z6Mk#key-0',
+              proofPurpose: 'assertionMethod',
+              proofValue: 'zMock',
+            }],
+          },
+        ],
+      };
+
+      expect(() => manager.getCurrentState(shapelessLog)).toThrow(/genesis|controller|did/i);
+    });
   });
 
   describe('integration: peer to webvh migration', () => {
