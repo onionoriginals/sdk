@@ -17,10 +17,12 @@ import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix } from '../cel/btcoDid.js';
 import { KeyManager } from '../did/KeyManager.js';
-import { celSignerFromKeyPair, hexSha256ToDigestMultibase } from '../cel/signerAdapter.js';
+import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
 import { createCelDidDocument } from '../cel/celDid.js';
 import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
-import type { ExternalReference } from '../cel/types.js';
+import { appendEvent } from '../cel/algorithms/appendEvent.js';
+import { serializeEventLogJson } from '../cel/serialization/json.js';
+import type { EventLog, ExternalReference } from '../cel/types.js';
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { multikey } from '../crypto/Multikey.js';
 import { createBtcoDidDocument } from '../did/createBtcoDidDocument.js';
@@ -596,6 +598,10 @@ export class LifecycleManager {
       // guard above, but captured dynamically for correctness).
       const priorLayer = asset.currentLayer;
 
+      // Snapshot the CEL log so a mid-publish failure after the migrate append
+      // can restore it (alongside the resource-url/storage rollback).
+      const logBefore = asset.celLog;
+
       try {
         // Mint the asset's OWN did:webvh — genuine SCID, signed genesis log,
         // alsoKnownAs back-link to the peer DID (#376). The publisher argument
@@ -632,14 +638,64 @@ export class LifecycleManager {
         const minted = this.parseWebVHDid(migration.did);
         await this.publishResources(asset, migration.did, minted.domain, minted.userPath, writtenObjects);
 
+        // Append the signed `migrate` event to the asset's CEL — the first
+        // lifecycle append. Signed by the CURRENT controller (folded from the
+        // log). Degraded modes: no keyStore to sign with, or a legacy asset
+        // with no CEL log — skip the append + cel.json hosting and surface why.
+        // Publish must not hard-require a keyStore in Phase 2.
+        const migratedAt = new Date().toISOString();
+        let celAppended = false;
+        // Reason is null while a signable append is still possible.
+        let skipReason: 'NO_KEYSTORE' | 'NO_CEL_LOG' | 'NO_SIGNING_KEY' | null =
+          !this.keyStore ? 'NO_KEYSTORE' : !logBefore ? 'NO_CEL_LOG' : null;
+        if (this.keyStore && logBefore && skipReason === null) {
+          const vm = currentControllerVm(logBefore);
+          // The controller key can be absent when the asset was minted by a
+          // different, keyStore-less manager. Degrade gracefully rather than
+          // failing the whole publish (Phase 2 does not hard-require signing).
+          if (!(await this.keyStore.getPrivateKey(vm))) {
+            skipReason = 'NO_SIGNING_KEY';
+          } else {
+            const signer = createKeyStoreCelSigner(this.keyStore, vm);
+            const newLog = await appendEvent(
+              logBefore,
+              'migrate',
+              {
+                sourceDid: asset.id,
+                targetDid: migration.did,
+                layer: 'webvh',
+                domain: minted.domain,
+                migratedAt
+              },
+              { signer, verificationMethod: vm }
+            );
+            asset._replaceCelLog(newLog);
+            celAppended = true;
+          }
+        }
+        if (!celAppended && skipReason) {
+          await this.eventEmitter.emit({
+            type: 'cel:append-skipped',
+            timestamp: new Date().toISOString(),
+            asset: { id: asset.id },
+            reason: skipReason
+          });
+        }
+
         // Host the signed DID log so the DID actually resolves.
         await this.hostDIDLog(migration.did, migration.log, writtenObjects);
 
-        const originalPeerDid = asset.id;
+        // Host the CEL beside did.jsonl (only when the migrate event was
+        // appended, so the hosted log includes it).
+        if (celAppended) {
+          await this.hostCelLog(migration.did, asset.celLog!, writtenObjects);
+        }
+
+        const sourceDid = asset.id;
         await asset.migrate('did:webvh');
         asset.bindings = {
           ...(asset.bindings || {}),
-          'did:peer': originalPeerDid,
+          'did:cel': sourceDid,
           'did:webvh': migration.did
         };
 
@@ -654,6 +710,10 @@ export class LifecycleManager {
       } catch (publishError) {
         if (atomicRollback) {
           await this.rollbackPartialPublish(asset, urlSnapshots, writtenObjects);
+          // Revert the migrate append if it landed before the failure.
+          if (logBefore && asset.celLog !== logBefore) {
+            asset._replaceCelLog(logBefore);
+          }
         }
         throw publishError;
       }
@@ -856,27 +916,36 @@ export class LifecycleManager {
   }
 
   /**
-   * Hosts the signed did:webvh log as JSONL through the storage adapter,
-   * mirroring the resolution-URL layout WebVHManager.saveDIDLog uses on the
-   * filesystem: did:webvh:{SCID}:{domain}:p1:p2 -> {domain}/p1/p2/did.jsonl,
-   * no-path DIDs -> {domain}/.well-known/did.jsonl. No storage adapter is a
-   * degraded (but allowed) mode: the DID exists and the signed log is
-   * returned to the caller, but nothing hosts it — surfaced via event.
+   * Derives the storage location for a sibling file (did.jsonl, cel.json) under
+   * a did:webvh, mirroring WebVHManager.saveDIDLog's resolution layout:
+   * did:webvh:{SCID}:{domain}:p1:p2 -> {domain}/p1/p2/{filename}, no-path DIDs
+   * -> {domain}/.well-known/{filename}.
+   */
+  private webvhStorageLocation(did: string, filename: string): { domain: string; relativePath: string } {
+    const parts = did.split(':');
+    if (parts.length < 4 || parts[0] !== 'did' || parts[1] !== 'webvh') {
+      throw new StructuredError('INVALID_DID', `Cannot host ${filename} for non-webvh DID: ${did}`);
+    }
+    const domain = decodeURIComponent(parts[3]);
+    const pathParts = parts.slice(4);
+    const relativePath = pathParts.length
+      ? `${pathParts.join('/')}/${filename}`
+      : `.well-known/${filename}`;
+    return { domain, relativePath };
+  }
+
+  /**
+   * Hosts the signed did:webvh log as JSONL through the storage adapter (see
+   * webvhStorageLocation for the layout). No storage adapter is a degraded (but
+   * allowed) mode: the DID exists and the signed log is returned to the caller,
+   * but nothing hosts it — surfaced via event.
    */
   private async hostDIDLog(
     did: string,
     log: unknown,
     writtenObjects?: Array<{ domain: string; relativePath: string }>
   ): Promise<void> {
-    const parts = did.split(':');
-    if (parts.length < 4 || parts[0] !== 'did' || parts[1] !== 'webvh') {
-      throw new StructuredError('INVALID_DID', `Cannot host log for non-webvh DID: ${did}`);
-    }
-    const domain = decodeURIComponent(parts[3]);
-    const pathParts = parts.slice(4);
-    const relativePath = pathParts.length
-      ? `${pathParts.join('/')}/did.jsonl`
-      : `.well-known/did.jsonl`;
+    const { domain, relativePath } = this.webvhStorageLocation(did, 'did.jsonl');
 
     // A non-array or empty log would serialize to a zero-byte did.jsonl that
     // silently serves an unresolvable DID. Surface it via event and write
@@ -909,6 +978,33 @@ export class LifecycleManager {
         did,
         reason: 'NO_STORAGE_ADAPTER'
       });
+    }
+  }
+
+  /**
+   * Hosts the asset's CEL as `cel.json` beside its `did.jsonl` (same webvh
+   * storage layout), serialized with the deterministic JSON serializer. A
+   * missing storage adapter is a no-op: the DID log's own NO_STORAGE_ADAPTER
+   * event already surfaces the un-hosted state for this publish.
+   */
+  private async hostCelLog(
+    did: string,
+    log: EventLog,
+    writtenObjects?: Array<{ domain: string; relativePath: string }>
+  ): Promise<void> {
+    const { domain, relativePath } = this.webvhStorageLocation(did, 'cel.json');
+    const json = serializeEventLogJson(log);
+
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
+    const withPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<unknown> } | undefined;
+    const withPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<unknown> } | undefined;
+
+    if (withPut && typeof withPut.put === 'function') {
+      await withPut.put(`${domain}/${relativePath}`, Buffer.from(json), { contentType: 'application/json' });
+      writtenObjects?.push({ domain, relativePath });
+    } else if (withPutObject && typeof withPutObject.putObject === 'function') {
+      await withPutObject.putObject(domain, relativePath, new TextEncoder().encode(json));
+      writtenObjects?.push({ domain, relativePath });
     }
   }
 

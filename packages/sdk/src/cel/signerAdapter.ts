@@ -10,7 +10,7 @@ import { StructuredError } from '../utils/telemetry.js';
 import { multibase } from '../utils/encoding.js';
 import type { KeyStore } from '../types/common.js';
 import type { KeyPair } from '../types/bitcoin.js';
-import type { DataIntegrityProof } from './types.js';
+import type { DataIntegrityProof, EventLog } from './types.js';
 import type { CelSigner } from './layers/PeerCelManager.js';
 
 const SHA2_256_MULTIHASH_PREFIX = Uint8Array.from([0x12, 0x20]);
@@ -56,6 +56,39 @@ export function createKeyStoreCelSigner(keyStore: KeyStore, verificationMethodId
     }
     return buildProof(assertEd25519(priv), verificationMethodId, data);
   };
+}
+
+/** The controller's canonical VM: `<did>#<key>` for did:key, else `<did>#key-0`. */
+function canonicalControllerVm(controller: string): string {
+  return controller.startsWith('did:key:')
+    ? `${controller}#${controller.slice('did:key:'.length)}`
+    : `${controller}#key-0`;
+}
+
+/**
+ * Folds a CEL log to the CURRENT controller's verification method: the genesis
+ * `controller`'s did:key VM, unless a later `rotateKey` supersedes it (the LAST
+ * rotation's `newController` wins). Mirrors PeerCelManager.getCurrentState.
+ *
+ * NOTE: this fold does NOT verify proofs — it replays event state the same way
+ * the manager does; the signature check happens at verify time. Callers that
+ * need authority guarantees must verify the log separately.
+ */
+export function currentControllerVm(log: EventLog): string {
+  const events = log?.events ?? [];
+  const genesis = events[0]?.data as { controller?: unknown } | undefined;
+  let controller = typeof genesis?.controller === 'string' ? genesis.controller : undefined;
+  for (let i = 1; i < events.length; i++) {
+    if (events[i].type === 'rotateKey') {
+      const nc = (events[i].data as { newController?: unknown })?.newController;
+      if (typeof nc === 'string') controller = nc;
+    }
+  }
+  if (!controller) {
+    throw new StructuredError('CEL_NO_CONTROLLER',
+      'Cannot determine controller VM: genesis has no `controller` and no rotateKey supplied one.');
+  }
+  return canonicalControllerVm(controller);
 }
 
 /** AssetResource.hash (hex sha256) → CEL digestMultibase (multibase multihash). */
