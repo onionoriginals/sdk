@@ -21,6 +21,8 @@ import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSign
 import { createCelDidDocument } from '../cel/celDid.js';
 import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
 import { appendEvent } from '../cel/algorithms/appendEvent.js';
+import { computeDigestMultibase } from '../cel/hash.js';
+import { canonicalizeEntryForChain } from '../cel/canonicalize.js';
 import { serializeEventLogJson } from '../cel/serialization/json.js';
 import type { EventLog, ExternalReference } from '../cel/types.js';
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
@@ -1303,6 +1305,43 @@ export class LifecycleManager {
     return this.credentialManager.signCredential(credential, privateKey, vmId);
   }
 
+  /**
+   * Append-first lifecycle CEL event with the same degrade contract as
+   * publishToWeb: signed by the CURRENT controller folded from the log; when
+   * no keyStore / no CEL log / no signing key, skip and emit
+   * `cel:append-skipped` instead of failing the lifecycle operation.
+   *
+   * @returns the head digest (chain-link expression over the appended entry —
+   * stable across later witness-proof attachment, since chain canonicalization
+   * excludes proofs) or null when the append was skipped.
+   */
+  private async appendCelEventOrSkip(
+    asset: OriginalsAsset,
+    type: 'migrate' | 'rotateKey',
+    data: unknown
+  ): Promise<string | null> {
+    const logBefore = asset.celLog;
+    let skipReason: 'NO_KEYSTORE' | 'NO_CEL_LOG' | 'NO_SIGNING_KEY' =
+      !this.keyStore ? 'NO_KEYSTORE' : 'NO_CEL_LOG';
+    if (this.keyStore && logBefore) {
+      const vm = currentControllerVm(logBefore);
+      if (await this.keyStore.getPrivateKey(vm)) {
+        const signer = createKeyStoreCelSigner(this.keyStore, vm);
+        const newLog = await appendEvent(logBefore, type, data, { signer, verificationMethod: vm });
+        asset._replaceCelLog(newLog);
+        return computeDigestMultibase(canonicalizeEntryForChain(newLog.events[newLog.events.length - 1]));
+      }
+      skipReason = 'NO_SIGNING_KEY';
+    }
+    await this.eventEmitter.emit({
+      type: 'cel:append-skipped',
+      timestamp: new Date().toISOString(),
+      asset: { id: asset.id },
+      reason: skipReason
+    });
+    return null;
+  }
+
   async inscribeOnBitcoin(
     asset: OriginalsAsset,
     feeRate?: number
@@ -1310,7 +1349,11 @@ export class LifecycleManager {
     const stopTimer = this.logger.startTimer('inscribeOnBitcoin');
     const metricsStart = performance.now();
     this.logger.info('Inscribing asset on Bitcoin', { assetId: asset.id, feeRate });
-    
+    // Method-scoped so the outer catch can restore the pre-append log on any
+    // failure after the append (in-memory only; nothing is paid pre-broadcast).
+    let celLogBefore: EventLog | undefined;
+    let celHeadDigest: string | null = null;
+
     try {
       // Input validation
       if (!asset || typeof asset !== 'object') {
@@ -1350,6 +1393,17 @@ export class LifecycleManager {
     for (const res of asset.resources) {
       this.assertContentMatchesDeclaredHash(res, 'inscribe on Bitcoin');
     }
+    // Append-first (#365): the signed btco migrate event lands BEFORE the
+    // inscription so the on-chain document can commit to the post-append head.
+    // Satoshi/txid are unknown pre-inscription and are deliberately NOT in the
+    // signed data — they arrive later via witness proofs (BtcoMigrationData).
+    celLogBefore = asset.celLog;
+    celHeadDigest = await this.appendCelEventOrSkip(asset, 'migrate', {
+      sourceDid: asset.bindings?.['did:webvh'] ?? asset.id,
+      layer: 'btco',
+      network: this.getConfiguredBitcoinNetwork(),
+      migratedAt: new Date().toISOString()
+    });
     // Resource manifest rides INSIDE the DID document as a service entry —
     // the inscription itself must be the DID document (application/did+json)
     // or the SDK's own BtcoDidResolver rejects it (#375).
@@ -1371,7 +1425,15 @@ export class LifecycleManager {
             id: `${btcoDoc.id}#resources`,
             type: 'OriginalsResourceManifest',
             serviceEndpoint: manifestEndpoint
-          }
+          },
+          // On-chain commitment to the entire signed history (#365): anchors
+          // the CEL head so the log cannot be swapped or truncated post-hoc.
+          // Absent when the append degraded — the doc simply lacks the anchor.
+          ...(celHeadDigest !== null ? [{
+            id: `${btcoDoc.id}#cel`,
+            type: 'OriginalsCelAnchor',
+            serviceEndpoint: { headDigestMultibase: celHeadDigest }
+          }] : [])
         ];
         return Buffer.from(JSON.stringify(btcoDoc));
       },
@@ -1468,6 +1530,11 @@ export class LifecycleManager {
       this.inFlightAssets.delete(asset.id);
     }
     } catch (error) {
+      // Anything thrown after the append leaves the log ahead of reality —
+      // restore the pre-append snapshot (pure in-memory).
+      if (celHeadDigest !== null && celLogBefore && asset.celLog !== celLogBefore) {
+        asset._replaceCelLog(celLogBefore);
+      }
       stopTimer();
       this.logger.error('Bitcoin inscription failed', error as Error, { assetId: asset.id, feeRate });
       this.metrics.recordOperation('lifecycle.inscribeOnBitcoin', performance.now() - metricsStart, false);
@@ -1666,13 +1733,47 @@ export class LifecycleManager {
       }
     ];
 
+    // Append-first (#365): rotateKey signed by the CURRENT controller — the
+    // cooperative-rotation contract (the verifier only accepts rotations
+    // authorized by the outgoing authority). Non-cooperative rotation
+    // acceptance (post-transfer stale-key window, design §5) is Phase-3+
+    // verifier work; this wires the cooperative path only.
+    const celLogBefore = asset.celLog;
+    const celHeadDigest = await this.appendCelEventOrSkip(asset, 'rotateKey', {
+      newController: `did:key:${newVerificationMethod.publicKeyMultibase}`,
+      rotatedAt: new Date().toISOString()
+    });
+    // Re-embed #cel with the FRESH head (the rotateKey entry): the resolver
+    // serves the newest inscription, so omitting it would erase the anchor.
+    // On degrade the event was not appended and no anchor is embedded.
+    if (celHeadDigest !== null) {
+      rotatedDoc.service = [
+        ...(rotatedDoc.service || []),
+        {
+          id: `${rotatedDoc.id}#cel`,
+          type: 'OriginalsCelAnchor',
+          serviceEndpoint: { headDigestMultibase: celHeadDigest }
+        }
+      ];
+    }
+
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
-    const inscription = await bitcoinManager.inscribeData(
-      Buffer.from(JSON.stringify(rotatedDoc)),
-      'application/did+json',
-      feeRate,
-      { targetSatoshi: satoshi }
-    );
+    let inscription;
+    try {
+      inscription = await bitcoinManager.inscribeData(
+        Buffer.from(JSON.stringify(rotatedDoc)),
+        'application/did+json',
+        feeRate,
+        { targetSatoshi: satoshi }
+      );
+    } catch (error) {
+      // Reinscription failed after the append — restore the pre-append log
+      // (pure in-memory; nothing was paid before broadcast failed).
+      if (celHeadDigest !== null && celLogBefore) {
+        asset._replaceCelLog(celLogBefore);
+      }
+      throw error;
+    }
 
     await this.eventEmitter.emit({
       type: 'key:rotated',
