@@ -11,7 +11,14 @@ import {
 import { BitcoinManager, MAX_REASONABLE_FEE_RATE } from '../bitcoin/BitcoinManager.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { CredentialManager } from '../vc/CredentialManager.js';
-import { OriginalsAsset } from './OriginalsAsset.js';
+import { OriginalsAsset, type ProvenanceChain } from './OriginalsAsset.js';
+import { replayProvenance } from './replayProvenance.js';
+import { checkGenesisResourceBinding } from './genesisBinding.js';
+import {
+  ASSET_ENVELOPE_FORMAT,
+  ASSET_ENVELOPE_VERSION,
+  type AssetEnvelope
+} from './assetEnvelope.js';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
 import { hashResource } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
@@ -19,13 +26,15 @@ import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix } from '../cel/btcoDid.js';
 import { KeyManager } from '../did/KeyManager.js';
 import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
-import { createCelDidDocument } from '../cel/celDid.js';
+import { createCelDidDocument, didCelMatchesLog } from '../cel/celDid.js';
+import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
+import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
 import { appendEvent } from '../cel/algorithms/appendEvent.js';
 import { computeDigestMultibase } from '../cel/hash.js';
 import { canonicalizeEntryForChain } from '../cel/canonicalize.js';
-import { serializeEventLogJson } from '../cel/serialization/json.js';
-import type { EventLog, ExternalReference, WitnessProof } from '../cel/types.js';
+import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
+import type { EventLog, LogEntry, ExternalReference, WitnessProof, OrdinalsLookup, VerificationResult } from '../cel/types.js';
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { multikey } from '../crypto/Multikey.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
@@ -337,6 +346,262 @@ export class LifecycleManager {
       this.metrics.recordError('ASSET_CREATION_FAILED', 'createAsset');
       throw error;
     }
+  }
+
+  /**
+   * Reconstruct an asset from a serialized {@link AssetEnvelope} — the buyer
+   * half of the interchange format (#377). Inverse of {@link OriginalsAsset.serialize}.
+   *
+   * VERIFIES BY DEFAULT: parses and structurally validates the envelope, then
+   * (unless `skipVerification`) runs the SAME cryptographic gate the live verify
+   * path uses — `verifyEventLog` bound to `assetDid`, the resource↔genesis
+   * binding, per-resource inline-content hashes, and DID-doc↔fold cross-checks —
+   * before folding the log into provenance and rebuilding via
+   * {@link OriginalsAsset.restore}. Every failure is fail-closed.
+   *
+   * The `unverified.*` honesty section is passed through as advisory only and is
+   * NEVER promoted to trusted state: a `unverified.bindings['did:btco']` the fold
+   * cannot derive from the log is surfaced in `warnings`, not in `asset.bindings`.
+   *
+   * @param envelope - The envelope object or its JSON string.
+   * @param opts.skipVerification - Skip the cryptographic + binding checks ONLY;
+   *   structural validation (format/version/required fields) always runs.
+   * @param opts.ordinalsProvider - Ordinals lookup for bitcoin witness proofs;
+   *   defaults to `config.ordinalsProvider`. btco-anchored logs fail closed
+   *   without one.
+   * @throws StructuredError('ENVELOPE_INVALID') for malformed envelopes.
+   * @throws StructuredError('ENVELOPE_VERSION_UNSUPPORTED') for a version newer
+   *   than this SDK supports.
+   * @throws StructuredError('ASSET_LOAD_VERIFICATION_FAILED', …, { verification })
+   *   when verification or any binding/cross-check fails.
+   */
+  async loadAsset(
+    envelope: AssetEnvelope | string,
+    opts?: { skipVerification?: boolean; ordinalsProvider?: OrdinalsLookup }
+  ): Promise<{ asset: OriginalsAsset; verification?: VerificationResult; warnings: string[] }> {
+    // 1) Structural validation (ALWAYS runs, even under skipVerification).
+    let env: AssetEnvelope;
+    if (typeof envelope === 'string') {
+      try {
+        env = JSON.parse(envelope) as AssetEnvelope;
+      } catch (e) {
+        throw new StructuredError('ENVELOPE_INVALID', `Envelope is not valid JSON: ${(e as Error).message}`);
+      }
+    } else {
+      env = envelope;
+    }
+    if (!env || typeof env !== 'object') {
+      throw new StructuredError('ENVELOPE_INVALID', 'Envelope must be an object or a JSON string.');
+    }
+    if (env.format !== ASSET_ENVELOPE_FORMAT) {
+      throw new StructuredError('ENVELOPE_INVALID', `Unrecognized envelope format: ${String(env.format)} (expected ${ASSET_ENVELOPE_FORMAT}).`);
+    }
+    if (!Number.isInteger(env.version)) {
+      throw new StructuredError('ENVELOPE_INVALID', `Envelope version must be an integer; got ${String(env.version)}.`);
+    }
+    if (env.version > ASSET_ENVELOPE_VERSION) {
+      throw new StructuredError('ENVELOPE_VERSION_UNSUPPORTED', `Envelope version ${env.version} is newer than this SDK supports (max ${ASSET_ENVELOPE_VERSION}).`);
+    }
+    if (typeof env.assetDid !== 'string' || !env.assetDid) {
+      throw new StructuredError('ENVELOPE_INVALID', 'Envelope is missing a valid assetDid.');
+    }
+    if (!env.eventLog || typeof env.eventLog !== 'object') {
+      throw new StructuredError('ENVELOPE_INVALID', 'Envelope is missing a valid eventLog.');
+    }
+    if (!env.didDocuments || typeof env.didDocuments !== 'object' || !env.didDocuments['did:cel']) {
+      throw new StructuredError('ENVELOPE_INVALID', "Envelope is missing didDocuments['did:cel'].");
+    }
+    if (!Array.isArray(env.resources) || env.resources.length === 0) {
+      throw new StructuredError('ENVELOPE_INVALID', 'Envelope must carry a non-empty resources array.');
+    }
+
+    // 2) Log parsing through the JSON gate (validates structure, decouples from
+    // the caller's object, preserves witness-proof extension fields).
+    let log: EventLog;
+    try {
+      log = parseEventLogJson(JSON.stringify(env.eventLog));
+    } catch (e) {
+      throw new StructuredError('ENVELOPE_INVALID', `Envelope eventLog is not a valid CEL log: ${(e as Error).message}`);
+    }
+
+    // The fold is needed to rebuild the asset regardless of verification.
+    const folded = replayProvenance(log);
+
+    // 3-5) Verification + binding + cross-checks (skipped by skipVerification).
+    let verification: VerificationResult | undefined;
+    if (!opts?.skipVerification) {
+      const provider = opts?.ordinalsProvider ?? this.config.ordinalsProvider;
+      verification = await verifyEventLog(log, {
+        expectedDid: env.assetDid,
+        resolveKey: createDidManagerKeyResolver(this.didManager),
+        ordinalsProvider: provider
+      });
+      if (!verification.verified) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          `Event log failed verification for ${env.assetDid}. Refusing to load an asset whose provenance does not verify.`,
+          { verification }
+        );
+      }
+
+      // 4) Resource↔genesis binding (shared helper) + inline-content hashes.
+      if (!checkGenesisResourceBinding(log, env.resources)) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          'Envelope resources do not back the log genesis (a genesis resource digest is missing).',
+          { verification }
+        );
+      }
+      for (const res of env.resources) {
+        if (typeof res.content === 'string') {
+          const computed = hashResource(Buffer.from(res.content, 'utf8'));
+          if (computed.toLowerCase() !== String(res.hash).toLowerCase()) {
+            throw new StructuredError(
+              'ASSET_LOAD_VERIFICATION_FAILED',
+              `Resource ${res.id}: inline content does not match its declared hash (declared ${res.hash}, computed ${computed}).`,
+              { verification }
+            );
+          }
+        }
+      }
+
+      // 5) Cross-checks: the fold IS the source of truth for identity/bindings;
+      // an envelope's advisory DID docs must not disagree with it — a swapped
+      // doc is exactly the attack the envelope invites. did:cel is bound by the
+      // genesis derivation; webvh/btco docs must match the folded binding when
+      // the fold derived one (a degraded btco binding has none — see step 7).
+      if (!didCelMatchesLog(env.assetDid, log)) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          `assetDid ${env.assetDid} does not derive from the log genesis.`,
+          { verification }
+        );
+      }
+      const webvhDoc = env.didDocuments['did:webvh'];
+      if (webvhDoc && folded.bindings['did:webvh'] && webvhDoc.id !== folded.bindings['did:webvh']) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          `didDocuments['did:webvh'].id (${webvhDoc.id}) does not match the folded binding (${folded.bindings['did:webvh']}).`,
+          { verification }
+        );
+      }
+      const btcoDoc = env.didDocuments['did:btco'];
+      if (btcoDoc && folded.bindings['did:btco'] && btcoDoc.id !== folded.bindings['did:btco']) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          `didDocuments['did:btco'].id (${btcoDoc.id}) does not match the folded binding (${folded.bindings['did:btco']}).`,
+          { verification }
+        );
+      }
+    }
+
+    // 6) Assemble provenance from the (verified) log + fold + advisory unverified.
+    const warnings: string[] = [];
+    const provenance = this.buildRestoredProvenance(log, folded, env, warnings);
+
+    const asset = OriginalsAsset.restore(
+      env.resources.map(r => ({ ...r })),
+      structuredClone(env.didDocuments['did:cel']),
+      (env.credentials ?? []).map(c => ({ ...c })),
+      log,
+      { currentLayer: folded.currentLayer, bindings: folded.bindings, provenance }
+    );
+
+    return { asset, verification, warnings };
+  }
+
+  /**
+   * Fold the log into a {@link ProvenanceChain} for restore(). createdAt/creator
+   * come from the genesis data; migrations are re-materialized in the live
+   * layer-to-layer shape (enriched from bitcoin witness proofs + advisory
+   * `unverified.commitTxId`/`feeRate`); transfers come from the fold; the
+   * `unverified.bindings` degraded btco binding is NEVER promoted — surfaced in
+   * `warnings` instead (step 7).
+   */
+  private buildRestoredProvenance(
+    log: EventLog,
+    folded: ReturnType<typeof replayProvenance>,
+    env: AssetEnvelope,
+    warnings: string[]
+  ): ProvenanceChain {
+    const genesisData = (log.events[0]?.data ?? {}) as Record<string, unknown>;
+    const createdAt = typeof genesisData.createdAt === 'string' ? genesisData.createdAt : '';
+    const creator = typeof genesisData.controller === 'string'
+      ? genesisData.controller
+      : typeof genesisData.creator === 'string'
+        ? genesisData.creator
+        : env.assetDid;
+
+    // Re-materialize migrations layer-to-layer by walking the log.
+    const migrations: ProvenanceChain['migrations'] = [];
+    let layer: LayerType = 'did:peer';
+    for (let i = 1; i < log.events.length; i++) {
+      const ev = log.events[i];
+      if (ev.type !== 'migrate') continue;
+      const data = (ev.data ?? {}) as Record<string, unknown>;
+      const timestamp = typeof data.migratedAt === 'string' ? data.migratedAt : '';
+      if (data.layer === 'webvh') {
+        migrations.push({ from: layer, to: 'did:webvh', timestamp });
+        layer = 'did:webvh';
+      } else if (data.layer === 'btco') {
+        const wp = this.extractBitcoinWitnessProof(ev);
+        migrations.push({
+          from: layer,
+          to: 'did:btco',
+          timestamp,
+          transactionId: wp?.txid,
+          inscriptionId: wp?.inscriptionId,
+          satoshi: wp?.satoshi,
+          commitTxId: env.unverified?.commitTxId,
+          revealTxId: wp?.txid,
+          feeRate: env.unverified?.feeRate
+        });
+        layer = 'did:btco';
+      }
+    }
+
+    const transfers = folded.transfers.map(t => ({
+      from: t.from,
+      to: t.to,
+      timestamp: t.timestamp,
+      transactionId: t.transactionId ?? ''
+    }));
+
+    const resourceUpdates = (env.unverified?.resourceUpdates ?? []).map(u => ({ ...u }));
+
+    // txid: last transfer wins, else the btco migration's witnessed reveal txid.
+    const lastTransfer = transfers[transfers.length - 1];
+    const lastBtco = [...migrations].reverse().find(m => m.to === 'did:btco');
+    const txid = lastTransfer?.transactionId || lastBtco?.transactionId;
+
+    // 7) Degraded binding: fold couldn't derive btco but the honesty section
+    // carries one — do NOT promote; surface as advisory.
+    const advisoryBtco = env.unverified?.bindings?.['did:btco'];
+    if (!folded.bindings['did:btco'] && advisoryBtco) {
+      warnings.push(
+        `did:btco binding (${advisoryBtco}) is present only in unverified.bindings and is not derivable from the log; ` +
+        `it was NOT promoted to a trusted binding (advisory only).`
+      );
+    }
+
+    const provenance: ProvenanceChain = { createdAt, creator, migrations, transfers, resourceUpdates };
+    if (txid) provenance.txid = txid;
+    return provenance;
+  }
+
+  /** Extract the bitcoin witness proof fields from a migrate event, if present. */
+  private extractBitcoinWitnessProof(event: LogEntry): { txid?: string; satoshi?: string; inscriptionId?: string } | undefined {
+    const proofs = event.proof as ReadonlyArray<unknown> | undefined;
+    const bp = proofs?.find(
+      (p): p is Record<string, unknown> =>
+        !!p && typeof p === 'object' && (p as Record<string, unknown>).cryptosuite === 'bitcoin-ordinals-2024'
+    );
+    if (!bp) return undefined;
+    return {
+      txid: typeof bp.txid === 'string' ? bp.txid : undefined,
+      satoshi: typeof bp.satoshi === 'string' ? bp.satoshi : undefined,
+      inscriptionId: typeof bp.inscriptionId === 'string' ? bp.inscriptionId : undefined
+    };
   }
 
   /**
