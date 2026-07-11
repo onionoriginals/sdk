@@ -5,7 +5,8 @@ import {
   KeyStore,
   ExternalSigner,
   VerifiableCredential,
-  LayerType
+  LayerType,
+  DIDDocument
 } from '../types/index.js';
 import { BitcoinManager, MAX_REASONABLE_FEE_RATE } from '../bitcoin/BitcoinManager.js';
 import { DIDManager } from '../did/DIDManager.js';
@@ -701,9 +702,6 @@ export class LifecycleManager {
           'did:cel': sourceDid,
           'did:webvh': migration.did
         };
-        // Retain the minted webvh DID doc for serialize() (the live flow reads
-        // only its VM id and otherwise discards it).
-        asset._captureDidDocument('did:webvh', migration.didDocument);
 
         // Mirror onto the manager emitter: asset.migrate emits only on the
         // asset's private emitter, so sdk.lifecycle.on('asset:migrated', ...)
@@ -713,6 +711,12 @@ export class LifecycleManager {
           timestamp: new Date().toISOString(),
           asset: { id: asset.id, fromLayer: priorLayer, toLayer: 'did:webvh' }
         });
+
+        // Retain the minted webvh DID doc for serialize() (the live flow reads
+        // only its VM id and otherwise discards it) — captured after the
+        // same-try emit so the capture only lands once this step is fully
+        // committed (mirrors inscribeOnBitcoin's post-migrate capture).
+        asset._captureDidDocument('did:webvh', migration.didDocument);
       } catch (publishError) {
         if (atomicRollback) {
           await this.rollbackPartialPublish(asset, urlSnapshots, writtenObjects);
@@ -1423,6 +1427,12 @@ export class LifecycleManager {
       (d): d is string => typeof d === 'string'
     );
 
+    // Held locally, not captured into the asset yet: buildContent runs BEFORE
+    // the inscription is confirmed (satoshi known, asset.migrate succeeded).
+    // Capturing here would leave a stale doc in #didDocuments with no rollback
+    // if the operation fails afterward (e.g. ORD_SATOSHI_UNKNOWN) — mirrors
+    // rotateBtcoKeys' post-success capture.
+    let inscribedBtcoDoc: DIDDocument | undefined;
     const inscription = await bitcoinManager.inscribeData(
       async (satoshi: string) => {
         const btcoDoc = await this.didManager.migrateToDIDBTCO(asset.did, satoshi);
@@ -1443,8 +1453,7 @@ export class LifecycleManager {
             serviceEndpoint: { headDigestMultibase: celHeadDigest }
           }] : [])
         ];
-        // Retain the inscribed btco DID doc for serialize() (otherwise discarded).
-        asset._captureDidDocument('did:btco', btcoDoc);
+        inscribedBtcoDoc = btcoDoc;
         return Buffer.from(JSON.stringify(btcoDoc));
       },
       'application/did+json',
@@ -1518,6 +1527,14 @@ export class LifecycleManager {
       feeRate: usedFeeRate
     };
     await asset.migrate('did:btco', migrationDetails);
+
+    // Retain the inscribed btco DID doc for serialize() (otherwise discarded)
+    // — only now that the satoshi check and asset.migrate have both
+    // succeeded, so a failure before this point (e.g. ORD_SATOSHI_UNKNOWN)
+    // leaves #didDocuments untouched, consistent with the CEL-log restore.
+    if (inscribedBtcoDoc) {
+      asset._captureDidDocument('did:btco', inscribedBtcoDoc);
+    }
 
     // Mirror onto the manager emitter: asset.migrate emits only on the
     // asset's private emitter, so sdk.lifecycle.on('asset:migrated', ...)

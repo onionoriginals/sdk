@@ -150,7 +150,9 @@ export class OriginalsAsset {
    * replaces the inscription-time btco doc).
    */
   _captureDidDocument(layer: 'did:webvh' | 'did:btco', doc: DIDDocument): void {
-    this.#didDocuments.set(layer, doc);
+    // Clone at capture time: the caller may keep and later mutate `doc` (it
+    // built it locally moments before), which must not corrupt this cache.
+    this.#didDocuments.set(layer, structuredClone(doc));
   }
 
   /**
@@ -179,11 +181,15 @@ export class OriginalsAsset {
     // extension fields) decoupled from the live #celLog reference.
     const eventLog = parseEventLogJson(serializeEventLogJson(this.#celLog));
 
-    const didDocuments: AssetEnvelope['didDocuments'] = { 'did:cel': this.did };
+    // Clone every doc handed out: these are LIVE readonly state (`this.did`)
+    // or the per-layer capture cache — a caller mutating the returned envelope
+    // must never be able to corrupt the signing-key material asset.migrate
+    // and inscribeOnBitcoin consume.
+    const didDocuments: AssetEnvelope['didDocuments'] = { 'did:cel': structuredClone(this.did) };
     const webvhDoc = this.#didDocuments.get('did:webvh');
-    if (webvhDoc) didDocuments['did:webvh'] = webvhDoc;
+    if (webvhDoc) didDocuments['did:webvh'] = structuredClone(webvhDoc);
     const btcoDoc = this.#didDocuments.get('did:btco');
-    if (btcoDoc) didDocuments['did:btco'] = btcoDoc;
+    if (btcoDoc) didDocuments['did:btco'] = structuredClone(btcoDoc);
 
     // Honesty section — assembled from the live in-memory caches only.
     const unverified: NonNullable<AssetEnvelope['unverified']> = {};

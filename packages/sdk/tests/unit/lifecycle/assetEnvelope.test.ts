@@ -122,4 +122,63 @@ describe('AssetEnvelope + serialize() (#377)', () => {
       expect((e as { code?: string }).code).toBe('ASSET_NOT_SERIALIZABLE');
     }
   });
+
+  // Review fix (#377 follow-up): serialize() must hand out defensive copies of
+  // every didDocuments entry, not live references — a caller mutating the
+  // envelope must never be able to corrupt the asset's own signing-key state
+  // (asset.did, or a later-serialized webvh/btco doc).
+  test('serialize() didDocuments are defensive copies — mutating them does not corrupt the asset', async () => {
+    const sdk = makeSDK();
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
+    ]);
+    await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+
+    const originalCelVmId = asset.did.verificationMethod?.[0]?.id;
+    const originalCelKey = asset.did.verificationMethod?.[0]?.publicKeyMultibase;
+
+    const env = asset.serialize();
+    env.didDocuments['did:cel'].verificationMethod![0].publicKeyMultibase = 'CORRUPTED';
+    env.didDocuments['did:webvh']!.verificationMethod![0].publicKeyMultibase = 'CORRUPTED';
+    env.didDocuments['did:btco']!.verificationMethod![0].publicKeyMultibase = 'CORRUPTED';
+
+    // The live asset's own DID doc (consumed by migrateToDIDBTCO etc.) is untouched.
+    expect(asset.did.verificationMethod?.[0]?.id).toBe(originalCelVmId);
+    expect(asset.did.verificationMethod?.[0]?.publicKeyMultibase).toBe(originalCelKey);
+
+    // A fresh serialize() also proves the internal #didDocuments cache was
+    // never mutated via the handed-out reference.
+    const env2 = asset.serialize();
+    expect(env2.didDocuments['did:cel'].verificationMethod![0].publicKeyMultibase).not.toBe('CORRUPTED');
+    expect(env2.didDocuments['did:webvh']!.verificationMethod![0].publicKeyMultibase).not.toBe('CORRUPTED');
+    expect(env2.didDocuments['did:btco']!.verificationMethod![0].publicKeyMultibase).not.toBe('CORRUPTED');
+  });
+
+  test('_captureDidDocument clones at capture time — later mutation of the source object does not corrupt the asset', async () => {
+    const sdk = makeSDK();
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
+    ]);
+
+    const doc = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:webvh:example.com:mutation-source',
+      verificationMethod: [{
+        id: 'did:webvh:example.com:mutation-source#key-0',
+        type: 'Multikey',
+        controller: 'did:webvh:example.com:mutation-source',
+        publicKeyMultibase: 'zORIGINAL'
+      }]
+    } as any;
+
+    (asset as unknown as { _captureDidDocument: (l: 'did:webvh' | 'did:btco', d: any) => void })
+      ._captureDidDocument('did:webvh', doc);
+
+    // Mutate the source object AFTER handing it to _captureDidDocument.
+    doc.verificationMethod[0].publicKeyMultibase = 'zCORRUPTED';
+
+    const env = asset.serialize();
+    expect(env.didDocuments['did:webvh']!.verificationMethod![0].publicKeyMultibase).toBe('zORIGINAL');
+  });
 });
