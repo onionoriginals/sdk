@@ -215,6 +215,28 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     expect(result.errors.some(e => /incompatible with a custom verifier/i.test(e))).toBe(true);
   });
 
+  test('POISONED ANCHOR: truncated prefix whose migrate carries TWO verified bitcoin witnesses → STALE_LOG (fail closed, not fail open)', async () => {
+    const provider = new OrdMockProvider();
+    const a = await makeKey();
+    const b = await makeKey();
+    const { log: prefix, migrateDigest } = await makeAnchoredLog(provider, a);
+    // Honest history continues: b's rotation is re-inscribed on SAT.
+    await addNonCoopRotation(prefix, provider, b);
+    // Attacker appends a SECOND verified witness on a sat THEY control,
+    // committing to the public migrate digest. Task 5 poisons anchoredSat to
+    // undefined — which must NOT disable head-freshness on this btco-anchored
+    // truncated prefix (that would be fail-open, defeating the Task-7 defense).
+    const SAT2 = '9999999999';
+    const insc2 = await inscribeDoc(provider, SAT2, migrateDigest);
+    const poisoned = attachWitness(prefix, insc2, SAT2);
+
+    // Both witnesses verify, so the log's own proofs stay valid — the ONLY
+    // guard left is freshness, which must fail closed.
+    const result = await verifyEventLog(poisoned, { ordinalsProvider: provider, checkHeadFreshness: true });
+    expect(result.verified).toBe(false);
+    expect(STALE(result)).toBe(true);
+  });
+
   test('no anchoredSat (never btco-anchored): the flag is a no-op', async () => {
     const a = await makeKey();
     const log = await createEventLog(

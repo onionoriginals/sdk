@@ -1210,6 +1210,11 @@ export async function verifyEventLog(
   // non-cooperative rotation rule (see evaluateNonCooperativeRotation). Both
   // are default-path machinery; a custom verifier owns proof semantics.
   let anchoredSat: AnchoredSat | undefined;
+  // Tracks whether ANY verified migrate event carried a bitcoin witness proof —
+  // even when the anchor-poison rule below voids anchoredSat. Head-freshness
+  // needs this to distinguish never-btco-anchored (legit no-op) from
+  // btco-anchored-but-poisoned (must fail closed).
+  let sawBtcoAnchorAttempt = false;
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
@@ -1259,6 +1264,11 @@ export async function verifyEventLog(
         // non-cooperative rotation arm stays unavailable otherwise — the log's
         // verdict itself is unchanged.
         const witnessed = bitcoinWitnessProofs(event);
+        // Any verified bitcoin-witnessed migrate marks the log btco-anchored,
+        // INCLUDING the poisoned (>1) case — freshness must still fail closed.
+        if (witnessed.length >= 1) {
+          sawBtcoAnchorAttempt = true;
+        }
         if (witnessed.length === 1) {
           anchoredSat = { satoshi: witnessed[0].satoshi, inscriptionId: witnessed[0].inscriptionId };
         } else if (witnessed.length > 1) {
@@ -1282,8 +1292,12 @@ export async function verifyEventLog(
   // so existing callers see zero behavior change. `anchoredSat` is default-path
   // authority state that never establishes on the custom-verifier path, so
   // requesting the check there is a configuration error (it would silently pass)
-  // and instead fails closed. No anchoredSat ⇒ never btco-anchored ⇒ nothing to
-  // be fresh against ⇒ documented no-op.
+  // and instead fails closed. The no-op is reserved for logs that were NEVER
+  // btco-anchored (no verified bitcoin-witnessed migrate at all) — nothing to be
+  // fresh against. A btco-anchored log whose anchor was POISONED to undefined
+  // (Task-5 >1-witness rule) is UNCHECKABLE, not unanchored: the caller asked
+  // for freshness, so inability to check fails closed as STALE_LOG rather than
+  // silently passing (which would hand attackers a poison-to-bypass lever).
   let staleLogError: string | undefined;
   if (options?.checkHeadFreshness) {
     if (options?.verifier) {
@@ -1292,6 +1306,10 @@ export async function verifyEventLog(
         `on-chain authority walk that head freshness is validated against`;
     } else if (anchoredSat) {
       staleLogError = await verifyHeadFreshness(log, anchoredSat, options?.ordinalsProvider) ?? undefined;
+    } else if (sawBtcoAnchorAttempt) {
+      staleLogError =
+        `STALE_LOG: the log is bitcoin-anchored but its anchor is ambiguous (a migrate event carries ` +
+        `more than one verified bitcoin witness proof), so head freshness cannot be checked; failing closed`;
     }
   }
 
