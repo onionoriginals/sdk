@@ -1317,7 +1317,7 @@ export class LifecycleManager {
    */
   private async appendCelEventOrSkip(
     asset: OriginalsAsset,
-    type: 'migrate' | 'rotateKey',
+    type: 'migrate' | 'rotateKey' | 'transfer',
     data: unknown
   ): Promise<string | null> {
     const logBefore = asset.celLog;
@@ -1644,9 +1644,44 @@ export class LifecycleManager {
     const currentOwner = priorTransfers.length > 0
       ? priorTransfers[priorTransfers.length - 1].to
       : asset.id;
+
+    // Append-first CEL transfer event, signed by the OUTGOING controller, right
+    // after the sat moved. Atomicity differs from publish/inscribe/rotate (task
+    // 6): the sat has ALREADY moved, so a REAL append failure must NOT silently
+    // degrade — provenance would truncate on-log with no signal. Ordering:
+    //   try append → (catch) recordTransfer + throw CEL_APPEND_FAILED_POST_TRANSFER{txid}
+    //   success/degrade → recordTransfer → emit asset:transferred (as today)
+    // recordTransfer runs on BOTH paths so in-memory chain of custody is never
+    // lost; the invariant is EITHER (log has transfer event + provenance
+    // recorded) OR (provenance recorded + loud error carrying the txid to
+    // re-append with). Guard-based degrade (no keyStore / no celLog / controller
+    // key absent) still emits cel:append-skipped and falls through — that is the
+    // never-had-it path, allowed here exactly as for the other ops.
+    let celAppendError: unknown;
+    try {
+      await this.appendCelEventOrSkip(asset, 'transfer', {
+        // Current controller's did:key (the DID part, pre-#) folded from the log.
+        previousOwner: asset.celLog ? currentControllerVm(asset.celLog).split('#')[0] : undefined,
+        newOwner,
+        txid: tx.txid,
+        transferredAt: new Date().toISOString()
+      });
+    } catch (appendErr) {
+      celAppendError = appendErr;
+    }
+
     // Rotation-first model (#366): the sat moved but the DID document still
     // carries the previous owner's keys. The recipient must rotateBtcoKeys.
     await asset.recordTransfer(currentOwner, newOwner, tx.txid, true);
+
+    if (celAppendError) {
+      const detail = celAppendError instanceof Error ? celAppendError.message : String(celAppendError);
+      throw new StructuredError(
+        'CEL_APPEND_FAILED_POST_TRANSFER',
+        `Ownership transferred (txid ${tx.txid}) but the signed CEL transfer event could not be appended: ${detail}. Provenance is truncated on-log; re-append the transfer event with this txid.`,
+        { txid: tx.txid }
+      );
+    }
 
     // Mirror onto the manager emitter: asset.recordTransfer emits only on the
     // asset's private emitter, so sdk.lifecycle.on('asset:transferred', ...)
