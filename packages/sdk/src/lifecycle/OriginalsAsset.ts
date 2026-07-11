@@ -338,10 +338,11 @@ export class OriginalsAsset {
         const genesis = this.#celLog.events[0]?.data as
           { resources?: unknown; did?: unknown } | undefined;
         const genesisResources = genesis?.resources;
-        if (!Array.isArray(genesisResources)) {
-          // Controller-shaped genesis MUST carry a resources array; a missing/
-          // malformed one fails closed. Only legacy-shaped geneses (data.did) —
-          // which predate this contract — skip the check.
+        if (!Array.isArray(genesisResources) || genesisResources.length === 0) {
+          // Controller-shaped genesis MUST carry a NON-EMPTY resources array;
+          // missing, malformed, or empty fails closed (an empty array would
+          // pass the subset check vacuously, binding nothing). Only legacy-
+          // shaped geneses (data.did) — predating this contract — skip it.
           if (typeof genesis?.did !== 'string') {
             return false;
           }

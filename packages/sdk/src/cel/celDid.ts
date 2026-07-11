@@ -44,12 +44,6 @@ export function didCelMatchesLog(did: string, log: EventLog): boolean {
 }
 
 /**
- * Build a minimal did:cel DID Document facade for a genesis controller key.
- * Single Multikey VM (#key-0) bound to authentication + assertionMethod;
- * `alsoKnownAs` records the did:key form of the same key for resolvers that
- * only know did:key. Consumed by asset creation (Phase-2 Task 3).
- */
-/**
  * Resolves a did:cel from its event log: verifies the WHOLE chain against the
  * DID (`expectedDid` binds the log to it) and, on success, folds the CURRENT
  * controller (genesis `controller`, handed off by valid rotateKey events) into
@@ -78,6 +72,12 @@ export async function resolveDidCel(did: string, log: EventLog): Promise<DIDDocu
   }
 }
 
+/**
+ * Build a minimal did:cel DID Document facade for a genesis controller key.
+ * Single Multikey VM (#key-0) bound to authentication + assertionMethod;
+ * `alsoKnownAs` records the did:key form of the same key for resolvers that
+ * only know did:key. Consumed by asset creation (Phase-2 Task 3).
+ */
 export function createCelDidDocument(didCel: string, controllerPublicKeyMultibase: string): DIDDocument {
   const vmId = `${didCel}#key-0`;
   return {

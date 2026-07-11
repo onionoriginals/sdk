@@ -5,9 +5,12 @@ import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 import { OriginalsConfig } from '../../../src/types';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
-import { deriveDidCel } from '../../../src/cel/celDid';
+import { createCelDidDocument, deriveDidCel } from '../../../src/cel/celDid';
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
 import { OriginalsAsset } from '../../../src/lifecycle/OriginalsAsset';
+import { celSignerFromKeyPair } from '../../../src/cel/signerAdapter';
+import { PeerCelManager } from '../../../src/cel/layers/PeerCelManager';
+import { KeyManager } from '../../../src/did/KeyManager';
 
 const config: OriginalsConfig = {
   network: 'regtest',
@@ -76,5 +79,22 @@ describe('verify() binds in-memory resources to the CEL genesis', () => {
       asset.celLog!
     );
     expect(await swapped.verify()).toBe(false);
+  });
+
+  test('empty genesis resources array fails closed (binds nothing)', async () => {
+    // createAsset rejects empty resource lists, but the lower-level
+    // PeerCelManager.create does not — an empty genesis would pass the
+    // subset check vacuously without the explicit guard.
+    const km = new KeyManager();
+    const kp = await km.generateKeyPair('Ed25519');
+    const { signer } = celSignerFromKeyPair(kp);
+    const { log, did } = await new PeerCelManager(signer).create('unbound', []);
+    const asset = new OriginalsAsset(
+      [{ id: 'res-1', type: 'data', contentType: 'text/plain', hash: 'ab'.repeat(32) }],
+      createCelDidDocument(did, kp.publicKey),
+      [],
+      log
+    );
+    expect(await asset.verify()).toBe(false);
   });
 });
