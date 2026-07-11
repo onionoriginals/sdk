@@ -160,6 +160,30 @@ describe('resolveDidCel (#Phase2 Task 8)', () => {
     expect(await resolveDidCel('did:peer:4zQmWhatever', log)).toBeNull();
   });
 
+  test('PIN: migrate events do not change resolveDidCel\'s controller', async () => {
+    // Staleness adjudications (design §5) rest on migrate being a non-authority
+    // event — only rotateKey may hand off the controller. Pin it: appending a
+    // migrate event must resolve to the SAME document as the genesis-only log.
+    const { log, did, signer, pubMb } = await makeVerifiedLog();
+    const migrated = await appendEvent(
+      log,
+      'migrate',
+      {
+        sourceDid: did,
+        targetDid: 'did:webvh:example.com:abc123',
+        layer: 'webvh',
+        domain: 'example.com',
+        migratedAt: '2026-07-10T00:01:00Z',
+      },
+      { signer, verificationMethod: 'ignored' }
+    );
+    const genesisOnlyDoc = await resolveDidCel(did, log);
+    const afterMigrateDoc = await resolveDidCel(did, migrated);
+    expect(afterMigrateDoc).not.toBeNull();
+    expect(afterMigrateDoc).toEqual(genesisOnlyDoc);
+    expect(afterMigrateDoc!.verificationMethod?.[0]?.publicKeyMultibase).toBe(pubMb);
+  });
+
   test('rotateKey hands the resolved document to the NEW controller key', async () => {
     const { log, did, signer } = await makeVerifiedLog();
     const { getPubMb: getNewPubMb } = realKey();

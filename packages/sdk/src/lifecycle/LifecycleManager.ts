@@ -525,6 +525,25 @@ export class LifecycleManager {
   }
 
   /**
+   * Verify an already-live asset using the manager's own DID/credential
+   * resolvers, so callers don't have to hand-thread them (`asset.verify()`
+   * called directly requires deps the caller may not have handy).
+   *
+   * @param overrides.ordinalsProvider - Defaults to `config.ordinalsProvider`.
+   *   btco-anchored logs fail closed without one (same contract as loadAsset).
+   */
+  async verifyAsset(
+    asset: OriginalsAsset,
+    overrides?: { ordinalsProvider?: OrdinalsLookup }
+  ): Promise<boolean> {
+    return asset.verify({
+      didManager: this.didManager,
+      credentialManager: this.credentialManager,
+      ordinalsProvider: overrides?.ordinalsProvider ?? this.config.ordinalsProvider
+    });
+  }
+
+  /**
    * Fold the log into a {@link ProvenanceChain} for restore(). createdAt/creator
    * come from the genesis data; migrations are re-materialized in the live
    * layer-to-layer shape (enriched from bitcoin witness proofs + advisory
@@ -927,43 +946,18 @@ export class LifecycleManager {
         // with no CEL log — skip the append + cel.json hosting and surface why.
         // Publish must not hard-require a keyStore in Phase 2.
         const migratedAt = new Date().toISOString();
-        let celAppended = false;
-        // Reason is null while a signable append is still possible.
-        let skipReason: 'NO_KEYSTORE' | 'NO_CEL_LOG' | 'NO_SIGNING_KEY' | null =
-          !this.keyStore ? 'NO_KEYSTORE' : !logBefore ? 'NO_CEL_LOG' : null;
-        if (this.keyStore && logBefore && skipReason === null) {
-          const vm = currentControllerVm(logBefore);
-          // The controller key can be absent when the asset was minted by a
-          // different, keyStore-less manager. Degrade gracefully rather than
-          // failing the whole publish (Phase 2 does not hard-require signing).
-          if (!(await this.keyStore.getPrivateKey(vm))) {
-            skipReason = 'NO_SIGNING_KEY';
-          } else {
-            const signer = createKeyStoreCelSigner(this.keyStore, vm);
-            const newLog = await appendEvent(
-              logBefore,
-              'migrate',
-              {
-                sourceDid: asset.id,
-                targetDid: migration.did,
-                layer: 'webvh',
-                domain: minted.domain,
-                migratedAt
-              },
-              { signer, verificationMethod: vm }
-            );
-            asset._replaceCelLog(newLog);
-            celAppended = true;
-          }
-        }
-        if (!celAppended && skipReason) {
-          await this.eventEmitter.emit({
-            type: 'cel:append-skipped',
-            timestamp: new Date().toISOString(),
-            asset: { id: asset.id },
-            reason: skipReason
-          });
-        }
+        // Routed through the shared choke point (same guards/degrade contract
+        // as transfer/rotate) — as a side effect this also refreshes
+        // cel/<suffix>.json via persistCelArtifacts on every publish append,
+        // not just later transfer/rotate ones (carry-forward #3).
+        const celHeadDigest = await this.appendCelEventOrSkip(asset, 'migrate', {
+          sourceDid: asset.id,
+          targetDid: migration.did,
+          layer: 'webvh',
+          domain: minted.domain,
+          migratedAt
+        });
+        const celAppended = celHeadDigest !== null;
 
         // Host the signed DID log so the DID actually resolves.
         await this.hostDIDLog(migration.did, migration.log, writtenObjects);
@@ -2149,6 +2143,19 @@ export class LifecycleManager {
     if (!btcoDid) {
       throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to rotate.');
     }
+    // Concurrency guard (issue #255, same pattern as publishToWeb/
+    // transferOwnership): the checks above are check-then-act across the
+    // awaits below — two overlapping rotations of the same asset would both
+    // pass them and both broadcast reinscriptions. Claim the asset
+    // synchronously before the first await.
+    if (this.inFlightAssets.has(asset.id)) {
+      throw new StructuredError(
+        'OPERATION_IN_PROGRESS',
+        `An operation for asset ${asset.id} is already in progress; concurrent rotations of the same asset would broadcast duplicate reinscriptions.`
+      );
+    }
+    this.inFlightAssets.add(asset.id);
+    try {
     // pop() yields the sat for every prefix form (did:btco:N, :reg:N, :sig:N).
     const satoshi = btcoDid.split(':').pop()!;
     const { key, type } = multikey.decodePublicKey(newVerificationMethod.publicKeyMultibase);
@@ -2272,6 +2279,9 @@ export class LifecycleManager {
     });
 
     return { inscriptionId: inscription.inscriptionId, did: btcoDid };
+    } finally {
+      this.inFlightAssets.delete(asset.id);
+    }
   }
 
   /**
