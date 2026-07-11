@@ -1145,11 +1145,20 @@ export async function verifyEventLog(
     if (!options?.verifier && eventResult.proofValid && eventResult.chainValid) {
       if (event.type === 'migrate') {
         // proofValid=true ⇒ every bitcoin witness proof on the event verified,
-        // so its satoshi/inscriptionId are chain-attested. First proof mirrors
-        // replayProvenance/BtcoCelManager's extraction.
+        // so its satoshi/inscriptionId are chain-attested. But the proof array
+        // is UNSIGNED: with more than one verified bitcoin witness proof an
+        // attacker who controls the array order (or injected a proof anchored
+        // to a sat THEY control, committing to this public digest) could pick
+        // which sat "anchors" authority and rotate on it. Ambiguity therefore
+        // POISONS the anchor (mirrors the exactly-one-controller-proof rule on
+        // the create event): only an unambiguous single proof anchors, and the
+        // non-cooperative rotation arm stays unavailable otherwise — the log's
+        // verdict itself is unchanged.
         const witnessed = bitcoinWitnessProofs(event);
-        if (witnessed.length > 0) {
+        if (witnessed.length === 1) {
           anchoredSat = { satoshi: witnessed[0].satoshi, inscriptionId: witnessed[0].inscriptionId };
+        } else if (witnessed.length > 1) {
+          anchoredSat = undefined;
         }
       } else if (event.type === 'rotateKey' && eventResult.nonCooperativeRotation && anchoredSat) {
         // The accepted reinscription becomes the new anchor, so a CHAINED

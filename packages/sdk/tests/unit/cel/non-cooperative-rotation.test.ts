@@ -420,6 +420,55 @@ describe('non-cooperative rotation (reinscription-attested hand-off)', () => {
     expect(result.events[3].proofValid).toBe(false);
   });
 
+  test('an INJECTED second witness proof on the migrate poisons the anchor: attacker cannot re-route authority to their own sat', async () => {
+    // The proof array is unsigned. An attacker prepends a fully VERIFIED
+    // witness proof — an inscription on a sat THEY control, committing to the
+    // victim's public migrate digest — hoping first-proof extraction anchors
+    // authority to their sat, where they can reinscribe and "rotate".
+    // Ambiguity must poison the anchor entirely: the log still verifies, but
+    // NO non-cooperative rotation is possible on EITHER sat.
+    const provider = new OrdMockProvider();
+    const a = await makeKey();
+    const attacker = await makeKey();
+    const ATTACKER_SAT = '666';
+    const { log } = await makeAnchoredLog(provider, a);
+
+    // Attacker inscribes a commitment to the migrate digest on their own sat
+    // and PREPENDS the (verifying!) witness proof to the migrate event.
+    const migrateDigest = chainDigest(log.events[1]);
+    const evil = await inscribeDoc(provider, ATTACKER_SAT, migrateDigest);
+    const migrate = log.events[1];
+    const evilProof = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'bitcoin-ordinals-2024',
+      created: '2026-07-10T00:00:01Z',
+      verificationMethod: 'did:btco:witness',
+      proofPurpose: 'assertionMethod',
+      proofValue: `z${evil.inscriptionId}`,
+      witnessedAt: '2026-07-10T00:00:01Z',
+      txid: evil.txid,
+      satoshi: ATTACKER_SAT,
+      inscriptionId: evil.inscriptionId,
+    };
+    const controllerProof = migrate.proof[0];
+    const victimWitness = migrate.proof[1];
+    const tampered: EventLog = {
+      events: [log.events[0], { ...migrate, proof: [controllerProof, evilProof, victimWitness] }],
+    };
+    // Sanity: the tampered log itself still verifies (both witness proofs pass).
+    expect((await verifyEventLog(tampered, { ordinalsProvider: provider })).verified).toBe(true);
+
+    // Rotation on the ATTACKER's sat must fail...
+    const onAttackerSat = await addNonCoopRotation(tampered, provider, attacker, { inscribeSat: ATTACKER_SAT, claimSat: ATTACKER_SAT });
+    const attackResult = await verifyEventLog(onAttackerSat.log, { ordinalsProvider: provider });
+    expect(attackResult.verified).toBe(false);
+    expect(attackResult.errors.some(e => /is not authorized/.test(e))).toBe(true);
+
+    // ...and the ambiguity poisons the TRUE sat too (fail closed, no guessing).
+    const onTrueSat = await addNonCoopRotation(tampered, provider, attacker);
+    expect((await verifyEventLog(onTrueSat.log, { ordinalsProvider: provider })).verified).toBe(false);
+  });
+
   test('cooperative rotation (old key signs) still works unchanged alongside the new arm', async () => {
     const provider = new OrdMockProvider();
     const a = await makeKey();
