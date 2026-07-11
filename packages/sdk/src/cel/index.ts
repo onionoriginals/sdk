@@ -16,4 +16,9 @@ export * from './ExternalReferenceManager.js';
 export * from './layers/index.js';
 export * from './OriginalsCel.js';
 export * from './keyResolver.js';
+export {
+  celSignerFromKeyPair,
+  createKeyStoreCelSigner,
+  hexSha256ToDigestMultibase,
+} from './signerAdapter.js';
 export { main as celCli } from './cli/index.js';

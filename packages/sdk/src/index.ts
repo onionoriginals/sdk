@@ -251,6 +251,11 @@ export {
   serializeEventLogCbor,
   parseEventLogCbor,
 } from './cel/serialization/cbor.js';
+export {
+  celSignerFromKeyPair,
+  createKeyStoreCelSigner,
+  hexSha256ToDigestMultibase,
+} from './cel/signerAdapter.js';
 
 // Default export
 export default OriginalsSDK;
