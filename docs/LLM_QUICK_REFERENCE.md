@@ -37,6 +37,31 @@ const cost = await sdk.lifecycle.estimateCost(draft, 'did:btco');
 const validation = await sdk.lifecycle.validateMigration(draft, 'did:webvh');
 ```
 
+## Interchange & Ownership Hand-off
+
+```typescript
+// Creator: serialize provenance into a self-describing envelope.
+const envelope = asset.serialize();                 // AssetEnvelope
+const wire = JSON.stringify(envelope);
+
+// Buyer: reconstruct + VERIFY BY DEFAULT — no keys needed (verification is
+// public-key-only). With an ordinalsProvider, sets checkHeadFreshness and
+// rejects a truncated pre-rotation hand-off as STALE_LOG.
+const { asset, verification, warnings } = await sdk.lifecycle.loadAsset(wire);
+//   throws ASSET_LOAD_VERIFICATION_FAILED / ENVELOPE_INVALID / ENVELOPE_VERSION_UNSUPPORTED
+
+// COOPERATIVE: seller signs → move sat, then rotate the buyer's key in.
+await sdk.lifecycle.transferOwnership(asset, 'bcrt1q...');
+await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase, privateKey });
+
+// NON-COOPERATIVE: buyer holds the sat but not the seller's signature. Buyer
+// reinscribes with THEIR key and self-signs; the witness proves sat control.
+await sdk.lifecycle.claimOwnership(asset, { publicKeyMultibase, privateKey }); // privateKey REQUIRED
+// Before the claim, a buyer's appends DEGRADE (cel:append-skipped/NO_SIGNING_KEY);
+// after it the buyer is the controller and appends sign. Post-genesis resource
+// versions ride unverified.resourceUpdates (advisory) until Phase 4.
+```
+
 ## Typed Originals (Kinds System)
 
 ```typescript

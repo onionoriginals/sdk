@@ -607,6 +607,61 @@ await sdk.lifecycle.registerKey(
 ): Promise<void>
 ```
 
+### Interchange: serialize / loadAsset (creator→buyer hand-off)
+
+The provenance travels as a self-describing `AssetEnvelope` (the signed CEL log
+plus captured DID docs, resources, and an advisory `unverified` section).
+
+```typescript
+// Creator: emit the envelope after building provenance on-log.
+const envelope = asset.serialize();          // AssetEnvelope (throws ASSET_NOT_SERIALIZABLE for legacy assets)
+const wire = JSON.stringify(envelope);       // deliver over any channel
+
+// Buyer: reconstruct + VERIFY BY DEFAULT (no keys needed — verification is
+// public-key-only). Fails closed on any tamper/swap/mismatch/stale prefix.
+const { asset, verification, warnings } = await sdk.lifecycle.loadAsset(wire, {
+  // ordinalsProvider defaults to config.ordinalsProvider; with one present,
+  // loadAsset sets checkHeadFreshness and rejects a truncated pre-rotation
+  // hand-off as STALE_LOG (#366). btco-anchored logs fail closed WITHOUT one.
+  skipVerification: false                     // default; true skips crypto ONLY, not structural checks
+});
+// verification.verified === true; warnings notes e.g. an unchecked btco freshness.
+```
+
+- `loadAsset` throws `ENVELOPE_INVALID` / `ENVELOPE_VERSION_UNSUPPORTED` for
+  malformed or too-new envelopes, and `ASSET_LOAD_VERIFICATION_FAILED`
+  (carrying `.details.verification`) when the log, resource↔genesis binding, or
+  DID-doc↔fold cross-checks fail.
+- The `unverified.*` honesty section (commitTxId/feeRate/resourceUpdates/degraded
+  bindings) is advisory ONLY — never promoted to trusted state; a binding the
+  fold cannot derive surfaces in `warnings`, not in `asset.bindings`.
+- **Honest gap:** post-genesis resource versions ride `unverified.resourceUpdates`
+  and are UNverifiable until Phase 4 puts resource-update events on the log.
+
+### Ownership hand-off: cooperative vs non-cooperative
+
+```typescript
+// COOPERATIVE — the current (outgoing) controller signs the rotateKey.
+await sdk.lifecycle.transferOwnership(asset, newOwnerBtcAddress);   // moves the sat
+await sdk.lifecycle.rotateBtcoKeys(asset, {                          // incoming key rotated in
+  publicKeyMultibase, privateKey
+});
+
+// NON-COOPERATIVE — the buyer cannot get the seller's signature. The buyer
+// reinscribes the did:btco doc with THEIR key and SELF-SIGNS the rotateKey;
+// the reinscription witness proves sat control, so the verifier accepts the
+// otherwise-unauthorized rotation. privateKey is REQUIRED.
+const { inscriptionId, did } = await sdk.lifecycle.claimOwnership(asset, {
+  publicKeyMultibase, privateKey
+});
+// After the claim the buyer is the current controller: their subsequent CEL
+// appends (transfer, further rotation) SIGN instead of degrading.
+```
+
+Before claiming, a buyer who holds only the loaded asset (not the controller
+key) sees appends DEGRADE with a `cel:append-skipped` (`NO_SIGNING_KEY`) event —
+verification is public, but WRITING to the log needs the key.
+
 ### Batch Operations
 
 #### Batch Create

@@ -147,8 +147,10 @@ An Original asset **IS a CEL** (Cryptographic Event Log, src/cel/): every lifecy
 - `createAsset()` - Mints a `did:cel` genesis (`create` event); `asset.id` is the derived did:cel, while `currentLayer` label stays `'did:peer'`
 - `publishToWeb()` - Migrates to did:webvh (`migrate` event)
 - `inscribeOnBitcoin()` - Migrates to did:btco (`migrate` event); the on-chain DID doc carries an `OriginalsCelAnchor` (`#cel` service) committing to the log head at inscription time, and IS the witness artifact for the event's bitcoin proof
-- `transferOwnership()` - Moves the sat (`transfer` event); `rotateBtcoKeys()` reinscribes same-id doc with a new key (`rotateKey` event), re-embedding a fresher `#cel`
-- Event-driven architecture via EventEmitter; when no keyStore is available, appends degrade with a `cel:append-skipped` event
+- `transferOwnership()` - Moves the sat (`transfer` event); `rotateBtcoKeys()` reinscribes same-id doc with a new key (`rotateKey` event, COOPERATIVE — signed by the outgoing controller), re-embedding a fresher `#cel`
+- `claimOwnership()` - NON-COOPERATIVE ownership claim (#366): a new owner who holds the sat but cannot obtain the seller's signature reinscribes the did:btco doc with THEIR key and SELF-SIGNS the `rotateKey`; the reinscription witness proves sat control, and the verifier accepts the otherwise-unauthorized rotation. `privateKey` is REQUIRED. Contrast with the cooperative `rotateBtcoKeys`.
+- `asset.serialize()` / `lifecycle.loadAsset()` - The interchange format (#377): `serialize()` emits a self-describing `AssetEnvelope` (the CEL log + captured DID docs + resources + an `unverified` honesty section); `loadAsset()` is the inverse and VERIFIES BY DEFAULT — same `verifyEventLog` gate plus resource↔genesis binding and DID-doc↔fold cross-checks, all fail-closed. With an ordinalsProvider it sets `checkHeadFreshness`, rejecting a truncated pre-rotation hand-off as `STALE_LOG` (#366).
+- Event-driven architecture via EventEmitter; when no keyStore/signing key is available, appends degrade with a `cel:append-skipped` event (verification is public-key-only and needs no keys; only WRITING needs the controller key)
 - Batch operations support for multiple assets
 
 **OriginalsAsset (OriginalsAsset.ts)** - Asset representation, backed by its CEL log
