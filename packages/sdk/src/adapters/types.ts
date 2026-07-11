@@ -22,7 +22,8 @@ export interface FeeOracleAdapter {
 export interface OrdinalsProvider {
   getInscriptionById(id: string): Promise<{
     inscriptionId: string;
-    content: Buffer;
+    // Optional: deferred-content providers may not echo built content back.
+    content?: Buffer;
     contentType: string;
     txid: string;
     vout: number;
@@ -34,9 +35,18 @@ export interface OrdinalsProvider {
   getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }>;
   estimateFee(blocks?: number): Promise<number>;
   createInscription(params: {
-    data: Buffer;
+    /** Static content. Provide exactly one of data / buildContent. */
+    data?: Buffer;
+    /**
+     * Deferred content: called with the pinned satoshi between commit and
+     * reveal, so content that must embed its own sat (a did:btco DID
+     * document) can be constructed. Provide exactly one of data / buildContent.
+     */
+    buildContent?: (satoshi: string) => Buffer | Promise<Buffer>;
     contentType: string;
     feeRate?: number;
+    /** Reinscribe on an existing sat (key rotation / DID update). */
+    targetSatoshi?: string;
   }): Promise<{
     inscriptionId: string;
     revealTxId: string;
@@ -49,6 +59,13 @@ export interface OrdinalsProvider {
     contentType?: string;
     feeRate?: number;
   }>;
+  /**
+   * Current ownership of the UTXO carrying this satoshi. Optional: providers
+   * without an owner index simply omit it and resolution carries no
+   * ownership metadata. Ownership is resolution METADATA — implementations
+   * must never rewrite the inscribed DID document from it.
+   */
+  getSatOwnership?(satoshi: string): Promise<{ address: string; outpoint: string } | null>;
   transferInscription(
     inscriptionId: string,
     toAddress: string,

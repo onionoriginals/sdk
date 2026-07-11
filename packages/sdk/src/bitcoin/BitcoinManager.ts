@@ -114,7 +114,8 @@ export class BitcoinManager {
   async inscribeData(
     data: any,
     contentType: string,
-    feeRate?: number
+    feeRate?: number,
+    options?: { targetSatoshi?: string }
   ): Promise<OrdinalsInscription> {
     // Input validation
     if (!data) {
@@ -153,7 +154,19 @@ export class BitcoinManager {
       );
     }
 
-    const creation = await this.ord.createInscription({ data, contentType, feeRate: effectiveFeeRate });
+    const creation = typeof data === 'function'
+      ? await this.ord.createInscription({
+          buildContent: data as (satoshi: string) => Buffer | Promise<Buffer>,
+          contentType,
+          feeRate: effectiveFeeRate,
+          ...(options?.targetSatoshi ? { targetSatoshi: options.targetSatoshi } : {})
+        })
+      : await this.ord.createInscription({
+          data,
+          contentType,
+          feeRate: effectiveFeeRate,
+          ...(options?.targetSatoshi ? { targetSatoshi: options.targetSatoshi } : {})
+        });
     const txid = creation.txid ?? creation.revealTxId;
     if (!creation.inscriptionId || !txid) {
       throw new StructuredError(
@@ -207,7 +220,11 @@ export class BitcoinManager {
     } = {
       satoshi,
       inscriptionId: creation.inscriptionId,
-      content: creation.content ?? data,
+      // On the deferred path `data` is a content-BUILDER function, never valid
+      // inscription content — only fall back to it when it is a real Buffer,
+      // else leave content undefined (a function here crashes downstream JSON
+      // parsing after migrate + payment).
+      content: creation.content ?? (Buffer.isBuffer(data) ? data : undefined),
       contentType: creation.contentType ?? contentType,
       txid,
       vout: typeof creation.vout === 'number' ? creation.vout : 0,

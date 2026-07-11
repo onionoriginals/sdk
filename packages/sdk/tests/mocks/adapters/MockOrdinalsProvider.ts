@@ -1,16 +1,27 @@
 import type { OrdinalsProvider } from '../../../src/adapters/types';
 
 export class MockOrdinalsProvider implements OrdinalsProvider {
-  async createInscription(params: { data: Buffer; contentType: string; feeRate?: number }) {
+  async createInscription(params: {
+    data?: Buffer;
+    buildContent?: (satoshi: string) => Buffer | Promise<Buffer>;
+    contentType: string;
+    feeRate?: number;
+    targetSatoshi?: string;
+  }) {
+    // Pin the sat first, then invoke deferred content with it (Task 1/2 API).
+    const satoshi = params.targetSatoshi ?? '123';
+    const content = params.buildContent
+      ? Buffer.from(await params.buildContent(satoshi))
+      : (params.data as Buffer);
     return {
       inscriptionId: 'insc-mock',
       revealTxId: 'tx-reveal-mock',
       commitTxId: 'tx-commit-mock',
-      satoshi: '123',
+      satoshi,
       txid: 'tx-mock',
       vout: 0,
       blockHeight: 1,
-      content: params.data,
+      content,
       contentType: params.contentType,
       feeRate: params.feeRate
     };

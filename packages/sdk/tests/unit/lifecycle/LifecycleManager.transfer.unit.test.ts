@@ -27,6 +27,19 @@ describe('LifecycleManager.transferOwnership unit edge cases', () => {
     expect(asset.getProvenance().transfers.length).toBe(1);
   });
 
+  test('asset-emitter asset:transferred payload carries keyRotationPending (rotation-first #366)', async () => {
+    const asset = new OriginalsAsset(
+      [{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'h' }],
+      { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:43' } as any,
+      []
+    );
+    const events: any[] = [];
+    asset.on('asset:transferred', (e) => { events.push(e); });
+    await sdk.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
+    expect(events.length).toBe(1);
+    expect(events[0].keyRotationPending).toBe(true);
+  });
+
   test('extracts satoshi network-blindly and resolves the real inscription (no migration record) (#273)', async () => {
     // Two regressions in one path:
     //  1. For `did:btco:reg:<sat>` the old `split(':')[2]` returned the network

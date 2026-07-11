@@ -16,7 +16,9 @@ import { hashResource } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix } from '../cel/btcoDid.js';
+import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { multikey } from '../crypto/Multikey.js';
+import { createBtcoDidDocument } from '../did/createBtcoDidDocument.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 import { Logger } from '../utils/Logger.js';
@@ -595,9 +597,11 @@ export class LifecycleManager {
       this.inFlightAssets.add(asset.id);
       try {
       const { publisherDid, signer } = this.extractPublisherInfo(publisherDidOrSigner);
-      const { domain, userPath } = this.parseWebVHDid(publisherDid);
+      // Publisher DID contributes only the domain; the hosting path comes
+      // from the minted DID below.
+      const { domain } = this.parseWebVHDid(publisherDid);
 
-      this.logger.info('Publishing asset to web', { assetId: asset.id, publisherDid });
+      this.logger.info('Publishing asset to web', { assetId: asset.id, domain });
 
       // atomicRollback (default: true — the option was documented but never
       // consumed): capture pre-publish resource urls and track written
@@ -611,20 +615,56 @@ export class LifecycleManager {
       }));
       const writtenObjects: Array<{ domain: string; relativePath: string }> = [];
 
+      // Capture the layer before migration (always 'did:peer' here due to the
+      // guard above, but captured dynamically for correctness).
+      const priorLayer = asset.currentLayer;
+
       try {
-        // Publish resources to storage
-        await this.publishResources(asset, publisherDid, domain, userPath, writtenObjects);
+        // Mint the asset's OWN did:webvh — genuine SCID, signed genesis log,
+        // alsoKnownAs back-link to the peer DID (#376). The publisher argument
+        // contributes the domain and (optionally) the log-signing authority.
+        const migration = await this.didManager.migrateToDIDWebVH(
+          asset.did,
+          domain,
+          signer ? { externalSigner: signer } : {}
+        );
 
-        // Store the original did:peer ID before migration
+        // Persist the update key so the minted DID stays updatable. Without a
+        // keyStore the DID still exists but cannot be rotated later — surface
+        // that instead of silently dropping the key.
+        const keyStore = this.keyStore;
+        let newVmId = migration.didDocument.verificationMethod?.[0]?.id;
+        // Normalize a fragment id to absolute (mirror createAsset's peer-key registration).
+        if (newVmId && newVmId.startsWith('#')) {
+          newVmId = `${migration.did}${newVmId}`;
+        }
+        if (migration.keyPair && keyStore && newVmId) {
+          await keyStore.setPrivateKey(newVmId, migration.keyPair.privateKey);
+        } else if (migration.keyPair && !keyStore) {
+          await this.eventEmitter.emit({
+            type: 'key:unpersisted',
+            timestamp: new Date().toISOString(),
+            asset: { id: asset.id },
+            did: migration.did
+          });
+        }
+
+        // Host resources under the MINTED DID (urls now belong to the asset):
+        // derive the storage path from migration.did, not the publisher
+        // shorthand, or the URL and the stored bytes diverge (stale ":user").
+        const minted = this.parseWebVHDid(migration.did);
+        await this.publishResources(asset, migration.did, minted.domain, minted.userPath, writtenObjects);
+
+        // Host the signed DID log so the DID actually resolves.
+        await this.hostDIDLog(migration.did, migration.log, writtenObjects);
+
         const originalPeerDid = asset.id;
-
-        // Capture the layer before migration (always 'did:peer' here due to
-        // the guard above, but captured dynamically for correctness).
-        const priorLayer = asset.currentLayer;
-
-        // Migrate asset to did:webvh layer
         await asset.migrate('did:webvh');
-        asset.bindings = { ...(asset.bindings || {}), 'did:peer': originalPeerDid, 'did:webvh': publisherDid };
+        asset.bindings = {
+          ...(asset.bindings || {}),
+          'did:peer': originalPeerDid,
+          'did:webvh': migration.did
+        };
 
         // Mirror onto the manager emitter: asset.migrate emits only on the
         // asset's private emitter, so sdk.lifecycle.on('asset:migrated', ...)
@@ -641,8 +681,8 @@ export class LifecycleManager {
         throw publishError;
       }
 
-      // Issue publication credential (best-effort)
-      await this.issuePublicationCredential(asset, publisherDid, signer);
+      // Issue the peer-key-signed migration credential (best-effort).
+      await this.issuePublicationCredential(asset, asset.bindings['did:webvh'], signer);
 
       stopTimer();
       this.logger.info('Asset published to web successfully', { 
@@ -666,6 +706,9 @@ export class LifecycleManager {
     }
   }
 
+  // NOTE: the fabricated did:webvh:{domain}:user shorthand never leaves this
+  // class anymore — it is parsed for its domain only. The asset's real
+  // did:webvh is minted in publishToWeb via DIDManager.migrateToDIDWebVH (#376).
   private extractPublisherInfo(publisherDidOrSigner: string | ExternalSigner): {
     publisherDid: string;
     signer?: ExternalSigner;
@@ -835,6 +878,63 @@ export class LifecycleManager {
     }
   }
 
+  /**
+   * Hosts the signed did:webvh log as JSONL through the storage adapter,
+   * mirroring the resolution-URL layout WebVHManager.saveDIDLog uses on the
+   * filesystem: did:webvh:{SCID}:{domain}:p1:p2 -> {domain}/p1/p2/did.jsonl,
+   * no-path DIDs -> {domain}/.well-known/did.jsonl. No storage adapter is a
+   * degraded (but allowed) mode: the DID exists and the signed log is
+   * returned to the caller, but nothing hosts it — surfaced via event.
+   */
+  private async hostDIDLog(
+    did: string,
+    log: unknown,
+    writtenObjects?: Array<{ domain: string; relativePath: string }>
+  ): Promise<void> {
+    const parts = did.split(':');
+    if (parts.length < 4 || parts[0] !== 'did' || parts[1] !== 'webvh') {
+      throw new StructuredError('INVALID_DID', `Cannot host log for non-webvh DID: ${did}`);
+    }
+    const domain = decodeURIComponent(parts[3]);
+    const pathParts = parts.slice(4);
+    const relativePath = pathParts.length
+      ? `${pathParts.join('/')}/did.jsonl`
+      : `.well-known/did.jsonl`;
+
+    // A non-array or empty log would serialize to a zero-byte did.jsonl that
+    // silently serves an unresolvable DID. Surface it via event and write
+    // nothing, mirroring the NO_STORAGE_ADAPTER degraded mode below.
+    if (!Array.isArray(log) || log.length === 0) {
+      await this.eventEmitter.emit({
+        type: 'did:log-unhosted',
+        timestamp: new Date().toISOString(),
+        did,
+        reason: 'EMPTY_LOG'
+      });
+      return;
+    }
+    const jsonl = log.map((e) => JSON.stringify(e)).join('\n');
+
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
+    const withPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<unknown> } | undefined;
+    const withPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<unknown> } | undefined;
+
+    if (withPut && typeof withPut.put === 'function') {
+      await withPut.put(`${domain}/${relativePath}`, Buffer.from(jsonl), { contentType: 'application/jsonl' });
+      writtenObjects?.push({ domain, relativePath });
+    } else if (withPutObject && typeof withPutObject.putObject === 'function') {
+      await withPutObject.putObject(domain, relativePath, new TextEncoder().encode(jsonl));
+      writtenObjects?.push({ domain, relativePath });
+    } else {
+      await this.eventEmitter.emit({
+        type: 'did:log-unhosted',
+        timestamp: new Date().toISOString(),
+        did,
+        reason: 'NO_STORAGE_ADAPTER'
+      });
+    }
+  }
+
   private async publishResources(
     asset: OriginalsAsset,
     publisherDid: string,
@@ -951,7 +1051,7 @@ export class LifecycleManager {
 
   private async issuePublicationCredential(
     asset: OriginalsAsset,
-    publisherDid: string,
+    migratedTo: string,
     signer?: ExternalSigner
   ): Promise<void> {
     try {
@@ -962,25 +1062,41 @@ export class LifecycleManager {
         );
       }
 
+      // The cross-layer claim is countersigned by the PREVIOUS layer's key:
+      // issuer = the asset's peer DID (its key was registered in the keyStore
+      // at createAsset). A publisher-self-asserted credential proves nothing
+      // about the asset (#365).
       const subject = {
         id: asset.id,
-        publishedAs: publisherDid,
+        migratedTo,
         resourceId: asset.resources[0].id,
         fromLayer: 'did:peer' as const,
         toLayer: 'did:webvh' as const,
         migratedAt: new Date().toISOString()
       };
-      
+
       const unsigned = this.credentialManager.createResourceCredential(
         'ResourceMigrated',
         subject,
-        publisherDid
+        asset.id
       );
 
-      const signed = signer
-        ? await this.credentialManager.signCredentialWithExternalSigner(unsigned, signer)
-        : await this.signWithKeyStore(unsigned, publisherDid);
-      
+      let signed;
+      try {
+        signed = await this.signWithKeyStore(unsigned, asset.id);
+      } catch (keyStoreErr) {
+        if (signer) {
+          // Fallback: external signer attests the publication when the peer
+          // key is unavailable (issuer becomes the signer's DID — recorded
+          // truthfully rather than pretending the peer key signed).
+          const vmDid = signer.getVerificationMethodId().split('#')[0];
+          const resigned = this.credentialManager.createResourceCredential('ResourceMigrated', subject, vmDid);
+          signed = await this.credentialManager.signCredentialWithExternalSigner(resigned, signer);
+        } else {
+          throw keyStoreErr;
+        }
+      }
+
       asset.credentials.push(signed);
       
       const event = {
@@ -1161,19 +1277,41 @@ export class LifecycleManager {
     for (const res of asset.resources) {
       this.assertContentMatchesDeclaredHash(res, 'inscribe on Bitcoin');
     }
-    const manifest = {
-      assetId: asset.id,
+    // Resource manifest rides INSIDE the DID document as a service entry —
+    // the inscription itself must be the DID document (application/did+json)
+    // or the SDK's own BtcoDidResolver rejects it (#375).
+    const manifestEndpoint = {
       resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
       timestamp: new Date().toISOString()
     };
-    const payload = Buffer.from(JSON.stringify(manifest));
-    const inscription = await bitcoinManager.inscribeData(payload, 'application/json', feeRate) as {
+    const backLinks = [asset.id, asset.bindings?.['did:webvh']].filter(
+      (d): d is string => typeof d === 'string'
+    );
+
+    const inscription = await bitcoinManager.inscribeData(
+      async (satoshi: string) => {
+        const btcoDoc = await this.didManager.migrateToDIDBTCO(asset.did, satoshi);
+        btcoDoc.alsoKnownAs = backLinks;
+        btcoDoc.service = [
+          ...(btcoDoc.service || []),
+          {
+            id: `${btcoDoc.id}#resources`,
+            type: 'OriginalsResourceManifest',
+            serviceEndpoint: manifestEndpoint
+          }
+        ];
+        return Buffer.from(JSON.stringify(btcoDoc));
+      },
+      'application/did+json',
+      feeRate
+    ) as {
       revealTxId?: string;
       txid: string;
       commitTxId?: string;
       inscriptionId: string;
       satoshi?: string;
       feeRate?: number;
+      content?: Buffer;
     };
     const revealTxId = inscription.revealTxId ?? inscription.txid;
     const commitTxId = inscription.commitTxId;
@@ -1214,10 +1352,33 @@ export class LifecycleManager {
       details: migrationDetails
     });
 
-    // The binding must be network-prefixed: a regtest/signet satoshi recorded
-    // in bare mainnet form would collide with (and resolve to) whoever owns
-    // that satoshi on mainnet (issue #247).
-    const bindingValue = `${btcoDidPrefix(this.config.network || 'mainnet')}:${inscription.satoshi}`;
+    // The binding is ALWAYS computed locally from the configured network +
+    // the real satoshi the provider assigned — never the provider-echoed
+    // document id. A compromised provider that echoes `{"id":"did:btco:…"}`
+    // must not be able to steer the binding. Same network derivation as
+    // migrateToDIDBTCO (explicit network wins over the webvhNetwork mapping,
+    // #247), so a tier-only config can't drift into a prefix mismatch.
+    const bindingValue = `${btcoDidPrefix(this.getConfiguredBitcoinNetwork())}:${inscription.satoshi}`;
+    // Parse the echoed content ONLY as an integrity cross-check: if it parses
+    // and disagrees with the computed binding, the provider may have altered
+    // the inscription — log it (payment already happened, state is migrated;
+    // do NOT throw, the caller has the inscriptionId to investigate). Missing
+    // or non-JSON content is fine — no cross-check possible.
+    if (inscription.content) {
+      let inscribedDoc: { id?: unknown } | undefined;
+      try {
+        inscribedDoc = JSON.parse(inscription.content.toString()) as { id?: unknown };
+      } catch {
+        inscribedDoc = undefined;
+      }
+      if (inscribedDoc && inscribedDoc.id !== bindingValue) {
+        this.logger.error(
+          'Inscribed DID document id does not match expected binding — provider may have altered the inscription content',
+          undefined,
+          { expected: bindingValue, inscribed: inscribedDoc.id, inscriptionId: inscription.inscriptionId }
+        );
+      }
+    }
     asset.bindings = Object.assign({}, asset.bindings || {}, { 'did:btco': bindingValue });
     
     stopTimer();
@@ -1343,22 +1504,26 @@ export class LifecycleManager {
     const currentOwner = priorTransfers.length > 0
       ? priorTransfers[priorTransfers.length - 1].to
       : asset.id;
-    await asset.recordTransfer(currentOwner, newOwner, tx.txid);
+    // Rotation-first model (#366): the sat moved but the DID document still
+    // carries the previous owner's keys. The recipient must rotateBtcoKeys.
+    await asset.recordTransfer(currentOwner, newOwner, tx.txid, true);
 
     // Mirror onto the manager emitter: asset.recordTransfer emits only on the
     // asset's private emitter, so sdk.lifecycle.on('asset:transferred', ...)
     // subscriptions (and the built-in EventLogger) never fired (issue #346).
+    // Payload must match the asset-emitted event exactly (keyRotationPending included).
     await this.eventEmitter.emit({
       type: 'asset:transferred',
       timestamp: new Date().toISOString(),
       asset: { id: asset.id, layer: asset.currentLayer },
       from: currentOwner,
       to: newOwner,
-      transactionId: tx.txid
+      transactionId: tx.txid,
+      keyRotationPending: true
     });
 
     stopTimer();
-    this.logger.info('Asset ownership transferred successfully', { 
+    this.logger.info('Asset ownership transferred successfully', {
       assetId: asset.id, 
       newOwner, 
       transactionId: tx.txid 
@@ -1380,6 +1545,85 @@ export class LifecycleManager {
   }
 
   /**
+   * Rotation-first ownership hand-off (#366): reinscribe the did:btco
+   * document — same id, new verification method — on the SAME sat. Only the
+   * current UTXO holder can do this (reinscription spends the output), so a
+   * successful rotation simultaneously proves sat control and announces the
+   * new owner's signing key. The resolver's newest-valid-inscription rule
+   * then serves the rotated document.
+   */
+  async rotateBtcoKeys(
+    asset: OriginalsAsset,
+    newVerificationMethod: { publicKeyMultibase: string },
+    feeRate?: number
+  ): Promise<{ inscriptionId: string; did: string }> {
+    if (asset.currentLayer !== 'did:btco') {
+      throw new StructuredError('INVALID_STATE', 'Key rotation requires the asset to be on the did:btco layer.');
+    }
+    const btcoDid = asset.bindings?.['did:btco'];
+    if (!btcoDid) {
+      throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to rotate.');
+    }
+    // pop() yields the sat for every prefix form (did:btco:N, :reg:N, :sig:N).
+    const satoshi = btcoDid.split(':').pop()!;
+    const { key, type } = multikey.decodePublicKey(newVerificationMethod.publicKeyMultibase);
+    const network = this.getConfiguredBitcoinNetwork();
+    const rotatedDoc = createBtcoDidDocument(satoshi, network, { publicKey: key, keyType: type });
+    // createBtcoDidDocument re-derives the prefix from network; the rotated id
+    // MUST equal the existing binding or config.network drifted from the DID.
+    if (rotatedDoc.id !== btcoDid) {
+      throw new StructuredError('NETWORK_MISMATCH', `Rotated document id ${rotatedDoc.id} does not match binding ${btcoDid}; check config.network.`);
+    }
+    // Preserve lineage links across rotations.
+    const backLinks = [asset.id, asset.bindings?.['did:webvh']].filter(
+      (d): d is string => typeof d === 'string'
+    );
+    rotatedDoc.alsoKnownAs = backLinks;
+    // Resolver serves the newest inscription; without re-embedding the
+    // manifest here, the first rotation would erase it from resolution.
+    rotatedDoc.service = [
+      ...(rotatedDoc.service || []),
+      {
+        id: `${rotatedDoc.id}#resources`,
+        type: 'OriginalsResourceManifest',
+        serviceEndpoint: {
+          resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
+          timestamp: new Date().toISOString()
+        }
+      }
+    ];
+
+    const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+    const inscription = await bitcoinManager.inscribeData(
+      Buffer.from(JSON.stringify(rotatedDoc)),
+      'application/did+json',
+      feeRate,
+      { targetSatoshi: satoshi }
+    );
+
+    await this.eventEmitter.emit({
+      type: 'key:rotated',
+      timestamp: new Date().toISOString(),
+      asset: { id: asset.id },
+      did: btcoDid,
+      inscriptionId: inscription.inscriptionId
+    });
+
+    return { inscriptionId: inscription.inscriptionId, did: btcoDid };
+  }
+
+  /**
+   * The Bitcoin network this SDK is on, using the SAME derivation as
+   * DIDManager.migrateToDIDBTCO (explicit `network` wins over the webvhNetwork
+   * tier mapping, #247). Both the btco binding fallback and rotateBtcoKeys use
+   * this so a tier-only config can never drift into a NETWORK_MISMATCH.
+   */
+  private getConfiguredBitcoinNetwork(): 'mainnet' | 'regtest' | 'signet' {
+    return this.config.network
+      ?? (this.config.webvhNetwork ? getBitcoinNetworkForWebVH(this.config.webvhNetwork) : undefined)
+      ?? 'mainnet';
+  }
+
   /**
    * Create multiple assets in batch
    */

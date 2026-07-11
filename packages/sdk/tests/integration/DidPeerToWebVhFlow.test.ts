@@ -84,7 +84,8 @@ describe('DID Peer to WebVH Publication Flow', () => {
     const bindings = (publishedAsset as any).bindings;
     expect(bindings).toBeDefined();
     expect(bindings['did:webvh']).toBeDefined();
-    expect(bindings['did:webvh']).toMatch(new RegExp(`^did:webvh:${domain.replace(':', '%3A')}:`));
+    // Minted DID is did:webvh:{SCID}:{domain}[:slug] — SCID segment now precedes the domain.
+    expect(bindings['did:webvh']).toMatch(new RegExp(`^did:webvh:[^:]+:${domain.replace(':', '%3A')}`));
     
     const webvhDid = bindings['did:webvh'];
     console.log(`✅ Asset published to web!`);

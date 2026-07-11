@@ -68,6 +68,8 @@ export interface AssetTransferredEvent extends BaseEvent {
   from: string;
   to: string;
   transactionId: string;
+  /** True when ownership moved on-chain but the DID document still carries the previous owner's keys (rotation-first model, #366). */
+  keyRotationPending?: boolean;
 }
 
 /**
@@ -300,6 +302,43 @@ export interface BatchProgressEvent extends BaseEvent {
 }
 
 /**
+ * Emitted when a migration mints a new update key but no keyStore is
+ * configured to persist it: the DID exists but cannot be rotated later.
+ */
+export interface KeyUnpersistedEvent extends BaseEvent {
+  type: 'key:unpersisted';
+  asset: {
+    id: string;
+  };
+  did: string;
+}
+
+/**
+ * Emitted when a did:webvh log is signed but no storage adapter is
+ * configured to host it: the DID exists but does not resolve.
+ */
+export interface DidLogUnhostedEvent extends BaseEvent {
+  type: 'did:log-unhosted';
+  did: string;
+  /** Why the signed log was not hosted: no adapter configured, or the log had no entries to write. */
+  reason: 'NO_STORAGE_ADAPTER' | 'EMPTY_LOG';
+}
+
+/**
+ * Emitted when a recipient rotates the did:btco keys by reinscribing an
+ * updated document (same id, new verification method) on the same sat —
+ * the recipient-side act of the rotation-first ownership model (#366).
+ */
+export interface KeyRotatedEvent extends BaseEvent {
+  type: 'key:rotated';
+  asset: {
+    id: string;
+  };
+  did: string;
+  inscriptionId: string;
+}
+
+/**
  * Union type of all possible events
  */
 export type OriginalsEvent =
@@ -323,7 +362,10 @@ export type OriginalsEvent =
   | MigrationCompletedEvent
   | MigrationFailedEvent
   | MigrationRolledbackEvent
-  | MigrationQuarantineEvent;
+  | MigrationQuarantineEvent
+  | KeyUnpersistedEvent
+  | DidLogUnhostedEvent
+  | KeyRotatedEvent;
 
 /**
  * Event handler function type
@@ -355,6 +397,9 @@ export interface EventTypeMap {
   'migration:failed': MigrationFailedEvent;
   'migration:rolledback': MigrationRolledbackEvent;
   'migration:quarantine': MigrationQuarantineEvent;
+  'key:unpersisted': KeyUnpersistedEvent;
+  'did:log-unhosted': DidLogUnhostedEvent;
+  'key:rotated': KeyRotatedEvent;
 }
 
 /**

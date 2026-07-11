@@ -170,7 +170,13 @@ export class OrdHttpProvider implements OrdinalsProvider {
     ));
   }
 
-  createInscription(_params: { data: Buffer; contentType: string; feeRate?: number; }): Promise<{
+  createInscription(params: {
+    data?: Buffer;
+    buildContent?: (satoshi: string) => Buffer | Promise<Buffer>;
+    contentType: string;
+    feeRate?: number;
+    targetSatoshi?: string;
+  }): Promise<{
     inscriptionId: string;
     revealTxId: string;
     commitTxId?: string;
@@ -182,6 +188,12 @@ export class OrdHttpProvider implements OrdinalsProvider {
     contentType?: string;
     feeRate?: number;
   }> {
+    if (params.buildContent || params.targetSatoshi) {
+      return Promise.reject(new StructuredError(
+        'ORD_PROVIDER_UNSUPPORTED',
+        'This provider does not support deferred content (buildContent) or sat-targeted reinscription (targetSatoshi). Build the inscription locally and submit via broadcastTransaction.'
+      ));
+    }
     return Promise.reject(new StructuredError(
       'ORD_CREATE_INSCRIPTION_NOT_IMPLEMENTED',
       'OrdHttpProvider.createInscription is not implemented: no inscription was created and no transaction was broadcast. Configure an OrdinalsProvider with real inscription support.'

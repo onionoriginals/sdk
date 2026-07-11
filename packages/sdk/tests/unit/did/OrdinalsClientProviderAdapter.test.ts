@@ -43,3 +43,23 @@ describe('OrdinalsClientProviderAdapter branches', () => {
     (global as any).fetch = originalFetch;
   });
 });
+
+// The config.ordinalsProvider → resolver adapter (the path DIDManager uses when
+// an ordinalsProvider is configured) must pass the optional getSatOwnership
+// lookup straight through, and report none when the provider lacks it.
+describe('OrdinalsProviderResolverAdapter getSatOwnership contract', () => {
+  test('passes sat ownership through from the underlying provider', async () => {
+    const { OrdinalsProviderResolverAdapter } = await import('../../../src/did/providers/OrdinalsProviderResolverAdapter');
+    const owner = { address: 'bcrt1qmockowner', outpoint: 'tx-abc:0' };
+    const provider = { getSatOwnership: async (_sat: string) => owner } as any;
+    const adapter = new OrdinalsProviderResolverAdapter(provider);
+    expect(await adapter.getSatOwnership('123')).toEqual(owner);
+  });
+
+  test('reports null when the provider has no ownership lookup', async () => {
+    const { OrdinalsProviderResolverAdapter } = await import('../../../src/did/providers/OrdinalsProviderResolverAdapter');
+    const provider = {} as any;
+    const adapter = new OrdinalsProviderResolverAdapter(provider);
+    expect(await adapter.getSatOwnership('123')).toBeNull();
+  });
+});

@@ -39,6 +39,14 @@ export class OrdinalsProviderResolverAdapter implements ResourceProviderLike {
     };
   }
 
+  // Pass through the optional sat-ownership lookup so resolution can surface
+  // ownership metadata; providers without one simply omit it. Ownership is
+  // resolution METADATA — never used to rewrite the inscribed document.
+  async getSatOwnership(satoshi: string): Promise<{ address: string; outpoint: string } | null> {
+    if (typeof this.provider.getSatOwnership !== 'function') return null;
+    return this.provider.getSatOwnership(satoshi);
+  }
+
   // The adapters/OrdinalsProvider interface exposes no metadata endpoint;
   // metadata is diagnostic-only in BtcoDidResolver, so report none.
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -63,6 +71,9 @@ export class OrdinalsProviderResolverAdapter implements ResourceProviderLike {
     const inscription = await this.provider.getInscriptionById(inscriptionId);
     if (!inscription) {
       return respond(false, 404, 'Not Found', `Inscription ${inscriptionId} not found`);
+    }
+    if (inscription.content === undefined) {
+      return respond(false, 404, 'Not Found', `Inscription ${inscriptionId} has no content to serve`);
     }
     return respond(true, 200, 'OK', inscription.content.toString('utf8'));
   };

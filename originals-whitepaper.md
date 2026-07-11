@@ -46,6 +46,7 @@ operations without breaking historical provenance.
 3. Front-Running: Unique satoshi assignment thwarts front-running attacks.
 4. Layer Resilience: Failure in web hosting affects discoverability but not ownership; Bitcoin
 anchoring is final.
+5. Content Permanence: Inscriptions anchor resource hashes; they do not by themselves host resource bytes. Implementations SHOULD inscribe content inline below a size threshold and MUST record which resources are inscribed versus referenced, so holders can assess availability risk.
 7. Related Work
 Originals builds directly on the interoperability of W3C DID and VC standards, and the finality of Bitcoin’s Ordinals protocol, but deliberately separates the processes of asset creation, discovery, and settlement.
 8. Conclusion
@@ -71,7 +72,7 @@ DAO Governance
 enterprises to verify provenance and source integrity, reducing supply chain risks. Heritage Collectibles
 ● Archivists, museums, or estates catalog rare items with did:peer credentials, creating verifiable records without needing a blockchain.
 ● did:webvh migration makes these records publicly discoverable and indexable for researchers and the public.
-● did:btco anchoring ensures provenance persists even if institutions dissolve or servers disappear — preserving cultural heritage with Bitcoin’s permanence.
+● did:btco anchoring makes provenance and content integrity permanent: the asset's identity, history, and resource hashes survive any host. Content availability is permanent only for resources inscribed inline; referenced resources remain verifiable against the inscribed hashes (any surviving copy can be authenticated) but depend on at least one copy surviving.
 Consumer Goods with Provenance Trails
 ● A manufacturer issues did:peer credentials for limited-run sneakers, instruments, or other goods.
 ● did:webvh provides a verifiable public registry of authentic items, reducing counterfeiting risk.

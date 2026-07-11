@@ -24,21 +24,20 @@ describe('WebVH publish end-to-end', () => {
     expect(published.currentLayer).toBe('did:webvh');
     expect(published.id.startsWith('did:peer:')).toBe(true);
     
-    // Binding to publisher's did:webvh
+    // Binding is a real minted did:webvh owned by the asset: did:webvh:{SCID}:{domain}[:slug].
+    // It embeds the publisher's domain but is never equal to the publisher shorthand input.
     const webBinding = (published as any).bindings?.['did:webvh'];
     expect(typeof webBinding).toBe('string');
-    expect(webBinding).toBe(publisherDid);
+    expect(webBinding).toMatch(/^did:webvh:[^:]+:example\.com(:.+)?$/);
+    expect(webBinding).not.toBe(publisherDid);
 
-    // The synthetic publisher DID has no hosted did:webvh log, so honest
-    // resolution returns null (resolveDID no longer fabricates stub docs).
-    const resolved = await sdk.did.resolveDID(webBinding!);
-    expect(resolved).toBeNull();
+    // Binding resolution over HTTP requires hosting; the storage-hosted log is asserted in LifecycleManager.mintwebvh.test.ts
 
     // Resources have DID-based URLs (not .well-known)
     expect(Array.isArray(published.resources)).toBe(true);
     for (const r of published.resources) {
       expect(typeof r.url).toBe('string');
-      expect((r.url as string).startsWith(publisherDid)).toBe(true);
+      expect((r.url as string).startsWith(webBinding)).toBe(true);
       expect((r.url as string).includes('/resources/')).toBe(true);
     }
 
