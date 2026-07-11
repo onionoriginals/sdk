@@ -17,9 +17,10 @@ import { parseEventLogCbor } from '../serialization/cbor.js';
 import { serializeEventLogJson } from '../serialization/json.js';
 import { serializeEventLogCbor } from '../serialization/cbor.js';
 import { multikey } from '../../crypto/Multikey.js';
-import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize.js';
-import { computeDigestMultibase } from '../hash.js';
+import { canonicalizeEvent } from '../canonicalize.js';
+import { appendEvent } from '../algorithms/appendEvent.js';
 import { btcoDidFromSatoshi } from '../btcoDid.js';
+import { deriveDidCel } from '../celDid.js';
 
 /**
  * Flags parsed from command line arguments
@@ -71,9 +72,20 @@ function getCurrentDid(log: EventLog): string {
 
   for (const event of log.events) {
     const data = event.data as Record<string, unknown>;
-    if (event.type === 'create' && data.did) {
-      currentDid = data.did as string;
-    } else if (event.type === 'update' && data.sourceDid && data.layer && data.migratedAt) {
+    if (event.type === 'create') {
+      // Dual-read the genesis: a new-shape genesis (`controller` present)
+      // derives its identity (did:cel); a legacy genesis embeds `did`.
+      if (data.did) {
+        currentDid = data.did as string;
+      } else if (data.controller !== undefined) {
+        currentDid = deriveDidCel(log);
+      }
+    } else if (
+      // Type-first: first-class 'migrate' events are migrations by type.
+      (event.type === 'migrate' && data.layer) ||
+      // Legacy sniff kept verbatim: old logs record migrations as 'update' events.
+      (event.type === 'update' && data.sourceDid && data.layer && data.migratedAt)
+    ) {
       // Migration event. webvh migrations carry the resolvable targetDid; btco
       // migrations derive did:btco:<satoshi> from the bitcoin witness proof.
       // Transfers happen at the btco layer, so getting this right matters for
@@ -234,44 +246,28 @@ export async function transferCommand(flags: TransferFlags): Promise<TransferRes
   // Create signer and sign the transfer event
   const signer = createSigner(privateKey, publicKey);
 
+  // First-class transfer event: the discriminator is the event type itself,
+  // not an inner data.type field.
   const transferData = {
-    type: 'transfer',
     previousOwner: currentDid,
     newOwner: flags.to,
     transferredAt: new Date().toISOString(),
   };
 
-  // Compute previous event hash first (same canonicalization as updateEventLog),
-  // then sign over the full event base so the signed payload matches what
-  // verifyEventLog reconstructs: { type, data, previousEvent }. Signing only
-  // `transferData` would produce a signature that verification cannot reproduce,
-  // yielding proofValid: false on every transferred log.
-  const lastEvent = eventLog.events[eventLog.events.length - 1];
-  const previousEvent = computeDigestMultibase(canonicalizeEntryForChain(lastEvent));
-
-  const eventBase = {
-    type: 'update' as const,
-    data: transferData,
-    previousEvent,
-  };
-
-  let proof: DataIntegrityProof;
+  // appendEvent signs exactly { type, data, previousEvent } — the shape
+  // verifyEventLog reconstructs — and computes the chain link itself.
   try {
-    proof = await signer(eventBase);
+    eventLog = await appendEvent(eventLog, 'transfer', transferData, {
+      signer,
+      verificationMethod: `did:key:${publicKey}#${publicKey}`,
+      proofPurpose: 'assertionMethod',
+    });
   } catch (e) {
     return {
       success: false,
       message: `Error: Failed to sign transfer: ${(e as Error).message}`,
     };
   }
-
-  // Append transfer event to log
-  eventLog.events.push({
-    type: 'update',
-    data: transferData,
-    proof: [proof],
-    previousEvent,
-  });
 
   // Serialize output
   const format = (flags.format || 'json').toLowerCase();

@@ -34,7 +34,7 @@ export interface ExternalReference {
 /**
  * Event type for log entries
  */
-export type EventType = 'create' | 'update' | 'deactivate';
+export type EventType = 'create' | 'update' | 'deactivate' | 'migrate' | 'transfer' | 'rotateKey';
 
 /**
  * Log Entry - a single event in the cryptographic event log
@@ -103,6 +103,13 @@ export interface VerificationResult {
   errors: string[];
   /** Per-event verification details */
   events: EventVerification[];
+  /**
+   * The asset DID this log backs, when derivable from the genesis event:
+   * the DERIVED `did:cel:<digest>` for new-shape (`data.controller`) logs, or
+   * the declared `data.did` for legacy logs. Absent for shapeless logs.
+   * Informational: it is a trust statement only when `verified` is true.
+   */
+  assetDid?: string;
 }
 
 /**
@@ -166,6 +173,13 @@ export interface VerifyOptions {
    * `verifier` path, where the caller owns proof semantics.)
    */
   ordinalsProvider?: OrdinalsLookup;
+  /**
+   * When set, the log must back this exact asset DID or verification fails.
+   * did:cel expected DIDs are compared via suffix derivation
+   * (`didCelMatchesLog`); legacy DIDs by string equality against `data.did`.
+   * Ignored on the custom `verifier` path (which owns proof semantics).
+   */
+  expectedDid?: string;
 }
 
 /**
@@ -182,6 +196,8 @@ export interface AssetState {
   resources: ExternalReference[];
   /** Creator DID */
   creator?: string;
+  /** Current controller key DID: genesis `controller`, handed off by rotateKey */
+  controller?: string;
   /** Creation timestamp */
   createdAt?: string;
   /** Last update timestamp */

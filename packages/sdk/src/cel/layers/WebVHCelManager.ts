@@ -11,10 +11,11 @@
  */
 
 import type { EventLog, ExternalReference, UpdateOptions, AssetState } from '../types.js';
-import { updateEventLog } from '../algorithms/updateEventLog.js';
+import { appendEvent } from '../algorithms/appendEvent.js';
 import { witnessEvent } from '../algorithms/witnessEvent.js';
 import type { WitnessService } from '../witnesses/WitnessService.js';
 import type { CelSigner } from './PeerCelManager.js';
+import { deriveDidCel } from '../celDid.js';
 
 /**
  * Configuration options for WebVHCelManager
@@ -136,10 +137,14 @@ export class WebVHCelManager {
       throw new Error('First event must be a create event');
     }
 
-    // Extract source data
+    // Extract source data. Dual-read: a new-shape genesis (`controller`
+    // present) derives its identity from the event — the did:cel IS the
+    // source; a legacy genesis embeds `did` and is read verbatim.
     const createData = createEvent.data as Record<string, unknown>;
-    const sourceDid = createData.did as string;
-    
+    const sourceDid = createData.controller !== undefined
+      ? deriveDidCel(peerLog)
+      : (createData.did as string);
+
     if (!sourceDid) {
       throw new Error('Create event must have a did field');
     }
@@ -175,8 +180,8 @@ export class WebVHCelManager {
       proofPurpose: this.config.proofPurpose,
     };
 
-    // Create the update event with migration data
-    let updatedLog = await updateEventLog(peerLog, migrationData, updateOptions);
+    // Append the first-class migrate event with the migration data
+    let updatedLog = await appendEvent(peerLog, 'migrate', migrationData, updateOptions);
 
     // Add witness proofs if witnesses are configured
     if (this.witnesses.length > 0) {
@@ -222,6 +227,11 @@ export class WebVHCelManager {
       const peerPart = sourceDid.replace('did:peer:', '');
       // Take first 32 chars of the peer DID identifier for brevity
       idPart = peerPart.substring(0, Math.min(32, peerPart.length));
+    } else if (sourceDid.startsWith('did:cel:')) {
+      // did:cel suffix is a base64url digest (already URL-safe); truncate it
+      // exactly the way the did:peer branch truncates its identifier.
+      const celPart = sourceDid.replace('did:cel:', '');
+      idPart = celPart.substring(0, Math.min(32, celPart.length));
     } else if (sourceDid.startsWith('did:key:')) {
       // For key DIDs, extract the key portion
       idPart = sourceDid.replace('did:key:', '').substring(0, 32);
@@ -268,16 +278,21 @@ export class WebVHCelManager {
       throw new Error('First event must be a create event');
     }
 
-    // Extract initial state from create event
+    // Extract initial state from create event. Dual-read the genesis: a
+    // new-shape genesis (`controller` present) derives its identity (did:cel)
+    // and sources the creator from the controller; a legacy genesis embeds
+    // `did`/`creator` and is read verbatim.
     const createData = createEvent.data as Record<string, unknown>;
-    
+    const isLegacyGenesis = createData.controller === undefined && createData.did !== undefined;
+
     // Initialize state from create event
     const state: AssetState = {
-      did: createData.did as string,
+      did: isLegacyGenesis ? (createData.did as string) : deriveDidCel(log),
       name: createData.name as string | undefined,
       layer: (createData.layer as 'peer' | 'webvh' | 'btco') || 'peer',
       resources: (createData.resources as ExternalReference[]) || [],
-      creator: createData.creator as string | undefined,
+      creator: (createData.creator as string | undefined) ?? (createData.controller as string | undefined),
+      controller: createData.controller as string | undefined,
       createdAt: createData.createdAt as string | undefined,
       updatedAt: undefined,
       deactivated: false,
@@ -288,15 +303,17 @@ export class WebVHCelManager {
     for (let i = 1; i < log.events.length; i++) {
       const event = log.events[i];
 
-      if (event.type === 'update') {
+      if (event.type === 'update' || event.type === 'migrate') {
         const updateData = event.data as Record<string, unknown>;
-        
-        // Check if this is a migration event. Detect via sourceDid + layer
-        // (present on BOTH webvh and btco migrations) rather than targetDid
-        // (webvh-only): keying off targetDid would misclassify a btco
-        // migration as a regular update. Mirrors OriginalsCel.getCurrentLayer
-        // and BtcoCelManager.getCurrentState.
-        if (updateData.sourceDid && updateData.layer && updateData.migratedAt) {
+
+        // Type-first: first-class 'migrate' events are migrations by type.
+        // Legacy logs record migrations as 'update' events — the sniff via
+        // sourceDid + layer (present on BOTH webvh and btco migrations)
+        // rather than targetDid (webvh-only) is kept verbatim as fallback:
+        // keying off targetDid would misclassify a btco migration as a
+        // regular update. Mirrors OriginalsCel.getCurrentLayer and
+        // BtcoCelManager.getCurrentState.
+        if (event.type === 'migrate' || (updateData.sourceDid && updateData.layer && updateData.migratedAt)) {
           // Migration event - update DID and layer
           if (updateData.targetDid) {
             state.did = updateData.targetDid as string;
@@ -333,6 +350,31 @@ export class WebVHCelManager {
             state.metadata = state.metadata || {};
             state.metadata[key] = value;
           }
+        }
+      } else if (event.type === 'transfer') {
+        // Ownership hand-off: surface the owners; identity (did) is unchanged.
+        const transferData = event.data as Record<string, unknown>;
+        if (transferData.transferredAt !== undefined) {
+          state.updatedAt = transferData.transferredAt as string;
+        }
+        state.metadata = state.metadata || {};
+        if (transferData.previousOwner !== undefined) {
+          state.metadata.previousOwner = transferData.previousOwner;
+        }
+        if (transferData.newOwner !== undefined) {
+          state.metadata.newOwner = transferData.newOwner;
+        }
+        if (transferData.txid !== undefined) {
+          state.metadata.txid = transferData.txid;
+        }
+      } else if (event.type === 'rotateKey') {
+        // Authority hand-off: the last rotation's newController is current.
+        const rotationData = event.data as Record<string, unknown>;
+        if (typeof rotationData?.newController === 'string') {
+          state.controller = rotationData.newController;
+        }
+        if (typeof rotationData?.rotatedAt === 'string') {
+          state.updatedAt = rotationData.rotatedAt;
         }
       } else if (event.type === 'deactivate') {
         state.deactivated = true;

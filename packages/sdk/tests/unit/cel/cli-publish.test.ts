@@ -121,7 +121,7 @@ describe('CLI Publish Command', () => {
 
       const publishedLog = parseEventLogJson(fs.readFileSync(outputPath, 'utf-8'));
       expect(publishedLog.events.length).toBe(2);
-      expect(publishedLog.events[1].type).toBe('update');
+      expect(publishedLog.events[1].type).toBe('migrate');
 
       const migrationData = publishedLog.events[1].data as Record<string, unknown>;
       expect(migrationData.layer).toBe('webvh');

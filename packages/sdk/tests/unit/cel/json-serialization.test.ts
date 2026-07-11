@@ -630,6 +630,19 @@ describe('CEL JSON Serialization', () => {
       expect(parsed.events[1].type).toBe('deactivate');
       expect((parsed.events[1].data as { reason: string }).reason).toBe('No longer needed');
     });
+
+    test('round-trips migrate/transfer/rotateKey event types', () => {
+      const log = {
+        events: [
+          { type: 'create', data: { name: 'A' }, proof: [{ type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022', created: 'x', verificationMethod: 'did:key:z6Mk#z6Mk', proofPurpose: 'assertionMethod', proofValue: 'z1' }] },
+          { type: 'migrate', data: { sourceDid: 'did:cel:uEiA', targetDid: 'did:webvh:x:example.com:a', layer: 'webvh', migratedAt: 'x' }, previousEvent: 'uEiB', proof: [{ type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022', created: 'x', verificationMethod: 'did:key:z6Mk#z6Mk', proofPurpose: 'assertionMethod', proofValue: 'z2' }] },
+          { type: 'transfer', data: { previousOwner: 'did:key:z6Mk', newOwner: 'did:key:z6Mk2', transferredAt: 'x' }, previousEvent: 'uEiC', proof: [{ type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022', created: 'x', verificationMethod: 'did:key:z6Mk#z6Mk', proofPurpose: 'assertionMethod', proofValue: 'z3' }] },
+          { type: 'rotateKey', data: { newController: 'did:key:z6Mk2', rotatedAt: 'x' }, previousEvent: 'uEiD', proof: [{ type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022', created: 'x', verificationMethod: 'did:key:z6Mk#z6Mk', proofPurpose: 'assertionMethod', proofValue: 'z4' }] }
+        ]
+      };
+      const parsed = parseEventLogJson(serializeEventLogJson(log as never));
+      expect(parsed.events.map(e => e.type)).toEqual(['create', 'migrate', 'transfer', 'rotateKey']);
+    });
   });
 
   describe('optional created field (type/serialization parity)', () => {

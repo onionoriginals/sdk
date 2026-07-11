@@ -131,7 +131,7 @@ function parseEntry(entry: unknown): LogEntry {
   const e = entry as Record<string, unknown>;
   
   // Validate type
-  if (e.type !== 'create' && e.type !== 'update' && e.type !== 'deactivate') {
+  if (e.type !== 'create' && e.type !== 'update' && e.type !== 'deactivate' && e.type !== 'migrate' && e.type !== 'transfer' && e.type !== 'rotateKey') {
     throw new Error(`Invalid entry type: ${e.type}`);
   }
   

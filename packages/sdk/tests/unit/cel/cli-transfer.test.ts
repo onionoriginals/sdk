@@ -201,10 +201,11 @@ describe('CLI Transfer Command', () => {
       expect(transferredLog.events.length).toBe(2); // create + transfer
 
       const transferEvent = transferredLog.events[1];
-      expect(transferEvent.type).toBe('update');
+      // First-class event type: the discriminator lives on the event, not in data.
+      expect(transferEvent.type).toBe('transfer');
 
       const transferData = transferEvent.data as Record<string, unknown>;
-      expect(transferData.type).toBe('transfer');
+      expect(transferData.type).toBeUndefined();
       expect(transferData.previousOwner).toBe('did:peer:4z6MkTestPeerDid12345');
       expect(transferData.newOwner).toBe('bc1qtest');
       expect(transferData.transferredAt).toBeDefined();
