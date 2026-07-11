@@ -324,7 +324,7 @@ export class PeerCelManager {
     // Initialize state from create event
     const state: AssetState = {
       did: isLegacy ? (createData.did as string) : deriveDidCel(log),
-      name: createData.name as string,
+      name: createData.name,
       layer: isLegacy ? (createData.layer as 'peer') : 'peer',
       resources: [...(createData.resources ?? [])],
       creator: isLegacy ? createData.creator : createData.controller,

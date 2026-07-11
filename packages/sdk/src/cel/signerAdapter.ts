@@ -24,7 +24,7 @@ function assertEd25519(privateKeyMultibase: string): Uint8Array {
   return decoded.key;
 }
 
-async function buildProof(secret: Uint8Array, verificationMethod: string, data: unknown): Promise<DataIntegrityProof> {
+function buildProof(secret: Uint8Array, verificationMethod: string, data: unknown): DataIntegrityProof {
   // @noble/curves' ed25519.sign is synchronous (unlike @noble/ed25519's signAsync).
   const sig = ed25519.sign(canonicalizeEvent(data), secret);
   return {
@@ -43,7 +43,7 @@ export function celSignerFromKeyPair(keyPair: KeyPair): {
   const secret = assertEd25519(keyPair.privateKey);
   const controller = `did:key:${keyPair.publicKey}`;
   const verificationMethod = `${controller}#${keyPair.publicKey}`;
-  return { signer: (data) => buildProof(secret, verificationMethod, data), controller, verificationMethod };
+  return { signer: (data) => Promise.resolve(buildProof(secret, verificationMethod, data)), controller, verificationMethod };
 }
 
 /** Lazy per-sign lookup: rotation-fresh, and key absence fails at sign time. */

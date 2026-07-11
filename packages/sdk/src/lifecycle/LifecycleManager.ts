@@ -1707,7 +1707,7 @@ export class LifecycleManager {
     await asset.recordTransfer(currentOwner, newOwner, tx.txid, true);
 
     if (celAppendError) {
-      const detail = celAppendError instanceof Error ? celAppendError.message : String(celAppendError);
+      const detail = celAppendError instanceof Error ? celAppendError.message : JSON.stringify(celAppendError);
       throw new StructuredError(
         'CEL_APPEND_FAILED_POST_TRANSFER',
         `Ownership transferred (txid ${tx.txid}) but the signed CEL transfer event could not be appended: ${detail}. Provenance is truncated on-log; re-append the transfer event with this txid.`,
