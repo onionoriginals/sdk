@@ -50,9 +50,13 @@ describe('CEL storage persistence (#Phase3 Task 3)', () => {
     const stored = await storage.getObject('cel', celStoragePath(asset.id));
     expect(stored).not.toBeNull();
     const log = parseEventLogJson(Buffer.from(stored!.content).toString('utf8'));
+    // Last event is the acknowledgeWitness update (map §5.1); the btco migrate
+    // it acknowledges is present just before it.
     const last = log.events[log.events.length - 1];
-    expect(last.type).toBe('migrate');
-    expect((last.data as any).layer).toBe('btco');
+    expect(last.type).toBe('update');
+    expect((last.data as any).operation).toBe('acknowledgeWitness');
+    const migrate = log.events.find(e => e.type === 'migrate' && (e.data as any).layer === 'btco');
+    expect(migrate).toBeDefined();
   });
 
   test('post-publish appends refresh the webvh-hosted cel.json (not frozen at publish time)', async () => {
@@ -77,10 +81,10 @@ describe('CEL storage persistence (#Phase3 Task 3)', () => {
     const after = parseEventLogJson(
       Buffer.from((await storage.getObject('example.com', celJsonPath))!.content).toString('utf8')
     );
-    const last = after.events[after.events.length - 1];
-    expect(last.type).toBe('migrate');
-    expect((last.data as any).layer).toBe('btco');
-    expect(after.events.length).toBe(before.events.length + 1);
+    // inscribe appends the btco migrate AND its acknowledgeWitness update.
+    expect(after.events.some(e => e.type === 'migrate' && (e.data as any).layer === 'btco')).toBe(true);
+    expect(after.events[after.events.length - 1].type).toBe('update');
+    expect(after.events.length).toBe(before.events.length + 2);
   });
 
   test('legacy put-shaped adapters receive the cel/<suffix>.json key', async () => {

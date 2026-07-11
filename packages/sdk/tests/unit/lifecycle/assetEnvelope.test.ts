@@ -56,8 +56,9 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     expect(env.version).toBe(ASSET_ENVELOPE_VERSION);
     expect(env.assetDid).toBe(didCel);
 
-    // eventLog is THE provenance encoding, embedded as a parsed object.
-    expect(env.eventLog.events.map(e => e.type)).toEqual(['create', 'migrate', 'migrate']);
+    // eventLog is THE provenance encoding, embedded as a parsed object. The
+    // trailing update is the btco migrate's acknowledgeWitness (map §5.1).
+    expect(env.eventLog.events.map(e => e.type)).toEqual(['create', 'migrate', 'migrate', 'update']);
     const folded = replayProvenance(env.eventLog);
     expect(folded.bindings['did:cel']).toBe(didCel);
     expect(folded.bindings['did:webvh']).toBe(webvhBinding);

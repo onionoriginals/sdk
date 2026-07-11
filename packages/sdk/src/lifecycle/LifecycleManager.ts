@@ -38,6 +38,7 @@ import type { EventLog, LogEntry, ExternalReference, WitnessProof, OrdinalsLooku
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { multikey } from '../crypto/Multikey.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
+import type { KeyPair } from '../types/bitcoin.js';
 import { createBtcoDidDocument } from '../did/createBtcoDidDocument.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
@@ -1654,7 +1655,7 @@ export class LifecycleManager {
    */
   private async appendCelEventOrSkip(
     asset: OriginalsAsset,
-    type: 'migrate' | 'rotateKey' | 'transfer',
+    type: 'migrate' | 'rotateKey' | 'transfer' | 'update',
     data: unknown
   ): Promise<string | null> {
     const logBefore = asset.celLog;
@@ -1908,9 +1909,23 @@ export class LifecycleManager {
       }
     }
     asset.bindings = Object.assign({}, asset.bindings || {}, { 'did:btco': bindingValue });
-    
+
+    // Witness acknowledgment (map §5.1): controller-signed update recording the
+    // inscription that witnessed the btco migrate event. Appended AFTER the
+    // witness-proof attach above; non-gating and best-effort (the inscription is
+    // committed and paid). Also re-persists the now-proofed log through the
+    // Task-3/4 choke point, closing the stored-copy-predates-the-proof window.
+    if (celHeadDigest !== null && inscription.satoshi) {
+      await this.appendWitnessAcknowledgment(asset, {
+        satoshi: inscription.satoshi,
+        inscriptionId: inscription.inscriptionId,
+        txid: revealTxId,
+        witnessedEventDigest: celHeadDigest
+      });
+    }
+
     stopTimer();
-    this.logger.info('Asset inscribed on Bitcoin successfully', { 
+    this.logger.info('Asset inscribed on Bitcoin successfully', {
       assetId: asset.id, 
       inscriptionId: inscription.inscriptionId,
       transactionId: revealTxId
@@ -2112,6 +2127,180 @@ export class LifecycleManager {
     }
   }
 
+  // ===== Shared rotation-first core (rotateBtcoKeys + claimOwnership) =====
+
+  /**
+   * Ed25519 + derive check for a caller-supplied rotation keypair: the private
+   * key MUST derive the announced `publicKeyMultibase`, or every subsequent
+   * append would be signed by a key nobody can verify against. Pure — no
+   * keyStore side effects. Throws CEL_ED25519_REQUIRED / INVALID_KEY_PAIR.
+   */
+  private assertRotationKeyPair(publicKeyMultibase: string, privateKey: string): void {
+    const { key: privBytes, type: privType } = multikey.decodePrivateKey(privateKey);
+    if (privType !== 'Ed25519') {
+      throw new StructuredError('CEL_ED25519_REQUIRED',
+        `CEL events must be signed with Ed25519; got ${privType}. Generate a dedicated Ed25519 controller key.`);
+    }
+    const derivedPub = multikey.encodePublicKey(ed25519.getPublicKey(privBytes), 'Ed25519');
+    if (derivedPub !== publicKeyMultibase) {
+      throw new StructuredError('INVALID_KEY_PAIR',
+        'privateKey does not derive the announced publicKeyMultibase');
+    }
+  }
+
+  /**
+   * Builds the rotated did:btco document (shared by rotateBtcoKeys and
+   * claimOwnership): same id, the NEW verification method, lineage back-links,
+   * and the re-embedded resource manifest (the resolver serves the newest
+   * inscription, so a rotation that dropped the manifest would erase it). The
+   * `#cel` anchor is embedded separately, after the rotateKey head is known.
+   * Throws NETWORK_MISMATCH if config.network drifted from the DID's prefix.
+   */
+  private buildRotatedBtcoDoc(
+    asset: OriginalsAsset,
+    satoshi: string,
+    btcoDid: string,
+    publicKeyMultibase: string
+  ): DIDDocument {
+    const { key, type } = multikey.decodePublicKey(publicKeyMultibase);
+    const network = this.getConfiguredBitcoinNetwork();
+    const rotatedDoc = createBtcoDidDocument(satoshi, network, { publicKey: key, keyType: type });
+    // createBtcoDidDocument re-derives the prefix from network; the rotated id
+    // MUST equal the existing binding or config.network drifted from the DID.
+    if (rotatedDoc.id !== btcoDid) {
+      throw new StructuredError('NETWORK_MISMATCH', `Rotated document id ${rotatedDoc.id} does not match binding ${btcoDid}; check config.network.`);
+    }
+    const backLinks = [asset.id, asset.bindings?.['did:webvh']].filter(
+      (d): d is string => typeof d === 'string'
+    );
+    rotatedDoc.alsoKnownAs = backLinks;
+    rotatedDoc.service = [
+      ...(rotatedDoc.service || []),
+      {
+        id: `${rotatedDoc.id}#resources`,
+        type: 'OriginalsResourceManifest',
+        serviceEndpoint: {
+          resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
+          timestamp: new Date().toISOString()
+        }
+      }
+    ];
+    return rotatedDoc;
+  }
+
+  /**
+   * Embeds the fresh `#cel` OriginalsCelAnchor (committing to the rotateKey
+   * entry's chain digest) into the rotated document. The resolver serves the
+   * newest inscription, so this must be re-embedded on every reinscription or
+   * the anchor is erased.
+   */
+  private embedCelAnchor(rotatedDoc: DIDDocument, celHeadDigest: string): void {
+    rotatedDoc.service = [
+      ...(rotatedDoc.service || []),
+      {
+        id: `${rotatedDoc.id}#cel`,
+        type: 'OriginalsCelAnchor',
+        serviceEndpoint: { headDigestMultibase: celHeadDigest }
+      }
+    ];
+  }
+
+  /**
+   * Reinscribes the rotated document on the SAME sat (targetSatoshi). On
+   * failure — nothing is paid before the broadcast fails — restores the
+   * pre-append CEL log (`restoreLog`) so the in-memory log never runs ahead of
+   * the chain.
+   */
+  private async reinscribeRotatedDoc(
+    asset: OriginalsAsset,
+    rotatedDoc: DIDDocument,
+    satoshi: string,
+    feeRate: number | undefined,
+    restoreLog: EventLog | undefined
+  ): Promise<{ inscriptionId: string; satoshi?: string; txid?: string; revealTxId?: string }> {
+    const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+    try {
+      return await bitcoinManager.inscribeData(
+        Buffer.from(JSON.stringify(rotatedDoc)),
+        'application/did+json',
+        feeRate,
+        { targetSatoshi: satoshi }
+      );
+    } catch (error) {
+      // Reinscription failed after the append — restore the pre-append log
+      // (pure in-memory; nothing was paid before broadcast failed).
+      if (restoreLog) {
+        asset._replaceCelLog(restoreLog);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Attaches a `bitcoin-ordinals-2024` witness proof to the log's HEAD event
+   * post-inscription (mirrors inscribeOnBitcoin): the reinscription commits to
+   * the head's chain digest via its `#cel` anchor, so this proof binds
+   * satoshi/inscriptionId/txid to that event. Chain digests exclude proofs, so
+   * this post-hoc attachment cannot break the chain or the anchored head.
+   */
+  private attachBitcoinWitnessProof(
+    asset: OriginalsAsset,
+    witness: { satoshi: string; inscriptionId: string; txid: string }
+  ): void {
+    const log = asset.celLog;
+    if (!log) return;
+    const headIdx = log.events.length - 1;
+    const witnessedAt = new Date().toISOString();
+    const witnessProof: WitnessProof & { txid: string; satoshi: string; inscriptionId: string } = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'bitcoin-ordinals-2024',
+      created: witnessedAt,
+      verificationMethod: 'did:btco:witness',
+      proofPurpose: 'assertionMethod',
+      proofValue: `z${witness.inscriptionId}`,
+      witnessedAt,
+      txid: witness.txid,
+      satoshi: witness.satoshi,
+      inscriptionId: witness.inscriptionId
+    };
+    const events = log.events.slice();
+    events[headIdx] = {
+      ...events[headIdx],
+      proof: [...events[headIdx].proof, witnessProof]
+    };
+    asset._replaceCelLog({ ...log, events });
+  }
+
+  /**
+   * Controller-signed witness acknowledgment (map §5.1): records the
+   * inscription that witnessed `witnessedEventDigest` as an `update` event via
+   * the STANDARD append path — folds to the CURRENT controller (for claim, the
+   * NEW key post-rotation). Non-gating: `replayProvenance` ignores updates and
+   * the verifier never requires it. Best-effort — the inscription is already
+   * committed and paid, so a failed acknowledgment must not undo it. As a side
+   * effect this append re-persists the now-proofed log through the Task-3/4
+   * choke point, closing the window where the stored copy predates the proof.
+   */
+  private async appendWitnessAcknowledgment(
+    asset: OriginalsAsset,
+    ack: { satoshi: string; inscriptionId: string; txid?: string; witnessedEventDigest: string }
+  ): Promise<void> {
+    try {
+      await this.appendCelEventOrSkip(asset, 'update', {
+        operation: 'acknowledgeWitness',
+        satoshi: ack.satoshi,
+        inscriptionId: ack.inscriptionId,
+        ...(ack.txid ? { txid: ack.txid } : {}),
+        witnessedEventDigest: ack.witnessedEventDigest
+      });
+    } catch (err) {
+      this.logger.warn('witness acknowledgment append failed (non-gating)', {
+        assetId: asset.id,
+        error: (err as Error)?.message ?? String(err)
+      });
+    }
+  }
+
   /**
    * Rotation-first ownership hand-off (#366): reinscribe the did:btco
    * document — same id, new verification method — on the SAME sat. Only the
@@ -2158,38 +2347,13 @@ export class LifecycleManager {
     try {
     // pop() yields the sat for every prefix form (did:btco:N, :reg:N, :sig:N).
     const satoshi = btcoDid.split(':').pop()!;
-    const { key, type } = multikey.decodePublicKey(newVerificationMethod.publicKeyMultibase);
-    const network = this.getConfiguredBitcoinNetwork();
-    const rotatedDoc = createBtcoDidDocument(satoshi, network, { publicKey: key, keyType: type });
-    // createBtcoDidDocument re-derives the prefix from network; the rotated id
-    // MUST equal the existing binding or config.network drifted from the DID.
-    if (rotatedDoc.id !== btcoDid) {
-      throw new StructuredError('NETWORK_MISMATCH', `Rotated document id ${rotatedDoc.id} does not match binding ${btcoDid}; check config.network.`);
-    }
-    // Preserve lineage links across rotations.
-    const backLinks = [asset.id, asset.bindings?.['did:webvh']].filter(
-      (d): d is string => typeof d === 'string'
-    );
-    rotatedDoc.alsoKnownAs = backLinks;
-    // Resolver serves the newest inscription; without re-embedding the
-    // manifest here, the first rotation would erase it from resolution.
-    rotatedDoc.service = [
-      ...(rotatedDoc.service || []),
-      {
-        id: `${rotatedDoc.id}#resources`,
-        type: 'OriginalsResourceManifest',
-        serviceEndpoint: {
-          resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
-          timestamp: new Date().toISOString()
-        }
-      }
-    ];
+    // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
+    const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, newVerificationMethod.publicKeyMultibase);
 
     // Append-first (#365): rotateKey signed by the CURRENT controller — the
     // cooperative-rotation contract (the verifier only accepts rotations
-    // authorized by the outgoing authority). Non-cooperative rotation
-    // acceptance (post-transfer stale-key window, design §5) is Phase-3+
-    // verifier work; this wires the cooperative path only.
+    // authorized by the outgoing authority). The non-cooperative arm (a NEW
+    // owner who cannot obtain the seller's signature) is claimOwnership.
     // Canonical VM the post-rotation controller will sign appends under.
     const newController = `did:key:${newVerificationMethod.publicKeyMultibase}`;
     const newControllerVm = `${newController}#${newVerificationMethod.publicKeyMultibase}`;
@@ -2198,19 +2362,7 @@ export class LifecycleManager {
     // event itself is signed by the OUTGOING controller; this key is for what
     // follows.
     if (newVerificationMethod.privateKey && this.keyStore) {
-      // Guard against a caller-supplied privateKey that doesn't derive the
-      // announced publicKeyMultibase: a mismatched pair would silently sign
-      // every subsequent append with a key nobody can verify against.
-      const { key: privBytes, type: privType } = multikey.decodePrivateKey(newVerificationMethod.privateKey);
-      if (privType !== 'Ed25519') {
-        throw new StructuredError('CEL_ED25519_REQUIRED',
-          `CEL events must be signed with Ed25519; got ${privType}. Generate a dedicated Ed25519 controller key.`);
-      }
-      const derivedPub = multikey.encodePublicKey(ed25519.getPublicKey(privBytes), 'Ed25519');
-      if (derivedPub !== newVerificationMethod.publicKeyMultibase) {
-        throw new StructuredError('INVALID_KEY_PAIR',
-          'privateKey does not derive the announced publicKeyMultibase');
-      }
+      this.assertRotationKeyPair(newVerificationMethod.publicKeyMultibase, newVerificationMethod.privateKey);
       await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
     }
 
@@ -2219,37 +2371,15 @@ export class LifecycleManager {
       newController,
       rotatedAt: new Date().toISOString()
     });
-    // Re-embed #cel with the FRESH head (the rotateKey entry): the resolver
-    // serves the newest inscription, so omitting it would erase the anchor.
-    // On degrade the event was not appended and no anchor is embedded.
+    // Re-embed #cel with the FRESH head (the rotateKey entry). On degrade the
+    // event was not appended and no anchor is embedded.
     if (celHeadDigest !== null) {
-      rotatedDoc.service = [
-        ...(rotatedDoc.service || []),
-        {
-          id: `${rotatedDoc.id}#cel`,
-          type: 'OriginalsCelAnchor',
-          serviceEndpoint: { headDigestMultibase: celHeadDigest }
-        }
-      ];
+      this.embedCelAnchor(rotatedDoc, celHeadDigest);
     }
 
-    const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
-    let inscription;
-    try {
-      inscription = await bitcoinManager.inscribeData(
-        Buffer.from(JSON.stringify(rotatedDoc)),
-        'application/did+json',
-        feeRate,
-        { targetSatoshi: satoshi }
-      );
-    } catch (error) {
-      // Reinscription failed after the append — restore the pre-append log
-      // (pure in-memory; nothing was paid before broadcast failed).
-      if (celHeadDigest !== null && celLogBefore) {
-        asset._replaceCelLog(celLogBefore);
-      }
-      throw error;
-    }
+    const inscription = await this.reinscribeRotatedDoc(
+      asset, rotatedDoc, satoshi, feeRate, celHeadDigest !== null ? celLogBefore : undefined
+    );
 
     // Key-custody probe: no private key was supplied, and a keyStore exists but
     // doesn't hold the new controller's key. Post-rotation appends will degrade
@@ -2269,6 +2399,148 @@ export class LifecycleManager {
     // Reinscription succeeded — the rotated doc is now the resolvable btco doc;
     // it REPLACES the inscription-time capture for serialize().
     asset._captureDidDocument('did:btco', rotatedDoc);
+
+    // Witness acknowledgment (map §5.1): controller-signed update recording the
+    // reinscription. Folds to the CURRENT (post-rotation) controller; degrades
+    // to a skip when that key isn't held. Only when the rotateKey landed.
+    if (celHeadDigest !== null) {
+      await this.appendWitnessAcknowledgment(asset, {
+        satoshi,
+        inscriptionId: inscription.inscriptionId,
+        txid: inscription.revealTxId ?? inscription.txid,
+        witnessedEventDigest: celHeadDigest
+      });
+    }
+
+    await this.eventEmitter.emit({
+      type: 'key:rotated',
+      timestamp: new Date().toISOString(),
+      asset: { id: asset.id },
+      did: btcoDid,
+      inscriptionId: inscription.inscriptionId
+    });
+
+    return { inscriptionId: inscription.inscriptionId, did: btcoDid };
+    } finally {
+      this.inFlightAssets.delete(asset.id);
+    }
+  }
+
+  /**
+   * Non-cooperative ownership claim (#366, design §5): the write side of the
+   * verifier rule Task 5 landed. A NEW owner who has received the sat but
+   * CANNOT obtain the seller's signature reinscribes the did:btco document —
+   * same id, THEIR key — on the same sat, and self-signs the rotateKey with
+   * that new key. Because only the current UTXO holder can reinscribe, the
+   * reinscription is itself proof of sat control; the verifier accepts the
+   * otherwise-unauthorized rotation once the attached bitcoin witness proof
+   * (check (a)), the announced key (b), the signer (c), and the strictly-later
+   * inscription index (d) all line up.
+   *
+   * Differs from {@link rotateBtcoKeys} (the COOPERATIVE arm): the rotateKey is
+   * SELF-SIGNED with the new key (explicitly NOT the standard append path,
+   * which folds to the seller's current controller the claimer does not hold),
+   * `privateKey` is REQUIRED (the claimer must be able to sign), and a bitcoin
+   * witness proof is attached to the rotateKey post-inscription — that is what
+   * satisfies the verifier's check (a).
+   *
+   * @throws INVALID_STATE when the asset is not on did:btco / has no binding.
+   * @throws INVALID_INPUT when no privateKey is supplied.
+   * @throws INVALID_KEY_PAIR / CEL_ED25519_REQUIRED for a bad claimant keypair.
+   * @throws OPERATION_IN_PROGRESS on a concurrent claim of the same asset.
+   */
+  async claimOwnership(
+    asset: OriginalsAsset,
+    newVerificationMethod: { publicKeyMultibase: string; privateKey: string },
+    feeRate?: number
+  ): Promise<{ inscriptionId: string; did: string }> {
+    if (asset.currentLayer !== 'did:btco') {
+      throw new StructuredError('INVALID_STATE', 'Claiming ownership requires the asset to be on the did:btco layer.');
+    }
+    const btcoDid = asset.bindings?.['did:btco'];
+    if (!btcoDid) {
+      throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to claim.');
+    }
+    // privateKey is REQUIRED: the claimer self-signs the rotateKey with it (the
+    // seller's controller is unavailable to fold onto).
+    if (!newVerificationMethod?.privateKey) {
+      throw new StructuredError('INVALID_INPUT', 'claimOwnership requires the claimant private key to self-sign the rotation.');
+    }
+    // Concurrency guard (issue #255, same pattern as rotateBtcoKeys): claim the
+    // asset synchronously before the first await so two overlapping claims
+    // cannot both broadcast reinscriptions.
+    if (this.inFlightAssets.has(asset.id)) {
+      throw new StructuredError(
+        'OPERATION_IN_PROGRESS',
+        `An operation for asset ${asset.id} is already in progress; concurrent claims of the same asset would broadcast duplicate reinscriptions.`
+      );
+    }
+    this.inFlightAssets.add(asset.id);
+    try {
+    const satoshi = btcoDid.split(':').pop()!;
+    const pkm = newVerificationMethod.publicKeyMultibase;
+    // Derive-check the claimant keypair (privateKey REQUIRED); register it so
+    // post-claim appends by the new controller can sign.
+    this.assertRotationKeyPair(pkm, newVerificationMethod.privateKey);
+    const newController = `did:key:${pkm}`;
+    const newControllerVm = `${newController}#${pkm}`;
+    if (this.keyStore) {
+      await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
+    }
+
+    // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
+    const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, pkm);
+
+    // SELF-SIGN the rotateKey with the NEW key — explicitly NOT
+    // appendCelEventOrSkip, which folds to the seller's current controller the
+    // claimer cannot hold. The verifier accepts this unauthorized rotation
+    // non-cooperatively once the reinscription witness proves sat control.
+    const celLogBefore = asset.celLog;
+    if (!celLogBefore) {
+      throw new StructuredError('INVALID_STATE', 'Asset has no CEL log to append the claim rotation to.');
+    }
+    const { signer, verificationMethod } = celSignerFromKeyPair(
+      { publicKey: pkm, privateKey: newVerificationMethod.privateKey } as KeyPair
+    );
+    const rotatedLog = await appendEvent(
+      celLogBefore,
+      'rotateKey',
+      { newController, rotatedAt: new Date().toISOString() },
+      { signer, verificationMethod }
+    );
+    asset._replaceCelLog(rotatedLog);
+    const rotateEntry = rotatedLog.events[rotatedLog.events.length - 1];
+    const celHeadDigest = computeDigestMultibase(canonicalizeEntryForChain(rotateEntry));
+
+    // #cel anchor = the rotateKey event's chain digest (commits the on-chain
+    // doc to the rotation the reinscription witnesses).
+    this.embedCelAnchor(rotatedDoc, celHeadDigest);
+
+    // Reinscribe on the SAME sat; restore the pre-append log on failure.
+    const inscription = await this.reinscribeRotatedDoc(asset, rotatedDoc, satoshi, feeRate, celLogBefore);
+
+    // Attach the bitcoin witness proof to the rotateKey event post-inscription
+    // — this is what satisfies the verifier's non-cooperative check (a).
+    this.attachBitcoinWitnessProof(asset, {
+      satoshi,
+      inscriptionId: inscription.inscriptionId,
+      txid: inscription.revealTxId ?? inscription.txid ?? ''
+    });
+
+    // Reinscription succeeded — the rotated doc is the resolvable btco doc.
+    asset._captureDidDocument('did:btco', rotatedDoc);
+
+    // Witness acknowledgment (map §5.1): the acknowledging controller IS the
+    // new key (current post-rotation — the fold picks it up). This standard-path
+    // append ALSO re-persists the now-proofed log through the Task-3/4 choke
+    // point, closing the window where the stored copy predates the witness proof
+    // attached above.
+    await this.appendWitnessAcknowledgment(asset, {
+      satoshi,
+      inscriptionId: inscription.inscriptionId,
+      txid: inscription.revealTxId ?? inscription.txid,
+      witnessedEventDigest: celHeadDigest
+    });
 
     await this.eventEmitter.emit({
       type: 'key:rotated',

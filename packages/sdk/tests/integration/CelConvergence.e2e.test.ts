@@ -77,8 +77,12 @@ describe('CEL convergence end-to-end (#Phase2 Task9)', () => {
     await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey });
 
     // ---- The log tells the whole story, in order. ----
+    // inscribe appends a controller-signed acknowledgeWitness update after the
+    // btco migrate (map §5.1). The fill(7) rotation carries no matching secret,
+    // so the post-rotation controller can't sign its own acknowledgment — that
+    // append degrades (NO_SIGNING_KEY) and no trailing update lands.
     const log = asset.celLog!;
-    expect(log.events.map(e => e.type)).toEqual(['create', 'migrate', 'migrate', 'transfer', 'rotateKey']);
+    expect(log.events.map(e => e.type)).toEqual(['create', 'migrate', 'migrate', 'update', 'transfer', 'rotateKey']);
 
     // ---- verify() gates on the WHOLE chain, needing the ordinals provider
     // for the btco witness proof. ----
@@ -99,8 +103,9 @@ describe('CEL convergence end-to-end (#Phase2 Task9)', () => {
 
     // ---- Two anchors, one sat: newest-inscription-wins resolution. ----
     // resolveDID returns the CURRENT (rotated) doc, so its #cel is the FRESHER
-    // anchor — the rotateKey entry (index 4), not the inscription-time head.
-    const rotateEntry = log.events[4];
+    // anchor — the rotateKey entry (now index 5, after the inscribe ack), not
+    // the inscription-time head.
+    const rotateEntry = log.events[5];
     const currentDoc = await sdk.did.resolveDID(btcoDid, { skipCache: true });
     const currentAnchor = (currentDoc!.service || []).find(s => s.type === 'OriginalsCelAnchor');
     expect(currentAnchor).toBeDefined();

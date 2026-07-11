@@ -53,11 +53,12 @@ describe('inscribeOnBitcoin commits to the CEL head digest (#365)', () => {
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const btcoDid = asset.bindings!['did:btco']!;
 
-    // The append landed: last event is the signed btco migrate. Satoshi/txid
-    // are NOT in the signed data — they arrive later via witness proofs.
+    // The append landed: the signed btco migrate, then a controller-signed
+    // acknowledgeWitness update (map §5.1). Satoshi/txid are NOT in the migrate
+    // signed data — they arrive later via witness proofs.
     const log = asset.celLog!;
-    expect(log.events.length).toBe(eventsBefore + 1);
-    const last = log.events[log.events.length - 1];
+    expect(log.events.length).toBe(eventsBefore + 2);
+    const last = log.events.find(e => e.type === 'migrate' && (e.data as any).layer === 'btco')!;
     expect(last.type).toBe('migrate');
     expect((last.data as any).layer).toBe('btco');
     expect((last.data as any).network).toBe('regtest');
@@ -99,7 +100,7 @@ describe('inscribeOnBitcoin commits to the CEL head digest (#365)', () => {
     // The DID-doc inscription IS the witness artifact: the migrate event's
     // proof array gains a bitcoin-ordinals-2024 witness proof binding the
     // satoshi/inscriptionId that carry the anchoring document.
-    const last = asset.celLog!.events[asset.celLog!.events.length - 1];
+    const last = asset.celLog!.events.find(e => e.type === 'migrate' && (e.data as any).layer === 'btco')!;
     expect(last.type).toBe('migrate');
     const wp = (last.proof as Array<Record<string, unknown>>).find(
       p => p.cryptosuite === 'bitcoin-ordinals-2024'
