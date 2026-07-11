@@ -118,7 +118,7 @@ describe('Batch Operations Integration', () => {
       for (const item of result.successful) {
         expect(item.result).toBeInstanceOf(OriginalsAsset);
         expect(item.result.currentLayer).toBe('did:peer');
-        expect(item.result.id).toMatch(/^did:peer:/);
+        expect(item.result.id).toMatch(/^did:cel:/);
       }
     });
 

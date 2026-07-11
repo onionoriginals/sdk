@@ -65,7 +65,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
     const asset = await sdk.lifecycle.createAsset(resources);
     
     expect(asset).toBeDefined();
-    expect(asset.id).toMatch(/^did:peer:/);
+    expect(asset.id).toMatch(/^did:cel:/);
     expect(asset.currentLayer).toBe('did:peer');
     expect(asset.resources).toHaveLength(2);
     

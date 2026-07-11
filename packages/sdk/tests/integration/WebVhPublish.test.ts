@@ -22,7 +22,7 @@ describe('WebVH publish end-to-end', () => {
     
     // Asset migrated to did:webvh layer
     expect(published.currentLayer).toBe('did:webvh');
-    expect(published.id.startsWith('did:peer:')).toBe(true);
+    expect(published.id.startsWith('did:cel:')).toBe(true);
     
     // Binding is a real minted did:webvh owned by the asset: did:webvh:{SCID}:{domain}[:slug].
     // It embeds the publisher's domain but is never equal to the publisher shorthand input.

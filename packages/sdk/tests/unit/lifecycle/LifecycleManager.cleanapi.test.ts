@@ -21,7 +21,7 @@ describe('LifecycleManager - Clean API', () => {
       const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const asset = await sdk.lifecycle.createDraft(resources);
       expect(asset.currentLayer).toBe('did:peer');
-      expect(asset.id.startsWith('did:peer:')).toBe(true);
+      expect(asset.id.startsWith('did:cel:')).toBe(true);
     });
 
     test('reports progress during creation', async () => {

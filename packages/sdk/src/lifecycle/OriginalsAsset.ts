@@ -12,6 +12,7 @@ import { ProvenanceQuery, Migration, Transfer } from './ProvenanceQuery.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning.js';
+import type { EventLog } from '../cel/types.js';
 
 export interface ProvenanceChain {
   createdAt: string;
@@ -55,13 +56,18 @@ export class OriginalsAsset {
   private provenance: ProvenanceChain;
   private eventEmitter: EventEmitter;
   private versionManager: ResourceVersionManager;
+  // The CEL event log backing this asset's provenance. Present for assets minted
+  // via createAsset (did:cel genesis); undefined for legacy did:peer constructions.
+  #celLog?: EventLog;
 
   constructor(
     resources: AssetResource[],
     did: DIDDocument,
-    credentials: VerifiableCredential[]
+    credentials: VerifiableCredential[],
+    eventLog?: EventLog
   ) {
     this.id = did.id;
+    this.#celLog = eventLog;
     this.resources = resources;
     this.did = did;
     this.credentials = credentials;
@@ -108,6 +114,19 @@ export class OriginalsAsset {
         );
       }
     }
+  }
+
+  /** The CEL event log backing this asset, if minted via createAsset. */
+  get celLog(): EventLog | undefined {
+    return this.#celLog;
+  }
+
+  /**
+   * @internal — LifecycleManager owns appends. Swaps the attached CEL log
+   * (e.g. after appending a migrate/transfer event).
+   */
+  _replaceCelLog(log: EventLog): void {
+    this.#celLog = log;
   }
 
   async migrate(

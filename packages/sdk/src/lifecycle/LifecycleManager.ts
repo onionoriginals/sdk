@@ -16,6 +16,11 @@ import { hashResource } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix } from '../cel/btcoDid.js';
+import { KeyManager } from '../did/KeyManager.js';
+import { celSignerFromKeyPair, hexSha256ToDigestMultibase } from '../cel/signerAdapter.js';
+import { createCelDidDocument } from '../cel/celDid.js';
+import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
+import type { ExternalReference } from '../cel/types.js';
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { multikey } from '../crypto/Multikey.js';
 import { createBtcoDidDocument } from '../did/createBtcoDidDocument.js';
@@ -260,93 +265,65 @@ export class LifecycleManager {
         this.assertContentMatchesDeclaredHash(resource, 'createAsset');
       }
     
-    // Create a proper DID:peer document with verification methods
-    // If keyStore is provided, request the key pair to be returned
+    // Mint the asset's genesis identity as a did:cel derived from a signed CEL
+    // create event. The controller key is ALWAYS Ed25519 (CEL is Ed25519-only),
+    // independent of config.defaultKeyType. LifecycleManager holds no KeyManager;
+    // KeyManager is stateless, so we instantiate one locally.
+    const controllerKp = await new KeyManager().generateKeyPair('Ed25519');
+    const { signer, verificationMethod } = celSignerFromKeyPair(controllerKp);
+
+    // Bridge AssetResource hashes (hex sha256) to CEL ExternalReferences.
+    const externalRefs: ExternalReference[] = resources.map((r) => ({
+      digestMultibase: hexSha256ToDigestMultibase(r.hash),
+      ...(r.contentType ? { mediaType: r.contentType } : {})
+    }));
+
+    // Genesis name = first resource's id (no name param on createAsset by design).
+    const manager = new PeerCelManager(signer, { verificationMethod });
+    const { log, did } = await manager.create(resources[0]?.id ?? 'asset', externalRefs);
+
+    const didDoc = createCelDidDocument(did, controllerKp.publicKey);
+
+    // Register the controller key under BOTH the did:key VM (CEL signing) and
+    // `${did}#key-0` (so signWithKeyStore's `${issuer}#key-0` probe resolves).
+    // keyStore-less SDKs still get a fully-formed did:cel asset with its log.
     if (this.keyStore) {
-      const result = await this.didManager.createDIDPeer(resources, true);
-      const didDoc = result.didDocument;
-      const keyPair = result.keyPair;
-      
-      // Register the private key in the keyStore
-      if (didDoc.verificationMethod && didDoc.verificationMethod.length > 0) {
-        let verificationMethodId = didDoc.verificationMethod[0].id;
-        
-        // Ensure VM ID is absolute (not just a fragment like #key-0)
-        if (verificationMethodId.startsWith('#')) {
-          verificationMethodId = `${didDoc.id}${verificationMethodId}`;
-        }
-        
-        await this.keyStore.setPrivateKey(verificationMethodId, keyPair.privateKey);
-      }
-      
-      const asset = new OriginalsAsset(resources, didDoc, []);
-      
-      // Defer asset:created emission to the next microtask so a handler
-      // subscribed on the LifecycleManager emitter immediately before this call
-      // still observes it. (Only pre-subscription works — see below.)
-      queueMicrotask(() => {
-        const event = {
-          type: 'asset:created' as const,
-          timestamp: new Date().toISOString(),
-          asset: {
-            id: asset.id,
-            layer: asset.currentLayer,
-            resourceCount: resources.length,
-            createdAt: asset.getProvenance().createdAt
-          }
-        };
-
-        // Emitted only on the LifecycleManager emitter. An asset-level emit
-        // here would be dead code: a caller obtains the asset reference only
-        // after `await createAsset()` resolves, and this microtask has already
-        // run by then, so `(await createAsset()).on('asset:created', ...)` could
-        // never fire. Subscribe via `sdk.lifecycle.on('asset:created', ...)`
-        // before creating instead.
-        void this.eventEmitter.emit(event);
-      });
-      
-      stopTimer();
-      this.logger.info('Asset created successfully', { assetId: asset.id });
-      this.metrics.recordOperation('lifecycle.createAsset', performance.now() - metricsStart, true);
-      this.metrics.recordAssetCreated();
-
-      return asset;
-    } else {
-      // No keyStore, just create the DID document
-      const didDoc = await this.didManager.createDIDPeer(resources);
-      const asset = new OriginalsAsset(resources, didDoc, []);
-      
-      // Defer asset:created emission to the next microtask so a handler
-      // subscribed on the LifecycleManager emitter immediately before this call
-      // still observes it. (Only pre-subscription works — see below.)
-      queueMicrotask(() => {
-        const event = {
-          type: 'asset:created' as const,
-          timestamp: new Date().toISOString(),
-          asset: {
-            id: asset.id,
-            layer: asset.currentLayer,
-            resourceCount: resources.length,
-            createdAt: asset.getProvenance().createdAt
-          }
-        };
-
-        // Emitted only on the LifecycleManager emitter. An asset-level emit
-        // here would be dead code: a caller obtains the asset reference only
-        // after `await createAsset()` resolves, and this microtask has already
-        // run by then, so `(await createAsset()).on('asset:created', ...)` could
-        // never fire. Subscribe via `sdk.lifecycle.on('asset:created', ...)`
-        // before creating instead.
-        void this.eventEmitter.emit(event);
-      });
-      
-      stopTimer();
-      this.logger.info('Asset created successfully', { assetId: asset.id });
-      this.metrics.recordOperation('lifecycle.createAsset', performance.now() - metricsStart, true);
-      this.metrics.recordAssetCreated();
-
-      return asset;
+      await this.keyStore.setPrivateKey(verificationMethod, controllerKp.privateKey);
+      await this.keyStore.setPrivateKey(`${did}#key-0`, controllerKp.privateKey);
     }
+
+    const asset = new OriginalsAsset(resources, didDoc, [], log);
+
+    // Defer asset:created emission to the next microtask so a handler
+    // subscribed on the LifecycleManager emitter immediately before this call
+    // still observes it. (Only pre-subscription works — see below.)
+    queueMicrotask(() => {
+      const event = {
+        type: 'asset:created' as const,
+        timestamp: new Date().toISOString(),
+        asset: {
+          id: asset.id,
+          layer: asset.currentLayer,
+          resourceCount: resources.length,
+          createdAt: asset.getProvenance().createdAt
+        }
+      };
+
+      // Emitted only on the LifecycleManager emitter. An asset-level emit
+      // here would be dead code: a caller obtains the asset reference only
+      // after `await createAsset()` resolves, and this microtask has already
+      // run by then, so `(await createAsset()).on('asset:created', ...)` could
+      // never fire. Subscribe via `sdk.lifecycle.on('asset:created', ...)`
+      // before creating instead.
+      void this.eventEmitter.emit(event);
+    });
+
+    stopTimer();
+    this.logger.info('Asset created successfully', { assetId: asset.id });
+    this.metrics.recordOperation('lifecycle.createAsset', performance.now() - metricsStart, true);
+    this.metrics.recordAssetCreated();
+
+    return asset;
     } catch (error) {
       stopTimer();
       this.logger.error('Asset creation failed', error as Error, { resourceCount: resources.length });

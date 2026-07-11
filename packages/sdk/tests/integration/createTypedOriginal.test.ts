@@ -56,7 +56,7 @@ describe('LifecycleManager.createTypedOriginal', () => {
       const asset = await sdk.lifecycle.createTypedOriginal(OriginalKind.App, manifest);
       
       expect(asset).toBeDefined();
-      expect(asset.id).toMatch(/^did:peer:/);
+      expect(asset.id).toMatch(/^did:cel:/);
       expect(asset.currentLayer).toBe('did:peer');
       expect(asset.resources.length).toBe(1);
       expect(asset.resources[0].id).toBe('index.js');
