@@ -38,7 +38,6 @@ import type { EventLog, LogEntry, ExternalReference, WitnessProof, OrdinalsLooku
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { multikey } from '../crypto/Multikey.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
-import type { KeyPair } from '../types/bitcoin.js';
 import { createBtcoDidDocument } from '../did/createBtcoDidDocument.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
@@ -2515,7 +2514,7 @@ export class LifecycleManager {
     const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, pkm);
 
     const { signer, verificationMethod } = celSignerFromKeyPair(
-      { publicKey: pkm, privateKey: newVerificationMethod.privateKey } as KeyPair
+      { publicKey: pkm, privateKey: newVerificationMethod.privateKey }
     );
     const rotatedLog = await appendEvent(
       celLogBefore,

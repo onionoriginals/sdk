@@ -531,7 +531,7 @@ async function verifyHeadFreshness(
   }
 
   const present = log.events.some(
-    (ev) => digestMultibaseEquals(headDigest as string, computeDigestMultibase(canonicalizeEntryForChain(ev)))
+    (ev) => digestMultibaseEquals(headDigest, computeDigestMultibase(canonicalizeEntryForChain(ev)))
   );
   if (!present) {
     return `STALE_LOG: the newest on-chain anchor on satoshi ${anchoredSat.satoshi} commits to head digest ${headDigest}, which is absent from the presented log; the log is truncated or stale`;
