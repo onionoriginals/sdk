@@ -312,6 +312,15 @@ export class PeerCelManager {
     const createData = createEvent.data as Partial<CelAssetData & PeerAssetData>;
     const isLegacy = createData.controller === undefined && createData.did !== undefined;
 
+    // Shapeless genesis (neither controller nor did): the verifier reports no
+    // assetDid for this shape (verifyEventLog.ts), so minting a did:cel here
+    // would produce state for a DID the log cannot back. Fail closed instead.
+    if (createData.controller === undefined && createData.did === undefined) {
+      throw new Error(
+        'Cannot derive asset state: genesis create event has neither `controller` nor `did`'
+      );
+    }
+
     // Initialize state from create event
     const state: AssetState = {
       did: isLegacy ? (createData.did as string) : deriveDidCel(log),

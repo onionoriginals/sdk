@@ -1,8 +1,9 @@
 import { describe, test, expect } from 'bun:test';
-import { deriveDidCel, deriveDidCelFromGenesis, isDidCel, didCelMatchesLog, DID_CEL_PREFIX } from '../../../src/cel/celDid';
+import { deriveDidCel, deriveDidCelFromGenesis, isDidCel, didCelMatchesLog, DID_CEL_PREFIX, createCelDidDocument } from '../../../src/cel/celDid';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
 import type { DataIntegrityProof } from '../../../src/cel/types';
+import { validateDIDDocument } from '../../../src/utils/validation';
 
 const fakeSigner = async (_data: unknown): Promise<DataIntegrityProof> => ({
   type: 'DataIntegrityProof',
@@ -61,5 +62,36 @@ describe('did:cel derivation', () => {
     const did = deriveDidCel(log);
     const notCreate = { ...log, events: [{ ...log.events[0], type: 'update' as const }] };
     expect(didCelMatchesLog(did, notCreate as never)).toBe(false);
+  });
+});
+
+describe('createCelDidDocument', () => {
+  const did = 'did:cel:uEiAabc123';
+  const pubKey = 'z6MkfakePublicKey';
+
+  test('produces a Multikey #key-0 VM with authentication/assertionMethod/alsoKnownAs', () => {
+    const doc = createCelDidDocument(did, pubKey);
+
+    expect(doc['@context']).toEqual([
+      'https://www.w3.org/ns/did/v1',
+      'https://w3id.org/security/multikey/v1',
+    ]);
+    expect(doc.id).toBe(did);
+    expect(doc.verificationMethod).toEqual([
+      {
+        id: `${did}#key-0`,
+        type: 'Multikey',
+        controller: did,
+        publicKeyMultibase: pubKey,
+      },
+    ]);
+    expect(doc.authentication).toEqual([`${did}#key-0`]);
+    expect(doc.assertionMethod).toEqual([`${did}#key-0`]);
+    expect(doc.alsoKnownAs).toEqual([`did:key:${pubKey}`]);
+  });
+
+  test('the produced document passes validateDIDDocument', () => {
+    const doc = createCelDidDocument(did, pubKey);
+    expect(validateDIDDocument(doc)).toBe(true);
   });
 });

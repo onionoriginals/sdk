@@ -10,6 +10,7 @@
  * `data.controller` instead.
  */
 import type { EventLog, LogEntry } from './types.js';
+import type { DIDDocument } from '../types/index.js';
 import { computeDigestMultibase, digestMultibaseEquals } from './hash.js';
 import { canonicalizeEntryForChain } from './canonicalize.js';
 
@@ -39,4 +40,32 @@ export function didCelMatchesLog(did: string, log: EventLog): boolean {
   if (log.events[0].type !== 'create') return false; // create-check as guard, not a throw
   const expected = deriveDidCelFromGenesis(log.events[0]).slice(DID_CEL_PREFIX.length);
   return digestMultibaseEquals(did.slice(DID_CEL_PREFIX.length), expected);
+}
+
+/**
+ * Build a minimal did:cel DID Document facade for a genesis controller key.
+ * Single Multikey VM (#key-0) bound to authentication + assertionMethod;
+ * `alsoKnownAs` records the did:key form of the same key for resolvers that
+ * only know did:key. Consumed by asset creation (Phase-2 Task 3).
+ */
+export function createCelDidDocument(didCel: string, controllerPublicKeyMultibase: string): DIDDocument {
+  const vmId = `${didCel}#key-0`;
+  return {
+    '@context': [
+      'https://www.w3.org/ns/did/v1',
+      'https://w3id.org/security/multikey/v1',
+    ],
+    id: didCel,
+    verificationMethod: [
+      {
+        id: vmId,
+        type: 'Multikey',
+        controller: didCel,
+        publicKeyMultibase: controllerPublicKeyMultibase,
+      },
+    ],
+    authentication: [vmId],
+    assertionMethod: [vmId],
+    alsoKnownAs: [`did:key:${controllerPublicKeyMultibase}`],
+  };
 }

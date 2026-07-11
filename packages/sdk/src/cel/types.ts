@@ -118,7 +118,11 @@ export interface VerificationResult {
 export interface CreateOptions {
   /** Signer function that produces a proof */
   signer: (data: unknown) => Promise<DataIntegrityProof>;
-  /** The verification method DID URL */
+  /**
+   * The verification method DID URL — advisory: the recorded VM comes from
+   * the signer's proof; managers use this only to construct fallback VM
+   * strings.
+   */
   verificationMethod: string;
   /** The proof purpose (defaults to "assertionMethod") */
   proofPurpose?: string;

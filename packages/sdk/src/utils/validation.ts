@@ -17,7 +17,7 @@ export function validateDID(did: string): boolean {
   const method = match[1];
   
   // Validate supported methods
-  const supportedMethods = ['peer', 'webvh', 'btco'];
+  const supportedMethods = ['peer', 'webvh', 'btco', 'cel'];
   if (!supportedMethods.includes(method)) {
     return false;
   }

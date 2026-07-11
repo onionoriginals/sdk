@@ -227,6 +227,7 @@ export {
   deriveDidCelFromGenesis,
   isDidCel,
   didCelMatchesLog,
+  createCelDidDocument,
 } from './cel/celDid.js';
 export {
   createExternalReference,

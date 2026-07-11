@@ -561,6 +561,8 @@ export class OriginalsAsset {
 
   private determineCurrentLayer(didId: string): LayerType {
     if (didId.startsWith('did:peer:')) return 'did:peer';
+    // did:cel is the genesis-layer synonym for did:peer (Phase-4 may introduce a dedicated layer).
+    if (didId.startsWith('did:cel:')) return 'did:peer';
     if (didId.startsWith('did:webvh:')) return 'did:webvh';
     if (didId.startsWith('did:btco:')) return 'did:btco';
     throw new Error('Unknown DID method');
