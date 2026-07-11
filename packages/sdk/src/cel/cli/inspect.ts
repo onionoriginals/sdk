@@ -212,8 +212,11 @@ function deriveCurrentState(log: EventLog): AssetState {
   // Dual-read the genesis. New shape (`controller` present): the asset DID is
   // DERIVED (did:cel), the creator is sourced from the controller, layer is
   // definitionally 'peer'. Legacy shape (`did` present): read verbatim.
+  // Match the verifier/manager pattern (PeerCelManager, Btco/WebVHCelManager):
+  // legacy iff `did` present and `controller` absent; everything else is new-shape.
   const createData = createEvent.data as Record<string, unknown>;
-  const isNewShapeGenesis = createData.controller !== undefined;
+  const isLegacyGenesis = createData.controller === undefined && createData.did !== undefined;
+  const isNewShapeGenesis = !isLegacyGenesis;
 
   // Initialize state from create event
   const state: AssetState = {

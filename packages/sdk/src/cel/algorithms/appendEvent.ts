@@ -57,9 +57,10 @@ export async function appendEvent(
   // Generate proof using the provided signer
   const proof: DataIntegrityProof = await signer(eventBase);
 
-  // Validate the proof has required fields
-  if (!proof.type || !proof.cryptosuite || !proof.proofValue) {
-    throw new Error('Invalid proof: missing required fields (type, cryptosuite, proofValue)');
+  // Validate the proof has required fields. Include verificationMethod so a
+  // signer that omits it fails loudly here rather than at verifyEventLog time.
+  if (!proof.type || !proof.cryptosuite || !proof.proofValue || !proof.verificationMethod) {
+    throw new Error('Invalid proof: missing required fields (type, cryptosuite, proofValue, verificationMethod)');
   }
 
   // Construct the complete log entry
