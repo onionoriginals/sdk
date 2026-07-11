@@ -103,6 +103,64 @@ describe('replayProvenance pure fold (#Phase2 Task7)', () => {
     expect(btcoMigration.to).toBe(folded.bindings['did:btco'] ?? 'did:btco:?');
   });
 
+  test('witness-proof-present btco migration derives bindings[did:btco] and precise migration.to', () => {
+    // Hand-built log: replayProvenance verifies nothing, so the create/migrate
+    // proofs below are structurally valid but not real signatures.
+    const genesisDid = 'did:cel:zFakeGenesisDigestFakeGenesisDigest';
+    const log = {
+      events: [
+        {
+          type: 'create',
+          data: {
+            name: 'Witnessed Asset',
+            controller: 'did:key:z6MkFakeControllerFakeControllerFakeFake',
+            resources: [],
+            createdAt: '2026-07-10T00:00:00.000Z',
+            nonce: 'u1111',
+          },
+          proof: [
+            {
+              type: 'DataIntegrityProof',
+              cryptosuite: 'eddsa-jcs-2022',
+              created: 'x',
+              verificationMethod: 'did:key:z6MkFakeControllerFakeControllerFakeFake#z6MkFakeControllerFakeControllerFakeFake',
+              proofPurpose: 'assertionMethod',
+              proofValue: 'z1',
+            },
+          ],
+        },
+        {
+          type: 'migrate',
+          data: {
+            sourceDid: genesisDid,
+            layer: 'btco',
+            network: 'regtest',
+            migratedAt: '2026-07-10T00:05:00.000Z',
+          },
+          proof: [
+            {
+              type: 'DataIntegrityProof',
+              cryptosuite: 'bitcoin-ordinals-2024',
+              satoshi: '123456789',
+              witnessedAt: 'x',
+              created: 'x',
+              verificationMethod: 'x',
+              proofPurpose: 'assertionMethod',
+              proofValue: 'z1',
+            },
+          ],
+        },
+      ],
+    } as const;
+
+    const folded = replayProvenance(log as unknown as Parameters<typeof replayProvenance>[0]);
+
+    expect(folded.currentLayer).toBe('did:btco');
+    expect(folded.bindings['did:btco']).toBe('did:btco:reg:123456789');
+    const btcoMigration = folded.migrations[folded.migrations.length - 1];
+    expect(btcoMigration.to).toBe('did:btco:reg:123456789');
+  });
+
   test('rotateKey/update/deactivate events contribute no provenance entries', async () => {
     const { lifecycle, keyStore } = makeLifecycle();
     const asset = await lifecycle.createAsset([
