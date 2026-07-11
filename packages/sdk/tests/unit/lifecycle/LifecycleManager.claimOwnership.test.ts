@@ -8,6 +8,13 @@ import { KeyManager } from '../../../src/did/KeyManager';
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
 import { appendEvent } from '../../../src/cel/algorithms/appendEvent';
 import { celSignerFromKeyPair, currentControllerVm } from '../../../src/cel/signerAdapter';
+import { deriveDidCel, DID_CEL_PREFIX } from '../../../src/cel/celDid';
+import { parseEventLogJson } from '../../../src/cel/serialization/json';
+import { LifecycleManager } from '../../../src/lifecycle/LifecycleManager';
+import { DIDManager } from '../../../src/did/DIDManager';
+import { CredentialManager } from '../../../src/vc/CredentialManager';
+import { BitcoinManager } from '../../../src/bitcoin/BitcoinManager';
+import { OriginalsConfig } from '../../../src/types';
 
 // regtest-accepted bech32 address (same one the transfer integration tests use).
 const NEW_OWNER = 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx';
@@ -183,5 +190,79 @@ describe('claimOwnership (#366 non-cooperative rotation, write side)', () => {
       // @ts-expect-error privateKey is required
       sdk.lifecycle.claimOwnership(asset, { publicKeyMultibase: newKey })
     ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+
+  test('persists the self-signed rotation to storage even with no keyStore configured', async () => {
+    const provider = new OrdMockProvider();
+    const storage = new MemoryStorageAdapter();
+    // No keyStore: the trailing witness-ack append (the only other path to
+    // persistCelArtifacts) degrades to a skip, so the direct persist after
+    // the self-signed rotation is the only thing that can reach storage.
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: provider,
+      storageAdapter: storage
+    } as any);
+
+    const asset = await sdk.lifecycle.createAsset(RES);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+
+    const claimer = await new KeyManager().generateKeyPair('Ed25519');
+    await sdk.lifecycle.claimOwnership(asset, {
+      publicKeyMultibase: claimer.publicKey,
+      privateKey: claimer.privateKey
+    });
+
+    const suffix = deriveDidCel(asset.celLog!).slice(DID_CEL_PREFIX.length);
+    const stored = await storage.getObject('cel', `${suffix}.json`);
+    expect(stored).not.toBeNull();
+    const storedLog = parseEventLogJson(new TextDecoder().decode(stored!.content));
+    const rotateEntry = storedLog.events.find(e => e.type === 'rotateKey');
+    expect(rotateEntry).toBeDefined();
+    expect((rotateEntry!.proof as any).some((p: any) => p.cryptosuite === 'bitcoin-ordinals-2024')).toBe(true);
+  });
+
+  test('throws ORD_PROVIDER_INVALID_RESPONSE when the reinscription has no txid', async () => {
+    // BitcoinManager.inscribeData itself guarantees a txid, so this exercises
+    // the defensive guard against a misbehaving deps.bitcoinManager — the only
+    // way this shape reaches claimOwnership in practice — rather than relying
+    // solely on the (real) provider's own invariant.
+    const provider = new OrdMockProvider();
+    const keyStore = new MockKeyStore();
+    const config: OriginalsConfig = {
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: provider,
+      storageAdapter: new MemoryStorageAdapter()
+    } as any;
+    const didManager = new DIDManager(config);
+    const credentialManager = new CredentialManager(config, didManager);
+    const lifecycleManager = new LifecycleManager(config, didManager, credentialManager, undefined, keyStore);
+
+    const asset = await lifecycleManager.createAsset(RES);
+    await lifecycleManager.inscribeOnBitcoin(asset);
+    const satoshi = asset.bindings!['did:btco']!.split(':').pop()!;
+
+    const brokenBitcoinManager = {
+      inscribeData: async () => ({ inscriptionId: 'insc-no-txid', satoshi })
+    } as unknown as BitcoinManager;
+    const claimLifecycle = new LifecycleManager(
+      config, didManager, credentialManager, { bitcoinManager: brokenBitcoinManager }, keyStore
+    );
+
+    const claimer = await new KeyManager().generateKeyPair('Ed25519');
+    let caught: any;
+    try {
+      await claimLifecycle.claimOwnership(asset, {
+        publicKeyMultibase: claimer.publicKey,
+        privateKey: claimer.privateKey
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    expect(caught.code).toBe('ORD_PROVIDER_INVALID_RESPONSE');
+    expect(caught.details?.inscriptionId).toBe('insc-no-txid');
   });
 });

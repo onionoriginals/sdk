@@ -2484,12 +2484,6 @@ export class LifecycleManager {
     this.assertRotationKeyPair(pkm, newVerificationMethod.privateKey);
     const newController = `did:key:${pkm}`;
     const newControllerVm = `${newController}#${pkm}`;
-    if (this.keyStore) {
-      await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
-    }
-
-    // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
-    const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, pkm);
 
     // SELF-SIGN the rotateKey with the NEW key — explicitly NOT
     // appendCelEventOrSkip, which folds to the seller's current controller the
@@ -2499,6 +2493,15 @@ export class LifecycleManager {
     if (!celLogBefore) {
       throw new StructuredError('INVALID_STATE', 'Asset has no CEL log to append the claim rotation to.');
     }
+    // Guard above must run BEFORE registering the key: a doomed claim (no CEL
+    // log) should not leave an unused key sitting in the keyStore.
+    if (this.keyStore) {
+      await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
+    }
+
+    // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
+    const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, pkm);
+
     const { signer, verificationMethod } = celSignerFromKeyPair(
       { publicKey: pkm, privateKey: newVerificationMethod.privateKey } as KeyPair
     );
@@ -2519,16 +2522,35 @@ export class LifecycleManager {
     // Reinscribe on the SAME sat; restore the pre-append log on failure.
     const inscription = await this.reinscribeRotatedDoc(asset, rotatedDoc, satoshi, feeRate, celLogBefore);
 
+    // Fail loudly rather than write an empty txid into the witness proof
+    // (guaranteed verifier failure later): the reinscription already
+    // happened and was paid for, so surface the inscriptionId for recovery.
+    const witnessTxid = inscription.revealTxId ?? inscription.txid;
+    if (!witnessTxid) {
+      throw new StructuredError(
+        'ORD_PROVIDER_INVALID_RESPONSE',
+        'Reinscription succeeded but the provider returned neither revealTxId nor txid; cannot attach a witness proof.',
+        { inscriptionId: inscription.inscriptionId }
+      );
+    }
+
     // Attach the bitcoin witness proof to the rotateKey event post-inscription
     // — this is what satisfies the verifier's non-cooperative check (a).
     this.attachBitcoinWitnessProof(asset, {
       satoshi,
       inscriptionId: inscription.inscriptionId,
-      txid: inscription.revealTxId ?? inscription.txid ?? ''
+      txid: witnessTxid
     });
 
     // Reinscription succeeded — the rotated doc is the resolvable btco doc.
     asset._captureDidDocument('did:btco', rotatedDoc);
+
+    // Direct best-effort persist (issue: no-keyStore gap): with no keyStore,
+    // appendWitnessAcknowledgment below degrades to a skip and never reaches
+    // persistCelArtifacts, so the self-signed rotation + witness proof would
+    // otherwise never reach storage. The ack's own persist (when it lands) is
+    // a harmless double write.
+    await this.persistCelArtifacts(asset);
 
     // Witness acknowledgment (map §5.1): the acknowledging controller IS the
     // new key (current post-rotation — the fold picks it up). This standard-path
