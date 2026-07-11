@@ -355,11 +355,13 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const webAsset = await sdk.lifecycle.publishToWeb(asset, 'integrity.test');
       expect(await webAsset.verify()).toBe(true);
 
+      // Post-inscription the CEL log carries a bitcoin witness proof (#367):
+      // verify() now gates on the chain, so the ordinals provider is required.
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
-      expect(await btcoAsset.verify()).toBe(true);
+      expect(await btcoAsset.verify({ ordinalsProvider })).toBe(true);
 
       await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
-      expect(await btcoAsset.verify()).toBe(true);
+      expect(await btcoAsset.verify({ ordinalsProvider })).toBe(true);
     });
   });
 

@@ -18,7 +18,10 @@ import { PeerCelManager } from '../../../src/cel/layers/PeerCelManager';
 import { WebVHCelManager } from '../../../src/cel/layers/WebVHCelManager';
 import { BtcoCelManager } from '../../../src/cel/layers/BtcoCelManager';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
+import { appendEvent } from '../../../src/cel/algorithms/appendEvent';
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { computeDigestMultibase } from '../../../src/cel/hash';
+import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
 import type { BitcoinManager } from '../../../src/bitcoin/BitcoinManager';
 
 function makeSigner() {
@@ -258,6 +261,95 @@ describe('CEL event-log authorization and btco verifiability', () => {
     const result = await verifyEventLog(log);
     expect(result.verified).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+
+  // #367: the asset's own inscribed DID document (carrying an
+  // OriginalsCelAnchor service) is an accepted bitcoin-witness artifact,
+  // alongside the original attestation-JSON format. Fail-closed on anything else.
+  describe('DID-document inscription as bitcoin witness content (#367)', () => {
+    // A real signed log ending in a btco migrate event carrying a
+    // bitcoin-ordinals-2024 witness proof for inscription 'insc1' on sat '123'.
+    async function makeWitnessedLog() {
+      const signer = makeSigner();
+      const peer = new PeerCelManager(signer as any);
+      let { log } = await peer.create('Asset', []);
+      log = await appendEvent(
+        log,
+        'migrate',
+        { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', migratedAt: '2026-07-10T00:00:00Z' },
+        { signer: signer as any, verificationMethod: 'ignored' }
+      );
+      const last = log.events[log.events.length - 1];
+      const digest = computeDigestMultibase(canonicalizeEntryForChain(last));
+      const witnessProof = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'bitcoin-ordinals-2024',
+        created: '2026-07-10T00:00:01Z',
+        verificationMethod: 'did:btco:witness',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'zinsc1',
+        witnessedAt: '2026-07-10T00:00:01Z',
+        txid: 'tx1',
+        satoshi: '123',
+        inscriptionId: 'insc1',
+      };
+      const witnessed = {
+        events: [...log.events.slice(0, -1), { ...last, proof: [...last.proof, witnessProof] }],
+      };
+      return { log: witnessed as typeof log, digest };
+    }
+
+    const providerServing = (content: unknown) => ({
+      getInscriptionById: async (id: string) =>
+        id === 'insc1'
+          ? {
+              inscriptionId: 'insc1',
+              content: Buffer.from(JSON.stringify(content)),
+              contentType: 'application/did+json',
+              txid: 'tx1',
+              satoshi: '123',
+            }
+          : null,
+    });
+
+    const anchorDoc = (headDigestMultibase: string) => ({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:btco:reg:123',
+      service: [
+        { id: 'did:btco:reg:123#resources', type: 'OriginalsResourceManifest', serviceEndpoint: { resources: [] } },
+        { id: 'did:btco:reg:123#cel', type: 'OriginalsCelAnchor', serviceEndpoint: { headDigestMultibase } },
+      ],
+    });
+
+    it('accepts a DID document whose OriginalsCelAnchor commits to the event digest', async () => {
+      const { log, digest } = await makeWitnessedLog();
+      const result = await verifyEventLog(log, { ordinalsProvider: providerServing(anchorDoc(digest)) });
+      expect(result.verified).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('rejects a DID document with a WRONG headDigestMultibase', async () => {
+      const { log } = await makeWitnessedLog();
+      const wrong = computeDigestMultibase(Buffer.from('some other event'));
+      const result = await verifyEventLog(log, { ordinalsProvider: providerServing(anchorDoc(wrong)) });
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /does not commit to this event's digest/.test(e))).toBe(true);
+    });
+
+    it('rejects a DID document whose anchor service is missing entirely', async () => {
+      const { log } = await makeWitnessedLog();
+      const doc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:reg:123', service: [] };
+      const result = await verifyEventLog(log, { ordinalsProvider: providerServing(doc) });
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /does not commit to this event's digest/.test(e))).toBe(true);
+    });
+
+    it('rejects content that is neither an attestation nor an anchored DID document', async () => {
+      const { log } = await makeWitnessedLog();
+      const result = await verifyEventLog(log, { ordinalsProvider: providerServing({ hello: 'world' }) });
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /does not commit to this event's digest/.test(e))).toBe(true);
+    });
   });
 
   // Authorization is by resolved public KEY, not the VM URI string. These two

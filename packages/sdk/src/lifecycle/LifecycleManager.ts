@@ -24,7 +24,7 @@ import { appendEvent } from '../cel/algorithms/appendEvent.js';
 import { computeDigestMultibase } from '../cel/hash.js';
 import { canonicalizeEntryForChain } from '../cel/canonicalize.js';
 import { serializeEventLogJson } from '../cel/serialization/json.js';
-import type { EventLog, ExternalReference } from '../cel/types.js';
+import type { EventLog, ExternalReference, WitnessProof } from '../cel/types.js';
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { multikey } from '../crypto/Multikey.js';
 import { createBtcoDidDocument } from '../did/createBtcoDidDocument.js';
@@ -1462,6 +1462,38 @@ export class LifecycleManager {
         'Inscription completed but no satoshi was returned; cannot derive a did:btco binding.',
         { inscriptionId: inscription.inscriptionId, txid: revealTxId }
       );
+    }
+
+    // The DID-doc inscription IS the bitcoin witness artifact for the migrate
+    // event appended above (#367): its #cel OriginalsCelAnchor commits to that
+    // event's chain digest, so a bitcoin-ordinals-2024 witness proof binding
+    // satoshi/inscriptionId makes the btco identity derivable — and GATING —
+    // from the log alone (verifyEventLog checks the inscription against the
+    // chain). No second inscription is made. Chain digests exclude proofs, so
+    // this post-hoc attachment (mirroring witnessEvent) cannot break the chain
+    // or the anchored head digest.
+    if (celHeadDigest !== null && asset.celLog) {
+      const log = asset.celLog;
+      const migrateIdx = log.events.length - 1;
+      const witnessedAt = new Date().toISOString();
+      const witnessProof: WitnessProof & { txid: string; satoshi: string; inscriptionId: string } = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'bitcoin-ordinals-2024',
+        created: witnessedAt,
+        verificationMethod: 'did:btco:witness',
+        proofPurpose: 'assertionMethod',
+        proofValue: `z${inscription.inscriptionId}`,
+        witnessedAt,
+        txid: revealTxId,
+        satoshi: inscription.satoshi,
+        inscriptionId: inscription.inscriptionId
+      };
+      const events = log.events.slice();
+      events[migrateIdx] = {
+        ...events[migrateIdx],
+        proof: [...events[migrateIdx].proof, witnessProof]
+      };
+      asset._replaceCelLog({ ...log, events });
     }
 
     // Capture the layer before migration for accurate metrics

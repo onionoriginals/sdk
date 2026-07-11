@@ -12,7 +12,9 @@ import { ProvenanceQuery, Migration, Transfer } from './ProvenanceQuery.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning.js';
-import type { EventLog } from '../cel/types.js';
+import type { EventLog, OrdinalsLookup } from '../cel/types.js';
+import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
+import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 
 export interface ProvenanceChain {
   createdAt: string;
@@ -286,6 +288,12 @@ export class OriginalsAsset {
     didManager?: DIDManager;
     credentialManager?: CredentialManager;
     fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
+    /**
+     * Required to verify `bitcoin-ordinals-2024` witness proofs in the CEL log
+     * (btco-anchored assets). Without it, a log carrying a bitcoin witness
+     * proof fails closed — see VerifyOptions.ordinalsProvider.
+     */
+    ordinalsProvider?: OrdinalsLookup;
   }): Promise<boolean> {
     const result = await this.runVerificationChecks(deps);
     // 'verification:completed' is part of the public EventTypeMap and is
@@ -303,8 +311,24 @@ export class OriginalsAsset {
     didManager?: DIDManager;
     credentialManager?: CredentialManager;
     fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
+    ordinalsProvider?: OrdinalsLookup;
   }): Promise<boolean> {
     try {
+      // 0) GATING: whole-chain CEL verification. `expectedDid: this.id` is the
+      // binding check for _replaceCelLog — a swapped-in foreign log (even one
+      // valid on its own terms) does not back this asset's DID and fails here.
+      // Assets without a celLog (legacy constructions) skip this entirely.
+      if (this.#celLog) {
+        const celResult = await verifyEventLog(this.#celLog, {
+          expectedDid: this.id,
+          resolveKey: deps?.didManager ? createDidManagerKeyResolver(deps.didManager) : undefined,
+          ordinalsProvider: deps?.ordinalsProvider
+        });
+        if (!celResult.verified) {
+          return false;
+        }
+      }
+
       // 1) DID Document validation (structure + supported method via validateDID)
       if (!validateDIDDocument(this.did)) {
         return false;

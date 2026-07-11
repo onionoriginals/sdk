@@ -19,9 +19,10 @@
  *    BtcoCelManager.ts ~L374-409). When such a proof IS present, the satoshi
  *    + `data.network` derive `bindings['did:btco']` and the migration's
  *    precise `to`. LifecycleManager.inscribeOnBitcoin's append-first flow
- *    (Phase-2 Task 5) appends the migrate event BEFORE inscription and never
- *    attaches a witness proof afterwards, so in that flow — and generally,
- *    whenever no witness proof is present — `bindings['did:btco']` is
+ *    appends the migrate event BEFORE inscription and, post-inscription,
+ *    attaches a bitcoin witness proof from the DID-doc inscription (#367) —
+ *    so the binding IS derivable in that flow. Whenever no witness proof is
+ *    present (degraded flows, legacy logs), `bindings['did:btco']` is
  *    OMITTED and the migration's `to` is the honest sentinel `'did:btco:?'`
  *    rather than a fabricated DID.
  *  - `transfer` → a transfers entry `{ from: data.previousOwner,
@@ -31,9 +32,9 @@
  *
  * KNOWN, DOCUMENTED DIVERGENCE from the live in-memory caches
  * (`OriginalsAsset.getProvenance()` / `asset.bindings`):
- *  - `bindings['did:btco']` (see above) — absent whenever the log carries no
- *    bitcoin witness proof, even though the live cache always has it
- *    (computed directly from the inscription result at migration time).
+ *  - `bindings['did:btco']` (see above) — absent when the log carries no
+ *    bitcoin witness proof (degraded/legacy flows), even though the live
+ *    cache always has it (computed from the inscription result directly).
  *  - migrations here are DID-to-DID (`sourceDid` → `targetDid`/derived btco
  *    DID), not the live cache's layer-to-layer labels
  *    (`'did:peer'` → `'did:webvh'`) — a different, complementary shape.

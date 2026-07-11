@@ -104,11 +104,11 @@ describe('LifecycleManager.transferOwnership unit edge cases', () => {
 });
 
 describe('transferOwnership appends signed CEL transfer event (#Phase2 task 6)', () => {
-  const makeSdk = (keyStore?: MockKeyStore) =>
+  const makeSdk = (keyStore?: MockKeyStore, provider: OrdMockProvider = new OrdMockProvider()) =>
     OriginalsSDK.create({
       network: 'regtest',
       defaultKeyType: 'Ed25519',
-      ordinalsProvider: new OrdMockProvider(),
+      ordinalsProvider: provider,
       ...(keyStore ? { keyStore } : {})
     } as any);
 
@@ -122,7 +122,8 @@ describe('transferOwnership appends signed CEL transfer event (#Phase2 task 6)',
   };
 
   test('appends a transfer event: last event type=transfer, data.txid=tx.txid, data.newOwner=address, log verifies', async () => {
-    const sdk = makeSdk(new MockKeyStore());
+    const provider = new OrdMockProvider();
+    const sdk = makeSdk(new MockKeyStore(), provider);
     const asset = await inscribedCelAsset(sdk);
 
     const tx = await sdk.lifecycle.transferOwnership(asset, TO_ADDRESS);
@@ -135,7 +136,12 @@ describe('transferOwnership appends signed CEL transfer event (#Phase2 task 6)',
     // previousOwner is the outgoing controller's did:key (pre-#), folded from the log.
     expect(String((last.data as any).previousOwner).startsWith('did:key:')).toBe(true);
 
-    const result = await verifyEventLog(asset.celLog!, { expectedDid: deriveDidCel(asset.celLog!) });
+    // The btco migrate event carries a bitcoin witness proof (#367), so the
+    // log verifies only against the chain — the provider is required.
+    const result = await verifyEventLog(asset.celLog!, {
+      expectedDid: deriveDidCel(asset.celLog!),
+      ordinalsProvider: provider
+    });
     expect(result.verified).toBe(true);
   });
 

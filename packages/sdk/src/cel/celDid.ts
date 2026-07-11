@@ -13,6 +13,7 @@ import type { EventLog, LogEntry } from './types.js';
 import type { DIDDocument } from '../types/index.js';
 import { computeDigestMultibase, digestMultibaseEquals } from './hash.js';
 import { canonicalizeEntryForChain } from './canonicalize.js';
+import { currentControllerVm } from './signerAdapter.js';
 
 export const DID_CEL_PREFIX = 'did:cel:';
 
@@ -48,6 +49,35 @@ export function didCelMatchesLog(did: string, log: EventLog): boolean {
  * `alsoKnownAs` records the did:key form of the same key for resolvers that
  * only know did:key. Consumed by asset creation (Phase-2 Task 3).
  */
+/**
+ * Resolves a did:cel from its event log: verifies the WHOLE chain against the
+ * DID (`expectedDid` binds the log to it) and, on success, folds the CURRENT
+ * controller (genesis `controller`, handed off by valid rotateKey events) into
+ * a DID document. Returns null — never a fabricated document — when the log
+ * does not verify, does not back `did`, or the current controller is not a
+ * did:key (its key material would not be derivable offline).
+ *
+ * The verify options are deliberately minimal (no resolveKey/ordinalsProvider):
+ * this resolver is for genesis-layer logs whose proofs are did:key-based.
+ * Logs carrying bitcoin witness proofs fail closed here — verify those via
+ * `verifyEventLog` with an ordinalsProvider instead.
+ */
+export async function resolveDidCel(did: string, log: EventLog): Promise<DIDDocument | null> {
+  if (!isDidCel(did)) return null;
+  // Lazy import: verifyEventLog statically imports this module (derivation
+  // helpers), so a static reverse edge would create an import cycle.
+  const { verifyEventLog } = await import('./algorithms/verifyEventLog.js');
+  const result = await verifyEventLog(log, { expectedDid: did });
+  if (!result.verified) return null;
+  try {
+    const controller = currentControllerVm(log).split('#')[0];
+    if (!controller.startsWith('did:key:')) return null;
+    return createCelDidDocument(did, controller.slice('did:key:'.length));
+  } catch {
+    return null;
+  }
+}
+
 export function createCelDidDocument(didCel: string, controllerPublicKeyMultibase: string): DIDDocument {
   const vmId = `${didCel}#key-0`;
   return {

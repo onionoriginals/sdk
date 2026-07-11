@@ -4,11 +4,11 @@
  * Parity contract: replaying `asset.celLog!` must agree with the live,
  * in-memory caches (`asset.currentLayer`, `asset.bindings`,
  * `asset.getProvenance()`) on the fields the log can actually reconstruct.
- * KNOWN, DOCUMENTED DIVERGENCE (see replayProvenance.ts JSDoc): the OrdMock
- * lifecycle's btco `migrate` event carries no bitcoin witness proof
- * (append-first, pre-inscription — Task 5), so `bindings['did:btco']` is
- * un-derivable from the log alone in this flow; the live cache derives it
- * from the inscription result instead. Also, `commitTxId`/`feeRate` live
+ * Since Task 8 (#367) the lifecycle's btco `migrate` event carries a bitcoin
+ * witness proof from the DID-doc inscription, so `bindings['did:btco']` IS
+ * derivable from the log in the real flow (the parity test's conditional
+ * exercises the equality branch). It stays un-derivable only in degraded /
+ * legacy flows without a witness proof. `commitTxId`/`feeRate` still live
  * only in the in-memory ProvenanceChain, never in the log.
  */
 import { describe, test, expect } from 'bun:test';

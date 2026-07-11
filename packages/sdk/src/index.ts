@@ -230,6 +230,7 @@ export {
   isDidCel,
   didCelMatchesLog,
   createCelDidDocument,
+  resolveDidCel,
 } from './cel/celDid.js';
 export {
   createExternalReference,
