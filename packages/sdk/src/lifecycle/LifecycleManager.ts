@@ -640,11 +640,11 @@ export class LifecycleManager {
   async getCurrentOwner(asset: OriginalsAsset): Promise<{ address: string; outpoint: string } | null> {
     const btcoDid = asset.bindings?.['did:btco'] ?? (asset.id.startsWith('did:btco:') ? asset.id : undefined);
     if (!btcoDid) return null;
-    const satoshi = String(parseSatoshiIdentifier(btcoDid));
     const provider = this.config.ordinalsProvider;
     if (!provider) {
       throw new StructuredError('ORD_PROVIDER_REQUIRED', 'Ordinals provider must be configured to read live ownership from Bitcoin.');
     }
+    const satoshi = String(parseSatoshiIdentifier(btcoDid));
     if (typeof provider.getSatOwnership !== 'function') return null;
     return await provider.getSatOwnership(satoshi);
   }
@@ -2540,7 +2540,7 @@ export class LifecycleManager {
     if (!newVerificationMethod?.privateKey) {
       throw new StructuredError('INVALID_INPUT', 'authorizeSigner requires the signer\'s private key to self-sign the rotation.');
     }
-    // Concurrency guard (issue #255, same pattern as rotateBtcoKeys): claim the
+    // Concurrency guard (issue #255, same pattern as rotateBtcoKeys): reserve the
     // asset synchronously before the first await so two overlapping calls
     // cannot both broadcast reinscriptions.
     if (this.inFlightAssets.has(asset.id)) {
