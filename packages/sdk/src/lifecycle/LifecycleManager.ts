@@ -2171,7 +2171,7 @@ export class LifecycleManager {
     }
   }
 
-  // ===== Shared rotation-first core (rotateBtcoKeys + claimOwnership) =====
+  // ===== Shared rotation-first core (rotateBtcoKeys + authorizeSigner) =====
 
   /**
    * Ed25519 + derive check for a caller-supplied rotation keypair: the private
@@ -2194,7 +2194,7 @@ export class LifecycleManager {
 
   /**
    * Builds the rotated did:btco document (shared by rotateBtcoKeys and
-   * claimOwnership): same id, the NEW verification method, lineage back-links,
+   * authorizeSigner): same id, the NEW verification method, lineage back-links,
    * and the re-embedded resource manifest (the resolver serves the newest
    * inscription, so a rotation that dropped the manifest would erase it). The
    * `#cel` anchor is embedded separately, after the rotateKey head is known.
@@ -2318,10 +2318,11 @@ export class LifecycleManager {
   /**
    * Controller-signed witness acknowledgment (map §5.1): records the
    * inscription that witnessed `witnessedEventDigest` as an `update` event via
-   * the STANDARD append path — folds to the CURRENT controller (for claim, the
-   * NEW key post-rotation). Non-gating: `replayProvenance` ignores updates and
-   * the verifier never requires it. Best-effort — the inscription is already
-   * committed and paid, so a failed acknowledgment must not undo it. As a side
+   * the STANDARD append path — folds to the CURRENT controller (for
+   * authorizeSigner, the NEW key post-rotation). Non-gating: `replayProvenance`
+   * ignores updates and the verifier never requires it. Best-effort — the
+   * inscription is already committed and paid, so a failed acknowledgment
+   * must not undo it. As a side
    * effect this append re-persists the now-proofed log through the Task-3/4
    * choke point, closing the window where the stored copy predates the proof.
    */
@@ -2346,12 +2347,13 @@ export class LifecycleManager {
   }
 
   /**
-   * Rotation-first ownership hand-off (#366): reinscribe the did:btco
+   * Rotation-first optional authoring (#366): reinscribe the did:btco
    * document — same id, new verification method — on the SAME sat. Only the
    * current UTXO holder can do this (reinscription spends the output), so a
    * successful rotation simultaneously proves sat control and announces the
-   * new owner's signing key. The resolver's newest-valid-inscription rule
-   * then serves the rotated document.
+   * signing key the (already-owning) sat holder will author future
+   * provenance with. The resolver's newest-valid-inscription rule then
+   * serves the rotated document.
    *
    * KEY CUSTODY CONTRACT: after rotation the CURRENT controller folds to the
    * new key, so every subsequent CEL append (transfer, further rotation) signs
@@ -2396,8 +2398,9 @@ export class LifecycleManager {
 
     // Append-first (#365): rotateKey signed by the CURRENT controller — the
     // cooperative-rotation contract (the verifier only accepts rotations
-    // authorized by the outgoing authority). The non-cooperative arm (a NEW
-    // owner who cannot obtain the seller's signature) is claimOwnership.
+    // authorized by the outgoing authority). The non-cooperative arm (a sat
+    // holder who cannot obtain the prior controller's signature) is
+    // authorizeSigner.
     // Canonical VM the post-rotation controller will sign appends under.
     const newController = `did:key:${newVerificationMethod.publicKeyMultibase}`;
     const newControllerVm = `${newController}#${newVerificationMethod.publicKeyMultibase}`;
@@ -2405,7 +2408,7 @@ export class LifecycleManager {
     // can sign (key-custody contract). Before the append is fine — the rotateKey
     // event itself is signed by the OUTGOING controller; this key is for what
     // follows.
-    // Assert the pair whenever a privateKey is supplied (mirrors claimOwnership);
+    // Assert the pair whenever a privateKey is supplied (mirrors authorizeSigner);
     // registering it needs a keyStore, but the derive-check must not be skipped
     // just because none is configured — a mismatched key must fail loudly.
     if (newVerificationMethod.privateKey) {
@@ -2476,73 +2479,75 @@ export class LifecycleManager {
   }
 
   /**
-   * Non-cooperative ownership claim (#366, design §5): the write side of the
-   * verifier rule Task 5 landed. A NEW owner who has received the sat but
-   * CANNOT obtain the seller's signature reinscribes the did:btco document —
-   * same id, THEIR key — on the same sat, and self-signs the rotateKey with
-   * that new key. Because only the current UTXO holder can reinscribe, the
-   * reinscription is itself proof of sat control; the verifier accepts the
-   * otherwise-unauthorized rotation once the attached bitcoin witness proof
-   * (check (a)), the announced key (b), the signer (c), and the strictly-later
-   * inscription index (d) all line up.
+   * Optional author-enablement (#366, design §5): the write side of the
+   * verifier rule Task 5 landed. Ownership itself is the sat — this method
+   * does not grant or claim it. It lets the sat holder establish a signing
+   * key in the log so they can author new provenance even when they CANNOT
+   * obtain the prior controller's signature: they reinscribe the did:btco
+   * document — same id, THEIR key — on the same sat, and self-sign the
+   * rotateKey with that new key. Because only the current UTXO holder can
+   * reinscribe, the reinscription is itself proof of sat control; the
+   * verifier accepts the otherwise-unauthorized rotation once the attached
+   * bitcoin witness proof (check (a)), the announced key (b), the signer
+   * (c), and the strictly-later inscription index (d) all line up.
    *
    * Differs from {@link rotateBtcoKeys} (the COOPERATIVE arm): the rotateKey is
    * SELF-SIGNED with the new key (explicitly NOT the standard append path,
-   * which folds to the seller's current controller the claimer does not hold),
-   * `privateKey` is REQUIRED (the claimer must be able to sign), and a bitcoin
+   * which folds to the prior controller the sat holder does not hold),
+   * `privateKey` is REQUIRED (the signer must be able to sign), and a bitcoin
    * witness proof is attached to the rotateKey post-inscription — that is what
    * satisfies the verifier's check (a).
    *
    * @throws INVALID_STATE when the asset is not on did:btco / has no binding.
    * @throws INVALID_INPUT when no privateKey is supplied.
-   * @throws INVALID_KEY_PAIR / CEL_ED25519_REQUIRED for a bad claimant keypair.
-   * @throws OPERATION_IN_PROGRESS on a concurrent claim of the same asset.
+   * @throws INVALID_KEY_PAIR / CEL_ED25519_REQUIRED for a bad keypair.
+   * @throws OPERATION_IN_PROGRESS on a concurrent call for the same asset.
    */
-  async claimOwnership(
+  async authorizeSigner(
     asset: OriginalsAsset,
     newVerificationMethod: { publicKeyMultibase: string; privateKey: string },
     feeRate?: number
   ): Promise<{ inscriptionId: string; did: string }> {
     if (asset.currentLayer !== 'did:btco') {
-      throw new StructuredError('INVALID_STATE', 'Claiming ownership requires the asset to be on the did:btco layer.');
+      throw new StructuredError('INVALID_STATE', 'Authorizing a signer requires the asset to be on the did:btco layer.');
     }
     const btcoDid = asset.bindings?.['did:btco'];
     if (!btcoDid) {
-      throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to claim.');
+      throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to authorize a signer for.');
     }
-    // privateKey is REQUIRED: the claimer self-signs the rotateKey with it (the
-    // seller's controller is unavailable to fold onto).
+    // privateKey is REQUIRED: the sat holder self-signs the rotateKey with it
+    // (the prior controller is unavailable to fold onto).
     if (!newVerificationMethod?.privateKey) {
-      throw new StructuredError('INVALID_INPUT', 'claimOwnership requires the claimant private key to self-sign the rotation.');
+      throw new StructuredError('INVALID_INPUT', 'authorizeSigner requires the signer\'s private key to self-sign the rotation.');
     }
     // Concurrency guard (issue #255, same pattern as rotateBtcoKeys): claim the
-    // asset synchronously before the first await so two overlapping claims
+    // asset synchronously before the first await so two overlapping calls
     // cannot both broadcast reinscriptions.
     if (this.inFlightAssets.has(asset.id)) {
       throw new StructuredError(
         'OPERATION_IN_PROGRESS',
-        `An operation for asset ${asset.id} is already in progress; concurrent claims of the same asset would broadcast duplicate reinscriptions.`
+        `An operation for asset ${asset.id} is already in progress; concurrent authorizeSigner calls for the same asset would broadcast duplicate reinscriptions.`
       );
     }
     this.inFlightAssets.add(asset.id);
     try {
     const satoshi = btcoDid.split(':').pop()!;
     const pkm = newVerificationMethod.publicKeyMultibase;
-    // Derive-check the claimant keypair (privateKey REQUIRED); register it so
-    // post-claim appends by the new controller can sign.
+    // Derive-check the new signer's keypair (privateKey REQUIRED); register it
+    // so subsequent appends by the new controller can sign.
     this.assertRotationKeyPair(pkm, newVerificationMethod.privateKey);
     const newController = `did:key:${pkm}`;
     const newControllerVm = `${newController}#${pkm}`;
 
     // SELF-SIGN the rotateKey with the NEW key — explicitly NOT
-    // appendCelEventOrSkip, which folds to the seller's current controller the
-    // claimer cannot hold. The verifier accepts this unauthorized rotation
+    // appendCelEventOrSkip, which folds to the prior controller the sat
+    // holder cannot hold. The verifier accepts this unauthorized rotation
     // non-cooperatively once the reinscription witness proves sat control.
     const celLogBefore = asset.celLog;
     if (!celLogBefore) {
-      throw new StructuredError('INVALID_STATE', 'Asset has no CEL log to append the claim rotation to.');
+      throw new StructuredError('INVALID_STATE', 'Asset has no CEL log to append the rotation to.');
     }
-    // Guard above must run BEFORE registering the key: a doomed claim (no CEL
+    // Guard above must run BEFORE registering the key: a doomed call (no CEL
     // log) should not leave an unused key sitting in the keyStore.
     if (this.keyStore) {
       await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
