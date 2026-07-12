@@ -156,7 +156,7 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     expect(events[events.length - 1].type).not.toBe('rotateKey');
   });
 
-  test('rotate with privateKey: subsequent transfer append is signed by the NEW controller', async () => {
+  test('rotate with privateKey: the post-rotation authoring append is signed by the NEW controller; a later transfer grows no log', async () => {
     const provider = new OrdMockProvider();
     const sdk = OriginalsSDK.create({
       network: 'regtest',
@@ -177,12 +177,23 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
       privateKey: newKp.privateKey
     });
 
-    // Post-rotation the current controller folds to the new key; the transfer
-    // append signs with it and the whole log verifies.
-    await sdk.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
+    // Post-rotation the current controller folds to the new key. The rotation's
+    // own witness-acknowledgment `update` is a real standard-path append that
+    // folds to — and is signed by — that new controller.
     const last = asset.celLog!.events[asset.celLog!.events.length - 1];
-    expect(last.type).toBe('transfer');
+    expect(last.type).toBe('update');
+    expect((last.data as any).operation).toBe('acknowledgeWitness');
     expect(((last.proof as any)[0].verificationMethod as string).startsWith(`did:key:${newKp.publicKey}`)).toBe(true);
+
+    // Ownership IS sat control: a transfer moves the sat but writes NOTHING to
+    // the CEL. The log is byte-for-byte unchanged across transferOwnership.
+    const lenBefore = asset.celLog!.events.length;
+    const headBefore = asset.celLog!.events[lenBefore - 1];
+    await sdk.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
+    expect(asset.celLog!.events.length).toBe(lenBefore);
+    expect(asset.celLog!.events[asset.celLog!.events.length - 1]).toBe(headBefore);
+
+    // The whole log (rotation + its ack, no transfer entry) verifies.
     const result = await verifyEventLog(asset.celLog!, { expectedDid: asset.id, ordinalsProvider: provider });
     expect(result.verified).toBe(true);
   });

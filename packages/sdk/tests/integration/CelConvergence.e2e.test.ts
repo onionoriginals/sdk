@@ -68,8 +68,12 @@ describe('CEL convergence end-to-end (#Phase2 Task9)', () => {
     expect(inscriptionAnchorDigest)
       .toBe(computeDigestMultibase(canonicalizeEntryForChain(btcoMigrateEntry)));
 
-    // transfer — the sat moves; append the signed transfer event (no reinscribe).
+    // transfer — the sat moves; ownership IS sat control, so a transfer writes
+    // NOTHING to the CEL. The sharpest new-model assertion: the log length is
+    // UNCHANGED across transferOwnership (a transfer grows no log).
+    const lenBeforeTransfer = asset.celLog!.events.length;
     await sdk.lifecycle.transferOwnership(asset, NEW_OWNER);
+    expect(asset.celLog!.events.length).toBe(lenBeforeTransfer);
 
     // rotate — the recipient reinscribes the same-id doc with a fresh key,
     // appending rotateKey and RE-embedding a fresher #cel on the same sat.
@@ -78,11 +82,12 @@ describe('CEL convergence end-to-end (#Phase2 Task9)', () => {
 
     // ---- The log tells the whole story, in order. ----
     // inscribe appends a controller-signed acknowledgeWitness update after the
-    // btco migrate (map §5.1). The fill(7) rotation carries no matching secret,
-    // so the post-rotation controller can't sign its own acknowledgment — that
-    // append degrades (NO_SIGNING_KEY) and no trailing update lands.
+    // btco migrate (map §5.1). The transfer contributed nothing. The fill(7)
+    // rotation carries no matching secret, so the post-rotation controller can't
+    // sign its own acknowledgment — that append degrades (NO_SIGNING_KEY) and no
+    // trailing update lands.
     const log = asset.celLog!;
-    expect(log.events.map(e => e.type)).toEqual(['create', 'migrate', 'migrate', 'update', 'transfer', 'rotateKey']);
+    expect(log.events.map(e => e.type)).toEqual(['create', 'migrate', 'migrate', 'update', 'rotateKey']);
 
     // ---- verify() gates on the WHOLE chain, needing the ordinals provider
     // for the btco witness proof. ----
@@ -103,9 +108,9 @@ describe('CEL convergence end-to-end (#Phase2 Task9)', () => {
 
     // ---- Two anchors, one sat: newest-inscription-wins resolution. ----
     // resolveDID returns the CURRENT (rotated) doc, so its #cel is the FRESHER
-    // anchor — the rotateKey entry (now index 5, after the inscribe ack), not
-    // the inscription-time head.
-    const rotateEntry = log.events[5];
+    // anchor — the rotateKey entry (now index 4, after the inscribe ack; the
+    // transfer added nothing), not the inscription-time head.
+    const rotateEntry = log.events[4];
     const currentDoc = await sdk.did.resolveDID(btcoDid, { skipCache: true });
     const currentAnchor = (currentDoc!.service || []).find(s => s.type === 'OriginalsCelAnchor');
     expect(currentAnchor).toBeDefined();

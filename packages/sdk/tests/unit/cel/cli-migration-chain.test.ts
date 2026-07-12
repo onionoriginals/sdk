@@ -2,7 +2,10 @@
  * CLI two-step migration chain (Task 8 — closes the Task 7 review break)
  *
  * Drives the full CLI chain over MANAGER-PRODUCED logs:
- *   create (did:cel genesis) → migrate --to webvh → migrate --to btco → transfer
+ *   create (did:cel genesis) → migrate --to webvh → migrate --to btco
+ *
+ * (No transfer step: ownership is sat control, not a CEL write — an offline log
+ * CLI can't move a sat, so the transfer command was removed in Phase 4.)
  *
  * The Task 7 break: `migrate --to webvh` writes a `migrate`-typed event, but
  * the CLI's detectCurrentLayer/getCurrentDid sniffed only `update`-typed
@@ -16,7 +19,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { createCommand } from '../../../src/cel/cli/create';
 import { migrateCommand } from '../../../src/cel/cli/migrate';
-import { transferCommand } from '../../../src/cel/cli/transfer';
 import { parseEventLogJson } from '../../../src/cel/serialization/json';
 import { multikey } from '../../../src/crypto/Multikey';
 
@@ -61,11 +63,10 @@ describe('CLI two-step migration chain (peer → webvh → btco)', () => {
     expect(result.did!.startsWith('did:cel:')).toBe(true);
   });
 
-  it('migrates a fresh did:cel-genesis log to webvh, then to btco, then transfers', async () => {
+  it('migrates a fresh did:cel-genesis log to webvh, then to btco', async () => {
     const peerPath = path.join(tempDir, 'asset.cel.json');
     const webvhPath = path.join(tempDir, 'asset.webvh.cel.json');
     const btcoPath = path.join(tempDir, 'asset.btco.cel.json');
-    const transferredPath = path.join(tempDir, 'asset.transferred.cel.json');
 
     // Step 0: create — new-shape genesis (no embedded did/layer)
     const createResult = await createCommand({
@@ -117,27 +118,6 @@ describe('CLI two-step migration chain (peer → webvh → btco)', () => {
     });
     expect(terminalResult.success).toBe(false);
     expect(terminalResult.message).toContain('Cannot migrate from btco layer');
-
-    // Step 4: transfer emits a first-class `transfer` event whose
-    // previousOwner is the resolvable did:btco (derived from the witness proof).
-    const transferResult = await transferCommand({
-      log: btcoPath,
-      to: 'bc1qnewownerchain',
-      wallet: walletPath,
-      output: transferredPath,
-    });
-    expect(transferResult.success).toBe(true);
-    expect(transferResult.previousOwner).toContain('did:btco');
-
-    const transferredLog = parseEventLogJson(fs.readFileSync(transferredPath, 'utf-8'));
-    const transferEvent = transferredLog.events[transferredLog.events.length - 1];
-    expect(transferEvent.type).toBe('transfer');
-    const transferData = transferEvent.data as Record<string, unknown>;
-    // No inner discriminator — the type lives on the event itself.
-    expect(transferData.type).toBeUndefined();
-    expect(transferData.previousOwner).toContain('did:btco');
-    expect(transferData.newOwner).toBe('bc1qnewownerchain');
-    expect(transferData.transferredAt).toBeDefined();
   });
 
   it('legacy update-sniffed migration chain still detects webvh (fallback kept)', async () => {
