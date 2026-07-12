@@ -20,7 +20,7 @@ import {
   type AssetEnvelope
 } from './assetEnvelope.js';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
-import { hashResource } from '../utils/validation.js';
+import { hashResource, validateCredential } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix } from '../cel/btcoDid.js';
@@ -418,6 +418,19 @@ export class LifecycleManager {
     if (!Array.isArray(env.resources) || env.resources.length === 0) {
       throw new StructuredError('ENVELOPE_INVALID', 'Envelope must carry a non-empty resources array.');
     }
+    // Each resource needs a string hash: the genesis-binding path feeds it to
+    // hexSha256ToDigestMultibase, which throws a raw TypeError on undefined (#377).
+    for (const res of env.resources) {
+      if (!res || typeof res !== 'object' || typeof (res as { hash?: unknown }).hash !== 'string') {
+        const resId = (res as { id?: unknown })?.id;
+        throw new StructuredError('ENVELOPE_INVALID', `Envelope resource ${typeof resId === 'string' ? resId : '(unknown)'} is missing a string hash.`);
+      }
+    }
+    // Credentials, when present, must be an array (else map() throws a raw
+    // TypeError); their contents are validated after the fold (step 6).
+    if (env.credentials !== undefined && !Array.isArray(env.credentials)) {
+      throw new StructuredError('ENVELOPE_INVALID', 'Envelope credentials must be an array when present.');
+    }
 
     // 2) Log parsing through the JSON gate (validates structure, decouples from
     // the caller's object, preserves witness-proof extension fields).
@@ -429,7 +442,14 @@ export class LifecycleManager {
     }
 
     // The fold is needed to rebuild the asset regardless of verification.
-    const folded = replayProvenance(log);
+    // Guard: replayProvenance throws a raw Error for a parseable-but-misordered
+    // (non-create-first) log; surface it in the envelope taxonomy (#377).
+    let folded: ReturnType<typeof replayProvenance>;
+    try {
+      folded = replayProvenance(log);
+    } catch (e) {
+      throw new StructuredError('ENVELOPE_INVALID', `Envelope eventLog cannot be folded into provenance: ${(e as Error).message}`);
+    }
 
     // 3-5) Verification + binding + cross-checks (skipped by skipVerification).
     const provider = opts?.ordinalsProvider ?? this.config.ordinalsProvider;
@@ -515,10 +535,64 @@ export class LifecycleManager {
     }
     const provenance = this.buildRestoredProvenance(log, folded, env, warnings);
 
+    // CRITICAL (#377): DERIVE the did:cel document from the VERIFIED genesis
+    // controller — never trust envelope.didDocuments['did:cel']. A tampered VM
+    // or rogue service in that doc would otherwise flow into the buyer's minted
+    // did:webvh and inscribed did:btco identity. The rebuilt doc is a pure
+    // function of the genesis, so re-serialization stays lossless.
+    const genesisController = (log.events[0]?.data as { controller?: unknown })?.controller;
+    if (typeof genesisController !== 'string' || !genesisController.startsWith('did:key:')) {
+      throw new StructuredError(
+        'ASSET_LOAD_VERIFICATION_FAILED',
+        `Cannot derive did:cel document: genesis controller is not a did:key (got ${String(genesisController)}).`,
+        { verification }
+      );
+    }
+    const celDidDocument = createCelDidDocument(env.assetDid, genesisController.slice('did:key:'.length));
+
+    // Important (#377): validate envelope credentials — a verified-reported load
+    // must not silently attach forged/malformed ones. Structural validation runs
+    // ALWAYS (even under skipVerification) and fails closed. Cryptographic
+    // verification runs when not skipping, but a credential that does not verify
+    // at load is SURFACED as a warning, not hard-failed: a genuine credential
+    // issued by a since-rotated did:cel key legitimately no longer verifies
+    // against the folded head (the resolver only knows the current key), and must
+    // not block the buyer's load. Forged/unresolvable ones land here too — named,
+    // never silently trusted. (Mirrors OriginalsAsset.verify's structural+crypto
+    // credential path, downgrading only the crypto failure to advisory at load.)
+    const credentials = (env.credentials ?? []).map(c => ({ ...c }));
+    for (const cred of credentials) {
+      if (!validateCredential(cred)) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          'Envelope carries a structurally invalid credential.',
+          { verification }
+        );
+      }
+    }
+    if (!opts?.skipVerification) {
+      for (const cred of credentials) {
+        const credId = (cred as { id?: unknown }).id;
+        const credLabel = typeof credId === 'string' ? credId : '(no id)';
+        let ok = false;
+        try {
+          ok = await this.credentialManager.verifyCredential(cred);
+        } catch {
+          ok = false;
+        }
+        if (!ok) {
+          warnings.push(
+            `Credential ${credLabel} could not be cryptographically verified at load ` +
+            `(forged, or issued by a since-rotated/unresolvable issuer); attached as unverified.`
+          );
+        }
+      }
+    }
+
     const asset = OriginalsAsset.restore(
       env.resources.map(r => ({ ...r })),
-      structuredClone(env.didDocuments['did:cel']),
-      (env.credentials ?? []).map(c => ({ ...c })),
+      celDidDocument,
+      credentials,
       log,
       { currentLayer: folded.currentLayer, bindings: folded.bindings, provenance }
     );
@@ -2372,9 +2446,14 @@ export class LifecycleManager {
     // can sign (key-custody contract). Before the append is fine — the rotateKey
     // event itself is signed by the OUTGOING controller; this key is for what
     // follows.
-    if (newVerificationMethod.privateKey && this.keyStore) {
+    // Assert the pair whenever a privateKey is supplied (mirrors claimOwnership);
+    // registering it needs a keyStore, but the derive-check must not be skipped
+    // just because none is configured — a mismatched key must fail loudly.
+    if (newVerificationMethod.privateKey) {
       this.assertRotationKeyPair(newVerificationMethod.publicKeyMultibase, newVerificationMethod.privateKey);
-      await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
+      if (this.keyStore) {
+        await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
+      }
     }
 
     const celLogBefore = asset.celLog;

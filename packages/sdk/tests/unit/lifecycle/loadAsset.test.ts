@@ -243,6 +243,104 @@ describe('loadAsset — captured DID document repopulation', () => {
   });
 });
 
+describe('loadAsset — did:cel doc is DERIVED from the verified log, not trusted', () => {
+  test('tampered did:cel VM[0] + rogue service are ignored: asset.did carries the genuine genesis key and no rogue service', async () => {
+    const { sdk } = makeSDK();
+    const asset = await createGenesisAsset(sdk);
+    const envelope = asset.serialize();
+    const genuineKey = envelope.didDocuments['did:cel'].verificationMethod![0].publicKeyMultibase;
+
+    // Tamper: swap VM[0] to an attacker key + inject rogue service endpoints.
+    envelope.didDocuments['did:cel'].verificationMethod![0].publicKeyMultibase =
+      'z6MkspoJoTNRrjXk4fWjZgVCyxysPnaMFDafFkPQxvBhwjNb';
+    (envelope.didDocuments['did:cel'] as any).service = [
+      { id: `${asset.id}#evil`, type: 'Attacker', serviceEndpoint: 'https://evil.example' }
+    ];
+
+    const { asset: loaded } = await sdk.lifecycle.loadAsset(envelope);
+    expect(loaded.id).toBe(envelope.assetDid);
+    expect(loaded.did.verificationMethod![0].publicKeyMultibase).toBe(genuineKey);
+    expect((loaded.did as any).service).toBeUndefined();
+  });
+
+  test('swapped did:cel doc id is ignored: loaded asset.id is the derived/verified did:cel', async () => {
+    const { sdk } = makeSDK();
+    const asset = await createGenesisAsset(sdk);
+    const envelope = asset.serialize();
+    envelope.didDocuments['did:cel'].id = 'did:cel:uEVILEVILEVIL';
+    const { asset: loaded } = await sdk.lifecycle.loadAsset(envelope);
+    expect(loaded.id).toBe(envelope.assetDid);
+    expect(loaded.did.id).toBe(envelope.assetDid);
+  });
+});
+
+describe('loadAsset — envelope credentials are validated, not trusted', () => {
+  test('non-array credentials -> ENVELOPE_INVALID', async () => {
+    const { sdk } = makeSDK();
+    const asset = await createGenesisAsset(sdk);
+    const envelope = asset.serialize();
+    (envelope as any).credentials = { not: 'an array' };
+    let err: any;
+    try { await sdk.lifecycle.loadAsset(envelope); } catch (e) { err = e; }
+    expect(err?.code).toBe('ENVELOPE_INVALID');
+  });
+
+  test('forged credential proof -> fails load (issuer resolves) or loads with a warning naming the credential', async () => {
+    const { sdk } = makeSDK();
+    const asset = await createGenesisAsset(sdk);
+    await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    const envelope = asset.serialize();
+    expect((envelope.credentials?.length ?? 0)).toBeGreaterThan(0);
+    const cred: any = envelope.credentials![0];
+    const proof = Array.isArray(cred.proof) ? cred.proof[0] : cred.proof;
+    proof.proofValue = 'z' + 'A'.repeat(80);
+
+    let err: any; let res: any;
+    try { res = await sdk.lifecycle.loadAsset(envelope); } catch (e) { err = e; }
+    if (err) {
+      expect(err.code).toBe('ASSET_LOAD_VERIFICATION_FAILED');
+    } else {
+      expect(res.warnings.some((w: string) => /credential/i.test(w))).toBe(true);
+    }
+  });
+
+  test('structurally invalid credential -> ASSET_LOAD_VERIFICATION_FAILED (even under skipVerification)', async () => {
+    const { sdk } = makeSDK();
+    const asset = await createGenesisAsset(sdk);
+    const envelope = asset.serialize();
+    (envelope as any).credentials = [{ '@context': ['nope'], type: ['NotACredential'] }];
+    let err: any;
+    try { await sdk.lifecycle.loadAsset(envelope, { skipVerification: true }); } catch (e) { err = e; }
+    expect(err?.code).toBe('ASSET_LOAD_VERIFICATION_FAILED');
+  });
+});
+
+describe('loadAsset — malformed envelope taxonomy', () => {
+  test('resource with non-string hash -> ENVELOPE_INVALID (not a raw TypeError)', async () => {
+    const { sdk } = makeSDK();
+    const asset = await createGenesisAsset(sdk);
+    const envelope = asset.serialize();
+    delete (envelope.resources[0] as any).hash;
+    let err: any;
+    try { await sdk.lifecycle.loadAsset(envelope); } catch (e) { err = e; }
+    expect(err?.code).toBe('ENVELOPE_INVALID');
+  });
+
+  test('non-create-first log -> ENVELOPE_INVALID (not a raw Error)', async () => {
+    const { sdk } = makeSDK();
+    const asset = await createGenesisAsset(sdk);
+    const envelope = asset.serialize();
+    // Drop the create event so the first event is no longer a create.
+    envelope.eventLog.events = envelope.eventLog.events.slice(1);
+    if (envelope.eventLog.events.length === 0) {
+      envelope.eventLog.events = [{ type: 'transfer', data: {}, proof: [] } as any];
+    }
+    let err: any;
+    try { await sdk.lifecycle.loadAsset(envelope); } catch (e) { err = e; }
+    expect(['ENVELOPE_INVALID', 'ASSET_LOAD_VERIFICATION_FAILED']).toContain(err?.code);
+  });
+});
+
 describe('checkGenesisResourceBinding (extracted pure helper)', () => {
   test('returns true when every genesis digest is present among resources', async () => {
     const { sdk } = makeSDK();
