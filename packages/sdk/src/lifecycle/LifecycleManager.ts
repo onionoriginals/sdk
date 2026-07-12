@@ -633,7 +633,8 @@ export class LifecycleManager {
    * Fold the log into a {@link ProvenanceChain} for restore(). createdAt/creator
    * come from the genesis data; migrations are re-materialized in the live
    * layer-to-layer shape (enriched from bitcoin witness proofs + advisory
-   * `unverified.commitTxId`/`feeRate`); transfers come from the fold; the
+   * `unverified.commitTxId`/`feeRate`); ownership history is the sat's UTXO
+   * chain, not the CEL, so provenance carries no transfers. The
    * `unverified.bindings` degraded btco binding is NEVER promoted — surfaced in
    * `warnings` instead (step 7).
    */
@@ -679,19 +680,12 @@ export class LifecycleManager {
       }
     }
 
-    const transfers = folded.transfers.map(t => ({
-      from: t.from,
-      to: t.to,
-      timestamp: t.timestamp,
-      transactionId: t.transactionId ?? ''
-    }));
-
     const resourceUpdates = (env.unverified?.resourceUpdates ?? []).map(u => ({ ...u }));
 
-    // txid: last transfer wins, else the btco migration's witnessed reveal txid.
-    const lastTransfer = transfers[transfers.length - 1];
+    // txid: the btco migration's witnessed reveal txid (ownership moves live on
+    // the sat's UTXO chain, not the CEL — no transfers to derive a txid from).
     const lastBtco = [...migrations].reverse().find(m => m.to === 'did:btco');
-    const txid = lastTransfer?.transactionId || lastBtco?.transactionId;
+    const txid = lastBtco?.transactionId;
 
     // 7) Degraded binding: fold couldn't derive btco but the honesty section
     // carries one — do NOT promote; surface as advisory.
@@ -703,7 +697,7 @@ export class LifecycleManager {
       );
     }
 
-    const provenance: ProvenanceChain = { createdAt, creator, migrations, transfers, resourceUpdates };
+    const provenance: ProvenanceChain = { createdAt, creator, migrations, resourceUpdates };
     if (txid) provenance.txid = txid;
     return provenance;
   }

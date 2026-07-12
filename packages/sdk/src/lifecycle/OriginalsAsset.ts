@@ -8,7 +8,7 @@ import { validateDIDDocument, validateCredential, hashResource } from '../utils/
 import { StructuredError } from '../utils/telemetry.js';
 import { CredentialManager } from '../vc/CredentialManager.js';
 import { DIDManager } from '../did/DIDManager.js';
-import { ProvenanceQuery, Migration, Transfer } from './ProvenanceQuery.js';
+import { ProvenanceQuery, Migration } from './ProvenanceQuery.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning.js';
@@ -38,12 +38,6 @@ export interface ProvenanceChain {
     commitTxId?: string;
     revealTxId?: string;
     feeRate?: number;
-  }>;
-  transfers: Array<{
-    from: string;
-    to: string;
-    timestamp: string;
-    transactionId: string;
   }>;
   resourceUpdates: Array<{
     resourceId: string;
@@ -89,7 +83,6 @@ export class OriginalsAsset {
       createdAt: new Date().toISOString(),
       creator: did.id,
       migrations: [],
-      transfers: [],
       resourceUpdates: []
     };
     this.eventEmitter = new EventEmitter();
@@ -312,32 +305,6 @@ export class OriginalsAsset {
     return this.provenance;
   }
 
-  async recordTransfer(from: string, to: string, transactionId: string, keyRotationPending?: boolean): Promise<void> {
-    this.provenance.transfers.push({
-      from,
-      to,
-      timestamp: new Date().toISOString(),
-      transactionId
-    });
-    this.provenance.txid = transactionId;
-
-    // Emit transfer event and await handlers
-    await this.eventEmitter.emit({
-      type: 'asset:transferred',
-      timestamp: new Date().toISOString(),
-      asset: {
-        id: this.id,
-        layer: this.currentLayer
-      },
-      from,
-      to,
-      transactionId,
-      // Keep in sync with the manager's mirror emit (LifecycleManager#366) so
-      // asset.on(...) subscribers see the same flag as sdk.lifecycle.on(...).
-      ...(keyRotationPending !== undefined ? { keyRotationPending } : {})
-    });
-  }
-
   /**
    * Query provenance with fluent API
    */
@@ -353,20 +320,6 @@ export class OriginalsAsset {
   }
 
   /**
-   * Get all transfers from an address
-   */
-  getTransfersFrom(address: string): Transfer[] {
-    return this.provenance.transfers.filter(t => t.from === address);
-  }
-
-  /**
-   * Get all transfers to an address
-   */
-  getTransfersTo(address: string): Transfer[] {
-    return this.provenance.transfers.filter(t => t.to === address);
-  }
-
-  /**
    * Get provenance summary
    */
   getProvenanceSummary(): {
@@ -374,31 +327,24 @@ export class OriginalsAsset {
     creator: string;
     currentLayer: LayerType;
     migrationCount: number;
-    transferCount: number;
     lastActivity: string;
   } {
     const lastMigration = this.provenance.migrations[this.provenance.migrations.length - 1];
-    const lastTransfer = this.provenance.transfers[this.provenance.transfers.length - 1];
-    
+
     return {
       created: this.provenance.createdAt,
       creator: this.id,
       currentLayer: this.currentLayer,
       migrationCount: this.provenance.migrations.length,
-      transferCount: this.provenance.transfers.length,
-      lastActivity: lastTransfer?.timestamp || lastMigration?.timestamp || this.provenance.createdAt
+      lastActivity: lastMigration?.timestamp || this.provenance.createdAt
     };
   }
 
   /**
-   * Find migration or transfer by transaction ID
+   * Find migration by transaction ID
    */
-  findByTransactionId(txId: string): Migration | Transfer | null {
-    const migration = this.provenance.migrations.find(m => m.transactionId === txId);
-    if (migration) return migration;
-    
-    const transfer = this.provenance.transfers.find(t => t.transactionId === txId);
-    return transfer || null;
+  findByTransactionId(txId: string): Migration | null {
+    return this.provenance.migrations.find(m => m.transactionId === txId) || null;
   }
 
   /**

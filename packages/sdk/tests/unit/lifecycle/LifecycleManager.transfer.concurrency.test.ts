@@ -54,9 +54,8 @@ describe('transferOwnership concurrency guard', () => {
     expect(rejected.length).toBe(1);
     const reason = (rejected[0] as PromiseRejectedResult).reason as { code?: string; message: string };
     expect(reason.code ?? reason.message).toContain('OPERATION_IN_PROGRESS');
+    // Exactly one paid sat move reached the provider; the guard blocked the second.
     expect(transferCalls).toBe(1);
-    // Only one transfer recorded in provenance.
-    expect(asset.getProvenance().transfers.length).toBe(1);
   });
 
   test('the guard is released after a transfer completes (sequential transfers work)', async () => {
@@ -69,7 +68,6 @@ describe('transferOwnership concurrency guard', () => {
     const tx2 = await sdk.lifecycle.transferOwnership(asset, VALID_ADDR);
     expect(typeof tx1.txid).toBe('string');
     expect(typeof tx2.txid).toBe('string');
-    expect(asset.getProvenance().transfers.length).toBe(2);
   });
 
   test('the guard is released after a failed transfer (retry not blocked)', async () => {

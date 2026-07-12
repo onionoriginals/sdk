@@ -211,9 +211,8 @@ describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     await sdk.lifecycle.inscribeOnBitcoin(asset, 8);
     const tx = await sdk.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
+    // Pure sat move: txid is returned; ownership history is the sat's UTXO chain, not provenance.
     expect(tx.txid).toBe('tx-transfer-mock');
-    const provenance = asset.getProvenance();
-    expect(provenance.transfers[provenance.transfers.length - 1].transactionId).toBe('tx-transfer-mock');
   });
 });
 

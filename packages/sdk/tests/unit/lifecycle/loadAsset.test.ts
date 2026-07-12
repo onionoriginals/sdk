@@ -77,10 +77,11 @@ describe('loadAsset — round-trip', () => {
     expect(lBtco.inscriptionId).toBe(oBtco.inscriptionId);
     expect(lBtco.commitTxId).toBe(oBtco.commitTxId);
     expect(lBtco.feeRate).toBe(oBtco.feeRate);
-    expect(lp.transfers.length).toBe(1);
-    expect(lp.transfers[0].to).toBe(op.transfers[0].to);
-    expect(lp.transfers[0].transactionId).toBe(op.transfers[0].transactionId);
-    expect(lp.txid).toBe(op.transfers[0].transactionId);
+    // Ownership history is the sat's UTXO chain, not the CEL — a transfer is a
+    // pure sat move that appends nothing, so provenance carries no transfers and
+    // txid stays at the btco migration's reveal txid on both live and restored.
+    expect(lp.txid).toBe(op.txid);
+    expect(lp.txid).toBe(oBtco.transactionId);
 
     // The loaded asset re-verifies on its own.
     expect(await loaded.verify({ ordinalsProvider: (sdk as any).config?.ordinalsProvider })).toBe(true);
