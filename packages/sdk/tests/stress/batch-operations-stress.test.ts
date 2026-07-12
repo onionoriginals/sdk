@@ -388,15 +388,22 @@ describe('Batch Operations Stress Tests', () => {
 
   describe('6. Memory and Resource Tests', () => {
     it('should not leak memory during repeated batch operations', async () => {
-      const iterations = 10;
+      const warmupIterations = 5; // allow JIT to settle before measuring
+      const measuredIterations = 10;
       const batchSize = 100;
+
+      // Warmup: let Bun's JIT and allocator reach a steady state
+      for (let i = 0; i < warmupIterations; i++) {
+        await sdk.lifecycle.batchCreateAssets(createTestResourcesList(batchSize), {
+          maxConcurrent: 5
+        });
+        if (global.gc) global.gc();
+      }
 
       const memoryReadings: number[] = [];
 
-      for (let i = 0; i < iterations; i++) {
-        const resourcesList = createTestResourcesList(batchSize);
-
-        await sdk.lifecycle.batchCreateAssets(resourcesList, {
+      for (let i = 0; i < measuredIterations; i++) {
+        await sdk.lifecycle.batchCreateAssets(createTestResourcesList(batchSize), {
           maxConcurrent: 5
         });
 
@@ -411,7 +418,9 @@ describe('Batch Operations Stress Tests', () => {
         console.log(`[STRESS] Iteration ${i + 1}: ${memUsage.toFixed(2)}MB`);
       }
 
-      // Check for memory leak (memory shouldn't grow linearly)
+      // Check for memory leak: after JIT warmup the heap should be stable.
+      // Compare first half vs second half of the measured window — a real leak
+      // would show the second half steadily above the first.
       const firstHalf = memoryReadings.slice(0, 5).reduce((a, b) => a + b) / 5;
       const secondHalf = memoryReadings.slice(5).reduce((a, b) => a + b) / 5;
       const growth = ((secondHalf - firstHalf) / firstHalf) * 100;
