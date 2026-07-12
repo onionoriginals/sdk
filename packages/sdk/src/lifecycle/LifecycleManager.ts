@@ -634,8 +634,12 @@ export class LifecycleManager {
 
   /**
    * Live ownership of the asset's anchoring satoshi, read from Bitcoin.
-   * Ownership IS sat control; the CEL is authorship only. Returns null for
-   * assets not yet on did:btco or when the provider has no owner index.
+   * Ownership IS sat control; the CEL is authorship only. A convenience LIVE
+   * READ, not an integrity gate (that's verify()/loadAsset's job), so it
+   * fails open: returns null for assets not yet on did:btco, for a
+   * malformed/unresolvable did:btco binding, or when the provider has no
+   * owner index. Throws ORD_PROVIDER_REQUIRED only when no ordinalsProvider
+   * is configured.
    */
   async getCurrentOwner(asset: OriginalsAsset): Promise<{ address: string; outpoint: string } | null> {
     const btcoDid = asset.bindings?.['did:btco'] ?? (asset.id.startsWith('did:btco:') ? asset.id : undefined);
@@ -644,7 +648,12 @@ export class LifecycleManager {
     if (!provider) {
       throw new StructuredError('ORD_PROVIDER_REQUIRED', 'Ordinals provider must be configured to read live ownership from Bitcoin.');
     }
-    const satoshi = String(parseSatoshiIdentifier(btcoDid));
+    let satoshi: string;
+    try {
+      satoshi = String(parseSatoshiIdentifier(btcoDid));
+    } catch {
+      return null;
+    }
     if (typeof provider.getSatOwnership !== 'function') return null;
     return await provider.getSatOwnership(satoshi);
   }

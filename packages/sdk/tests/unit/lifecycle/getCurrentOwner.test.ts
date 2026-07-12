@@ -82,6 +82,23 @@ describe('LifecycleManager.getCurrentOwner', () => {
     await expect(sdk.lifecycle.getCurrentOwner(asset)).rejects.toMatchObject({ code: 'ORD_PROVIDER_REQUIRED' });
   });
 
+  test('returns null (not a throw) for a malformed did:btco binding with a configured provider', async () => {
+    const provider = new OrdMockProvider();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: provider,
+      keyStore: new MockKeyStore()
+    });
+    const asset = new OriginalsAsset(
+      [{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'h' }],
+      { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:not-a-number' } as any,
+      []
+    );
+
+    expect(await sdk.lifecycle.getCurrentOwner(asset)).toBeNull();
+  });
+
   test('returns null when the configured provider has no getSatOwnership (no owner index)', async () => {
     const provider = new OrdMockProvider();
     // Shadow getSatOwnership (a prototype method — delete wouldn't remove it)
