@@ -1,8 +1,8 @@
 # Originals CEL Application Specification
 
-**Version:** 1.1.0  
+**Version:** 1.2.0  
 **Status:** Draft  
-**Date:** 2026-07-10
+**Date:** 2026-07-11
 
 ## Abstract
 
@@ -150,11 +150,14 @@ established by the genesis `controller` (bound fail-closed; see
   forward, and verifiers MUST reject post-rotation events signed by them.
 - A `rotateKey` MUST pass every check (chain, signature, current-set authorization,
   target bindability) BEFORE the swap; a failed rotation MUST NOT rotate.
-- `migrate` and `transfer` events MUST NOT change the authorized key set.
-- **Post-transfer append authority (rotation-first).** After a non-cooperative
-  ownership transfer, the log accepts nothing from the new owner until their first
-  act is a `rotateKey` (backed on-chain by a reinscription proving sat control). Old-key
-  events timestamped after the transfer are rejected. See the design doc §5.
+- `migrate` events MUST NOT change the authorized key set. (Legacy `transfer` events —
+  §5.5 — likewise never changed it; ownership is the sat, not a log event.)
+- **Post-transfer append authority (rotation-first).** Ownership moves with the sat
+  alone and writes nothing to the log (§5.5); this rule governs only *authoring*. A new
+  sat holder who wants to append provenance gains authority only via their first act — a
+  `rotateKey` (backed on-chain by a reinscription proving sat control). Old-key events
+  timestamped after the sat move are rejected. Author-enablement is optional; a holder
+  who never rotates is still the owner. See the design doc §5.
 
 ---
 
@@ -520,12 +523,18 @@ earning a stronger resolution substrate. Does **not** change authority.
 - The asset's `did:cel` identity is unchanged; `targetDid` records a new substrate,
   not a new identity
 
-### 5.5 Transfer Event
+### 5.5 Transfer Event (LEGACY — read-only)
 
-Records an ownership hand-off. Ownership is the Bitcoin sat/UTXO (btco layer);
-transfer moves the sat and records the txid. Identity is unchanged and authority does
-**not** change — the recipient gains append authority only via a subsequent
-`rotateKey` (rotation-first rule; see §2.4 and the design doc §5).
+> **LEGACY as of 1.2.0.** Ownership **is** the Bitcoin sat/UTXO (btco layer): a transfer
+> is a pure sat move that writes **nothing** to the CEL, and ownership is read live from
+> sat control, not reconstructed from a log event. The `transfer` event type is retained
+> only for backward compatibility: **verifiers MUST accept** a well-formed `transfer`
+> event in pre-1.2.0 logs (dual-accept), but **writers MUST NOT emit** it. The structure
+> and rules below describe those legacy events; they are informative for verifier
+> conformance, not a supported write path.
+
+Records a legacy ownership hand-off. Identity is unchanged and authority does **not**
+change — a legacy `transfer` event never became a log signer for the recipient.
 
 #### 5.5.1 Structure
 
@@ -920,3 +929,4 @@ interface EventVerification {
 |---------|------|---------|
 | 1.0.0 | 2026-01 | Initial release |
 | 1.1.0 | 2026-07-10 | `did:cel` genesis (`CelAssetData`, `did`-embedded shape marked legacy read-only); first-class `migrate`/`transfer`/`rotateKey` event types; evolving-authority / rotation semantics (§2.4). See `specs/did-cel-method.md`. |
+| 1.2.0 | 2026-07-11 | Ownership **is** the sat; the CEL is authorship only. `transfer` event (§5.5) demoted to **legacy/read-only** — verifiers MUST accept it in old logs, writers MUST NOT emit it; transfers are pure sat moves that write nothing to the CEL. Post-transfer authority rule (§2.4) rescoped to author-enablement only. |

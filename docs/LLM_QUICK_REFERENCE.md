@@ -37,7 +37,7 @@ const cost = await sdk.lifecycle.estimateCost(draft, 'did:btco');
 const validation = await sdk.lifecycle.validateMigration(draft, 'did:webvh');
 ```
 
-## Interchange & Ownership Hand-off
+## Interchange, Ownership & Author-enablement
 
 ```typescript
 // Creator: serialize provenance into a self-describing envelope.
@@ -50,16 +50,22 @@ const wire = JSON.stringify(envelope);
 const { asset, verification, warnings } = await sdk.lifecycle.loadAsset(wire);
 //   throws ASSET_LOAD_VERIFICATION_FAILED / ENVELOPE_INVALID / ENVELOPE_VERSION_UNSUPPORTED
 
-// COOPERATIVE: seller signs → move sat, then rotate the buyer's key in.
+// OWNERSHIP = sat control. transferOwnership is a pure sat move — it writes
+// NOTHING to the CEL. Receiving an asset = receiving the sat (no inscription).
 await sdk.lifecycle.transferOwnership(asset, 'bcrt1q...');
-await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase, privateKey });
+const owner = await sdk.lifecycle.getCurrentOwner(asset); // { address, outpoint } | null (read live)
 
-// NON-COOPERATIVE: buyer holds the sat but not the seller's signature. Buyer
-// reinscribes with THEIR key and self-signs; the witness proves sat control.
-await sdk.lifecycle.claimOwnership(asset, { publicKeyMultibase, privateKey }); // privateKey REQUIRED
-// Before the claim, a buyer's appends DEGRADE (cel:append-skipped/NO_SIGNING_KEY);
-// after it the buyer is the controller and appends sign. Post-genesis resource
-// versions ride unverified.resourceUpdates (advisory) until Phase 4.
+// AUTHORING is optional and separate from ownership. To append new provenance the
+// sat holder must establish a signing key:
+//  COOPERATIVE: outgoing controller signs → rotate the new holder's key in.
+await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase, privateKey });
+//  NON-COOPERATIVE: holder can't get the seller's signature. authorizeSigner
+//  reinscribes with THEIR key and self-signs; the witness proves sat control.
+//  It enables authoring, NOT ownership (the sat already is). privateKey REQUIRED.
+await sdk.lifecycle.authorizeSigner(asset, { publicKeyMultibase, privateKey });
+// Before enabling a signer, a holder's appends DEGRADE (cel:append-skipped/
+// NO_SIGNING_KEY) yet they still own and can transfer the sat. Post-genesis
+// resource versions ride unverified.resourceUpdates (advisory) until Phase 4.
 ```
 
 ## Typed Originals (Kinds System)
