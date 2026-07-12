@@ -459,8 +459,9 @@ export class LifecycleManager {
         expectedDid: env.assetDid,
         resolveKey: createDidManagerKeyResolver(this.didManager),
         ordinalsProvider: provider,
-        // A provider lets us reject a truncated pre-rotation log handed off by a
-        // seller (#366); its on-chain head betrays the omission.
+        // A provider lets us reject a truncated pre-rotation log (#366); its
+        // on-chain head betrays the omission. Off the ownership path — this is
+        // an authorship-completeness check, not an ownership check.
         checkHeadFreshness: provider !== undefined
       });
       if (!verification.verified) {
@@ -526,11 +527,13 @@ export class LifecycleManager {
     const warnings: string[] = [];
     // Freshness could not be checked (#366): a btco-anchored log without a
     // provider cannot be tested against its on-chain head, so a truncated
-    // pre-rotation hand-off would go undetected. Surface it — do not fail.
+    // pre-rotation authoring record would go undetected. Surface it — do not
+    // fail. Off the ownership path: ownership is sat control, read live from
+    // Bitcoin via getCurrentOwner(); this warns about provenance completeness.
     if (!provider && folded.currentLayer === 'did:btco') {
       warnings.push(
         'Loaded a btco-anchored asset without an ordinals provider: head freshness was NOT checked, so a ' +
-        'truncated (pre-rotation/pre-transfer) log cannot be ruled out. Re-load with a provider to verify freshness.'
+        'truncated (pre-rotation) authoring record cannot be ruled out. Re-load with a provider to verify freshness.'
       );
     }
     const provenance = this.buildRestoredProvenance(log, folded, env, warnings);
@@ -627,6 +630,23 @@ export class LifecycleManager {
       credentialManager: this.credentialManager,
       ordinalsProvider: overrides?.ordinalsProvider ?? this.config.ordinalsProvider
     });
+  }
+
+  /**
+   * Live ownership of the asset's anchoring satoshi, read from Bitcoin.
+   * Ownership IS sat control; the CEL is authorship only. Returns null for
+   * assets not yet on did:btco or when the provider has no owner index.
+   */
+  async getCurrentOwner(asset: OriginalsAsset): Promise<{ address: string; outpoint: string } | null> {
+    const btcoDid = asset.bindings?.['did:btco'] ?? (asset.id.startsWith('did:btco:') ? asset.id : undefined);
+    if (!btcoDid) return null;
+    const satoshi = String(parseSatoshiIdentifier(btcoDid));
+    const provider = this.config.ordinalsProvider;
+    if (!provider) {
+      throw new StructuredError('ORD_PROVIDER_REQUIRED', 'Ordinals provider must be configured to read live ownership from Bitcoin.');
+    }
+    if (typeof provider.getSatOwnership !== 'function') return null;
+    return await provider.getSatOwnership(satoshi);
   }
 
   /**
