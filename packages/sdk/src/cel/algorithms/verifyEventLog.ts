@@ -625,6 +625,13 @@ async function verifyUniqueness(
 
   const canonicalSat = canonicalSats[0];
   if (anchoredSat.satoshi !== canonicalSat) {
+    // Distinguish a genuine competing mint from a self-inflicted enumeration
+    // gap: if the log's OWN anchored sat is absent from the enumeration, the
+    // real cause is a missing back-link (its inscribed did:btco doc did not list
+    // this did:cel in alsoKnownAs), not a rival dupe. Both fail closed.
+    if (!earliestBySat.has(anchoredSat.satoshi)) {
+      return `NON_CANONICAL_ANCHOR: the log's own anchoring sat ${anchoredSat.satoshi} for ${didCel} is absent from the on-chain enumeration — its inscribed did:btco document may be missing the did:cel back-link in alsoKnownAs; the canonical (earliest-anchored) sat is ${canonicalSat}`;
+    }
     return `NON_CANONICAL_ANCHOR: the log is anchored on satoshi ${anchoredSat.satoshi} for ${didCel}, but the canonical (earliest-anchored) sat is ${canonicalSat}; this is a non-canonical dupe`;
   }
 
