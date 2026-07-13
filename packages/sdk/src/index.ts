@@ -169,6 +169,7 @@ export { Logger } from './utils/Logger.js';
 export type { LogLevel, LogOutput } from './utils/Logger.js';
 export { EventLogger } from './utils/EventLogger.js';
 export type { EventLoggingConfig } from './utils/EventLogger.js';
+export { OperationLock } from './utils/OperationLock.js';
 
 // Utility exports
 export * from './utils/validation.js';

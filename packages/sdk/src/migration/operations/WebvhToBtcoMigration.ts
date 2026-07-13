@@ -62,7 +62,10 @@ export class WebvhToBtcoMigration extends BaseMigration {
     const inscription = await this.bitcoinManager.inscribeData(
       payload,
       'application/json',
-      options.feeRate
+      options.feeRate,
+      // Shared money-lock key: the source DID, matching LifecycleManager so a
+      // concurrent inscribeOnBitcoin of the same DID is blocked (issue #303).
+      { lockKey: options.sourceDid }
     );
 
     // The satoshi ordinal is the did:btco identifier — a txid derived from the

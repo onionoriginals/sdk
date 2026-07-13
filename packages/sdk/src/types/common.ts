@@ -4,6 +4,7 @@ import type { LogLevel, LogOutput } from '../utils/Logger.js';
 import type { EventLoggingConfig } from '../utils/EventLogger.js';
 import type { WebVHNetworkName } from './network.js';
 import type { DIDCacheConfig } from '../did/DIDCache.js';
+import type { OperationLock } from '../utils/OperationLock.js';
 
 // Base types for the Originals protocol
 export type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';
@@ -22,6 +23,9 @@ export interface OriginalsConfig {
   didCache?: DIDCacheConfig;
   feeOracle?: FeeOracleAdapter;
   ordinalsProvider?: OrdinalsProvider;
+  // Shared keyed lock coordinating money-spending inscriptions across managers
+  // (issue #303). OriginalsSDK injects one instance so all managers share it.
+  operationLock?: OperationLock;
   // Optional telemetry hooks
   telemetry?: TelemetryHooks;
   // Enhanced logging configuration

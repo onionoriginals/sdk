@@ -1926,7 +1926,10 @@ export class LifecycleManager {
         return Buffer.from(JSON.stringify(btcoDoc));
       },
       'application/did+json',
-      feeRate
+      feeRate,
+      // Key the shared money-lock by the asset's current DID so a concurrent
+      // MigrationManager.migrate of the same DID is blocked at inscribe (issue #303).
+      { lockKey: asset.id }
     ) as {
       revealTxId?: string;
       txid: string;
