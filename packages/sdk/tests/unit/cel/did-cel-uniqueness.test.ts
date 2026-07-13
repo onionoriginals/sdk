@@ -143,4 +143,118 @@ describe('did:cel uniqueness — first-anchor-wins', () => {
     expect(xResult.errors).toEqual([]);
     expect(xResult.verified).toBe(true);
   });
+
+  test('ROTATION IS NOT A COMPETITOR: migrate + N reinscriptions on the SAME sat X still verify', async () => {
+    const p = new OrdMockProvider();
+    const a = await makeKey();
+    const b = await makeKey();
+    const { base, didCel } = await genesis(a, 'uniq-rot');
+    const X = '111000111';
+    const bx = await branch(base, a, p, X, didCel);
+
+    // A non-cooperative rotation reinscribes the SAME sat X (a second anchoring
+    // for the same did:cel on the same sat — must NOT count as a rival sat).
+    const rotated = await appendEvent(
+      bx.log,
+      'rotateKey',
+      { newController: b.didKey, rotatedAt: '2026-07-13T00:00:02Z' },
+      { signer: b.signer, verificationMethod: b.vm }
+    );
+    const rotInsc = await inscribeDoc(p, X, chainDigest(rotated.events[rotated.events.length - 1]), didCel);
+    const full = attachWitness(rotated, rotInsc, X);
+
+    // Migrate at block 100, rotation reinscription at block 200 — both on X.
+    const provider = withHeights(p, { [bx.inscriptionId]: 100, [rotInsc.inscriptionId]: 200 });
+    const result = await verifyEventLog(full, { ordinalsProvider: provider });
+    expect(result.errors).toEqual([]);
+    expect(result.verified).toBe(true);
+  });
+
+  test('SAME-BLOCK AMBIGUITY: X and Y both anchored at block 100 → AMBIGUOUS_CANONICAL', async () => {
+    const p = new OrdMockProvider();
+    const a = await makeKey();
+    const { base, didCel } = await genesis(a, 'uniq-tie');
+    const X = '100000001';
+    const Y = '200000002';
+    const bx = await branch(base, a, p, X, didCel);
+    const by = await branch(base, a, p, Y, didCel);
+    const provider = withHeights(p, { [bx.inscriptionId]: 100, [by.inscriptionId]: 100 });
+
+    const result = await verifyEventLog(by.log, { ordinalsProvider: provider });
+    expect(result.verified).toBe(false);
+    expect(hasCode(result, 'AMBIGUOUS_CANONICAL')).toBe(true);
+  });
+
+  test('PROVIDER POSTURE: btco-anchored log + provider WITHOUT getAnchoringsForDidCel → UNIQUENESS_UNVERIFIABLE', async () => {
+    const p = new OrdMockProvider();
+    const a = await makeKey();
+    const { base, didCel } = await genesis(a, 'uniq-noenum');
+    const X = '100000001';
+    const bx = await branch(base, a, p, X, didCel);
+
+    // Enough to verify the migrate witness (getInscriptionById) but NOT to
+    // enumerate anchorings — uniqueness must fail closed.
+    const limited = { getInscriptionById: (id: string) => p.getInscriptionById(id) };
+    const result = await verifyEventLog(bx.log, { ordinalsProvider: limited });
+    expect(result.verified).toBe(false);
+    expect(hasCode(result, 'UNIQUENESS_UNVERIFIABLE')).toBe(true);
+  });
+
+  test('PROVIDER POSTURE: an anchoring missing a blockHeight → UNIQUENESS_UNVERIFIABLE', async () => {
+    const p = new OrdMockProvider();
+    const a = await makeKey();
+    const { base, didCel } = await genesis(a, 'uniq-noheight');
+    const X = '100000001';
+    const bx = await branch(base, a, p, X, didCel);
+
+    // Strip blockHeight from the enumeration only (witness still verifies).
+    const provider = {
+      getInscriptionById: (id: string) => p.getInscriptionById(id),
+      getInscriptionsBySatoshi: (s: string) => p.getInscriptionsBySatoshi(s),
+      getAnchoringsForDidCel: async (dc: string) =>
+        (await p.getAnchoringsForDidCel!(dc)).map(({ blockHeight: _bh, ...rest }) => rest),
+    };
+    const result = await verifyEventLog(bx.log, { ordinalsProvider: provider });
+    expect(result.verified).toBe(false);
+    expect(hasCode(result, 'UNIQUENESS_UNVERIFIABLE')).toBe(true);
+  });
+
+  test('EMPTY ENUMERATION: provider HAS getAnchoringsForDidCel but returns [] → UNIQUENESS_UNVERIFIABLE', async () => {
+    const p = new OrdMockProvider();
+    const a = await makeKey();
+    const { base, didCel } = await genesis(a, 'uniq-empty');
+    const X = '100000001';
+    const bx = await branch(base, a, p, X, didCel);
+
+    // Witness still verifies (getInscriptionById/getInscriptionsBySatoshi delegate
+    // to the real provider); enumeration returns [] — must fail closed, not treat
+    // the anchoring as unopposed/canonical.
+    const provider = {
+      getInscriptionById: (id: string) => p.getInscriptionById(id),
+      getInscriptionsBySatoshi: (s: string) => p.getInscriptionsBySatoshi(s),
+      getAnchoringsForDidCel: async (_dc: string) => [],
+    };
+    const result = await verifyEventLog(bx.log, { ordinalsProvider: provider });
+    expect(result.verified).toBe(false);
+    expect(hasCode(result, 'UNIQUENESS_UNVERIFIABLE')).toBe(true);
+  });
+
+  test('THROWING PROVIDER: getAnchoringsForDidCel throws → UNIQUENESS_UNVERIFIABLE', async () => {
+    const p = new OrdMockProvider();
+    const a = await makeKey();
+    const { base, didCel } = await genesis(a, 'uniq-throw');
+    const X = '100000001';
+    const bx = await branch(base, a, p, X, didCel);
+
+    const provider = {
+      getInscriptionById: (id: string) => p.getInscriptionById(id),
+      getInscriptionsBySatoshi: (s: string) => p.getInscriptionsBySatoshi(s),
+      getAnchoringsForDidCel: async (_dc: string): Promise<never> => {
+        throw new Error('index down');
+      },
+    };
+    const result = await verifyEventLog(bx.log, { ordinalsProvider: provider });
+    expect(result.verified).toBe(false);
+    expect(hasCode(result, 'UNIQUENESS_UNVERIFIABLE')).toBe(true);
+  });
 });
