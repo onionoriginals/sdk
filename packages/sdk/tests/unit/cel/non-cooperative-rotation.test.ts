@@ -421,13 +421,14 @@ describe('non-cooperative rotation (reinscription-attested hand-off)', () => {
     expect(result.events[3].proofValid).toBe(false);
   });
 
-  test('an INJECTED second witness proof on the migrate poisons the anchor: attacker cannot re-route authority to their own sat', async () => {
+  test('an INJECTED second witness proof on the migrate is a cross-sat fork: rejected outright, not merely poisoned (design 2026-07-13)', async () => {
     // The proof array is unsigned. An attacker prepends a fully VERIFIED
     // witness proof — an inscription on a sat THEY control, committing to the
-    // victim's public migrate digest — hoping first-proof extraction anchors
-    // authority to their sat, where they can reinscribe and "rotate".
-    // Ambiguity must poison the anchor entirely: the log still verifies, but
-    // NO non-cooperative rotation is possible on EITHER sat.
+    // victim's public migrate digest — hoping to re-route authority to their
+    // sat. Under the signed-anchor rule the canonical sat is the SIGNED
+    // data.to, so any witness proof on a different sat (the attacker's, here)
+    // disagrees with it and rejects the migrate (and therefore the whole log)
+    // outright — there is no more "ambiguous but still verifies" state.
     const provider = new OrdMockProvider();
     const a = await makeKey();
     const attacker = await makeKey();
@@ -456,16 +457,20 @@ describe('non-cooperative rotation (reinscription-attested hand-off)', () => {
     const tampered: EventLog = {
       events: [log.events[0], { ...migrate, proof: [controllerProof, evilProof, victimWitness] }],
     };
-    // Sanity: the tampered log itself still verifies (both witness proofs pass).
-    expect((await verifyEventLog(tampered, { ordinalsProvider: provider })).verified).toBe(true);
+    // The injected off-sat witness now fails the migrate closed, independent
+    // of any rotation attempt — no window where the attacker's sat is even
+    // ambiguous authority.
+    const tamperedResult = await verifyEventLog(tampered, { ordinalsProvider: provider });
+    expect(tamperedResult.verified).toBe(false);
+    expect(tamperedResult.errors.some(e => /does not match the signed anchoring sat/.test(e))).toBe(true);
 
     // Rotation on the ATTACKER's sat must fail...
     const onAttackerSat = await addNonCoopRotation(tampered, provider, attacker, { inscribeSat: ATTACKER_SAT, claimSat: ATTACKER_SAT });
     const attackResult = await verifyEventLog(onAttackerSat.log, { ordinalsProvider: provider });
     expect(attackResult.verified).toBe(false);
-    expect(attackResult.errors.some(e => /is not authorized/.test(e))).toBe(true);
 
-    // ...and the ambiguity poisons the TRUE sat too (fail closed, no guessing).
+    // ...and rotation on the TRUE sat fails too, since the migrate itself is
+    // rejected (no anchoredSat is ever established for `tampered` to chain off).
     const onTrueSat = await addNonCoopRotation(tampered, provider, attacker);
     expect((await verifyEventLog(onTrueSat.log, { ordinalsProvider: provider })).verified).toBe(false);
   });
