@@ -421,8 +421,9 @@ describe('Batch Operations Stress Tests', () => {
       // Check for memory leak: after JIT warmup the heap should be stable.
       // Compare first half vs second half of the measured window — a real leak
       // would show the second half steadily above the first.
-      const firstHalf = memoryReadings.slice(0, 5).reduce((a, b) => a + b) / 5;
-      const secondHalf = memoryReadings.slice(5).reduce((a, b) => a + b) / 5;
+      const half = Math.floor(measuredIterations / 2);
+      const firstHalf = memoryReadings.slice(0, half).reduce((a, b) => a + b) / half;
+      const secondHalf = memoryReadings.slice(half).reduce((a, b) => a + b) / (measuredIterations - half);
       const growth = ((secondHalf - firstHalf) / firstHalf) * 100;
 
       console.log(`[STRESS] Memory growth: ${growth.toFixed(2)}%`);
