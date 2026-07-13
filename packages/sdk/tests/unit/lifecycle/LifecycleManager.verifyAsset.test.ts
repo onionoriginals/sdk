@@ -64,7 +64,8 @@ describe('LifecycleManager.verifyAsset', () => {
         calls += 1;
         return configProvider.getInscriptionById(id);
       },
-      getInscriptionsBySatoshi: (sat: string) => configProvider.getInscriptionsBySatoshi(sat)
+      getInscriptionsBySatoshi: (sat: string) => configProvider.getInscriptionsBySatoshi(sat),
+      getAnchoringsForDidCel: (didCel: string) => configProvider.getAnchoringsForDidCel!(didCel)
     };
     expect(await sdk.lifecycle.verifyAsset(asset, { ordinalsProvider: overrideProvider })).toBe(true);
     expect(calls).toBeGreaterThan(0);
