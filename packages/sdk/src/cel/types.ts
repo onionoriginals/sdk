@@ -171,6 +171,20 @@ export interface OrdinalsLookup {
    * prove ordering at all: non-cooperative rotations then fail closed.
    */
   getInscriptionsBySatoshi?(satoshi: string): Promise<Array<{ inscriptionId: string }>>;
+  /**
+   * Enumerate every on-chain btco DID-doc anchoring whose `alsoKnownAs`
+   * back-links this did:cel. `blockHeight` is the canonical ordering signal
+   * (first-anchor-wins). Required for btco-anchored did:cel verification: a
+   * btco log already needs a provider, so a provider that cannot enumerate
+   * fails uniqueness CLOSED (`UNIQUENESS_UNVERIFIABLE`). Multiple inscriptions
+   * on the SAME sat (migrate + rotation reinscriptions) are expected and do
+   * not compete — only a different, earlier sat wins.
+   */
+  getAnchoringsForDidCel?(didCel: string): Promise<Array<{
+    satoshi: string;
+    inscriptionId: string;
+    blockHeight?: number;
+  }>>;
 }
 
 /**
