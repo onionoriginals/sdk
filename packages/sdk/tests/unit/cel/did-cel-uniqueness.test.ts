@@ -107,18 +107,27 @@ async function branch(base: EventLog, a: Key, p: OrdMockProvider, sat: string, d
 }
 
 // Wrap a provider to stamp per-inscription block heights onto BOTH
-// getInscriptionById and getAnchoringsForDidCel (OrdMock hardcodes height 1).
+// getInscriptionById and getAnchoringsForDidCel. An UNMAPPED inscription has its
+// blockHeight STRIPPED (not left at OrdMock's hardcoded 1), matching the sibling
+// wrappers in head-freshness/non-cooperative-rotation: an unmapped mock must not
+// silently participate in canonical ordering — it fails uniqueness closed.
 function withHeights(p: OrdMockProvider, heights: Record<string, number>) {
   return {
     getInscriptionById: async (id: string) => {
       const rec = await p.getInscriptionById(id);
       if (!rec) return null;
-      return id in heights ? { ...rec, blockHeight: heights[id] } : rec;
+      if (id in heights) return { ...rec, blockHeight: heights[id] };
+      const { blockHeight: _bh, ...rest } = rec as typeof rec & { blockHeight?: number };
+      return rest as typeof rec;
     },
     getInscriptionsBySatoshi: (s: string) => p.getInscriptionsBySatoshi(s),
     getAnchoringsForDidCel: async (didCel: string) => {
       const anchorings = await p.getAnchoringsForDidCel!(didCel);
-      return anchorings.map((a) => (a.inscriptionId in heights ? { ...a, blockHeight: heights[a.inscriptionId] } : a));
+      return anchorings.map((a) => {
+        if (a.inscriptionId in heights) return { ...a, blockHeight: heights[a.inscriptionId] };
+        const { blockHeight: _bh, ...rest } = a;
+        return rest;
+      });
     },
   };
 }
