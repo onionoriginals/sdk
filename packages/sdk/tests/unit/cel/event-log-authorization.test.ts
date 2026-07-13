@@ -276,7 +276,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
       log = await appendEvent(
         log,
         'migrate',
-        { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', migratedAt: '2026-07-10T00:00:00Z' },
+        { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', to: 'did:btco:reg:123', migratedAt: '2026-07-10T00:00:00Z' },
         { signer: signer as any, verificationMethod: 'ignored' }
       );
       const last = log.events[log.events.length - 1];

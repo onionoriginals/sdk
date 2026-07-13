@@ -93,7 +93,7 @@ async function makeAnchoredLog(provider: OrdMockProvider, a: Key, sat = SAT) {
   log = await appendEvent(
     log,
     'migrate',
-    { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', migratedAt: '2026-07-10T00:00:00Z' },
+    { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', to: `did:btco:reg:${sat}`, migratedAt: '2026-07-10T00:00:00Z' },
     { signer: a.signer, verificationMethod: a.vm }
   );
   const migrateDigest = chainDigest(log.events[log.events.length - 1]);

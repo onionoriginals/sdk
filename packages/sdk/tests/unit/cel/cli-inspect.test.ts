@@ -537,6 +537,7 @@ describe('CLI Inspect Command', () => {
       log = await appendEvent(log, 'migrate', {
         sourceDid: 'did:webvh:example.com:btco1',
         layer: 'btco',
+        to: 'did:btco:123456789',
         migratedAt: '2026-01-20T11:00:00Z',
       }, options);
 

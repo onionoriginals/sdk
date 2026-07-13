@@ -133,6 +133,7 @@ describe('replayProvenance pure fold (#Phase2 Task7)', () => {
             sourceDid: genesisDid,
             layer: 'btco',
             network: 'regtest',
+            to: 'did:btco:reg:123456789',
             migratedAt: '2026-07-10T00:05:00.000Z',
           },
           proof: [

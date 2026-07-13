@@ -116,7 +116,7 @@ async function makeAnchoredLog(provider: OrdMockProvider, a: Key, sat = SAT) {
   log = await appendEvent(
     log,
     'migrate',
-    { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', migratedAt: '2026-07-10T00:00:00Z' },
+    { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', to: `did:btco:reg:${sat}`, migratedAt: '2026-07-10T00:00:00Z' },
     { signer: a.signer, verificationMethod: a.vm }
   );
   const migrateDigest = chainDigest(log.events[log.events.length - 1]);
@@ -313,7 +313,7 @@ describe('non-cooperative rotation (reinscription-attested hand-off)', () => {
       { name: 'Asset', controller: a.didKey, resources: [], createdAt: 'x', nonce: 'nc-d' },
       { signer: a.signer, verificationMethod: a.vm }
     );
-    log = await appendEvent(log, 'migrate', { sourceDid: 'did:cel:uP', layer: 'btco', network: 'regtest', migratedAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
+    log = await appendEvent(log, 'migrate', { sourceDid: 'did:cel:uP', layer: 'btco', network: 'regtest', to: `did:btco:reg:${SAT}`, migratedAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
     const migrateDigest = chainDigest(log.events[1]);
     let rotated = await appendEvent(log, 'rotateKey', { newController: b.didKey, rotatedAt: 'x' }, { signer: b.signer, verificationMethod: b.vm });
     const rotDigest = chainDigest(rotated.events[2]);
@@ -509,7 +509,7 @@ describe('non-cooperative rotation (reinscription-attested hand-off)', () => {
         { name: 'Asset', controller: a.didKey, resources: [], createdAt: 'x', nonce: 'nc-nf' },
         { signer: a.signer, verificationMethod: a.vm }
       );
-      log = await appendEvent(log, 'migrate', { sourceDid: 'did:cel:uP', layer: 'btco', network: 'regtest', migratedAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
+      log = await appendEvent(log, 'migrate', { sourceDid: 'did:cel:uP', layer: 'btco', network: 'regtest', to: `did:btco:reg:${SAT}`, migratedAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
       const migrateDigest = chainDigest(log.events[1]);
       const rotated = await appendEvent(log, 'rotateKey', { newController: b.didKey, rotatedAt: 'x' }, { signer: b.signer, verificationMethod: b.vm });
       const rotDigest = chainDigest(rotated.events[2]);
