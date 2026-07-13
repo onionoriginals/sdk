@@ -12,19 +12,14 @@
  *    `bindings['did:webvh'] = data.targetDid`, and a migrations entry
  *    `{ from: data.sourceDid, to: data.targetDid, timestamp: data.migratedAt }`.
  *  - `migrate` with `data.layer === 'btco'` → `currentLayer: 'did:btco'`.
- *    The did:btco identifier is satoshi-scoped and the satoshi is only known
- *    post-inscription, so it never lives in the signed migrate data — it can
- *    only be recovered from a `bitcoin-ordinals-2024` witness proof on the
- *    event (mirroring `BtcoCelManager.getCurrentState`, src/cel/layers/
- *    BtcoCelManager.ts ~L374-409). When such a proof IS present, the satoshi
- *    + `data.network` derive `bindings['did:btco']` and the migration's
- *    precise `to`. LifecycleManager.inscribeOnBitcoin's append-first flow
- *    appends the migrate event BEFORE inscription and, post-inscription,
- *    attaches a bitcoin witness proof from the DID-doc inscription (#367) —
- *    so the binding IS derivable in that flow. Whenever no witness proof is
- *    present (degraded flows, legacy logs), `bindings['did:btco']` is
- *    OMITTED and the migration's `to` is the honest sentinel `'did:btco:?'`
- *    rather than a fabricated DID.
+ *    The anchoring sat is read from the controller-SIGNED `data.to`
+ *    (`did:btco:<network>:<sat>`, design 2026-07-13), never the unsigned
+ *    `bitcoin-ordinals-2024` witness proof — the witness names a sat but
+ *    isn't signed by the controller, so it is not identity-bearing. When
+ *    `data.to` parses, it derives `bindings['did:btco']` and the migration's
+ *    precise `to`. Whenever `data.to` is absent/unparseable (degraded flows,
+ *    legacy logs), `bindings['did:btco']` is OMITTED and the migration's `to`
+ *    is the honest sentinel `'did:btco:?'` rather than a fabricated DID.
  *  - `transfer` (legacy, no longer written) → no provenance entries. Ownership
  *    history is the sat's UTXO chain on Bitcoin, not the CEL.
  *  - `rotateKey` / `update` / `deactivate` → no provenance entries. Key
@@ -32,9 +27,10 @@
  *
  * KNOWN, DOCUMENTED DIVERGENCE from the live in-memory caches
  * (`OriginalsAsset.getProvenance()` / `asset.bindings`):
- *  - `bindings['did:btco']` (see above) — absent when the log carries no
- *    bitcoin witness proof (degraded/legacy flows), even though the live
- *    cache always has it (computed from the inscription result directly).
+ *  - `bindings['did:btco']` (see above) — absent when the signed migrate
+ *    event carries no parseable `data.to` (degraded/legacy flows), even
+ *    though the live cache always has it (computed from the inscription
+ *    result directly).
  *  - migrations here are DID-to-DID (`sourceDid` → `targetDid`/derived btco
  *    DID), not the live cache's layer-to-layer labels
  *    (`'did:peer'` → `'did:webvh'`) — a different, complementary shape.
@@ -42,9 +38,10 @@
  *    the signed log never carries them (they are not part of the CEL data
  *    Phase 2 signs).
  */
-import type { EventLog, LogEntry } from '../cel/types.js';
+import type { EventLog } from '../cel/types.js';
 import { deriveDidCel } from '../cel/celDid.js';
 import { btcoDidFromSatoshi } from '../cel/btcoDid.js';
+import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 
 /** Honest sentinel: a btco migration whose satoshi cannot be recovered from the log. */
 export const BTCO_SATOSHI_UNKNOWN = 'did:btco:?';
@@ -53,17 +50,6 @@ export interface ReplayedProvenance {
   currentLayer: 'did:peer' | 'did:webvh' | 'did:btco';
   bindings: Record<string, string>;
   migrations: Array<{ from: string; to: string; timestamp: string }>;
-}
-
-/** Mirrors BtcoCelManager.getCurrentState's witness-proof satoshi extraction. */
-function extractWitnessSatoshi(event: LogEntry): string | undefined {
-  const proofs = event.proof as ReadonlyArray<unknown> | undefined;
-  const bitcoinProof = proofs?.find(
-    (p): p is Record<string, unknown> =>
-      !!p && typeof p === 'object' && (p as Record<string, unknown>).cryptosuite === 'bitcoin-ordinals-2024'
-  );
-  const satoshi = bitcoinProof?.satoshi;
-  return typeof satoshi === 'string' ? satoshi : undefined;
 }
 
 export function replayProvenance(log: EventLog): ReplayedProvenance {
@@ -110,13 +96,20 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
       });
     } else if (data.layer === 'btco') {
       result.currentLayer = 'did:btco';
-      const satoshi = extractWitnessSatoshi(event);
+      // The anchoring sat is the controller-SIGNED did:btco in data.to (design
+      // 2026-07-13), never the unsigned witness proof. Absent/unparseable to
+      // (degraded/legacy) folds to the honest sentinel.
       let to = BTCO_SATOSHI_UNKNOWN;
-      if (satoshi) {
-        const network = typeof data.network === 'string' ? data.network : undefined;
-        const btcoDid = btcoDidFromSatoshi(satoshi, network);
-        result.bindings['did:btco'] = btcoDid;
-        to = btcoDid;
+      if (typeof data.to === 'string') {
+        try {
+          const satoshi = String(parseSatoshiIdentifier(data.to));
+          const network = typeof data.network === 'string' ? data.network : undefined;
+          const btcoDid = btcoDidFromSatoshi(satoshi, network);
+          result.bindings['did:btco'] = btcoDid;
+          to = btcoDid;
+        } catch {
+          // unparseable signed anchor → leave the sentinel, omit the binding
+        }
       }
       result.migrations.push({
         from: typeof data.sourceDid === 'string' ? data.sourceDid : '',

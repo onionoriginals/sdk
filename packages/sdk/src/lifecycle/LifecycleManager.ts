@@ -723,13 +723,20 @@ export class LifecycleManager {
         layer = 'did:webvh';
       } else if (data.layer === 'btco') {
         const wp = this.extractBitcoinWitnessProof(ev);
+        // The anchoring sat is the SIGNED data.to (design 2026-07-13). txid /
+        // inscriptionId stay advisory transaction metadata scraped off the
+        // (unsigned) witness — they are not identity-bearing.
+        let satoshi: string | undefined;
+        if (typeof data.to === 'string') {
+          try { satoshi = String(parseSatoshiIdentifier(data.to)); } catch { satoshi = undefined; }
+        }
         migrations.push({
           from: layer,
           to: 'did:btco',
           timestamp,
           transactionId: wp?.txid,
           inscriptionId: wp?.inscriptionId,
-          satoshi: wp?.satoshi,
+          satoshi,
           commitTxId: env.unverified?.commitTxId,
           revealTxId: wp?.txid,
           feeRate: env.unverified?.feeRate
