@@ -20,7 +20,7 @@
     "@originals/sdk": "workspace:*",
     "didwebvh-ts": "^2.8.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
