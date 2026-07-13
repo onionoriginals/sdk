@@ -41,8 +41,10 @@ export interface ProvenanceChain {
   }>;
   resourceUpdates: Array<{
     resourceId: string;
-    fromVersion: number;
-    toVersion: number;
+    // Optional: foreign/legacy update events may carry no numeric version (see
+    // replayProvenance — omitted rather than folded as NaN).
+    fromVersion?: number;
+    toVersion?: number;
     fromHash: string;
     toHash: string;
     timestamp: string;
@@ -71,6 +73,13 @@ export class OriginalsAsset {
   // or null when the append was skipped (no keyStore / no signing key). Undefined
   // for assets constructed outside the lifecycle (they degrade in-memory only).
   #celAppender?: (type: 'migrate' | 'rotateKey' | 'update', data: unknown) => Promise<string | null>;
+  // Per-asset serialization for addResourceVersion: the sync→async cutover made
+  // the shared #celLog read-modify-write span await points, so concurrent calls
+  // raced (a later _replaceCelLog clobbered an earlier signed append, or landed
+  // a stale-chained unverifiable event). A promise-chain mutex forces each call
+  // to run its critical section — re-read head, base-check, append — to
+  // completion before the next begins.
+  #appendChain: Promise<unknown> = Promise.resolve();
 
   constructor(
     resources: AssetResource[],
@@ -591,7 +600,47 @@ export class OriginalsAsset {
         'or host the bytes externally and reference them by hash.'
       );
     }
-    // Find the current version of the resource by id
+    // Serialize the whole read-modify-write of #celLog per asset: acquire this
+    // asset's append turn, run the critical section to completion, release. A
+    // second queued call re-reads the head INSIDE its turn, so it chains from
+    // the first call's committed result rather than a stale snapshot (Finding 2).
+    const run = this.#appendChain.then(() =>
+      this.#addResourceVersionCritical(resourceId, newContent, contentType, changes)
+    );
+    // Keep the chain alive across a rejected turn without swallowing it for the caller.
+    this.#appendChain = run.catch(() => {});
+    return run;
+  }
+
+  /**
+   * The on-log provable head hex hash for a resourceId — the base the verifier
+   * will chain the next update from: the last on-log update's derived `toHash`,
+   * or (no on-log update yet) the genesis version-1 resource's `.hash`. Returns
+   * undefined when there is no CEL log (nothing to prove against). Used to
+   * detect an in-memory head that has diverged from the log (Finding 1).
+   */
+  #onLogProvableHead(resourceId: string): string | undefined {
+    if (!this.#celLog) return undefined;
+    const updates = replayProvenance(this.#celLog).resourceUpdates.filter(
+      u => u.resourceId === resourceId
+    );
+    if (updates.length > 0) return updates[updates.length - 1].toHash;
+    // Genesis entries are never removed, only appended — the lowest version is v1.
+    const genesis = this.resources
+      .filter(r => r.id === resourceId)
+      .sort((a, b) => (a.version || 1) - (b.version || 1))[0];
+    return genesis?.hash;
+  }
+
+  /** Critical section of addResourceVersion — runs one-at-a-time via #appendChain. */
+  async #addResourceVersionCritical(
+    resourceId: string,
+    newContent: string,
+    contentType: string,
+    changes?: string
+  ): Promise<AssetResource> {
+    // RE-READ the current head inside the turn (a prior queued call may have
+    // just committed a new version).
     const currentResources = this.resources.filter(r => r.id === resourceId);
     if (currentResources.length === 0) {
       throw new Error(`Resource with id ${resourceId} not found`);
@@ -631,14 +680,30 @@ export class OriginalsAsset {
     // resource-update shape; toHash is derived at verify/fold time.
     let appended = false;
     if (this.#celAppender) {
-      const digest = await this.#celAppender('update', {
-        resourceId,
-        content: newContent,
-        contentType,
-        previousVersionHash: currentResource.hash,
-        toVersion: newVersion
-      });
-      appended = digest !== null; // null ⇒ the manager already emitted cel:append-skipped
+      // Finding 1: the verifier chains continuity from the ON-LOG head, but our
+      // base is the IN-MEMORY head. They diverge once a prior update degraded
+      // (in-memory advanced, log did not). Appending now would chain from a base
+      // that isn't on the log → the event (and every later one) is permanently
+      // unverifiable. Detect the divergence and degrade instead of poisoning.
+      const onLogHead = this.#onLogProvableHead(resourceId);
+      if (onLogHead !== undefined && onLogHead !== currentResource.hash) {
+        await this.eventEmitter.emit({
+          type: 'cel:append-skipped',
+          timestamp: new Date().toISOString(),
+          asset: { id: this.id },
+          reason: 'UNPROVABLE_BASE'
+        });
+        // Do NOT also call the appender — exactly one cel:append-skipped per call.
+      } else {
+        const digest = await this.#celAppender('update', {
+          resourceId,
+          content: newContent,
+          contentType,
+          previousVersionHash: currentResource.hash,
+          toVersion: newVersion
+        });
+        appended = digest !== null; // null ⇒ the manager already emitted cel:append-skipped
+      }
     } else {
       // No manager bound: degrade in-memory only. Surface the honesty signal on
       // the asset emitter (the manager path uses its own emitter).

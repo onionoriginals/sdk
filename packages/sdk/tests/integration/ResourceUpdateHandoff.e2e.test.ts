@@ -60,4 +60,85 @@ describe('Resource-update handoff (e2e)', () => {
     expect(skipped.length).toBe(1);
     expect(asset.getProvenance().resourceUpdates.length).toBe(0);
   });
+
+  test('degrade-then-provable does NOT poison the log (Finding 1)', async () => {
+    // Real Finding-1 repro: a skipped update advances the in-memory head to v2
+    // while the log stays at genesis; when the key becomes available and a
+    // second update is attempted, chaining from the un-logged v2 would make the
+    // log permanently unverifiable. The fix must degrade instead of poison.
+    const ks = new MockKeyStore();
+    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: ks });
+    const asset = await creator.lifecycle.createAsset([
+      { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+    ]);
+
+    // 1) Key temporarily unavailable → this update degrades (in-memory only).
+    const saved = ks.getAllKeys();
+    ks.clear();
+    await asset.addResourceVersion('note', 'v2', 'text/plain');
+    expect(asset.getResourceVersion('note', 2)?.content).toBe('v2'); // in-memory advanced
+    expect(asset.celLog!.events.some(e => e.type === 'update')).toBe(false); // nothing on log
+
+    // 2) Key becomes available again; attempting a provable update now would
+    //    chain from the un-logged v2. The base-check must catch the divergence.
+    for (const [vm, sk] of saved) await ks.setPrivateKey(vm, sk);
+    const skipped: CelAppendSkippedEvent[] = [];
+    asset.on('cel:append-skipped', (e) => skipped.push(e as CelAppendSkippedEvent));
+    await asset.addResourceVersion('note', 'v3', 'text/plain');
+
+    // Degraded (not appended): exactly one skip with the new reason, no update event.
+    expect(skipped.length).toBe(1);
+    expect(skipped[0].reason).toBe('UNPROVABLE_BASE');
+    expect(asset.celLog!.events.some(e => e.type === 'update')).toBe(false);
+
+    // The log is still verifiable — no unverifiable event was ever appended.
+    expect(await asset.verify()).toBe(true);
+    const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    const { verification } = await buyer.lifecycle.loadAsset(asset.serialize());
+    expect(verification?.verified).toBe(true);
+  });
+
+  test('concurrent same-resource updates serialize into a valid chain (Finding 2)', async () => {
+    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    const asset = await creator.lifecycle.createAsset([
+      { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+    ]);
+
+    await Promise.all([
+      asset.addResourceVersion('note', 'v2a', 'text/plain'),
+      asset.addResourceVersion('note', 'v2b', 'text/plain')
+    ]);
+
+    // Both signed appends landed — neither was lost/clobbered.
+    const updates = asset.celLog!.events.filter(e => e.type === 'update');
+    expect(updates.length).toBe(2);
+    const contents = asset.getAllVersions('note').map(r => r.content);
+    expect(contents).toContain('v2a');
+    expect(contents).toContain('v2b');
+
+    // The resulting chain verifies (genesis → v2a → v2b, correctly serialized).
+    expect(await asset.verify()).toBe(true);
+    const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    const { verification } = await buyer.lifecycle.loadAsset(asset.serialize());
+    expect(verification?.verified).toBe(true);
+  });
+
+  test('concurrent updates to different resources both land (Finding 2)', async () => {
+    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    const asset = await creator.lifecycle.createAsset([
+      { id: 'a', type: 'text', content: 'a1', contentType: 'text/plain', hash: h('a1') },
+      { id: 'b', type: 'text', content: 'b1', contentType: 'text/plain', hash: h('b1') }
+    ]);
+
+    await Promise.all([
+      asset.addResourceVersion('a', 'a2', 'text/plain'),
+      asset.addResourceVersion('b', 'b2', 'text/plain')
+    ]);
+
+    const updates = asset.celLog!.events.filter(e => e.type === 'update');
+    expect(updates.length).toBe(2);
+    expect(asset.getResourceVersion('a', 2)?.content).toBe('a2');
+    expect(asset.getResourceVersion('b', 2)?.content).toBe('b2');
+    expect(await asset.verify()).toBe(true);
+  });
 });

@@ -54,8 +54,10 @@ export interface ReplayedProvenance {
   migrations: Array<{ from: string; to: string; timestamp: string }>;
   resourceUpdates: Array<{
     resourceId: string;
-    fromVersion: number;
-    toVersion: number;
+    // Omitted for foreign/legacy update events that carry no numeric toVersion
+    // (folding them as NaN serialized to null, poisoning the interchange shape).
+    fromVersion?: number;
+    toVersion?: number;
     fromHash: string;
     toHash: string;
     timestamp: string;
@@ -101,14 +103,19 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
         const proofs = event.proof as ReadonlyArray<{ created?: unknown; witnessedAt?: unknown }> | undefined;
         const controllerProof = proofs?.find((p) => !(p && typeof p === 'object' && 'witnessedAt' in p));
         const timestamp = typeof controllerProof?.created === 'string' ? controllerProof.created : '';
-        result.resourceUpdates.push({
+        const entry: ReplayedProvenance['resourceUpdates'][number] = {
           resourceId,
-          fromVersion: Number.isFinite(toVersion) ? toVersion - 1 : NaN,
-          toVersion,
           fromHash: previousVersionHash,
           toHash: hashResource(Buffer.from(content, 'utf-8')),
           timestamp,
-        });
+        };
+        // Omit the version fields entirely for foreign logs whose update event
+        // carries no numeric toVersion (rather than fold them as NaN → null).
+        if (Number.isFinite(toVersion)) {
+          entry.fromVersion = toVersion - 1;
+          entry.toVersion = toVersion;
+        }
+        result.resourceUpdates.push(entry);
       }
       continue;
     }

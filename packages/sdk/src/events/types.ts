@@ -347,8 +347,11 @@ export interface CelAppendSkippedEvent extends BaseEvent {
    * NO_KEYSTORE: no keyStore configured. NO_CEL_LOG: legacy asset with no CEL
    * log. NO_SIGNING_KEY: keyStore present but the current controller's key is
    * absent (e.g. asset minted by a different, keyStore-less manager).
+   * UNPROVABLE_BASE: the in-memory resource head diverged from the on-log head
+   * (a prior update degraded/skipped), so appending now would chain from an
+   * un-logged base and be permanently unverifiable — degrade instead of poison.
    */
-  reason: 'NO_KEYSTORE' | 'NO_CEL_LOG' | 'NO_SIGNING_KEY';
+  reason: 'NO_KEYSTORE' | 'NO_CEL_LOG' | 'NO_SIGNING_KEY' | 'UNPROVABLE_BASE';
 }
 
 /**
