@@ -321,6 +321,9 @@ export class LifecycleManager {
     }
 
     const asset = new OriginalsAsset(resources, didDoc, [], log);
+    // Bind the controller append path so addResourceVersion can write signed
+    // `update` events with the same degrade contract as the other authorship ops.
+    asset._bindCelAppender((type, data) => this.appendCelEventOrSkip(asset, type, data));
 
     // Persist the genesis CEL at the conventional cel/<suffix>.json key so
     // the did:cel resolves from storage immediately (best-effort, never gates).
@@ -612,6 +615,7 @@ export class LifecycleManager {
       log,
       { currentLayer: folded.currentLayer, bindings: folded.bindings, provenance }
     );
+    asset._bindCelAppender((type, data) => this.appendCelEventOrSkip(asset, type, data));
 
     // Repopulate captured DID docs so re-serializing a loaded asset is
     // lossless. Only for layers cross-checked against the fold in step 5
@@ -745,7 +749,9 @@ export class LifecycleManager {
       }
     }
 
-    const resourceUpdates = (env.unverified?.resourceUpdates ?? []).map(u => ({ ...u }));
+    // Resource versions are now signed `update` log events — fold them from the
+    // (verified) log, never from the advisory envelope section (removed).
+    const resourceUpdates = folded.resourceUpdates.map(u => ({ ...u }));
 
     // txid: the btco migration's witnessed reveal txid (ownership moves live on
     // the sat's UTXO chain, not the CEL — no transfers to derive a txid from).

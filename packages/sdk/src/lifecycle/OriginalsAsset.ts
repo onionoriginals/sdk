@@ -235,9 +235,6 @@ export class OriginalsAsset {
     const btcoMigration = this.provenance.migrations.find(m => m.to === 'did:btco');
     if (btcoMigration?.commitTxId) unverified.commitTxId = btcoMigration.commitTxId;
     if (typeof btcoMigration?.feeRate === 'number') unverified.feeRate = btcoMigration.feeRate;
-    if (this.provenance.resourceUpdates.length > 0) {
-      unverified.resourceUpdates = this.provenance.resourceUpdates.map(u => ({ ...u }));
-    }
     // Degraded binding: the fold can't derive did:btco (no witness proof in the
     // log) but the live cache holds it — surface the whole live binding snapshot
     // as advisory. Do NOT promote it: loadAsset must not trust it.
