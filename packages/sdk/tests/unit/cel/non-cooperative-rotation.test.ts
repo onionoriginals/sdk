@@ -25,6 +25,7 @@ import { multikey } from '../../../src/crypto/Multikey';
 import { canonicalizeEvent, canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
 import { computeDigestMultibase } from '../../../src/cel/hash';
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { deriveDidCel } from '../../../src/cel/celDid';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { appendEvent } from '../../../src/cel/algorithms/appendEvent';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
@@ -55,11 +56,12 @@ const chainDigest = (event: LogEntry) => computeDigestMultibase(canonicalizeEntr
 
 // The inscribed btco DID document: OriginalsCelAnchor commits to the event's
 // chain digest; verificationMethod announces the (new) controller key.
-function btcoDoc(satoshi: string, headDigestMultibase: string, publicKeyMultibase?: string) {
+function btcoDoc(satoshi: string, headDigestMultibase: string, publicKeyMultibase?: string, didCel?: string) {
   const id = `did:btco:reg:${satoshi}`;
   return {
     '@context': ['https://www.w3.org/ns/did/v1'],
     id,
+    ...(didCel ? { alsoKnownAs: [didCel] } : {}),
     ...(publicKeyMultibase
       ? { verificationMethod: [{ id: `${id}#key-0`, type: 'Multikey', controller: id, publicKeyMultibase }] }
       : {}),
@@ -95,10 +97,11 @@ async function inscribeDoc(
   provider: OrdMockProvider,
   satoshi: string,
   headDigest: string,
-  publicKeyMultibase?: string
+  publicKeyMultibase?: string,
+  didCel?: string
 ) {
   const res = await provider.createInscription({
-    data: Buffer.from(JSON.stringify(btcoDoc(satoshi, headDigest, publicKeyMultibase))),
+    data: Buffer.from(JSON.stringify(btcoDoc(satoshi, headDigest, publicKeyMultibase, didCel))),
     contentType: 'application/did+json',
     targetSatoshi: satoshi,
   });
@@ -120,7 +123,7 @@ async function makeAnchoredLog(provider: OrdMockProvider, a: Key, sat = SAT) {
     { signer: a.signer, verificationMethod: a.vm }
   );
   const migrateDigest = chainDigest(log.events[log.events.length - 1]);
-  const insc = await inscribeDoc(provider, sat, migrateDigest);
+  const insc = await inscribeDoc(provider, sat, migrateDigest, undefined, deriveDidCel(log));
   log = attachWitness(log, insc, sat);
   return { log, migrateInscriptionId: insc.inscriptionId };
 }
@@ -143,7 +146,12 @@ async function addNonCoopRotation(
   );
   const rotDigest = chainDigest(rotated.events[rotated.events.length - 1]);
   const announce = opts.announceMb === null ? undefined : (opts.announceMb ?? newController.pubMb);
-  const insc = await inscribeDoc(provider, opts.inscribeSat ?? SAT, rotDigest, announce);
+  const onSat = opts.inscribeSat ?? SAT;
+  // Only an HONEST anchoring (reinscription on the log's anchored sat) back-links
+  // the did:cel; a foreign-sat attack reinscription must NOT — else uniqueness
+  // sees two block-1 sats and false-flags AMBIGUOUS_CANONICAL.
+  const aka = onSat === SAT ? deriveDidCel(log) : undefined;
+  const insc = await inscribeDoc(provider, onSat, rotDigest, announce, aka);
   return { log: attachWitness(rotated, insc, opts.claimSat ?? opts.inscribeSat ?? SAT), inscriptionId: insc.inscriptionId };
 }
 
@@ -499,6 +507,16 @@ describe('non-cooperative rotation (reinscription-attested hand-off)', () => {
         async getInscriptionsBySatoshi(satoshi: string) {
           const list = await provider.getInscriptionsBySatoshi(satoshi);
           return opts.reverse ? [...list].reverse() : list;
+        },
+        // Delegate uniqueness enumeration, remapping each anchoring's blockHeight
+        // through `heights` exactly as getInscriptionById does (unmapped → stripped).
+        async getAnchoringsForDidCel(didCel: string) {
+          const list = await provider.getAnchoringsForDidCel!(didCel);
+          return list.map((a) => {
+            if (a.inscriptionId in heights) return { ...a, blockHeight: heights[a.inscriptionId] };
+            const { blockHeight: _bh, ...rest } = a;
+            return rest;
+          });
         },
       };
     }

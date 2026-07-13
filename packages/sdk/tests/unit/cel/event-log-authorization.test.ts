@@ -20,6 +20,7 @@ import { BtcoCelManager } from '../../../src/cel/layers/BtcoCelManager';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
 import { appendEvent } from '../../../src/cel/algorithms/appendEvent';
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { deriveDidCel } from '../../../src/cel/celDid';
 import { computeDigestMultibase } from '../../../src/cel/hash';
 import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
 import type { BitcoinManager } from '../../../src/bitcoin/BitcoinManager';
@@ -314,11 +315,20 @@ describe('CEL event-log authorization and btco verifiability', () => {
               satoshi: '123',
             }
           : null,
+      // First-anchor-wins uniqueness: enumerate this content's anchoring iff it
+      // back-links the queried did:cel (mirrors OrdMockProvider.getAnchoringsForDidCel).
+      getAnchoringsForDidCel: async (didCel: string) => {
+        const aka = (content as { alsoKnownAs?: unknown } | null)?.alsoKnownAs;
+        return Array.isArray(aka) && aka.includes(didCel)
+          ? [{ satoshi: '123', inscriptionId: 'insc1', blockHeight: 1 }]
+          : [];
+      },
     });
 
-    const anchorDoc = (headDigestMultibase: string) => ({
+    const anchorDoc = (headDigestMultibase: string, didCel?: string) => ({
       '@context': ['https://www.w3.org/ns/did/v1'],
       id: 'did:btco:reg:123',
+      ...(didCel ? { alsoKnownAs: [didCel] } : {}),
       service: [
         { id: 'did:btco:reg:123#resources', type: 'OriginalsResourceManifest', serviceEndpoint: { resources: [] } },
         { id: 'did:btco:reg:123#cel', type: 'OriginalsCelAnchor', serviceEndpoint: { headDigestMultibase } },
@@ -327,7 +337,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
 
     it('accepts a DID document whose OriginalsCelAnchor commits to the event digest', async () => {
       const { log, digest } = await makeWitnessedLog();
-      const result = await verifyEventLog(log, { ordinalsProvider: providerServing(anchorDoc(digest)) });
+      const result = await verifyEventLog(log, { ordinalsProvider: providerServing(anchorDoc(digest, deriveDidCel(log))) });
       expect(result.verified).toBe(true);
       expect(result.errors).toEqual([]);
     });
