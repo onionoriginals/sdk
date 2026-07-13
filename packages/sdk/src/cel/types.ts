@@ -161,9 +161,14 @@ export interface OrdinalsLookup {
   } | null>;
   /**
    * MUST return inscription ids oldest-first (on-chain inscription order).
-   * The non-cooperative rotation rule's later-than-anchor check depends on
-   * this ordering; a provider violating it can make that check accept
-   * earlier inscriptions.
+   * The non-cooperative rotation rule orders inscriptions primarily by their
+   * confirmed block heights (via getInscriptionById, provider-order-
+   * independent) and trusts this list order only as a same-block tiebreak —
+   * a provider violating the contract can therefore no longer make that
+   * check accept a pre-anchor inscription from an earlier block, but
+   * same-block tiebreaks and the head-freshness check still rely on it.
+   * Providers whose getInscriptionById results omit `blockHeight` cannot
+   * prove ordering at all: non-cooperative rotations then fail closed.
    */
   getInscriptionsBySatoshi?(satoshi: string): Promise<Array<{ inscriptionId: string }>>;
 }
