@@ -65,11 +65,10 @@ export interface AssetTransferredEvent extends BaseEvent {
     id: string;
     layer: LayerType;
   };
-  from: string;
+  /** Best-effort pre-move sat holder; omitted when no owner index is available (never fabricated). Ownership is the sat itself (#366 ownership-is-sat). */
+  from?: string;
   to: string;
   transactionId: string;
-  /** True when ownership moved on-chain but the DID document still carries the previous owner's keys (rotation-first model, #366). */
-  keyRotationPending?: boolean;
 }
 
 /**

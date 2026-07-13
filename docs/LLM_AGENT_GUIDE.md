@@ -591,11 +591,22 @@ const inscribedAsset = await sdk.lifecycle.inscribeOnBitcoin(
 
 ### Transferring Ownership
 
+Ownership **IS** control of the asset's anchoring sat; the CEL is authorship only.
+`transferOwnership` is a thin Bitcoin sat move — it writes **nothing** to the CEL
+(the `transfer` event type is legacy/read-only: verifiers still accept it in old
+logs, but the SDK no longer emits it). Receiving an asset = receiving the sat; no
+inscription or log write is required to become the owner.
+
 ```typescript
 const tx = await sdk.lifecycle.transferOwnership(
   asset: OriginalsAsset,
   newOwner: string               // Bitcoin address
-): Promise<BitcoinTransaction>
+): Promise<BitcoinTransaction>   // txid at tx.txid; the CEL is untouched
+
+// Read live ownership from the sat (never reconstructed from a log event):
+const owner = await sdk.lifecycle.getCurrentOwner(asset);
+// → { address, outpoint } | null   (null before did:btco / no owner index;
+//   throws ORD_PROVIDER_REQUIRED if no ordinalsProvider is configured)
 ```
 
 ### Key Registration
@@ -638,29 +649,38 @@ const { asset, verification, warnings } = await sdk.lifecycle.loadAsset(wire, {
 - **Honest gap:** post-genesis resource versions ride `unverified.resourceUpdates`
   and are UNverifiable until Phase 4 puts resource-update events on the log.
 
-### Ownership hand-off: cooperative vs non-cooperative
+### Ownership transfer + optional author-enablement
+
+Ownership moves with the sat alone — `transferOwnership` writes nothing to the CEL,
+and the new holder is the owner the moment they hold the sat (confirm with
+`getCurrentOwner`). Authoring *new* provenance is a separate, **optional** step: to
+append signed events the new holder must establish a signing key in the log.
 
 ```typescript
-// COOPERATIVE — the current (outgoing) controller signs the rotateKey.
-await sdk.lifecycle.transferOwnership(asset, newOwnerBtcAddress);   // moves the sat
-await sdk.lifecycle.rotateBtcoKeys(asset, {                          // incoming key rotated in
-  publicKeyMultibase, privateKey
-});
+// OWNERSHIP: a pure sat move. Nothing is written to the CEL.
+await sdk.lifecycle.transferOwnership(asset, newOwnerBtcAddress);
+const owner = await sdk.lifecycle.getCurrentOwner(asset);  // { address, outpoint }
 
-// NON-COOPERATIVE — the buyer cannot get the seller's signature. The buyer
-// reinscribes the did:btco doc with THEIR key and SELF-SIGNS the rotateKey;
-// the reinscription witness proves sat control, so the verifier accepts the
-// otherwise-unauthorized rotation. privateKey is REQUIRED.
-const { inscriptionId, did } = await sdk.lifecycle.claimOwnership(asset, {
+// AUTHORING (optional) — COOPERATIVE: the outgoing controller signs the rotateKey,
+// rotating the incoming key in so the new holder can author.
+await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase, privateKey });
+
+// AUTHORING (optional) — NON-COOPERATIVE: the new holder cannot get the seller's
+// signature. authorizeSigner reinscribes the did:btco doc with THEIR key and
+// SELF-SIGNS the rotateKey; the reinscription witness proves sat control, so the
+// verifier accepts the otherwise-unauthorized rotation. privateKey is REQUIRED.
+// It does NOT grant ownership (the sat already does) — it enables authoring.
+const { inscriptionId, did } = await sdk.lifecycle.authorizeSigner(asset, {
   publicKeyMultibase, privateKey
 });
-// After the claim the buyer is the current controller: their subsequent CEL
-// appends (transfer, further rotation) SIGN instead of degrading.
+// After authorizeSigner the holder is the current controller: their subsequent
+// CEL appends (e.g. update, further rotation) SIGN instead of degrading.
 ```
 
-Before claiming, a buyer who holds only the loaded asset (not the controller
-key) sees appends DEGRADE with a `cel:append-skipped` (`NO_SIGNING_KEY`) event —
-verification is public, but WRITING to the log needs the key.
+A holder who owns the sat but has not enabled authoring (holds no controller key)
+still owns the asset and can transfer it freely; they simply see log appends
+DEGRADE with a `cel:append-skipped` (`NO_SIGNING_KEY`) event — verification is
+public, but WRITING to the log needs the key.
 
 ### Batch Operations
 
@@ -739,12 +759,13 @@ await asset.migrate(
   details?: { transactionId?, inscriptionId?, satoshi?, commitTxId?, revealTxId?, feeRate? }
 ): Promise<void>
 
-// Record ownership transfer
-await asset.recordTransfer(from: string, to: string, transactionId: string): Promise<void>
+// Ownership is the sat, not the log — transfer via sdk.lifecycle.transferOwnership
+// (a pure sat move) and read it live via sdk.lifecycle.getCurrentOwner(asset).
+// The asset carries no transfer history (removed with .transfers).
 
 // Provenance
 asset.getProvenance(): ProvenanceChain
-asset.getProvenanceSummary(): { created, creator, currentLayer, migrationCount, transferCount, lastActivity }
+asset.getProvenanceSummary(): { created, creator, currentLayer, migrationCount, lastActivity }
 asset.queryProvenance(): ProvenanceQuery  // Fluent API for queries
 
 // Resource versioning
@@ -791,12 +812,8 @@ interface ProvenanceChain {
     revealTxId?: string;
     feeRate?: number;
   }>;
-  transfers: Array<{
-    from: string;
-    to: string;
-    timestamp: string;
-    transactionId: string;
-  }>;
+  // No `transfers`: ownership is the sat (a transfer writes nothing to provenance);
+  // read it live via sdk.lifecycle.getCurrentOwner(asset).
   resourceUpdates: Array<{
     resourceId: string;
     fromVersion: number;

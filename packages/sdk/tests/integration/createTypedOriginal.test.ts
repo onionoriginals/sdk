@@ -335,7 +335,6 @@ describe('LifecycleManager.createTypedOriginal', () => {
       expect(provenance.createdAt).toBeDefined();
       expect(provenance.creator).toBe(asset.id);
       expect(provenance.migrations).toEqual([]);
-      expect(provenance.transfers).toEqual([]);
     });
   });
 });

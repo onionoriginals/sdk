@@ -30,8 +30,8 @@ function makeSdk(provider: OrdMockProvider, keyStore?: MockKeyStore) {
   } as any);
 }
 
-describe('claimOwnership (#366 non-cooperative rotation, write side)', () => {
-  test('e2e: transfer then claimOwnership with a fresh key; whole log verifies through the REAL write path', async () => {
+describe('authorizeSigner (#366 non-cooperative rotation, write side; optional author-enablement, not ownership)', () => {
+  test('e2e: transfer then authorizeSigner with a fresh key; whole log verifies through the REAL write path', async () => {
     const provider = new OrdMockProvider();
     const keyStore = new MockKeyStore();
     const sdk = makeSdk(provider, keyStore);
@@ -41,27 +41,29 @@ describe('claimOwnership (#366 non-cooperative rotation, write side)', () => {
     await sdk.lifecycle.transferOwnership(asset, NEW_OWNER);
     const satoshi = asset.bindings!['did:btco']!.split(':').pop()!;
 
-    // Capture the OUTGOING controller's key BEFORE the claim rotates it away.
+    // Capture the OUTGOING controller's key BEFORE authorizeSigner rotates it away.
     const oldVm = currentControllerVm(asset.celLog!);
     const oldPriv = (await keyStore.getPrivateKey(oldVm))!;
     expect(oldPriv).toBeTruthy();
 
-    // The buyer holds a FRESH Ed25519 keypair (never registered by the seller).
-    const claimer = await new KeyManager().generateKeyPair('Ed25519');
-    await sdk.lifecycle.claimOwnership(asset, {
-      publicKeyMultibase: claimer.publicKey,
-      privateKey: claimer.privateKey
+    // The new sat holder holds a FRESH Ed25519 keypair (never registered by the seller).
+    const newSigner = await new KeyManager().generateKeyPair('Ed25519');
+    await sdk.lifecycle.authorizeSigner(asset, {
+      publicKeyMultibase: newSigner.publicKey,
+      privateKey: newSigner.privateKey
     });
 
-    // Last three events: transfer, rotateKey(+witness proof), update(ack).
+    // transferOwnership is a thin sat move (no CEL append) — the log's tail is
+    // whatever inscribeOnBitcoin left, followed by authorizeSigner's own
+    // rotateKey(+witness proof) and update(ack).
     const events = asset.celLog!.events;
-    expect(events.slice(-3).map(e => e.type)).toEqual(['transfer', 'rotateKey', 'update']);
+    expect(events.slice(-2).map(e => e.type)).toEqual(['rotateKey', 'update']);
 
     const rotateEntry = events[events.length - 2];
-    expect((rotateEntry.data as any).newController).toBe(`did:key:${claimer.publicKey}`);
+    expect((rotateEntry.data as any).newController).toBe(`did:key:${newSigner.publicKey}`);
     // SELF-SIGNED with the NEW key (not folded to the seller's controller).
     expect(((rotateEntry.proof as any)[0].verificationMethod as string)
-      .startsWith(`did:key:${claimer.publicKey}`)).toBe(true);
+      .startsWith(`did:key:${newSigner.publicKey}`)).toBe(true);
     // The bitcoin witness proof is attached post-inscription (satisfies check (a)).
     expect((rotateEntry.proof as any).some((p: any) => p.cryptosuite === 'bitcoin-ordinals-2024')).toBe(true);
 
@@ -71,7 +73,7 @@ describe('claimOwnership (#366 non-cooperative rotation, write side)', () => {
     expect((ackEntry.data as any).satoshi).toBe(satoshi);
     expect((ackEntry.data as any).inscriptionId).toBeDefined();
     expect(((ackEntry.proof as any)[0].verificationMethod as string)
-      .startsWith(`did:key:${claimer.publicKey}`)).toBe(true);
+      .startsWith(`did:key:${newSigner.publicKey}`)).toBe(true);
 
     // The whole log verifies — Task 5's non-cooperative rule exercised through
     // the real write path, not hand-built events.
@@ -83,17 +85,23 @@ describe('claimOwnership (#366 non-cooperative rotation, write side)', () => {
     const oldPub = oldVm.slice('did:key:'.length).split('#')[0];
     const { signer, verificationMethod } = celSignerFromKeyPair({ publicKey: oldPub, privateKey: oldPriv } as any);
     const forged = await appendEvent(asset.celLog!, 'transfer', {
-      previousOwner: `did:key:${claimer.publicKey}`, newOwner: 'someone', txid: 'zzz', transferredAt: new Date().toISOString()
+      previousOwner: `did:key:${newSigner.publicKey}`, newOwner: 'someone', txid: 'zzz', transferredAt: new Date().toISOString()
     }, { signer, verificationMethod });
     expect((await verifyEventLog(forged, { expectedDid: asset.id, ordinalsProvider: provider })).verified).toBe(false);
 
-    // The NEW controller IS authorized: a real transfer append signs with the
-    // claimer key (registered by claim) and the whole log still verifies.
-    await sdk.lifecycle.transferOwnership(asset, NEW_OWNER);
-    const newLast = asset.celLog!.events[asset.celLog!.events.length - 1];
-    expect(newLast.type).toBe('transfer');
-    expect(((newLast.proof as any)[0].verificationMethod as string)
-      .startsWith(`did:key:${claimer.publicKey}`)).toBe(true);
+    // The NEW controller IS authorized to author further provenance: a real
+    // cooperative rotation, folded through the STANDARD append path, signs
+    // with the key authorizeSigner registered — proving it (not the locked-out
+    // seller) is the current controller — and the whole log still verifies.
+    const thirdKp = await new KeyManager().generateKeyPair('Ed25519');
+    await sdk.lifecycle.rotateBtcoKeys(asset, {
+      publicKeyMultibase: thirdKp.publicKey,
+      privateKey: thirdKp.privateKey
+    });
+    const rotateAgain = asset.celLog!.events[asset.celLog!.events.length - 2];
+    expect(rotateAgain.type).toBe('rotateKey');
+    expect(((rotateAgain.proof as any)[0].verificationMethod as string)
+      .startsWith(`did:key:${newSigner.publicKey}`)).toBe(true);
     expect((await verifyEventLog(asset.celLog!, { expectedDid: asset.id, ordinalsProvider: provider })).verified).toBe(true);
   });
 
@@ -115,23 +123,23 @@ describe('claimOwnership (#366 non-cooperative rotation, write side)', () => {
     const kpA = await new KeyManager().generateKeyPair('Ed25519');
     const kpB = await new KeyManager().generateKeyPair('Ed25519');
     await expect(
-      sdk.lifecycle.claimOwnership(asset, { publicKeyMultibase: kpA.publicKey, privateKey: kpB.privateKey })
+      sdk.lifecycle.authorizeSigner(asset, { publicKeyMultibase: kpA.publicKey, privateKey: kpB.privateKey })
     ).rejects.toMatchObject({ code: 'INVALID_KEY_PAIR' });
 
     expect(asset.celLog!.events.length).toBe(eventsBefore);
     expect(provider.inscribeCalls).toBe(inscribeCallsBefore);
   });
 
-  test('rejects claiming a non-btco asset with INVALID_STATE', async () => {
+  test('rejects authorizing a signer on a non-btco asset with INVALID_STATE', async () => {
     const sdk = makeSdk(new OrdMockProvider(), new MockKeyStore());
     const asset = await sdk.lifecycle.createAsset(RES); // did:peer
     const kp = await new KeyManager().generateKeyPair('Ed25519');
     await expect(
-      sdk.lifecycle.claimOwnership(asset, { publicKeyMultibase: kp.publicKey, privateKey: kp.privateKey })
+      sdk.lifecycle.authorizeSigner(asset, { publicKeyMultibase: kp.publicKey, privateKey: kp.privateKey })
     ).rejects.toMatchObject({ code: 'INVALID_STATE' });
   });
 
-  test('concurrent claims on the same asset reject with OPERATION_IN_PROGRESS', async () => {
+  test('concurrent authorizeSigner calls on the same asset reject with OPERATION_IN_PROGRESS', async () => {
     const provider = new OrdMockProvider();
     const sdk = makeSdk(provider, new MockKeyStore());
     const asset = await sdk.lifecycle.createAsset(RES);
@@ -139,8 +147,8 @@ describe('claimOwnership (#366 non-cooperative rotation, write side)', () => {
 
     const kp1 = await new KeyManager().generateKeyPair('Ed25519');
     const kp2 = await new KeyManager().generateKeyPair('Ed25519');
-    const p1 = sdk.lifecycle.claimOwnership(asset, { publicKeyMultibase: kp1.publicKey, privateKey: kp1.privateKey });
-    const p2 = sdk.lifecycle.claimOwnership(asset, { publicKeyMultibase: kp2.publicKey, privateKey: kp2.privateKey });
+    const p1 = sdk.lifecycle.authorizeSigner(asset, { publicKeyMultibase: kp1.publicKey, privateKey: kp1.privateKey });
+    const p2 = sdk.lifecycle.authorizeSigner(asset, { publicKeyMultibase: kp2.publicKey, privateKey: kp2.privateKey });
     await expect(p2).rejects.toMatchObject({ code: 'OPERATION_IN_PROGRESS' });
     await p1;
   });
@@ -188,7 +196,7 @@ describe('claimOwnership (#366 non-cooperative rotation, write side)', () => {
     const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
     await expect(
       // @ts-expect-error privateKey is required
-      sdk.lifecycle.claimOwnership(asset, { publicKeyMultibase: newKey })
+      sdk.lifecycle.authorizeSigner(asset, { publicKeyMultibase: newKey })
     ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 
@@ -208,10 +216,10 @@ describe('claimOwnership (#366 non-cooperative rotation, write side)', () => {
     const asset = await sdk.lifecycle.createAsset(RES);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
-    const claimer = await new KeyManager().generateKeyPair('Ed25519');
-    await sdk.lifecycle.claimOwnership(asset, {
-      publicKeyMultibase: claimer.publicKey,
-      privateKey: claimer.privateKey
+    const newSigner = await new KeyManager().generateKeyPair('Ed25519');
+    await sdk.lifecycle.authorizeSigner(asset, {
+      publicKeyMultibase: newSigner.publicKey,
+      privateKey: newSigner.privateKey
     });
 
     const suffix = deriveDidCel(asset.celLog!).slice(DID_CEL_PREFIX.length);
@@ -226,7 +234,7 @@ describe('claimOwnership (#366 non-cooperative rotation, write side)', () => {
   test('throws ORD_PROVIDER_INVALID_RESPONSE when the reinscription has no txid', async () => {
     // BitcoinManager.inscribeData itself guarantees a txid, so this exercises
     // the defensive guard against a misbehaving deps.bitcoinManager — the only
-    // way this shape reaches claimOwnership in practice — rather than relying
+    // way this shape reaches authorizeSigner in practice — rather than relying
     // solely on the (real) provider's own invariant.
     const provider = new OrdMockProvider();
     const keyStore = new MockKeyStore();
@@ -247,16 +255,16 @@ describe('claimOwnership (#366 non-cooperative rotation, write side)', () => {
     const brokenBitcoinManager = {
       inscribeData: async () => ({ inscriptionId: 'insc-no-txid', satoshi })
     } as unknown as BitcoinManager;
-    const claimLifecycle = new LifecycleManager(
+    const authLifecycle = new LifecycleManager(
       config, didManager, credentialManager, { bitcoinManager: brokenBitcoinManager }, keyStore
     );
 
-    const claimer = await new KeyManager().generateKeyPair('Ed25519');
+    const newSigner = await new KeyManager().generateKeyPair('Ed25519');
     let caught: any;
     try {
-      await claimLifecycle.claimOwnership(asset, {
-        publicKeyMultibase: claimer.publicKey,
-        privateKey: claimer.privateKey
+      await authLifecycle.authorizeSigner(asset, {
+        publicKeyMultibase: newSigner.publicKey,
+        privateKey: newSigner.privateKey
       });
     } catch (err) {
       caught = err;

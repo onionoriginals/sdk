@@ -466,8 +466,11 @@ function extractCelAnchorHeadDigest(content: unknown): string | undefined {
 }
 
 /**
- * Head-freshness check (#366 truncated-log defense): the buyer's guard against
- * being handed a pre-transfer / pre-rotation prefix that verifies on its own.
+ * Head-freshness check (#366 truncated-log defense): a provenance-completeness
+ * guard against being handed a pre-rotation prefix that verifies on its own.
+ * This is off the ownership path — ownership is sat control, read live from
+ * Bitcoin (see LifecycleManager.getCurrentOwner); this check only defends the
+ * authoring record (the CEL) from looking complete when it isn't.
  *
  * Given the log's anchored satoshi, enumerate its inscriptions (oldest-first by
  * the OrdinalsLookup contract), take the NEWEST one whose content is a DID

@@ -390,7 +390,7 @@ export class PeerCelManager {
           state.metadata.domain = migrationData.domain;
         }
       } else if (event.type === 'transfer') {
-        // Ownership hand-off: surface the owners; identity (did) is unchanged.
+        // Legacy ownership hand-off (transfer events are no longer written; dual-accept read only): surface the owners; identity (did) is unchanged.
         const transferData = event.data as Record<string, unknown>;
         if (transferData.transferredAt !== undefined) {
           state.updatedAt = transferData.transferredAt as string;

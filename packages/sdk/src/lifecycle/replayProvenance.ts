@@ -25,8 +25,8 @@
  *    present (degraded flows, legacy logs), `bindings['did:btco']` is
  *    OMITTED and the migration's `to` is the honest sentinel `'did:btco:?'`
  *    rather than a fabricated DID.
- *  - `transfer` → a transfers entry `{ from: data.previousOwner,
- *    to: data.newOwner, timestamp: data.transferredAt, transactionId: data.txid }`.
+ *  - `transfer` (legacy, no longer written) → no provenance entries. Ownership
+ *    history is the sat's UTXO chain on Bitcoin, not the CEL.
  *  - `rotateKey` / `update` / `deactivate` → no provenance entries. Key
  *    rotation is custody, not provenance, for this fold.
  *
@@ -53,7 +53,6 @@ export interface ReplayedProvenance {
   currentLayer: 'did:peer' | 'did:webvh' | 'did:btco';
   bindings: Record<string, string>;
   migrations: Array<{ from: string; to: string; timestamp: string }>;
-  transfers: Array<{ from: string; to: string; timestamp: string; transactionId?: string }>;
 }
 
 /** Mirrors BtcoCelManager.getCurrentState's witness-proof satoshi extraction. */
@@ -81,7 +80,6 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
     currentLayer: 'did:peer',
     bindings: {},
     migrations: [],
-    transfers: [],
   };
 
   const genesisData = genesis.data as Record<string, unknown>;
@@ -93,12 +91,13 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
     const event = log.events[i];
     const data = (event.data ?? {}) as Record<string, unknown>;
 
-    if (event.type !== 'migrate' && event.type !== 'transfer') {
-      // rotateKey / update / deactivate: rotation is custody, not provenance.
+    if (event.type !== 'migrate') {
+      // transfer (legacy) / rotateKey / update / deactivate: not provenance.
+      // Ownership history is the sat's UTXO chain, not the CEL.
       continue;
     }
 
-    if (event.type === 'migrate' && data.layer === 'webvh') {
+    if (data.layer === 'webvh') {
       result.currentLayer = 'did:webvh';
       const targetDid = typeof data.targetDid === 'string' ? data.targetDid : '';
       if (targetDid) {
@@ -109,7 +108,7 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
         to: targetDid,
         timestamp: typeof data.migratedAt === 'string' ? data.migratedAt : '',
       });
-    } else if (event.type === 'migrate' && data.layer === 'btco') {
+    } else if (data.layer === 'btco') {
       result.currentLayer = 'did:btco';
       const satoshi = extractWitnessSatoshi(event);
       let to = BTCO_SATOSHI_UNKNOWN;
@@ -123,14 +122,6 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
         from: typeof data.sourceDid === 'string' ? data.sourceDid : '',
         to,
         timestamp: typeof data.migratedAt === 'string' ? data.migratedAt : '',
-      });
-    } else if (event.type === 'transfer') {
-      const txid = data.txid;
-      result.transfers.push({
-        from: typeof data.previousOwner === 'string' ? data.previousOwner : '',
-        to: typeof data.newOwner === 'string' ? data.newOwner : '',
-        timestamp: typeof data.transferredAt === 'string' ? data.transferredAt : '',
-        ...(typeof txid === 'string' ? { transactionId: txid } : {}),
       });
     }
   }

@@ -270,6 +270,8 @@ describe('Integration: Event System', () => {
       expect(capturedEvent?.type).toBe('asset:transferred');
       expect(capturedEvent?.to).toBe(recipientAddress);
       expect(capturedEvent?.transactionId).toBeDefined();
+      // Pure sat move: ownership is the sat, no rotation-first flag (#366).
+      expect(capturedEvent && 'keyRotationPending' in capturedEvent).toBe(false);
     });
   });
 

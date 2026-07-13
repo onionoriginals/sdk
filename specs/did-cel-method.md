@@ -171,8 +171,11 @@ control from the current key set to a new controller.
 ## 6. Event vocabulary
 
 The Originals CEL profile defines six event types. `create`, `update`, and
-`deactivate` are inherited from the base CEL profile; `migrate`, `transfer`, and
-`rotateKey` are first-class Originals additions (previously folded into `update`).
+`deactivate` are inherited from the base CEL profile; `migrate` and `rotateKey` are
+first-class Originals additions (previously folded into `update`). `transfer` is
+**legacy/read-only** — verifiers **MUST** still accept it in pre-1.2.0 logs
+(dual-accept), but writers **MUST NOT** emit it: ownership **is** the sat, so a
+transfer is a pure sat move that writes nothing to the CEL (see the design doc §5).
 The genesis event is always `create`; every subsequent event carries a
 `previousEvent` chain link and at least one controller proof.
 
@@ -181,17 +184,19 @@ The genesis event is always `create`; every subsequent event carries a
 | `create` | Genesis; establishes identity + controller | `name`, `controller`, `resources`, `createdAt`, `nonce` (§3) |
 | `update` | Mutate metadata / resources | `name?`, `resources?`, `updatedAt`, arbitrary metadata |
 | `migrate` | Layer transition (new resolution substrate) | `sourceDid`, `targetDid`, `layer`, `migratedAt`, `domain?` |
-| `transfer` | Ownership hand-off (identity unchanged) | `previousOwner?`, `newOwner?`, `txid?`, `transferredAt` |
+| `transfer` | **LEGACY/read-only** — ownership hand-off in pre-1.2.0 logs (identity unchanged); no longer written | `previousOwner?`, `newOwner?`, `txid?`, `transferredAt` |
 | `rotateKey` | Authority hand-off (§5) | `newController`, `rotatedAt` |
 | `deactivate` | Seals the log permanently | `reason?`, `deactivatedAt` |
 
 Authority semantics differ by type and **MUST** be honored:
 
 - `rotateKey` **REPLACES** the authorized key set (§5).
-- `migrate` and `transfer` **MUST NOT** change the authorized key set — a `transfer`
-  is not a key rotation, so the recipient's key does not become a log signer until a
-  subsequent `rotateKey` (post-transfer append authority is rotation-gated; see the
-  design doc §5).
+- `migrate` **MUST NOT** change the authorized key set. A legacy `transfer` (§6)
+  likewise never changed it — a transfer is not a key rotation, so a recipient's key
+  does not become a log signer. Ownership moves with the sat and writes nothing to the
+  log; a new sat holder gains *append* authority only via a subsequent `rotateKey`
+  (post-transfer append authority is rotation-gated, optional author-enablement; see
+  the design doc §5).
 - `deactivate` seals the log: any event after a `deactivate` **MUST** cause the whole
   log to fail verification, even if each individual signature and chain link is
   valid.

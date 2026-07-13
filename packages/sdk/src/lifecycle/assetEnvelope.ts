@@ -2,8 +2,9 @@
  * AssetEnvelope — the versioned, interchange format for an Originals asset (#377).
  *
  * The envelope's provenance IS the CEL: `eventLog` is the single source of truth,
- * and `bindings` / `currentLayer` / `migrations` / `transfers` are deliberately
- * NOT first-class fields — they are folds over the log (see replayProvenance).
+ * and `bindings` / `currentLayer` / `migrations` are deliberately NOT
+ * first-class fields — they are folds over the log (see replayProvenance).
+ * Ownership history is the sat's UTXO chain on Bitcoin, never the envelope.
  * Anything the log cannot derive (commitTxId, feeRate, post-genesis resource
  * updates, a btco binding not yet anchored by a witness proof) rides in the
  * `unverified` HONESTY SECTION: advisory-only, never trusted at load/verify time.

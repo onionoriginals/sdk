@@ -45,7 +45,7 @@ function makeLifecycle() {
 }
 
 describe('replayProvenance pure fold (#Phase2 Task7)', () => {
-  test('genesis-only log: did:peer layer, did:cel binding, no migrations/transfers', async () => {
+  test('genesis-only log: did:peer layer, did:cel binding, no migrations', async () => {
     const { lifecycle } = makeLifecycle();
     const asset = await lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: 'cd'.repeat(32) }
@@ -57,7 +57,6 @@ describe('replayProvenance pure fold (#Phase2 Task7)', () => {
     expect(folded.bindings['did:cel']).toBe(asset.id);
     expect(folded.bindings['did:cel']).toBe(deriveDidCel(asset.celLog!));
     expect(folded.migrations).toEqual([]);
-    expect(folded.transfers).toEqual([]);
   });
 
   test('throws on an empty log', () => {
@@ -71,19 +70,18 @@ describe('replayProvenance pure fold (#Phase2 Task7)', () => {
     ]);
     asset = await lifecycle.publishToWeb(asset, 'example.com');
     asset = await lifecycle.inscribeOnBitcoin(asset);
+    // Transfer is a pure sat move: it must NOT grow the log. Snapshot the event
+    // count, run the transfer, and assert the fold is unchanged by it.
+    const eventsBeforeTransfer = asset.celLog!.events.length;
     await lifecycle.transferOwnership(asset, VALID_ADDR);
+    expect(asset.celLog!.events.length).toBe(eventsBeforeTransfer);
 
     const folded = replayProvenance(asset.celLog!);
-    const live = asset.getProvenance();
 
     // Shared, log-derivable fields must agree exactly.
     expect(folded.currentLayer).toBe(asset.currentLayer);
     expect(folded.bindings['did:cel']).toBe(asset.id);
     expect(folded.bindings['did:webvh']).toBe(asset.bindings?.['did:webvh']);
-    expect(folded.transfers.length).toBe(live.transfers.length);
-    expect(folded.transfers[folded.transfers.length - 1]?.transactionId).toBe(
-      live.transfers[live.transfers.length - 1]?.transactionId
-    );
 
     // Known divergence: no bitcoin witness proof in this flow, so the fold
     // cannot derive the btco binding. Assert parity only if it DID find one.
@@ -182,7 +180,6 @@ describe('replayProvenance pure fold (#Phase2 Task7)', () => {
 
     const afterFold = replayProvenance(rotatedLog);
     expect(afterFold.migrations).toEqual(beforeFold.migrations);
-    expect(afterFold.transfers).toEqual(beforeFold.transfers);
     // Layer/bindings also unaffected by a rotation.
     expect(afterFold.currentLayer).toBe(beforeFold.currentLayer);
     expect(afterFold.bindings).toEqual(beforeFold.bindings);

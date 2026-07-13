@@ -443,26 +443,6 @@ describe('LIFECYCLE-021/happy – query migrations by toLayer', () => {
 // LIFECYCLE-022 / happy  –  query transfers filtered by recipient address
 // ---------------------------------------------------------------------------
 
-describe('LIFECYCLE-022/happy – query transfers by recipient', () => {
-  test('to() filter returns only transfers destined for that address', async () => {
-    const asset = new OriginalsAsset(
-      [baseResource],
-      buildDid('did:peer:abc') as any,
-      []
-    );
-    await asset.migrate('did:btco');
-
-    await asset.recordTransfer('addr-alice', 'addr-bob', 'tx-1');
-    await asset.recordTransfer('addr-bob', 'addr-carol', 'tx-2');
-    await asset.recordTransfer('addr-carol', 'addr-bob', 'tx-3');
-
-    const toBob = asset.queryProvenance().transfers().to('addr-bob').all();
-
-    expect(toBob).toHaveLength(2);
-    expect(toBob.every(t => t.to === 'addr-bob')).toBe(true);
-  });
-});
-
 // ---------------------------------------------------------------------------
 // LIFECYCLE-023 / happy  –  findByTransactionId
 // ---------------------------------------------------------------------------
@@ -479,20 +459,6 @@ describe('LIFECYCLE-023/happy – findByTransactionId', () => {
     const found = asset.findByTransactionId('tx-web-xyz');
     expect(found).not.toBeNull();
     expect((found as any).to).toBe('did:webvh');
-  });
-
-  test('finds transfer by transaction ID', async () => {
-    const asset = new OriginalsAsset(
-      [baseResource],
-      buildDid('did:peer:abc') as any,
-      []
-    );
-    await asset.migrate('did:btco');
-    await asset.recordTransfer('from-addr', 'to-addr', 'tx-transfer-abc');
-
-    const found = asset.findByTransactionId('tx-transfer-abc');
-    expect(found).not.toBeNull();
-    expect((found as any).transactionId).toBe('tx-transfer-abc');
   });
 
   test('returns null for unknown transaction ID', async () => {
@@ -549,13 +515,11 @@ describe('LIFECYCLE-024/happy – getProvenanceSummary', () => {
     );
     await asset.migrate('did:webvh', { transactionId: 'tx-w' });
     await asset.migrate('did:btco', { transactionId: 'tx-b', inscriptionId: 'i-1' });
-    await asset.recordTransfer('owner-1', 'owner-2', 'tx-t');
 
     const summary = asset.getProvenanceSummary();
 
     expect(summary.currentLayer).toBe('did:btco');
     expect(summary.migrationCount).toBe(2);
-    expect(summary.transferCount).toBe(1);
     expect(summary.created).toBeTruthy();
     expect(summary.lastActivity).toBeTruthy();
   });
@@ -569,7 +533,6 @@ describe('LIFECYCLE-024/happy – getProvenanceSummary', () => {
     const summary = asset.getProvenanceSummary();
 
     expect(summary.migrationCount).toBe(0);
-    expect(summary.transferCount).toBe(0);
     expect(summary.lastActivity).toBe(summary.created);
   });
 });

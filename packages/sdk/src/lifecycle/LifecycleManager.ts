@@ -459,8 +459,9 @@ export class LifecycleManager {
         expectedDid: env.assetDid,
         resolveKey: createDidManagerKeyResolver(this.didManager),
         ordinalsProvider: provider,
-        // A provider lets us reject a truncated pre-rotation log handed off by a
-        // seller (#366); its on-chain head betrays the omission.
+        // A provider lets us reject a truncated pre-rotation log (#366); its
+        // on-chain head betrays the omission. Off the ownership path — this is
+        // an authorship-completeness check, not an ownership check.
         checkHeadFreshness: provider !== undefined
       });
       if (!verification.verified) {
@@ -526,11 +527,13 @@ export class LifecycleManager {
     const warnings: string[] = [];
     // Freshness could not be checked (#366): a btco-anchored log without a
     // provider cannot be tested against its on-chain head, so a truncated
-    // pre-rotation hand-off would go undetected. Surface it — do not fail.
+    // pre-rotation authoring record would go undetected. Surface it — do not
+    // fail. Off the ownership path: ownership is sat control, read live from
+    // Bitcoin via getCurrentOwner(); this warns about provenance completeness.
     if (!provider && folded.currentLayer === 'did:btco') {
       warnings.push(
         'Loaded a btco-anchored asset without an ordinals provider: head freshness was NOT checked, so a ' +
-        'truncated (pre-rotation/pre-transfer) log cannot be ruled out. Re-load with a provider to verify freshness.'
+        'truncated (pre-rotation) authoring record cannot be ruled out. Re-load with a provider to verify freshness.'
       );
     }
     const provenance = this.buildRestoredProvenance(log, folded, env, warnings);
@@ -630,10 +633,45 @@ export class LifecycleManager {
   }
 
   /**
+   * Live ownership of the asset's anchoring satoshi, read from Bitcoin.
+   * Ownership IS sat control; the CEL is authorship only. A convenience LIVE
+   * READ, not an integrity gate (that's verify()/loadAsset's job), so it
+   * fails open: returns null for assets not yet on did:btco, for a
+   * malformed/unresolvable did:btco binding, or when the provider has no
+   * owner index. Throws ORD_PROVIDER_REQUIRED only when no ordinalsProvider
+   * is configured.
+   */
+  async getCurrentOwner(asset: OriginalsAsset): Promise<{ address: string; outpoint: string } | null> {
+    const btcoDid = asset.bindings?.['did:btco'] ?? (asset.id.startsWith('did:btco:') ? asset.id : undefined);
+    if (!btcoDid) return null;
+    const provider = this.config.ordinalsProvider;
+    if (!provider) {
+      throw new StructuredError('ORD_PROVIDER_REQUIRED', 'Ordinals provider must be configured to read live ownership from Bitcoin.');
+    }
+    let satoshi: string;
+    try {
+      satoshi = String(parseSatoshiIdentifier(btcoDid));
+    } catch {
+      return null;
+    }
+    if (typeof provider.getSatOwnership !== 'function') return null;
+    try {
+      return await provider.getSatOwnership(satoshi);
+    } catch (err) {
+      this.logger.warn('getCurrentOwner: ordinals provider getSatOwnership failed; returning null', {
+        satoshi,
+        error: (err as Error)?.message ?? String(err)
+      });
+      return null;
+    }
+  }
+
+  /**
    * Fold the log into a {@link ProvenanceChain} for restore(). createdAt/creator
    * come from the genesis data; migrations are re-materialized in the live
    * layer-to-layer shape (enriched from bitcoin witness proofs + advisory
-   * `unverified.commitTxId`/`feeRate`); transfers come from the fold; the
+   * `unverified.commitTxId`/`feeRate`); ownership history is the sat's UTXO
+   * chain, not the CEL, so provenance carries no transfers. The
    * `unverified.bindings` degraded btco binding is NEVER promoted — surfaced in
    * `warnings` instead (step 7).
    */
@@ -679,19 +717,12 @@ export class LifecycleManager {
       }
     }
 
-    const transfers = folded.transfers.map(t => ({
-      from: t.from,
-      to: t.to,
-      timestamp: t.timestamp,
-      transactionId: t.transactionId ?? ''
-    }));
-
     const resourceUpdates = (env.unverified?.resourceUpdates ?? []).map(u => ({ ...u }));
 
-    // txid: last transfer wins, else the btco migration's witnessed reveal txid.
-    const lastTransfer = transfers[transfers.length - 1];
+    // txid: the btco migration's witnessed reveal txid (ownership moves live on
+    // the sat's UTXO chain, not the CEL — no transfers to derive a txid from).
     const lastBtco = [...migrations].reverse().find(m => m.to === 'did:btco');
-    const txid = lastTransfer?.transactionId || lastBtco?.transactionId;
+    const txid = lastBtco?.transactionId;
 
     // 7) Degraded binding: fold couldn't derive btco but the honesty section
     // carries one — do NOT promote; surface as advisory.
@@ -703,7 +734,7 @@ export class LifecycleManager {
       );
     }
 
-    const provenance: ProvenanceChain = { createdAt, creator, migrations, transfers, resourceUpdates };
+    const provenance: ProvenanceChain = { createdAt, creator, migrations, resourceUpdates };
     if (txid) provenance.txid = txid;
     return provenance;
   }
@@ -1740,7 +1771,7 @@ export class LifecycleManager {
    */
   private async appendCelEventOrSkip(
     asset: OriginalsAsset,
-    type: 'migrate' | 'rotateKey' | 'transfer' | 'update',
+    type: 'migrate' | 'rotateKey' | 'update',
     data: unknown
   ): Promise<string | null> {
     const logBefore = asset.celLog;
@@ -1753,9 +1784,6 @@ export class LifecycleManager {
         const newLog = await appendEvent(logBefore, type, data, { signer, verificationMethod: vm });
         asset._replaceCelLog(newLog);
         // Keep the hosted CEL copies fresh AFTER the append committed.
-        // Must never throw: transferOwnership converts any throw from this
-        // method into CEL_APPEND_FAILED_POST_TRANSFER, which would misreport
-        // a mere hosting failure as a truncated log.
         await this.persistCelArtifacts(asset);
         return computeDigestMultibase(canonicalizeEntryForChain(newLog.events[newLog.events.length - 1]));
       }
@@ -2128,67 +2156,35 @@ export class LifecycleManager {
       vout: 0
     } as const;
 
+    // Best-effort pre-move sat holder, purely for the event payload. Ownership
+    // is the sat, read live from the chain; we NEVER fabricate `from` — if the
+    // provider has no owner index, or the lookup fails, we omit it (#366).
+    let from: string | undefined;
+    const ownershipProvider = this.config.ordinalsProvider;
+    if (satoshi && ownershipProvider?.getSatOwnership) {
+      try {
+        from = (await ownershipProvider.getSatOwnership(satoshi))?.address;
+      } catch {
+        from = undefined;
+      }
+    }
+
     const tx = await bm.transferInscription(inscription, newOwner);
-    // Record the actual chain of custody: the current owner (the last
-    // transfer's recipient) hands off to newOwner. Recording the asset DID
-    // as `from` on every transfer broke getTransfersFrom and produced a
-    // provenance chain where nobody ever transferred to anybody.
-    const priorTransfers = provenance.transfers;
-    const currentOwner = priorTransfers.length > 0
-      ? priorTransfers[priorTransfers.length - 1].to
-      : asset.id;
 
-    // Append-first CEL transfer event, signed by the OUTGOING controller, right
-    // after the sat moved. Atomicity differs from publish/inscribe/rotate (task
-    // 6): the sat has ALREADY moved, so a REAL append failure must NOT silently
-    // degrade — provenance would truncate on-log with no signal. Ordering:
-    //   try append → (catch) recordTransfer + throw CEL_APPEND_FAILED_POST_TRANSFER{txid}
-    //   success/degrade → recordTransfer → emit asset:transferred (as today)
-    // recordTransfer runs on BOTH paths so in-memory chain of custody is never
-    // lost; the invariant is EITHER (log has transfer event + provenance
-    // recorded) OR (provenance recorded + loud error carrying the txid to
-    // re-append with). Guard-based degrade (no keyStore / no celLog / controller
-    // key absent) still emits cel:append-skipped and falls through — that is the
-    // never-had-it path, allowed here exactly as for the other ops.
-    let celAppendError: unknown;
-    try {
-      await this.appendCelEventOrSkip(asset, 'transfer', {
-        // Current controller's did:key (the DID part, pre-#) folded from the log.
-        previousOwner: asset.celLog ? currentControllerVm(asset.celLog).split('#')[0] : undefined,
-        newOwner,
-        txid: tx.txid,
-        transferredAt: new Date().toISOString()
-      });
-    } catch (appendErr) {
-      celAppendError = appendErr;
-    }
-
-    // Rotation-first model (#366): the sat moved but the DID document still
-    // carries the previous owner's keys. The recipient must rotateBtcoKeys.
-    await asset.recordTransfer(currentOwner, newOwner, tx.txid, true);
-
-    if (celAppendError) {
-      const detail = celAppendError instanceof Error ? celAppendError.message : JSON.stringify(celAppendError);
-      throw new StructuredError(
-        'CEL_APPEND_FAILED_POST_TRANSFER',
-        `Ownership transferred (txid ${tx.txid}) but the signed CEL transfer event could not be appended: ${detail}. Provenance is truncated on-log; re-append the transfer event with this txid.`,
-        { txid: tx.txid }
-      );
-    }
-
-    // Mirror onto the manager emitter: asset.recordTransfer emits only on the
-    // asset's private emitter, so sdk.lifecycle.on('asset:transferred', ...)
-    // subscriptions (and the built-in EventLogger) never fired (issue #346).
-    // Payload must match the asset-emitted event exactly (keyRotationPending included).
-    await this.eventEmitter.emit({
-      type: 'asset:transferred',
+    // Ownership = sat control (this Bitcoin tx). The CEL is authorship only, so
+    // a transfer writes NOTHING to the log. Emit asset:transferred on BOTH the
+    // asset's private emitter and the manager emitter (issue #346: the asset
+    // emitter alone left sdk.lifecycle.on(...) subscribers unnotified).
+    const transferredEvent = {
+      type: 'asset:transferred' as const,
       timestamp: new Date().toISOString(),
       asset: { id: asset.id, layer: asset.currentLayer },
-      from: currentOwner,
+      ...(from !== undefined ? { from } : {}),
       to: newOwner,
-      transactionId: tx.txid,
-      keyRotationPending: true
-    });
+      transactionId: tx.txid
+    };
+    await asset._internalEmit(transferredEvent);
+    await this.eventEmitter.emit(transferredEvent);
 
     stopTimer();
     this.logger.info('Asset ownership transferred successfully', {
@@ -2212,7 +2208,7 @@ export class LifecycleManager {
     }
   }
 
-  // ===== Shared rotation-first core (rotateBtcoKeys + claimOwnership) =====
+  // ===== Shared rotation-first core (rotateBtcoKeys + authorizeSigner) =====
 
   /**
    * Ed25519 + derive check for a caller-supplied rotation keypair: the private
@@ -2235,7 +2231,7 @@ export class LifecycleManager {
 
   /**
    * Builds the rotated did:btco document (shared by rotateBtcoKeys and
-   * claimOwnership): same id, the NEW verification method, lineage back-links,
+   * authorizeSigner): same id, the NEW verification method, lineage back-links,
    * and the re-embedded resource manifest (the resolver serves the newest
    * inscription, so a rotation that dropped the manifest would erase it). The
    * `#cel` anchor is embedded separately, after the rotateKey head is known.
@@ -2359,10 +2355,11 @@ export class LifecycleManager {
   /**
    * Controller-signed witness acknowledgment (map §5.1): records the
    * inscription that witnessed `witnessedEventDigest` as an `update` event via
-   * the STANDARD append path — folds to the CURRENT controller (for claim, the
-   * NEW key post-rotation). Non-gating: `replayProvenance` ignores updates and
-   * the verifier never requires it. Best-effort — the inscription is already
-   * committed and paid, so a failed acknowledgment must not undo it. As a side
+   * the STANDARD append path — folds to the CURRENT controller (for
+   * authorizeSigner, the NEW key post-rotation). Non-gating: `replayProvenance`
+   * ignores updates and the verifier never requires it. Best-effort — the
+   * inscription is already committed and paid, so a failed acknowledgment
+   * must not undo it. As a side
    * effect this append re-persists the now-proofed log through the Task-3/4
    * choke point, closing the window where the stored copy predates the proof.
    */
@@ -2387,12 +2384,13 @@ export class LifecycleManager {
   }
 
   /**
-   * Rotation-first ownership hand-off (#366): reinscribe the did:btco
+   * Rotation-first optional authoring (#366): reinscribe the did:btco
    * document — same id, new verification method — on the SAME sat. Only the
    * current UTXO holder can do this (reinscription spends the output), so a
    * successful rotation simultaneously proves sat control and announces the
-   * new owner's signing key. The resolver's newest-valid-inscription rule
-   * then serves the rotated document.
+   * signing key the (already-owning) sat holder will author future
+   * provenance with. The resolver's newest-valid-inscription rule then
+   * serves the rotated document.
    *
    * KEY CUSTODY CONTRACT: after rotation the CURRENT controller folds to the
    * new key, so every subsequent CEL append (transfer, further rotation) signs
@@ -2437,8 +2435,9 @@ export class LifecycleManager {
 
     // Append-first (#365): rotateKey signed by the CURRENT controller — the
     // cooperative-rotation contract (the verifier only accepts rotations
-    // authorized by the outgoing authority). The non-cooperative arm (a NEW
-    // owner who cannot obtain the seller's signature) is claimOwnership.
+    // authorized by the outgoing authority). The non-cooperative arm (a sat
+    // holder who cannot obtain the prior controller's signature) is
+    // authorizeSigner.
     // Canonical VM the post-rotation controller will sign appends under.
     const newController = `did:key:${newVerificationMethod.publicKeyMultibase}`;
     const newControllerVm = `${newController}#${newVerificationMethod.publicKeyMultibase}`;
@@ -2446,7 +2445,7 @@ export class LifecycleManager {
     // can sign (key-custody contract). Before the append is fine — the rotateKey
     // event itself is signed by the OUTGOING controller; this key is for what
     // follows.
-    // Assert the pair whenever a privateKey is supplied (mirrors claimOwnership);
+    // Assert the pair whenever a privateKey is supplied (mirrors authorizeSigner);
     // registering it needs a keyStore, but the derive-check must not be skipped
     // just because none is configured — a mismatched key must fail loudly.
     if (newVerificationMethod.privateKey) {
@@ -2517,73 +2516,75 @@ export class LifecycleManager {
   }
 
   /**
-   * Non-cooperative ownership claim (#366, design §5): the write side of the
-   * verifier rule Task 5 landed. A NEW owner who has received the sat but
-   * CANNOT obtain the seller's signature reinscribes the did:btco document —
-   * same id, THEIR key — on the same sat, and self-signs the rotateKey with
-   * that new key. Because only the current UTXO holder can reinscribe, the
-   * reinscription is itself proof of sat control; the verifier accepts the
-   * otherwise-unauthorized rotation once the attached bitcoin witness proof
-   * (check (a)), the announced key (b), the signer (c), and the strictly-later
-   * inscription index (d) all line up.
+   * Optional author-enablement (#366, design §5): the write side of the
+   * verifier rule Task 5 landed. Ownership itself is the sat — this method
+   * does not grant or claim it. It lets the sat holder establish a signing
+   * key in the log so they can author new provenance even when they CANNOT
+   * obtain the prior controller's signature: they reinscribe the did:btco
+   * document — same id, THEIR key — on the same sat, and self-sign the
+   * rotateKey with that new key. Because only the current UTXO holder can
+   * reinscribe, the reinscription is itself proof of sat control; the
+   * verifier accepts the otherwise-unauthorized rotation once the attached
+   * bitcoin witness proof (check (a)), the announced key (b), the signer
+   * (c), and the strictly-later inscription index (d) all line up.
    *
    * Differs from {@link rotateBtcoKeys} (the COOPERATIVE arm): the rotateKey is
    * SELF-SIGNED with the new key (explicitly NOT the standard append path,
-   * which folds to the seller's current controller the claimer does not hold),
-   * `privateKey` is REQUIRED (the claimer must be able to sign), and a bitcoin
+   * which folds to the prior controller the sat holder does not hold),
+   * `privateKey` is REQUIRED (the signer must be able to sign), and a bitcoin
    * witness proof is attached to the rotateKey post-inscription — that is what
    * satisfies the verifier's check (a).
    *
    * @throws INVALID_STATE when the asset is not on did:btco / has no binding.
    * @throws INVALID_INPUT when no privateKey is supplied.
-   * @throws INVALID_KEY_PAIR / CEL_ED25519_REQUIRED for a bad claimant keypair.
-   * @throws OPERATION_IN_PROGRESS on a concurrent claim of the same asset.
+   * @throws INVALID_KEY_PAIR / CEL_ED25519_REQUIRED for a bad keypair.
+   * @throws OPERATION_IN_PROGRESS on a concurrent call for the same asset.
    */
-  async claimOwnership(
+  async authorizeSigner(
     asset: OriginalsAsset,
     newVerificationMethod: { publicKeyMultibase: string; privateKey: string },
     feeRate?: number
   ): Promise<{ inscriptionId: string; did: string }> {
     if (asset.currentLayer !== 'did:btco') {
-      throw new StructuredError('INVALID_STATE', 'Claiming ownership requires the asset to be on the did:btco layer.');
+      throw new StructuredError('INVALID_STATE', 'Authorizing a signer requires the asset to be on the did:btco layer.');
     }
     const btcoDid = asset.bindings?.['did:btco'];
     if (!btcoDid) {
-      throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to claim.');
+      throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to authorize a signer for.');
     }
-    // privateKey is REQUIRED: the claimer self-signs the rotateKey with it (the
-    // seller's controller is unavailable to fold onto).
+    // privateKey is REQUIRED: the sat holder self-signs the rotateKey with it
+    // (the prior controller is unavailable to fold onto).
     if (!newVerificationMethod?.privateKey) {
-      throw new StructuredError('INVALID_INPUT', 'claimOwnership requires the claimant private key to self-sign the rotation.');
+      throw new StructuredError('INVALID_INPUT', 'authorizeSigner requires the signer\'s private key to self-sign the rotation.');
     }
-    // Concurrency guard (issue #255, same pattern as rotateBtcoKeys): claim the
-    // asset synchronously before the first await so two overlapping claims
+    // Concurrency guard (issue #255, same pattern as rotateBtcoKeys): reserve the
+    // asset synchronously before the first await so two overlapping calls
     // cannot both broadcast reinscriptions.
     if (this.inFlightAssets.has(asset.id)) {
       throw new StructuredError(
         'OPERATION_IN_PROGRESS',
-        `An operation for asset ${asset.id} is already in progress; concurrent claims of the same asset would broadcast duplicate reinscriptions.`
+        `An operation for asset ${asset.id} is already in progress; concurrent authorizeSigner calls for the same asset would broadcast duplicate reinscriptions.`
       );
     }
     this.inFlightAssets.add(asset.id);
     try {
     const satoshi = btcoDid.split(':').pop()!;
     const pkm = newVerificationMethod.publicKeyMultibase;
-    // Derive-check the claimant keypair (privateKey REQUIRED); register it so
-    // post-claim appends by the new controller can sign.
+    // Derive-check the new signer's keypair (privateKey REQUIRED); register it
+    // so subsequent appends by the new controller can sign.
     this.assertRotationKeyPair(pkm, newVerificationMethod.privateKey);
     const newController = `did:key:${pkm}`;
     const newControllerVm = `${newController}#${pkm}`;
 
     // SELF-SIGN the rotateKey with the NEW key — explicitly NOT
-    // appendCelEventOrSkip, which folds to the seller's current controller the
-    // claimer cannot hold. The verifier accepts this unauthorized rotation
+    // appendCelEventOrSkip, which folds to the prior controller the sat
+    // holder cannot hold. The verifier accepts this unauthorized rotation
     // non-cooperatively once the reinscription witness proves sat control.
     const celLogBefore = asset.celLog;
     if (!celLogBefore) {
-      throw new StructuredError('INVALID_STATE', 'Asset has no CEL log to append the claim rotation to.');
+      throw new StructuredError('INVALID_STATE', 'Asset has no CEL log to append the rotation to.');
     }
-    // Guard above must run BEFORE registering the key: a doomed claim (no CEL
+    // Guard above must run BEFORE registering the key: a doomed call (no CEL
     // log) should not leave an unused key sitting in the keyStore.
     if (this.keyStore) {
       await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);

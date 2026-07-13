@@ -6,7 +6,7 @@
  * catches it as STALE_LOG; the honest full log loads; a no-provider load of a
  * btco-anchored envelope surfaces a "cannot check freshness" warning.
  *
- * Drives the REAL write path: createAsset → inscribeOnBitcoin → claimOwnership
+ * Drives the REAL write path: createAsset → inscribeOnBitcoin → authorizeSigner
  * (Task 6) reinscribes the rotated anchor doc on the shared OrdMock.
  */
 import { describe, test, expect } from 'bun:test';
@@ -29,17 +29,18 @@ function makeSdk(provider: OrdMockProvider) {
   } as any);
 }
 
-// create → inscribeOnBitcoin → claimOwnership: the buyer's rotation reinscribes
-// the anchor doc on the sat. Returns the full envelope + the rotateKey index.
+// create → inscribeOnBitcoin → authorizeSigner: the new sat holder's rotation
+// reinscribes the anchor doc on the sat. Returns the full envelope + the
+// rotateKey index.
 async function buildRotatedAsset(provider: OrdMockProvider) {
   const sdk = makeSdk(provider);
   const asset = await sdk.lifecycle.createAsset(RES);
   await sdk.lifecycle.inscribeOnBitcoin(asset);
 
-  const claimer = await new KeyManager().generateKeyPair('Ed25519');
-  await sdk.lifecycle.claimOwnership(asset, {
-    publicKeyMultibase: claimer.publicKey,
-    privateKey: claimer.privateKey,
+  const newSigner = await new KeyManager().generateKeyPair('Ed25519');
+  await sdk.lifecycle.authorizeSigner(asset, {
+    publicKeyMultibase: newSigner.publicKey,
+    privateKey: newSigner.privateKey,
   });
 
   const envelope = asset.serialize();

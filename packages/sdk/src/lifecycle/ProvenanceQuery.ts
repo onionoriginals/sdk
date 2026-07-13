@@ -2,7 +2,6 @@ import { ProvenanceChain } from './OriginalsAsset.js';
 import { LayerType } from '../types/index.js';
 
 export type Migration = ProvenanceChain['migrations'][number];
-export type Transfer = ProvenanceChain['transfers'][number];
 
 /**
  * Base query class for provenance inspection
@@ -21,13 +20,6 @@ export class ProvenanceQuery {
    */
   migrations(): MigrationQuery {
     return new MigrationQuery(this.provenance, this.afterDate, this.beforeDate);
-  }
-
-  /**
-   * Query transfers
-   */
-  transfers(): TransferQuery {
-    return new TransferQuery(this.provenance, this.afterDate, this.beforeDate);
   }
 
   /**
@@ -65,7 +57,7 @@ export class ProvenanceQuery {
   /**
    * Get first result
    */
-  first(): Migration | Transfer | null {
+  first(): Migration | null {
     const results = this.all();
     return results.length > 0 ? results[0] : null;
   }
@@ -73,7 +65,7 @@ export class ProvenanceQuery {
   /**
    * Get last result
    */
-  last(): Migration | Transfer | null {
+  last(): Migration | null {
     const results = this.all();
     return results.length > 0 ? results[results.length - 1] : null;
   }
@@ -81,9 +73,8 @@ export class ProvenanceQuery {
   /**
    * Get all results
    */
-  all(): Array<Migration | Transfer> {
-    const merged = [...this.provenance.migrations, ...this.provenance.transfers];
-    const filtered = this.applyDateFilters(merged);
+  all(): Migration[] {
+    const filtered = this.applyDateFilters([...this.provenance.migrations]);
     return filtered.sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
@@ -190,91 +181,5 @@ export class MigrationQuery extends ProvenanceQuery {
    */
   migrations(): MigrationQuery {
     return this;
-  }
-
-  /**
-   * Override transfers to create new TransferQuery with date filters
-   */
-  transfers(): TransferQuery {
-    return new TransferQuery(this.provenance, this.afterDate, this.beforeDate);
-  }
-}
-
-/**
- * Query class for transfers
- */
-export class TransferQuery extends ProvenanceQuery {
-  private fromAddressFilter?: string;
-  private toAddressFilter?: string;
-  private transactionIdFilter?: string;
-
-  constructor(provenance: ProvenanceChain, afterDate?: Date, beforeDate?: Date) {
-    super(provenance);
-    this.afterDate = afterDate;
-    this.beforeDate = beforeDate;
-  }
-
-  /**
-   * Filter by source address
-   */
-  from(address: string): this {
-    this.fromAddressFilter = address;
-    return this;
-  }
-
-  /**
-   * Filter by destination address
-   */
-  to(address: string): this {
-    this.toAddressFilter = address;
-    return this;
-  }
-
-  /**
-   * Filter by transaction ID
-   */
-  withTransaction(txId: string): this {
-    this.transactionIdFilter = txId;
-    return this;
-  }
-
-  /**
-   * Get all filtered transfers
-   */
-  all(): Transfer[] {
-    let results = [...this.provenance.transfers];
-
-    // Apply date filters
-    results = this.applyDateFilters(results);
-
-    // Apply address filters
-    if (this.fromAddressFilter) {
-      results = results.filter(t => t.from === this.fromAddressFilter);
-    }
-
-    if (this.toAddressFilter) {
-      results = results.filter(t => t.to === this.toAddressFilter);
-    }
-
-    // Apply transaction ID filter
-    if (this.transactionIdFilter) {
-      results = results.filter(t => t.transactionId === this.transactionIdFilter);
-    }
-
-    return results;
-  }
-
-  /**
-   * Override transfers to return this (method chaining)
-   */
-  transfers(): TransferQuery {
-    return this;
-  }
-
-  /**
-   * Override migrations to create new MigrationQuery with date filters
-   */
-  migrations(): MigrationQuery {
-    return new MigrationQuery(this.provenance, this.afterDate, this.beforeDate);
   }
 }

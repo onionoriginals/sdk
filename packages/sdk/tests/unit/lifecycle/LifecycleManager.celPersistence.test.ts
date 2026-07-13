@@ -143,17 +143,31 @@ describe('CEL storage persistence (#Phase3 Task 3)', () => {
     expect(failed.length).toBeGreaterThanOrEqual(1);
   });
 
-  test('transferOwnership refreshes the stored copy with the transfer event', async () => {
+  test('transferOwnership writes NOTHING to the CEL: the stored copy is unchanged (ownership is sat control, not a log write)', async () => {
     const storage = new MemoryStorageAdapter();
     const sdk = makeSdk({ storageAdapter: storage });
     const asset = await sdk.lifecycle.createAsset(RES);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
+
+    // Snapshot the stored CEL after inscribe (its real authoring events).
+    const before = Buffer.from(
+      (await storage.getObject('cel', celStoragePath(asset.id)))!.content
+    ).toString('utf8');
+    const beforeLog = parseEventLogJson(before);
+    // The stored copy reflects the real authoring flow: no transfer event.
+    expect(beforeLog.events.some(e => e.type === 'transfer')).toBe(false);
+    expect(beforeLog.events[beforeLog.events.length - 1].type).toBe('update');
+
     await sdk.lifecycle.transferOwnership(asset, 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080');
 
-    const stored = await storage.getObject('cel', celStoragePath(asset.id));
-    expect(stored).not.toBeNull();
-    const log = parseEventLogJson(Buffer.from(stored!.content).toString('utf8'));
-    expect(log.events[log.events.length - 1].type).toBe('transfer');
+    // A transfer appends no CEL event, so it re-persists nothing: the stored
+    // copy is byte-for-byte identical to the pre-transfer snapshot.
+    const after = Buffer.from(
+      (await storage.getObject('cel', celStoragePath(asset.id)))!.content
+    ).toString('utf8');
+    expect(after).toBe(before);
+    const afterLog = parseEventLogJson(after);
+    expect(afterLog.events.some(e => e.type === 'transfer')).toBe(false);
   });
 
   test('rotateBtcoKeys refreshes the stored copy with the rotateKey event', async () => {
