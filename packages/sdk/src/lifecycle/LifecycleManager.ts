@@ -655,7 +655,15 @@ export class LifecycleManager {
       return null;
     }
     if (typeof provider.getSatOwnership !== 'function') return null;
-    return await provider.getSatOwnership(satoshi);
+    try {
+      return await provider.getSatOwnership(satoshi);
+    } catch (err) {
+      this.logger.warn('getCurrentOwner: ordinals provider getSatOwnership failed; returning null', {
+        satoshi,
+        error: (err as Error)?.message ?? String(err)
+      });
+      return null;
+    }
   }
 
   /**

@@ -119,4 +119,26 @@ describe('LifecycleManager.getCurrentOwner', () => {
 
     expect(await sdk.lifecycle.getCurrentOwner(asset)).toBeNull();
   });
+
+  test('returns null (not a throw) when the provider getSatOwnership call rejects', async () => {
+    const provider = new OrdMockProvider();
+    // Simulate a down/erroring provider (network error, bug, etc.) — the
+    // fail-open contract must hold for unexpected exceptions too, not just
+    // the documented not-on-btco/malformed-binding/no-owner-index cases.
+    (provider as any).getSatOwnership = async () => {
+      throw new Error('provider down');
+    };
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: provider,
+      keyStore: new MockKeyStore()
+    });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '44'.repeat(32) }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset);
+
+    expect(await sdk.lifecycle.getCurrentOwner(asset)).toBeNull();
+  });
 });
