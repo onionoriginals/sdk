@@ -77,6 +77,8 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
     expect(events[0].to).toBe('bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080');
     expect(events[0].transactionId).toBe(tx.txid);
     expect(events[0].asset.layer).toBe('did:btco');
+    // Ownership is the sat now — no rotation-first flag (#366 ownership-is-sat).
+    expect('keyRotationPending' in events[0]).toBe(false);
   });
 
   test('asset-level subscriptions still fire (dual emit)', async () => {

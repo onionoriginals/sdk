@@ -7,9 +7,8 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-import type { EventLog, LogEntry, UpdateOptions, DataIntegrityProof } from '../types.js';
-import { computeDigestMultibase } from '../hash.js';
-import { canonicalizeEntryForChain } from '../canonicalize.js';
+import type { EventLog, UpdateOptions } from '../types.js';
+import { appendEvent } from './appendEvent.js';
 
 /**
  * Updates an event log by appending a new "update" event.
@@ -40,48 +39,9 @@ export async function updateEventLog(
   data: unknown,
   options: UpdateOptions
 ): Promise<EventLog> {
-  const { signer } = options;
-
-  // Validate input log
+  // Validate input log (preserved verbatim: message predates the generic guard in appendEvent)
   if (!log.events || log.events.length === 0) {
     throw new Error('Cannot update an empty event log');
   }
-
-  // Get the last event to compute the hash chain link
-  const lastEvent = log.events[log.events.length - 1];
-  
-  // Compute the digestMultibase of the last event
-  const previousEvent = computeDigestMultibase(canonicalizeEntryForChain(lastEvent));
-
-  // Create the event structure without proof first
-  const eventBase = {
-    type: 'update' as const,
-    data,
-    previousEvent,
-  };
-
-  // Generate proof using the provided signer
-  const proof: DataIntegrityProof = await signer(eventBase);
-
-  // Validate the proof has required fields
-  if (!proof.type || !proof.cryptosuite || !proof.proofValue) {
-    throw new Error('Invalid proof: missing required fields (type, cryptosuite, proofValue)');
-  }
-
-  // Construct the complete log entry
-  const entry: LogEntry = {
-    type: 'update',
-    data,
-    previousEvent,
-    proof: [proof],
-  };
-
-  // Return a new event log (immutable - does not mutate input)
-  const eventLog: EventLog = {
-    events: [...log.events, entry],
-    // Preserve previousLog reference if it exists
-    ...(log.previousLog ? { previousLog: log.previousLog } : {}),
-  };
-
-  return eventLog;
+  return appendEvent(log, 'update', data, options);
 }

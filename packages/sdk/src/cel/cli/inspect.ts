@@ -10,9 +10,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { EventLog, DataIntegrityProof, WitnessProof, AssetState, ExternalReference } from '../types.js';
+import type { EventLog, LogEntry, DataIntegrityProof, WitnessProof, AssetState, ExternalReference } from '../types.js';
 import { parseEventLogJson } from '../serialization/json.js';
 import { parseEventLogCbor } from '../serialization/cbor.js';
+import { btcoDidFromSatoshi } from '../btcoDid.js';
+import { deriveDidCel } from '../celDid.js';
 
 /**
  * Flags parsed from command line arguments
@@ -53,15 +55,39 @@ function isWitnessProof(proof: DataIntegrityProof | WitnessProof): proof is Witn
 }
 
 /**
- * Check if event data contains migration information
+ * LEGACY-ONLY sniff: detects migrations recorded as `update`-typed events
+ * (pre-first-class-`migrate` logs). Kept verbatim as the fallback; new logs
+ * are detected type-first via `event.type === 'migrate'`.
  */
 function isMigrationEvent(data: unknown): data is MigrationData {
   if (typeof data !== 'object' || data === null) return false;
   const d = data as Record<string, unknown>;
   return (
-    ('sourceDid' in d && 'targetDid' in d) || 
+    ('sourceDid' in d && 'targetDid' in d) ||
     ('layer' in d && typeof d.layer === 'string' && ['peer', 'webvh', 'btco'].includes(d.layer))
   );
+}
+
+/**
+ * Derives the resolvable DID for a migration event: the targetDid when the
+ * signed data carries one (webvh), or did:btco:<satoshi> from the
+ * bitcoin-ordinals-2024 witness proof (btco — the satoshi is only known
+ * after inscription, so it isn't in the signed data).
+ */
+function resolveMigrationDid(event: LogEntry, data: Record<string, unknown>): string | undefined {
+  if (data.layer === 'btco') {
+    const proof = (event.proof as ReadonlyArray<unknown> | undefined)?.find(
+      (p): p is Record<string, unknown> =>
+        !!p && typeof p === 'object' && (p as Record<string, unknown>).cryptosuite === 'bitcoin-ordinals-2024'
+    );
+    const satoshi = proof?.satoshi;
+    if (satoshi !== undefined && satoshi !== null) {
+      // Network-scoped identifier read from the SIGNED migration data;
+      // legacy logs without one default to the bare mainnet form.
+      return btcoDidFromSatoshi(satoshi as string | number, data.network as string | undefined);
+    }
+  }
+  return data.targetDid as string | undefined;
 }
 
 /**
@@ -150,6 +176,9 @@ function getEventBadge(type: string): string {
   switch (type) {
     case 'create': return '🆕 CREATE';
     case 'update': return '✏️  UPDATE';
+    case 'migrate': return '🗺️  MIGRATE';
+    case 'transfer': return '🔁 TRANSFER';
+    case 'rotateKey': return '🔑 ROTATEKEY';
     case 'deactivate': return '🔒 DEACTIVATE';
     default: return `📋 ${type.toUpperCase()}`;
   }
@@ -180,15 +209,20 @@ function deriveCurrentState(log: EventLog): AssetState {
     throw new Error('First event must be a create event');
   }
 
+  // Dual-read the genesis. New shape (`controller` present): the asset DID is
+  // DERIVED (did:cel), the creator is sourced from the controller, layer is
+  // definitionally 'peer'. Legacy shape (`did` present): read verbatim.
   const createData = createEvent.data as Record<string, unknown>;
-  
+  const isNewShapeGenesis = createData.controller !== undefined;
+
   // Initialize state from create event
   const state: AssetState = {
-    did: (createData.did as string) || 'unknown',
+    did: isNewShapeGenesis ? deriveDidCel(log) : ((createData.did as string) || 'unknown'),
     name: createData.name as string,
     layer: (createData.layer as 'peer' | 'webvh' | 'btco') || 'peer',
     resources: (createData.resources as ExternalReference[]) || [],
-    creator: createData.creator as string,
+    creator: (createData.creator as string | undefined) ?? (createData.controller as string | undefined),
+    controller: createData.controller as string | undefined,
     createdAt: createData.createdAt as string,
     updatedAt: undefined,
     deactivated: false,
@@ -201,16 +235,20 @@ function deriveCurrentState(log: EventLog): AssetState {
 
     if (event.type === 'update') {
       const updateData = event.data as Record<string, unknown>;
-      
+
       // Update known fields
       if (updateData.name !== undefined) state.name = updateData.name as string;
       if (updateData.resources !== undefined) state.resources = updateData.resources as ExternalReference[];
       if (updateData.updatedAt !== undefined) state.updatedAt = updateData.updatedAt as string;
-      if (updateData.did !== undefined) state.did = updateData.did as string;
-      if (updateData.targetDid !== undefined) state.did = updateData.targetDid as string;
-      if (updateData.layer !== undefined) state.layer = updateData.layer as 'peer' | 'webvh' | 'btco';
-      
-      // Store migration data in metadata
+      // Legacy logs only: new-shape did:cel genesis derives identity/layer, so a
+      // stray did/targetDid/layer field on an update event must not clobber it.
+      if (!isNewShapeGenesis) {
+        if (updateData.did !== undefined) state.did = updateData.did as string;
+        if (updateData.targetDid !== undefined) state.did = updateData.targetDid as string;
+        if (updateData.layer !== undefined) state.layer = updateData.layer as 'peer' | 'webvh' | 'btco';
+      }
+
+      // Store migration data in metadata (legacy update-sniffed migrations)
       if (isMigrationEvent(updateData)) {
         state.metadata = state.metadata || {};
         if (updateData.sourceDid) state.metadata.sourceDid = updateData.sourceDid;
@@ -218,7 +256,7 @@ function deriveCurrentState(log: EventLog): AssetState {
         if (updateData.txid) state.metadata.txid = updateData.txid;
         if (updateData.inscriptionId) state.metadata.inscriptionId = updateData.inscriptionId;
       }
-      
+
       // Store other fields in metadata
       for (const [key, value] of Object.entries(updateData)) {
         if (!['name', 'resources', 'updatedAt', 'did', 'targetDid', 'layer', 'creator', 'createdAt', 'sourceDid', 'domain', 'txid', 'inscriptionId'].includes(key)) {
@@ -226,6 +264,39 @@ function deriveCurrentState(log: EventLog): AssetState {
           state.metadata[key] = value;
         }
       }
+    } else if (event.type === 'migrate') {
+      // First-class migration event: layer transition with the same payload
+      // fields legacy update-sniffed migrations carried. For btco the
+      // resolvable DID comes from the bitcoin witness proof's satoshi.
+      const migrationData = event.data as Record<string, unknown>;
+      const migratedDid = resolveMigrationDid(event, migrationData);
+      if (migratedDid !== undefined) state.did = migratedDid;
+      if (migrationData.layer !== undefined) state.layer = migrationData.layer as 'peer' | 'webvh' | 'btco';
+      if (migrationData.migratedAt !== undefined) state.updatedAt = migrationData.migratedAt as string;
+
+      state.metadata = state.metadata || {};
+      if (migrationData.sourceDid !== undefined) state.metadata.sourceDid = migrationData.sourceDid;
+      if (migrationData.domain !== undefined) state.metadata.domain = migrationData.domain;
+      // Bitcoin details live in the witness proof (added after signing).
+      const bitcoinProof = (event.proof as ReadonlyArray<unknown> | undefined)?.find(
+        (p): p is Record<string, unknown> =>
+          !!p && typeof p === 'object' && (p as Record<string, unknown>).cryptosuite === 'bitcoin-ordinals-2024'
+      );
+      if (bitcoinProof?.txid !== undefined) state.metadata.txid = bitcoinProof.txid;
+      if (bitcoinProof?.inscriptionId !== undefined) state.metadata.inscriptionId = bitcoinProof.inscriptionId;
+    } else if (event.type === 'transfer') {
+      // Ownership hand-off: surface the owners; identity (did) is unchanged.
+      const transferData = event.data as Record<string, unknown>;
+      if (transferData.transferredAt !== undefined) state.updatedAt = transferData.transferredAt as string;
+      state.metadata = state.metadata || {};
+      if (transferData.previousOwner !== undefined) state.metadata.previousOwner = transferData.previousOwner;
+      if (transferData.newOwner !== undefined) state.metadata.newOwner = transferData.newOwner;
+      if (transferData.txid !== undefined) state.metadata.txid = transferData.txid;
+    } else if (event.type === 'rotateKey') {
+      // Authority hand-off: the last rotation's newController is current.
+      const rotationData = event.data as Record<string, unknown>;
+      if (typeof rotationData?.newController === 'string') state.controller = rotationData.newController;
+      if (typeof rotationData?.rotatedAt === 'string') state.updatedAt = rotationData.rotatedAt;
     } else if (event.type === 'deactivate') {
       state.deactivated = true;
       const deactivateData = event.data as Record<string, unknown>;
@@ -250,16 +321,27 @@ function extractLayerHistory(log: EventLog): Array<{ layer: string; timestamp: s
   
   for (const event of log.events) {
     const data = event.data as Record<string, unknown>;
-    
-    if (event.type === 'create' && data.layer) {
+
+    if (event.type === 'create') {
+      // New-shape genesis carries neither layer (definitionally 'peer') nor
+      // did (derived did:cel); legacy genesis embeds both.
       history.push({
-        layer: data.layer as string,
+        layer: (data.layer as string) || 'peer',
         timestamp: (data.createdAt as string) || event.proof[0]?.created || 'unknown',
-        did: data.did as string,
+        did: (data.did as string | undefined) ??
+          (data.controller !== undefined ? deriveDidCel(log) : undefined),
       });
     }
-    
-    if (event.type === 'update' && isMigrationEvent(event.data)) {
+
+    if (event.type === 'migrate') {
+      // Type-first: first-class migration event.
+      history.push({
+        layer: (data.layer as string) ?? 'unknown',
+        timestamp: (data.migratedAt as string) ?? event.proof[0]?.created ?? 'unknown',
+        did: resolveMigrationDid(event, data) ?? 'unknown',
+      });
+    } else if (event.type === 'update' && isMigrationEvent(event.data)) {
+      // Legacy sniff kept verbatim.
       const migrationData = event.data;
       history.push({
         layer: migrationData.layer ?? 'unknown',
@@ -268,7 +350,7 @@ function extractLayerHistory(log: EventLog): Array<{ layer: string; timestamp: s
       });
     }
   }
-  
+
   return history;
 }
 
@@ -434,19 +516,33 @@ function outputInspection(log: EventLog, state: AssetState): void {
     console.log(`\n ${prefix} ${getEventBadge(event.type)}`);
     
     // Timestamp from proof
-    const timestamp = event.proof[0]?.created || data.createdAt || data.updatedAt || data.migratedAt || data.deactivatedAt;
+    const timestamp = event.proof[0]?.created || data.createdAt || data.updatedAt || data.migratedAt || data.transferredAt || data.rotatedAt || data.deactivatedAt;
     if (timestamp) {
       console.log(` ${connector}   📅 ${formatTimestamp(timestamp as string)}`);
     }
-    
+
     // Event-specific details
     if (event.type === 'create') {
       if (data.name) console.log(` ${connector}   Name: ${String(data.name)}`);
       if (data.did) console.log(` ${connector}   DID: ${formatDid(data.did as string)}`);
+      if (data.controller) console.log(` ${connector}   Controller: ${formatDid(data.controller as string)}`);
       if (data.layer) console.log(` ${connector}   Layer: ${String(data.layer)}`);
       if (data.resources && Array.isArray(data.resources)) {
         console.log(` ${connector}   Resources: ${data.resources.length} file(s)`);
       }
+    } else if (event.type === 'migrate') {
+      // First-class migration event
+      console.log(` ${connector}   Migrated to: ${(data.layer as string | undefined) ?? 'unknown'}`);
+      if (data.sourceDid) console.log(` ${connector}   From: ${formatDid(data.sourceDid as string)}`);
+      const migratedDid = resolveMigrationDid(event, data);
+      if (migratedDid) console.log(` ${connector}   To:   ${formatDid(migratedDid)}`);
+      if (data.domain) console.log(` ${connector}   Domain: ${data.domain as string}`);
+    } else if (event.type === 'transfer') {
+      if (data.previousOwner) console.log(` ${connector}   From: ${formatDid(data.previousOwner as string)}`);
+      if (data.newOwner) console.log(` ${connector}   To:   ${formatDid(data.newOwner as string)}`);
+    } else if (event.type === 'rotateKey') {
+      if (data.previousController) console.log(` ${connector}   From: ${formatDid(data.previousController as string)}`);
+      if (data.newController) console.log(` ${connector}   To:   ${formatDid(data.newController as string)}`);
     } else if (event.type === 'update') {
       // Show what changed
       const changes: string[] = [];

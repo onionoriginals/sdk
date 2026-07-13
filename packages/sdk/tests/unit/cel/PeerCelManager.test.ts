@@ -1,8 +1,13 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { PeerCelManager, PeerCelConfig, PeerAssetData, CelSigner } from '../../../src/cel/layers/PeerCelManager';
+import { PeerCelManager, PeerCelConfig, CelAssetData, CelSigner } from '../../../src/cel/layers/PeerCelManager';
 import type { DataIntegrityProof, EventLog, ExternalReference, AssetState } from '../../../src/cel/types';
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
 import { deactivateEventLog } from '../../../src/cel/algorithms/deactivateEventLog';
+import { deriveDidCel } from '../../../src/cel/celDid';
+
+// The did:key the default mock signer reports as its verificationMethod; the
+// controller derived from the create event equals the DID portion (before '#').
+const MOCK_CONTROLLER = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
 
 /**
  * Mock signer that creates a valid DataIntegrityProof structure.
@@ -14,7 +19,7 @@ function createMockSigner(verificationMethod?: string): CelSigner {
       type: 'DataIntegrityProof',
       cryptosuite: 'eddsa-jcs-2022',
       created: new Date().toISOString(),
-      verificationMethod: verificationMethod || 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
+      verificationMethod: verificationMethod || `${MOCK_CONTROLLER}#z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK`,
       proofPurpose: 'assertionMethod',
       proofValue: 'z' + Buffer.from('mock-signature-' + JSON.stringify(data).slice(0, 50)).toString('base64'),
     };
@@ -51,12 +56,31 @@ describe('PeerCelManager', () => {
       manager = new PeerCelManager(createMockSigner());
     });
 
+    test('returns a derived did:cel and a de-self-referenced genesis', async () => {
+      const { log, did } = await manager.create('My Asset', []);
+      expect(did.startsWith('did:cel:u')).toBe(true);
+      expect(deriveDidCel(log)).toBe(did);
+      const data = log.events[0].data as Record<string, unknown>;
+      expect(data.did).toBeUndefined();          // no self-reference
+      expect(data.creator).toBeUndefined();      // holder ≠ asset identity
+      expect(data.layer).toBeUndefined();        // genesis layer is definitional
+      expect(typeof data.controller).toBe('string');
+      expect((data.controller as string).startsWith('did:key:')).toBe(true);
+      expect(typeof data.nonce).toBe('string');
+    });
+
+    test('two identical creates yield different DIDs (nonce)', async () => {
+      const a = await manager.create('Same', []);
+      const b = await manager.create('Same', []);
+      expect(a.did).not.toBe(b.did);
+    });
+
     test('creates an event log with a single create event', async () => {
       const resources: ExternalReference[] = [
         { digestMultibase: 'uXYZ123abc', mediaType: 'image/png' }
       ];
 
-      const log = await manager.create('My Asset', resources);
+      const { log } = await manager.create('My Asset', resources);
 
       expect(log).toBeDefined();
       expect(log.events).toBeInstanceOf(Array);
@@ -65,41 +89,32 @@ describe('PeerCelManager', () => {
 
     test('create event has type "create"', async () => {
       const resources: ExternalReference[] = [];
-      const log = await manager.create('Test Asset', resources);
+      const { log } = await manager.create('Test Asset', resources);
 
       expect(log.events[0].type).toBe('create');
     });
 
     test('create event has no previousEvent (first event in log)', async () => {
       const resources: ExternalReference[] = [];
-      const log = await manager.create('Test Asset', resources);
+      const { log } = await manager.create('Test Asset', resources);
 
       expect(log.events[0].previousEvent).toBeUndefined();
     });
 
     test('asset data includes name', async () => {
       const resources: ExternalReference[] = [];
-      const log = await manager.create('My Beautiful Asset', resources);
-      const data = log.events[0].data as PeerAssetData;
+      const { log } = await manager.create('My Beautiful Asset', resources);
+      const data = log.events[0].data as CelAssetData;
 
       expect(data.name).toBe('My Beautiful Asset');
     });
 
-    test('asset data includes did:peer identifier', async () => {
+    test('asset data includes controller (the holder did:key)', async () => {
       const resources: ExternalReference[] = [];
-      const log = await manager.create('Test Asset', resources);
-      const data = log.events[0].data as PeerAssetData;
+      const { log } = await manager.create('Test Asset', resources);
+      const data = log.events[0].data as CelAssetData;
 
-      expect(data.did).toBeDefined();
-      expect(data.did.startsWith('did:peer:')).toBe(true);
-    });
-
-    test('asset data includes layer as "peer"', async () => {
-      const resources: ExternalReference[] = [];
-      const log = await manager.create('Test Asset', resources);
-      const data = log.events[0].data as PeerAssetData;
-
-      expect(data.layer).toBe('peer');
+      expect(data.controller).toBe(MOCK_CONTROLLER);
     });
 
     test('asset data includes provided resources', async () => {
@@ -107,26 +122,27 @@ describe('PeerCelManager', () => {
         { digestMultibase: 'uHash1', mediaType: 'image/png', url: ['https://example.com/1.png'] },
         { digestMultibase: 'uHash2', mediaType: 'video/mp4' },
       ];
-      const log = await manager.create('Test Asset', resources);
-      const data = log.events[0].data as PeerAssetData;
+      const { log } = await manager.create('Test Asset', resources);
+      const data = log.events[0].data as CelAssetData;
 
       expect(data.resources).toEqual(resources);
     });
 
-    test('asset data includes creator (same as DID for peer layer)', async () => {
+    test('asset data includes a nonce (multibase base64url, 16 bytes)', async () => {
       const resources: ExternalReference[] = [];
-      const log = await manager.create('Test Asset', resources);
-      const data = log.events[0].data as PeerAssetData;
+      const { log } = await manager.create('Test Asset', resources);
+      const data = log.events[0].data as CelAssetData;
 
-      expect(data.creator).toBe(data.did);
+      expect(typeof data.nonce).toBe('string');
+      expect(data.nonce.startsWith('u')).toBe(true);
     });
 
     test('asset data includes createdAt timestamp', async () => {
       const beforeCreate = new Date().toISOString();
       const resources: ExternalReference[] = [];
-      const log = await manager.create('Test Asset', resources);
+      const { log } = await manager.create('Test Asset', resources);
       const afterCreate = new Date().toISOString();
-      const data = log.events[0].data as PeerAssetData;
+      const data = log.events[0].data as CelAssetData;
 
       expect(data.createdAt).toBeDefined();
       // Verify it's a valid ISO timestamp between before and after
@@ -136,7 +152,7 @@ describe('PeerCelManager', () => {
 
     test('event has at least one proof', async () => {
       const resources: ExternalReference[] = [];
-      const log = await manager.create('Test Asset', resources);
+      const { log } = await manager.create('Test Asset', resources);
 
       expect(log.events[0].proof).toBeInstanceOf(Array);
       expect(log.events[0].proof.length).toBeGreaterThanOrEqual(1);
@@ -144,7 +160,7 @@ describe('PeerCelManager', () => {
 
     test('proof uses eddsa-jcs-2022 cryptosuite', async () => {
       const resources: ExternalReference[] = [];
-      const log = await manager.create('Test Asset', resources);
+      const { log } = await manager.create('Test Asset', resources);
       const proof = log.events[0].proof[0];
 
       expect(proof.cryptosuite).toBe('eddsa-jcs-2022');
@@ -152,7 +168,7 @@ describe('PeerCelManager', () => {
 
     test('proof has type DataIntegrityProof', async () => {
       const resources: ExternalReference[] = [];
-      const log = await manager.create('Test Asset', resources);
+      const { log } = await manager.create('Test Asset', resources);
       const proof = log.events[0].proof[0];
 
       expect(proof.type).toBe('DataIntegrityProof');
@@ -160,7 +176,7 @@ describe('PeerCelManager', () => {
 
     test('no witness proofs are added (empty for peer layer)', async () => {
       const resources: ExternalReference[] = [];
-      const log = await manager.create('Test Asset', resources);
+      const { log } = await manager.create('Test Asset', resources);
 
       // Only one proof (controller proof), no witness proofs
       expect(log.events[0].proof).toHaveLength(1);
@@ -189,36 +205,29 @@ describe('PeerCelManager', () => {
     });
 
     test('accepts empty resources array', async () => {
-      const log = await manager.create('Test Asset', []);
-      const data = log.events[0].data as PeerAssetData;
+      const { log } = await manager.create('Test Asset', []);
+      const data = log.events[0].data as CelAssetData;
 
       expect(data.resources).toEqual([]);
     });
   });
 
-  describe('DID generation', () => {
-    test('generates unique DIDs for each asset', async () => {
+  describe('DID derivation', () => {
+    test('derives a distinct did:cel for each asset (nonce insurance)', async () => {
       const manager = new PeerCelManager(createMockSigner());
-      const resources: ExternalReference[] = [];
 
-      const log1 = await manager.create('Asset 1', resources);
-      const log2 = await manager.create('Asset 2', resources);
+      const a = await manager.create('Asset 1', []);
+      const b = await manager.create('Asset 2', []);
 
-      const data1 = log1.events[0].data as PeerAssetData;
-      const data2 = log2.events[0].data as PeerAssetData;
-
-      expect(data1.did).not.toBe(data2.did);
+      expect(a.did).not.toBe(b.did);
     });
 
-    test('generates did:peer numalgo 4 (long form) DID', async () => {
+    test('derives a did:cel identifier', async () => {
       const manager = new PeerCelManager(createMockSigner());
-      const resources: ExternalReference[] = [];
 
-      const log = await manager.create('Test Asset', resources);
-      const data = log.events[0].data as PeerAssetData;
+      const { did } = await manager.create('Test Asset', []);
 
-      // Numalgo 4 DIDs start with did:peer:4
-      expect(data.did.startsWith('did:peer:4')).toBe(true);
+      expect(did.startsWith('did:cel:')).toBe(true);
     });
   });
 
@@ -229,7 +238,7 @@ describe('PeerCelManager', () => {
         { digestMultibase: 'uTestHash123', mediaType: 'image/png' }
       ];
 
-      const log = await manager.create('My Original', resources);
+      const { log } = await manager.create('My Original', resources);
 
       // Verify the log
       const result = await verifyEventLog(log);
@@ -247,7 +256,7 @@ describe('PeerCelManager', () => {
       const manager = new PeerCelManager(createMockSigner());
       const resources: ExternalReference[] = [];
 
-      const log: EventLog = await manager.create('Test Asset', resources);
+      const { log } = await manager.create('Test Asset', resources);
 
       // Verify structure
       expect(log.events).toBeDefined();
@@ -264,10 +273,23 @@ describe('PeerCelManager', () => {
         { verificationMethod: customVm }
       );
 
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const proof = log.events[0].proof[0];
 
       expect(proof.verificationMethod).toBe(customVm);
+    });
+
+    test('controller from config verificationMethod is the DID before the fragment', async () => {
+      const customVm = 'did:key:z6MkCustomKey#key-0';
+      const manager = new PeerCelManager(
+        createMockSigner(customVm),
+        { verificationMethod: customVm }
+      );
+
+      const { log } = await manager.create('Test Asset', []);
+      const data = log.events[0].data as CelAssetData;
+
+      expect(data.controller).toBe('did:key:z6MkCustomKey');
     });
 
     test('uses custom proofPurpose from config', async () => {
@@ -284,7 +306,7 @@ describe('PeerCelManager', () => {
         proofPurpose: 'authentication',
       });
 
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const proof = log.events[0].proof[0];
 
       expect(proof.proofPurpose).toBe('authentication');
@@ -301,8 +323,8 @@ describe('PeerCelManager', () => {
         { digestMultibase: 'uDocHash', mediaType: 'application/pdf' },
       ];
 
-      const log = await manager.create('Multi-Resource Asset', resources);
-      const data = log.events[0].data as PeerAssetData;
+      const { log } = await manager.create('Multi-Resource Asset', resources);
+      const data = log.events[0].data as CelAssetData;
 
       expect(data.resources).toHaveLength(4);
       expect(data.resources).toEqual(resources);
@@ -312,8 +334,8 @@ describe('PeerCelManager', () => {
       const manager = new PeerCelManager(createMockSigner());
       const unicodeName = 'アート作品 🎨 Œuvre d\'art';
 
-      const log = await manager.create(unicodeName, []);
-      const data = log.events[0].data as PeerAssetData;
+      const { log } = await manager.create(unicodeName, []);
+      const data = log.events[0].data as CelAssetData;
 
       expect(data.name).toBe(unicodeName);
     });
@@ -322,8 +344,8 @@ describe('PeerCelManager', () => {
       const manager = new PeerCelManager(createMockSigner());
       const longName = 'A'.repeat(1000);
 
-      const log = await manager.create(longName, []);
-      const data = log.events[0].data as PeerAssetData;
+      const { log } = await manager.create(longName, []);
+      const data = log.events[0].data as CelAssetData;
 
       expect(data.name).toBe(longName);
     });
@@ -337,7 +359,7 @@ describe('PeerCelManager', () => {
     });
 
     test('appends an update event to the log', async () => {
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const updatedLog = await manager.update(log, { name: 'Updated Name' });
 
       expect(updatedLog.events).toHaveLength(2);
@@ -345,7 +367,7 @@ describe('PeerCelManager', () => {
     });
 
     test('update event contains provided data', async () => {
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const updateData = { name: 'New Name', description: 'A description' };
       const updatedLog = await manager.update(log, updateData);
 
@@ -356,7 +378,7 @@ describe('PeerCelManager', () => {
 
     test('update event includes updatedAt timestamp', async () => {
       const beforeUpdate = new Date().toISOString();
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const updatedLog = await manager.update(log, { name: 'New Name' });
       const afterUpdate = new Date().toISOString();
 
@@ -368,7 +390,7 @@ describe('PeerCelManager', () => {
     });
 
     test('update event has previousEvent linking to last event', async () => {
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const updatedLog = await manager.update(log, { name: 'New Name' });
 
       expect(updatedLog.events[1].previousEvent).toBeDefined();
@@ -377,9 +399,9 @@ describe('PeerCelManager', () => {
     });
 
     test('does not mutate original log', async () => {
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const originalEventCount = log.events.length;
-      
+
       await manager.update(log, { name: 'New Name' });
 
       expect(log.events).toHaveLength(originalEventCount);
@@ -396,7 +418,7 @@ describe('PeerCelManager', () => {
     });
 
     test('throws error when updating deactivated log', async () => {
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const deactivatedLog = await deactivateEventLog(log, 'No longer needed', {
         signer: createMockSigner(),
         verificationMethod: 'did:key:z6Mk#key-0',
@@ -407,7 +429,7 @@ describe('PeerCelManager', () => {
     });
 
     test('supports multiple sequential updates', async () => {
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const log2 = await manager.update(log, { name: 'Name 2' });
       const log3 = await manager.update(log2, { name: 'Name 3' });
 
@@ -423,7 +445,7 @@ describe('PeerCelManager', () => {
     });
 
     test('update has valid proof', async () => {
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const updatedLog = await manager.update(log, { name: 'New Name' });
 
       const proof = updatedLog.events[1].proof[0];
@@ -433,7 +455,7 @@ describe('PeerCelManager', () => {
     });
 
     test('handles non-object data by wrapping in value field', async () => {
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const updatedLog = await manager.update(log, 'simple string value');
 
       const eventData = updatedLog.events[1].data as Record<string, unknown>;
@@ -452,7 +474,7 @@ describe('PeerCelManager', () => {
       const resources: ExternalReference[] = [
         { digestMultibase: 'uHash1', mediaType: 'image/png' }
       ];
-      const log = await manager.create('My Asset', resources);
+      const { log } = await manager.create('My Asset', resources);
 
       const state = manager.getCurrentState(log);
 
@@ -462,29 +484,117 @@ describe('PeerCelManager', () => {
       expect(state.deactivated).toBe(false);
     });
 
-    test('state has did from create event', async () => {
-      const log = await manager.create('Test Asset', []);
-      const createData = log.events[0].data as PeerAssetData;
+    test('state did is the derived did:cel from the create event', async () => {
+      const { log, did } = await manager.create('Test Asset', []);
 
       const state = manager.getCurrentState(log);
 
-      expect(state.did).toBe(createData.did);
-      expect(state.did.startsWith('did:peer:')).toBe(true);
+      expect(state.did).toBe(did);
+      expect(state.did.startsWith('did:cel:')).toBe(true);
     });
 
-    test('state has creator from create event', async () => {
-      const log = await manager.create('Test Asset', []);
-      const createData = log.events[0].data as PeerAssetData;
+    test('state creator is the controller from the create event', async () => {
+      const { log } = await manager.create('Test Asset', []);
+      const createData = log.events[0].data as CelAssetData;
 
       const state = manager.getCurrentState(log);
 
-      expect(state.creator).toBe(createData.creator);
-      expect(state.creator).toBe(state.did); // For peer layer, creator === did
+      expect(state.creator).toBe(createData.controller);
+      expect(state.creator).toBe(MOCK_CONTROLLER);
+    });
+
+    test('state controller is the genesis controller before any rotation', async () => {
+      const { log } = await manager.create('Test Asset', []);
+
+      const state = manager.getCurrentState(log);
+
+      expect(state.controller).toBe(MOCK_CONTROLLER);
+    });
+
+    test('rotateKey replay hands the controller off to the last newController', async () => {
+      const { log } = await manager.create('Test Asset', []);
+      const rotatedLog: EventLog = {
+        events: [
+          ...log.events,
+          {
+            type: 'rotateKey',
+            data: { newController: 'did:key:z6MkFirstRotation', rotatedAt: '2026-01-01T00:00:00.000Z' },
+            previousEvent: 'uRotate1',
+            proof: log.events[0].proof,
+          },
+          {
+            type: 'rotateKey',
+            data: { newController: 'did:key:z6MkSecondRotation', rotatedAt: '2026-02-01T00:00:00.000Z' },
+            previousEvent: 'uRotate2',
+            proof: log.events[0].proof,
+          },
+        ],
+      };
+
+      const state = manager.getCurrentState(rotatedLog);
+
+      expect(state.controller).toBe('did:key:z6MkSecondRotation');
+    });
+
+    test('transfer replay records owners in metadata and bumps updatedAt', async () => {
+      const { log } = await manager.create('Test Asset', []);
+      const transferredLog: EventLog = {
+        events: [
+          ...log.events,
+          {
+            type: 'transfer',
+            data: {
+              previousOwner: MOCK_CONTROLLER,
+              newOwner: 'bc1qnewowner',
+              transferredAt: '2026-03-01T00:00:00.000Z',
+              txid: 'cafebabe',
+            },
+            previousEvent: 'uTransfer',
+            proof: log.events[0].proof,
+          },
+        ],
+      };
+
+      const state = manager.getCurrentState(transferredLog);
+
+      expect(state.metadata?.previousOwner).toBe(MOCK_CONTROLLER);
+      expect(state.metadata?.newOwner).toBe('bc1qnewowner');
+      expect(state.metadata?.txid).toBe('cafebabe');
+      expect(state.updatedAt).toBe('2026-03-01T00:00:00.000Z');
+    });
+
+    test('first-class migrate replay updates layer, did, and migration metadata', async () => {
+      const { log, did } = await manager.create('Test Asset', []);
+      const migratedLog: EventLog = {
+        events: [
+          ...log.events,
+          {
+            type: 'migrate',
+            data: {
+              sourceDid: did,
+              targetDid: 'did:webvh:example.com:abc123',
+              layer: 'webvh',
+              domain: 'example.com',
+              migratedAt: '2026-04-01T00:00:00.000Z',
+            },
+            previousEvent: 'uMigrate',
+            proof: log.events[0].proof,
+          },
+        ],
+      };
+
+      const state = manager.getCurrentState(migratedLog);
+
+      expect(state.layer).toBe('webvh');
+      expect(state.did).toBe('did:webvh:example.com:abc123');
+      expect(state.metadata?.sourceDid).toBe(did);
+      expect(state.metadata?.domain).toBe('example.com');
+      expect(state.updatedAt).toBe('2026-04-01T00:00:00.000Z');
     });
 
     test('state has createdAt from create event', async () => {
-      const log = await manager.create('Test Asset', []);
-      const createData = log.events[0].data as PeerAssetData;
+      const { log } = await manager.create('Test Asset', []);
+      const createData = log.events[0].data as CelAssetData;
 
       const state = manager.getCurrentState(log);
 
@@ -492,7 +602,7 @@ describe('PeerCelManager', () => {
     });
 
     test('reflects updated name after update event', async () => {
-      const log = await manager.create('Original Name', []);
+      const { log } = await manager.create('Original Name', []);
       const updatedLog = await manager.update(log, { name: 'New Name' });
 
       const state = manager.getCurrentState(updatedLog);
@@ -504,8 +614,8 @@ describe('PeerCelManager', () => {
       const initialResources: ExternalReference[] = [
         { digestMultibase: 'uHash1', mediaType: 'image/png' }
       ];
-      const log = await manager.create('Test Asset', initialResources);
-      
+      const { log } = await manager.create('Test Asset', initialResources);
+
       const newResources: ExternalReference[] = [
         { digestMultibase: 'uHash2', mediaType: 'video/mp4' }
       ];
@@ -517,7 +627,7 @@ describe('PeerCelManager', () => {
     });
 
     test('has updatedAt after update event', async () => {
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const updatedLog = await manager.update(log, { name: 'New Name' });
 
       const state = manager.getCurrentState(updatedLog);
@@ -526,10 +636,10 @@ describe('PeerCelManager', () => {
     });
 
     test('stores custom fields in metadata', async () => {
-      const log = await manager.create('Test Asset', []);
-      const updatedLog = await manager.update(log, { 
+      const { log } = await manager.create('Test Asset', []);
+      const updatedLog = await manager.update(log, {
         customField: 'custom value',
-        anotherField: 123 
+        anotherField: 123
       });
 
       const state = manager.getCurrentState(updatedLog);
@@ -540,7 +650,7 @@ describe('PeerCelManager', () => {
     });
 
     test('applies multiple updates sequentially', async () => {
-      const log = await manager.create('Name 1', []);
+      const { log } = await manager.create('Name 1', []);
       const log2 = await manager.update(log, { name: 'Name 2', version: 1 });
       const log3 = await manager.update(log2, { name: 'Name 3', version: 2 });
 
@@ -551,7 +661,7 @@ describe('PeerCelManager', () => {
     });
 
     test('marks state as deactivated after deactivate event', async () => {
-      const log = await manager.create('Test Asset', []);
+      const { log } = await manager.create('Test Asset', []);
       const deactivatedLog = await deactivateEventLog(log, 'Asset retired', {
         signer: createMockSigner(),
         verificationMethod: 'did:key:z6Mk#key-0',
@@ -593,17 +703,99 @@ describe('PeerCelManager', () => {
 
       expect(() => manager.getCurrentState(invalidLog)).toThrow('First event must be a create event');
     });
+
+    test('throws for a shapeless genesis (neither controller nor did) instead of minting an unbacked did:cel', () => {
+      const shapelessLog: EventLog = {
+        events: [{
+          type: 'create',
+          data: {
+            name: 'Shapeless Asset',
+            resources: [],
+            createdAt: '2020-01-01T00:00:00Z',
+          },
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: '2020-01-01T00:00:00Z',
+            verificationMethod: 'did:key:z6Mk#key-0',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zMock',
+          }],
+        }],
+      };
+
+      expect(() => manager.getCurrentState(shapelessLog)).toThrow(/genesis|controller|did/i);
+    });
+
+    describe('legacy did:peer logs (back-compat read path)', () => {
+      // A hand-built genesis in the pre-did:cel shape (embeds did/layer/creator).
+      // getCurrentState must keep reading these verbatim.
+      function legacyLog(did: string): EventLog {
+        return {
+          events: [{
+            type: 'create',
+            data: {
+              name: 'Legacy Asset',
+              did,
+              layer: 'peer',
+              resources: [{ digestMultibase: 'uHash', mediaType: 'image/png' }],
+              creator: did,
+              createdAt: '2020-01-01T00:00:00Z',
+            },
+            proof: [{
+              type: 'DataIntegrityProof',
+              cryptosuite: 'eddsa-jcs-2022',
+              created: '2020-01-01T00:00:00Z',
+              verificationMethod: `${did}#key-0`,
+              proofPurpose: 'assertionMethod',
+              proofValue: 'zMock',
+            }],
+          }],
+        };
+      }
+
+      test('preserves did/creator/layer from a legacy genesis', () => {
+        const did = 'did:peer:4zLegacy123';
+        const state = manager.getCurrentState(legacyLog(did));
+
+        expect(state.did).toBe(did);
+        expect(state.creator).toBe(did);
+        expect(state.layer).toBe('peer');
+      });
+
+      test('applies legacy did/layer override on update events', () => {
+        const did = 'did:peer:4zLegacy123';
+        const log = legacyLog(did);
+        log.events.push({
+          type: 'update',
+          data: { did: 'did:webvh:example.com:asset', layer: 'webvh', updatedAt: '2020-02-01T00:00:00Z' },
+          previousEvent: 'uPrev',
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: '2020-02-01T00:00:00Z',
+            verificationMethod: `${did}#key-0`,
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zMock',
+          }],
+        });
+
+        const state = manager.getCurrentState(log);
+        expect(state.did).toBe('did:webvh:example.com:asset');
+        expect(state.layer).toBe('webvh');
+      });
+    });
   });
 
   describe('integration: create then update then getCurrentState', () => {
     test('full lifecycle shows updated state', async () => {
       const manager = new PeerCelManager(createMockSigner());
-      
+
       // Create asset
       const initialResources: ExternalReference[] = [
         { digestMultibase: 'uOriginalHash', mediaType: 'image/png' }
       ];
-      const log = await manager.create('Original Name', initialResources);
+      const { log } = await manager.create('Original Name', initialResources);
 
       // Verify initial state
       const initialState = manager.getCurrentState(log);
@@ -615,7 +807,7 @@ describe('PeerCelManager', () => {
       const newResources: ExternalReference[] = [
         { digestMultibase: 'uNewHash', mediaType: 'video/mp4' }
       ];
-      const updatedLog = await manager.update(log, { 
+      const updatedLog = await manager.update(log, {
         name: 'Updated Name',
         resources: newResources,
         description: 'Now with video!'
@@ -628,7 +820,7 @@ describe('PeerCelManager', () => {
       expect(updatedState.metadata?.description).toBe('Now with video!');
       expect(updatedState.deactivated).toBe(false);
       expect(updatedState.updatedAt).toBeDefined();
-      
+
       // Original create data should still be preserved
       expect(updatedState.did).toBe(initialState.did);
       expect(updatedState.creator).toBe(initialState.creator);
@@ -637,8 +829,8 @@ describe('PeerCelManager', () => {
 
     test('updated log passes verification', async () => {
       const manager = new PeerCelManager(createMockSigner());
-      
-      const log = await manager.create('Test Asset', []);
+
+      const { log } = await manager.create('Test Asset', []);
       const updatedLog = await manager.update(log, { name: 'New Name' });
 
       // Verify the updated log

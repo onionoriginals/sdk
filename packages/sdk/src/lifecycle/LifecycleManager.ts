@@ -5,19 +5,39 @@ import {
   KeyStore,
   ExternalSigner,
   VerifiableCredential,
-  LayerType
+  LayerType,
+  DIDDocument
 } from '../types/index.js';
 import { BitcoinManager, MAX_REASONABLE_FEE_RATE } from '../bitcoin/BitcoinManager.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { CredentialManager } from '../vc/CredentialManager.js';
-import { OriginalsAsset } from './OriginalsAsset.js';
+import { OriginalsAsset, type ProvenanceChain } from './OriginalsAsset.js';
+import { replayProvenance } from './replayProvenance.js';
+import { checkGenesisResourceBinding } from './genesisBinding.js';
+import {
+  ASSET_ENVELOPE_FORMAT,
+  ASSET_ENVELOPE_VERSION,
+  type AssetEnvelope
+} from './assetEnvelope.js';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
-import { hashResource } from '../utils/validation.js';
+import { hashResource, validateCredential } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix } from '../cel/btcoDid.js';
+import { KeyManager } from '../did/KeyManager.js';
+import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
+import { createCelDidDocument, didCelMatchesLog, deriveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
+import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
+import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
+import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
+import { appendEvent } from '../cel/algorithms/appendEvent.js';
+import { computeDigestMultibase } from '../cel/hash.js';
+import { canonicalizeEntryForChain } from '../cel/canonicalize.js';
+import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
+import type { EventLog, LogEntry, ExternalReference, WitnessProof, OrdinalsLookup, VerificationResult } from '../cel/types.js';
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { multikey } from '../crypto/Multikey.js';
+import { ed25519 } from '@noble/curves/ed25519.js';
 import { createBtcoDidDocument } from '../did/createBtcoDidDocument.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
@@ -260,93 +280,82 @@ export class LifecycleManager {
         this.assertContentMatchesDeclaredHash(resource, 'createAsset');
       }
     
-    // Create a proper DID:peer document with verification methods
-    // If keyStore is provided, request the key pair to be returned
+    // Mint the asset's genesis identity as a did:cel derived from a signed CEL
+    // create event. The controller key is ALWAYS Ed25519 (CEL is Ed25519-only),
+    // independent of config.defaultKeyType. LifecycleManager holds no KeyManager;
+    // KeyManager is stateless, so we instantiate one locally.
+    const controllerKp = await new KeyManager().generateKeyPair('Ed25519');
+    const { signer, verificationMethod } = celSignerFromKeyPair(controllerKp);
+
+    // Bridge AssetResource hashes (hex sha256) to CEL ExternalReferences.
+    const externalRefs: ExternalReference[] = resources.map((r) => ({
+      digestMultibase: hexSha256ToDigestMultibase(r.hash),
+      ...(r.contentType ? { mediaType: r.contentType } : {})
+    }));
+
+    // Genesis name = first resource's id (no name param on createAsset by design).
+    const manager = new PeerCelManager(signer, { verificationMethod });
+    const { log, did } = await manager.create(resources[0]?.id ?? 'asset', externalRefs);
+
+    const didDoc = createCelDidDocument(did, controllerKp.publicKey);
+
+    // Register the controller key under BOTH the did:key VM (CEL signing) and
+    // `${did}#key-0` (so signWithKeyStore's `${issuer}#key-0` probe resolves).
+    // keyStore-less SDKs still get a fully-formed did:cel asset with its log.
     if (this.keyStore) {
-      const result = await this.didManager.createDIDPeer(resources, true);
-      const didDoc = result.didDocument;
-      const keyPair = result.keyPair;
-      
-      // Register the private key in the keyStore
-      if (didDoc.verificationMethod && didDoc.verificationMethod.length > 0) {
-        let verificationMethodId = didDoc.verificationMethod[0].id;
-        
-        // Ensure VM ID is absolute (not just a fragment like #key-0)
-        if (verificationMethodId.startsWith('#')) {
-          verificationMethodId = `${didDoc.id}${verificationMethodId}`;
-        }
-        
-        await this.keyStore.setPrivateKey(verificationMethodId, keyPair.privateKey);
-      }
-      
-      const asset = new OriginalsAsset(resources, didDoc, []);
-      
-      // Defer asset:created emission to the next microtask so a handler
-      // subscribed on the LifecycleManager emitter immediately before this call
-      // still observes it. (Only pre-subscription works — see below.)
-      queueMicrotask(() => {
-        const event = {
-          type: 'asset:created' as const,
-          timestamp: new Date().toISOString(),
-          asset: {
-            id: asset.id,
-            layer: asset.currentLayer,
-            resourceCount: resources.length,
-            createdAt: asset.getProvenance().createdAt
-          }
-        };
-
-        // Emitted only on the LifecycleManager emitter. An asset-level emit
-        // here would be dead code: a caller obtains the asset reference only
-        // after `await createAsset()` resolves, and this microtask has already
-        // run by then, so `(await createAsset()).on('asset:created', ...)` could
-        // never fire. Subscribe via `sdk.lifecycle.on('asset:created', ...)`
-        // before creating instead.
-        void this.eventEmitter.emit(event);
-      });
-      
-      stopTimer();
-      this.logger.info('Asset created successfully', { assetId: asset.id });
-      this.metrics.recordOperation('lifecycle.createAsset', performance.now() - metricsStart, true);
-      this.metrics.recordAssetCreated();
-
-      return asset;
+      await this.keyStore.setPrivateKey(verificationMethod, controllerKp.privateKey);
+      await this.keyStore.setPrivateKey(`${did}#key-0`, controllerKp.privateKey);
     } else {
-      // No keyStore, just create the DID document
-      const didDoc = await this.didManager.createDIDPeer(resources);
-      const asset = new OriginalsAsset(resources, didDoc, []);
-      
-      // Defer asset:created emission to the next microtask so a handler
-      // subscribed on the LifecycleManager emitter immediately before this call
-      // still observes it. (Only pre-subscription works — see below.)
-      queueMicrotask(() => {
-        const event = {
-          type: 'asset:created' as const,
-          timestamp: new Date().toISOString(),
-          asset: {
-            id: asset.id,
-            layer: asset.currentLayer,
-            resourceCount: resources.length,
-            createdAt: asset.getProvenance().createdAt
-          }
-        };
-
-        // Emitted only on the LifecycleManager emitter. An asset-level emit
-        // here would be dead code: a caller obtains the asset reference only
-        // after `await createAsset()` resolves, and this microtask has already
-        // run by then, so `(await createAsset()).on('asset:created', ...)` could
-        // never fire. Subscribe via `sdk.lifecycle.on('asset:created', ...)`
-        // before creating instead.
-        void this.eventEmitter.emit(event);
+      // No keyStore: the freshly minted controller private key is held nowhere
+      // and is dropped here, so the asset cannot author CEL events — publish/
+      // inscribe/authorizeSigner appends will degrade (cel:append-skipped)
+      // until this VM's key is available in a keyStore. Surface it; never
+      // hard-fail (keyStore-less SDKs are valid for verification-only use).
+      await this.eventEmitter.emit({
+        type: 'key:unpersisted',
+        timestamp: new Date().toISOString(),
+        asset: { id: did },
+        did,
+        verificationMethod
       });
-      
-      stopTimer();
-      this.logger.info('Asset created successfully', { assetId: asset.id });
-      this.metrics.recordOperation('lifecycle.createAsset', performance.now() - metricsStart, true);
-      this.metrics.recordAssetCreated();
-
-      return asset;
     }
+
+    const asset = new OriginalsAsset(resources, didDoc, [], log);
+
+    // Persist the genesis CEL at the conventional cel/<suffix>.json key so
+    // the did:cel resolves from storage immediately (best-effort, never gates).
+    await this.persistCelArtifacts(asset);
+
+    // Defer asset:created emission to the next microtask so a handler
+    // subscribed on the LifecycleManager emitter immediately before this call
+    // still observes it. (Only pre-subscription works — see below.)
+    queueMicrotask(() => {
+      const event = {
+        type: 'asset:created' as const,
+        timestamp: new Date().toISOString(),
+        asset: {
+          id: asset.id,
+          layer: asset.currentLayer,
+          resourceCount: resources.length,
+          createdAt: asset.getProvenance().createdAt
+        }
+      };
+
+      // Emitted only on the LifecycleManager emitter. An asset-level emit
+      // here would be dead code: a caller obtains the asset reference only
+      // after `await createAsset()` resolves, and this microtask has already
+      // run by then, so `(await createAsset()).on('asset:created', ...)` could
+      // never fire. Subscribe via `sdk.lifecycle.on('asset:created', ...)`
+      // before creating instead.
+      void this.eventEmitter.emit(event);
+    });
+
+    stopTimer();
+    this.logger.info('Asset created successfully', { assetId: asset.id });
+    this.metrics.recordOperation('lifecycle.createAsset', performance.now() - metricsStart, true);
+    this.metrics.recordAssetCreated();
+
+    return asset;
     } catch (error) {
       stopTimer();
       this.logger.error('Asset creation failed', error as Error, { resourceCount: resources.length });
@@ -354,6 +363,416 @@ export class LifecycleManager {
       this.metrics.recordError('ASSET_CREATION_FAILED', 'createAsset');
       throw error;
     }
+  }
+
+  /**
+   * Reconstruct an asset from a serialized {@link AssetEnvelope} — the buyer
+   * half of the interchange format (#377). Inverse of {@link OriginalsAsset.serialize}.
+   *
+   * VERIFIES BY DEFAULT: parses and structurally validates the envelope, then
+   * (unless `skipVerification`) runs the SAME cryptographic gate the live verify
+   * path uses — `verifyEventLog` bound to `assetDid`, the resource↔genesis
+   * binding, per-resource inline-content hashes, and DID-doc↔fold cross-checks —
+   * before folding the log into provenance and rebuilding via
+   * {@link OriginalsAsset.restore}. Every failure is fail-closed.
+   *
+   * The `unverified.*` honesty section is passed through as advisory only and is
+   * NEVER promoted to trusted state: a `unverified.bindings['did:btco']` the fold
+   * cannot derive from the log is surfaced in `warnings`, not in `asset.bindings`.
+   *
+   * @param envelope - The envelope object or its JSON string.
+   * @param opts.skipVerification - Skip the cryptographic + binding checks ONLY;
+   *   structural validation (format/version/required fields) always runs.
+   * @param opts.ordinalsProvider - Ordinals lookup for bitcoin witness proofs;
+   *   defaults to `config.ordinalsProvider`. btco-anchored logs fail closed
+   *   without one.
+   * @throws StructuredError('ENVELOPE_INVALID') for malformed envelopes.
+   * @throws StructuredError('ENVELOPE_VERSION_UNSUPPORTED') for a version newer
+   *   than this SDK supports.
+   * @throws StructuredError('ASSET_LOAD_VERIFICATION_FAILED', …, { verification })
+   *   when verification or any binding/cross-check fails.
+   */
+  async loadAsset(
+    envelope: AssetEnvelope | string,
+    opts?: { skipVerification?: boolean; ordinalsProvider?: OrdinalsLookup }
+  ): Promise<{ asset: OriginalsAsset; verification?: VerificationResult; warnings: string[] }> {
+    // 1) Structural validation (ALWAYS runs, even under skipVerification).
+    let env: AssetEnvelope;
+    if (typeof envelope === 'string') {
+      try {
+        env = JSON.parse(envelope) as AssetEnvelope;
+      } catch (e) {
+        throw new StructuredError('ENVELOPE_INVALID', `Envelope is not valid JSON: ${(e as Error).message}`);
+      }
+    } else {
+      env = envelope;
+    }
+    if (!env || typeof env !== 'object') {
+      throw new StructuredError('ENVELOPE_INVALID', 'Envelope must be an object or a JSON string.');
+    }
+    if (env.format !== ASSET_ENVELOPE_FORMAT) {
+      throw new StructuredError('ENVELOPE_INVALID', `Unrecognized envelope format: ${String(env.format)} (expected ${ASSET_ENVELOPE_FORMAT}).`);
+    }
+    if (!Number.isInteger(env.version)) {
+      throw new StructuredError('ENVELOPE_INVALID', `Envelope version must be an integer; got ${String(env.version)}.`);
+    }
+    if (env.version > ASSET_ENVELOPE_VERSION) {
+      throw new StructuredError('ENVELOPE_VERSION_UNSUPPORTED', `Envelope version ${env.version} is newer than this SDK supports (max ${ASSET_ENVELOPE_VERSION}).`);
+    }
+    if (typeof env.assetDid !== 'string' || !env.assetDid) {
+      throw new StructuredError('ENVELOPE_INVALID', 'Envelope is missing a valid assetDid.');
+    }
+    if (!env.eventLog || typeof env.eventLog !== 'object') {
+      throw new StructuredError('ENVELOPE_INVALID', 'Envelope is missing a valid eventLog.');
+    }
+    if (!env.didDocuments || typeof env.didDocuments !== 'object' || !env.didDocuments['did:cel']) {
+      throw new StructuredError('ENVELOPE_INVALID', "Envelope is missing didDocuments['did:cel'].");
+    }
+    if (!Array.isArray(env.resources) || env.resources.length === 0) {
+      throw new StructuredError('ENVELOPE_INVALID', 'Envelope must carry a non-empty resources array.');
+    }
+    // Each resource needs a string hash: the genesis-binding path feeds it to
+    // hexSha256ToDigestMultibase, which throws a raw TypeError on undefined (#377).
+    for (const res of env.resources) {
+      if (!res || typeof res !== 'object' || typeof (res as { hash?: unknown }).hash !== 'string') {
+        const resId = (res as { id?: unknown })?.id;
+        throw new StructuredError('ENVELOPE_INVALID', `Envelope resource ${typeof resId === 'string' ? resId : '(unknown)'} is missing a string hash.`);
+      }
+    }
+    // Credentials, when present, must be an array (else map() throws a raw
+    // TypeError); their contents are validated after the fold (step 6).
+    if (env.credentials !== undefined && !Array.isArray(env.credentials)) {
+      throw new StructuredError('ENVELOPE_INVALID', 'Envelope credentials must be an array when present.');
+    }
+
+    // 2) Log parsing through the JSON gate (validates structure, decouples from
+    // the caller's object, preserves witness-proof extension fields).
+    let log: EventLog;
+    try {
+      log = parseEventLogJson(JSON.stringify(env.eventLog));
+    } catch (e) {
+      throw new StructuredError('ENVELOPE_INVALID', `Envelope eventLog is not a valid CEL log: ${(e as Error).message}`);
+    }
+
+    // The fold is needed to rebuild the asset regardless of verification.
+    // Guard: replayProvenance throws a raw Error for a parseable-but-misordered
+    // (non-create-first) log; surface it in the envelope taxonomy (#377).
+    let folded: ReturnType<typeof replayProvenance>;
+    try {
+      folded = replayProvenance(log);
+    } catch (e) {
+      throw new StructuredError('ENVELOPE_INVALID', `Envelope eventLog cannot be folded into provenance: ${(e as Error).message}`);
+    }
+
+    // 3-5) Verification + binding + cross-checks (skipped by skipVerification).
+    const provider = opts?.ordinalsProvider ?? this.config.ordinalsProvider;
+    let verification: VerificationResult | undefined;
+    if (!opts?.skipVerification) {
+      verification = await verifyEventLog(log, {
+        expectedDid: env.assetDid,
+        resolveKey: createDidManagerKeyResolver(this.didManager),
+        ordinalsProvider: provider,
+        // A provider lets us reject a truncated pre-rotation log (#366); its
+        // on-chain head betrays the omission. Off the ownership path — this is
+        // an authorship-completeness check, not an ownership check.
+        checkHeadFreshness: provider !== undefined
+      });
+      if (!verification.verified) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          `Event log failed verification for ${env.assetDid}. Refusing to load an asset whose provenance does not verify.`,
+          { verification }
+        );
+      }
+
+      // 4) Resource↔genesis binding (shared helper) + inline-content hashes.
+      if (!checkGenesisResourceBinding(log, env.resources)) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          'Envelope resources do not back the log genesis (a genesis resource digest is missing).',
+          { verification }
+        );
+      }
+      for (const res of env.resources) {
+        if (typeof res.content === 'string') {
+          const computed = hashResource(Buffer.from(res.content, 'utf8'));
+          if (computed.toLowerCase() !== String(res.hash).toLowerCase()) {
+            throw new StructuredError(
+              'ASSET_LOAD_VERIFICATION_FAILED',
+              `Resource ${res.id}: inline content does not match its declared hash (declared ${res.hash}, computed ${computed}).`,
+              { verification }
+            );
+          }
+        }
+      }
+
+      // 5) Cross-checks: the fold IS the source of truth for identity/bindings;
+      // an envelope's advisory DID docs must not disagree with it — a swapped
+      // doc is exactly the attack the envelope invites. did:cel is bound by the
+      // genesis derivation; webvh/btco docs must match the folded binding when
+      // the fold derived one (a degraded btco binding has none — see step 7).
+      if (!didCelMatchesLog(env.assetDid, log)) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          `assetDid ${env.assetDid} does not derive from the log genesis.`,
+          { verification }
+        );
+      }
+      const webvhDoc = env.didDocuments['did:webvh'];
+      if (webvhDoc && folded.bindings['did:webvh'] && webvhDoc.id !== folded.bindings['did:webvh']) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          `didDocuments['did:webvh'].id (${webvhDoc.id}) does not match the folded binding (${folded.bindings['did:webvh']}).`,
+          { verification }
+        );
+      }
+      const btcoDoc = env.didDocuments['did:btco'];
+      if (btcoDoc && folded.bindings['did:btco'] && btcoDoc.id !== folded.bindings['did:btco']) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          `didDocuments['did:btco'].id (${btcoDoc.id}) does not match the folded binding (${folded.bindings['did:btco']}).`,
+          { verification }
+        );
+      }
+    }
+
+    // 6) Assemble provenance from the (verified) log + fold + advisory unverified.
+    const warnings: string[] = [];
+    // Freshness could not be checked (#366): a btco-anchored log without a
+    // provider cannot be tested against its on-chain head, so a truncated
+    // pre-rotation authoring record would go undetected. Surface it — do not
+    // fail. Off the ownership path: ownership is sat control, read live from
+    // Bitcoin via getCurrentOwner(); this warns about provenance completeness.
+    if (!provider && folded.currentLayer === 'did:btco') {
+      warnings.push(
+        'Loaded a btco-anchored asset without an ordinals provider: head freshness was NOT checked, so a ' +
+        'truncated (pre-rotation) authoring record cannot be ruled out. Re-load with a provider to verify freshness.'
+      );
+    }
+    const provenance = this.buildRestoredProvenance(log, folded, env, warnings);
+
+    // CRITICAL (#377): DERIVE the did:cel document from the VERIFIED genesis
+    // controller — never trust envelope.didDocuments['did:cel']. A tampered VM
+    // or rogue service in that doc would otherwise flow into the buyer's minted
+    // did:webvh and inscribed did:btco identity. The rebuilt doc is a pure
+    // function of the genesis, so re-serialization stays lossless.
+    const genesisController = (log.events[0]?.data as { controller?: unknown })?.controller;
+    if (typeof genesisController !== 'string' || !genesisController.startsWith('did:key:')) {
+      throw new StructuredError(
+        'ASSET_LOAD_VERIFICATION_FAILED',
+        `Cannot derive did:cel document: genesis controller is not a did:key (got ${String(genesisController)}).`,
+        { verification }
+      );
+    }
+    const celDidDocument = createCelDidDocument(env.assetDid, genesisController.slice('did:key:'.length));
+
+    // Important (#377): validate envelope credentials — a verified-reported load
+    // must not silently attach forged/malformed ones. Structural validation runs
+    // ALWAYS (even under skipVerification) and fails closed. Cryptographic
+    // verification runs when not skipping, but a credential that does not verify
+    // at load is SURFACED as a warning, not hard-failed: a genuine credential
+    // issued by a since-rotated did:cel key legitimately no longer verifies
+    // against the folded head (the resolver only knows the current key), and must
+    // not block the buyer's load. Forged/unresolvable ones land here too — named,
+    // never silently trusted. (Mirrors OriginalsAsset.verify's structural+crypto
+    // credential path, downgrading only the crypto failure to advisory at load.)
+    const credentials = (env.credentials ?? []).map(c => ({ ...c }));
+    for (const cred of credentials) {
+      if (!validateCredential(cred)) {
+        throw new StructuredError(
+          'ASSET_LOAD_VERIFICATION_FAILED',
+          'Envelope carries a structurally invalid credential.',
+          { verification }
+        );
+      }
+    }
+    if (!opts?.skipVerification) {
+      for (const cred of credentials) {
+        const credId = (cred as { id?: unknown }).id;
+        const credLabel = typeof credId === 'string' ? credId : '(no id)';
+        let ok = false;
+        try {
+          ok = await this.credentialManager.verifyCredential(cred);
+        } catch {
+          ok = false;
+        }
+        if (!ok) {
+          warnings.push(
+            `Credential ${credLabel} could not be cryptographically verified at load ` +
+            `(forged, or issued by a since-rotated/unresolvable issuer); attached as unverified.`
+          );
+        }
+      }
+    }
+
+    const asset = OriginalsAsset.restore(
+      env.resources.map(r => ({ ...r })),
+      celDidDocument,
+      credentials,
+      log,
+      { currentLayer: folded.currentLayer, bindings: folded.bindings, provenance }
+    );
+
+    // Repopulate captured DID docs so re-serializing a loaded asset is
+    // lossless. Only for layers cross-checked against the fold in step 5
+    // above; a degraded/absent binding must not be backfilled here either.
+    for (const layer of ['did:webvh', 'did:btco'] as const) {
+      const doc = env.didDocuments[layer];
+      if (folded.bindings[layer] && doc) {
+        asset._captureDidDocument(layer, doc);
+      }
+    }
+
+    return { asset, verification, warnings };
+  }
+
+  /**
+   * Verify an already-live asset using the manager's own DID/credential
+   * resolvers, so callers don't have to hand-thread them (`asset.verify()`
+   * called directly requires deps the caller may not have handy).
+   *
+   * @param overrides.ordinalsProvider - Defaults to `config.ordinalsProvider`.
+   *   btco-anchored logs fail closed without one (same contract as loadAsset).
+   */
+  async verifyAsset(
+    asset: OriginalsAsset,
+    overrides?: { ordinalsProvider?: OrdinalsLookup }
+  ): Promise<boolean> {
+    return asset.verify({
+      didManager: this.didManager,
+      credentialManager: this.credentialManager,
+      ordinalsProvider: overrides?.ordinalsProvider ?? this.config.ordinalsProvider
+    });
+  }
+
+  /**
+   * Live ownership of the asset's anchoring satoshi, read from Bitcoin.
+   * Ownership IS sat control; the CEL is authorship only. A convenience LIVE
+   * READ, not an integrity gate (that's verify()/loadAsset's job), so it
+   * fails open: returns null for assets not yet on did:btco, for a
+   * malformed/unresolvable did:btco binding, or when the provider has no
+   * owner index. Throws ORD_PROVIDER_REQUIRED only when no ordinalsProvider
+   * is configured.
+   */
+  async getCurrentOwner(asset: OriginalsAsset): Promise<{ address: string; outpoint: string } | null> {
+    const btcoDid = asset.bindings?.['did:btco'] ?? (asset.id.startsWith('did:btco:') ? asset.id : undefined);
+    if (!btcoDid) return null;
+    const provider = this.config.ordinalsProvider;
+    if (!provider) {
+      throw new StructuredError('ORD_PROVIDER_REQUIRED', 'Ordinals provider must be configured to read live ownership from Bitcoin.');
+    }
+    let satoshi: string;
+    try {
+      satoshi = String(parseSatoshiIdentifier(btcoDid));
+    } catch {
+      return null;
+    }
+    if (typeof provider.getSatOwnership !== 'function') return null;
+    try {
+      return await provider.getSatOwnership(satoshi);
+    } catch (err) {
+      this.logger.warn('getCurrentOwner: ordinals provider getSatOwnership failed; returning null', {
+        satoshi,
+        error: (err as Error)?.message ?? String(err)
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Fold the log into a {@link ProvenanceChain} for restore(). createdAt/creator
+   * come from the genesis data; migrations are re-materialized in the live
+   * layer-to-layer shape (enriched from bitcoin witness proofs + advisory
+   * `unverified.commitTxId`/`feeRate`); ownership history is the sat's UTXO
+   * chain, not the CEL, so provenance carries no transfers. The
+   * `unverified.bindings` degraded btco binding is NEVER promoted — surfaced in
+   * `warnings` instead (step 7).
+   */
+  private buildRestoredProvenance(
+    log: EventLog,
+    folded: ReturnType<typeof replayProvenance>,
+    env: AssetEnvelope,
+    warnings: string[]
+  ): ProvenanceChain {
+    const genesisData = (log.events[0]?.data ?? {}) as Record<string, unknown>;
+    // A genesis without a string createdAt is malformed — reject rather than
+    // fold an empty timestamp into provenance (new Date('') = Invalid Date).
+    if (typeof genesisData.createdAt !== 'string' || genesisData.createdAt.length === 0) {
+      throw new StructuredError(
+        'ENVELOPE_INVALID',
+        'Envelope event log genesis is missing a string data.createdAt; cannot restore provenance.'
+      );
+    }
+    const createdAt = genesisData.createdAt;
+    const creator = typeof genesisData.controller === 'string'
+      ? genesisData.controller
+      : typeof genesisData.creator === 'string'
+        ? genesisData.creator
+        : env.assetDid;
+
+    // Re-materialize migrations layer-to-layer by walking the log.
+    const migrations: ProvenanceChain['migrations'] = [];
+    let layer: LayerType = 'did:peer';
+    for (let i = 1; i < log.events.length; i++) {
+      const ev = log.events[i];
+      if (ev.type !== 'migrate') continue;
+      const data = (ev.data ?? {}) as Record<string, unknown>;
+      const timestamp = typeof data.migratedAt === 'string' ? data.migratedAt : '';
+      if (data.layer === 'webvh') {
+        migrations.push({ from: layer, to: 'did:webvh', timestamp });
+        layer = 'did:webvh';
+      } else if (data.layer === 'btco') {
+        const wp = this.extractBitcoinWitnessProof(ev);
+        migrations.push({
+          from: layer,
+          to: 'did:btco',
+          timestamp,
+          transactionId: wp?.txid,
+          inscriptionId: wp?.inscriptionId,
+          satoshi: wp?.satoshi,
+          commitTxId: env.unverified?.commitTxId,
+          revealTxId: wp?.txid,
+          feeRate: env.unverified?.feeRate
+        });
+        layer = 'did:btco';
+      }
+    }
+
+    const resourceUpdates = (env.unverified?.resourceUpdates ?? []).map(u => ({ ...u }));
+
+    // txid: the btco migration's witnessed reveal txid (ownership moves live on
+    // the sat's UTXO chain, not the CEL — no transfers to derive a txid from).
+    const lastBtco = [...migrations].reverse().find(m => m.to === 'did:btco');
+    const txid = lastBtco?.transactionId;
+
+    // 7) Degraded binding: fold couldn't derive btco but the honesty section
+    // carries one — do NOT promote; surface as advisory.
+    const advisoryBtco = env.unverified?.bindings?.['did:btco'];
+    if (!folded.bindings['did:btco'] && advisoryBtco) {
+      warnings.push(
+        `did:btco binding (${advisoryBtco}) is present only in unverified.bindings and is not derivable from the log; ` +
+        `it was NOT promoted to a trusted binding (advisory only).`
+      );
+    }
+
+    const provenance: ProvenanceChain = { createdAt, creator, migrations, resourceUpdates };
+    if (txid) provenance.txid = txid;
+    return provenance;
+  }
+
+  /** Extract the bitcoin witness proof fields from a migrate event, if present. */
+  private extractBitcoinWitnessProof(event: LogEntry): { txid?: string; satoshi?: string; inscriptionId?: string } | undefined {
+    const proofs = event.proof as ReadonlyArray<unknown> | undefined;
+    const bp = proofs?.find(
+      (p): p is Record<string, unknown> =>
+        !!p && typeof p === 'object' && (p as Record<string, unknown>).cryptosuite === 'bitcoin-ordinals-2024'
+    );
+    if (!bp) return undefined;
+    return {
+      txid: typeof bp.txid === 'string' ? bp.txid : undefined,
+      satoshi: typeof bp.satoshi === 'string' ? bp.satoshi : undefined,
+      inscriptionId: typeof bp.inscriptionId === 'string' ? bp.inscriptionId : undefined
+    };
   }
 
   /**
@@ -619,6 +1038,10 @@ export class LifecycleManager {
       // guard above, but captured dynamically for correctness).
       const priorLayer = asset.currentLayer;
 
+      // Snapshot the CEL log so a mid-publish failure after the migrate append
+      // can restore it (alongside the resource-url/storage rollback).
+      const logBefore = asset.celLog;
+
       try {
         // Mint the asset's OWN did:webvh — genuine SCID, signed genesis log,
         // alsoKnownAs back-link to the peer DID (#376). The publisher argument
@@ -655,14 +1078,39 @@ export class LifecycleManager {
         const minted = this.parseWebVHDid(migration.did);
         await this.publishResources(asset, migration.did, minted.domain, minted.userPath, writtenObjects);
 
+        // Append the signed `migrate` event to the asset's CEL — the first
+        // lifecycle append. Signed by the CURRENT controller (folded from the
+        // log). Degraded modes: no keyStore to sign with, or a legacy asset
+        // with no CEL log — skip the append + cel.json hosting and surface why.
+        // Publish must not hard-require a keyStore in Phase 2.
+        const migratedAt = new Date().toISOString();
+        // Routed through the shared choke point (same guards/degrade contract
+        // as transfer/rotate) — as a side effect this also refreshes
+        // cel/<suffix>.json via persistCelArtifacts on every publish append,
+        // not just later transfer/rotate ones (carry-forward #3).
+        const celHeadDigest = await this.appendCelEventOrSkip(asset, 'migrate', {
+          sourceDid: asset.id,
+          targetDid: migration.did,
+          layer: 'webvh',
+          domain: minted.domain,
+          migratedAt
+        });
+        const celAppended = celHeadDigest !== null;
+
         // Host the signed DID log so the DID actually resolves.
         await this.hostDIDLog(migration.did, migration.log, writtenObjects);
 
-        const originalPeerDid = asset.id;
+        // Host the CEL beside did.jsonl (only when the migrate event was
+        // appended, so the hosted log includes it).
+        if (celAppended) {
+          await this.hostCelLog(migration.did, asset.celLog!, writtenObjects);
+        }
+
+        const sourceDid = asset.id;
         await asset.migrate('did:webvh');
         asset.bindings = {
           ...(asset.bindings || {}),
-          'did:peer': originalPeerDid,
+          'did:cel': sourceDid,
           'did:webvh': migration.did
         };
 
@@ -674,9 +1122,19 @@ export class LifecycleManager {
           timestamp: new Date().toISOString(),
           asset: { id: asset.id, fromLayer: priorLayer, toLayer: 'did:webvh' }
         });
+
+        // Retain the minted webvh DID doc for serialize() (the live flow reads
+        // only its VM id and otherwise discards it) — captured after the
+        // same-try emit so the capture only lands once this step is fully
+        // committed (mirrors inscribeOnBitcoin's post-migrate capture).
+        asset._captureDidDocument('did:webvh', migration.didDocument);
       } catch (publishError) {
         if (atomicRollback) {
           await this.rollbackPartialPublish(asset, urlSnapshots, writtenObjects);
+          // Revert the migrate append if it landed before the failure.
+          if (logBefore && asset.celLog !== logBefore) {
+            asset._replaceCelLog(logBefore);
+          }
         }
         throw publishError;
       }
@@ -879,27 +1337,36 @@ export class LifecycleManager {
   }
 
   /**
-   * Hosts the signed did:webvh log as JSONL through the storage adapter,
-   * mirroring the resolution-URL layout WebVHManager.saveDIDLog uses on the
-   * filesystem: did:webvh:{SCID}:{domain}:p1:p2 -> {domain}/p1/p2/did.jsonl,
-   * no-path DIDs -> {domain}/.well-known/did.jsonl. No storage adapter is a
-   * degraded (but allowed) mode: the DID exists and the signed log is
-   * returned to the caller, but nothing hosts it — surfaced via event.
+   * Derives the storage location for a sibling file (did.jsonl, cel.json) under
+   * a did:webvh, mirroring WebVHManager.saveDIDLog's resolution layout:
+   * did:webvh:{SCID}:{domain}:p1:p2 -> {domain}/p1/p2/{filename}, no-path DIDs
+   * -> {domain}/.well-known/{filename}.
+   */
+  private webvhStorageLocation(did: string, filename: string): { domain: string; relativePath: string } {
+    const parts = did.split(':');
+    if (parts.length < 4 || parts[0] !== 'did' || parts[1] !== 'webvh') {
+      throw new StructuredError('INVALID_DID', `Cannot host ${filename} for non-webvh DID: ${did}`);
+    }
+    const domain = decodeURIComponent(parts[3]);
+    const pathParts = parts.slice(4);
+    const relativePath = pathParts.length
+      ? `${pathParts.join('/')}/${filename}`
+      : `.well-known/${filename}`;
+    return { domain, relativePath };
+  }
+
+  /**
+   * Hosts the signed did:webvh log as JSONL through the storage adapter (see
+   * webvhStorageLocation for the layout). No storage adapter is a degraded (but
+   * allowed) mode: the DID exists and the signed log is returned to the caller,
+   * but nothing hosts it — surfaced via event.
    */
   private async hostDIDLog(
     did: string,
     log: unknown,
     writtenObjects?: Array<{ domain: string; relativePath: string }>
   ): Promise<void> {
-    const parts = did.split(':');
-    if (parts.length < 4 || parts[0] !== 'did' || parts[1] !== 'webvh') {
-      throw new StructuredError('INVALID_DID', `Cannot host log for non-webvh DID: ${did}`);
-    }
-    const domain = decodeURIComponent(parts[3]);
-    const pathParts = parts.slice(4);
-    const relativePath = pathParts.length
-      ? `${pathParts.join('/')}/did.jsonl`
-      : `.well-known/did.jsonl`;
+    const { domain, relativePath } = this.webvhStorageLocation(did, 'did.jsonl');
 
     // A non-array or empty log would serialize to a zero-byte did.jsonl that
     // silently serves an unresolvable DID. Surface it via event and write
@@ -932,6 +1399,89 @@ export class LifecycleManager {
         did,
         reason: 'NO_STORAGE_ADAPTER'
       });
+    }
+  }
+
+  /**
+   * Hosts the asset's CEL as `cel.json` beside its `did.jsonl` (same webvh
+   * storage layout), serialized with the deterministic JSON serializer. A
+   * missing storage adapter is a no-op: the DID log's own NO_STORAGE_ADAPTER
+   * event already surfaces the un-hosted state for this publish.
+   */
+  private async hostCelLog(
+    did: string,
+    log: EventLog,
+    writtenObjects?: Array<{ domain: string; relativePath: string }>
+  ): Promise<void> {
+    const { domain, relativePath } = this.webvhStorageLocation(did, 'cel.json');
+    const json = serializeEventLogJson(log);
+
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
+    const withPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<unknown> } | undefined;
+    const withPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<unknown> } | undefined;
+
+    if (withPut && typeof withPut.put === 'function') {
+      await withPut.put(`${domain}/${relativePath}`, Buffer.from(json), { contentType: 'application/json' });
+      writtenObjects?.push({ domain, relativePath });
+    } else if (withPutObject && typeof withPutObject.putObject === 'function') {
+      await withPutObject.putObject(domain, relativePath, new TextEncoder().encode(json));
+      writtenObjects?.push({ domain, relativePath });
+    }
+  }
+
+  /**
+   * Best-effort persistence of the asset's CEL, called at genesis and after
+   * every successful append (the appendCelEventOrSkip choke point):
+   * 1. the layer-agnostic copy at `cel/<didCelSuffix>.json` — the conventional
+   *    key DIDManager.resolveDID's did:cel branch reads back; and
+   * 2. when the asset is bound to a did:webvh, a refresh of the hosted
+   *    `cel.json` so the published copy is not frozen at publish time.
+   * NEVER gates the lifecycle op: any failure surfaces as a `cel:host-failed`
+   * warn event and nothing is thrown. No storage adapter is a silent no-op
+   * (same contract as hostCelLog).
+   */
+  private async persistCelArtifacts(asset: OriginalsAsset): Promise<void> {
+    const log = asset.celLog;
+    if (!log) return;
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
+    if (!storage) return;
+
+    try {
+      const suffix = deriveDidCel(log).slice(DID_CEL_PREFIX.length);
+      const json = serializeEventLogJson(log);
+      const withPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<unknown> };
+      const withPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<unknown> };
+      if (typeof withPut.put === 'function') {
+        await withPut.put(`cel/${suffix}.json`, Buffer.from(json), { contentType: 'application/json' });
+      } else if (typeof withPutObject.putObject === 'function') {
+        await withPutObject.putObject('cel', `${suffix}.json`, new TextEncoder().encode(json));
+      }
+    } catch (err) {
+      await this.emitCelHostFailed(asset.id, 'cel-copy', err);
+    }
+
+    const webvhDid = asset.bindings?.['did:webvh'];
+    if (webvhDid) {
+      try {
+        await this.hostCelLog(webvhDid, log);
+      } catch (err) {
+        await this.emitCelHostFailed(asset.id, 'webvh-cel-json', err);
+      }
+    }
+  }
+
+  /** cel:host-failed emitter that itself never throws (hosting is best-effort). */
+  private async emitCelHostFailed(assetId: string, target: 'cel-copy' | 'webvh-cel-json', err: unknown): Promise<void> {
+    try {
+      await this.eventEmitter.emit({
+        type: 'cel:host-failed',
+        timestamp: new Date().toISOString(),
+        asset: { id: assetId },
+        target,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    } catch {
+      // best-effort — a throwing emitter must not gate the lifecycle op
     }
   }
 
@@ -1230,6 +1780,45 @@ export class LifecycleManager {
     return this.credentialManager.signCredential(credential, privateKey, vmId);
   }
 
+  /**
+   * Append-first lifecycle CEL event with the same degrade contract as
+   * publishToWeb: signed by the CURRENT controller folded from the log; when
+   * no keyStore / no CEL log / no signing key, skip and emit
+   * `cel:append-skipped` instead of failing the lifecycle operation.
+   *
+   * @returns the head digest (chain-link expression over the appended entry —
+   * stable across later witness-proof attachment, since chain canonicalization
+   * excludes proofs) or null when the append was skipped.
+   */
+  private async appendCelEventOrSkip(
+    asset: OriginalsAsset,
+    type: 'migrate' | 'rotateKey' | 'update',
+    data: unknown
+  ): Promise<string | null> {
+    const logBefore = asset.celLog;
+    let skipReason: 'NO_KEYSTORE' | 'NO_CEL_LOG' | 'NO_SIGNING_KEY' =
+      !this.keyStore ? 'NO_KEYSTORE' : 'NO_CEL_LOG';
+    if (this.keyStore && logBefore) {
+      const vm = currentControllerVm(logBefore);
+      if (await this.keyStore.getPrivateKey(vm)) {
+        const signer = createKeyStoreCelSigner(this.keyStore, vm);
+        const newLog = await appendEvent(logBefore, type, data, { signer, verificationMethod: vm });
+        asset._replaceCelLog(newLog);
+        // Keep the hosted CEL copies fresh AFTER the append committed.
+        await this.persistCelArtifacts(asset);
+        return computeDigestMultibase(canonicalizeEntryForChain(newLog.events[newLog.events.length - 1]));
+      }
+      skipReason = 'NO_SIGNING_KEY';
+    }
+    await this.eventEmitter.emit({
+      type: 'cel:append-skipped',
+      timestamp: new Date().toISOString(),
+      asset: { id: asset.id },
+      reason: skipReason
+    });
+    return null;
+  }
+
   async inscribeOnBitcoin(
     asset: OriginalsAsset,
     feeRate?: number
@@ -1237,7 +1826,15 @@ export class LifecycleManager {
     const stopTimer = this.logger.startTimer('inscribeOnBitcoin');
     const metricsStart = performance.now();
     this.logger.info('Inscribing asset on Bitcoin', { assetId: asset.id, feeRate });
-    
+    // Method-scoped so the outer catch can restore the pre-append log on any
+    // failure after the append (in-memory only). Fires pre-broadcast (nothing
+    // paid) AND post-broadcast — notably ORD_SATOSHI_UNKNOWN, where the
+    // inscription already landed on-chain but anchors a now-rolled-back event;
+    // that orphaned inscription is a harmless dangling anchor by design (see
+    // Task-5 adjudication), so restoring the in-memory log is still correct.
+    let celLogBefore: EventLog | undefined;
+    let celHeadDigest: string | null = null;
+
     try {
       // Input validation
       if (!asset || typeof asset !== 'object') {
@@ -1277,6 +1874,17 @@ export class LifecycleManager {
     for (const res of asset.resources) {
       this.assertContentMatchesDeclaredHash(res, 'inscribe on Bitcoin');
     }
+    // Append-first (#365): the signed btco migrate event lands BEFORE the
+    // inscription so the on-chain document can commit to the post-append head.
+    // Satoshi/txid are unknown pre-inscription and are deliberately NOT in the
+    // signed data — they arrive later via witness proofs (BtcoMigrationData).
+    celLogBefore = asset.celLog;
+    celHeadDigest = await this.appendCelEventOrSkip(asset, 'migrate', {
+      sourceDid: asset.bindings?.['did:webvh'] ?? asset.id,
+      layer: 'btco',
+      network: this.getConfiguredBitcoinNetwork(),
+      migratedAt: new Date().toISOString()
+    });
     // Resource manifest rides INSIDE the DID document as a service entry —
     // the inscription itself must be the DID document (application/did+json)
     // or the SDK's own BtcoDidResolver rejects it (#375).
@@ -1288,6 +1896,12 @@ export class LifecycleManager {
       (d): d is string => typeof d === 'string'
     );
 
+    // Held locally, not captured into the asset yet: buildContent runs BEFORE
+    // the inscription is confirmed (satoshi known, asset.migrate succeeded).
+    // Capturing here would leave a stale doc in #didDocuments with no rollback
+    // if the operation fails afterward (e.g. ORD_SATOSHI_UNKNOWN) — mirrors
+    // rotateBtcoKeys' post-success capture.
+    let inscribedBtcoDoc: DIDDocument | undefined;
     const inscription = await bitcoinManager.inscribeData(
       async (satoshi: string) => {
         const btcoDoc = await this.didManager.migrateToDIDBTCO(asset.did, satoshi);
@@ -1298,8 +1912,17 @@ export class LifecycleManager {
             id: `${btcoDoc.id}#resources`,
             type: 'OriginalsResourceManifest',
             serviceEndpoint: manifestEndpoint
-          }
+          },
+          // On-chain commitment to the entire signed history (#365): anchors
+          // the CEL head so the log cannot be swapped or truncated post-hoc.
+          // Absent when the append degraded — the doc simply lacks the anchor.
+          ...(celHeadDigest !== null ? [{
+            id: `${btcoDoc.id}#cel`,
+            type: 'OriginalsCelAnchor',
+            serviceEndpoint: { headDigestMultibase: celHeadDigest }
+          }] : [])
         ];
+        inscribedBtcoDoc = btcoDoc;
         return Buffer.from(JSON.stringify(btcoDoc));
       },
       'application/did+json',
@@ -1329,6 +1952,38 @@ export class LifecycleManager {
       );
     }
 
+    // The DID-doc inscription IS the bitcoin witness artifact for the migrate
+    // event appended above (#367): its #cel OriginalsCelAnchor commits to that
+    // event's chain digest, so a bitcoin-ordinals-2024 witness proof binding
+    // satoshi/inscriptionId makes the btco identity derivable — and GATING —
+    // from the log alone (verifyEventLog checks the inscription against the
+    // chain). No second inscription is made. Chain digests exclude proofs, so
+    // this post-hoc attachment (mirroring witnessEvent) cannot break the chain
+    // or the anchored head digest.
+    if (celHeadDigest !== null && asset.celLog) {
+      const log = asset.celLog;
+      const migrateIdx = log.events.length - 1;
+      const witnessedAt = new Date().toISOString();
+      const witnessProof: WitnessProof & { txid: string; satoshi: string; inscriptionId: string } = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'bitcoin-ordinals-2024',
+        created: witnessedAt,
+        verificationMethod: 'did:btco:witness',
+        proofPurpose: 'assertionMethod',
+        proofValue: `z${inscription.inscriptionId}`,
+        witnessedAt,
+        txid: revealTxId,
+        satoshi: inscription.satoshi,
+        inscriptionId: inscription.inscriptionId
+      };
+      const events = log.events.slice();
+      events[migrateIdx] = {
+        ...events[migrateIdx],
+        proof: [...events[migrateIdx].proof, witnessProof]
+      };
+      asset._replaceCelLog({ ...log, events });
+    }
+
     // Capture the layer before migration for accurate metrics
     const fromLayer = asset.currentLayer;
 
@@ -1341,6 +1996,14 @@ export class LifecycleManager {
       feeRate: usedFeeRate
     };
     await asset.migrate('did:btco', migrationDetails);
+
+    // Retain the inscribed btco DID doc for serialize() (otherwise discarded)
+    // — only now that the satoshi check and asset.migrate have both
+    // succeeded, so a failure before this point (e.g. ORD_SATOSHI_UNKNOWN)
+    // leaves #didDocuments untouched, consistent with the CEL-log restore.
+    if (inscribedBtcoDoc) {
+      asset._captureDidDocument('did:btco', inscribedBtcoDoc);
+    }
 
     // Mirror onto the manager emitter: asset.migrate emits only on the
     // asset's private emitter, so sdk.lifecycle.on('asset:migrated', ...)
@@ -1380,9 +2043,23 @@ export class LifecycleManager {
       }
     }
     asset.bindings = Object.assign({}, asset.bindings || {}, { 'did:btco': bindingValue });
-    
+
+    // Witness acknowledgment (map §5.1): controller-signed update recording the
+    // inscription that witnessed the btco migrate event. Appended AFTER the
+    // witness-proof attach above; non-gating and best-effort (the inscription is
+    // committed and paid). Also re-persists the now-proofed log through the
+    // Task-3/4 choke point, closing the stored-copy-predates-the-proof window.
+    if (celHeadDigest !== null && inscription.satoshi) {
+      await this.appendWitnessAcknowledgment(asset, {
+        satoshi: inscription.satoshi,
+        inscriptionId: inscription.inscriptionId,
+        txid: revealTxId,
+        witnessedEventDigest: celHeadDigest
+      });
+    }
+
     stopTimer();
-    this.logger.info('Asset inscribed on Bitcoin successfully', { 
+    this.logger.info('Asset inscribed on Bitcoin successfully', {
       assetId: asset.id, 
       inscriptionId: inscription.inscriptionId,
       transactionId: revealTxId
@@ -1395,6 +2072,11 @@ export class LifecycleManager {
       this.inFlightAssets.delete(asset.id);
     }
     } catch (error) {
+      // Anything thrown after the append leaves the log ahead of reality —
+      // restore the pre-append snapshot (pure in-memory).
+      if (celHeadDigest !== null && celLogBefore && asset.celLog !== celLogBefore) {
+        asset._replaceCelLog(celLogBefore);
+      }
       stopTimer();
       this.logger.error('Bitcoin inscription failed', error as Error, { assetId: asset.id, feeRate });
       this.metrics.recordOperation('lifecycle.inscribeOnBitcoin', performance.now() - metricsStart, false);
@@ -1495,32 +2177,35 @@ export class LifecycleManager {
       vout: 0
     } as const;
 
-    const tx = await bm.transferInscription(inscription, newOwner);
-    // Record the actual chain of custody: the current owner (the last
-    // transfer's recipient) hands off to newOwner. Recording the asset DID
-    // as `from` on every transfer broke getTransfersFrom and produced a
-    // provenance chain where nobody ever transferred to anybody.
-    const priorTransfers = provenance.transfers;
-    const currentOwner = priorTransfers.length > 0
-      ? priorTransfers[priorTransfers.length - 1].to
-      : asset.id;
-    // Rotation-first model (#366): the sat moved but the DID document still
-    // carries the previous owner's keys. The recipient must rotateBtcoKeys.
-    await asset.recordTransfer(currentOwner, newOwner, tx.txid, true);
+    // Best-effort pre-move sat holder, purely for the event payload. Ownership
+    // is the sat, read live from the chain; we NEVER fabricate `from` — if the
+    // provider has no owner index, or the lookup fails, we omit it (#366).
+    let from: string | undefined;
+    const ownershipProvider = this.config.ordinalsProvider;
+    if (satoshi && ownershipProvider?.getSatOwnership) {
+      try {
+        from = (await ownershipProvider.getSatOwnership(satoshi))?.address;
+      } catch {
+        from = undefined;
+      }
+    }
 
-    // Mirror onto the manager emitter: asset.recordTransfer emits only on the
-    // asset's private emitter, so sdk.lifecycle.on('asset:transferred', ...)
-    // subscriptions (and the built-in EventLogger) never fired (issue #346).
-    // Payload must match the asset-emitted event exactly (keyRotationPending included).
-    await this.eventEmitter.emit({
-      type: 'asset:transferred',
+    const tx = await bm.transferInscription(inscription, newOwner);
+
+    // Ownership = sat control (this Bitcoin tx). The CEL is authorship only, so
+    // a transfer writes NOTHING to the log. Emit asset:transferred on BOTH the
+    // asset's private emitter and the manager emitter (issue #346: the asset
+    // emitter alone left sdk.lifecycle.on(...) subscribers unnotified).
+    const transferredEvent = {
+      type: 'asset:transferred' as const,
       timestamp: new Date().toISOString(),
       asset: { id: asset.id, layer: asset.currentLayer },
-      from: currentOwner,
+      ...(from !== undefined ? { from } : {}),
       to: newOwner,
-      transactionId: tx.txid,
-      keyRotationPending: true
-    });
+      transactionId: tx.txid
+    };
+    await asset._internalEmit(transferredEvent);
+    await this.eventEmitter.emit(transferredEvent);
 
     stopTimer();
     this.logger.info('Asset ownership transferred successfully', {
@@ -1544,29 +2229,42 @@ export class LifecycleManager {
     }
   }
 
+  // ===== Shared rotation-first core (rotateBtcoKeys + authorizeSigner) =====
+
   /**
-   * Rotation-first ownership hand-off (#366): reinscribe the did:btco
-   * document — same id, new verification method — on the SAME sat. Only the
-   * current UTXO holder can do this (reinscription spends the output), so a
-   * successful rotation simultaneously proves sat control and announces the
-   * new owner's signing key. The resolver's newest-valid-inscription rule
-   * then serves the rotated document.
+   * Ed25519 + derive check for a caller-supplied rotation keypair: the private
+   * key MUST derive the announced `publicKeyMultibase`, or every subsequent
+   * append would be signed by a key nobody can verify against. Pure — no
+   * keyStore side effects. Throws CEL_ED25519_REQUIRED / INVALID_KEY_PAIR.
    */
-  async rotateBtcoKeys(
+  private assertRotationKeyPair(publicKeyMultibase: string, privateKey: string): void {
+    const { key: privBytes, type: privType } = multikey.decodePrivateKey(privateKey);
+    if (privType !== 'Ed25519') {
+      throw new StructuredError('CEL_ED25519_REQUIRED',
+        `CEL events must be signed with Ed25519; got ${privType}. Generate a dedicated Ed25519 controller key.`);
+    }
+    const derivedPub = multikey.encodePublicKey(ed25519.getPublicKey(privBytes), 'Ed25519');
+    if (derivedPub !== publicKeyMultibase) {
+      throw new StructuredError('INVALID_KEY_PAIR',
+        'privateKey does not derive the announced publicKeyMultibase');
+    }
+  }
+
+  /**
+   * Builds the rotated did:btco document (shared by rotateBtcoKeys and
+   * authorizeSigner): same id, the NEW verification method, lineage back-links,
+   * and the re-embedded resource manifest (the resolver serves the newest
+   * inscription, so a rotation that dropped the manifest would erase it). The
+   * `#cel` anchor is embedded separately, after the rotateKey head is known.
+   * Throws NETWORK_MISMATCH if config.network drifted from the DID's prefix.
+   */
+  private buildRotatedBtcoDoc(
     asset: OriginalsAsset,
-    newVerificationMethod: { publicKeyMultibase: string },
-    feeRate?: number
-  ): Promise<{ inscriptionId: string; did: string }> {
-    if (asset.currentLayer !== 'did:btco') {
-      throw new StructuredError('INVALID_STATE', 'Key rotation requires the asset to be on the did:btco layer.');
-    }
-    const btcoDid = asset.bindings?.['did:btco'];
-    if (!btcoDid) {
-      throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to rotate.');
-    }
-    // pop() yields the sat for every prefix form (did:btco:N, :reg:N, :sig:N).
-    const satoshi = btcoDid.split(':').pop()!;
-    const { key, type } = multikey.decodePublicKey(newVerificationMethod.publicKeyMultibase);
+    satoshi: string,
+    btcoDid: string,
+    publicKeyMultibase: string
+  ): DIDDocument {
+    const { key, type } = multikey.decodePublicKey(publicKeyMultibase);
     const network = this.getConfiguredBitcoinNetwork();
     const rotatedDoc = createBtcoDidDocument(satoshi, network, { publicKey: key, keyType: type });
     // createBtcoDidDocument re-derives the prefix from network; the rotated id
@@ -1574,13 +2272,10 @@ export class LifecycleManager {
     if (rotatedDoc.id !== btcoDid) {
       throw new StructuredError('NETWORK_MISMATCH', `Rotated document id ${rotatedDoc.id} does not match binding ${btcoDid}; check config.network.`);
     }
-    // Preserve lineage links across rotations.
     const backLinks = [asset.id, asset.bindings?.['did:webvh']].filter(
       (d): d is string => typeof d === 'string'
     );
     rotatedDoc.alsoKnownAs = backLinks;
-    // Resolver serves the newest inscription; without re-embedding the
-    // manifest here, the first rotation would erase it from resolution.
     rotatedDoc.service = [
       ...(rotatedDoc.service || []),
       {
@@ -1592,14 +2287,240 @@ export class LifecycleManager {
         }
       }
     ];
+    return rotatedDoc;
+  }
 
+  /**
+   * Embeds the fresh `#cel` OriginalsCelAnchor (committing to the rotateKey
+   * entry's chain digest) into the rotated document. The resolver serves the
+   * newest inscription, so this must be re-embedded on every reinscription or
+   * the anchor is erased.
+   */
+  private embedCelAnchor(rotatedDoc: DIDDocument, celHeadDigest: string): void {
+    rotatedDoc.service = [
+      ...(rotatedDoc.service || []),
+      {
+        id: `${rotatedDoc.id}#cel`,
+        type: 'OriginalsCelAnchor',
+        serviceEndpoint: { headDigestMultibase: celHeadDigest }
+      }
+    ];
+  }
+
+  /**
+   * Reinscribes the rotated document on the SAME sat (targetSatoshi). On
+   * failure — nothing is paid before the broadcast fails — restores the
+   * pre-append CEL log (`restoreLog`) so the in-memory log never runs ahead of
+   * the chain.
+   */
+  private async reinscribeRotatedDoc(
+    asset: OriginalsAsset,
+    rotatedDoc: DIDDocument,
+    satoshi: string,
+    feeRate: number | undefined,
+    restoreLog: EventLog | undefined
+  ): Promise<{ inscriptionId: string; satoshi?: string; txid?: string; revealTxId?: string }> {
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
-    const inscription = await bitcoinManager.inscribeData(
-      Buffer.from(JSON.stringify(rotatedDoc)),
-      'application/did+json',
-      feeRate,
-      { targetSatoshi: satoshi }
+    try {
+      return await bitcoinManager.inscribeData(
+        Buffer.from(JSON.stringify(rotatedDoc)),
+        'application/did+json',
+        feeRate,
+        { targetSatoshi: satoshi }
+      );
+    } catch (error) {
+      // Reinscription failed after the append — restore the pre-append log
+      // (pure in-memory; nothing was paid before broadcast failed).
+      if (restoreLog) {
+        asset._replaceCelLog(restoreLog);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Attaches a `bitcoin-ordinals-2024` witness proof to the log's HEAD event
+   * post-inscription (mirrors inscribeOnBitcoin): the reinscription commits to
+   * the head's chain digest via its `#cel` anchor, so this proof binds
+   * satoshi/inscriptionId/txid to that event. Chain digests exclude proofs, so
+   * this post-hoc attachment cannot break the chain or the anchored head.
+   */
+  private attachBitcoinWitnessProof(
+    asset: OriginalsAsset,
+    witness: { satoshi: string; inscriptionId: string; txid: string }
+  ): void {
+    const log = asset.celLog;
+    if (!log) return;
+    const headIdx = log.events.length - 1;
+    const witnessedAt = new Date().toISOString();
+    const witnessProof: WitnessProof & { txid: string; satoshi: string; inscriptionId: string } = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'bitcoin-ordinals-2024',
+      created: witnessedAt,
+      verificationMethod: 'did:btco:witness',
+      proofPurpose: 'assertionMethod',
+      proofValue: `z${witness.inscriptionId}`,
+      witnessedAt,
+      txid: witness.txid,
+      satoshi: witness.satoshi,
+      inscriptionId: witness.inscriptionId
+    };
+    const events = log.events.slice();
+    events[headIdx] = {
+      ...events[headIdx],
+      proof: [...events[headIdx].proof, witnessProof]
+    };
+    asset._replaceCelLog({ ...log, events });
+  }
+
+  /**
+   * Controller-signed witness acknowledgment (map §5.1): records the
+   * inscription that witnessed `witnessedEventDigest` as an `update` event via
+   * the STANDARD append path — folds to the CURRENT controller (for
+   * authorizeSigner, the NEW key post-rotation). Non-gating: `replayProvenance`
+   * ignores updates and the verifier never requires it. Best-effort — the
+   * inscription is already committed and paid, so a failed acknowledgment
+   * must not undo it. As a side
+   * effect this append re-persists the now-proofed log through the Task-3/4
+   * choke point, closing the window where the stored copy predates the proof.
+   */
+  private async appendWitnessAcknowledgment(
+    asset: OriginalsAsset,
+    ack: { satoshi: string; inscriptionId: string; txid?: string; witnessedEventDigest: string }
+  ): Promise<void> {
+    try {
+      await this.appendCelEventOrSkip(asset, 'update', {
+        operation: 'acknowledgeWitness',
+        satoshi: ack.satoshi,
+        inscriptionId: ack.inscriptionId,
+        ...(ack.txid ? { txid: ack.txid } : {}),
+        witnessedEventDigest: ack.witnessedEventDigest
+      });
+    } catch (err) {
+      this.logger.warn('witness acknowledgment append failed (non-gating)', {
+        assetId: asset.id,
+        error: (err as Error)?.message ?? String(err)
+      });
+    }
+  }
+
+  /**
+   * Rotation-first optional authoring (#366): reinscribe the did:btco
+   * document — same id, new verification method — on the SAME sat. Only the
+   * current UTXO holder can do this (reinscription spends the output), so a
+   * successful rotation simultaneously proves sat control and announces the
+   * signing key the (already-owning) sat holder will author future
+   * provenance with. The resolver's newest-valid-inscription rule then
+   * serves the rotated document.
+   *
+   * KEY CUSTODY CONTRACT: after rotation the CURRENT controller folds to the
+   * new key, so every subsequent CEL append (transfer, further rotation) signs
+   * with it. The caller MUST make the new controller's PRIVATE key available in
+   * the keyStore under the canonical VM id
+   * `did:key:<publicKeyMultibase>#<publicKeyMultibase>`, or those appends degrade
+   * (cel:append-skipped / NO_SIGNING_KEY). Pass it as `privateKey` here and, when
+   * a keyStore is configured, it is registered under that VM id before the
+   * rotateKey append. If omitted and the key is not already registered, a
+   * `key:unpersisted` event (carrying the new VM) is emitted after the rotation
+   * succeeds to surface the impending degrade.
+   */
+  async rotateBtcoKeys(
+    asset: OriginalsAsset,
+    newVerificationMethod: { publicKeyMultibase: string; privateKey?: string },
+    feeRate?: number
+  ): Promise<{ inscriptionId: string; did: string }> {
+    if (asset.currentLayer !== 'did:btco') {
+      throw new StructuredError('INVALID_STATE', 'Key rotation requires the asset to be on the did:btco layer.');
+    }
+    const btcoDid = asset.bindings?.['did:btco'];
+    if (!btcoDid) {
+      throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to rotate.');
+    }
+    // Concurrency guard (issue #255, same pattern as publishToWeb/
+    // transferOwnership): the checks above are check-then-act across the
+    // awaits below — two overlapping rotations of the same asset would both
+    // pass them and both broadcast reinscriptions. Claim the asset
+    // synchronously before the first await.
+    if (this.inFlightAssets.has(asset.id)) {
+      throw new StructuredError(
+        'OPERATION_IN_PROGRESS',
+        `An operation for asset ${asset.id} is already in progress; concurrent rotations of the same asset would broadcast duplicate reinscriptions.`
+      );
+    }
+    this.inFlightAssets.add(asset.id);
+    try {
+    // pop() yields the sat for every prefix form (did:btco:N, :reg:N, :sig:N).
+    const satoshi = btcoDid.split(':').pop()!;
+    // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
+    const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, newVerificationMethod.publicKeyMultibase);
+
+    // Append-first (#365): rotateKey signed by the CURRENT controller — the
+    // cooperative-rotation contract (the verifier only accepts rotations
+    // authorized by the outgoing authority). The non-cooperative arm (a sat
+    // holder who cannot obtain the prior controller's signature) is
+    // authorizeSigner.
+    // Canonical VM the post-rotation controller will sign appends under.
+    const newController = `did:key:${newVerificationMethod.publicKeyMultibase}`;
+    const newControllerVm = `${newController}#${newVerificationMethod.publicKeyMultibase}`;
+    // Register the incoming controller's private key so post-rotation appends
+    // can sign (key-custody contract). Before the append is fine — the rotateKey
+    // event itself is signed by the OUTGOING controller; this key is for what
+    // follows.
+    // Assert the pair whenever a privateKey is supplied (mirrors authorizeSigner);
+    // registering it needs a keyStore, but the derive-check must not be skipped
+    // just because none is configured — a mismatched key must fail loudly.
+    if (newVerificationMethod.privateKey) {
+      this.assertRotationKeyPair(newVerificationMethod.publicKeyMultibase, newVerificationMethod.privateKey);
+      if (this.keyStore) {
+        await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
+      }
+    }
+
+    const celLogBefore = asset.celLog;
+    const celHeadDigest = await this.appendCelEventOrSkip(asset, 'rotateKey', {
+      newController,
+      rotatedAt: new Date().toISOString()
+    });
+    // Re-embed #cel with the FRESH head (the rotateKey entry). On degrade the
+    // event was not appended and no anchor is embedded.
+    if (celHeadDigest !== null) {
+      this.embedCelAnchor(rotatedDoc, celHeadDigest);
+    }
+
+    const inscription = await this.reinscribeRotatedDoc(
+      asset, rotatedDoc, satoshi, feeRate, celHeadDigest !== null ? celLogBefore : undefined
     );
+
+    // Key-custody probe: no private key was supplied, and a keyStore exists but
+    // doesn't hold the new controller's key. Post-rotation appends will degrade
+    // (nothing was SKIPPED here — the rotation succeeded — so cel:append-skipped
+    // is the wrong signal; key:unpersisted names the unpersisted VM).
+    if (!newVerificationMethod.privateKey && this.keyStore &&
+        !(await this.keyStore.getPrivateKey(newControllerVm))) {
+      await this.eventEmitter.emit({
+        type: 'key:unpersisted',
+        timestamp: new Date().toISOString(),
+        asset: { id: asset.id },
+        did: btcoDid,
+        verificationMethod: newControllerVm
+      });
+    }
+
+    // Reinscription succeeded — the rotated doc is now the resolvable btco doc;
+    // it REPLACES the inscription-time capture for serialize().
+    asset._captureDidDocument('did:btco', rotatedDoc);
+
+    // Witness acknowledgment (map §5.1): controller-signed update recording the
+    // reinscription. Folds to the CURRENT (post-rotation) controller; degrades
+    // to a skip when that key isn't held. Only when the rotateKey landed.
+    if (celHeadDigest !== null) {
+      await this.appendWitnessAcknowledgment(asset, {
+        satoshi,
+        inscriptionId: inscription.inscriptionId,
+        txid: inscription.revealTxId ?? inscription.txid,
+        witnessedEventDigest: celHeadDigest
+      });
+    }
 
     await this.eventEmitter.emit({
       type: 'key:rotated',
@@ -1610,6 +2531,163 @@ export class LifecycleManager {
     });
 
     return { inscriptionId: inscription.inscriptionId, did: btcoDid };
+    } finally {
+      this.inFlightAssets.delete(asset.id);
+    }
+  }
+
+  /**
+   * Optional author-enablement (#366, design §5): the write side of the
+   * verifier rule Task 5 landed. Ownership itself is the sat — this method
+   * does not grant or claim it. It lets the sat holder establish a signing
+   * key in the log so they can author new provenance even when they CANNOT
+   * obtain the prior controller's signature: they reinscribe the did:btco
+   * document — same id, THEIR key — on the same sat, and self-sign the
+   * rotateKey with that new key. Because only the current UTXO holder can
+   * reinscribe, the reinscription is itself proof of sat control; the
+   * verifier accepts the otherwise-unauthorized rotation once the attached
+   * bitcoin witness proof (check (a)), the announced key (b), the signer
+   * (c), and the strictly-later inscription index (d) all line up.
+   *
+   * Differs from {@link rotateBtcoKeys} (the COOPERATIVE arm): the rotateKey is
+   * SELF-SIGNED with the new key (explicitly NOT the standard append path,
+   * which folds to the prior controller the sat holder does not hold),
+   * `privateKey` is REQUIRED (the signer must be able to sign), and a bitcoin
+   * witness proof is attached to the rotateKey post-inscription — that is what
+   * satisfies the verifier's check (a).
+   *
+   * @throws INVALID_STATE when the asset is not on did:btco / has no binding.
+   * @throws INVALID_INPUT when no privateKey is supplied.
+   * @throws INVALID_KEY_PAIR / CEL_ED25519_REQUIRED for a bad keypair.
+   * @throws OPERATION_IN_PROGRESS on a concurrent call for the same asset.
+   */
+  async authorizeSigner(
+    asset: OriginalsAsset,
+    newVerificationMethod: { publicKeyMultibase: string; privateKey: string },
+    feeRate?: number
+  ): Promise<{ inscriptionId: string; did: string }> {
+    if (asset.currentLayer !== 'did:btco') {
+      throw new StructuredError('INVALID_STATE', 'Authorizing a signer requires the asset to be on the did:btco layer.');
+    }
+    const btcoDid = asset.bindings?.['did:btco'];
+    if (!btcoDid) {
+      throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to authorize a signer for.');
+    }
+    // privateKey is REQUIRED: the sat holder self-signs the rotateKey with it
+    // (the prior controller is unavailable to fold onto).
+    if (!newVerificationMethod?.privateKey) {
+      throw new StructuredError('INVALID_INPUT', 'authorizeSigner requires the signer\'s private key to self-sign the rotation.');
+    }
+    // Concurrency guard (issue #255, same pattern as rotateBtcoKeys): reserve the
+    // asset synchronously before the first await so two overlapping calls
+    // cannot both broadcast reinscriptions.
+    if (this.inFlightAssets.has(asset.id)) {
+      throw new StructuredError(
+        'OPERATION_IN_PROGRESS',
+        `An operation for asset ${asset.id} is already in progress; concurrent authorizeSigner calls for the same asset would broadcast duplicate reinscriptions.`
+      );
+    }
+    this.inFlightAssets.add(asset.id);
+    try {
+    const satoshi = btcoDid.split(':').pop()!;
+    const pkm = newVerificationMethod.publicKeyMultibase;
+    // Derive-check the new signer's keypair (privateKey REQUIRED); register it
+    // so subsequent appends by the new controller can sign.
+    this.assertRotationKeyPair(pkm, newVerificationMethod.privateKey);
+    const newController = `did:key:${pkm}`;
+    const newControllerVm = `${newController}#${pkm}`;
+
+    // SELF-SIGN the rotateKey with the NEW key — explicitly NOT
+    // appendCelEventOrSkip, which folds to the prior controller the sat
+    // holder cannot hold. The verifier accepts this unauthorized rotation
+    // non-cooperatively once the reinscription witness proves sat control.
+    const celLogBefore = asset.celLog;
+    if (!celLogBefore) {
+      throw new StructuredError('INVALID_STATE', 'Asset has no CEL log to append the rotation to.');
+    }
+    // Guard above must run BEFORE registering the key: a doomed call (no CEL
+    // log) should not leave an unused key sitting in the keyStore.
+    if (this.keyStore) {
+      await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
+    }
+
+    // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
+    const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, pkm);
+
+    const { signer, verificationMethod } = celSignerFromKeyPair(
+      { publicKey: pkm, privateKey: newVerificationMethod.privateKey }
+    );
+    const rotatedLog = await appendEvent(
+      celLogBefore,
+      'rotateKey',
+      { newController, rotatedAt: new Date().toISOString() },
+      { signer, verificationMethod }
+    );
+    asset._replaceCelLog(rotatedLog);
+    const rotateEntry = rotatedLog.events[rotatedLog.events.length - 1];
+    const celHeadDigest = computeDigestMultibase(canonicalizeEntryForChain(rotateEntry));
+
+    // #cel anchor = the rotateKey event's chain digest (commits the on-chain
+    // doc to the rotation the reinscription witnesses).
+    this.embedCelAnchor(rotatedDoc, celHeadDigest);
+
+    // Reinscribe on the SAME sat; restore the pre-append log on failure.
+    const inscription = await this.reinscribeRotatedDoc(asset, rotatedDoc, satoshi, feeRate, celLogBefore);
+
+    // Fail loudly rather than write an empty txid into the witness proof
+    // (guaranteed verifier failure later): the reinscription already
+    // happened and was paid for, so surface the inscriptionId for recovery.
+    const witnessTxid = inscription.revealTxId ?? inscription.txid;
+    if (!witnessTxid) {
+      throw new StructuredError(
+        'ORD_PROVIDER_INVALID_RESPONSE',
+        'Reinscription succeeded but the provider returned neither revealTxId nor txid; cannot attach a witness proof.',
+        { inscriptionId: inscription.inscriptionId }
+      );
+    }
+
+    // Attach the bitcoin witness proof to the rotateKey event post-inscription
+    // — this is what satisfies the verifier's non-cooperative check (a).
+    this.attachBitcoinWitnessProof(asset, {
+      satoshi,
+      inscriptionId: inscription.inscriptionId,
+      txid: witnessTxid
+    });
+
+    // Reinscription succeeded — the rotated doc is the resolvable btco doc.
+    asset._captureDidDocument('did:btco', rotatedDoc);
+
+    // Direct best-effort persist (issue: no-keyStore gap): with no keyStore,
+    // appendWitnessAcknowledgment below degrades to a skip and never reaches
+    // persistCelArtifacts, so the self-signed rotation + witness proof would
+    // otherwise never reach storage. The ack's own persist (when it lands) is
+    // a harmless double write.
+    await this.persistCelArtifacts(asset);
+
+    // Witness acknowledgment (map §5.1): the acknowledging controller IS the
+    // new key (current post-rotation — the fold picks it up). This standard-path
+    // append ALSO re-persists the now-proofed log through the Task-3/4 choke
+    // point, closing the window where the stored copy predates the witness proof
+    // attached above.
+    await this.appendWitnessAcknowledgment(asset, {
+      satoshi,
+      inscriptionId: inscription.inscriptionId,
+      txid: inscription.revealTxId ?? inscription.txid,
+      witnessedEventDigest: celHeadDigest
+    });
+
+    await this.eventEmitter.emit({
+      type: 'key:rotated',
+      timestamp: new Date().toISOString(),
+      asset: { id: asset.id },
+      did: btcoDid,
+      inscriptionId: inscription.inscriptionId
+    });
+
+    return { inscriptionId: inscription.inscriptionId, did: btcoDid };
+    } finally {
+      this.inFlightAssets.delete(asset.id);
+    }
   }
 
   /**

@@ -1,6 +1,12 @@
 import { describe, test, expect, spyOn } from 'bun:test';
 import { OriginalsAsset } from '../../../src/lifecycle/OriginalsAsset';
-import { AssetResource, DIDDocument, VerifiableCredential, LayerType } from '../../../src/types';
+import { AssetResource, DIDDocument, VerifiableCredential, LayerType, OriginalsConfig } from '../../../src/types';
+import { LifecycleManager } from '../../../src/lifecycle/LifecycleManager';
+import { DIDManager } from '../../../src/did/DIDManager';
+import { CredentialManager } from '../../../src/vc/CredentialManager';
+import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
+import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
 
 function buildDid(id: string): DIDDocument {
   return {
@@ -25,6 +31,10 @@ describe('OriginalsAsset', () => {
     expect(new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds).currentLayer).toBe('did:peer');
     expect(new OriginalsAsset(resources, buildDid('did:webvh:example.com:xyz'), emptyCreds).currentLayer).toBe('did:webvh');
     expect(new OriginalsAsset(resources, buildDid('did:btco:123'), emptyCreds).currentLayer).toBe('did:btco');
+  });
+
+  test('treats did:cel as the genesis-layer synonym for did:peer', () => {
+    expect(new OriginalsAsset(resources, buildDid('did:cel:uEiAabc'), emptyCreds).currentLayer).toBe('did:peer');
   });
 
   test('rejects invalid migration path', async () => {
@@ -187,6 +197,53 @@ describe('OriginalsAsset', () => {
 
   test('constructor throws on unknown DID method (coverage for error path)', () => {
     expect(() => new OriginalsAsset(resources, buildDid('did:web:example.com'), emptyCreds)).toThrow('Unknown DID method');
+  });
+});
+
+describe('verify() gates on whole-chain CEL verification (#Phase2 Task 8)', () => {
+  // Real did:cel assets minted through the lifecycle: celLog carries genuine
+  // Ed25519 controller proofs, so verifyEventLog exercises the full check.
+  async function makeCelAsset() {
+    const config: OriginalsConfig = {
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      enableLogging: false,
+      storageAdapter: new MemoryStorageAdapter()
+    };
+    const didManager = new DIDManager(config);
+    const credentialManager = new CredentialManager(config, didManager);
+    const lifecycle = new LifecycleManager(config, didManager, credentialManager, undefined, new MockKeyStore());
+    return lifecycle.createAsset([
+      { id: 'res-1', type: 'data', contentType: 'text/plain', hash: 'ab'.repeat(32) }
+    ]);
+  }
+
+  test('intact celLog: verify() is true', async () => {
+    const asset = await makeCelAsset();
+    expect(asset.celLog).toBeDefined();
+    await expect(asset.verify()).resolves.toBe(true);
+  });
+
+  test('tampered log (event data mutated post-hoc) flips verify() to false', async () => {
+    const asset = await makeCelAsset();
+    (asset.celLog!.events[0].data as { name?: string }).name = 'tampered';
+    await expect(asset.verify()).resolves.toBe(false);
+  });
+
+  test('a swapped-in FOREIGN log (individually valid) flips verify() to false — the _replaceCelLog binding check', async () => {
+    const a = await makeCelAsset();
+    const b = await makeCelAsset();
+    // Sanity: B's log is valid on its own terms...
+    expect((await verifyEventLog(b.celLog!)).verified).toBe(true);
+    // ...but it does not back A's DID, so verify() must reject the swap.
+    a._replaceCelLog(b.celLog!);
+    await expect(a.verify()).resolves.toBe(false);
+  });
+
+  test('legacy asset without a celLog keeps its current verify behavior', async () => {
+    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    expect(asset.celLog).toBeUndefined();
+    await expect(asset.verify()).resolves.toBe(true);
   });
 });
 

@@ -100,7 +100,7 @@ describe('Metrics Integration', () => {
         id: 'main.js',
         type: 'code',
         contentType: 'application/javascript',
-        hash: 'abc123def456',
+        hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
       }];
 
       const didDoc = await didManager.createDIDPeer(resources);
@@ -117,7 +117,7 @@ describe('Metrics Integration', () => {
         id: 'main.js',
         type: 'code',
         contentType: 'application/javascript',
-        hash: 'abc123def456',
+        hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
       }];
 
       const didDoc = await didManager.createDIDPeer(resources);
@@ -134,7 +134,7 @@ describe('Metrics Integration', () => {
         id: 'main.js',
         type: 'code',
         contentType: 'application/javascript',
-        hash: 'abc123def456',
+        hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
       }];
 
       const didDoc = await didManager.createDIDPeer(resources);
@@ -151,7 +151,7 @@ describe('Metrics Integration', () => {
         id: 'main.js',
         type: 'code',
         contentType: 'application/javascript',
-        hash: 'abc123def456',
+        hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
       }];
 
       const didDoc = await didManager.createDIDPeer(resources);
@@ -199,12 +199,20 @@ describe('Metrics Integration', () => {
         webvhNetwork: 'magby',
       });
 
-      // Create an asset (goes through DIDManager and LifecycleManager)
+      // Create an asset via LifecycleManager (mints a did:cel genesis; does not
+      // call DIDManager.createDIDPeer). Exercise a DIDManager op separately so
+      // the "aggregate across managers" assertion still has DID metrics.
       const asset = await sdk.lifecycle.createAsset([{
         id: 'test.js',
         type: 'code',
         contentType: 'application/javascript',
-        hash: 'abc123',
+        hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
+      }]);
+      await sdk.did.createDIDPeer([{
+        id: 'peer.js',
+        type: 'code',
+        contentType: 'application/javascript',
+        hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
       }]);
 
       expect(asset).toBeDefined();
@@ -235,7 +243,15 @@ describe('Metrics Integration', () => {
         id: 'test.js',
         type: 'code',
         contentType: 'application/javascript',
-        hash: 'abc123',
+        hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
+      }]);
+      // createAsset no longer routes through DIDManager.createDIDPeer; exercise
+      // it directly so the multi-manager Prometheus assertion holds.
+      await sdk.did.createDIDPeer([{
+        id: 'peer.js',
+        type: 'code',
+        contentType: 'application/javascript',
+        hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
       }]);
 
       const prometheus = sdk.metrics.export('prometheus');

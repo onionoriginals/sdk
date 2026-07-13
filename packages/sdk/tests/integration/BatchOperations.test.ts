@@ -118,7 +118,7 @@ describe('Batch Operations Integration', () => {
       for (const item of result.successful) {
         expect(item.result).toBeInstanceOf(OriginalsAsset);
         expect(item.result.currentLayer).toBe('did:peer');
-        expect(item.result.id).toMatch(/^did:peer:/);
+        expect(item.result.id).toMatch(/^did:cel:/);
       }
     });
 
@@ -314,13 +314,7 @@ describe('Batch Operations Integration', () => {
 
       expect(result.successful).toHaveLength(3);
       expect(result.failed).toHaveLength(0);
-
-      // Verify all transfers
-      for (let i = 0; i < assets.length; i++) {
-        const provenance = assets[i].getProvenance();
-        expect(provenance.transfers).toHaveLength(1);
-        expect(provenance.transfers[0].to).toBe('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
-      }
+      // Transfers are pure sat moves; ownership history is the sat's UTXO chain, not provenance.
     });
 
     test('should validate Bitcoin addresses', async () => {
@@ -392,7 +386,6 @@ describe('Batch Operations Integration', () => {
       for (const asset of inscribedAssets) {
         const provenance = asset.getProvenance();
         expect(provenance.migrations).toHaveLength(2); // peer -> webvh -> btco
-        expect(provenance.transfers).toHaveLength(1);
         expect(provenance.migrations[0].from).toBe('did:peer');
         expect(provenance.migrations[0].to).toBe('did:webvh');
         expect(provenance.migrations[1].from).toBe('did:webvh');

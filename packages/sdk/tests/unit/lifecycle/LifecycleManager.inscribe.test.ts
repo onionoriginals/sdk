@@ -264,4 +264,33 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
     expect(binding).toBe('did:btco:reg:7000');
     expect(binding).not.toBe('did:btco:999999999');
   });
+
+  // --- Review fix: ORD_SATOSHI_UNKNOWN must not leave a captured btco doc behind ---
+
+  test('ORD_SATOSHI_UNKNOWN: no did:btco doc is captured for serialize() after rollback', async () => {
+    // Provider's createInscription invokes buildContent (so the btco DID doc IS
+    // built, mirroring the real inscribeData deferred-content path) but returns
+    // no satoshi and offers no way to resolve one — the real BitcoinManager
+    // throws ORD_SATOSHI_UNKNOWN in that case. The doc must never have been
+    // captured into the asset's #didDocuments (no rollback exists for it).
+    const provider = {
+      async createInscription({ buildContent }: { buildContent: (s: string) => Buffer | Promise<Buffer> }) {
+        await buildContent('999999');
+        return { inscriptionId: 'insc-nosat', txid: 'tx-nosat' };
+      }
+    };
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      ordinalsProvider: provider,
+      keyStore: new (await import('../../mocks/MockKeyStore')).MockKeyStore()
+    } as any);
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
+    ]);
+
+    await expect(sdk.lifecycle.inscribeOnBitcoin(asset, 5)).rejects.toThrow();
+
+    const env = asset.serialize();
+    expect(env.didDocuments['did:btco']).toBeUndefined();
+  });
 });

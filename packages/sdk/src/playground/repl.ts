@@ -202,7 +202,6 @@ function handleInspect(state: SessionState, args: string[]): void {
   console.log(`    Created:     ${summary.created}`);
   console.log(`    Creator:     ${summary.creator}`);
   console.log(`    Migrations:  ${summary.migrationCount}`);
-  console.log(`    Transfers:   ${summary.transferCount}`);
   console.log(`    Last Active: ${summary.lastActivity}`);
 
   if (provenance.migrations.length > 0) {

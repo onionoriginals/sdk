@@ -1,16 +1,20 @@
 /**
- * PeerCelManager - CEL Manager for did:peer Layer
- * 
- * Creates and manages Originals assets in the did:peer layer (Layer 0).
- * This is the initial layer for creating new assets with local control.
- * No witnesses are required at this layer.
- * 
- * @see https://identity.foundation/peer-did-method-spec/
+ * PeerCelManager - CEL Manager for the genesis (peer) layer
+ *
+ * Creates and manages Originals assets at the genesis layer (Layer 0).
+ * The asset's identity is a `did:cel` derived from the signed create event;
+ * the holder's key DID lives in the genesis `controller` field. No witnesses
+ * are required at this layer.
+ *
+ * Legacy logs whose genesis embeds a did:peer (`PeerAssetData`) remain
+ * readable on the update/getCurrentState paths.
  */
 
 import type { EventLog, ExternalReference, DataIntegrityProof, CreateOptions, UpdateOptions, AssetState } from '../types.js';
 import { createEventLog } from '../algorithms/createEventLog.js';
 import { updateEventLog } from '../algorithms/updateEventLog.js';
+import { deriveDidCel } from '../celDid.js';
+import { multibase } from '../../utils/encoding.js';
 
 /**
  * Configuration options for PeerCelManager
@@ -25,7 +29,30 @@ export interface PeerCelConfig {
 }
 
 /**
- * Asset data stored in the create event
+ * Genesis (create-event) data for a did:cel asset.
+ *
+ * The asset's identity (`did:cel`) is DERIVED FROM this event, so the event
+ * must NOT embed it. Identity, holder, and ownership are distinct axes:
+ * `controller` is the HOLDER's key DID (a `did:key`), never the asset DID.
+ * The `nonce` guarantees two otherwise-identical genesis events derive
+ * different DIDs.
+ */
+export interface CelAssetData {
+  /** Asset name */
+  name: string;
+  /** The holder's key DID (did:key) — distinct from the derived asset did:cel */
+  controller: string;
+  /** External resources associated with the asset */
+  resources: ExternalReference[];
+  /** ISO 8601 creation timestamp */
+  createdAt: string;
+  /** Multibase base64url of 16 random bytes — collision insurance for the derived DID */
+  nonce: string;
+}
+
+/**
+ * @deprecated Legacy genesis shape (pre-did:cel). Still readable on the verify
+ * and getCurrentState paths; the write path now emits {@link CelAssetData}.
  */
 export interface PeerAssetData {
   /** Asset name */
@@ -48,23 +75,23 @@ export interface PeerAssetData {
 export type CelSigner = (data: unknown) => Promise<DataIntegrityProof>;
 
 /**
- * PeerCelManager - Manages CEL-based assets in the did:peer layer
- * 
- * The peer layer is the initial layer for creating new Originals assets.
+ * PeerCelManager - Manages CEL-based assets at the genesis layer
+ *
+ * The genesis layer is the initial layer for creating new Originals assets.
  * Assets at this layer:
- * - Have a did:peer identifier
- * - Are controlled by the creator's key pair
+ * - Have a did:cel identifier derived from the signed create event
+ * - Are controlled by the holder's key pair (genesis `controller`)
  * - Do not require witnesses (empty witness array)
  * - Can be migrated to did:webvh or did:btco layers
- * 
+ *
  * @example
  * ```typescript
  * const manager = new PeerCelManager(async (data) => {
  *   // Sign with your private key
  *   return createEdDsaProof(data, privateKey);
  * });
- * 
- * const log = await manager.create('My Asset', [
+ *
+ * const { log, did } = await manager.create('My Asset', [
  *   { digestMultibase: 'uXYZ...', mediaType: 'image/png' }
  * ]);
  * ```
@@ -92,22 +119,27 @@ export class PeerCelManager {
   }
 
   /**
-   * Creates a new asset with a did:peer identifier and CEL event log
-   * 
+   * Creates a new asset: builds the de-self-referenced genesis event and
+   * derives the asset's `did:cel` from it.
+   *
    * This method:
-   * 1. Generates a new did:peer DID using the verification method from config
-   * 2. Creates a "create" event with the asset data
+   * 1. Determines the holder's `controller` DID from the signer/config
+   * 2. Creates a "create" event carrying {@link CelAssetData} (no asset DID —
+   *    identity is derived, not embedded)
    * 3. Signs the event using the provided signer
-   * 4. Returns an EventLog containing the initial create event
-   * 
+   * 4. Derives the `did:cel` from the signed genesis event
+   *
    * @param name - Human-readable name for the asset
    * @param resources - External resources associated with the asset
-   * @returns Promise resolving to an EventLog with the create event
-   * 
+   * @returns The genesis EventLog and the derived `did:cel`
+   *
    * @throws Error if signer produces invalid proof
-   * @throws Error if DID generation fails
+   * @throws Error if the controller cannot be determined
    */
-  async create(name: string, resources: ExternalReference[]): Promise<EventLog> {
+  async create(
+    name: string,
+    resources: ExternalReference[]
+  ): Promise<{ log: EventLog; did: string }> {
     // Validate inputs
     if (!name || typeof name !== 'string') {
       throw new Error('Asset name is required and must be a string');
@@ -116,137 +148,71 @@ export class PeerCelManager {
       throw new Error('Resources must be an array');
     }
 
-    // Generate did:peer DID for this asset
-    const did = await this.generatePeerDid();
+    // The holder's key DID — the asset DID is derived, never embedded here.
+    const controller = await this.resolveController();
 
-    // Prepare asset data for the create event
-    const assetData: PeerAssetData = {
+    // Prepare de-self-referenced genesis data. nonce = 'u' + base64url(16 bytes)
+    // so identical {name, controller, resources, createdAt} never collide.
+    const assetData: CelAssetData = {
       name,
-      did,
-      layer: 'peer',
+      controller,
       resources,
-      creator: did, // Creator is the same as asset DID for peer layer
       createdAt: new Date().toISOString(),
+      nonce: multibase.encode(crypto.getRandomValues(new Uint8Array(16)), 'base64url'),
     };
 
-    // Build create options
+    // Build create options. createEventLog signs over {type,data} only; the VM
+    // is set to the controller's canonical did:key VM for real signers.
     const createOptions: CreateOptions = {
       signer: this.signer,
-      verificationMethod: this.config.verificationMethod || `${did}#key-0`,
+      verificationMethod: this.config.verificationMethod || this.canonicalControllerVm(controller),
       proofPurpose: this.config.proofPurpose,
     };
 
-    // Create the event log with a create event
-    const eventLog = await createEventLog(assetData, createOptions);
+    // Create the event log, then derive the did:cel from the signed genesis.
+    const log = await createEventLog(assetData, createOptions);
+    const did = deriveDidCel(log);
 
-    return eventLog;
+    return { log, did };
   }
 
   /**
-   * Generates a new did:peer DID (numalgo 4 - long form)
-   * 
-   * Uses @aviarytech/did-peer library to create a numalgo 4 DID
-   * which embeds the full DID document for self-contained resolution.
-   * 
-   * @returns Promise resolving to a did:peer string
+   * Determines the holder's controller DID. Prefers `config.verificationMethod`;
+   * otherwise probes the signer for the verificationMethod it reports (the probe
+   * signature is discarded). The controller is the DID portion (before '#').
+   *
+   * A signing FAILURE propagates rather than being swallowed: an asset whose
+   * controller cannot be established is unusable, so failing loudly at creation
+   * time beats emitting a log that cannot be authored against.
    */
-  private async generatePeerDid(): Promise<string> {
-    // Dynamically import did-peer library
-    let didPeerMod: any;
-    try {
-      didPeerMod = await import('@aviarytech/did-peer');
-    } catch (err) {
+  private async resolveController(): Promise<string> {
+    const vm =
+      this.config.verificationMethod ?? (await this.discoverSignerVerificationMethod());
+    if (!vm) {
       throw new Error(
-        'Failed to import @aviarytech/did-peer. Make sure it is installed: npm install @aviarytech/did-peer'
+        'Cannot determine controller: no verificationMethod in config and the signer did not report one'
       );
     }
+    const hashIdx = vm.indexOf('#');
+    return hashIdx > 0 ? vm.slice(0, hashIdx) : vm;
+  }
 
-    // If we have a verification method with a public key, use it
-    // Otherwise, generate a placeholder DID using a random key
-    // In production, the signer's verification method should be used
-    
-    // For did:peer numalgo 4, we need a verification method
-    // The verification method should come from the config or be derived from the signer
-    
-    // Generate a DID using numalgo 4 (long-form with embedded DID document)
-    // We'll use a simple verification method structure
-    let publicKeyMultibase: string;
-    
-    // The did:peer:4 identifier is SELF-CERTIFYING: it embeds its DID
-    // document, so verification (verifyEventLog) requires the create event's
-    // signing key to be one of the embedded keys. The embedded key must
-    // therefore be the CONTROLLER's key, not a random one:
-    // 1. a did:key verificationMethod in config carries the key directly;
-    // 2. otherwise, discover the signer's key with a probe signature (the
-    //    signer reports its verificationMethod in every proof it produces);
-    // 3. only fall back to a random key when neither reveals a did:key —
-    //    such logs cannot pass the self-certifying binding check.
-    if (this.config.verificationMethod && this.config.verificationMethod.includes('did:key:')) {
-      // Extract the public key from did:key format
-      const keyMatch = this.config.verificationMethod.match(/did:key:(z[a-zA-Z0-9]+)/);
-      publicKeyMultibase = keyMatch ? keyMatch[1] : await this.generateRandomPublicKey();
-    } else {
-      publicKeyMultibase =
-        (await this.discoverSignerPublicKey()) ?? (await this.generateRandomPublicKey());
+  /** The controller's canonical verification method (`<did>#<key>` for did:key). */
+  private canonicalControllerVm(controller: string): string {
+    if (controller.startsWith('did:key:')) {
+      return `${controller}#${controller.slice('did:key:'.length)}`;
     }
-
-    // Create did:peer using numalgo 4. did:peer:4 is deterministic over the
-    // embedded document, so a document containing only the (reused) controller
-    // key would produce the SAME DID for every asset created with that key.
-    // A second, per-asset random verification method keeps each asset's DID
-    // unique while the controller key stays embedded for the self-certifying
-    // binding check.
-    const did: string = await didPeerMod.createNumAlgo4(
-      [
-        {
-          type: 'Multikey',
-          publicKeyMultibase,
-        },
-        {
-          type: 'Multikey',
-          publicKeyMultibase: await this.generateRandomPublicKey(),
-        }
-      ],
-      undefined, // services
-      undefined  // alsoKnownAs
-    );
-
-    return did;
+    return `${controller}#key-0`;
   }
 
   /**
-   * Discovers the signer's public multikey by asking it to sign a probe
-   * payload and reading the `did:key:` verificationMethod it reports on the
-   * resulting proof. The probe signature is discarded.
-   *
-   * Returns null only when the signer does not use a did:key verification
-   * method (its create proofs then aren't subject to the self-certifying
-   * binding check either). A signing FAILURE propagates: swallowing it would
-   * fall back to a random embedded key, and a did:key signer's create event
-   * would later fail verifyEventLog's binding check — a silently
-   * unverifiable asset instead of a clear error at creation time.
+   * Reads the verificationMethod the signer reports by asking it to sign a
+   * discarded probe payload. Returns null when the signer reports no string VM.
    */
-  private async discoverSignerPublicKey(): Promise<string | null> {
+  private async discoverSignerVerificationMethod(): Promise<string | null> {
     const probeProof = await this.signer({ type: 'originals-vm-discovery-probe' });
     const vm = probeProof?.verificationMethod;
-    const keyMatch = typeof vm === 'string' ? vm.match(/^did:key:(z[a-zA-Z0-9]+)/) : null;
-    return keyMatch ? keyMatch[1] : null;
-  }
-
-  /**
-   * Generates a random Ed25519 public key for DID creation
-   *
-   * @returns Promise resolving to a multibase-encoded public key
-   */
-  private async generateRandomPublicKey(): Promise<string> {
-    // Use @noble/ed25519 for key generation
-    const ed25519 = await import('@noble/ed25519');
-    const privateKeyBytes = ed25519.utils.randomSecretKey();
-    const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
-    
-    // Import multikey encoder
-    const { multikey } = await import('../../crypto/Multikey.js');
-    return multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519');
+    return typeof vm === 'string' ? vm : null;
   }
 
   /**
@@ -282,14 +248,18 @@ export class PeerCelManager {
       throw new Error('Cannot update a deactivated event log');
     }
 
-    // Get the DID from the create event for verification method construction
-    const createData = log.events[0].data as PeerAssetData;
-    const did = createData.did;
+    // Derive the fallback verification method from the create event. New-shape
+    // logs must NOT fall back to `did:cel:...#key-0` (unresolvable) — use the
+    // controller's canonical did:key VM; legacy logs keep the old expression.
+    const createData = log.events[0].data as Partial<CelAssetData & PeerAssetData>;
+    const fallbackVm = createData.controller
+      ? this.canonicalControllerVm(createData.controller)
+      : `${createData.did}#key-0`;
 
     // Build update options using the same signer
     const updateOptions: UpdateOptions = {
       signer: this.signer,
-      verificationMethod: this.config.verificationMethod || `${did}#key-0`,
+      verificationMethod: this.config.verificationMethod || fallbackVm,
       proofPurpose: this.config.proofPurpose,
     };
 
@@ -336,16 +306,29 @@ export class PeerCelManager {
       throw new Error('First event must be a create event');
     }
 
-    // Extract initial state from create event
-    const createData = createEvent.data as PeerAssetData;
-    
+    // Dual-read the genesis. New shape (`controller` present): the asset DID is
+    // derived (did:cel), `creator` is sourced from the controller, layer is
+    // definitionally 'peer'. Legacy shape (`did` present): read verbatim.
+    const createData = createEvent.data as Partial<CelAssetData & PeerAssetData>;
+    const isLegacy = createData.controller === undefined && createData.did !== undefined;
+
+    // Shapeless genesis (neither controller nor did): the verifier reports no
+    // assetDid for this shape (verifyEventLog.ts), so minting a did:cel here
+    // would produce state for a DID the log cannot back. Fail closed instead.
+    if (createData.controller === undefined && createData.did === undefined) {
+      throw new Error(
+        'Cannot derive asset state: genesis create event has neither `controller` nor `did`'
+      );
+    }
+
     // Initialize state from create event
     const state: AssetState = {
-      did: createData.did,
+      did: isLegacy ? (createData.did as string) : deriveDidCel(log),
       name: createData.name,
-      layer: createData.layer,
-      resources: [...createData.resources],
-      creator: createData.creator,
+      layer: isLegacy ? (createData.layer as 'peer') : 'peer',
+      resources: [...(createData.resources ?? [])],
+      creator: isLegacy ? createData.creator : createData.controller,
+      controller: createData.controller,
       createdAt: createData.createdAt,
       updatedAt: undefined,
       deactivated: false,
@@ -370,10 +353,12 @@ export class PeerCelManager {
         if (updateData.updatedAt !== undefined) {
           state.updatedAt = updateData.updatedAt as string;
         }
-        if (updateData.did !== undefined) {
+        // did/layer overrides are a legacy-log affordance only: new-shape logs
+        // derive identity from the genesis (did:cel) and never rewrite it here.
+        if (isLegacy && updateData.did !== undefined) {
           state.did = updateData.did as string;
         }
-        if (updateData.layer !== undefined) {
+        if (isLegacy && updateData.layer !== undefined) {
           state.layer = updateData.layer as 'peer' | 'webvh' | 'btco';
         }
         
@@ -384,9 +369,54 @@ export class PeerCelManager {
             state.metadata[key] = value;
           }
         }
+      } else if (event.type === 'migrate') {
+        // First-class migration event: layer transition with the same payload
+        // fields legacy update-sniffed migrations carried.
+        const migrationData = event.data as Record<string, unknown>;
+        if (migrationData.targetDid !== undefined) {
+          state.did = migrationData.targetDid as string;
+        }
+        if (migrationData.layer !== undefined) {
+          state.layer = migrationData.layer as 'peer' | 'webvh' | 'btco';
+        }
+        if (migrationData.migratedAt !== undefined) {
+          state.updatedAt = migrationData.migratedAt as string;
+        }
+        state.metadata = state.metadata || {};
+        if (migrationData.sourceDid !== undefined) {
+          state.metadata.sourceDid = migrationData.sourceDid;
+        }
+        if (migrationData.domain !== undefined) {
+          state.metadata.domain = migrationData.domain;
+        }
+      } else if (event.type === 'transfer') {
+        // Legacy ownership hand-off (transfer events are no longer written; dual-accept read only): surface the owners; identity (did) is unchanged.
+        const transferData = event.data as Record<string, unknown>;
+        if (transferData.transferredAt !== undefined) {
+          state.updatedAt = transferData.transferredAt as string;
+        }
+        state.metadata = state.metadata || {};
+        if (transferData.previousOwner !== undefined) {
+          state.metadata.previousOwner = transferData.previousOwner;
+        }
+        if (transferData.newOwner !== undefined) {
+          state.metadata.newOwner = transferData.newOwner;
+        }
+        if (transferData.txid !== undefined) {
+          state.metadata.txid = transferData.txid;
+        }
+      } else if (event.type === 'rotateKey') {
+        // Authority hand-off: the last rotation's newController is current.
+        const rotationData = event.data as Record<string, unknown>;
+        if (typeof rotationData?.newController === 'string') {
+          state.controller = rotationData.newController;
+        }
+        if (typeof rotationData?.rotatedAt === 'string') {
+          state.updatedAt = rotationData.rotatedAt;
+        }
       } else if (event.type === 'deactivate') {
         state.deactivated = true;
-        
+
         // Extract deactivation details
         const deactivateData = event.data as Record<string, unknown>;
         if (deactivateData.deactivatedAt !== undefined) {

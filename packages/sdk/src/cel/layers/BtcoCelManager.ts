@@ -12,12 +12,13 @@
  */
 
 import type { EventLog, ExternalReference, UpdateOptions, AssetState } from '../types.js';
-import { updateEventLog } from '../algorithms/updateEventLog.js';
+import { appendEvent } from '../algorithms/appendEvent.js';
 import { witnessEvent } from '../algorithms/witnessEvent.js';
 import { BitcoinWitness } from '../witnesses/BitcoinWitness.js';
 import type { BitcoinManager } from '../../bitcoin/BitcoinManager.js';
 import type { CelSigner } from './PeerCelManager.js';
 import { btcoDidPrefix } from '../btcoDid.js';
+import { deriveDidCel } from '../celDid.js';
 
 /**
  * Configuration options for BtcoCelManager
@@ -202,15 +203,24 @@ export class BtcoCelManager {
       const eventData = event.data as Record<string, unknown>;
       
       if (event.type === 'create') {
-        currentDid = eventData.did as string;
+        // Dual-read: new-shape genesis (controller present) derives its
+        // identity (did:cel); legacy genesis embeds `did` and is read verbatim.
+        currentDid = eventData.controller !== undefined
+          ? deriveDidCel(webvhLog)
+          : (eventData.did as string);
         currentLayer = eventData.layer as string || 'peer';
-      } else if (event.type === 'update' && eventData.sourceDid && eventData.layer && eventData.migratedAt) {
-        // This is a migration event. Detect via sourceDid (present on both
-        // webvh and btco migrations) rather than targetDid (webvh-only), so a
-        // log already migrated to btco is recognised as such and the terminal
-        // guard below correctly rejects a second btco migration. webvh
-        // migrations carry the resolvable targetDid; btco migrations don't, but
-        // migrate() only proceeds from the webvh layer anyway.
+      } else if (
+        // Type-first: first-class 'migrate' events are migrations by type.
+        (event.type === 'migrate' && eventData?.layer) ||
+        // Legacy sniff kept verbatim: old logs record migrations as 'update'
+        // events. Detect via sourceDid (present on both webvh and btco
+        // migrations) rather than targetDid (webvh-only), so a log already
+        // migrated to btco is recognised as such and the terminal guard below
+        // correctly rejects a second btco migration. webvh migrations carry
+        // the resolvable targetDid; btco migrations don't, but migrate() only
+        // proceeds from the webvh layer anyway.
+        (event.type === 'update' && eventData.sourceDid && eventData.layer && eventData.migratedAt)
+      ) {
         currentLayer = eventData.layer as string;
         currentDid = (eventData.targetDid as string) ?? (eventData.sourceDid as string);
       }
@@ -261,8 +271,8 @@ export class BtcoCelManager {
       proofPurpose: this.config.proofPurpose,
     };
 
-    // Create the (final, signed) update event with the migration data.
-    const updatedLog = await updateEventLog(webvhLog, migrationData, updateOptions);
+    // Append the (final, signed) first-class migrate event with the migration data.
+    const updatedLog = await appendEvent(webvhLog, 'migrate', migrationData, updateOptions);
 
     // Add the Bitcoin witness proof (REQUIRED at btco layer). This attests the
     // already-signed event content and appends the txid/inscriptionId; it does
@@ -306,16 +316,30 @@ export class BtcoCelManager {
       throw new Error('First event must be a create event');
     }
 
-    // Extract initial state from create event
+    // Extract initial state from create event. Dual-read the genesis: a
+    // new-shape genesis (`controller` present) derives its identity (did:cel)
+    // and sources the creator from the controller; a legacy genesis embeds
+    // `did`/`creator` and is read verbatim.
     const createData = createEvent.data as Record<string, unknown>;
-    
+    const isLegacyGenesis = createData.controller === undefined && createData.did !== undefined;
+
+    // Shapeless genesis (neither controller nor did): the verifier reports no
+    // assetDid for this shape (verifyEventLog.ts), so minting a did:cel here
+    // would produce state for a DID the log cannot back. Fail closed instead.
+    if (createData.controller === undefined && createData.did === undefined) {
+      throw new Error(
+        'Cannot derive asset state: genesis create event has neither `controller` nor `did`'
+      );
+    }
+
     // Initialize state from create event
     const state: AssetState = {
-      did: createData.did as string,
+      did: isLegacyGenesis ? (createData.did as string) : deriveDidCel(log),
       name: createData.name as string | undefined,
       layer: (createData.layer as 'peer' | 'webvh' | 'btco') || 'peer',
       resources: (createData.resources as ExternalReference[]) || [],
-      creator: createData.creator as string | undefined,
+      creator: (createData.creator as string | undefined) ?? (createData.controller as string | undefined),
+      controller: createData.controller as string | undefined,
       createdAt: createData.createdAt as string | undefined,
       updatedAt: undefined,
       deactivated: false,
@@ -326,13 +350,15 @@ export class BtcoCelManager {
     for (let i = 1; i < log.events.length; i++) {
       const event = log.events[i];
 
-      if (event.type === 'update') {
+      if (event.type === 'update' || event.type === 'migrate') {
         const updateData = event.data as Record<string, unknown>;
-        
-        // Check if this is a migration event. Migration events carry a
-        // sourceDid + layer; regular updates don't. (btco migrations no longer
-        // carry targetDid in the signed data — see below.)
-        if (updateData.sourceDid && updateData.layer && updateData.migratedAt) {
+
+        // Type-first: first-class 'migrate' events are migrations by type.
+        // Legacy logs record migrations as 'update' events — the sniff via
+        // sourceDid + layer (regular updates don't carry them) is kept
+        // verbatim as fallback. (btco migrations no longer carry targetDid in
+        // the signed data — see below.)
+        if (event.type === 'migrate' || (updateData.sourceDid && updateData.layer && updateData.migratedAt)) {
           // Migration event - update DID and layer
           state.layer = updateData.layer as 'peer' | 'webvh' | 'btco';
           state.updatedAt = updateData.migratedAt as string;
@@ -415,7 +441,9 @@ export class BtcoCelManager {
         // those events alone — for an ordinary update, an application-defined
         // `network` field must still flow through to metadata.
         const excludedKeys = ['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt', 'txid', 'inscriptionId'];
-        if (updateData.sourceDid && updateData.layer === 'btco' && updateData.migratedAt) {
+        const isBtcoMigration = updateData.layer === 'btco' &&
+          (event.type === 'migrate' || (updateData.sourceDid && updateData.migratedAt));
+        if (isBtcoMigration) {
           excludedKeys.push('network');
         }
         for (const [key, value] of Object.entries(updateData)) {
@@ -423,6 +451,31 @@ export class BtcoCelManager {
             state.metadata = state.metadata || {};
             state.metadata[key] = value;
           }
+        }
+      } else if (event.type === 'transfer') {
+        // Legacy ownership hand-off (transfer events are no longer written; dual-accept read only): surface the owners; identity (did) is unchanged.
+        const transferData = event.data as Record<string, unknown>;
+        if (transferData.transferredAt !== undefined) {
+          state.updatedAt = transferData.transferredAt as string;
+        }
+        state.metadata = state.metadata || {};
+        if (transferData.previousOwner !== undefined) {
+          state.metadata.previousOwner = transferData.previousOwner;
+        }
+        if (transferData.newOwner !== undefined) {
+          state.metadata.newOwner = transferData.newOwner;
+        }
+        if (transferData.txid !== undefined) {
+          state.metadata.txid = transferData.txid;
+        }
+      } else if (event.type === 'rotateKey') {
+        // Authority hand-off: the last rotation's newController is current.
+        const rotationData = event.data as Record<string, unknown>;
+        if (typeof rotationData?.newController === 'string') {
+          state.controller = rotationData.newController;
+        }
+        if (typeof rotationData?.rotatedAt === 'string') {
+          state.updatedAt = rotationData.rotatedAt;
         }
       } else if (event.type === 'deactivate') {
         state.deactivated = true;

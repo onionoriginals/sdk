@@ -16,6 +16,11 @@ export type {
 } from './core/OriginalsSDK.js';
 export { OriginalsAsset } from './lifecycle/OriginalsAsset.js';
 export type { ProvenanceChain } from './lifecycle/OriginalsAsset.js';
+export { replayProvenance, BTCO_SATOSHI_UNKNOWN } from './lifecycle/replayProvenance.js';
+export type { ReplayedProvenance } from './lifecycle/replayProvenance.js';
+export { ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION } from './lifecycle/assetEnvelope.js';
+export type { AssetEnvelope } from './lifecycle/assetEnvelope.js';
+export { checkGenesisResourceBinding } from './lifecycle/genesisBinding.js';
 
 // Type exports
 export * from './types/index.js';
@@ -222,10 +227,24 @@ export {
 } from './cel/hash.js';
 export { witnessSigningBytes } from './cel/canonicalize.js';
 export {
+  DID_CEL_PREFIX,
+  deriveDidCel,
+  deriveDidCelFromGenesis,
+  isDidCel,
+  didCelMatchesLog,
+  createCelDidDocument,
+  resolveDidCel,
+} from './cel/celDid.js';
+export {
   createExternalReference,
   verifyExternalReference,
 } from './cel/ExternalReferenceManager.js';
-export { PeerCelManager } from './cel/layers/PeerCelManager.js';
+export {
+  PeerCelManager,
+  type CelAssetData,
+  type PeerAssetData,
+  type PeerCelConfig,
+} from './cel/layers/PeerCelManager.js';
 export { WebVHCelManager } from './cel/layers/WebVHCelManager.js';
 export { BtcoCelManager } from './cel/layers/BtcoCelManager.js';
 export type { WitnessService } from './cel/witnesses/WitnessService.js';
@@ -239,6 +258,11 @@ export {
   serializeEventLogCbor,
   parseEventLogCbor,
 } from './cel/serialization/cbor.js';
+export {
+  celSignerFromKeyPair,
+  createKeyStoreCelSigner,
+  hexSha256ToDigestMultibase,
+} from './cel/signerAdapter.js';
 
 // Default export
 export default OriginalsSDK;

@@ -24,6 +24,7 @@ import { serializeEventLogCbor } from '../serialization/cbor.js';
 import { multikey } from '../../crypto/Multikey.js';
 import { canonicalizeEvent } from '../canonicalize.js';
 import { btcoDidFromSatoshi } from '../btcoDid.js';
+import { deriveDidCel } from '../celDid.js';
 
 /**
  * Flags parsed from command line arguments
@@ -90,11 +91,15 @@ function detectCurrentLayer(log: EventLog): 'peer' | 'webvh' | 'btco' {
 
   for (const event of log.events) {
     const data = event.data as Record<string, unknown>;
-    
+
     if (event.type === 'create' && data.layer) {
       currentLayer = data.layer as 'peer' | 'webvh' | 'btco';
+    } else if (event.type === 'migrate' && data.layer) {
+      // Type-first: first-class 'migrate' events are migrations by type.
+      currentLayer = data.layer as 'peer' | 'webvh' | 'btco';
     } else if (event.type === 'update' && data.layer && data.sourceDid && data.migratedAt) {
-      // This is a migration event. Detect via sourceDid + migratedAt (present
+      // Legacy sniff kept verbatim: old logs record migrations as 'update'
+      // events. Detect via sourceDid + migratedAt (present
       // on both webvh and btco migrations, and reserved from regular updates);
       // btco migrations don't carry targetDid, so keying off targetDid left
       // btco logs mis-detected as webvh and bypassed the "cannot migrate from
@@ -119,14 +124,23 @@ function getCurrentDid(log: EventLog): string {
 
   for (const event of log.events) {
     const data = event.data as Record<string, unknown>;
-    
-    if (event.type === 'create' && data.did) {
-      currentDid = data.did as string;
+
+    if (event.type === 'create') {
+      // Dual-read the genesis: a new-shape genesis (`controller` present)
+      // derives its identity (did:cel); a legacy genesis embeds `did`.
+      if (data.did) {
+        currentDid = data.did as string;
+      } else if (data.controller !== undefined) {
+        currentDid = deriveDidCel(log);
+      }
+    } else if (event.type === 'migrate' && data.layer) {
+      // Type-first: first-class 'migrate' events are migrations by type.
+      currentDid = resolveMigrationDid(event, data) ?? currentDid;
     } else if (event.type === 'update' && data.sourceDid && data.layer && data.migratedAt) {
-      // Migration event. webvh migrations carry the resolvable targetDid; btco
-      // migrations derive did:btco:<satoshi> from the bitcoin witness proof
-      // (the satoshi is only known after inscription, so it isn't in the
-      // signed data).
+      // Legacy sniff kept verbatim. webvh migrations carry the resolvable
+      // targetDid; btco migrations derive did:btco:<satoshi> from the bitcoin
+      // witness proof (the satoshi is only known after inscription, so it
+      // isn't in the signed data).
       currentDid = resolveMigrationDid(event, data) ?? currentDid;
     }
   }

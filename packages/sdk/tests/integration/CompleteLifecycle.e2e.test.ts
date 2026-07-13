@@ -150,7 +150,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify asset creation
       expect(asset).toBeInstanceOf(OriginalsAsset);
       expect(asset.currentLayer).toBe('did:peer');
-      expect(asset.id).toMatch(/^did:peer:/);
+      expect(asset.id).toMatch(/^did:cel:/);
       expect(asset.resources).toHaveLength(2);
       expect(asset.resources[0].id).toBe('resource-1');
       expect(asset.resources[1].id).toBe('resource-2');
@@ -159,7 +159,6 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const initialProvenance = asset.getProvenance();
       expect(initialProvenance.creator).toBe(asset.id);
       expect(initialProvenance.migrations).toHaveLength(0);
-      expect(initialProvenance.transfers).toHaveLength(0);
       expect(initialProvenance.createdAt).toBeDefined();
 
       // ===== PHASE 2: Publish to Web (did:webvh) =====
@@ -266,35 +265,29 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(transferResult.vout).toBeDefined();
       expect(transferResult.fee).toBeDefined();
 
-      // Verify provenance after transfer
+      // Verify provenance after transfer. Ownership history is the sat's UTXO
+      // chain on Bitcoin, not the CEL — the transfer is a pure sat move that
+      // appends nothing to provenance; txid stays at the btco reveal txid.
       const finalProvenance = btcoAsset.getProvenance();
-      expect(finalProvenance.transfers).toHaveLength(1);
-      expect(finalProvenance.transfers[0].from).toBe(btcoAsset.id);
-      expect(finalProvenance.transfers[0].to).toBe(recipientAddress);
-      expect(finalProvenance.transfers[0].transactionId).toBe(transferResult.txid);
-      expect(finalProvenance.transfers[0].timestamp).toBeDefined();
-      expect(finalProvenance.txid).toBe(transferResult.txid);
+      expect(finalProvenance.txid).toBe(finalProvenance.migrations[1].transactionId);
 
       // ===== FINAL VERIFICATION: Complete provenance chain =====
       expect(finalProvenance.creator).toBe(asset.id);
       expect(finalProvenance.migrations).toHaveLength(2);
-      expect(finalProvenance.transfers).toHaveLength(1);
-      
+
       // Verify migration chain
       expect(finalProvenance.migrations[0].from).toBe('did:peer');
       expect(finalProvenance.migrations[0].to).toBe('did:webvh');
       expect(finalProvenance.migrations[1].from).toBe('did:webvh');
       expect(finalProvenance.migrations[1].to).toBe('did:btco');
-      
+
       // Verify all timestamps are in correct order
       const createdAt = new Date(finalProvenance.createdAt).getTime();
       const migration1Time = new Date(finalProvenance.migrations[0].timestamp).getTime();
       const migration2Time = new Date(finalProvenance.migrations[1].timestamp).getTime();
-      const transferTime = new Date(finalProvenance.transfers[0].timestamp).getTime();
-      
+
       expect(migration1Time).toBeGreaterThanOrEqual(createdAt);
       expect(migration2Time).toBeGreaterThanOrEqual(migration1Time);
-      expect(transferTime).toBeGreaterThanOrEqual(migration2Time);
     });
 
     test('handles peer → btco direct migration (skipping webvh)', async () => {
@@ -331,7 +324,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
         'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7'
       );
       expect(transferResult.txid).toBeDefined();
-      expect(provenance.transfers).toHaveLength(1);
+      // Transfer is a pure sat move; provenance carries migrations only.
     });
 
     test('validates complete asset integrity throughout lifecycle', async () => {
@@ -342,7 +335,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'integrity-test',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'aaaa5678901234567890abcdef1234567890abcdef1234567890abcdef1234'
+          hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
           // No content property - verify will skip content hash check
         }
       ];
@@ -355,11 +348,13 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const webAsset = await sdk.lifecycle.publishToWeb(asset, 'integrity.test');
       expect(await webAsset.verify()).toBe(true);
 
+      // Post-inscription the CEL log carries a bitcoin witness proof (#367):
+      // verify() now gates on the chain, so the ordinals provider is required.
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
-      expect(await btcoAsset.verify()).toBe(true);
+      expect(await btcoAsset.verify({ ordinalsProvider })).toBe(true);
 
       await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
-      expect(await btcoAsset.verify()).toBe(true);
+      expect(await btcoAsset.verify({ ordinalsProvider })).toBe(true);
     });
   });
 
@@ -534,12 +529,11 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(tx2.txid).toBeDefined();
       expect(tx2.txid).not.toBe(tx1.txid);
 
-      // Verify both transfers in provenance
+      // Each transfer is an independent sat move with its own txid. Ownership
+      // history is the sat's UTXO chain, not the CEL — provenance carries no
+      // transfers, and its txid stays anchored to the btco migration reveal.
       const provenance = btcoAsset.getProvenance();
-      expect(provenance.transfers).toHaveLength(2);
-      expect(provenance.transfers[0].to).toBe(recipient1);
-      expect(provenance.transfers[1].to).toBe(recipient2);
-      expect(provenance.txid).toBe(tx2.txid); // Latest txid
+      expect(provenance.txid).toBe(provenance.migrations[0].transactionId);
     });
 
     test('handles empty resources array', async () => {
@@ -706,13 +700,8 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(btcoMigration.revealTxId).toBeDefined();
       expect(btcoMigration.feeRate).toBe(8); // Explicitly requested rate wins over the oracle
 
-      // Verify transfer metadata
-      expect(provenance.transfers).toHaveLength(1);
-      const transfer = provenance.transfers[0];
-      expect(transfer.from).toBeDefined();
-      expect(transfer.to).toBe('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
-      expect(transfer.timestamp).toBeDefined();
-      expect(transfer.transactionId).toBeDefined();
+      // The transfer is a pure sat move; ownership history is the sat's UTXO
+      // chain on Bitcoin, not the CEL — provenance carries no transfer metadata.
     });
 
     test('timestamps are monotonically increasing', async () => {
@@ -727,15 +716,16 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
       
       await new Promise(resolve => setTimeout(resolve, 10)); // Small delay
+      // Transfer is a pure sat move (no provenance entry); it still must not
+      // disturb the monotonic migration timestamps below.
       await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
 
       const provenance = btcoAsset.getProvenance();
-      
+
       const times = [
         new Date(provenance.createdAt).getTime(),
         new Date(provenance.migrations[0].timestamp).getTime(),
-        new Date(provenance.migrations[1].timestamp).getTime(),
-        new Date(provenance.transfers[0].timestamp).getTime()
+        new Date(provenance.migrations[1].timestamp).getTime()
       ];
 
       for (let i = 1; i < times.length; i++) {
