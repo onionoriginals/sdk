@@ -40,7 +40,6 @@
  */
 import type { EventLog } from '../cel/types.js';
 import { deriveDidCel } from '../cel/celDid.js';
-import { btcoDidFromSatoshi } from '../cel/btcoDid.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
 
 /** Honest sentinel: a btco migration whose satoshi cannot be recovered from the log. */
@@ -102,11 +101,14 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
       let to = BTCO_SATOSHI_UNKNOWN;
       if (typeof data.to === 'string') {
         try {
-          const satoshi = String(parseSatoshiIdentifier(data.to));
-          const network = typeof data.network === 'string' ? data.network : undefined;
-          const btcoDid = btcoDidFromSatoshi(satoshi, network);
-          result.bindings['did:btco'] = btcoDid;
-          to = btcoDid;
+          // Validate `data.to` is a resolvable did:btco, then use it DIRECTLY:
+          // it is the controller-SIGNED authoritative value. Re-deriving from
+          // parseSatoshiIdentifier(data.to)+data.network would be a second
+          // source of truth that can silently disagree (e.g. `to` names `reg`
+          // while `data.network` says mainnet).
+          parseSatoshiIdentifier(data.to);
+          result.bindings['did:btco'] = data.to;
+          to = data.to;
         } catch {
           // unparseable signed anchor → leave the sentinel, omit the binding
         }
