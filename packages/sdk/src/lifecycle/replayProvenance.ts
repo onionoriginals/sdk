@@ -110,8 +110,9 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
           timestamp,
         };
         // Omit the version fields entirely for foreign logs whose update event
-        // carries no numeric toVersion (rather than fold them as NaN → null).
-        if (Number.isFinite(toVersion)) {
+        // carries no numeric toVersion (rather than fold them as NaN → null), or
+        // whose toVersion is < 2 (would yield a nonsensical fromVersion:0).
+        if (Number.isFinite(toVersion) && toVersion >= 2) {
           entry.fromVersion = toVersion - 1;
           entry.toVersion = toVersion;
         }
