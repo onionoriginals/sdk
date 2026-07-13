@@ -305,6 +305,19 @@ export class LifecycleManager {
     if (this.keyStore) {
       await this.keyStore.setPrivateKey(verificationMethod, controllerKp.privateKey);
       await this.keyStore.setPrivateKey(`${did}#key-0`, controllerKp.privateKey);
+    } else {
+      // No keyStore: the freshly minted controller private key is held nowhere
+      // and is dropped here, so the asset cannot author CEL events — publish/
+      // inscribe/authorizeSigner appends will degrade (cel:append-skipped)
+      // until this VM's key is available in a keyStore. Surface it; never
+      // hard-fail (keyStore-less SDKs are valid for verification-only use).
+      await this.eventEmitter.emit({
+        type: 'key:unpersisted',
+        timestamp: new Date().toISOString(),
+        asset: { id: did },
+        did,
+        verificationMethod
+      });
     }
 
     const asset = new OriginalsAsset(resources, didDoc, [], log);
@@ -682,7 +695,15 @@ export class LifecycleManager {
     warnings: string[]
   ): ProvenanceChain {
     const genesisData = (log.events[0]?.data ?? {}) as Record<string, unknown>;
-    const createdAt = typeof genesisData.createdAt === 'string' ? genesisData.createdAt : '';
+    // A genesis without a string createdAt is malformed — reject rather than
+    // fold an empty timestamp into provenance (new Date('') = Invalid Date).
+    if (typeof genesisData.createdAt !== 'string' || genesisData.createdAt.length === 0) {
+      throw new StructuredError(
+        'ENVELOPE_INVALID',
+        'Envelope event log genesis is missing a string data.createdAt; cannot restore provenance.'
+      );
+    }
+    const createdAt = genesisData.createdAt;
     const creator = typeof genesisData.controller === 'string'
       ? genesisData.controller
       : typeof genesisData.creator === 'string'

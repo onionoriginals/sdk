@@ -604,6 +604,18 @@ function ed25519KeyHexesFromDidDocument(content: unknown): Set<string> {
 }
 
 /**
+ * Confirmed block height of a getInscriptionById result, when the provider
+ * exposes one. `blockHeight` is not declared on the minimal OrdinalsLookup
+ * surface, so it is probed structurally — every SDK OrdinalsProvider returns
+ * it, and it is the only provider-order-INDEPENDENT ordering signal available
+ * to the non-cooperative rotation rule (check (d)).
+ */
+function inscriptionBlockHeight(inscription: unknown): number | undefined {
+  const h = (inscription as { blockHeight?: unknown } | null | undefined)?.blockHeight;
+  return typeof h === 'number' && Number.isFinite(h) ? h : undefined;
+}
+
+/**
  * Non-cooperative rotation candidacy (#366): after a sat transfer the new
  * owner cannot obtain the old controller's signature, so a rotateKey whose
  * controller proof is NOT authorized by the current key set is accepted IFF
@@ -621,9 +633,10 @@ function ed25519KeyHexesFromDidDocument(content: unknown): Set<string> {
  *      wrap-someone-else's-reinscription attack: an attacker cannot take the
  *      legitimate buyer's on-sat reinscription and wrap it in a rotateKey
  *      naming (or signed by) themselves;
- *  (d) on the sat's inscription list, the rotation's inscription appears at a
- *      STRICTLY LATER index than the current anchor inscription — the
- *      hand-off must postdate the anchor it supersedes.
+ *  (d) the rotation's inscription STRICTLY POSTDATES the current anchor
+ *      inscription, proven by per-inscription block heights (order-independent
+ *      of getInscriptionsBySatoshi's list order); the list index is only a
+ *      same-height tiebreak, and missing heights fail closed.
  *
  * No ordering-vs-transfer-tx check is needed (and none is done): only the
  * sat's current UTXO holder can reinscribe it, so a reinscription satisfying
@@ -683,14 +696,17 @@ async function evaluateNonCooperativeRotation(
 
     // (b) the reinscribed DID document must ANNOUNCE the new controller's key.
     // verifyBitcoinWitnessProof guaranteed the provider and the inscription
-    // content exist; a lookup failure here still fails closed.
+    // content exist; a lookup failure here still fails closed. The fetch also
+    // yields the rotation's block height for the (d) ordering check below.
     let announced: Set<string>;
+    let rotationHeight: number | undefined;
     try {
       const inscription = await (ordinalsProvider as OrdinalsLookup).getInscriptionById(candidate.inscriptionId);
       if (!inscription || inscription.content === undefined) {
         reason = `inscription ${candidate.inscriptionId} content is missing`;
         continue;
       }
+      rotationHeight = inscriptionBlockHeight(inscription);
       announced = ed25519KeyHexesFromDidDocument(JSON.parse(inscription.content.toString('utf8')));
     } catch (e) {
       reason = `failed to inspect inscription ${candidate.inscriptionId}: ${e instanceof Error ? e.message : String(e)}`;
@@ -701,12 +717,16 @@ async function evaluateNonCooperativeRotation(
       continue;
     }
 
-    // (d) the reinscription must be STRICTLY LATER on the sat than the current
-    // anchor inscription. Without an inscription-list capability the ordering
-    // is unprovable — fail closed. This index comparison trusts
-    // getInscriptionsBySatoshi's documented oldest-first contract (see
-    // OrdinalsLookup); a provider returning newest-first flips this check
-    // fail-open.
+    // (d) the reinscription must STRICTLY POSTDATE the current anchor
+    // inscription. PRIMARY signal: each inscription's confirmed block height
+    // (via getInscriptionById) — independent of getInscriptionsBySatoshi's
+    // list order, so a provider violating the documented oldest-first contract
+    // cannot invert this check into accepting a pre-anchor inscription. The
+    // list index is trusted ONLY as a same-height (same-block) tiebreak.
+    // Everything unprovable fails closed: no enumeration capability, either
+    // inscription absent from the sat's list, either block height unavailable,
+    // or a same-height list that does not place the rotation strictly after
+    // the anchor all REJECT the rotation.
     if (typeof ordinalsProvider?.getInscriptionsBySatoshi !== 'function') {
       return { accepted: false, reason: `ordinals provider cannot enumerate inscriptions on satoshi ${anchoredSat.satoshi}; reinscription order is unprovable` };
     }
@@ -719,7 +739,27 @@ async function evaluateNonCooperativeRotation(
     }
     const anchorIdx = onSat.findIndex(i => i.inscriptionId === anchoredSat.inscriptionId);
     const rotationIdx = onSat.findIndex(i => i.inscriptionId === candidate.inscriptionId);
-    if (anchorIdx === -1 || rotationIdx === -1 || rotationIdx <= anchorIdx) {
+    if (anchorIdx === -1 || rotationIdx === -1) {
+      reason = `rotation inscription ${candidate.inscriptionId} or anchor inscription ${anchoredSat.inscriptionId} is not enumerated on satoshi ${anchoredSat.satoshi}`;
+      continue;
+    }
+
+    let anchorHeight: number | undefined;
+    try {
+      anchorHeight = inscriptionBlockHeight(await ordinalsProvider.getInscriptionById(anchoredSat.inscriptionId));
+    } catch (e) {
+      reason = `failed to fetch anchor inscription ${anchoredSat.inscriptionId}: ${e instanceof Error ? e.message : String(e)}`;
+      continue;
+    }
+    if (rotationHeight === undefined || anchorHeight === undefined) {
+      reason = `cannot order rotation inscription ${candidate.inscriptionId} against anchor inscription ${anchoredSat.inscriptionId}: block heights unavailable from the provider; ordering is unprovable`;
+      continue;
+    }
+    if (rotationHeight < anchorHeight) {
+      reason = `rotation inscription ${candidate.inscriptionId} (block ${rotationHeight}) predates anchor inscription ${anchoredSat.inscriptionId} (block ${anchorHeight}) on satoshi ${anchoredSat.satoshi}`;
+      continue;
+    }
+    if (rotationHeight === anchorHeight && rotationIdx <= anchorIdx) {
       reason = `rotation inscription ${candidate.inscriptionId} does not appear strictly after anchor inscription ${anchoredSat.inscriptionId} on satoshi ${anchoredSat.satoshi}`;
       continue;
     }

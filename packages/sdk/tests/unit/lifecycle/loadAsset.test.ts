@@ -123,6 +123,22 @@ describe('loadAsset — fail-closed verification', () => {
     expect(err.details.verification.verified).toBe(false);
   });
 
+  test('genesis event without a string createdAt -> ENVELOPE_INVALID (no empty-timestamp fallback)', async () => {
+    const { sdk } = makeSDK();
+    const asset = await createGenesisAsset(sdk);
+    const envelope = asset.serialize();
+    delete (envelope.eventLog.events[0].data as { createdAt?: string }).createdAt;
+
+    // skipVerification isolates the provenance rebuild: the tamper would also
+    // fail the crypto gate, but the malformed genesis must be rejected as
+    // ENVELOPE_INVALID rather than folded into createdAt: ''.
+    let err: any;
+    try { await sdk.lifecycle.loadAsset(envelope, { skipVerification: true }); } catch (e) { err = e; }
+    expect(err).toBeDefined();
+    expect(err.code).toBe('ENVELOPE_INVALID');
+    expect(String(err.message)).toMatch(/createdAt/);
+  });
+
   test('version 2 envelope -> ENVELOPE_VERSION_UNSUPPORTED', async () => {
     const { sdk } = makeSDK();
     const asset = await createGenesisAsset(sdk);

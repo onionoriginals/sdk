@@ -301,8 +301,9 @@ export interface BatchProgressEvent extends BaseEvent {
 }
 
 /**
- * Emitted when a migration mints a new update key but no keyStore is
- * configured to persist it: the DID exists but cannot be rotated later.
+ * Emitted when an operation mints a new key but no keyStore holds it: the
+ * DID exists but the key is unusable later (a webvh migration's update key,
+ * or a did:cel controller key that cannot author CEL events).
  */
 export interface KeyUnpersistedEvent extends BaseEvent {
   type: 'key:unpersisted';
@@ -313,8 +314,9 @@ export interface KeyUnpersistedEvent extends BaseEvent {
   /**
    * The verification method whose private key is unpersisted. Set by
    * rotateBtcoKeys when the incoming controller's key is not in the keyStore,
-   * so subsequent CEL appends would degrade (no signing key). Absent for the
-   * webvh migration case, where the DID itself identifies the unpersisted key.
+   * and by a keyStore-less createAsset (the dropped did:cel controller key) —
+   * in both cases subsequent CEL appends degrade (no signing key). Absent for
+   * the webvh migration case, where the DID itself identifies the key.
    */
   verificationMethod?: string;
 }

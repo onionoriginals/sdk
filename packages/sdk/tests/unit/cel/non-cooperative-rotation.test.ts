@@ -9,8 +9,9 @@
  *  (b) the inscribed DID document announces an Ed25519 key of newController;
  *  (c) the event's own controller-proof key is a key of newController
  *      (signer ≡ announced ≡ inscribed);
- *  (d) the rotation's inscription appears at a STRICTLY LATER index on the sat
- *      than the current anchor inscription.
+ *  (d) the rotation's inscription STRICTLY POSTDATES the current anchor
+ *      inscription — block heights primary (provider-order-independent),
+ *      list index only as a same-block tiebreak, missing heights fail closed.
  * Anything unverifiable fails closed — the event and log fail exactly as an
  * unauthorized event does today.
  *
@@ -467,6 +468,114 @@ describe('non-cooperative rotation (reinscription-attested hand-off)', () => {
     // ...and the ambiguity poisons the TRUE sat too (fail closed, no guessing).
     const onTrueSat = await addNonCoopRotation(tampered, provider, attacker);
     expect((await verifyEventLog(onTrueSat.log, { ordinalsProvider: provider })).verified).toBe(false);
+  });
+
+  // Ordering hardening (#395): check (d) must not TRUST getInscriptionsBySatoshi's
+  // documented oldest-first contract. Per-inscription block heights (via
+  // getInscriptionById) are the provider-order-independent primary signal; the
+  // list index is only a same-height tiebreak; missing heights fail closed.
+  describe('(d) ordering hardening — mis-ordered providers cannot fail open', () => {
+    // Wraps an OrdMockProvider: overrides each inscription's blockHeight from
+    // `heights` (strips it when unmapped) and optionally reverses the sat list
+    // (a contract-violating newest-first provider).
+    function withHeights(
+      provider: OrdMockProvider,
+      heights: Record<string, number>,
+      opts: { reverse?: boolean } = {}
+    ) {
+      return {
+        async getInscriptionById(id: string) {
+          const rec = await provider.getInscriptionById(id);
+          if (!rec) return null;
+          if (id in heights) return { ...rec, blockHeight: heights[id] };
+          const { blockHeight: _bh, ...rest } = rec as Record<string, unknown> & { blockHeight?: number };
+          return rest as typeof rec;
+        },
+        async getInscriptionsBySatoshi(satoshi: string) {
+          const list = await provider.getInscriptionsBySatoshi(satoshi);
+          return opts.reverse ? [...list].reverse() : list;
+        },
+      };
+    }
+
+    test('newest-first provider + PRE-anchor rotation inscription (lower real height): rejected, no fail-open', async () => {
+      const provider = new OrdMockProvider();
+      const a = await makeKey();
+      const b = await makeKey();
+
+      // On-sat (true chain) order: I_rot first (block 100), I_mig second
+      // (block 200) — the rotation inscription PREDATES the anchor.
+      let log = await createEventLog(
+        { name: 'Asset', controller: a.didKey, resources: [], createdAt: 'x', nonce: 'nc-nf' },
+        { signer: a.signer, verificationMethod: a.vm }
+      );
+      log = await appendEvent(log, 'migrate', { sourceDid: 'did:cel:uP', layer: 'btco', network: 'regtest', migratedAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
+      const migrateDigest = chainDigest(log.events[1]);
+      const rotated = await appendEvent(log, 'rotateKey', { newController: b.didKey, rotatedAt: 'x' }, { signer: b.signer, verificationMethod: b.vm });
+      const rotDigest = chainDigest(rotated.events[2]);
+
+      const iRot = await inscribeDoc(provider, SAT, rotDigest, b.pubMb); // list index 0, height 100
+      const iMig = await inscribeDoc(provider, SAT, migrateDigest);      // list index 1, height 200
+
+      const events = rotated.events.slice();
+      const witness = (insc: { inscriptionId: string; txid: string }) => ({
+        type: 'DataIntegrityProof',
+        cryptosuite: 'bitcoin-ordinals-2024',
+        created: 'x',
+        verificationMethod: 'did:btco:witness',
+        proofPurpose: 'assertionMethod',
+        proofValue: `z${insc.inscriptionId}`,
+        witnessedAt: 'x',
+        txid: insc.txid,
+        satoshi: SAT,
+        inscriptionId: insc.inscriptionId,
+      });
+      events[1] = { ...events[1], proof: [...events[1].proof, witness(iMig)] };
+      events[2] = { ...events[2], proof: [...events[2].proof, witness(iRot)] };
+
+      // Newest-first list puts I_rot AFTER I_mig — the raw index check would
+      // invert and ACCEPT the pre-anchor inscription. Heights must catch it.
+      const misordered = withHeights(
+        provider,
+        { [iRot.inscriptionId]: 100, [iMig.inscriptionId]: 200 },
+        { reverse: true }
+      );
+      const result = await verifyEventLog({ events }, { ordinalsProvider: misordered });
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /is not authorized/.test(e))).toBe(true);
+    });
+
+    test('newest-first provider + genuinely LATER reinscription (higher height): still accepted (order-independent)', async () => {
+      const provider = new OrdMockProvider();
+      const a = await makeKey();
+      const b = await makeKey();
+      const { log, migrateInscriptionId } = await makeAnchoredLog(provider, a);
+      const { log: rotatedLog, inscriptionId } = await addNonCoopRotation(log, provider, b);
+
+      const misordered = withHeights(
+        provider,
+        { [migrateInscriptionId]: 100, [inscriptionId]: 200 },
+        { reverse: true }
+      );
+      const result = await verifyEventLog(rotatedLog, { ordinalsProvider: misordered });
+      expect(result.errors).toEqual([]);
+      expect(result.verified).toBe(true);
+      expect(result.events[2].nonCooperativeRotation?.inscriptionId).toBe(inscriptionId);
+    });
+
+    test('heights unavailable: ordering is unprovable and fails closed even on a correct oldest-first list', async () => {
+      const provider = new OrdMockProvider();
+      const a = await makeKey();
+      const b = await makeKey();
+      const { log } = await makeAnchoredLog(provider, a);
+      const { log: rotatedLog } = await addNonCoopRotation(log, provider, b);
+
+      // No heights mapped → blockHeight stripped from every inscription.
+      const heightless = withHeights(provider, {});
+      const result = await verifyEventLog(rotatedLog, { ordinalsProvider: heightless });
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /is not authorized/.test(e))).toBe(true);
+    });
   });
 
   test('cooperative rotation (old key signs) still works unchanged alongside the new arm', async () => {

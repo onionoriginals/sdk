@@ -56,6 +56,35 @@ describe('createAsset mints did:cel genesis (#Phase2)', () => {
     expect(await keyStore.getPrivateKey(didKeyVm)).toBeTruthy();
     expect(await keyStore.getPrivateKey(`${asset.id}#key-0`)).toBeTruthy();
   });
+
+  test('keyStore-less createAsset emits key:unpersisted naming the controller VM (asset is operationally inert)', async () => {
+    const didManager = new DIDManager(config);
+    const credentialManager = new CredentialManager(config, didManager);
+    const lifecycle = new LifecycleManager(config, didManager, credentialManager); // no keyStore
+    const unpersisted: any[] = [];
+    lifecycle.on('key:unpersisted', (e) => { unpersisted.push(e); });
+
+    const asset = await lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: 'ef'.repeat(32) }
+    ]);
+
+    expect(unpersisted.length).toBe(1);
+    expect(unpersisted[0].did).toBe(asset.id);
+    expect(unpersisted[0].asset.id).toBe(asset.id);
+    const genesis = asset.celLog!.events[0].data as { controller: string };
+    expect(unpersisted[0].verificationMethod)
+      .toBe(`${genesis.controller}#${genesis.controller.slice('did:key:'.length)}`);
+  });
+
+  test('keyStore-backed createAsset does NOT emit key:unpersisted', async () => {
+    const { sdk } = makeSdkWithKeyStoreExposed();
+    const unpersisted: any[] = [];
+    sdk.lifecycle.on('key:unpersisted', (e) => { unpersisted.push(e); });
+    await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '01'.repeat(32) }
+    ]);
+    expect(unpersisted.length).toBe(0);
+  });
 });
 
 describe('verify() binds in-memory resources to the CEL genesis', () => {
