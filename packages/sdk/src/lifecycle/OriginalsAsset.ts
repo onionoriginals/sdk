@@ -66,6 +66,11 @@ export class OriginalsAsset {
   // Per-layer DID documents captured at operation time (publish/inscribe/rotate).
   // These are discarded by the live flow otherwise; serialize() needs them.
   #didDocuments: Map<'did:webvh' | 'did:btco', DIDDocument> = new Map();
+  // Injected by LifecycleManager (createAsset / loadAsset). Appends a signed CEL
+  // event via the manager's degrade-aware path and returns the new head digest,
+  // or null when the append was skipped (no keyStore / no signing key). Undefined
+  // for assets constructed outside the lifecycle (they degrade in-memory only).
+  #celAppender?: (type: 'migrate' | 'rotateKey' | 'update', data: unknown) => Promise<string | null>;
 
   constructor(
     resources: AssetResource[],
@@ -161,6 +166,17 @@ export class OriginalsAsset {
    */
   _replaceCelLog(log: EventLog): void {
     this.#celLog = log;
+  }
+
+  /**
+   * @internal — LifecycleManager binds the controller append path so
+   * addResourceVersion can write signed `update` events with the same degrade
+   * contract (cel:append-skipped) as the other authorship ops.
+   */
+  _bindCelAppender(
+    fn: (type: 'migrate' | 'rotateKey' | 'update', data: unknown) => Promise<string | null>
+  ): void {
+    this.#celAppender = fn;
   }
 
   /**
@@ -532,9 +548,21 @@ export class OriginalsAsset {
   }
 
   /**
-   * Add a new version of a resource (immutable versioning).
-   * Creates a new AssetResource with incremented version number and links it to the previous version.
-   * 
+   * Add a new version of a resource (immutable versioning) as a signed CEL
+   * `update` event.
+   *
+   * Async: the new version is appended to the CEL log via the injected
+   * controller appender (bound by LifecycleManager). On success the in-memory
+   * resources advance and `provenance.resourceUpdates` is re-folded from the log.
+   * Degraded mode (no appender bound, or the appender skips because no signing
+   * key is available): the in-memory resources still advance so the object is
+   * usable, but NO event is appended (the version is not provable) and a
+   * `cel:append-skipped` is emitted.
+   *
+   * `changes` is retained for the emitted `resource:version:created` event only;
+   * it is NOT part of the signed CEL body (the log is the source of truth and its
+   * body is fixed — see the design contract).
+   *
    * @param resourceId - The logical resource ID
    * @param newContent - The new content. Must be a string: AssetResource can
    *   only carry inline string content, so Buffer input is rejected rather
@@ -544,14 +572,15 @@ export class OriginalsAsset {
    * @param contentType - The content type
    * @param changes - Optional description of changes
    * @returns The newly created AssetResource
-   * @throws Error if content is unchanged, resource not found, or newContent is a Buffer
+   * @throws StructuredError('BINARY_CONTENT_UNSUPPORTED') for Buffer content (#276)
+   * @throws Error if content is unchanged or the resource is not found
    */
-  addResourceVersion(
+  async addResourceVersion(
     resourceId: string,
     newContent: string,
     contentType: string,
     changes?: string
-  ): AssetResource {
+  ): Promise<AssetResource> {
     // AssetResource.content is a string; a Buffer used to be silently dropped
     // (only its hash was stored), unrecoverably losing the binary content
     // while the caller believed it was versioned (issue #276). The parameter
@@ -570,23 +599,23 @@ export class OriginalsAsset {
     if (currentResources.length === 0) {
       throw new Error(`Resource with id ${resourceId} not found`);
     }
-    
+
     // Get the latest version
     const currentResource = currentResources.sort((a, b) => {
       const versionA = a.version || 1;
       const versionB = b.version || 1;
       return versionB - versionA;
     })[0];
-    
+
     // Compute new hash
     const contentBuffer = Buffer.from(newContent, 'utf-8');
     const newHash = hashResource(contentBuffer);
-    
+
     // Check if content has actually changed
     if (newHash === currentResource.hash) {
       throw new Error('Content unchanged - new version would be identical to current version');
     }
-    
+
     // Create new resource version
     const newVersion = (currentResource.version || 1) + 1;
     const newResource: AssetResource = {
@@ -600,12 +629,32 @@ export class OriginalsAsset {
       previousVersionHash: currentResource.hash,
       createdAt: new Date().toISOString()
     };
-    
-    // Add to resources array (immutable - don't modify old resource)
+
+    // Append a signed `update` CEL event (or degrade). The body is the fixed
+    // resource-update shape; toHash is derived at verify/fold time.
+    let appended = false;
+    if (this.#celAppender) {
+      const digest = await this.#celAppender('update', {
+        resourceId,
+        content: newContent,
+        contentType,
+        previousVersionHash: currentResource.hash,
+        toVersion: newVersion
+      });
+      appended = digest !== null; // null ⇒ the manager already emitted cel:append-skipped
+    } else {
+      // No manager bound: degrade in-memory only. Surface the honesty signal on
+      // the asset emitter (the manager path uses its own emitter).
+      await this.eventEmitter.emit({
+        type: 'cel:append-skipped',
+        timestamp: new Date().toISOString(),
+        asset: { id: this.id },
+        reason: this.#celLog ? 'NO_SIGNING_KEY' : 'NO_CEL_LOG'
+      });
+    }
+
+    // In-memory resources advance in BOTH the appended and degraded cases.
     this.resources.push(newResource);
-    
-    // Track in version manager, using the resource's own next version number so
-    // the manager numbering matches getResourceVersion(id, newVersion).
     this.versionManager.addVersion(
       resourceId,
       newHash,
@@ -614,26 +663,18 @@ export class OriginalsAsset {
       changes,
       newVersion
     );
-    
-    // Update provenance
+
+    // Provenance.resourceUpdates is the source-of-truth fold of the log — only
+    // populated when the event actually landed (provable). Re-fold from the log.
+    if (appended && this.#celLog) {
+      this.provenance.resourceUpdates = replayProvenance(this.#celLog).resourceUpdates;
+    }
+
     const timestamp = new Date().toISOString();
-    this.provenance.resourceUpdates.push({
-      resourceId,
-      fromVersion: currentResource.version || 1,
-      toVersion: newVersion,
-      fromHash: currentResource.hash,
-      toHash: newHash,
-      timestamp,
-      changes
-    });
-    
-    // Emit version-created event
     const event = {
       type: 'resource:version:created' as const,
       timestamp,
-      asset: {
-        id: this.id
-      },
+      asset: { id: this.id },
       resource: {
         id: resourceId,
         fromVersion: currentResource.version || 1,
@@ -643,12 +684,10 @@ export class OriginalsAsset {
       },
       changes
     };
-    
-    // Emit asynchronously (don't block)
     queueMicrotask(() => {
       void this.eventEmitter.emit(event);
     });
-    
+
     return newResource;
   }
 

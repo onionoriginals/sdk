@@ -47,7 +47,7 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const btcoBinding = asset.bindings!['did:btco'];
 
     // A post-genesis resource version → rides envelope-only (no CEL event until Phase 4).
-    asset.addResourceVersion('note', 'hello originals v2', 'text/plain', 'edit');
+    await asset.addResourceVersion('note', 'hello originals v2', 'text/plain', 'edit');
 
     const env = asset.serialize();
 
