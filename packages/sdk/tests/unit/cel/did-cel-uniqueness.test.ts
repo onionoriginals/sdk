@@ -44,12 +44,15 @@ type Key = Awaited<ReturnType<typeof makeKey>>;
 const chainDigest = (e: LogEntry) => computeDigestMultibase(canonicalizeEntryForChain(e));
 
 // A btco DID document that back-links the did:cel (Task-2 writer shape).
-function btcoDoc(satoshi: string, headDigestMultibase: string, didCel: string) {
+function btcoDoc(satoshi: string, headDigestMultibase: string, didCel: string, publicKeyMultibase?: string) {
   const id = `did:btco:reg:${satoshi}`;
   return {
     '@context': ['https://www.w3.org/ns/did/v1'],
     id,
     alsoKnownAs: [didCel],
+    ...(publicKeyMultibase
+      ? { verificationMethod: [{ id: `${id}#key-0`, type: 'Multikey', controller: id, publicKeyMultibase }] }
+      : {}),
     service: [{ id: `${id}#cel`, type: 'OriginalsCelAnchor', serviceEndpoint: { headDigestMultibase } }],
   };
 }
@@ -72,9 +75,9 @@ function attachWitness(log: EventLog, insc: { inscriptionId: string; txid: strin
   return { events: [...log.events.slice(0, -1), { ...last, proof: [...last.proof, witnessProof] }] };
 }
 
-async function inscribeDoc(p: OrdMockProvider, satoshi: string, headDigest: string, didCel: string) {
+async function inscribeDoc(p: OrdMockProvider, satoshi: string, headDigest: string, didCel: string, publicKeyMultibase?: string) {
   const res = await p.createInscription({
-    data: Buffer.from(JSON.stringify(btcoDoc(satoshi, headDigest, didCel))),
+    data: Buffer.from(JSON.stringify(btcoDoc(satoshi, headDigest, didCel, publicKeyMultibase))),
     contentType: 'application/did+json',
     targetSatoshi: satoshi,
   });
@@ -160,7 +163,7 @@ describe('did:cel uniqueness — first-anchor-wins', () => {
       { newController: b.didKey, rotatedAt: '2026-07-13T00:00:02Z' },
       { signer: b.signer, verificationMethod: b.vm }
     );
-    const rotInsc = await inscribeDoc(p, X, chainDigest(rotated.events[rotated.events.length - 1]), didCel);
+    const rotInsc = await inscribeDoc(p, X, chainDigest(rotated.events[rotated.events.length - 1]), didCel, b.pubMb);
     const full = attachWitness(rotated, rotInsc, X);
 
     // Migrate at block 100, rotation reinscription at block 200 — both on X.
