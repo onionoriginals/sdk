@@ -237,6 +237,66 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     expect(STALE(result)).toBe(true);
   });
 
+  // Ordering hardening (#395 sibling of Fix 1): the "newest anchor" must be
+  // chosen by per-inscription block height, NOT list-tail position. A provider
+  // returning inscriptions newest-first would otherwise make the tail-walk pick
+  // the OLDEST anchor (present even in a truncated prefix) → STALE_LOG never
+  // fires → fail-open.
+  describe('newest-anchor selection is by block height, not list position', () => {
+    // Wraps a provider: overrides each inscription's blockHeight (strips it when
+    // unmapped) and reverses the sat list (contract-violating newest-first).
+    function newestFirstWithHeights(provider: OrdMockProvider, heights: Record<string, number>) {
+      return {
+        async getInscriptionById(id: string) {
+          const rec = await provider.getInscriptionById(id);
+          if (!rec) return null;
+          if (id in heights) return { ...rec, blockHeight: heights[id] };
+          const { blockHeight: _bh, ...rest } = rec as Record<string, unknown> & { blockHeight?: number };
+          return rest as typeof rec;
+        },
+        async getInscriptionsBySatoshi(satoshi: string) {
+          const list = await provider.getInscriptionsBySatoshi(satoshi);
+          return [...list].reverse();
+        },
+      };
+    }
+
+    test('newest-first provider + truncated log whose omitted head is the highest-block anchor → STALE_LOG (no fail-open)', async () => {
+      const provider = new OrdMockProvider();
+      const a = await makeKey();
+      const b = await makeKey();
+      const { log: prefix, migrateInscriptionId } = await makeAnchoredLog(provider, a); // I_mig
+      const { inscriptionId: rotInscriptionId } = await addNonCoopRotation(prefix, provider, b); // I_rot, omitted from prefix
+
+      // I_rot genuinely postdates I_mig (block 200 vs 100). Newest-first list is
+      // [I_rot, I_mig]: a list-tail walk would pick I_mig (present in prefix) and
+      // fail open. Height-based selection picks I_rot → its digest is absent → STALE.
+      const misordered = newestFirstWithHeights(provider, {
+        [migrateInscriptionId]: 100,
+        [rotInscriptionId]: 200,
+      });
+      const result = await verifyEventLog(prefix, { ordinalsProvider: misordered, checkHeadFreshness: true });
+      expect(result.verified).toBe(false);
+      expect(STALE(result)).toBe(true);
+    });
+
+    test('newest-first provider + honest FULL log still verifies (height selection is order-independent)', async () => {
+      const provider = new OrdMockProvider();
+      const a = await makeKey();
+      const b = await makeKey();
+      const { log: prefix, migrateInscriptionId } = await makeAnchoredLog(provider, a);
+      const { log: full, inscriptionId: rotInscriptionId } = await addNonCoopRotation(prefix, provider, b);
+
+      const misordered = newestFirstWithHeights(provider, {
+        [migrateInscriptionId]: 100,
+        [rotInscriptionId]: 200,
+      });
+      const result = await verifyEventLog(full, { ordinalsProvider: misordered, checkHeadFreshness: true });
+      expect(result.errors).toEqual([]);
+      expect(result.verified).toBe(true);
+    });
+  });
+
   test('no anchoredSat (never btco-anchored): the flag is a no-op', async () => {
     const a = await makeKey();
     const log = await createEventLog(

@@ -472,13 +472,15 @@ function extractCelAnchorHeadDigest(content: unknown): string | undefined {
  * Bitcoin (see LifecycleManager.getCurrentOwner); this check only defends the
  * authoring record (the CEL) from looking complete when it isn't.
  *
- * Given the log's anchored satoshi, enumerate its inscriptions (oldest-first by
- * the OrdinalsLookup contract), take the NEWEST one whose content is a DID
- * document carrying an `OriginalsCelAnchor`, and REQUIRE its
- * `headDigestMultibase` to equal the chain digest of SOME event PRESENT in the
- * log. Present-in-log, not is-the-head: a legitimate holder may have appended
- * events not yet re-inscribed, so a mid-log match passes; only a head committing
- * to an event the presented log OMITS (a truncation) fails.
+ * Given the log's anchored satoshi, enumerate its inscriptions, take the NEWEST
+ * anchor-carrying DID document — chosen by per-inscription block HEIGHT, not
+ * list position, so a contract-violating newest-first provider cannot fail this
+ * check open (#395) — and REQUIRE its `headDigestMultibase` to equal the chain
+ * digest of SOME event PRESENT in the log. Present-in-log, not is-the-head: a
+ * legitimate holder may have appended events not yet re-inscribed, so a mid-log
+ * match passes; only a head committing to an event the presented log OMITS (a
+ * truncation) fails. Missing block heights → fail closed; same-block ties fall
+ * back to list-tail order (the documented oldest-first residual).
  *
  * Fail-closed: the caller ASKED for freshness, so any inability to check — no
  * provider, no enumeration capability, a lookup that throws, or no anchor
@@ -502,12 +504,16 @@ async function verifyHeadFreshness(
     return `STALE_LOG: failed to enumerate inscriptions on satoshi ${anchoredSat.satoshi} for the head-freshness check: ${e instanceof Error ? e.message : String(e)}`;
   }
 
-  // Newest-first walk: the list is oldest-first by contract, so start at the end
-  // and take the first anchor-carrying DID document. Non-anchor inscriptions
-  // (other content on the same sat, or non-JSON) are skipped; a genuine FETCH
-  // failure fails closed rather than silently skipping a real head.
-  let headDigest: string | undefined;
-  for (let idx = onSat.length - 1; idx >= 0; idx--) {
+  // The "newest" anchor is chosen by per-inscription block HEIGHT (via
+  // getInscriptionById), NOT by list-tail position — otherwise a provider
+  // violating the oldest-first contract (returning newest-first) would make a
+  // tail-walk pick the OLDEST anchor, present even in a truncated prefix →
+  // fail-open (#395 sibling of the non-cooperative-rotation ordering fix).
+  // So collect EVERY anchor-carrying inscription with its height + list index.
+  // Non-anchor / non-JSON inscriptions are skipped; a genuine FETCH failure
+  // fails closed rather than silently skipping a real head.
+  const anchors: Array<{ height: number | undefined; listIdx: number; digest: string }> = [];
+  for (let idx = 0; idx < onSat.length; idx++) {
     const inscriptionId = onSat[idx].inscriptionId;
     let inscription: Awaited<ReturnType<OrdinalsLookup['getInscriptionById']>>;
     try {
@@ -524,14 +530,26 @@ async function verifyHeadFreshness(
     }
     const digest = extractCelAnchorHeadDigest(content);
     if (digest !== undefined) {
-      headDigest = digest;
-      break;
+      anchors.push({ height: inscriptionBlockHeight(inscription), listIdx: idx, digest });
     }
   }
 
-  if (headDigest === undefined) {
+  if (anchors.length === 0) {
     return `STALE_LOG: no OriginalsCelAnchor DID document found on satoshi ${anchoredSat.satoshi}; cannot confirm the presented log is current`;
   }
+  // Ordering must be provable: if any anchor candidate lacks a block height, we
+  // cannot identify the genuinely-newest one — fail closed (consistent with the
+  // non-cooperative rotation ordering check).
+  if (anchors.some((c) => c.height === undefined)) {
+    return `STALE_LOG: an OriginalsCelAnchor inscription on satoshi ${anchoredSat.satoshi} has no confirmed block height; the newest anchor is unprovable, so head freshness cannot be confirmed`;
+  }
+  // Highest block wins; same-block ties fall back to list-tail order (highest
+  // list index) — the documented oldest-first residual, unprovable intra-block.
+  let head = anchors[0];
+  for (const c of anchors) {
+    if (c.height! > head.height! || (c.height! === head.height! && c.listIdx > head.listIdx)) head = c;
+  }
+  const headDigest = head.digest;
 
   const present = log.events.some(
     (ev) => digestMultibaseEquals(headDigest, computeDigestMultibase(canonicalizeEntryForChain(ev)))
@@ -608,11 +626,17 @@ function ed25519KeyHexesFromDidDocument(content: unknown): Set<string> {
  * exposes one. `blockHeight` is not declared on the minimal OrdinalsLookup
  * surface, so it is probed structurally — every SDK OrdinalsProvider returns
  * it, and it is the only provider-order-INDEPENDENT ordering signal available
- * to the non-cooperative rotation rule (check (d)).
+ * to the ordering checks (non-cooperative rotation (d), head freshness).
+ *
+ * Only a non-negative INTEGER counts as a confirmed height; anything else
+ * (including the null OrdHttp/QuickNode return until an inscription has ≥1
+ * confirmation) yields undefined → fail closed. Behavior change (#395): an
+ * UNCONFIRMED reinscription is now rejected by the ordering checks until it
+ * confirms — intended, fail-closed.
  */
 function inscriptionBlockHeight(inscription: unknown): number | undefined {
   const h = (inscription as { blockHeight?: unknown } | null | undefined)?.blockHeight;
-  return typeof h === 'number' && Number.isFinite(h) ? h : undefined;
+  return typeof h === 'number' && Number.isInteger(h) && h >= 0 ? h : undefined;
 }
 
 /**
@@ -681,6 +705,20 @@ async function evaluateNonCooperativeRotation(
   const eventDigest = computeDigestMultibase(canonicalizeEntryForChain(event));
   let reason = 'no witness proof satisfied the reinscription conditions';
 
+  // The anchor inscription is fixed across candidates, so fetch its block
+  // height ONCE here (not per candidate). A fetch failure is a hard fail-closed:
+  // no candidate can be ordered against an anchor we cannot read. Skipped when
+  // there is no provider — the loop's verifyBitcoinWitnessProof already returns
+  // the clean "requires an ordinalsProvider" rejection in that case.
+  let anchorHeight: number | undefined;
+  if (ordinalsProvider) {
+    try {
+      anchorHeight = inscriptionBlockHeight(await ordinalsProvider.getInscriptionById(anchoredSat.inscriptionId));
+    } catch (e) {
+      return { accepted: false, reason: `failed to fetch anchor inscription ${anchoredSat.inscriptionId}: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  }
+
   // First-satisfying-candidate wins (unlike the migrate poison rule, which
   // rejects on >1 passing witness): both candidates here are necessarily
   // sat-holder-authored, so there's no cross-party escalation to guard against.
@@ -744,13 +782,7 @@ async function evaluateNonCooperativeRotation(
       continue;
     }
 
-    let anchorHeight: number | undefined;
-    try {
-      anchorHeight = inscriptionBlockHeight(await ordinalsProvider.getInscriptionById(anchoredSat.inscriptionId));
-    } catch (e) {
-      reason = `failed to fetch anchor inscription ${anchoredSat.inscriptionId}: ${e instanceof Error ? e.message : String(e)}`;
-      continue;
-    }
+    // anchorHeight was fetched once above the loop (anchor is fixed).
     if (rotationHeight === undefined || anchorHeight === undefined) {
       reason = `cannot order rotation inscription ${candidate.inscriptionId} against anchor inscription ${anchoredSat.inscriptionId}: block heights unavailable from the provider; ordering is unprovable`;
       continue;
