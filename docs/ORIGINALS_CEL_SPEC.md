@@ -1,8 +1,8 @@
 # Originals CEL Application Specification
 
-**Version:** 1.0.0  
+**Version:** 1.2.0  
 **Status:** Draft  
-**Date:** January 2026
+**Date:** 2026-07-11
 
 ## Abstract
 
@@ -71,9 +71,12 @@ Every Originals asset is controlled by a Decentralized Identifier (DID). The con
 
 | Layer | DID Method | Resolution |
 |-------|------------|------------|
-| peer  | `did:peer` | Self-contained (numalgo 4) |
+| genesis (peer) | `did:cel` | Derived from the genesis event; self-certifying (see `specs/did-cel-method.md`) |
 | webvh | `did:webvh` | HTTP-based with version history |
 | btco  | `did:btco` | Bitcoin ordinals inscription |
+
+Legacy logs use `did:peer` (numalgo 4) as the genesis identity; new logs derive a
+`did:cel` from the genesis event.
 
 ### 2.2 Proof Requirements
 
@@ -130,6 +133,31 @@ Where:
 1. The first event (`create`) MUST NOT have a `previousEvent` field
 2. All subsequent events MUST include `previousEvent` referencing the prior event
 3. The hash MUST match the SHA-256 digest of the previous event's canonical form
+
+The canonical form covers only the committed fields `{ type, data, previousEvent? }` —
+never the `proof` array. Proofs carry the signature plus unsigned metadata, and
+witness proofs may be appended after the fact; chaining over them would make the link
+depend on data no signature commits to.
+
+### 2.4 Authority Evolution
+
+Authority over a log is **not** fixed for its lifetime. The initial authorized key is
+established by the genesis `controller` (bound fail-closed; see
+[`specs/did-cel-method.md`](../specs/did-cel-method.md) §3.1). Thereafter:
+
+- A fully valid `rotateKey` event (§5.6) **REPLACES** the authorized key set with the
+  new controller's keys. Replace, not union: retired keys are dead from that event
+  forward, and verifiers MUST reject post-rotation events signed by them.
+- A `rotateKey` MUST pass every check (chain, signature, current-set authorization,
+  target bindability) BEFORE the swap; a failed rotation MUST NOT rotate.
+- `migrate` events MUST NOT change the authorized key set. (Legacy `transfer` events —
+  §5.5 — likewise never changed it; ownership is the sat, not a log event.)
+- **Post-transfer append authority (rotation-first).** Ownership moves with the sat
+  alone and writes nothing to the log (§5.5); this rule governs only *authoring*. A new
+  sat holder who wants to append provenance gains authority only via their first act — a
+  `rotateKey` (backed on-chain by a reinscription proving sat control). Old-key events
+  timestamped after the sat move are rejected. Author-enablement is optional; a holder
+  who never rotates is still the owner. See the design doc §5.
 
 ---
 
@@ -296,19 +324,21 @@ Within an event's `proof` array:
 
 ## 5. Event Types
 
-### 5.1 Create Event
+### 5.1 Create Event (Genesis)
 
-Initializes a new asset and establishes controller authority.
+Initializes a new asset and establishes controller authority. The genesis event is
+the preimage of the asset's `did:cel` identifier (see
+[`specs/did-cel-method.md`](../specs/did-cel-method.md)); the DID is **derived from**
+this event and therefore MUST NOT be embedded in it.
 
-#### 5.1.1 Structure
+#### 5.1.1 Structure (`CelAssetData` — current write shape)
 
 ```json
 {
   "type": "create",
   "data": {
     "name": "My Digital Artwork",
-    "did": "did:peer:4zQm...",
-    "layer": "peer",
+    "controller": "did:key:z6Mk...",
     "resources": [
       {
         "digestMultibase": "uXYZ...",
@@ -316,15 +346,15 @@ Initializes a new asset and establishes controller authority.
         "url": ["ipfs://Qm..."]
       }
     ],
-    "creator": "did:peer:4zQm...",
-    "createdAt": "2026-01-20T12:00:00Z"
+    "createdAt": "2026-01-20T12:00:00Z",
+    "nonce": "uAAAAAAAAAAAAAAAAAAAAAA"
   },
   "proof": [
     {
       "type": "DataIntegrityProof",
       "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-01-20T12:00:00Z",
-      "verificationMethod": "did:peer:4zQm...#key-0",
+      "verificationMethod": "did:key:z6Mk...#z6Mk...",
       "proofPurpose": "assertionMethod",
       "proofValue": "z3FXQ..."
     }
@@ -337,18 +367,43 @@ Initializes a new asset and establishes controller authority.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | Yes | Human-readable asset name |
-| `did` | string | Yes | Asset DID |
-| `layer` | string | Yes | Initial layer (`peer`) |
-| `resources` | array | Yes | Associated external resources |
-| `creator` | string | Yes | Creator DID |
+| `controller` | string | Yes | The **holder's** key DID (`did:key`, or a resolvable DID) — distinct from the derived asset `did:cel` |
+| `resources` | array | Yes | Associated external references (MAY be empty) |
 | `createdAt` | string | Yes | ISO 8601 creation timestamp |
+| `nonce` | string | Yes | Multibase base64url of 16 random bytes — collision insurance for the derived DID |
 
 #### 5.1.3 Rules
 
 - MUST be the first event in any log
 - MUST NOT have a `previousEvent` field
-- `creator` equals `did` at peer layer (self-issued)
+- MUST NOT contain a `did` field — identity is derived, not embedded
+- MUST carry exactly one controller proof (the unsigned proof array cannot
+  disambiguate an injected co-signer)
+- The genesis proof MUST bind to `controller`, fail-closed, with no
+  trust-on-first-use (see `specs/did-cel-method.md` §3.1)
 - `resources` array MAY be empty
+
+#### 5.1.4 Legacy genesis shape (`PeerAssetData`) — read-only
+
+Logs written by pre-`did:cel` releases embed the asset DID directly:
+
+```json
+{
+  "name": "My Digital Artwork",
+  "did": "did:peer:4zQm...",
+  "layer": "peer",
+  "resources": [ /* ... */ ],
+  "creator": "did:peer:4zQm...",
+  "createdAt": "2026-01-20T12:00:00Z"
+}
+```
+
+- Readers MUST continue to accept this shape (dual-accept); the reported asset DID is
+  the declared `data.did`.
+- Writers MUST NOT emit it; new assets use `CelAssetData` above.
+- Behavioral delta: a genesis whose `data.did` is a *malformed* long-form
+  `did:peer:4` now fails closed — only when the genesis proof's `verificationMethod`
+  is itself a `did:key` (previously trust-on-first-use).
 
 ### 5.2 Update Event
 
@@ -426,6 +481,128 @@ Permanently seals the event log, preventing further modifications.
 - Implementations MUST reject updates after deactivation
 - Double-deactivation is an error
 
+### 5.4 Migrate Event
+
+A first-class layer transition (previously folded into `update`). Records the asset
+earning a stronger resolution substrate. Does **not** change authority.
+
+#### 5.4.1 Structure
+
+```json
+{
+  "type": "migrate",
+  "data": {
+    "sourceDid": "did:cel:uEiD...",
+    "targetDid": "did:webvh:example.com:abc123",
+    "layer": "webvh",
+    "domain": "example.com",
+    "migratedAt": "2026-01-23T12:00:00Z"
+  },
+  "previousEvent": "uGHI...",
+  "proof": [ /* controller proof, + witness proof(s) as the target layer requires */ ]
+}
+```
+
+#### 5.4.2 Data Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `sourceDid` | string | Yes | The layer DID being migrated from |
+| `targetDid` | string | Yes | The newly minted layer DID |
+| `layer` | string | Yes | Target layer (`webvh` or `btco`) |
+| `migratedAt` | string | Yes | ISO 8601 timestamp |
+| `domain` | string | webvh | Hosting domain (webvh target) |
+| `txid` / `inscriptionId` | string | btco | Bitcoin anchor fields (btco target) |
+
+#### 5.4.3 Rules
+
+- MUST include `previousEvent` hash
+- MUST follow the one-way path `peer → webvh → btco` (see §6.2); reverse or
+  layer-skipping migrations are invalid
+- MUST NOT change the authorized key set — migration is not a key rotation
+- The asset's `did:cel` identity is unchanged; `targetDid` records a new substrate,
+  not a new identity
+
+### 5.5 Transfer Event (LEGACY — read-only)
+
+> **LEGACY as of 1.2.0.** Ownership **is** the Bitcoin sat/UTXO (btco layer): a transfer
+> is a pure sat move that writes **nothing** to the CEL, and ownership is read live from
+> sat control, not reconstructed from a log event. The `transfer` event type is retained
+> only for backward compatibility: **verifiers MUST accept** a well-formed `transfer`
+> event in pre-1.2.0 logs (dual-accept), but **writers MUST NOT emit** it. The structure
+> and rules below describe those legacy events; they are informative for verifier
+> conformance, not a supported write path.
+
+Records a legacy ownership hand-off. Identity is unchanged and authority does **not**
+change — a legacy `transfer` event never became a log signer for the recipient.
+
+#### 5.5.1 Structure
+
+```json
+{
+  "type": "transfer",
+  "data": {
+    "previousOwner": "bc1q...sender",
+    "newOwner": "bc1q...recipient",
+    "txid": "abc123...",
+    "transferredAt": "2026-01-24T12:00:00Z"
+  },
+  "previousEvent": "uJKL...",
+  "proof": [ /* controller proof (still the pre-transfer controller) */ ]
+}
+```
+
+#### 5.5.2 Data Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `transferredAt` | string | Yes | ISO 8601 timestamp |
+| `txid` | string | SHOULD | Bitcoin transaction ID moving the sat |
+| `previousOwner` / `newOwner` | string | No | Surfaced in derived state metadata |
+
+#### 5.5.3 Rules
+
+- MUST include `previousEvent` hash
+- MUST NOT change the authorized key set — a `transfer` is not a `rotateKey`; the new
+  owner's key does not become a log signer until they rotate
+
+### 5.6 RotateKey Event
+
+Hands authority from the current controller to a new controller. This is the sole
+event type that changes the authorized key set.
+
+#### 5.6.1 Structure
+
+```json
+{
+  "type": "rotateKey",
+  "data": {
+    "newController": "did:key:z6MkNew...",
+    "rotatedAt": "2026-01-25T12:00:00Z"
+  },
+  "previousEvent": "uMNO...",
+  "proof": [ /* signed by the CURRENT (pre-rotation) controller */ ]
+}
+```
+
+#### 5.6.2 Data Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `newController` | string | Yes | The new controller DID — MUST be self-certifying (`did:key` or long-form `did:peer:4`) |
+| `rotatedAt` | string | Yes | ISO 8601 timestamp |
+
+#### 5.6.3 Rules
+
+- MUST include `previousEvent` hash
+- MUST be signed by a key in the authorized set as it stood when appended
+- MUST pass all checks BEFORE the set is swapped; a rotation that fails any check
+  MUST NOT rotate
+- `newController` MUST be self-certifying; a resolver-backed, missing, non-string, or
+  unbindable `newController` MUST fail the event and the log
+- REPLACES (not unions) the authorized key set — the retired keys are dead from this
+  event forward (see §2.4)
+
 ---
 
 ## 6. Migration Events
@@ -446,13 +623,15 @@ peer → webvh → btco
 
 ### 6.3 Migration Event Structure
 
-Migration events are `update` type events with specific data fields:
+Migrations are first-class `migrate` events (§5.4). Legacy logs may carry migrations
+as `update` events with the same data fields (`sourceDid` + `targetDid` + `layer`);
+readers MUST still recognize that legacy shape, but writers MUST emit `migrate`:
 
 ```json
 {
-  "type": "update",
+  "type": "migrate",
   "data": {
-    "sourceDid": "did:peer:4zQm...",
+    "sourceDid": "did:cel:uEiD...",
     "targetDid": "did:webvh:example.com:abc123",
     "layer": "webvh",
     "domain": "example.com",
@@ -529,7 +708,8 @@ The DID is derived from the Bitcoin ordinals inscription ID.
 
 ### 6.6 Detecting Migration Events
 
-Migration events are distinguished from regular updates by:
+A first-class migration is identified by its event `type` of `migrate`. For legacy
+logs that recorded migrations as `update` events, detection falls back to:
 
 1. Presence of both `sourceDid` and `targetDid` fields
 2. A `layer` field indicating the target layer
@@ -748,3 +928,5 @@ interface EventVerification {
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0.0 | 2026-01 | Initial release |
+| 1.1.0 | 2026-07-10 | `did:cel` genesis (`CelAssetData`, `did`-embedded shape marked legacy read-only); first-class `migrate`/`transfer`/`rotateKey` event types; evolving-authority / rotation semantics (§2.4). See `specs/did-cel-method.md`. |
+| 1.2.0 | 2026-07-11 | Ownership **is** the sat; the CEL is authorship only. `transfer` event (§5.5) demoted to **legacy/read-only** — verifiers MUST accept it in old logs, writers MUST NOT emit it; transfers are pure sat moves that write nothing to the CEL. Post-transfer authority rule (§2.4) rescoped to author-enablement only. |

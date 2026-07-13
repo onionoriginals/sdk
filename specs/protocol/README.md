@@ -13,6 +13,7 @@ spec it cited.
 Authoritative documents:
 - `originals-whitepaper.md` — protocol vision
 - `docs/ORIGINALS_CEL_SPEC.md` + `packages/sdk/src/cel/` — CEL mechanics
+- `specs/did-cel-method.md` — the `did:cel` genesis DID method (draft, pinned to `src/cel/` tests)
 - `docs/superpowers/specs/2026-07-10-cel-backbone-did-cel-design.md` — current direction
 - `ORIGINALS_PROTOCOL_SPECIFICATION.md` — corroborating (agent-written, Nov 2025)
 

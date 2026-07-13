@@ -115,7 +115,7 @@ describe('Integration: Event System', () => {
       await new Promise(resolve => setTimeout(resolve, 10));
 
       // Events should have been emitted during creation
-      expect(asset.id).toMatch(/^did:peer:/);
+      expect(asset.id).toMatch(/^did:cel:/);
       expect(asset.currentLayer).toBe('did:peer');
     });
 
@@ -166,7 +166,7 @@ describe('Integration: Event System', () => {
       const asset = await sdk.lifecycle.createAsset(resources);
 
       // The event was emitted during creation, verify asset state
-      expect(asset.id).toMatch(/^did:peer:/);
+      expect(asset.id).toMatch(/^did:cel:/);
       expect(asset.currentLayer).toBe('did:peer');
       expect(asset.resources).toHaveLength(2);
     });
@@ -270,6 +270,8 @@ describe('Integration: Event System', () => {
       expect(capturedEvent?.type).toBe('asset:transferred');
       expect(capturedEvent?.to).toBe(recipientAddress);
       expect(capturedEvent?.transactionId).toBeDefined();
+      // Pure sat move: ownership is the sat, no rotation-first flag (#366).
+      expect(capturedEvent && 'keyRotationPending' in capturedEvent).toBe(false);
     });
   });
 

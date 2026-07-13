@@ -17,7 +17,7 @@ describe('LifecycleManager', () => {
     const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset(resources);
     expect(asset.currentLayer).toBe('did:peer');
-    expect(asset.id.startsWith('did:peer:')).toBe(true);
+    expect(asset.id.startsWith('did:cel:')).toBe(true);
   });
 
   test('publishToWeb migrates and records binding', async () => {
@@ -77,7 +77,7 @@ describe('LifecycleManager', () => {
     const provider = new MockOrdinalsProvider();
     const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }
+      { id: 'r', type: 'text', contentType: 'text/plain', hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9' }
     ]);
     // Migrate with real inscription details (as a genuine inscribeOnBitcoin flow
     // would record), so the transfer is backed by a real inscription id rather
@@ -126,7 +126,7 @@ describe('Bitcoin inscription MVP - dry run', () => {
     );
 
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'r1', type: 'text', contentType: 'text/plain', hash: 'aa' }
+      { id: 'r1', type: 'text', contentType: 'text/plain', hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9' }
     ]);
 
     const before = asset.currentLayer;
@@ -196,7 +196,7 @@ describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
   test('uses provider.estimateFee when feeRate not provided', async () => {
     const provider = new MockOrdinalsProvider();
     const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
-    const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }]);
+    const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9' }]);
     const result = await sdk.lifecycle.inscribeOnBitcoin(asset);
     expect(result.currentLayer).toBe('did:btco');
     const prov = (result as any).getProvenance();
@@ -211,9 +211,8 @@ describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     await sdk.lifecycle.inscribeOnBitcoin(asset, 8);
     const tx = await sdk.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
+    // Pure sat move: txid is returned; ownership history is the sat's UTXO chain, not provenance.
     expect(tx.txid).toBe('tx-transfer-mock');
-    const provenance = asset.getProvenance();
-    expect(provenance.transfers[provenance.transfers.length - 1].transactionId).toBe('tx-transfer-mock');
   });
 });
 
@@ -223,7 +222,7 @@ describe('LifecycleManager.issuePublicationCredential guard', () => {
     const provider = new MockOrdinalsProvider();
     const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
     // Create asset then clear its resources to simulate empty-resource edge case
-    const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'aa' }]);
+    const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9' }]);
     // Forcefully empty the resources array
     (asset as any)._resources = [];
     Object.defineProperty(asset, 'resources', { get: () => [] });
@@ -263,7 +262,7 @@ describe('publishToWeb with URL-only resources (review follow-up on #244)', () =
   test('publishes without a storageAdapter when no resource carries inline content', async () => {
     const sdk = OriginalsSDK.create({ network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'r1', type: 'text', contentType: 'text/plain', hash: 'ff00', url: 'https://cdn.example.com/r1' }
+      { id: 'r1', type: 'text', contentType: 'text/plain', hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9', url: 'https://cdn.example.com/r1' }
     ] as any);
     // No inline content → no storage writes needed → no STORAGE_REQUIRED
     const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');

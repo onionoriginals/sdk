@@ -18,7 +18,10 @@ import { PeerCelManager } from '../../../src/cel/layers/PeerCelManager';
 import { WebVHCelManager } from '../../../src/cel/layers/WebVHCelManager';
 import { BtcoCelManager } from '../../../src/cel/layers/BtcoCelManager';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
+import { appendEvent } from '../../../src/cel/algorithms/appendEvent';
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { computeDigestMultibase } from '../../../src/cel/hash';
+import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
 import type { BitcoinManager } from '../../../src/bitcoin/BitcoinManager';
 
 function makeSigner() {
@@ -78,7 +81,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
   it('a real webvh→btco migration produces a verifiable log', async () => {
     const signer = makeSigner();
     const peer = new PeerCelManager(signer as any);
-    let log = await peer.create('Asset', [{ digestMultibase: 'uHash', mediaType: 'image/png' }]);
+    let { log } = await peer.create('Asset', [{ digestMultibase: 'uHash', mediaType: 'image/png' }]);
     log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
     const { manager, ordinalsProvider } = mockBitcoin();
     const btcoLog = await new BtcoCelManager(signer as any, manager).migrate(log);
@@ -106,7 +109,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
   it('reports a clear "content is missing" diagnostic when the witness inscription has no content', async () => {
     const signer = makeSigner();
     const peer = new PeerCelManager(signer as any);
-    let log = await peer.create('Asset', [{ digestMultibase: 'uHash', mediaType: 'image/png' }]);
+    let { log } = await peer.create('Asset', [{ digestMultibase: 'uHash', mediaType: 'image/png' }]);
     log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
     const { manager } = mockBitcoin();
     const btcoLog = await new BtcoCelManager(signer as any, manager).migrate(log);
@@ -131,21 +134,42 @@ describe('CEL event-log authorization and btco verifiability', () => {
     expect(result.errors.some(e => /not valid JSON/.test(e))).toBe(false);
   });
 
-  it('rejects a create event re-signed by a different key than the one embedded in the did:peer', async () => {
+  it('rejects a LEGACY create event re-signed by a different key than the one embedded in the did:peer', async () => {
     // Attack: copy a victim's create event `data` verbatim (including the
     // victim's self-certifying did:peer:4) and re-sign event 0 with the
     // attacker's own did:key. The log is internally consistent, but the
     // create key is not embedded in the DID — verification must fail.
+    //
+    // Legacy fixture: the write path no longer emits `data.did` (did:cel
+    // genesis is de-self-referenced), but logs in this shape exist and the
+    // verify READ path must keep rejecting this forgery on them.
     const victim = makeSigner();
-    const log = await new PeerCelManager(victim as any).create('Victim Asset', []);
+    const victimVm = (await victim({ probe: true })).verificationMethod;
+    const victimKeyMb = victimVm.slice('did:key:'.length).split('#')[0];
+    const didPeerMod = await import('@aviarytech/did-peer');
+    const victimDid: string = await didPeerMod.createNumAlgo4(
+      [{ type: 'Multikey', publicKeyMultibase: victimKeyMb }],
+      undefined,
+      undefined
+    );
+    const legacyData = {
+      name: 'Victim Asset',
+      did: victimDid,
+      layer: 'peer',
+      resources: [],
+      creator: victimDid,
+      createdAt: '2020-01-01T00:00:00Z',
+    };
+    const victimProof = await victim({ type: 'create', data: legacyData });
+    const log = { events: [{ type: 'create', data: legacyData, proof: [victimProof] }] };
+
+    // Sanity: the victim's own legacy log passes the self-certifying binding.
+    const legit = await verifyEventLog(log as any);
+    expect(legit.verified).toBe(true);
 
     const attacker = makeSigner();
-    const createEvent = log.events[0];
-    const attackerProof = await attacker({ type: createEvent.type, data: createEvent.data });
-    const forged = {
-      ...log,
-      events: [{ ...createEvent, proof: [attackerProof] }],
-    };
+    const attackerProof = await attacker({ type: 'create', data: legacyData });
+    const forged = { events: [{ type: 'create', data: legacyData, proof: [attackerProof] }] };
 
     const result = await verifyEventLog(forged as any);
     expect(result.verified).toBe(false);
@@ -154,7 +178,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
 
   it('derives btco state without a BitcoinManager (network read from signed data)', async () => {
     const signer = makeSigner();
-    let log = await new PeerCelManager(signer as any).create('Asset', []);
+    let { log } = await new PeerCelManager(signer as any).create('Asset', []);
     log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
     const btcoLog = await new BtcoCelManager(signer as any, mockBitcoin().manager).migrate(log);
 
@@ -172,7 +196,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
     // sourceDid/layer fields but no migratedAt must replay as a regular
     // update: the name change applies and the layer does not flip.
     const signer = makeSigner();
-    let log = await new PeerCelManager(signer as any).create('Asset', []);
+    let { log } = await new PeerCelManager(signer as any).create('Asset', []);
     const webvhManager = new WebVHCelManager(signer as any, 'example.com');
     log = await webvhManager.migrate(log);
     log = await updateEventLog(log, { sourceDid: 'did:example:app-field', layer: 'btco', name: 'renamed' }, {
@@ -190,7 +214,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
 
   it('rejects an event appended by a key not authorized by the create event', async () => {
     const owner = makeSigner();
-    const log = await new PeerCelManager(owner as any).create('Owner Asset', []);
+    const { log } = await new PeerCelManager(owner as any).create('Owner Asset', []);
 
     // Attacker signs an update with their own unrelated key.
     const attacker = makeSigner();
@@ -210,7 +234,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
     // append their own valid controller proof to event 0 (keeping the owner's)
     // and, without this guard, become an authorized signer for later events.
     const owner = makeSigner();
-    const log = await new PeerCelManager(owner as any).create('Owner Asset', []);
+    const { log } = await new PeerCelManager(owner as any).create('Owner Asset', []);
 
     const attacker = makeSigner();
     const ev0 = log.events[0];
@@ -231,12 +255,101 @@ describe('CEL event-log authorization and btco verifiability', () => {
   it('accepts an update signed by the same controller key', async () => {
     const owner = makeSigner();
     const peer = new PeerCelManager(owner as any);
-    let log = await peer.create('Owner Asset', []);
+    let { log } = await peer.create('Owner Asset', []);
     log = await peer.update(log, { name: 'v2' });
 
     const result = await verifyEventLog(log);
     expect(result.verified).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+
+  // #367: the asset's own inscribed DID document (carrying an
+  // OriginalsCelAnchor service) is an accepted bitcoin-witness artifact,
+  // alongside the original attestation-JSON format. Fail-closed on anything else.
+  describe('DID-document inscription as bitcoin witness content (#367)', () => {
+    // A real signed log ending in a btco migrate event carrying a
+    // bitcoin-ordinals-2024 witness proof for inscription 'insc1' on sat '123'.
+    async function makeWitnessedLog() {
+      const signer = makeSigner();
+      const peer = new PeerCelManager(signer as any);
+      let { log } = await peer.create('Asset', []);
+      log = await appendEvent(
+        log,
+        'migrate',
+        { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', migratedAt: '2026-07-10T00:00:00Z' },
+        { signer: signer as any, verificationMethod: 'ignored' }
+      );
+      const last = log.events[log.events.length - 1];
+      const digest = computeDigestMultibase(canonicalizeEntryForChain(last));
+      const witnessProof = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'bitcoin-ordinals-2024',
+        created: '2026-07-10T00:00:01Z',
+        verificationMethod: 'did:btco:witness',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'zinsc1',
+        witnessedAt: '2026-07-10T00:00:01Z',
+        txid: 'tx1',
+        satoshi: '123',
+        inscriptionId: 'insc1',
+      };
+      const witnessed = {
+        events: [...log.events.slice(0, -1), { ...last, proof: [...last.proof, witnessProof] }],
+      };
+      return { log: witnessed as typeof log, digest };
+    }
+
+    const providerServing = (content: unknown) => ({
+      getInscriptionById: async (id: string) =>
+        id === 'insc1'
+          ? {
+              inscriptionId: 'insc1',
+              content: Buffer.from(JSON.stringify(content)),
+              contentType: 'application/did+json',
+              txid: 'tx1',
+              satoshi: '123',
+            }
+          : null,
+    });
+
+    const anchorDoc = (headDigestMultibase: string) => ({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: 'did:btco:reg:123',
+      service: [
+        { id: 'did:btco:reg:123#resources', type: 'OriginalsResourceManifest', serviceEndpoint: { resources: [] } },
+        { id: 'did:btco:reg:123#cel', type: 'OriginalsCelAnchor', serviceEndpoint: { headDigestMultibase } },
+      ],
+    });
+
+    it('accepts a DID document whose OriginalsCelAnchor commits to the event digest', async () => {
+      const { log, digest } = await makeWitnessedLog();
+      const result = await verifyEventLog(log, { ordinalsProvider: providerServing(anchorDoc(digest)) });
+      expect(result.verified).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('rejects a DID document with a WRONG headDigestMultibase', async () => {
+      const { log } = await makeWitnessedLog();
+      const wrong = computeDigestMultibase(Buffer.from('some other event'));
+      const result = await verifyEventLog(log, { ordinalsProvider: providerServing(anchorDoc(wrong)) });
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /does not commit to this event's digest/.test(e))).toBe(true);
+    });
+
+    it('rejects a DID document whose anchor service is missing entirely', async () => {
+      const { log } = await makeWitnessedLog();
+      const doc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:reg:123', service: [] };
+      const result = await verifyEventLog(log, { ordinalsProvider: providerServing(doc) });
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /does not commit to this event's digest/.test(e))).toBe(true);
+    });
+
+    it('rejects content that is neither an attestation nor an anchored DID document', async () => {
+      const { log } = await makeWitnessedLog();
+      const result = await verifyEventLog(log, { ordinalsProvider: providerServing({ hello: 'world' }) });
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /does not commit to this event's digest/.test(e))).toBe(true);
+    });
   });
 
   // Authorization is by resolved public KEY, not the VM URI string. These two
@@ -264,7 +377,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
       const resolveKey = async (_vm: string) => pub;
 
       const create = new PeerCelManager(vmSigner(priv, 'did:webvh:example.com:alice#key-0') as any);
-      let log = await create.create('Asset', []);
+      let { log } = await create.create('Asset', []);
       log = await new PeerCelManager(vmSigner(priv, 'did:webvh:example.com:alice#key-alias') as any)
         .update(log, { name: 'v2' });
 
@@ -282,7 +395,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
       const resolveKey = async (vm: string) => (vm.endsWith('#key-1') ? pubB : pubA);
 
       const create = new PeerCelManager(vmSigner(privA, 'did:webvh:example.com:alice#key-0') as any);
-      let log = await create.create('Asset', []);
+      let { log } = await create.create('Asset', []);
       log = await new PeerCelManager(vmSigner(privB, 'did:webvh:example.com:alice#key-1') as any)
         .update(log, { name: 'hijacked' });
 

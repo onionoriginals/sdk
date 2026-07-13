@@ -81,7 +81,7 @@ describe('Integration: CEL Lifecycle', () => {
     test('create peer asset, update, then verify passes', async () => {
       // Step 1: Create a new asset at peer layer
       const resources = [createTestResource('asset1')];
-      const log = await peerManager.create('My Test Asset', resources);
+      const { log } = await peerManager.create('My Test Asset', resources);
       
       // Validate create event structure
       expect(log.events).toHaveLength(1);
@@ -92,8 +92,11 @@ describe('Integration: CEL Lifecycle', () => {
       
       const createData = log.events[0].data as Record<string, unknown>;
       expect(createData.name).toBe('My Test Asset');
-      expect(createData.layer).toBe('peer');
-      expect(createData.did).toMatch(/^did:peer:/);
+      // De-self-referenced genesis: identity is derived (did:cel), not embedded
+      expect(createData.did).toBeUndefined();
+      expect(createData.layer).toBeUndefined();
+      expect(typeof createData.controller).toBe('string');
+      expect(typeof createData.nonce).toBe('string');
 
       // Step 2: Update the asset
       const updatedLog = await peerManager.update(log, {
@@ -126,7 +129,7 @@ describe('Integration: CEL Lifecycle', () => {
 
     test('multiple sequential updates maintain valid hash chain', async () => {
       // Create initial asset
-      const log = await peerManager.create('Multi-Update Asset', [createTestResource()]);
+      const { log } = await peerManager.create('Multi-Update Asset', [createTestResource()]);
       
       // Apply multiple updates
       let currentLog = log;
@@ -156,7 +159,7 @@ describe('Integration: CEL Lifecycle', () => {
   describe('Migration: peer → webvh', () => {
     test('migrate peer to webvh adds migration event', async () => {
       // Create a peer asset
-      const peerLog = await peerManager.create('Migratable Asset', [createTestResource('migrate')]);
+      const { log: peerLog } = await peerManager.create('Migratable Asset', [createTestResource('migrate')]);
       
       // Create webvh manager and migrate
       const webvhManager = new WebVHCelManager(signer, 'example.com');
@@ -164,11 +167,11 @@ describe('Integration: CEL Lifecycle', () => {
       
       // Validate migration event was added
       expect(webvhLog.events).toHaveLength(2);
-      expect(webvhLog.events[1].type).toBe('update'); // Migration is an update event
+      expect(webvhLog.events[1].type).toBe('migrate'); // Migration is a first-class event
       
       const migrationData = webvhLog.events[1].data as Record<string, unknown>;
       expect(migrationData.layer).toBe('webvh');
-      expect(migrationData.sourceDid).toMatch(/^did:peer:/);
+      expect(migrationData.sourceDid).toMatch(/^did:cel:/);
       expect(migrationData.targetDid).toMatch(/^did:webvh:example\.com:/);
       expect(migrationData.domain).toBe('example.com');
       expect(migrationData.migratedAt).toBeDefined();
@@ -186,14 +189,15 @@ describe('Integration: CEL Lifecycle', () => {
       const originalName = 'Preserved Asset Name';
       const resources = [createTestResource('preserved')];
       
-      const peerLog = await peerManager.create(originalName, resources);
+      const { log: peerLog } = await peerManager.create(originalName, resources);
       const webvhManager = new WebVHCelManager(signer, 'test.domain.com');
       const webvhLog = await webvhManager.migrate(peerLog);
       
       // Original create event should be unchanged
       const createData = webvhLog.events[0].data as Record<string, unknown>;
       expect(createData.name).toBe(originalName);
-      expect(createData.layer).toBe('peer');
+      expect(createData.layer).toBeUndefined();
+      expect(typeof createData.controller).toBe('string');
       
       // getCurrentState should reflect migration
       const state = webvhManager.getCurrentState(webvhLog);
@@ -206,7 +210,7 @@ describe('Integration: CEL Lifecycle', () => {
   describe('Tampered log detection', () => {
     test('tampered log verification fails with specific error', async () => {
       // Create a valid log
-      const log = await peerManager.create('Tamperable Asset', [createTestResource()]);
+      const { log } = await peerManager.create('Tamperable Asset', [createTestResource()]);
       const updatedLog = await peerManager.update(log, { value: 'original' });
       
       // Verify original is valid
@@ -262,7 +266,7 @@ describe('Integration: CEL Lifecycle', () => {
     });
 
     test('missing proof array causes verification failure', async () => {
-      const log = await peerManager.create('No Proof Asset', [createTestResource()]);
+      const { log } = await peerManager.create('No Proof Asset', [createTestResource()]);
       
       // Remove proof array from event
       const noProofLog: EventLog = {
@@ -282,7 +286,7 @@ describe('Integration: CEL Lifecycle', () => {
   describe('Hash chain integrity', () => {
     test('broken hash chain verification fails', async () => {
       // Create a log with multiple events
-      const log = await peerManager.create('Chain Test Asset', [createTestResource()]);
+      const { log } = await peerManager.create('Chain Test Asset', [createTestResource()]);
       const log2 = await peerManager.update(log, { step: 1 });
       const log3 = await peerManager.update(log2, { step: 2 });
       
@@ -313,7 +317,7 @@ describe('Integration: CEL Lifecycle', () => {
     });
 
     test('first event with previousEvent causes verification failure', async () => {
-      const log = await peerManager.create('First Event Test', [createTestResource()]);
+      const { log } = await peerManager.create('First Event Test', [createTestResource()]);
       
       // Add previousEvent to first event (which should not have one)
       const badFirstEventLog: EventLog = {
@@ -333,7 +337,7 @@ describe('Integration: CEL Lifecycle', () => {
     });
 
     test('second event missing previousEvent causes verification failure', async () => {
-      const log = await peerManager.create('Missing Link Test', [createTestResource()]);
+      const { log } = await peerManager.create('Missing Link Test', [createTestResource()]);
       const updatedLog = await peerManager.update(log, { value: 1 });
       
       // Remove previousEvent from second event
@@ -360,7 +364,7 @@ describe('Integration: CEL Lifecycle', () => {
   describe('Deactivation seals log', () => {
     test('deactivate seals log - further updates rejected', async () => {
       // Create and update an asset
-      const log = await peerManager.create('Deactivatable Asset', [createTestResource()]);
+      const { log } = await peerManager.create('Deactivatable Asset', [createTestResource()]);
       const updatedLog = await peerManager.update(log, { preDeactivate: true });
       
       // Deactivate the log
@@ -401,7 +405,7 @@ describe('Integration: CEL Lifecycle', () => {
     });
 
     test('deactivated log state reflects deactivation', async () => {
-      const log = await peerManager.create('State Test Asset', [createTestResource()]);
+      const { log } = await peerManager.create('State Test Asset', [createTestResource()]);
       const deactivatedLog = await deactivateEventLog(
         log,
         'Testing state reflection',
@@ -417,7 +421,7 @@ describe('Integration: CEL Lifecycle', () => {
     });
 
     test('cannot migrate deactivated log', async () => {
-      const peerLog = await peerManager.create('Unmigrateable Asset', [createTestResource()]);
+      const { log: peerLog } = await peerManager.create('Unmigrateable Asset', [createTestResource()]);
       const deactivatedLog = await deactivateEventLog(
         peerLog,
         'Blocking migration',
@@ -440,7 +444,7 @@ describe('Integration: CEL Lifecycle', () => {
       });
       
       // Create asset
-      const log = await cel.create('Unified SDK Asset', [createTestResource()]);
+      const { log } = await cel.create('Unified SDK Asset', [createTestResource()]);
       expect(log.events[0].type).toBe('create');
       
       // Update asset
@@ -469,7 +473,7 @@ describe('Integration: CEL Lifecycle', () => {
       });
       
       // Create at peer layer
-      const peerLog = await cel.create('Migrate via Unified', [createTestResource()]);
+      const { log: peerLog } = await cel.create('Migrate via Unified', [createTestResource()]);
       
       // Migrate to webvh
       const webvhLog = await cel.migrate(peerLog, 'webvh');

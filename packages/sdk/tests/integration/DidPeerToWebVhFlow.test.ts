@@ -65,7 +65,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
     const asset = await sdk.lifecycle.createAsset(resources);
     
     expect(asset).toBeDefined();
-    expect(asset.id).toMatch(/^did:peer:/);
+    expect(asset.id).toMatch(/^did:cel:/);
     expect(asset.currentLayer).toBe('did:peer');
     expect(asset.resources).toHaveLength(2);
     
@@ -233,18 +233,18 @@ describe('DID Peer to WebVH Publication Flow', () => {
     const published = await sdk.lifecycle.publishToWeb(asset, domain);
     const bindings = (published as any).bindings;
 
-    // Should have both peer and webvh bindings
-    expect(bindings['did:peer']).toBeDefined();
+    // Should have both source (did:cel) and webvh bindings
+    expect(bindings['did:cel']).toBeDefined();
     expect(bindings['did:webvh']).toBeDefined();
-    
-    // Peer binding should match original asset ID
-    expect(bindings['did:peer']).toBe(originalId);
-    
+
+    // Source binding should match original asset ID (did:cel genesis)
+    expect(bindings['did:cel']).toBe(originalId);
+
     // WebVH binding should be a valid did:webvh
     expect(bindings['did:webvh']).toMatch(/^did:webvh:/);
-    
+
     console.log(`\n✅ Bindings verified:`);
-    console.log(`   did:peer: ${bindings['did:peer']}`);
+    console.log(`   did:cel: ${bindings['did:cel']}`);
     console.log(`   did:webvh: ${bindings['did:webvh']}`);
     console.log(`   Previous DID: ${(published as any).previousDid}`);
   });
@@ -341,7 +341,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
     
     // Verify bindings preserve original ID
     const bindings = (published as any).bindings;
-    expect(bindings['did:peer']).toBe(originalId);
+    expect(bindings['did:cel']).toBe(originalId);
     
     console.log(`\n✅ Data preservation verified:`);
     console.log(`   All resource fields preserved: true`);

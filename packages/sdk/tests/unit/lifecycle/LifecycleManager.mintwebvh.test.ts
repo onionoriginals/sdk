@@ -3,6 +3,9 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { OriginalsSDK } from '../../../src';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
+import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { serializeEventLogJson, parseEventLogJson } from '../../../src/cel/serialization/json';
 
 describe('publishToWeb mints a real did:webvh (#376)', () => {
   test('binding is a SCID DID owned by the asset, not the publisher shorthand', async () => {
@@ -23,7 +26,10 @@ describe('publishToWeb mints a real did:webvh (#376)', () => {
     // Real shape: did:webvh:{SCID}:{domain}[:slug] — SCID segment present, no ":user" fabrication.
     expect(binding).toMatch(/^did:webvh:[^:]+:example\.com(:.+)?$/);
     expect(binding).not.toBe('did:webvh:example.com:user');
-    expect(published.bindings?.['did:peer']).toBe(asset.id);
+    // Task 4: the source binding key is 'did:cel' (the asset's genesis DID);
+    // the legacy 'did:peer' key is retired.
+    expect(published.bindings?.['did:cel']).toBe(asset.id);
+    expect(published.bindings?.['did:peer']).toBeUndefined();
   });
 
   test('hosts the signed DID log as JSONL in storage at the resolution path', async () => {
@@ -130,5 +136,84 @@ describe('publishToWeb mints a real did:webvh (#376)', () => {
     expect(events[0].reason).toBe('EMPTY_LOG');
     const stored = await storage.getObject('example.com', 'slug/did.jsonl');
     expect(stored).toBeNull();
+  });
+});
+
+describe('publishToWeb appends the signed migrate event (#Phase2 Task 4)', () => {
+  test('appends migrate event, hosts cel.json, writes did:cel binding', async () => {
+    const storage = new MemoryStorageAdapter();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      storageAdapter: storage,
+      keyStore: new MockKeyStore()
+    });
+    const content = 'migrate me';
+    const hash = bytesToHex(sha256(new TextEncoder().encode(content)));
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'res-1', type: 'data', contentType: 'text/plain', hash, content }
+    ]);
+    const sourceDid = asset.id;
+    const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
+
+    // Last CEL event is the signed migrate targeting the minted did:webvh.
+    const log = published.celLog!;
+    const last = log.events[log.events.length - 1];
+    expect(last.type).toBe('migrate');
+    expect((last.data as any).sourceDid).toBe(sourceDid);
+    expect((last.data as any).targetDid).toBe(published.bindings!['did:webvh']);
+    expect((last.data as any).layer).toBe('webvh');
+
+    // The log still verifies as the asset's own did:cel.
+    const res = await verifyEventLog(log, { expectedDid: published.id });
+    expect(res.verified).toBe(true);
+
+    // cel.json is hosted beside did.jsonl and round-trips to the same log.
+    const did = published.bindings!['did:webvh']!;
+    const paths = did.split(':').slice(4);
+    const relativePath = paths.length ? `${paths.join('/')}/cel.json` : '.well-known/cel.json';
+    const stored = await storage.getObject('example.com', relativePath);
+    expect(stored).not.toBeNull();
+    const parsed = parseEventLogJson(Buffer.from(stored!.content).toString('utf8'));
+    expect(serializeEventLogJson(parsed)).toBe(serializeEventLogJson(log));
+
+    // Bindings: did:cel present, did:peer retired.
+    expect(published.bindings!['did:cel']).toBe(sourceDid);
+    expect(published.bindings!['did:peer']).toBeUndefined();
+  });
+
+  test('keyStore-less publish succeeds and emits cel:append-skipped (NO_KEYSTORE)', async () => {
+    const storage = new MemoryStorageAdapter();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      storageAdapter: storage
+    });
+    const skipped: Array<{ reason: string; id: string }> = [];
+    sdk.lifecycle.on('cel:append-skipped', (e) => {
+      skipped.push({ reason: e.reason, id: e.asset.id });
+    });
+
+    const content = 'no keystore';
+    const hash = bytesToHex(sha256(new TextEncoder().encode(content)));
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'res-1', type: 'data', contentType: 'text/plain', hash, content }
+    ]);
+    const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
+
+    expect(published.currentLayer).toBe('did:webvh');
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].reason).toBe('NO_KEYSTORE');
+    expect(skipped[0].id).toBe(asset.id);
+
+    // No cel.json hosted when the append is skipped.
+    const did = published.bindings!['did:webvh']!;
+    const paths = did.split(':').slice(4);
+    const relativePath = paths.length ? `${paths.join('/')}/cel.json` : '.well-known/cel.json';
+    expect(await storage.getObject('example.com', relativePath)).toBeNull();
+
+    // Migrate binding still written under did:cel.
+    expect(published.bindings!['did:cel']).toBe(asset.id);
+    expect(published.bindings!['did:peer']).toBeUndefined();
   });
 });

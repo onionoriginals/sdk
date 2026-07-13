@@ -20,6 +20,7 @@ import type {
 import { computeDigestMultibase, digestMultibaseEquals } from '../hash.js';
 import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize.js';
 import { multikey } from '../../crypto/Multikey.js';
+import { deriveDidCelFromGenesis, didCelMatchesLog } from '../celDid.js';
 
 /**
  * Validates the structural requirements of a DataIntegrityProof (field presence,
@@ -176,15 +177,26 @@ async function dispatchVerify(
  * (did:key, or long-form did:peer numalgo-4 which embeds its DID document).
  *
  * Returns:
- * - a Set of hex-encoded keys when the DID is self-certifying and its key
- *   material could be extracted (possibly empty — meaning no Ed25519 key is
- *   embedded, so no Ed25519 controller proof can legitimately bind to it);
- * - null when the DID is not self-certifying or cannot be checked offline
- *   (short-form did:peer:4, other DID methods, resolution failure) — the
- *   caller then falls back to trust-on-first-use.
+ * - a Set of hex-encoded keys when the DID is self-certifying (possibly empty —
+ *   no Ed25519 key is embedded, or a long-form did:peer:4 whose embedded
+ *   document fails to parse — callers MUST fail closed on an empty set);
+ * - null when the DID is not self-certifying / not checkable offline
+ *   (short-form did:peer:4, other DID methods). Caller semantics on null
+ *   differ: the legacy `data.did` path keeps trust-on-first-use, the did:cel
+ *   genesis path falls back to VM-DID equality + resolver vouching, and the
+ *   rotateKey path fails closed (no proof-of-possession design yet).
  */
 async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null> {
   if (typeof did !== 'string') return null;
+
+  // Cap before base58 decode (O(n²), per-event amplifiable via rotateKey): over
+  // the bound, fail closed (empty) for the prefixes we'd otherwise decode; null
+  // for everything else, matching this function's null-vs-empty semantics.
+  if (did.length > 2048) {
+    const selfCertifying = did.startsWith('did:key:')
+      || (did.startsWith('did:peer:4') && did.split(':').length >= 4);
+    return selfCertifying ? new Set() : null;
+  }
 
   if (did.startsWith('did:key:')) {
     // Pure local decode — a did:key IS its key, so a decode failure or a
@@ -219,11 +231,11 @@ async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null>
       }
       return keys;
     } catch {
-      // Resolution failure: cannot check offline — fall back to TOFU rather
-      // than turning a library quirk into a false negative. (The attack this
-      // check blocks — re-signing a copied create event — requires the
-      // victim's DID, which does resolve.)
-      return null;
+      // A LONG-FORM did:peer:4 embeds its own document; if that document
+      // cannot be parsed the DID is malformed. Fail closed (empty set) rather
+      // than returning null and silently degrading to the caller's weaker
+      // fallback branch (TOFU / VM-equality).
+      return new Set();
     }
   }
 
@@ -383,20 +395,339 @@ async function verifyBitcoinWitnessProof(
   if (inscription.content === undefined) {
     return `bitcoin witness inscription ${inscriptionId} content is missing`;
   }
-  let content: { digestMultibase?: unknown };
+  let content: unknown;
   try {
-    content = JSON.parse(inscription.content.toString('utf8')) as { digestMultibase?: unknown };
+    content = JSON.parse(inscription.content.toString('utf8'));
   } catch {
     return `bitcoin witness inscription ${inscriptionId} content is not valid JSON`;
   }
-  if (
-    typeof content?.digestMultibase !== 'string' ||
-    !digestMultibaseEquals(content.digestMultibase, expectedDigest)
-  ) {
+  // Two accepted commitment shapes, each requiring an exact digest match:
+  //  (a) witness attestation JSON with a top-level `digestMultibase`
+  //      (BitcoinWitness / BtcoCelManager inscribe this), or
+  //  (b) the asset's own inscribed DID document carrying an OriginalsCelAnchor
+  //      service whose headDigestMultibase is this event's chain digest
+  //      (LifecycleManager.inscribeOnBitcoin — the DID-doc inscription IS the
+  //      witness artifact, #367).
+  // Anything else fails closed.
+  const attested = (content as { digestMultibase?: unknown } | null)?.digestMultibase;
+  const commits =
+    (typeof attested === 'string' && digestMultibaseEquals(attested, expectedDigest)) ||
+    didDocumentCommitsToDigest(content, expectedDigest);
+  if (!commits) {
     return `bitcoin witness inscription ${inscriptionId} does not commit to this event's digest`;
   }
 
   return null;
+}
+
+/**
+ * True when `content` parses as a DID document whose `OriginalsCelAnchor`
+ * service commits to `expectedDigest` (the event's chain digest). Strictly
+ * structural and fail-closed: a missing/malformed id, service array, anchor
+ * entry, or headDigestMultibase — or a digest mismatch — all return false.
+ */
+function didDocumentCommitsToDigest(content: unknown, expectedDigest: string): boolean {
+  if (!content || typeof content !== 'object') return false;
+  const doc = content as { id?: unknown; service?: unknown };
+  if (typeof doc.id !== 'string' || !doc.id.startsWith('did:')) return false;
+  if (!Array.isArray(doc.service)) return false;
+  return doc.service.some((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const svc = entry as { type?: unknown; serviceEndpoint?: unknown };
+    if (svc.type !== 'OriginalsCelAnchor') return false;
+    const ep = svc.serviceEndpoint;
+    if (!ep || typeof ep !== 'object') return false;
+    const head = (ep as { headDigestMultibase?: unknown }).headDigestMultibase;
+    return typeof head === 'string' && digestMultibaseEquals(head, expectedDigest);
+  });
+}
+
+/**
+ * Returns the `headDigestMultibase` of a DID document's first
+ * `OriginalsCelAnchor` service, or undefined when `content` is not a DID
+ * document carrying such an anchor. Sibling of `didDocumentCommitsToDigest` —
+ * that COMPARES against an expected digest, this EXTRACTS the committed one.
+ */
+function extractCelAnchorHeadDigest(content: unknown): string | undefined {
+  if (!content || typeof content !== 'object') return undefined;
+  const doc = content as { id?: unknown; service?: unknown };
+  if (typeof doc.id !== 'string' || !doc.id.startsWith('did:')) return undefined;
+  if (!Array.isArray(doc.service)) return undefined;
+  for (const entry of doc.service) {
+    if (!entry || typeof entry !== 'object') continue;
+    const svc = entry as { type?: unknown; serviceEndpoint?: unknown };
+    if (svc.type !== 'OriginalsCelAnchor') continue;
+    const ep = svc.serviceEndpoint;
+    if (!ep || typeof ep !== 'object') continue;
+    const head = (ep as { headDigestMultibase?: unknown }).headDigestMultibase;
+    if (typeof head === 'string' && head.length > 0) return head;
+  }
+  return undefined;
+}
+
+/**
+ * Head-freshness check (#366 truncated-log defense): a provenance-completeness
+ * guard against being handed a pre-rotation prefix that verifies on its own.
+ * This is off the ownership path — ownership is sat control, read live from
+ * Bitcoin (see LifecycleManager.getCurrentOwner); this check only defends the
+ * authoring record (the CEL) from looking complete when it isn't.
+ *
+ * Given the log's anchored satoshi, enumerate its inscriptions (oldest-first by
+ * the OrdinalsLookup contract), take the NEWEST one whose content is a DID
+ * document carrying an `OriginalsCelAnchor`, and REQUIRE its
+ * `headDigestMultibase` to equal the chain digest of SOME event PRESENT in the
+ * log. Present-in-log, not is-the-head: a legitimate holder may have appended
+ * events not yet re-inscribed, so a mid-log match passes; only a head committing
+ * to an event the presented log OMITS (a truncation) fails.
+ *
+ * Fail-closed: the caller ASKED for freshness, so any inability to check — no
+ * provider, no enumeration capability, a lookup that throws, or no anchor
+ * document on the sat — is a `STALE_LOG` failure, never a silent pass.
+ *
+ * Returns a `STALE_LOG`-coded error string on failure, or null when fresh.
+ */
+async function verifyHeadFreshness(
+  log: EventLog,
+  anchoredSat: AnchoredSat,
+  ordinalsProvider: OrdinalsLookup | undefined
+): Promise<string | null> {
+  if (!ordinalsProvider || typeof ordinalsProvider.getInscriptionsBySatoshi !== 'function') {
+    return `STALE_LOG: head freshness was requested but the ordinals provider cannot enumerate inscriptions on satoshi ${anchoredSat.satoshi}; cannot confirm the log is not truncated`;
+  }
+
+  let onSat: Array<{ inscriptionId: string }>;
+  try {
+    onSat = await ordinalsProvider.getInscriptionsBySatoshi(anchoredSat.satoshi);
+  } catch (e) {
+    return `STALE_LOG: failed to enumerate inscriptions on satoshi ${anchoredSat.satoshi} for the head-freshness check: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  // Newest-first walk: the list is oldest-first by contract, so start at the end
+  // and take the first anchor-carrying DID document. Non-anchor inscriptions
+  // (other content on the same sat, or non-JSON) are skipped; a genuine FETCH
+  // failure fails closed rather than silently skipping a real head.
+  let headDigest: string | undefined;
+  for (let idx = onSat.length - 1; idx >= 0; idx--) {
+    const inscriptionId = onSat[idx].inscriptionId;
+    let inscription: Awaited<ReturnType<OrdinalsLookup['getInscriptionById']>>;
+    try {
+      inscription = await ordinalsProvider.getInscriptionById(inscriptionId);
+    } catch (e) {
+      return `STALE_LOG: failed to fetch inscription ${inscriptionId} on satoshi ${anchoredSat.satoshi} during the head-freshness check: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    if (!inscription || inscription.content === undefined) continue;
+    let content: unknown;
+    try {
+      content = JSON.parse(inscription.content.toString('utf8'));
+    } catch {
+      continue;
+    }
+    const digest = extractCelAnchorHeadDigest(content);
+    if (digest !== undefined) {
+      headDigest = digest;
+      break;
+    }
+  }
+
+  if (headDigest === undefined) {
+    return `STALE_LOG: no OriginalsCelAnchor DID document found on satoshi ${anchoredSat.satoshi}; cannot confirm the presented log is current`;
+  }
+
+  const present = log.events.some(
+    (ev) => digestMultibaseEquals(headDigest, computeDigestMultibase(canonicalizeEntryForChain(ev)))
+  );
+  if (!present) {
+    return `STALE_LOG: the newest on-chain anchor on satoshi ${anchoredSat.satoshi} commits to head digest ${headDigest}, which is absent from the presented log; the log is truncated or stale`;
+  }
+
+  return null;
+}
+
+/**
+ * The log's current on-sat authority anchor: the satoshi a verified migrate
+ * event bound the log to, and the inscription that most recently attested
+ * authority on it (the migrate inscription, then each accepted non-cooperative
+ * rotation's reinscription).
+ */
+interface AnchoredSat {
+  satoshi: string;
+  inscriptionId: string;
+}
+
+/**
+ * Extracts the well-formed `bitcoin-ordinals-2024` witness proofs of an event
+ * (those carrying non-empty string satoshi/inscriptionId). Malformed entries
+ * are skipped here — verifyBitcoinWitnessProof still gates them in the witness
+ * loop, so skipping cannot launder a bad proof.
+ */
+function bitcoinWitnessProofs(
+  event: LogEntry
+): Array<{ proof: DataIntegrityProof; satoshi: string; inscriptionId: string }> {
+  if (!Array.isArray(event.proof)) return [];
+  const out: Array<{ proof: DataIntegrityProof; satoshi: string; inscriptionId: string }> = [];
+  for (const p of event.proof) {
+    if (!p || typeof p !== 'object' || !isWitnessProof(p)) continue;
+    if (p.cryptosuite !== BITCOIN_WITNESS_CRYPTOSUITE) continue;
+    const rec = p as unknown as { satoshi?: unknown; inscriptionId?: unknown };
+    if (
+      typeof rec.satoshi === 'string' && rec.satoshi.length > 0 &&
+      typeof rec.inscriptionId === 'string' && rec.inscriptionId.length > 0
+    ) {
+      out.push({ proof: p, satoshi: rec.satoshi, inscriptionId: rec.inscriptionId });
+    }
+  }
+  return out;
+}
+
+/**
+ * Collects the Ed25519 key hexes announced by a DID document's
+ * `verificationMethod[].publicKeyMultibase` entries. Non-documents,
+ * non-decodable and non-Ed25519 entries are skipped (fail closed at the
+ * caller on an empty set).
+ */
+function ed25519KeyHexesFromDidDocument(content: unknown): Set<string> {
+  const keys = new Set<string>();
+  if (!content || typeof content !== 'object') return keys;
+  const vms = (content as { verificationMethod?: unknown }).verificationMethod;
+  if (!Array.isArray(vms)) return keys;
+  for (const vm of vms) {
+    const pkm = vm && typeof vm === 'object' ? (vm as { publicKeyMultibase?: unknown }).publicKeyMultibase : undefined;
+    if (typeof pkm !== 'string') continue;
+    try {
+      const dec = multikey.decodePublicKey(pkm);
+      if (dec.type === 'Ed25519') keys.add(Buffer.from(dec.key).toString('hex'));
+    } catch {
+      // skip non-decodable verification methods
+    }
+  }
+  return keys;
+}
+
+/**
+ * Non-cooperative rotation candidacy (#366): after a sat transfer the new
+ * owner cannot obtain the old controller's signature, so a rotateKey whose
+ * controller proof is NOT authorized by the current key set is accepted IFF
+ * ALL of the following hold — every unverifiable step fails closed:
+ *
+ *  (a) the event carries a `bitcoin-ordinals-2024` witness proof whose
+ *      `satoshi` equals the anchored sat, and `verifyBitcoinWitnessProof`
+ *      passes IN FULL against THIS event's chain digest (the reinscription
+ *      commits to the rotation itself);
+ *  (b) the inscribed DID document announces an Ed25519 key of
+ *      `data.newController` in its verificationMethod — self-certifying
+ *      newControllers only (did:key / long-form did:peer:4);
+ *  (c) the event's own controller-proof key is itself a key of newController —
+ *      signer ≡ announced ≡ inscribed. This closes the
+ *      wrap-someone-else's-reinscription attack: an attacker cannot take the
+ *      legitimate buyer's on-sat reinscription and wrap it in a rotateKey
+ *      naming (or signed by) themselves;
+ *  (d) on the sat's inscription list, the rotation's inscription appears at a
+ *      STRICTLY LATER index than the current anchor inscription — the
+ *      hand-off must postdate the anchor it supersedes.
+ *
+ * No ordering-vs-transfer-tx check is needed (and none is done): only the
+ * sat's current UTXO holder can reinscribe it, so a reinscription satisfying
+ * (a)–(d) is itself proof of sat control at reinscription time — the sat
+ * enforces control, the verifier only orders inscriptions.
+ */
+async function evaluateNonCooperativeRotation(
+  event: LogEntry,
+  controllerProofs: { proof: DataIntegrityProof; originalIndex: number }[],
+  anchoredSat: AnchoredSat,
+  ordinalsProvider: OrdinalsLookup | undefined,
+  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>
+): Promise<{ accepted: true; inscriptionId: string } | { accepted: false; reason: string }> {
+  // Hand-off target: a self-certifying newController with embedded Ed25519
+  // key material. Resolver-backed targets (did:webvh, …) fail closed — nothing
+  // offline binds their keys, and (b)/(c) below need an enumerable key set.
+  const rotation = event.data as { newController?: unknown } | null | undefined;
+  const newController = typeof rotation?.newController === 'string' ? rotation.newController : undefined;
+  const newKeys = newController !== undefined ? await selfCertifyingKeyHexes(newController) : null;
+  if (!newKeys || newKeys.size === 0) {
+    return { accepted: false, reason: `newController (${String(newController)}) is not a self-certifying DID with an Ed25519 key` };
+  }
+
+  // (c) EVERY controller proof on the event must be signed by a key of
+  // newController — a mixed old/new or foreign co-signer disqualifies.
+  for (const { proof, originalIndex } of controllerProofs) {
+    const keyHex = await resolveControllerKeyHex(proof.verificationMethod, resolveKey);
+    if (keyHex === null || !newKeys.has(keyHex)) {
+      return {
+        accepted: false,
+        reason: `controller proof ${originalIndex} (${proof.verificationMethod}) is not signed by a key of newController — signer must equal the announced new controller`
+      };
+    }
+  }
+
+  // (a) precondition: a bitcoin witness proof ON THE ANCHORED SAT.
+  const candidates = bitcoinWitnessProofs(event).filter(w => w.satoshi === anchoredSat.satoshi);
+  if (candidates.length === 0) {
+    return { accepted: false, reason: `event carries no bitcoin witness proof on the anchored satoshi ${anchoredSat.satoshi}` };
+  }
+
+  const eventDigest = computeDigestMultibase(canonicalizeEntryForChain(event));
+  let reason = 'no witness proof satisfied the reinscription conditions';
+
+  // First-satisfying-candidate wins (unlike the migrate poison rule, which
+  // rejects on >1 passing witness): both candidates here are necessarily
+  // sat-holder-authored, so there's no cross-party escalation to guard against.
+  for (const candidate of candidates) {
+    // (a) full on-chain verification against THIS event's chain digest:
+    // inscription exists, is carried by the claimed (= anchored) sat, and its
+    // content commits to the rotation event.
+    const anchorError = await verifyBitcoinWitnessProof(candidate.proof, eventDigest, ordinalsProvider);
+    if (anchorError !== null) {
+      reason = anchorError;
+      continue;
+    }
+
+    // (b) the reinscribed DID document must ANNOUNCE the new controller's key.
+    // verifyBitcoinWitnessProof guaranteed the provider and the inscription
+    // content exist; a lookup failure here still fails closed.
+    let announced: Set<string>;
+    try {
+      const inscription = await (ordinalsProvider as OrdinalsLookup).getInscriptionById(candidate.inscriptionId);
+      if (!inscription || inscription.content === undefined) {
+        reason = `inscription ${candidate.inscriptionId} content is missing`;
+        continue;
+      }
+      announced = ed25519KeyHexesFromDidDocument(JSON.parse(inscription.content.toString('utf8')));
+    } catch (e) {
+      reason = `failed to inspect inscription ${candidate.inscriptionId}: ${e instanceof Error ? e.message : String(e)}`;
+      continue;
+    }
+    if (![...announced].some(k => newKeys.has(k))) {
+      reason = `inscribed DID document does not announce an Ed25519 key of newController ${newController}`;
+      continue;
+    }
+
+    // (d) the reinscription must be STRICTLY LATER on the sat than the current
+    // anchor inscription. Without an inscription-list capability the ordering
+    // is unprovable — fail closed. This index comparison trusts
+    // getInscriptionsBySatoshi's documented oldest-first contract (see
+    // OrdinalsLookup); a provider returning newest-first flips this check
+    // fail-open.
+    if (typeof ordinalsProvider?.getInscriptionsBySatoshi !== 'function') {
+      return { accepted: false, reason: `ordinals provider cannot enumerate inscriptions on satoshi ${anchoredSat.satoshi}; reinscription order is unprovable` };
+    }
+    let onSat: Array<{ inscriptionId: string }>;
+    try {
+      onSat = await ordinalsProvider.getInscriptionsBySatoshi(anchoredSat.satoshi);
+    } catch (e) {
+      reason = `failed to list inscriptions on satoshi ${anchoredSat.satoshi}: ${e instanceof Error ? e.message : String(e)}`;
+      continue;
+    }
+    const anchorIdx = onSat.findIndex(i => i.inscriptionId === anchoredSat.inscriptionId);
+    const rotationIdx = onSat.findIndex(i => i.inscriptionId === candidate.inscriptionId);
+    if (anchorIdx === -1 || rotationIdx === -1 || rotationIdx <= anchorIdx) {
+      reason = `rotation inscription ${candidate.inscriptionId} does not appear strictly after anchor inscription ${anchoredSat.inscriptionId} on satoshi ${anchoredSat.satoshi}`;
+      continue;
+    }
+
+    return { accepted: true, inscriptionId: candidate.inscriptionId };
+  }
+
+  return { accepted: false, reason };
 }
 
 /**
@@ -459,7 +790,8 @@ async function verifyEvent(
   previousEvent: LogEntry | undefined,
   resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>,
   authorizedKeyIds?: Set<string>,
-  ordinalsProvider?: OrdinalsLookup
+  ordinalsProvider?: OrdinalsLookup,
+  anchoredSat?: AnchoredSat
 ): Promise<EventVerification> {
   const errors: string[] = [];
 
@@ -520,13 +852,35 @@ async function verifyEvent(
   // in one DID document nor tripped up by the same key under an equivalent VM
   // id. A custom verifier takes full responsibility for authorization, so this
   // check is skipped there.
+  let nonCooperativeInscriptionId: string | undefined;
   if (!customVerifier && authorizedKeyIds && index > 0) {
     for (const { proof, originalIndex } of controllerProofs) {
       const keyHex = await resolveControllerKeyHex(proof.verificationMethod, resolveKey);
       if (keyHex === null || !authorizedKeyIds.has(keyHex)) {
+        // Non-cooperative rotation (#366): ONLY a rotateKey event — and only
+        // when the log already has a bitcoin-anchored authority — may take the
+        // alternate, reinscription-attested path instead of failing here. The
+        // candidacy re-checks EVERY controller proof against the announced
+        // newController (condition c), so once accepted the remaining
+        // per-proof checks against the OLD set are superseded. Every other
+        // event type, and every failed candidacy, fails exactly as before.
+        let candidacyReason: string | undefined;
+        if (event.type === 'rotateKey' && anchoredSat) {
+          const candidacy = await evaluateNonCooperativeRotation(
+            event, controllerProofs, anchoredSat, ordinalsProvider, resolveKey
+          );
+          if (candidacy.accepted) {
+            nonCooperativeInscriptionId = candidacy.inscriptionId;
+            break;
+          }
+          candidacyReason = candidacy.reason;
+        }
         errors.push(
           `Event ${index}, Proof ${originalIndex}: signer ${proof.verificationMethod} is not authorized by the log's create event`
         );
+        if (candidacyReason !== undefined) {
+          errors.push(`Event ${index}: non-cooperative rotation rejected: ${candidacyReason}`);
+        }
         return {
           index,
           type: event.type,
@@ -619,6 +973,12 @@ async function verifyEvent(
     proofValid: allControllerProofsValid,
     chainValid,
     ...(customVerifier ? {} : { cryptographicallyVerified: allCryptographicallyVerified }),
+    // Report the non-cooperative acceptance only when the event fully
+    // verified — a candidacy followed by a signature/witness failure is not
+    // an accepted rotation.
+    ...(nonCooperativeInscriptionId !== undefined && allControllerProofsValid && chainValid
+      ? { nonCooperativeRotation: { inscriptionId: nonCooperativeInscriptionId } }
+      : {}),
     errors,
   };
 
@@ -724,9 +1084,10 @@ export async function verifyEventLog(
     );
   }
 
-  // Establish the authorized controller key from the create event (event 0):
-  // the trust-on-first-use root of authority. The current CEL data model has
-  // no in-log key-rotation mechanism, so this key is fixed by the create event.
+  // Establish the INITIAL authorized controller key from the create event
+  // (event 0): the root of authority. The set is not fixed for the life of the
+  // log — a fully valid `rotateKey` event REPLACES it with the new controller's
+  // keys (hand-off semantics; see the rotation arm in the event loop below).
   //
   // SECURITY: the hash chain and the controller signature cover only
   // { type, data, previousEvent } — NOT the proof array. So an attacker can
@@ -742,7 +1103,19 @@ export async function verifyEventLog(
   // authorization (verifyEvent skips the controller-key binding on that path),
   // so this default authority check is skipped too — consistently.
   const createEvent = log.events[0];
-  const authorizedKeyIds = new Set<string>();
+
+  // Genesis shape discrimination (drives both the authority binding below and
+  // the assetDid/expectedDid semantics). Legacy logs embed the asset DID in
+  // `data.did`; did:cel genesis logs carry the holder's key in `data.controller`
+  // and DERIVE the asset DID from the event (no self-reference). A non-string
+  // `data.did` is malformed and treated as absent.
+  const genesisData = createEvent.data as { did?: unknown; controller?: unknown } | null | undefined;
+  const legacyDid = typeof genesisData?.did === 'string' ? genesisData.did : undefined;
+  const celController = legacyDid === undefined && typeof genesisData?.controller === 'string'
+    ? genesisData.controller
+    : undefined;
+
+  let authorizedKeyIds = new Set<string>();
   let authorityError: string | undefined;
   if (!options?.verifier) {
     // A non-array proof (missing, object, string, …) yields zero controller
@@ -758,32 +1131,63 @@ export async function verifyEventLog(
     } else {
       const rootKeyHex = await resolveControllerKeyHex(createControllerProofs[0].verificationMethod, options?.resolveKey);
       if (rootKeyHex) {
-        // Self-certifying binding: when the create event's `data.did` is a
-        // did:key or long-form did:peer:4, the identifier itself embeds the
-        // controller's key material, so the create-event signing key can be
-        // checked against it offline. Without this, an attacker can copy a
-        // victim's create event `data` verbatim, re-sign event 0 with their
-        // own did:key, and produce a "valid" provenance log for the victim's
-        // DID under the attacker's key.
-        //
-        // The check applies only when the create proof's verificationMethod
-        // is itself a did:key: that is the offline-checkable pattern the SDK
-        // emits (PeerCelManager embeds the signer's key in the generated
-        // did:peer). Resolver-backed verification methods (did:webvh, …)
-        // cannot embed their key in the asset DID at create time, so they
-        // keep trust-on-first-use — their authority is whatever the
-        // verifier's resolveKey vouches for. Non-self-certifying `data.did`
-        // methods also keep trust-on-first-use.
-        const dataDid = (createEvent.data as Record<string, unknown> | null | undefined)?.did;
-        const embeddedKeys = createControllerProofs[0].verificationMethod.startsWith('did:key:')
-          ? await selfCertifyingKeyHexes(dataDid)
-          : null;
-        if (embeddedKeys !== null && !embeddedKeys.has(rootKeyHex)) {
-          authorityError =
-            `Create event controller key (${createControllerProofs[0].verificationMethod}) is not a key ` +
-            `embedded in the self-certifying DID ${String(dataDid)}; the log was not created by that DID's controller.`;
+        if (celController !== undefined) {
+          // did:cel genesis: `data.controller` DEFINES authority — the create
+          // event's signing key MUST be a key of that controller. FAIL CLOSED,
+          // NEVER blind trust-on-first-use: without this an attacker can copy a
+          // victim's genesis `data` verbatim, re-sign event 0 with their own
+          // key, and mint a "valid" log for the victim's derived did:cel under
+          // the attacker's key.
+          //
+          // Two ways to bind, both fail-closed:
+          //  - self-certifying controller (did:key / long-form did:peer:4): its
+          //    key material is embedded, so the root key MUST be one of those
+          //    keys — checked offline, no resolver, no fallback.
+          //  - resolver-backed controller (did:webvh, …): its keys cannot be
+          //    enumerated offline, so the root proof's verificationMethod MUST
+          //    belong to the controller DID (proof VM DID === controller). The
+          //    resolver then vouches for that key and the signature is checked
+          //    downstream. A foreign-DID signer (e.g. a did:key claiming a
+          //    did:webvh controller) is not the controller and fails closed.
+          const controllerKeys = await selfCertifyingKeyHexes(celController);
+          const rootProofVm = createControllerProofs[0].verificationMethod;
+          const bound = controllerKeys !== null
+            ? controllerKeys.has(rootKeyHex)
+            : rootProofVm.split('#')[0] === celController;
+          if (!bound) {
+            authorityError =
+              `Create event proof key (${rootProofVm}) is not a key of ` +
+              `the genesis controller ${celController}; the log was not created by that controller.`;
+          } else {
+            authorizedKeyIds.add(rootKeyHex);
+          }
         } else {
-          authorizedKeyIds.add(rootKeyHex);
+          // Legacy / shapeless self-certifying binding (unchanged): when the
+          // create event's `data.did` is a did:key or long-form did:peer:4, the
+          // identifier itself embeds the controller's key material, so the
+          // create-event signing key can be checked against it offline. Without
+          // this, an attacker can copy a victim's create event `data` verbatim,
+          // re-sign event 0 with their own did:key, and produce a "valid"
+          // provenance log for the victim's DID under the attacker's key.
+          //
+          // The check applies only when the create proof's verificationMethod
+          // is itself a did:key: that is the offline-checkable pattern the SDK
+          // emits (PeerCelManager embeds the signer's key in the generated
+          // did:peer). Resolver-backed verification methods (did:webvh, …)
+          // cannot embed their key in the asset DID at create time, so they
+          // keep trust-on-first-use — their authority is whatever the
+          // verifier's resolveKey vouches for. Non-self-certifying `data.did`
+          // methods and shapeless logs also keep trust-on-first-use.
+          const embeddedKeys = createControllerProofs[0].verificationMethod.startsWith('did:key:')
+            ? await selfCertifyingKeyHexes(legacyDid)
+            : null;
+          if (embeddedKeys !== null && !embeddedKeys.has(rootKeyHex)) {
+            authorityError =
+              `Create event controller key (${createControllerProofs[0].verificationMethod}) is not a key ` +
+              `embedded in the self-certifying DID ${String(legacyDid)}; the log was not created by that DID's controller.`;
+          } else {
+            authorizedKeyIds.add(rootKeyHex);
+          }
         }
       } else {
         // The create event's key could not be resolved (e.g. a transient
@@ -798,15 +1202,138 @@ export async function verifyEventLog(
     }
   }
 
-  // Verify each event's proofs and hash chain
+  // Verify each event's proofs and hash chain. The loop is index-ordered and
+  // `authorizedKeyIds` EVOLVES: each event is authorized against the set as it
+  // stood when the event was appended, and a fully valid rotateKey event swaps
+  // the set for subsequent iterations.
+  //
+  // `anchoredSat` is companion walk state (#366): once a migrate event's
+  // GATING bitcoin witness proof verifies, the log's authority is anchored to
+  // that satoshi, and the anchoring inscription is the reference point for the
+  // non-cooperative rotation rule (see evaluateNonCooperativeRotation). Both
+  // are default-path machinery; a custom verifier owns proof semantics.
+  let anchoredSat: AnchoredSat | undefined;
+  // Tracks whether ANY verified migrate event carried a bitcoin witness proof —
+  // even when the anchor-poison rule below voids anchoredSat. Head-freshness
+  // needs this to distinguish never-btco-anchored (legit no-op) from
+  // btco-anchored-but-poisoned (must fail closed).
+  let sawBtcoAnchorAttempt = false;
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
-    const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds, options?.ordinalsProvider);
+    const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds, options?.ordinalsProvider, anchoredSat);
+
+    // rotateKey hand-off. Order matters: the rotation event must pass ALL its
+    // checks (chain link, signature, CURRENT-set authorization, gating witness
+    // proofs) BEFORE the set is swapped — a failed rotation must not rotate.
+    // Skipped on the custom-verifier path, where the caller owns authorization.
+    if (!options?.verifier && event.type === 'rotateKey' && eventResult.proofValid && eventResult.chainValid) {
+      const rotation = event.data as { newController?: unknown } | null | undefined;
+      const newController = typeof rotation?.newController === 'string' ? rotation.newController : undefined;
+      // v1 requires a SELF-CERTIFYING newController (did:key, or long-form
+      // did:peer:4): its key material is embedded, so the hand-off target is
+      // checkable offline. Resolver-backed newControllers (did:webvh, …) fail
+      // closed — VM-DID equality has no meaning here (nothing is signed by the
+      // new key yet); supporting them needs a proof-of-possession design.
+      const newKeys = newController !== undefined ? await selfCertifyingKeyHexes(newController) : null;
+      if (!newKeys || newKeys.size === 0) {
+        // Unbindable target fails the EVENT (and therefore the log) — an
+        // accepted rotation to nowhere would strand or hijack the log.
+        eventResult.proofValid = false;
+        eventResult.errors.push(
+          `Event ${i}: rotateKey has an unbindable newController (${String(newController)}); ` +
+          `a rotation target must be a self-certifying DID carrying an Ed25519 key`
+        );
+      } else {
+        // REPLACE, not union — hand-off semantics (design spec §2/§5); keeping
+        // the old keys would reopen the stale-key window rotation closes.
+        authorizedKeyIds = newKeys;
+      }
+    }
+
+    // anchoredSat maintenance (default path; a fully verified event only —
+    // an unverified migrate witness must never anchor authority, guaranteed
+    // because bitcoin witness proofs GATE proofValid).
+    if (!options?.verifier && eventResult.proofValid && eventResult.chainValid) {
+      if (event.type === 'migrate') {
+        // proofValid=true ⇒ every bitcoin witness proof on the event verified,
+        // so its satoshi/inscriptionId are chain-attested. But the proof array
+        // is UNSIGNED: with more than one verified bitcoin witness proof an
+        // attacker who controls the array order (or injected a proof anchored
+        // to a sat THEY control, committing to this public digest) could pick
+        // which sat "anchors" authority and rotate on it. Ambiguity therefore
+        // POISONS the anchor (mirrors the exactly-one-controller-proof rule on
+        // the create event): only an unambiguous single proof anchors, and the
+        // non-cooperative rotation arm stays unavailable otherwise — the log's
+        // verdict itself is unchanged.
+        const witnessed = bitcoinWitnessProofs(event);
+        // Any verified bitcoin-witnessed migrate marks the log btco-anchored,
+        // INCLUDING the poisoned (>1) case — freshness must still fail closed.
+        if (witnessed.length >= 1) {
+          sawBtcoAnchorAttempt = true;
+        }
+        if (witnessed.length === 1) {
+          anchoredSat = { satoshi: witnessed[0].satoshi, inscriptionId: witnessed[0].inscriptionId };
+        } else if (witnessed.length > 1) {
+          anchoredSat = undefined;
+        }
+      } else if (event.type === 'rotateKey' && eventResult.nonCooperativeRotation && anchoredSat) {
+        // The accepted reinscription becomes the new anchor, so a CHAINED
+        // non-cooperative rotation must reinscribe strictly after it.
+        anchoredSat = { satoshi: anchoredSat.satoshi, inscriptionId: eventResult.nonCooperativeRotation.inscriptionId };
+      }
+    }
+
     eventVerifications.push(eventResult);
 
     if (!eventResult.proofValid || !eventResult.chainValid) {
       errors.push(...eventResult.errors);
+    }
+  }
+
+  // Head-freshness (#366): buyer-requested truncated-log defense. Default OFF,
+  // so existing callers see zero behavior change. `anchoredSat` is default-path
+  // authority state that never establishes on the custom-verifier path, so
+  // requesting the check there is a configuration error (it would silently pass)
+  // and instead fails closed. The no-op is reserved for logs that were NEVER
+  // btco-anchored (no verified bitcoin-witnessed migrate at all) — nothing to be
+  // fresh against. A btco-anchored log whose anchor was POISONED to undefined
+  // (Task-5 >1-witness rule) is UNCHECKABLE, not unanchored: the caller asked
+  // for freshness, so inability to check fails closed as STALE_LOG rather than
+  // silently passing (which would hand attackers a poison-to-bypass lever).
+  let staleLogError: string | undefined;
+  if (options?.checkHeadFreshness) {
+    if (options?.verifier) {
+      staleLogError =
+        `head-freshness check is incompatible with a custom verifier: the custom path skips the ` +
+        `on-chain authority walk that head freshness is validated against`;
+    } else if (anchoredSat) {
+      staleLogError = await verifyHeadFreshness(log, anchoredSat, options?.ordinalsProvider) ?? undefined;
+    } else if (sawBtcoAnchorAttempt) {
+      staleLogError =
+        `STALE_LOG: the log is bitcoin-anchored but its anchor is ambiguous (a migrate event carries ` +
+        `more than one verified bitcoin witness proof), so head freshness cannot be checked; failing closed`;
+    }
+  }
+
+  // assetDid: the DERIVED did:cel for new-shape genesis logs, the declared
+  // data.did for legacy logs, absent for shapeless logs. Pure derivation — no
+  // authority machinery — so it is reported even on the custom-verifier path.
+  let assetDid: string | undefined;
+  if (celController !== undefined) assetDid = deriveDidCelFromGenesis(createEvent);
+  else if (legacyDid !== undefined) assetDid = legacyDid;
+
+  // expectedDid: reject a log that does not back the caller's expected DID.
+  // Scoped to the non-custom-verifier path — that path owns proof semantics and
+  // the authority binding above is skipped there. did:cel is matched by suffix
+  // derivation; legacy by string equality; a shapeless log backs no DID.
+  let expectedDidError: string | undefined;
+  if (options?.expectedDid !== undefined && !options?.verifier) {
+    const matches = celController !== undefined
+      ? didCelMatchesLog(options.expectedDid, log)
+      : options.expectedDid === legacyDid;
+    if (!matches) {
+      expectedDidError = `log does not back expected DID ${options.expectedDid}`;
     }
   }
 
@@ -818,10 +1345,17 @@ export async function verifyEventLog(
   if (authorityError) {
     errors.unshift(authorityError);
   }
+  if (expectedDidError) {
+    errors.push(expectedDidError);
+  }
+  if (staleLogError) {
+    errors.push(staleLogError);
+  }
 
   return {
-    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated,
+    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !expectedDidError && !staleLogError,
     errors,
     events: eventVerifications,
+    ...(assetDid !== undefined ? { assetDid } : {}),
   };
 }

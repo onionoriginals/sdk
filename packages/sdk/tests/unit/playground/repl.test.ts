@@ -43,7 +43,7 @@ describe('Playground REPL', () => {
     const output = await runRepl(['create', 'exit']);
     expect(output).toContain('Created "Asset 1"');
     expect(output).toContain('Alias:  a1');
-    expect(output).toContain('did:peer:');
+    expect(output).toContain('did:cel:');
     expect(output).toContain('Layer:  did:peer');
   });
 

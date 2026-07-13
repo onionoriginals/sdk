@@ -17,6 +17,9 @@ import type {
   RecoverWebVHResult,
 } from './WebVHManager.js';
 import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
+import { resolveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
+import { parseEventLogJson } from '../cel/serialization/json.js';
+import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
@@ -427,6 +430,46 @@ export class DIDManager {
     }
   }
 
+  /**
+   * Reads the persisted CEL for a did:cel from the storage adapter at the
+   * conventional key LifecycleManager writes (`cel/<suffix>.json`). Supports
+   * both duck-typed adapter shapes in the same priority order as the writes
+   * (legacy `get(key)` first, canonical `getObject(domain, path)` second).
+   * Any miss or adapter failure returns null — resolution then stays
+   * honest-null instead of crashing.
+   */
+  private async readStoredCelLog(did: string): Promise<string | null> {
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
+    if (!storage || typeof storage !== 'object') return null;
+    const path = `${did.slice(DID_CEL_PREFIX.length)}.json`;
+
+    const decode = (value: unknown): string | null => {
+      if (typeof value === 'string') return value;
+      if (value instanceof Uint8Array) return new TextDecoder().decode(value);
+      if (value && typeof value === 'object') {
+        const content = (value as { content?: unknown }).content;
+        if (typeof content === 'string') return content;
+        if (content instanceof Uint8Array) return new TextDecoder().decode(content);
+      }
+      return null;
+    };
+
+    try {
+      const withGet = storage as { get?: (key: string) => Promise<unknown> };
+      if (typeof withGet.get === 'function') {
+        const found = decode(await withGet.get(`cel/${path}`));
+        if (found !== null) return found;
+      }
+      const withGetObject = storage as { getObject?: (domain: string, path: string) => Promise<unknown> };
+      if (typeof withGetObject.getObject === 'function') {
+        return decode(await withGetObject.getObject('cel', path));
+      }
+    } catch {
+      // A throwing storage adapter must not crash resolution.
+    }
+    return null;
+  }
+
   async resolveDID(did: string, options?: { skipCache?: boolean }): Promise<DIDDocument | null> {
     return this.track('did.resolveDID', async () => {
       // Network guard must precede the cache read (issue #312).
@@ -531,6 +574,34 @@ export class DIDManager {
             if (this.config.enableLogging) {
               console.warn('Failed to resolve did:webvh:', err);
             }
+          }
+        } else if (did.startsWith(DID_CEL_PREFIX)) {
+          // Persistence-backed resolution (Phase 3): LifecycleManager persists
+          // the asset's CEL at the conventional `cel/<suffix>.json` key at
+          // genesis and after every successful append. Read it back, parse it
+          // through the JSON gate, and resolve via resolveDidCel — which
+          // verifies the WHOLE chain against the DID before folding the
+          // current controller into a document (never a fabricated one). The
+          // DIDManager-backed key resolver and the configured ordinalsProvider
+          // are threaded so rotated and btco-anchored (witness-proofed) logs
+          // verify too; without a provider those fail closed to null.
+          const json = await this.readStoredCelLog(did);
+          if (json !== null) {
+            try {
+              const log = parseEventLogJson(json);
+              result = await resolveDidCel(did, log, {
+                resolveKey: createDidManagerKeyResolver(this),
+                ordinalsProvider: this.config.ordinalsProvider
+              });
+            } catch {
+              // Parse failure → the honest null below.
+              result = null;
+            }
+          }
+          if (!result && this.config.enableLogging) {
+            console.warn(
+              `did:cel could not be resolved from storage; callers holding the event log can use resolveDidCel(did, log) from the cel module. Returning null for ${did}`
+            );
           }
         } else if (this.config.enableLogging) {
           console.warn(`Unsupported DID method for resolution: ${did}`);

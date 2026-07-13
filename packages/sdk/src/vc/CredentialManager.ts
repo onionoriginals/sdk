@@ -853,7 +853,8 @@ export class CredentialManager {
    * Issue an OwnershipTransferred credential for Bitcoin-anchored asset transfers
    * 
    * Records the transfer of ownership of a did:btco asset to a new owner.
-   * 
+   * This VC is an OPTIONAL attestation only — ownership is the sat, not this credential.
+   *
    * @param assetDid - The DID of the asset being transferred
    * @param previousOwner - The previous owner (DID or Bitcoin address)
    * @param newOwner - The new owner (Bitcoin address)
