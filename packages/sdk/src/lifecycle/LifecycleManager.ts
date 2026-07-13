@@ -1894,8 +1894,14 @@ export class LifecycleManager {
       resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
       timestamp: new Date().toISOString()
     };
-    const backLinks = [asset.id, asset.bindings?.['did:webvh']].filter(
-      (d): d is string => typeof d === 'string'
+    // First-anchor-wins uniqueness (#did-cel-uniqueness): the inscribed btco
+    // doc MUST back-link its did:cel so on-chain anchorings are enumerable via
+    // getAnchoringsForDidCel. Derive it from the genesis event (not the mutable
+    // asset.id) and place it first; dedupe so a coincidental asset.id === didCel
+    // does not double-list. The did:webvh predecessor follows.
+    const didCel = asset.celLog ? deriveDidCel(asset.celLog) : asset.id;
+    const backLinks = [didCel, asset.id, asset.bindings?.['did:webvh']].filter(
+      (d, i, arr): d is string => typeof d === 'string' && arr.indexOf(d) === i
     );
 
     // Held locally, not captured into the asset yet: buildContent runs BEFORE
