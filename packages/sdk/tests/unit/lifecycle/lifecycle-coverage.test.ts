@@ -147,7 +147,7 @@ describe('LIFECYCLE-004/happy – registerKey with Ed25519', () => {
 
     const keyManager = new KeyManager();
     const kp = await keyManager.generateKeyPair('Ed25519');
-    const vmId = 'did:peer:z6MkTest#key-0';
+    const vmId = 'did:cel:z6MkTest#key-0';
 
     await lm.registerKey(vmId, kp.privateKey);
 
@@ -391,11 +391,11 @@ describe('LIFECYCLE-010/happy – validateMigration resource integrity', () => {
 
   test('fake asset with empty resources fails resource check', () => {
     const fakeAsset = {
-      id: 'did:peer:z6MkEmpty',
-      currentLayer: 'did:peer' as const,
+      id: 'did:cel:z6MkEmpty',
+      currentLayer: 'did:cel' as const,
       resources: [] as AssetResource[],
       credentials: [],
-      did: { id: 'did:peer:z6MkEmpty' },
+      did: { id: 'did:cel:z6MkEmpty' },
     };
 
     const config: OriginalsConfig = { network: 'regtest' };
@@ -421,7 +421,7 @@ describe('LIFECYCLE-021/happy – query migrations by toLayer', () => {
   test('toLayer filter returns only matching migrations', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
 
@@ -451,7 +451,7 @@ describe('LIFECYCLE-023/happy – findByTransactionId', () => {
   test('finds migration by transaction ID', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     await asset.migrate('did:webvh', { transactionId: 'tx-web-xyz' });
@@ -464,7 +464,7 @@ describe('LIFECYCLE-023/happy – findByTransactionId', () => {
   test('returns null for unknown transaction ID', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     const found = asset.findByTransactionId('does-not-exist');
@@ -480,7 +480,7 @@ describe('LIFECYCLE-023/happy – findByInscriptionId', () => {
   test('finds migration by inscription ID', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     await asset.migrate('did:webvh');
@@ -494,7 +494,7 @@ describe('LIFECYCLE-023/happy – findByInscriptionId', () => {
   test('returns null for unknown inscription ID', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     const found = asset.findByInscriptionId('no-such-id');
@@ -510,7 +510,7 @@ describe('LIFECYCLE-024/happy – getProvenanceSummary', () => {
   test('reports correct counts and current layer after full lifecycle', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     await asset.migrate('did:webvh', { transactionId: 'tx-w' });
@@ -527,7 +527,7 @@ describe('LIFECYCLE-024/happy – getProvenanceSummary', () => {
   test('lastActivity equals createdAt when nothing has happened', () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:fresh') as any,
+      buildDid('did:cel:fresh') as any,
       []
     );
     const summary = asset.getProvenanceSummary();
@@ -608,7 +608,7 @@ describe('LIFECYCLE-039/security – asset immutable after btco inscription', ()
   test('migrate from did:btco to any target throws', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     await asset.migrate('did:webvh');
@@ -617,7 +617,7 @@ describe('LIFECYCLE-039/security – asset immutable after btco inscription', ()
     await expect(asset.migrate('did:webvh')).rejects.toThrow(
       /Invalid migration from did:btco/
     );
-    await expect(asset.migrate('did:peer' as any)).rejects.toThrow(
+    await expect(asset.migrate('did:cel' as any)).rejects.toThrow(
       /Invalid migration from did:btco/
     );
   });
@@ -625,7 +625,7 @@ describe('LIFECYCLE-039/security – asset immutable after btco inscription', ()
   test('currentLayer remains did:btco after attempted re-migration', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     await asset.migrate('did:btco', { inscriptionId: 'i-1', transactionId: 'tx-1' });
