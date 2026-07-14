@@ -192,9 +192,14 @@ describe('did:cel uniqueness — first-anchor-wins', () => {
     const by = await branch(base, a, p, Y, didCel);
     const provider = withHeights(p, { [bx.inscriptionId]: 100, [by.inscriptionId]: 100 });
 
-    const result = await verifyEventLog(by.log, { ordinalsProvider: provider });
-    expect(result.verified).toBe(false);
-    expect(hasCode(result, 'AMBIGUOUS_CANONICAL')).toBe(true);
+    const yResult = await verifyEventLog(by.log, { ordinalsProvider: provider });
+    expect(yResult.verified).toBe(false);
+    expect(hasCode(yResult, 'AMBIGUOUS_CANONICAL')).toBe(true);
+
+    // Symmetric: X-branch also cannot be canonical when tied at the same block.
+    const xResult = await verifyEventLog(bx.log, { ordinalsProvider: provider });
+    expect(xResult.verified).toBe(false);
+    expect(hasCode(xResult, 'AMBIGUOUS_CANONICAL')).toBe(true);
   });
 
   test('PROVIDER POSTURE: btco-anchored log + provider WITHOUT getAnchoringsForDidCel → UNIQUENESS_UNVERIFIABLE', async () => {
