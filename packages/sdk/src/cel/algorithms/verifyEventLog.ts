@@ -21,6 +21,7 @@ import { computeDigestMultibase, digestMultibaseEquals } from '../hash.js';
 import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize.js';
 import { multikey } from '../../crypto/Multikey.js';
 import { deriveDidCelFromGenesis, didCelMatchesLog } from '../celDid.js';
+import { parseSatoshiIdentifier } from '../../utils/satoshi-validation.js';
 
 /**
  * Validates the structural requirements of a DataIntegrityProof (field presence,
@@ -719,9 +720,9 @@ async function evaluateNonCooperativeRotation(
     }
   }
 
-  // First-satisfying-candidate wins (unlike the migrate poison rule, which
-  // rejects on >1 passing witness): both candidates here are necessarily
-  // sat-holder-authored, so there's no cross-party escalation to guard against.
+  // First-satisfying-candidate wins (unlike the migrate signed-sat rule, which
+  // rejects a witness that disagrees with data.to): both candidates here are
+  // necessarily sat-holder-authored, so there's no cross-party escalation to guard against.
   for (const candidate of candidates) {
     // (a) full on-chain verification against THIS event's chain digest:
     // inscription exists, is carried by the claimed (= anchored) sat, and its
@@ -1279,17 +1280,10 @@ export async function verifyEventLog(
   // stood when the event was appended, and a fully valid rotateKey event swaps
   // the set for subsequent iterations.
   //
-  // `anchoredSat` is companion walk state (#366): once a migrate event's
-  // GATING bitcoin witness proof verifies, the log's authority is anchored to
-  // that satoshi, and the anchoring inscription is the reference point for the
-  // non-cooperative rotation rule (see evaluateNonCooperativeRotation). Both
-  // are default-path machinery; a custom verifier owns proof semantics.
+  // Companion walk state (#366): once a btco migrate's SIGNED anchoring sat is
+  // confirmed by a matching bitcoin witness proof, the log's authority is
+  // anchored to that sat. Default-path only; a custom verifier owns semantics.
   let anchoredSat: AnchoredSat | undefined;
-  // Tracks whether ANY verified migrate event carried a bitcoin witness proof —
-  // even when the anchor-poison rule below voids anchoredSat. Head-freshness
-  // needs this to distinguish never-btco-anchored (legit no-op) from
-  // btco-anchored-but-poisoned (must fail closed).
-  let sawBtcoAnchorAttempt = false;
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
@@ -1328,26 +1322,42 @@ export async function verifyEventLog(
     // because bitcoin witness proofs GATE proofValid).
     if (!options?.verifier && eventResult.proofValid && eventResult.chainValid) {
       if (event.type === 'migrate') {
-        // proofValid=true ⇒ every bitcoin witness proof on the event verified,
-        // so its satoshi/inscriptionId are chain-attested. But the proof array
-        // is UNSIGNED: with more than one verified bitcoin witness proof an
-        // attacker who controls the array order (or injected a proof anchored
-        // to a sat THEY control, committing to this public digest) could pick
-        // which sat "anchors" authority and rotate on it. Ambiguity therefore
-        // POISONS the anchor (mirrors the exactly-one-controller-proof rule on
-        // the create event): only an unambiguous single proof anchors, and the
-        // non-cooperative rotation arm stays unavailable otherwise — the log's
-        // verdict itself is unchanged.
-        const witnessed = bitcoinWitnessProofs(event);
-        // Any verified bitcoin-witnessed migrate marks the log btco-anchored,
-        // INCLUDING the poisoned (>1) case — freshness must still fail closed.
-        if (witnessed.length >= 1) {
-          sawBtcoAnchorAttempt = true;
-        }
-        if (witnessed.length === 1) {
-          anchoredSat = { satoshi: witnessed[0].satoshi, inscriptionId: witnessed[0].inscriptionId };
-        } else if (witnessed.length > 1) {
-          anchoredSat = undefined;
+        const mdata = event.data as { layer?: unknown; to?: unknown } | null | undefined;
+        if (mdata?.layer === 'btco') {
+          // The canonical anchoring sat is the controller-SIGNED did:btco in
+          // data.to (design 2026-07-13), NOT the unsigned witness array. A btco
+          // migrate that does not sign a parseable sat is UNBOUND.
+          let signedSat: string | undefined;
+          if (typeof mdata.to === 'string') {
+            try { signedSat = String(parseSatoshiIdentifier(mdata.to)); } catch { signedSat = undefined; }
+          }
+          if (signedSat === undefined) {
+            eventResult.proofValid = false;
+            eventResult.errors.push(
+              `Event ${i}: UNBOUND_ANCHOR: a btco migrate must sign a resolvable did:btco anchoring sat in data.to (found ${String(mdata.to)})`
+            );
+          } else {
+            // proofValid=true ⇒ every bitcoin witness proof already verified
+            // on-chain. Require them to carry the SIGNED sat: a witness on any
+            // other sat is a cross-sat fork attempt; none on the signed sat is
+            // witness-stripping. Both fail closed.
+            const witnessed = bitcoinWitnessProofs(event);
+            const offSignedSat = witnessed.find(w => w.satoshi !== signedSat);
+            const onSignedSat = witnessed.find(w => w.satoshi === signedSat);
+            if (offSignedSat) {
+              eventResult.proofValid = false;
+              eventResult.errors.push(
+                `Event ${i}: bitcoin witness proof satoshi ${offSignedSat.satoshi} does not match the signed anchoring sat ${signedSat}`
+              );
+            } else if (!onSignedSat) {
+              eventResult.proofValid = false;
+              eventResult.errors.push(
+                `Event ${i}: btco migrate signs anchoring sat ${signedSat} but carries no verifiable bitcoin witness proof on it`
+              );
+            } else {
+              anchoredSat = { satoshi: signedSat, inscriptionId: onSignedSat.inscriptionId };
+            }
+          }
         }
       } else if (event.type === 'rotateKey' && eventResult.nonCooperativeRotation && anchoredSat) {
         // The accepted reinscription becomes the new anchor, so a CHAINED
@@ -1367,12 +1377,7 @@ export async function verifyEventLog(
   // so existing callers see zero behavior change. `anchoredSat` is default-path
   // authority state that never establishes on the custom-verifier path, so
   // requesting the check there is a configuration error (it would silently pass)
-  // and instead fails closed. The no-op is reserved for logs that were NEVER
-  // btco-anchored (no verified bitcoin-witnessed migrate at all) — nothing to be
-  // fresh against. A btco-anchored log whose anchor was POISONED to undefined
-  // (Task-5 >1-witness rule) is UNCHECKABLE, not unanchored: the caller asked
-  // for freshness, so inability to check fails closed as STALE_LOG rather than
-  // silently passing (which would hand attackers a poison-to-bypass lever).
+  // and instead fails closed.
   let staleLogError: string | undefined;
   if (options?.checkHeadFreshness) {
     if (options?.verifier) {
@@ -1381,11 +1386,10 @@ export async function verifyEventLog(
         `on-chain authority walk that head freshness is validated against`;
     } else if (anchoredSat) {
       staleLogError = await verifyHeadFreshness(log, anchoredSat, options?.ordinalsProvider) ?? undefined;
-    } else if (sawBtcoAnchorAttempt) {
-      staleLogError =
-        `STALE_LOG: the log is bitcoin-anchored but its anchor is ambiguous (a migrate event carries ` +
-        `more than one verified bitcoin witness proof), so head freshness cannot be checked; failing closed`;
     }
+    // No anchoredSat ⇒ the log was never btco-anchored (a signed btco migrate
+    // that failed the anchor checks failed the whole log above), so there is
+    // nothing to be fresh against — the flag is a no-op.
   }
 
   // assetDid: the DERIVED did:cel for new-shape genesis logs, the declared

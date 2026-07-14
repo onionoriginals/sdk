@@ -23,7 +23,7 @@ import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
 import { hashResource, validateCredential } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
-import { btcoDidPrefix } from '../cel/btcoDid.js';
+import { btcoDidPrefix, btcoDidFromSatoshi } from '../cel/btcoDid.js';
 import { KeyManager } from '../did/KeyManager.js';
 import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
 import { createCelDidDocument, didCelMatchesLog, deriveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
@@ -723,13 +723,20 @@ export class LifecycleManager {
         layer = 'did:webvh';
       } else if (data.layer === 'btco') {
         const wp = this.extractBitcoinWitnessProof(ev);
+        // The anchoring sat is the SIGNED data.to (design 2026-07-13). txid /
+        // inscriptionId stay advisory transaction metadata scraped off the
+        // (unsigned) witness — they are not identity-bearing.
+        let satoshi: string | undefined;
+        if (typeof data.to === 'string') {
+          try { satoshi = String(parseSatoshiIdentifier(data.to)); } catch { satoshi = undefined; }
+        }
         migrations.push({
           from: layer,
           to: 'did:btco',
           timestamp,
           transactionId: wp?.txid,
           inscriptionId: wp?.inscriptionId,
-          satoshi: wp?.satoshi,
+          satoshi,
           commitTxId: env.unverified?.commitTxId,
           revealTxId: wp?.txid,
           feeRate: env.unverified?.feeRate
@@ -1874,17 +1881,12 @@ export class LifecycleManager {
     for (const res of asset.resources) {
       this.assertContentMatchesDeclaredHash(res, 'inscribe on Bitcoin');
     }
-    // Append-first (#365): the signed btco migrate event lands BEFORE the
-    // inscription so the on-chain document can commit to the post-append head.
-    // Satoshi/txid are unknown pre-inscription and are deliberately NOT in the
-    // signed data — they arrive later via witness proofs (BtcoMigrationData).
+    // Anchor-in-signed-body (design 2026-07-13): the btco migrate event is
+    // signed INSIDE buildContent, where the target sat is pinned, so its body
+    // can carry the resolvable `to: did:btco:<network>:<sat>`. Snapshot the
+    // pre-append log here for rollback; the append itself is deferred below.
     celLogBefore = asset.celLog;
-    celHeadDigest = await this.appendCelEventOrSkip(asset, 'migrate', {
-      sourceDid: asset.bindings?.['did:webvh'] ?? asset.id,
-      layer: 'btco',
-      network: this.getConfiguredBitcoinNetwork(),
-      migratedAt: new Date().toISOString()
-    });
+    const network = this.getConfiguredBitcoinNetwork();
     // Resource manifest rides INSIDE the DID document as a service entry —
     // the inscription itself must be the DID document (application/did+json)
     // or the SDK's own BtcoDidResolver rejects it (#375).
@@ -1904,6 +1906,16 @@ export class LifecycleManager {
     let inscribedBtcoDoc: DIDDocument | undefined;
     const inscription = await bitcoinManager.inscribeData(
       async (satoshi: string) => {
+        // Sign the migrate event NOW that the sat is pinned: the body carries
+        // the resolvable did:btco anchor, and the DID doc's #cel commits to
+        // this event's digest — so the append MUST precede doc construction.
+        celHeadDigest = await this.appendCelEventOrSkip(asset, 'migrate', {
+          sourceDid: asset.bindings?.['did:webvh'] ?? asset.id,
+          layer: 'btco',
+          network,
+          to: btcoDidFromSatoshi(satoshi, network),
+          migratedAt: new Date().toISOString()
+        });
         const btcoDoc = await this.didManager.migrateToDIDBTCO(asset.did, satoshi);
         btcoDoc.alsoKnownAs = backLinks;
         btcoDoc.service = [

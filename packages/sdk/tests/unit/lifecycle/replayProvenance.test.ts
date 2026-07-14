@@ -133,6 +133,7 @@ describe('replayProvenance pure fold (#Phase2 Task7)', () => {
             sourceDid: genesisDid,
             layer: 'btco',
             network: 'regtest',
+            to: 'did:btco:reg:123456789',
             migratedAt: '2026-07-10T00:05:00.000Z',
           },
           proof: [
@@ -183,5 +184,32 @@ describe('replayProvenance pure fold (#Phase2 Task7)', () => {
     // Layer/bindings also unaffected by a rotation.
     expect(afterFold.currentLayer).toBe(beforeFold.currentLayer);
     expect(afterFold.bindings).toEqual(beforeFold.bindings);
+  });
+
+  test('btco binding is derived from the signed data.to, not the witness sat', async () => {
+    // A migrate whose SIGNED to disagrees with a (spoofable) witness sat must
+    // fold to the SIGNED sat. Build create + btco-migrate with data.to on one
+    // sat and a bitcoin witness proof naming a DIFFERENT sat.
+    const log = {
+      events: [
+        {
+          type: 'create',
+          data: { controller: 'did:key:zSigner', name: 'A', resources: [], createdAt: '2026-07-13T00:00:00Z' },
+          proof: [{ type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022', verificationMethod: 'did:key:zSigner#zSigner', proofPurpose: 'assertionMethod', proofValue: 'z1' }],
+        },
+        {
+          type: 'migrate',
+          data: { sourceDid: 'did:cel:uX', layer: 'btco', network: 'regtest', to: 'did:btco:reg:111', migratedAt: '2026-07-13T00:01:00Z' },
+          previousEvent: 'uPrev',
+          proof: [
+            { type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022', verificationMethod: 'did:key:zSigner#zSigner', proofPurpose: 'assertionMethod', proofValue: 'z2' },
+            { type: 'DataIntegrityProof', cryptosuite: 'bitcoin-ordinals-2024', witnessedAt: 'x', created: 'x', verificationMethod: 'did:btco:witness', proofPurpose: 'assertionMethod', proofValue: 'zinsc', satoshi: '999', inscriptionId: 'insc' },
+          ],
+        },
+      ],
+    } as any;
+    const folded = replayProvenance(log);
+    expect(folded.currentLayer).toBe('did:btco');
+    expect(folded.bindings['did:btco']).toBe('did:btco:reg:111'); // signed, not the witness 999
   });
 });

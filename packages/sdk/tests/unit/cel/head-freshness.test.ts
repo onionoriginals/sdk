@@ -93,7 +93,7 @@ async function makeAnchoredLog(provider: OrdMockProvider, a: Key, sat = SAT) {
   log = await appendEvent(
     log,
     'migrate',
-    { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', migratedAt: '2026-07-10T00:00:00Z' },
+    { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', to: `did:btco:reg:${sat}`, migratedAt: '2026-07-10T00:00:00Z' },
     { signer: a.signer, verificationMethod: a.vm }
   );
   const migrateDigest = chainDigest(log.events[log.events.length - 1]);
@@ -215,26 +215,19 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     expect(result.errors.some(e => /incompatible with a custom verifier/i.test(e))).toBe(true);
   });
 
-  test('POISONED ANCHOR: truncated prefix whose migrate carries TWO verified bitcoin witnesses → STALE_LOG (fail closed, not fail open)', async () => {
+  test('a migrate with a second witness on a NON-signed sat fails closed (witness must match the signed anchoring sat)', async () => {
     const provider = new OrdMockProvider();
     const a = await makeKey();
-    const b = await makeKey();
     const { log: prefix, migrateDigest } = await makeAnchoredLog(provider, a);
-    // Honest history continues: b's rotation is re-inscribed on SAT.
-    await addNonCoopRotation(prefix, provider, b);
-    // Attacker appends a SECOND verified witness on a sat THEY control,
-    // committing to the public migrate digest. Task 5 poisons anchoredSat to
-    // undefined — which must NOT disable head-freshness on this btco-anchored
-    // truncated prefix (that would be fail-open, defeating the Task-7 defense).
+    // Attacker adds a SECOND verified witness on a sat they control, committing
+    // to the public migrate digest. Under the signed-anchor rule this witness
+    // disagrees with the signed data.to (SAT) and rejects the migrate.
     const SAT2 = '9999999999';
     const insc2 = await inscribeDoc(provider, SAT2, migrateDigest);
-    const poisoned = attachWitness(prefix, insc2, SAT2);
-
-    // Both witnesses verify, so the log's own proofs stay valid — the ONLY
-    // guard left is freshness, which must fail closed.
-    const result = await verifyEventLog(poisoned, { ordinalsProvider: provider, checkHeadFreshness: true });
+    const twoWitness = attachWitness(prefix, insc2, SAT2);
+    const result = await verifyEventLog(twoWitness, { ordinalsProvider: provider, checkHeadFreshness: true });
     expect(result.verified).toBe(false);
-    expect(STALE(result)).toBe(true);
+    expect(result.errors.some(e => /does not match the signed anchoring sat/.test(e))).toBe(true);
   });
 
   // Ordering hardening (#395 sibling of Fix 1): the "newest anchor" must be
