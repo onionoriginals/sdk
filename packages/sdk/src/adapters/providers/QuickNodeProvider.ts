@@ -1,4 +1,4 @@
-import type { OrdinalsProvider } from '../types.js';
+import type { OrdinalsProvider, InscriptionParts } from '../types.js';
 import { StructuredError } from '../../utils/telemetry.js';
 import { validateSatoshiNumber } from '../../utils/satoshi-validation.js';
 
@@ -522,9 +522,10 @@ export class QuickNodeProvider implements OrdinalsProvider {
 
   createInscription(params: {
     data?: Buffer;
-    buildContent?: (satoshi: string) => Buffer | Promise<Buffer>;
+    buildContent?: (satoshi: string) => InscriptionParts | Promise<InscriptionParts>;
     contentType: string;
     feeRate?: number;
+    metadata?: Record<string, unknown>;
     targetSatoshi?: string;
   }): Promise<{
     inscriptionId: string;
@@ -537,6 +538,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
     content?: Buffer;
     contentType?: string;
     feeRate?: number;
+    metadata?: Record<string, unknown>;
   }> {
     if (params.buildContent || params.targetSatoshi) {
       return Promise.reject(new StructuredError(
