@@ -44,7 +44,7 @@ describe('Playground REPL', () => {
     expect(output).toContain('Created "Asset 1"');
     expect(output).toContain('Alias:  a1');
     expect(output).toContain('did:cel:');
-    expect(output).toContain('Layer:  did:peer');
+    expect(output).toContain('Layer:  did:cel');
   });
 
   test('creates an asset with custom name', async () => {
@@ -65,7 +65,7 @@ describe('Playground REPL', () => {
     expect(output).toContain('Session Assets:');
     expect(output).toContain('a1');
     expect(output).toContain('a2');
-    expect(output).toContain('did:peer');
+    expect(output).toContain('did:cel');
   });
 
   test('shows empty assets message', async () => {
@@ -76,7 +76,7 @@ describe('Playground REPL', () => {
   test('inspects an asset', async () => {
     const output = await runRepl(['create InspectMe', 'inspect a1', 'exit']);
     expect(output).toContain('Asset: a1');
-    expect(output).toContain('Layer:         did:peer');
+    expect(output).toContain('Layer:         did:cel');
     expect(output).toContain('Resources:     1');
     expect(output).toContain('Provenance:');
     expect(output).toContain('Migrations:  0');

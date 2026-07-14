@@ -897,14 +897,14 @@ describe('CORE-MIG-EVENTS-041: Peer→Bitcoin direct migration', () => {
     } as any);
 
     const asset = await sdk.lifecycle.createAsset(sampleResources);
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
 
     const inscribed = await sdk.lifecycle.inscribeOnBitcoin(asset, 10);
 
     expect(inscribed.currentLayer).toBe('did:btco');
     const prov = inscribed.getProvenance();
     const lastMig = prov.migrations[prov.migrations.length - 1];
-    expect(lastMig.from).toBe('did:peer');
+    expect(lastMig.from).toBe('did:cel');
     expect(lastMig.to).toBe('did:btco');
   });
 

@@ -13,10 +13,10 @@ const resources = [
 ];
 
 describe('LifecycleManager', () => {
-  test('createAsset creates a peer-layer asset', async () => {
+  test('createAsset creates a did:cel-layer asset', async () => {
     const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset(resources);
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
     expect(asset.id.startsWith('did:cel:')).toBe(true);
   });
 
@@ -138,7 +138,7 @@ describe('Bitcoin inscription MVP - dry run', () => {
     const latest = prov.migrations[prov.migrations.length - 1];
     expect(latest.feeRate).toBe(feeRate);
     expect(latest.transactionId).toEqual(expect.any(String));
-    expect(before).toBe('did:peer');
+    expect(before).toBe('did:cel');
   });
 });
 
@@ -244,7 +244,7 @@ describe('publishToWeb storage requirement (issue #244)', () => {
     await expect(sdk.lifecycle.publishToWeb(asset, 'example.com'))
       .rejects.toThrow(/storageAdapter must be configured/);
     // The asset must NOT have migrated
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
   });
 
   test('throws STORAGE_REQUIRED when the adapter implements neither put nor putObject', async () => {
@@ -254,7 +254,7 @@ describe('publishToWeb storage requirement (issue #244)', () => {
     ] as any);
     await expect(sdk.lifecycle.publishToWeb(asset, 'example.com'))
       .rejects.toThrow(/neither put\(\) nor putObject\(\)/);
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
   });
 });
 

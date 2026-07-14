@@ -6,7 +6,7 @@
  * live-cache parity tests below).
  *
  * Fold rules:
- *  - Genesis (`create` with `data.controller`) → `currentLayer: 'did:peer'`,
+ *  - Genesis (`create` with `data.controller`) → `currentLayer: 'did:cel'`,
  *    `bindings['did:cel'] = deriveDidCel(log)`.
  *  - `migrate` with `data.layer === 'webvh'` → `currentLayer: 'did:webvh'`,
  *    `bindings['did:webvh'] = data.targetDid`, and a migrations entry
@@ -49,7 +49,7 @@ import { hashResource } from '../utils/validation.js';
 export const BTCO_SATOSHI_UNKNOWN = 'did:btco:?';
 
 export interface ReplayedProvenance {
-  currentLayer: 'did:peer' | 'did:webvh' | 'did:btco';
+  currentLayer: 'did:peer' | 'did:cel' | 'did:webvh' | 'did:btco';
   bindings: Record<string, string>;
   migrations: Array<{ from: string; to: string; timestamp: string }>;
   resourceUpdates: Array<{
@@ -84,6 +84,8 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
 
   const genesisData = genesis.data as Record<string, unknown>;
   if (typeof genesisData.controller === 'string') {
+    // A signed did:cel genesis — the genesis layer is did:cel, not did:peer.
+    result.currentLayer = 'did:cel';
     result.bindings['did:cel'] = deriveDidCel(log);
   }
 

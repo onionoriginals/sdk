@@ -57,7 +57,7 @@ describe('LifecycleManager.createTypedOriginal', () => {
       
       expect(asset).toBeDefined();
       expect(asset.id).toMatch(/^did:cel:/);
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
       expect(asset.resources.length).toBe(1);
       expect(asset.resources[0].id).toBe('index.js');
     });

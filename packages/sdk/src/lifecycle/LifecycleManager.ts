@@ -750,9 +750,10 @@ export class LifecycleManager {
         ? genesisData.creator
         : env.assetDid;
 
-    // Re-materialize migrations layer-to-layer by walking the log.
+    // Re-materialize migrations layer-to-layer by walking the log. Genesis is a
+    // did:cel (the derived genesis identity), so the first migration folds from it.
     const migrations: ProvenanceChain['migrations'] = [];
-    let layer: LayerType = 'did:peer';
+    let layer: LayerType = 'did:cel';
     for (let i = 1; i < log.events.length; i++) {
       const ev = log.events[i];
       if (ev.type !== 'migrate') continue;
@@ -1049,8 +1050,8 @@ export class LifecycleManager {
     const metricsStart = performance.now();
 
     try {
-      if (asset.currentLayer !== 'did:peer') {
-        throw new StructuredError('INVALID_STATE', 'Asset must be in did:peer layer to publish to web. Assets can only be published from the did:peer layer.');
+      if (asset.currentLayer !== 'did:cel' && asset.currentLayer !== 'did:peer') {
+        throw new StructuredError('INVALID_STATE', 'Asset must be in the genesis layer (did:cel, or legacy did:peer) to publish to web.');
       }
 
       // Concurrency guard (issue #255): the layer check above is
@@ -1198,7 +1199,7 @@ export class LifecycleManager {
         resourceCount: asset.resources.length 
       });
       this.metrics.recordOperation('lifecycle.publishToWeb', performance.now() - metricsStart, true);
-      this.metrics.recordMigration('did:peer', 'did:webvh');
+      this.metrics.recordMigration(priorLayer, 'did:webvh');
 
       return asset;
       } finally {
@@ -1901,8 +1902,8 @@ export class LifecycleManager {
     if (typeof asset.migrate !== 'function') {
       throw new StructuredError('NOT_IMPLEMENTED', 'Asset inscription is not yet implemented for this asset type. Use a standard OriginalsAsset created via lifecycle.createAsset().');
     }
-    if (asset.currentLayer !== 'did:webvh' && asset.currentLayer !== 'did:peer') {
-      throw new StructuredError('NOT_IMPLEMENTED', 'Asset inscription is not yet implemented for this layer. Assets must be in did:peer or did:webvh layer to inscribe.');
+    if (asset.currentLayer !== 'did:webvh' && asset.currentLayer !== 'did:cel' && asset.currentLayer !== 'did:peer') {
+      throw new StructuredError('NOT_IMPLEMENTED', 'Asset inscription is not yet implemented for this layer. Assets must be in the genesis layer (did:cel, or legacy did:peer) or did:webvh layer to inscribe.');
     }
     // Concurrency guard (issue #255): the layer check above is check-then-act
     // across the awaits below — two overlapping calls would both pass it,
@@ -3327,10 +3328,11 @@ export class LifecycleManager {
     // Check layer transition validity
     const validTransitions: Record<LayerType, LayerType[]> = {
       'did:peer': ['did:webvh', 'did:btco'],
+      'did:cel': ['did:webvh', 'did:btco'],
       'did:webvh': ['did:btco'],
       'did:btco': []
     };
-    
+
     if (validTransitions[asset.currentLayer].includes(targetLayer)) {
       checks.layerTransition = true;
     } else {

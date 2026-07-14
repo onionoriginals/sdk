@@ -38,14 +38,14 @@ describe('CEL convergence end-to-end (#Phase2 Task9)', () => {
       keyStore: new MockKeyStore()
     });
 
-    // create — mints did:cel genesis; currentLayer label stays 'did:peer'.
+    // create — mints did:cel genesis; currentLayer label is 'did:cel'.
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
     ]);
     const didCel = asset.id;
     expect(didCel.startsWith('did:cel:u')).toBe(true);
     expect(deriveDidCel(asset.celLog!)).toBe(didCel);
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
 
     // publish — appends the webvh migrate event.
     await sdk.lifecycle.publishToWeb(asset, 'example.com');

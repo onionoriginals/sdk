@@ -117,7 +117,7 @@ describe('Batch Operations Integration', () => {
       // Verify each asset
       for (const item of result.successful) {
         expect(item.result).toBeInstanceOf(OriginalsAsset);
-        expect(item.result.currentLayer).toBe('did:peer');
+        expect(item.result.currentLayer).toBe('did:cel');
         expect(item.result.id).toMatch(/^did:cel:/);
       }
     });
@@ -386,7 +386,7 @@ describe('Batch Operations Integration', () => {
       for (const asset of inscribedAssets) {
         const provenance = asset.getProvenance();
         expect(provenance.migrations).toHaveLength(2); // peer -> webvh -> btco
-        expect(provenance.migrations[0].from).toBe('did:peer');
+        expect(provenance.migrations[0].from).toBe('did:cel');
         expect(provenance.migrations[0].to).toBe('did:webvh');
         expect(provenance.migrations[1].from).toBe('did:webvh');
         expect(provenance.migrations[1].to).toBe('did:btco');

@@ -50,7 +50,7 @@ function makeLifecycle() {
 }
 
 describe('replayProvenance pure fold (#Phase2 Task7)', () => {
-  test('genesis-only log: did:peer layer, did:cel binding, no migrations', async () => {
+  test('genesis-only log: did:cel layer, did:cel binding, no migrations', async () => {
     const { lifecycle } = makeLifecycle();
     const asset = await lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: 'cd'.repeat(32) }
@@ -58,7 +58,7 @@ describe('replayProvenance pure fold (#Phase2 Task7)', () => {
 
     const folded = replayProvenance(asset.celLog!);
 
-    expect(folded.currentLayer).toBe('did:peer');
+    expect(folded.currentLayer).toBe('did:cel');
     expect(folded.bindings['did:cel']).toBe(asset.id);
     expect(folded.bindings['did:cel']).toBe(deriveDidCel(asset.celLog!));
     expect(folded.migrations).toEqual([]);

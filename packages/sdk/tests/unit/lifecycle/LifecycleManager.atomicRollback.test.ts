@@ -56,7 +56,7 @@ function makeFailingAdapter(failOnCall: number) {
 }
 
 describe('publishToWeb atomicRollback', () => {
-  test('default (atomicRollback on): a mid-publish failure reverts resource.url mutations and stays on did:peer', async () => {
+  test('default (atomicRollback on): a mid-publish failure reverts resource.url mutations and stays on did:cel', async () => {
     // Fail on the SECOND resource write (call 1 = genesis cel persist).
     const { adapter, deleted } = makeFailingAdapter(3);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,7 +70,7 @@ describe('publishToWeb atomicRollback', () => {
     for (const resource of asset.resources) {
       expect((resource as { url?: string }).url).toBeUndefined();
     }
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
     // The successfully-written first object was best-effort deleted
     // (the adapter supports deleteObject).
     expect(deleted.length).toBe(1);
@@ -119,7 +119,7 @@ describe('publishToWeb atomicRollback', () => {
     for (const resource of asset.resources) {
       expect((resource as { url?: string }).url).toBeUndefined();
     }
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
   });
 
   test('a successful publish is unaffected by the rollback machinery', async () => {

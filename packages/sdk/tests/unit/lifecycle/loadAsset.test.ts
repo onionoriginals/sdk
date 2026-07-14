@@ -87,13 +87,13 @@ describe('loadAsset — round-trip', () => {
     expect(await loaded.verify({ ordinalsProvider: (sdk as any).config?.ordinalsProvider })).toBe(true);
   });
 
-  test('genesis-only asset round-trips (currentLayer did:peer)', async () => {
+  test('genesis-only asset round-trips (currentLayer did:cel)', async () => {
     const { sdk } = makeSDK();
     const asset = await createGenesisAsset(sdk);
     const envelope = asset.serialize();
     const { asset: loaded, verification } = await sdk.lifecycle.loadAsset(envelope);
     expect(verification?.verified).toBe(true);
-    expect(loaded.currentLayer).toBe('did:peer');
+    expect(loaded.currentLayer).toBe('did:cel');
     expect(loaded.id).toBe(asset.id);
     expect(loaded.bindings).toEqual({ 'did:cel': asset.id });
   });

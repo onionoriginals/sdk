@@ -38,7 +38,7 @@ describe('issue #347: content/hash verification', () => {
     const sdk = makeSdk();
     const upper = { ...goodResource(), hash: contentHash('authentic bytes').toUpperCase() };
     const asset = await sdk.lifecycle.createAsset([upper]);
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
   });
 
   test('createAsset still accepts hash-only resources (no inline content to check)', async () => {
@@ -50,7 +50,7 @@ describe('issue #347: content/hash verification', () => {
       hash: contentHash('content hosted elsewhere')
     };
     const asset = await sdk.lifecycle.createAsset([hashOnly]);
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
   });
 
   test('publishToWeb rejects content tampered with after creation, BEFORE writing or attesting', async () => {
@@ -75,7 +75,7 @@ describe('issue #347: content/hash verification', () => {
     expect(asset.credentials.length).toBe(0);
     expect(asset.resources[0].url).toBeUndefined();
     // The asset did not migrate.
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
   });
 
   test('publishToWeb succeeds when content matches its declared hash', async () => {

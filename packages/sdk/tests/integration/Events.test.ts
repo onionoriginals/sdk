@@ -116,7 +116,7 @@ describe('Integration: Event System', () => {
 
       // Events should have been emitted during creation
       expect(asset.id).toMatch(/^did:cel:/);
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
     });
 
     test('asset:created reaches pre-subscribed lifecycle handlers; asset-level post-await does not (#293)', async () => {
@@ -167,7 +167,7 @@ describe('Integration: Event System', () => {
 
       // The event was emitted during creation, verify asset state
       expect(asset.id).toMatch(/^did:cel:/);
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
       expect(asset.resources).toHaveLength(2);
     });
   });
@@ -199,7 +199,7 @@ describe('Integration: Event System', () => {
       expect(eventReceived).toBe(true);
       expect(capturedEvent).not.toBeNull();
       expect(capturedEvent?.type).toBe('asset:migrated');
-      expect(capturedEvent?.asset.fromLayer).toBe('did:peer');
+      expect(capturedEvent?.asset.fromLayer).toBe('did:cel');
       expect(capturedEvent?.asset.toLayer).toBe('did:webvh');
       expect(capturedEvent?.asset.id).toBe(asset.id);
     });

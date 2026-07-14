@@ -66,7 +66,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
     
     expect(asset).toBeDefined();
     expect(asset.id).toMatch(/^did:cel:/);
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
     expect(asset.resources).toHaveLength(2);
     
     console.log(`✅ Asset created: ${asset.id}`);
@@ -118,7 +118,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
     
     const webvhMigration = provenance.migrations.find((m: any) => m.to === 'did:webvh');
     expect(webvhMigration).toBeDefined();
-    expect(webvhMigration.from).toBe('did:peer');
+    expect(webvhMigration.from).toBe('did:cel');
     expect(webvhMigration.to).toBe('did:webvh');
     expect(webvhMigration.timestamp).toBeDefined();
     
@@ -337,7 +337,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
     
     // Verify layer changed
     expect(published.currentLayer).toBe('did:webvh');
-    expect(originalLayer).toBe('did:peer');
+    expect(originalLayer).toBe('did:cel');
     
     // Verify bindings preserve original ID
     const bindings = (published as any).bindings;

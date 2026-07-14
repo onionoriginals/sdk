@@ -193,7 +193,7 @@ describe('LIFECYCLE-005/error – publishToWeb from wrong layer', () => {
 
     await expect(
       sdk.lifecycle.publishToWeb(asset, 'example.com')
-    ).rejects.toThrow(/did:peer layer/);
+    ).rejects.toThrow(/genesis layer/);
   });
 
   test('asset on did:btco also throws', async () => {
@@ -204,7 +204,7 @@ describe('LIFECYCLE-005/error – publishToWeb from wrong layer', () => {
 
     await expect(
       sdk.lifecycle.publishToWeb(asset, 'example.com')
-    ).rejects.toThrow(/did:peer layer/);
+    ).rejects.toThrow(/genesis layer/);
   });
 });
 

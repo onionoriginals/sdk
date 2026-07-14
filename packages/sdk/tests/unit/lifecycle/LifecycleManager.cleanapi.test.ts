@@ -20,7 +20,7 @@ describe('LifecycleManager - Clean API', () => {
     test('creates a peer-layer asset', async () => {
       const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const asset = await sdk.lifecycle.createDraft(resources);
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
       expect(asset.id.startsWith('did:cel:')).toBe(true);
     });
 
@@ -32,7 +32,7 @@ describe('LifecycleManager - Clean API', () => {
         onProgress: (p) => progressEvents.push({ ...p })
       });
       
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
       expect(progressEvents.length).toBeGreaterThan(0);
       expect(progressEvents[0].phase).toBe('preparing');
       expect(progressEvents[progressEvents.length - 1].phase).toBe('complete');
@@ -280,7 +280,7 @@ describe('LifecycleManager - Migration Validation', () => {
       
       expect(validation.valid).toBe(true);
       expect(validation.errors).toHaveLength(0);
-      expect(validation.currentLayer).toBe('did:peer');
+      expect(validation.currentLayer).toBe('did:cel');
       expect(validation.targetLayer).toBe('did:webvh');
       expect(validation.checks.layerTransition).toBe(true);
       expect(validation.checks.resourcesValid).toBe(true);
