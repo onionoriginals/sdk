@@ -63,7 +63,7 @@ export class OriginalsAsset {
   private eventEmitter: EventEmitter;
   private versionManager: ResourceVersionManager;
   // The CEL event log backing this asset's provenance. Present for assets minted
-  // via createAsset (did:cel genesis); undefined for legacy did:peer constructions.
+  // via createAsset (did:cel genesis); undefined for legacy constructions.
   #celLog?: EventLog;
   // Per-layer DID documents captured at operation time (publish/inscribe/rotate).
   // These are discarded by the live flow otherwise; serialize() needs them.
@@ -284,8 +284,7 @@ export class OriginalsAsset {
   ): Promise<void> {
     // Handle migration between layers
     const validTransitions: Record<LayerType, LayerType[]> = {
-      'did:peer': ['did:webvh', 'did:btco'],
-      'did:cel': ['did:webvh', 'did:btco'], // did:cel genesis (same targets as legacy did:peer)
+      'did:cel': ['did:webvh', 'did:btco'], // did:cel genesis
       'did:webvh': ['did:btco'],
       'did:btco': [] // No further migrations possible
     };
@@ -789,7 +788,12 @@ export class OriginalsAsset {
   }
 
   private determineCurrentLayer(didId: string): LayerType {
-    if (didId.startsWith('did:peer:')) return 'did:peer';
+    // did:peer was purged as a genesis layer (did:cel Phase 4 · 5/5). A did:peer
+    // id can no longer be constructed, so encountering one is a caller error —
+    // fail loudly rather than silently mislabel it.
+    if (didId.startsWith('did:peer:')) {
+      throw new Error('did:peer is no longer a supported layer; use did:cel genesis (createAsset)');
+    }
     if (didId.startsWith('did:cel:')) return 'did:cel';
     if (didId.startsWith('did:webvh:')) return 'did:webvh';
     if (didId.startsWith('did:btco:')) return 'did:btco';

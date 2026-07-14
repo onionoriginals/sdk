@@ -132,7 +132,7 @@ describe('AssetEnvelope + serialize() (#377)', () => {
   test('serialize on a legacy 3-arg asset (no CEL log) throws ASSET_NOT_SERIALIZABLE', () => {
     const legacy = new OriginalsAsset(
       [{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'ab'.repeat(32) }],
-      { id: 'did:peer:0zlegacy' } as any,
+      { id: 'did:cel:0zlegacy' } as any,
       []
     );
     expect(() => legacy.serialize()).toThrow();

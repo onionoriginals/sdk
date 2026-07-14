@@ -28,8 +28,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
     await keyStore.setPrivateKey('did:webvh:localhost%3A5000:user#key-0', publisherKey.privateKey);
   });
 
-  test('complete flow: createDIDPeer -> publishToWeb -> resolve resource URL', async () => {
-    // Step 1: Create a DID peer with resources
+  test('complete flow: createAsset -> publishToWeb -> resolve resource URL', async () => {
     const resources: AssetResource[] = [
       {
         id: 'resource-1',
@@ -47,21 +46,9 @@ describe('DID Peer to WebVH Publication Flow', () => {
       }
     ];
 
-    console.log('\n🔧 Step 1: Creating DID peer...');
-    const { didDocument: peerDoc, keyPair } = await sdk.did.createDIDPeer(resources, true);
-    
-    // Verify DID peer was created
-    expect(peerDoc).toBeDefined();
-    expect(peerDoc.id).toMatch(/^did:peer:/);
-    expect(keyPair).toBeDefined();
-    expect(keyPair.publicKey).toBeTruthy();
-    expect(keyPair.privateKey).toBeTruthy();
-    
-    console.log(`✅ DID Peer created: ${peerDoc.id}`);
-    console.log(`   Public Key: ${keyPair.publicKey.substring(0, 20)}...`);
-
-    // Step 2: Create an asset using the DID peer
-    console.log('\n🔧 Step 2: Creating asset with DID peer...');
+    // Step 1: Create an asset (mints a did:cel genesis; did:peer creation was
+    // removed in the did:peer purge, did:cel Phase 4·5/5).
+    console.log('\n🔧 Step 1: Creating asset (did:cel genesis)...');
     const asset = await sdk.lifecycle.createAsset(resources);
     
     expect(asset).toBeDefined();

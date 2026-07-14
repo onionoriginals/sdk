@@ -82,11 +82,13 @@ describe('LifecycleManager.transferOwnership comprehensive', () => {
 
   // --- Layer validation ---
 
-  test('throws if asset is on did:peer', async () => {
+  test('throws if asset is on did:cel (genesis)', async () => {
+    // did:cel is the genesis layer (did:peer purge, Phase 4·5/5); a genesis
+    // asset is not yet inscribed and cannot be transferred.
     const sdk = createSDK();
     const asset = new OriginalsAsset(
       [{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'h' }],
-      { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:z6MkTest1' } as any,
+      { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:z6MkTest1' } as any,
       []
     );
     await expect(

@@ -35,7 +35,7 @@
  *    result directly).
  *  - migrations here are DID-to-DID (`sourceDid` → `targetDid`/derived btco
  *    DID), not the live cache's layer-to-layer labels
- *    (`'did:peer'` → `'did:webvh'`) — a different, complementary shape.
+ *    (`'did:cel'` → `'did:webvh'`) — a different, complementary shape.
  *  - `commitTxId` / `feeRate` live only in the in-memory ProvenanceChain;
  *    the signed log never carries them (they are not part of the CEL data
  *    Phase 2 signs).
@@ -49,7 +49,7 @@ import { hashResource } from '../utils/validation.js';
 export const BTCO_SATOSHI_UNKNOWN = 'did:btco:?';
 
 export interface ReplayedProvenance {
-  currentLayer: 'did:peer' | 'did:cel' | 'did:webvh' | 'did:btco';
+  currentLayer: 'did:cel' | 'did:webvh' | 'did:btco';
   bindings: Record<string, string>;
   migrations: Array<{ from: string; to: string; timestamp: string }>;
   resourceUpdates: Array<{
@@ -76,7 +76,7 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
   }
 
   const result: ReplayedProvenance = {
-    currentLayer: 'did:peer',
+    currentLayer: 'did:cel',
     bindings: {},
     migrations: [],
     resourceUpdates: [],
@@ -84,8 +84,7 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
 
   const genesisData = genesis.data as Record<string, unknown>;
   if (typeof genesisData.controller === 'string') {
-    // A signed did:cel genesis — the genesis layer is did:cel, not did:peer.
-    result.currentLayer = 'did:cel';
+    // A signed did:cel genesis binds the derived did:cel identifier.
     result.bindings['did:cel'] = deriveDidCel(log);
   }
 

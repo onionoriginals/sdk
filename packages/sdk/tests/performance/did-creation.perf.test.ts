@@ -1,8 +1,9 @@
 /**
- * Performance benchmarks for DID creation operations.
+ * Performance benchmarks for DID/asset creation operations.
  *
  * Establishes baselines for:
- * - did:peer creation (various key types)
+ * - did:cel genesis creation (createAsset) — did:peer creation was removed
+ *   (did:peer purge, did:cel Phase 4·5/5)
  * - did:webvh migration
  * - DID resolution
  */
@@ -14,6 +15,7 @@ import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { StorageAdapter as ConfigStorageAdapter } from '../../src/adapters/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';
+import { hashResource } from '../../src/utils/validation';
 
 class StorageAdapterBridge implements ConfigStorageAdapter {
   constructor(private memoryAdapter: MemoryStorageAdapter) {}
@@ -41,12 +43,15 @@ class StorageAdapterBridge implements ConfigStorageAdapter {
 }
 
 function makeResource(id: string): AssetResource {
+  const content = `content-${id}`;
   return {
     id,
     type: 'text',
     contentType: 'text/plain',
-    hash: id.padEnd(64, '0'),
-    content: `content-${id}`,
+    // createAsset verifies content hashes to the declared hash (sha256 over
+    // UTF-8 bytes); use the SDK's own hashResource so they always match.
+    hash: hashResource(Buffer.from(content, 'utf8')),
+    content,
   };
 }
 
@@ -71,14 +76,14 @@ describe('DID Creation Performance', () => {
     sdk = new OriginalsSDK(config, keyStore);
   });
 
-  describe('did:peer creation baselines', () => {
-    test('single did:peer creation (Ed25519)', async () => {
+  describe('did:cel genesis creation baselines', () => {
+    test('single did:cel creation (Ed25519)', async () => {
       const iterations = 20;
       const durations: number[] = [];
 
       for (let i = 0; i < iterations; i++) {
         const start = performance.now();
-        await sdk.did.createDIDPeer([makeResource(`ed-${i}`)]);
+        await sdk.lifecycle.createAsset([makeResource(`ed-${i}`)]);
         durations.push(performance.now() - start);
       }
 
@@ -87,7 +92,7 @@ describe('DID Creation Performance', () => {
       const p50 = sorted[Math.floor(durations.length * 0.5)];
       const p95 = sorted[Math.floor(durations.length * 0.95)];
 
-      console.log('\ndid:peer creation (Ed25519):');
+      console.log('\ndid:cel creation (Ed25519):');
       console.log(`  Iterations: ${iterations}`);
       console.log(`  Avg: ${avg.toFixed(2)}ms`);
       console.log(`  P50: ${p50.toFixed(2)}ms`);
@@ -97,63 +102,41 @@ describe('DID Creation Performance', () => {
       expect(avg).toBeLessThan(500);
     });
 
-    test('did:peer creation with key pair return', async () => {
-      const iterations = 20;
-      const durations: number[] = [];
-
-      for (let i = 0; i < iterations; i++) {
-        const start = performance.now();
-        const result = await sdk.did.createDIDPeer([makeResource(`kp-${i}`)], true);
-        durations.push(performance.now() - start);
-
-        expect(result.keyPair).toBeDefined();
-        expect(result.didDocument.id).toContain('did:peer');
-      }
-
-      const avg = durations.reduce((a, b) => a + b, 0) / durations.length;
-
-      console.log('\ndid:peer creation (with key pair):');
-      console.log(`  Avg: ${avg.toFixed(2)}ms`);
-
-      expect(avg).toBeLessThan(500);
-    });
-
-    test('concurrent did:peer creation throughput', async () => {
+    test('concurrent did:cel creation throughput', async () => {
       const batchSize = 10;
       const start = performance.now();
 
       const promises = Array.from({ length: batchSize }, (_, i) =>
-        sdk.did.createDIDPeer([makeResource(`conc-${i}`)])
+        sdk.lifecycle.createAsset([makeResource(`conc-${i}`)])
       );
       const results = await Promise.all(promises);
       const duration = performance.now() - start;
       const throughput = (batchSize / duration) * 1000;
 
-      console.log('\nConcurrent did:peer creation:');
+      console.log('\nConcurrent did:cel creation:');
       console.log(`  Batch size: ${batchSize}`);
       console.log(`  Total: ${duration.toFixed(2)}ms`);
-      console.log(`  Throughput: ${throughput.toFixed(1)} DIDs/sec`);
+      console.log(`  Throughput: ${throughput.toFixed(1)} assets/sec`);
 
       expect(results).toHaveLength(batchSize);
-      for (const doc of results) {
-        expect((doc as DIDDocument).id).toContain('did:peer');
+      for (const asset of results) {
+        expect(asset.id).toContain('did:cel');
       }
     });
   });
 
   describe('did:webvh migration baselines', () => {
-    test('did:peer to did:webvh migration', async () => {
-      // Pre-create did:peer documents
-      const peerDocs: DIDDocument[] = [];
+    test('did:cel to did:webvh migration', async () => {
+      // Pre-build did:cel source documents (did:peer creation was removed).
+      const sourceDocs: DIDDocument[] = [];
       for (let i = 0; i < 10; i++) {
-        const doc = await sdk.did.createDIDPeer([makeResource(`mig-${i}`)]);
-        peerDocs.push(doc as DIDDocument);
+        sourceDocs.push({ '@context': ['https://www.w3.org/ns/did/v1'], id: `did:cel:perf-mig-${i}` });
       }
 
       const durations: number[] = [];
-      for (const peerDoc of peerDocs) {
+      for (const sourceDoc of sourceDocs) {
         const start = performance.now();
-        const webvhDoc = await sdk.did.migrateToDIDWebVH(peerDoc);
+        const webvhDoc = await sdk.did.migrateToDIDWebVH(sourceDoc);
         durations.push(performance.now() - start);
 
         expect(webvhDoc.didDocument.id).toContain('did:webvh');
@@ -164,7 +147,7 @@ describe('DID Creation Performance', () => {
       const p50 = sorted[Math.floor(durations.length * 0.5)];
       const p95 = sorted[Math.floor(durations.length * 0.95)];
 
-      console.log('\ndid:peer -> did:webvh migration:');
+      console.log('\ndid:cel -> did:webvh migration:');
       console.log(`  Iterations: ${durations.length}`);
       console.log(`  Avg: ${avg.toFixed(2)}ms`);
       console.log(`  P50: ${p50.toFixed(2)}ms`);
@@ -175,9 +158,9 @@ describe('DID Creation Performance', () => {
   });
 
   describe('DID resolution baselines', () => {
-    test('did:peer resolution', async () => {
-      const doc = (await sdk.did.createDIDPeer([makeResource('res-peer')])) as DIDDocument;
-      const did = doc.id;
+    test('did:cel resolution (cache hit)', async () => {
+      const did = 'did:cel:perf-res';
+      await sdk.did.cache.set(did, { '@context': ['https://www.w3.org/ns/did/v1'], id: did });
 
       const iterations = 20;
       const durations: number[] = [];
@@ -192,7 +175,7 @@ describe('DID Creation Performance', () => {
 
       const avg = durations.reduce((a, b) => a + b, 0) / durations.length;
 
-      console.log('\ndid:peer resolution:');
+      console.log('\ndid:cel resolution:');
       console.log(`  Avg: ${avg.toFixed(2)}ms`);
 
       expect(avg).toBeLessThan(200);
@@ -200,15 +183,15 @@ describe('DID Creation Performance', () => {
   });
 
   describe('Regression guards', () => {
-    test('did:peer creation should not regress beyond 2x baseline', async () => {
+    test('did:cel creation should not regress beyond 2x baseline', async () => {
       // Warm up
-      await sdk.did.createDIDPeer([makeResource('warmup')]);
+      await sdk.lifecycle.createAsset([makeResource('warmup')]);
 
       // Measure baseline (5 runs, take median)
       const runs: number[] = [];
       for (let i = 0; i < 5; i++) {
         const start = performance.now();
-        await sdk.did.createDIDPeer([makeResource(`reg-${i}`)]);
+        await sdk.lifecycle.createAsset([makeResource(`reg-${i}`)]);
         runs.push(performance.now() - start);
       }
       const sorted = [...runs].sort((a, b) => a - b);

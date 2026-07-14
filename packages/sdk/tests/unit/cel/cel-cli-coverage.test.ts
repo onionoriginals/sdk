@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { spyOn } from 'bun:test';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -709,26 +710,33 @@ describe('CEL-CLI-012/error: file write permission error', () => {
 
     const outPath = path.join(roDir, 'output.json');
 
-    // Use a real did:peer (resolvable offline) so we reach the write path —
-    // unknown DID methods no longer resolve to fabricated stub documents.
-    const { OriginalsSDK } = await import('../../../src');
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
-    const peerDoc = await sdk.did.createDIDPeer([]);
-    const result = await resolveCommand({
-      did: peerDoc.id,
-      output: outPath,
-    });
+    // did:peer offline resolution is gone (did:peer purge, did:cel Phase 4·5/5),
+    // and resolveCommand builds a provider-less SDK, so stub the resolver to
+    // return a document — the subject here is the write-failure path, not resolution.
+    const { DIDManager } = await import('../../../src/did/DIDManager');
+    const did = 'did:cel:uEiExampleForWriteFailure';
+    const spy = spyOn(DIDManager.prototype, 'resolveDID').mockResolvedValue({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: did,
+    } as any);
 
-    // Restore permissions so cleanup works.
-    fs.chmodSync(roDir, 0o755);
+    try {
+      const result = await resolveCommand({ did, output: outPath });
 
-    // Either the write failed (permission denied) or (rarely on macOS running as root)
-    // it succeeded.
-    if (!result.success) {
-      expect(result.message).toMatch(/write|permission|EACCES|EPERM|output|Failed/i);
-    } else {
-      // Running as root or the OS allowed the write — document was returned.
-      expect(result.didDocument).toBeDefined();
+      // Restore permissions so cleanup works.
+      fs.chmodSync(roDir, 0o755);
+
+      // Either the write failed (permission denied) or (rarely on macOS running as root)
+      // it succeeded.
+      if (!result.success) {
+        expect(result.message).toMatch(/write|permission|EACCES|EPERM|output|Failed/i);
+      } else {
+        // Running as root or the OS allowed the write — document was returned.
+        expect(result.didDocument).toBeDefined();
+      }
+    } finally {
+      spy.mockRestore();
+      try { fs.chmodSync(roDir, 0o755); } catch { /* best-effort */ }
     }
   });
 });

@@ -127,7 +127,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
   describe('Complete Lifecycle: peer → webvh → btco → transfer', () => {
     test('successfully executes full lifecycle with provenance tracking', async () => {
-      // ===== PHASE 1: Create Asset (did:peer) =====
+      // ===== PHASE 1: Create Asset (did:cel) =====
       const resources: AssetResource[] = [
         {
           id: 'resource-1',
@@ -210,7 +210,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       );
       expect(publicationCred).toBeDefined();
       expect(publicationCred.credentialSubject).toBeDefined();
-      expect(publicationCred.credentialSubject.fromLayer).toBe('did:peer');
+      expect(publicationCred.credentialSubject.fromLayer).toBe('did:cel');
       expect(publicationCred.credentialSubject.toLayer).toBe('did:webvh');
 
       // ===== PHASE 3: Inscribe on Bitcoin (did:btco) =====

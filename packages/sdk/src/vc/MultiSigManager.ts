@@ -35,7 +35,7 @@ export class MultiSigManager {
 
   /**
    * @param didManager - Enables resolution of non-did:key signer verification
-   *   methods (did:webvh/did:btco/did:peer) and verification of
+   *   methods (did:webvh/did:btco/did:cel) and verification of
    *   `eddsa-rdfc-2022` (Data Integrity) proofs. Without it, only did:key
    *   signers with legacy (cryptosuite-less) proofs can be verified.
    */

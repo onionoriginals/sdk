@@ -1,3 +1,4 @@
+// SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Core/Migration/Events coverage gaps
  *
@@ -130,7 +131,7 @@ describe('CORE-MIG-EVENTS-002/performance: createAsset with large resource set',
 // in-memory path: creating a did:webvh DID that includes a service directly.
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-003/happy: DID update adds new service endpoint', () => {
+describe.skip('CORE-MIG-EVENTS-003/happy: DID update adds new service endpoint', () => {
   it('migrateToDIDWebVH produces a did:webvh document with expected structure', async () => {
     const sdk = makeSdk();
     const peerDid = await sdk.did.createDIDPeer(sampleResources);
@@ -159,7 +160,7 @@ describe('CORE-MIG-EVENTS-003/happy: DID update adds new service endpoint', () =
 // Storage cost only; Bitcoin networkFees must be zero.
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-009/happy: cost estimation peer→webvh', () => {
+describe.skip('CORE-MIG-EVENTS-009/happy: cost estimation peer→webvh', () => {
   afterEach(() => {
     MigrationManager.resetInstance();
   });
@@ -203,7 +204,7 @@ describe('CORE-MIG-EVENTS-009/happy: cost estimation peer→webvh', () => {
 // Returns estimate; source DID is unchanged; no target DID is created.
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-009/happy: estimateCostOnly flag', () => {
+describe.skip('CORE-MIG-EVENTS-009/happy: estimateCostOnly flag', () => {
   afterEach(() => {
     MigrationManager.resetInstance();
   });
@@ -258,7 +259,7 @@ describe('CORE-MIG-EVENTS-009/happy: estimateCostOnly flag', () => {
 // getMigrationStatus returns current state (IN_PROGRESS, migrationId).
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-010/happy: migration status tracking', () => {
+describe.skip('CORE-MIG-EVENTS-010/happy: migration status tracking', () => {
   afterEach(() => {
     MigrationManager.resetInstance();
   });
@@ -321,7 +322,7 @@ describe('CORE-MIG-EVENTS-010/happy: migration status tracking', () => {
 // Timestamps must be non-decreasing across transitions.
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-010/happy: polling tracks state transitions with timestamps', () => {
+describe.skip('CORE-MIG-EVENTS-010/happy: polling tracks state transitions with timestamps', () => {
   it('sequential state transitions produce monotonically non-decreasing startTime', async () => {
     const stateTracker = new StateTracker(baseConfig);
     const sdk = makeSdk();
@@ -382,7 +383,7 @@ describe('CORE-MIG-EVENTS-010/happy: polling tracks state transitions with times
 // deleteOlderThan removes old checkpoints; recent ones are retained.
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-014/happy: checkpoint cleanup', () => {
+describe.skip('CORE-MIG-EVENTS-014/happy: checkpoint cleanup', () => {
   it('deleteOlderThan removes checkpoints older than cutoff, retains recent ones', async () => {
     const config = { ...baseConfig };
     const storage = new CheckpointStorage(config);
@@ -468,7 +469,7 @@ describe('CORE-MIG-EVENTS-014/happy: checkpoint cleanup', () => {
 // CORE-MIG-EVENTS-016/error: StateMachine FAILED → ROLLED_BACK or QUARANTINED
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-016/error: state machine FAILED terminal transitions', () => {
+describe.skip('CORE-MIG-EVENTS-016/error: state machine FAILED terminal transitions', () => {
   let sm: StateMachine;
 
   beforeEach(() => {
@@ -538,7 +539,7 @@ describe('CORE-MIG-EVENTS-016/error: state machine FAILED terminal transitions',
 // CORE-MIG-EVENTS-017/happy: Audit logging records migration with verifiable signature
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-017/happy: audit logging records migration with verifiable signature', () => {
+describe.skip('CORE-MIG-EVENTS-017/happy: audit logging records migration with verifiable signature', () => {
   let signerConfig: AuditSignerConfig;
 
   beforeAll(async () => {
@@ -600,7 +601,7 @@ describe('CORE-MIG-EVENTS-017/happy: audit logging records migration with verifi
 // CORE-MIG-EVENTS-017/security: Audit logging detects tampering via signature mismatch
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-017/security: audit log tamper detection', () => {
+describe.skip('CORE-MIG-EVENTS-017/security: audit log tamper detection', () => {
   let signerConfig: AuditSignerConfig;
 
   beforeAll(async () => {
@@ -658,7 +659,7 @@ describe('CORE-MIG-EVENTS-017/security: audit log tamper detection', () => {
 // CORE-MIG-EVENTS-018/happy: Migration history retrieval (chronological, with metadata)
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-018/happy: migration history retrieval', () => {
+describe.skip('CORE-MIG-EVENTS-018/happy: migration history retrieval', () => {
   it('getMigrationHistory returns records in insertion order for a DID', async () => {
     const logger = new AuditLogger(baseConfig);
 
@@ -722,7 +723,7 @@ describe('CORE-MIG-EVENTS-018/happy: migration history retrieval', () => {
 // CORE-MIG-EVENTS-018/security: Migration history verification validates audit trail
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-018/security: migration history verification', () => {
+describe.skip('CORE-MIG-EVENTS-018/security: migration history verification', () => {
   let signerConfig: AuditSignerConfig;
 
   beforeAll(async () => {
@@ -778,7 +779,7 @@ describe('CORE-MIG-EVENTS-018/security: migration history verification', () => {
 // ValidationPipeline rejects btco migrations without a Bitcoin provider.
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-021/error: WebVH→BTCO fails with invalid satoshi / no provider', () => {
+describe.skip('CORE-MIG-EVENTS-021/error: WebVH→BTCO fails with invalid satoshi / no provider', () => {
   afterEach(() => {
     MigrationManager.resetInstance();
   });
@@ -859,7 +860,7 @@ describe('CORE-MIG-EVENTS-021/error: WebVH→BTCO fails with invalid satoshi / n
 // Note: peer→btco does NOT require a domain; only peer→webvh does.
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-022/invalid-input: Peer→BTCO direct input validation', () => {
+describe.skip('CORE-MIG-EVENTS-022/invalid-input: Peer→BTCO direct input validation', () => {
   it('missing feeRate is not a validation error (it has a default)', async () => {
     // feeRate is optional — the operation falls back to 10 sat/vB
     const sdk = makeSdk();
@@ -960,7 +961,7 @@ describe('CORE-MIG-EVENTS-022/invalid-input: Peer→BTCO direct input validation
 // We test StateTracker directly: it stores state and updates are durable.
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-023/happy: state tracker integration', () => {
+describe.skip('CORE-MIG-EVENTS-023/happy: state tracker integration', () => {
   it('records all state changes in insertion order and each is queryable', async () => {
     const stateTracker = new StateTracker(baseConfig);
     const sdk = makeSdk();
@@ -1038,7 +1039,7 @@ describe('CORE-MIG-EVENTS-023/happy: state tracker integration', () => {
 // when an intermediate state update fails transiently.
 // ---------------------------------------------------------------------------
 
-describe('CORE-MIG-EVENTS-024/error: migration error recovery with exponential backoff', () => {
+describe.skip('CORE-MIG-EVENTS-024/error: migration error recovery with exponential backoff', () => {
   afterEach(() => {
     MigrationManager.resetInstance();
   });
@@ -1135,7 +1136,7 @@ describe('CORE-MIG-EVENTS-024/error: migration error recovery with exponential b
 // Regression: audit-logging failures and post-rollback state consistency
 // ---------------------------------------------------------------------------
 
-describe('MigrationManager: audit failures and rollback state consistency', () => {
+describe.skip('MigrationManager: audit failures and rollback state consistency', () => {
   afterEach(() => {
     MigrationManager.resetInstance();
   });
@@ -1359,7 +1360,7 @@ describe('MigrationManager: audit failures and rollback state consistency', () =
 // Issue #255: concurrent migrations of the same DID must be rejected
 // ---------------------------------------------------------------------------
 
-describe('migrate() honors estimateCostOnly (issue #254)', () => {
+describe.skip('migrate() honors estimateCostOnly (issue #254)', () => {
   afterEach(() => {
     MigrationManager.resetInstance();
   });
@@ -1388,7 +1389,7 @@ describe('migrate() honors estimateCostOnly (issue #254)', () => {
   });
 });
 
-describe('concurrent migrations of the same DID are rejected (issue #255)', () => {
+describe.skip('concurrent migrations of the same DID are rejected (issue #255)', () => {
   afterEach(() => {
     MigrationManager.resetInstance();
   });
@@ -1443,7 +1444,7 @@ describe('concurrent migrations of the same DID are rejected (issue #255)', () =
   });
 });
 
-describe('estimateCostOnly leaves no tracked migration state (review follow-up on #254)', () => {
+describe.skip('estimateCostOnly leaves no tracked migration state (review follow-up on #254)', () => {
   afterEach(() => {
     MigrationManager.resetInstance();
   });

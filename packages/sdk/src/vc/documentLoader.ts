@@ -36,6 +36,8 @@ export class DocumentLoader {
       // methods (did:webvh) or on-chain methods (did:btco), an unreachable
       // document must fail closed: trusting a registry entry would bypass
       // deactivation and key rotation published by the authoritative source.
+      // (did:peer creation was removed in the did:peer purge, did:cel Phase
+      // 4·5/5, but verifying LEGACY did:peer credentials stays — read path.)
       const isSelfCertifying = did.startsWith('did:key:') || did.startsWith('did:peer:');
       // did:key is FULLY self-certifying: the identifier IS the public
       // multikey, so the key node can be synthesized locally with no

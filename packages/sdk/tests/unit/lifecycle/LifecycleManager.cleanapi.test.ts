@@ -262,7 +262,7 @@ describe('LifecycleManager - Cost Estimation', () => {
       const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       
-      const cost = await sdk.lifecycle.estimateCost(draft, 'did:peer');
+      const cost = await sdk.lifecycle.estimateCost(draft, 'did:cel');
       
       expect(cost.totalSats).toBe(0);
       expect(cost.confidence).toBe('high');
@@ -336,9 +336,9 @@ describe('LifecycleManager - Migration Validation', () => {
       
       // Create a fake asset with no resources
       const fakeAsset = {
-        currentLayer: 'did:peer' as const,
+        currentLayer: 'did:cel' as const,
         resources: [],
-        did: { id: 'did:peer:test' },
+        did: { id: 'did:cel:test' },
         credentials: []
       };
       
@@ -355,9 +355,9 @@ describe('LifecycleManager - Migration Validation', () => {
       const lm = new LifecycleManager(config, didManager, credentialManager);
       
       const fakeAsset = {
-        currentLayer: 'did:peer' as const,
+        currentLayer: 'did:cel' as const,
         resources: [{ id: 'r1', type: 'text', contentType: 'text/plain', hash: 'not-hex!' }],
-        did: { id: 'did:peer:test' },
+        did: { id: 'did:cel:test' },
         credentials: []
       };
       
@@ -397,9 +397,9 @@ describe('LifecycleManager - Migration Validation', () => {
       const lm = new LifecycleManager(config, didManager, credentialManager);
       
       const fakeAsset = {
-        currentLayer: 'did:peer' as const,
+        currentLayer: 'did:cel' as const,
         resources: [{ id: 'r1', type: 'text', contentType: 'text/plain', hash: 'deadbeef' }],
-        did: { id: 'did:peer:test' },
+        did: { id: 'did:cel:test' },
         credentials: [
           { type: ['VerifiableCredential'], issuer: 'did:test:issuer', issuanceDate: '2024-01-01' }
         ]
@@ -417,9 +417,9 @@ describe('LifecycleManager - Migration Validation', () => {
       const lm = new LifecycleManager(config, didManager, credentialManager);
       
       const fakeAsset = {
-        currentLayer: 'did:peer' as const,
+        currentLayer: 'did:cel' as const,
         resources: [{ id: 'r1', type: 'text', contentType: 'text/plain', hash: 'deadbeef' }],
-        did: { id: 'did:peer:test' },
+        did: { id: 'did:cel:test' },
         credentials: [
           { type: ['VerifiableCredential'] } // Missing issuer and issuanceDate
         ]

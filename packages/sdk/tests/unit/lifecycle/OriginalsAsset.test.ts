@@ -28,7 +28,8 @@ const resources: AssetResource[] = [
 
 describe('OriginalsAsset', () => {
   test('determines current layer from DID id', () => {
-    expect(new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds).currentLayer).toBe('did:peer');
+    // did:peer is no longer a layer (did:peer purge, Phase 4·5/5); did:cel is genesis.
+    expect(new OriginalsAsset(resources, buildDid('did:cel:uEiAabc'), emptyCreds).currentLayer).toBe('did:cel');
     expect(new OriginalsAsset(resources, buildDid('did:webvh:example.com:xyz'), emptyCreds).currentLayer).toBe('did:webvh');
     expect(new OriginalsAsset(resources, buildDid('did:btco:123'), emptyCreds).currentLayer).toBe('did:btco');
   });
@@ -39,28 +40,30 @@ describe('OriginalsAsset', () => {
 
   test('rejects invalid migration path', async () => {
     const asset = new OriginalsAsset(resources, buildDid('did:webvh:example.com:xyz'), emptyCreds);
-    await expect(asset.migrate('did:peer' as LayerType)).rejects.toThrow('Invalid migration');
+    // Migrating to a removed/unsupported layer (did:peer) is rejected.
+    // did:peer is no longer in LayerType, so cast through unknown.
+    await expect(asset.migrate('did:peer' as unknown as LayerType)).rejects.toThrow('Invalid migration');
   });
 
   test('migrates along valid path and updates layer (expected to fail until implemented)', async () => {
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     await asset.migrate('did:webvh');
     expect(asset.currentLayer).toBe('did:webvh');
   });
 
   test('returns provenance chain (expected to fail until implemented)', async () => {
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     const prov = asset.getProvenance();
     expect(prov.createdAt).toBeDefined();
   });
 
   test('verifies asset integrity (inline content hash match)', async () => {
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     await expect(asset.verify()).resolves.toBe(true);
   });
 
   test('verify returns false on invalid DID Document', async () => {
-    const badDid: any = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:abc', controller: ['not-a-did'] };
+    const badDid: any = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:abc', controller: ['not-a-did'] };
     const asset = new OriginalsAsset(resources, badDid, emptyCreds as any);
     await expect(asset.verify()).resolves.toBe(false);
   });
@@ -73,7 +76,7 @@ describe('OriginalsAsset', () => {
       contentType: 'text/plain',
       hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' // sha256 of empty
     };
-    const asset = new OriginalsAsset([resWithUrl], buildDid('did:peer:abc'), emptyCreds);
+    const asset = new OriginalsAsset([resWithUrl], buildDid('did:cel:abc'), emptyCreds);
     const mockFetch = async () => ({ arrayBuffer: async () => new ArrayBuffer(0) }) as any;
     await expect(asset.verify({ fetch: mockFetch })).resolves.toBe(true);
   });
@@ -90,14 +93,14 @@ describe('OriginalsAsset', () => {
       contentType: 'text/plain',
       hash: 'not-a-real-hash'
     };
-    const asset = new OriginalsAsset([resWithUrl], buildDid('did:peer:abc'), emptyCreds);
+    const asset = new OriginalsAsset([resWithUrl], buildDid('did:cel:abc'), emptyCreds);
     // No fetch provided → structural check is the only gate.
     await expect(asset.verify()).resolves.toBe(false);
   });
 
   test('verify validates attached credentials structure and returns false on bad', async () => {
-    const badVc: any = { '@context': ['https://example.com'], type: ['VerifiableCredential'], issuer: 'did:peer:x', issuanceDate: new Date().toISOString(), credentialSubject: {} };
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), [badVc]);
+    const badVc: any = { '@context': ['https://example.com'], type: ['VerifiableCredential'], issuer: 'did:cel:x', issuanceDate: new Date().toISOString(), credentialSubject: {} };
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), [badVc]);
     await expect(asset.verify()).resolves.toBe(false);
   });
 
@@ -105,12 +108,12 @@ describe('OriginalsAsset', () => {
     const goodVc: any = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:issuer',
+      issuer: 'did:cel:issuer',
       validFrom: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:xyz' },
-      proof: { type: 'DataIntegrityProof', created: new Date().toISOString(), verificationMethod: 'did:peer:issuer#key', proofPurpose: 'assertionMethod', proofValue: 'zabc' }
+      credentialSubject: { id: 'did:cel:xyz' },
+      proof: { type: 'DataIntegrityProof', created: new Date().toISOString(), verificationMethod: 'did:cel:issuer#key', proofPurpose: 'assertionMethod', proofValue: 'zabc' }
     };
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), [goodVc]);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), [goodVc]);
     const { CredentialManager } = await import('../../../src/vc/CredentialManager');
     const { DIDManager } = await import('../../../src/did/DIDManager');
     const didManager = new DIDManager({} as any);
@@ -124,12 +127,12 @@ describe('OriginalsAsset', () => {
     const goodVc: any = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:issuer',
+      issuer: 'did:cel:issuer',
       validFrom: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:xyz' },
-      proof: { type: 'DataIntegrityProof', created: new Date().toISOString(), verificationMethod: 'did:peer:issuer#key', proofPurpose: 'assertionMethod', proofValue: 'zabc' }
+      credentialSubject: { id: 'did:cel:xyz' },
+      proof: { type: 'DataIntegrityProof', created: new Date().toISOString(), verificationMethod: 'did:cel:issuer#key', proofPurpose: 'assertionMethod', proofValue: 'zabc' }
     };
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), [goodVc]);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), [goodVc]);
     const { CredentialManager } = await import('../../../src/vc/CredentialManager');
     const { DIDManager } = await import('../../../src/did/DIDManager');
     const didManager = new DIDManager({} as any);
@@ -143,20 +146,20 @@ describe('OriginalsAsset', () => {
     const resWithUrl: AssetResource = {
       id: 'r3', type: 'text', url: 'https://example.com/missing', contentType: 'text/plain', hash: resources[0].hash
     };
-    const asset = new OriginalsAsset([resWithUrl], buildDid('did:peer:abc'), emptyCreds);
+    const asset = new OriginalsAsset([resWithUrl], buildDid('did:cel:abc'), emptyCreds);
     const failingFetch = async () => { throw new Error('network'); };
     await expect(asset.verify({ fetch: failingFetch as any })).resolves.toBe(true);
   });
 
   test('verify returns false when resource has invalid id type', async () => {
     const badResource: any = { id: 123, type: 'text', contentType: 'text/plain', hash: 'abc' };
-    const asset = new OriginalsAsset([badResource], buildDid('did:peer:abc'), emptyCreds);
+    const asset = new OriginalsAsset([badResource], buildDid('did:cel:abc'), emptyCreds);
     await expect(asset.verify()).resolves.toBe(false);
   });
 
   test('verify returns false when resource hash has non-hex characters', async () => {
     const badResource: AssetResource = { id: 'r', type: 'text', contentType: 'text/plain', hash: 'zzzz' };
-    const asset = new OriginalsAsset([badResource], buildDid('did:peer:abc'), emptyCreds);
+    const asset = new OriginalsAsset([badResource], buildDid('did:cel:abc'), emptyCreds);
     await expect(asset.verify()).resolves.toBe(false);
   });
 
@@ -168,7 +171,7 @@ describe('OriginalsAsset', () => {
       contentType: 'text/plain',
       hash: 'wrong0000000000000000000000000000000000000000000000000000000000'
     };
-    const asset = new OriginalsAsset([badResource], buildDid('did:peer:abc'), emptyCreds);
+    const asset = new OriginalsAsset([badResource], buildDid('did:cel:abc'), emptyCreds);
     await expect(asset.verify()).resolves.toBe(false);
   });
 
@@ -180,13 +183,13 @@ describe('OriginalsAsset', () => {
       contentType: 'text/plain',
       hash: 'wrong0000000000000000000000000000000000000000000000000000000000'
     };
-    const asset = new OriginalsAsset([resWithUrl], buildDid('did:peer:abc'), emptyCreds);
+    const asset = new OriginalsAsset([resWithUrl], buildDid('did:cel:abc'), emptyCreds);
     const mockFetch = async () => ({ arrayBuffer: async () => Buffer.from('test').buffer }) as any;
     await expect(asset.verify({ fetch: mockFetch })).resolves.toBe(false);
   });
 
   test('verify catches and returns false on unexpected error', async () => {
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:abc'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:abc'), emptyCreds);
     // Force an error by mocking validateDIDDocument to throw
     const validateDIDDocument = require('../../../src/utils/validation').validateDIDDocument;
     spyOn(require('../../../src/utils/validation'), 'validateDIDDocument').mockImplementationOnce(() => {
@@ -241,7 +244,7 @@ describe('verify() gates on whole-chain CEL verification (#Phase2 Task 8)', () =
   });
 
   test('legacy asset without a celLog keeps its current verify behavior', async () => {
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     expect(asset.celLog).toBeUndefined();
     await expect(asset.verify()).resolves.toBe(true);
   });

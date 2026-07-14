@@ -4,7 +4,7 @@ import type { AssetResource, DIDDocument } from '../../../src/types';
 import type { CelAppendSkippedEvent } from '../../../src/events/types';
 
 function makeAsset(): OriginalsAsset {
-  const did: DIDDocument = { id: 'did:peer:zabc' } as DIDDocument;
+  const did: DIDDocument = { id: 'did:cel:zabc' } as DIDDocument;
   const resources: AssetResource[] = [
     { id: 'r', type: 'text', content: 'v1', contentType: 'text/plain', hash: '', version: 1 } as AssetResource,
   ];
