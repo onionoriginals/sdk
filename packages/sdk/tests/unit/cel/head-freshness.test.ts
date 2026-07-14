@@ -16,6 +16,7 @@ import { multikey } from '../../../src/crypto/Multikey';
 import { canonicalizeEvent, canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
 import { computeDigestMultibase } from '../../../src/cel/hash';
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { deriveDidCel } from '../../../src/cel/celDid';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { appendEvent } from '../../../src/cel/algorithms/appendEvent';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
@@ -43,11 +44,12 @@ type Key = Awaited<ReturnType<typeof makeKey>>;
 
 const chainDigest = (event: LogEntry) => computeDigestMultibase(canonicalizeEntryForChain(event));
 
-function btcoDoc(satoshi: string, headDigestMultibase: string, publicKeyMultibase?: string) {
+function btcoDoc(satoshi: string, headDigestMultibase: string, publicKeyMultibase?: string, didCel?: string) {
   const id = `did:btco:reg:${satoshi}`;
   return {
     '@context': ['https://www.w3.org/ns/did/v1'],
     id,
+    ...(didCel ? { alsoKnownAs: [didCel] } : {}),
     ...(publicKeyMultibase
       ? { verificationMethod: [{ id: `${id}#key-0`, type: 'Multikey', controller: id, publicKeyMultibase }] }
       : {}),
@@ -73,9 +75,9 @@ function attachWitness(log: EventLog, insc: { inscriptionId: string; txid: strin
   return { events: [...log.events.slice(0, -1), { ...last, proof: [...last.proof, witnessProof] }] };
 }
 
-async function inscribeDoc(provider: OrdMockProvider, satoshi: string, headDigest: string, publicKeyMultibase?: string) {
+async function inscribeDoc(provider: OrdMockProvider, satoshi: string, headDigest: string, publicKeyMultibase?: string, didCel?: string) {
   const res = await provider.createInscription({
-    data: Buffer.from(JSON.stringify(btcoDoc(satoshi, headDigest, publicKeyMultibase))),
+    data: Buffer.from(JSON.stringify(btcoDoc(satoshi, headDigest, publicKeyMultibase, didCel))),
     contentType: 'application/did+json',
     targetSatoshi: satoshi,
   });
@@ -97,7 +99,7 @@ async function makeAnchoredLog(provider: OrdMockProvider, a: Key, sat = SAT) {
     { signer: a.signer, verificationMethod: a.vm }
   );
   const migrateDigest = chainDigest(log.events[log.events.length - 1]);
-  const insc = await inscribeDoc(provider, sat, migrateDigest);
+  const insc = await inscribeDoc(provider, sat, migrateDigest, undefined, deriveDidCel(log));
   log = attachWitness(log, insc, sat);
   return { log, migrateInscriptionId: insc.inscriptionId, migrateDigest };
 }
@@ -111,7 +113,7 @@ async function addNonCoopRotation(log: EventLog, provider: OrdMockProvider, newC
     { signer: newController.signer, verificationMethod: newController.vm }
   );
   const rotDigest = chainDigest(rotated.events[rotated.events.length - 1]);
-  const insc = await inscribeDoc(provider, SAT, rotDigest, newController.pubMb);
+  const insc = await inscribeDoc(provider, SAT, rotDigest, newController.pubMb, deriveDidCel(log));
   return { log: attachWitness(rotated, insc, SAT), inscriptionId: insc.inscriptionId, rotDigest };
 }
 
@@ -250,6 +252,16 @@ describe('checkHeadFreshness — truncated-log detection', () => {
         async getInscriptionsBySatoshi(satoshi: string) {
           const list = await provider.getInscriptionsBySatoshi(satoshi);
           return [...list].reverse();
+        },
+        // Delegate uniqueness enumeration, remapping blockHeight through `heights`
+        // (unmapped → stripped) exactly as getInscriptionById does.
+        async getAnchoringsForDidCel(didCel: string) {
+          const list = await provider.getAnchoringsForDidCel!(didCel);
+          return list.map((a) => {
+            if (a.inscriptionId in heights) return { ...a, blockHeight: heights[a.inscriptionId] };
+            const { blockHeight: _bh, ...rest } = a;
+            return rest;
+          });
         },
       };
     }

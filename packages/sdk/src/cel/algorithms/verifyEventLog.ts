@@ -563,6 +563,82 @@ async function verifyHeadFreshness(
 }
 
 /**
+ * did:cel uniqueness — first-anchor-wins (follow-up to the signed-anchored-sat
+ * spec). The canonical sat for a did:cel is the sat of its EARLIEST on-chain
+ * anchoring: the lowest confirmed block height, GROUPED BY SAT. Multiple
+ * inscriptions on the same sat (migrate + rotation reinscriptions) do not
+ * compete — only a different, earlier sat wins. A btco-anchored log whose
+ * anchored sat is not that canonical sat is a non-canonical dupe.
+ *
+ * Fail-closed and NOT opt-in: a btco-anchored did:cel log already requires a
+ * provider, so a provider that cannot enumerate, an empty enumeration, or any
+ * anchoring missing a confirmed block height → `UNIQUENESS_UNVERIFIABLE`. A
+ * same-block tie between two DIFFERENT sats → `AMBIGUOUS_CANONICAL` (no finer
+ * on-chain order is exposed by the provider contract today).
+ *
+ * Returns a coded error string on failure, or null when the anchored sat is
+ * canonical.
+ */
+async function verifyUniqueness(
+  didCel: string,
+  anchoredSat: AnchoredSat,
+  ordinalsProvider: OrdinalsLookup | undefined
+): Promise<string | null> {
+  if (!ordinalsProvider || typeof ordinalsProvider.getAnchoringsForDidCel !== 'function') {
+    return `UNIQUENESS_UNVERIFIABLE: the ordinals provider cannot enumerate anchorings for ${didCel}; a btco-anchored did:cel log requires this to confirm first-anchor-wins canonicality`;
+  }
+
+  let anchorings: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number }>;
+  try {
+    anchorings = await ordinalsProvider.getAnchoringsForDidCel(didCel);
+  } catch (e) {
+    return `UNIQUENESS_UNVERIFIABLE: failed to enumerate anchorings for ${didCel}: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  if (!Array.isArray(anchorings) || anchorings.length === 0) {
+    return `UNIQUENESS_UNVERIFIABLE: no on-chain anchorings found for ${didCel}; cannot confirm the anchored sat ${anchoredSat.satoshi} is canonical`;
+  }
+
+  // Every anchoring must carry a confirmed (non-negative integer) block height:
+  // the ordering signal must be provable, or canonicality is undecidable.
+  for (const a of anchorings) {
+    if (typeof a.blockHeight !== 'number' || !Number.isInteger(a.blockHeight) || a.blockHeight < 0) {
+      return `UNIQUENESS_UNVERIFIABLE: anchoring ${a.inscriptionId} on satoshi ${a.satoshi} has no confirmed block height; first-anchor-wins ordering is unprovable`;
+    }
+  }
+
+  // Group by sat; each sat's competitor is its EARLIEST anchoring.
+  const earliestBySat = new Map<string, number>();
+  for (const a of anchorings) {
+    const cur = earliestBySat.get(a.satoshi);
+    if (cur === undefined || a.blockHeight! < cur) earliestBySat.set(a.satoshi, a.blockHeight!);
+  }
+
+  // Lowest earliest-height across DISTINCT sats is canonical.
+  let minHeight = Infinity;
+  for (const h of earliestBySat.values()) if (h < minHeight) minHeight = h;
+  const canonicalSats = [...earliestBySat.entries()].filter(([, h]) => h === minHeight).map(([s]) => s);
+
+  if (canonicalSats.length > 1) {
+    return `AMBIGUOUS_CANONICAL: ${canonicalSats.length} distinct sats (${canonicalSats.join(', ')}) share the earliest block ${minHeight} for ${didCel}; no finer on-chain order is available, so canonicality is undecidable`;
+  }
+
+  const canonicalSat = canonicalSats[0];
+  if (anchoredSat.satoshi !== canonicalSat) {
+    // Distinguish a genuine competing mint from a self-inflicted enumeration
+    // gap: if the log's OWN anchored sat is absent from the enumeration, the
+    // real cause is a missing back-link (its inscribed did:btco doc did not list
+    // this did:cel in alsoKnownAs), not a rival dupe. Both fail closed.
+    if (!earliestBySat.has(anchoredSat.satoshi)) {
+      return `NON_CANONICAL_ANCHOR: the log's own anchoring sat ${anchoredSat.satoshi} for ${didCel} is absent from the on-chain enumeration — its inscribed did:btco document may be missing the did:cel back-link in alsoKnownAs; the canonical (earliest-anchored) sat is ${canonicalSat}`;
+    }
+    return `NON_CANONICAL_ANCHOR: the log is anchored on satoshi ${anchoredSat.satoshi} for ${didCel}, but the canonical (earliest-anchored) sat is ${canonicalSat}; this is a non-canonical dupe`;
+  }
+
+  return null;
+}
+
+/**
  * The log's current on-sat authority anchor: the satoshi a verified migrate
  * event bound the log to, and the inscription that most recently attested
  * authority on it (the migrate inscription, then each accepted non-cooperative
@@ -1399,6 +1475,16 @@ export async function verifyEventLog(
   if (celController !== undefined) assetDid = deriveDidCelFromGenesis(createEvent);
   else if (legacyDid !== undefined) assetDid = legacyDid;
 
+  // did:cel uniqueness — first-anchor-wins (follow-up spec). Runs whenever a
+  // did:cel log is btco-anchored (`anchoredSat` set by the walk) and a provider
+  // is present. NOT gated on checkHeadFreshness: it is part of the btco
+  // verification contract, not an opt-in extra. Skipped on the custom-verifier
+  // path (which owns proof semantics and never establishes `anchoredSat`).
+  let uniquenessError: string | undefined;
+  if (!options?.verifier && anchoredSat && typeof assetDid === 'string' && assetDid.startsWith('did:cel:')) {
+    uniquenessError = (await verifyUniqueness(assetDid, anchoredSat, options?.ordinalsProvider)) ?? undefined;
+  }
+
   // expectedDid: reject a log that does not back the caller's expected DID.
   // Scoped to the non-custom-verifier path — that path owns proof semantics and
   // the authority binding above is skipped there. did:cel is matched by suffix
@@ -1427,9 +1513,12 @@ export async function verifyEventLog(
   if (staleLogError) {
     errors.push(staleLogError);
   }
+  if (uniquenessError) {
+    errors.push(uniquenessError);
+  }
 
   return {
-    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !expectedDidError && !staleLogError,
+    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !expectedDidError && !staleLogError && !uniquenessError,
     errors,
     events: eventVerifications,
     ...(assetDid !== undefined ? { assetDid } : {}),

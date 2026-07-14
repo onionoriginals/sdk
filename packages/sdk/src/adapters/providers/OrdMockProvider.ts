@@ -107,6 +107,29 @@ export class OrdMockProvider implements OrdinalsProvider {
     return this.state.ownershipBySatoshi.get(satoshi) ?? null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getAnchoringsForDidCel(didCel: string): Promise<Array<{
+    satoshi: string;
+    inscriptionId: string;
+    blockHeight?: number;
+  }>> {
+    const out: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number }> = [];
+    for (const rec of this.state.inscriptionsById.values()) {
+      if (rec.satoshi === undefined) continue;
+      let content: unknown;
+      try {
+        content = JSON.parse(rec.content.toString('utf8'));
+      } catch {
+        continue; // non-JSON inscription — not a DID document
+      }
+      const aka = (content as { alsoKnownAs?: unknown } | null)?.alsoKnownAs;
+      if (Array.isArray(aka) && aka.includes(didCel)) {
+        out.push({ satoshi: rec.satoshi, inscriptionId: rec.inscriptionId, blockHeight: rec.blockHeight });
+      }
+    }
+    return out;
+  }
+
   async transferInscription(inscriptionId: string, toAddress: string, _options?: { feeRate?: number }) {
     const rec = this.state.inscriptionsById.get(inscriptionId);
     if (!rec) {
