@@ -23,6 +23,15 @@ export interface WitnessProof extends DataIntegrityProof {
  * Used for large resources that shouldn't be embedded in the log
  */
 export interface ExternalReference {
+  /**
+   * Optional logical resource id (AssetResource.id). When present at genesis it
+   * BINDS this digest to a specific resourceId, so a resource's first on-log
+   * `update` must chain from ITS OWN genesis digest — not any genesis digest
+   * (#401). Omitted by legacy/hand-built geneses, which fall back to unkeyed
+   * matching. Additive: it does not affect the digest, only the did:cel
+   * derivation of assets that include it.
+   */
+  id?: string;
   /** Optional URLs where the data can be retrieved */
   url?: string[];
   /** Optional MIME type of the data */

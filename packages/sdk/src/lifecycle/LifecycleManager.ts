@@ -287,8 +287,13 @@ export class LifecycleManager {
     const controllerKp = await new KeyManager().generateKeyPair('Ed25519');
     const { signer, verificationMethod } = celSignerFromKeyPair(controllerKp);
 
-    // Bridge AssetResource hashes (hex sha256) to CEL ExternalReferences.
+    // Bridge AssetResource hashes (hex sha256) to CEL ExternalReferences. The
+    // resource id is bound into the genesis reference (#401) so the verifier can
+    // require a resource's first `update` to chain from ITS OWN genesis digest,
+    // not any genesis digest. (resource.id is validated as a non-empty string
+    // above.)
     const externalRefs: ExternalReference[] = resources.map((r) => ({
+      id: r.id,
       digestMultibase: hexSha256ToDigestMultibase(r.hash),
       ...(r.contentType ? { mediaType: r.contentType } : {})
     }));

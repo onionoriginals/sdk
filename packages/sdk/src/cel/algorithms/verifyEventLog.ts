@@ -863,8 +863,10 @@ async function resolveControllerKeyHex(
  *
  * A resource-shaped `update` event (`data.resourceId` + `data.previousVersionHash`
  * present) MUST chain forward from the last-known hash of its resourceId:
- *  - first update for a resourceId: `previousVersionHash` must match SOME genesis
- *    resource digest (genesis ExternalReferences carry no resourceId);
+ *  - first update for a resourceId: if genesis BOUND that resourceId to a digest
+ *    (ExternalReference carried an `id`, #401), `previousVersionHash` must match
+ *    THAT digest specifically; otherwise (legacy id-less genesis) it may match
+ *    ANY genesis digest;
  *  - subsequent updates: it must match the prior update's DERIVED hash.
  * The new current hash is `hashResource(content)` (derived, never stored). All
  * hashes are compared as digestMultibase. On success the per-resourceId map is
@@ -874,6 +876,7 @@ async function resolveControllerKeyHex(
 function checkResourceUpdateContinuity(
   data: { resourceId: unknown; previousVersionHash: unknown; content?: unknown },
   genesisDigests: Set<string>,
+  genesisDigestById: Map<string, string>,
   currentResourceHash: Map<string, string>
 ): string | null {
   const resourceId = data.resourceId as string;
@@ -890,9 +893,20 @@ function checkResourceUpdateContinuity(
   }
 
   const known = currentResourceHash.get(resourceId);
-  const matches = known !== undefined
-    ? digestMultibaseEquals(prevDigest, known)
-    : [...genesisDigests].some((d) => digestMultibaseEquals(prevDigest, d));
+  let matches: boolean;
+  if (known !== undefined) {
+    // Subsequent update: chain from this resource's prior derived hash.
+    matches = digestMultibaseEquals(prevDigest, known);
+  } else {
+    // First update. If genesis bound this resourceId (#401), it MUST chain from
+    // that specific digest — not any genesis resource's digest (which would let
+    // a fabricated/mismatched resourceId anchor off an unrelated resource). Only
+    // an id-less legacy genesis falls back to matching any genesis digest.
+    const boundDigest = genesisDigestById.get(resourceId);
+    matches = boundDigest !== undefined
+      ? digestMultibaseEquals(prevDigest, boundDigest)
+      : [...genesisDigests].some((d) => digestMultibaseEquals(prevDigest, d));
+  }
   if (!matches) {
     return `resource update for ${resourceId}: previousVersionHash does not match the last-known hash (chain-continuity broken)`;
   }
@@ -1233,16 +1247,24 @@ export async function verifyEventLog(
     ? genesisData.controller
     : undefined;
 
-  // Seed for resource-update continuity: the genesis resource digests
-  // (ExternalReference.digestMultibase). A resource's FIRST update must chain
-  // from one of these; subsequent updates chain from the prior derived hash.
+  // Seed for resource-update continuity from the genesis resource digests
+  // (ExternalReference.digestMultibase). Two seeds (#401):
+  //  - `genesisResourceDigestById`: when a genesis ref carries its resource `id`,
+  //    that resource's FIRST update MUST chain from ITS OWN genesis digest.
+  //  - `genesisResourceDigests` (flat): legacy/hand-built geneses whose refs have
+  //    no `id` fall back to matching ANY genesis digest (the pre-#401 behavior).
+  // Subsequent updates always chain from the prior derived hash.
   const genesisResourceDigests = new Set<string>();
+  const genesisResourceDigestById = new Map<string, string>();
   {
     const genesisResources = (createEvent.data as { resources?: unknown } | null | undefined)?.resources;
     if (Array.isArray(genesisResources)) {
       for (const r of genesisResources) {
         const dm = (r as { digestMultibase?: unknown })?.digestMultibase;
-        if (typeof dm === 'string' && dm.length > 0) genesisResourceDigests.add(dm);
+        if (typeof dm !== 'string' || dm.length === 0) continue;
+        genesisResourceDigests.add(dm);
+        const id = (r as { id?: unknown })?.id;
+        if (typeof id === 'string' && id.length > 0) genesisResourceDigestById.set(id, dm);
       }
     }
   }
@@ -1360,6 +1382,7 @@ export async function verifyEventLog(
         const err = checkResourceUpdateContinuity(
           { resourceId: rd.resourceId, previousVersionHash: rd.previousVersionHash, content: rd.content },
           genesisResourceDigests,
+          genesisResourceDigestById,
           currentResourceHash
         );
         if (err) {

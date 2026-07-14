@@ -130,4 +130,57 @@ describe('verifyEventLog: resource-update events', () => {
       { signer: a.signer, verificationMethod: a.vm });
     expect((await verifyEventLog(bad)).verified).toBe(false);
   });
+
+  // Genesis carrying TWO resources, each ExternalReference BOUND to its own id (#401).
+  async function genesisWithTwoIds(
+    a: { id: string; content: string },
+    b: { id: string; content: string },
+    signer: Awaited<ReturnType<typeof makeRealSigner>>
+  ) {
+    return createEventLog(
+      {
+        name: 'r',
+        controller: signer.didKey,
+        resources: [
+          { id: a.id, digestMultibase: hexSha256ToDigestMultibase(hex(a.content)) },
+          { id: b.id, digestMultibase: hexSha256ToDigestMultibase(hex(b.content)) },
+        ],
+        createdAt: 'x',
+        nonce: 'n-' + Math.random(),
+      },
+      { signer: signer.signer, verificationMethod: signer.vm }
+    );
+  }
+
+  test('id-bound genesis: a first update for A chaining from B\'s genesis digest is REJECTED (#401)', async () => {
+    const s = await makeRealSigner();
+    let log = await genesisWithTwoIds({ id: 'A', content: 'a1' }, { id: 'B', content: 'b1' }, s);
+    // First update for resourceId 'A', but previousVersionHash = B's genesis hash.
+    // With per-id binding, A must chain from A's own genesis digest → rejected.
+    log = await appendEvent(log, 'update',
+      { resourceId: 'A', content: 'a2', contentType: 'text/plain', previousVersionHash: hex('b1'), toVersion: 2 },
+      { signer: s.signer, verificationMethod: s.vm });
+    const result = await verifyEventLog(log);
+    expect(result.verified).toBe(false);
+    expect(result.errors.join(' ')).toContain('resource');
+  });
+
+  test('id-bound genesis: a first update for A chaining from A\'s OWN genesis digest verifies (#401)', async () => {
+    const s = await makeRealSigner();
+    let log = await genesisWithTwoIds({ id: 'A', content: 'a1' }, { id: 'B', content: 'b1' }, s);
+    log = await appendEvent(log, 'update',
+      { resourceId: 'A', content: 'a2', contentType: 'text/plain', previousVersionHash: hex('a1'), toVersion: 2 },
+      { signer: s.signer, verificationMethod: s.vm });
+    expect((await verifyEventLog(log)).verified).toBe(true);
+  });
+
+  test('legacy id-less genesis still falls back to matching any genesis digest', async () => {
+    // genesisWith emits an ExternalReference WITHOUT an id → flat-set fallback.
+    const s = await makeRealSigner();
+    let log = await genesisWith('v1', s);
+    log = await appendEvent(log, 'update',
+      { resourceId: 'r', content: 'v2', contentType: 'text/plain', previousVersionHash: hex('v1'), toVersion: 2 },
+      { signer: s.signer, verificationMethod: s.vm });
+    expect((await verifyEventLog(log)).verified).toBe(true);
+  });
 });
