@@ -509,6 +509,37 @@ export class LifecycleManager {
         }
       }
 
+      // 4b) Post-genesis resource binding (#401). Genesis (v1) resources are
+      // bound by checkGenesisResourceBinding above; every resource version ≥ 2
+      // MUST instead be backed by a VERIFIED `update` log event with the SAME
+      // resourceId, version, and derived content hash. The step-4 loop only
+      // proves each resource is self-consistent (content ↔ its own hash), NOT
+      // that its content is the one the controller signed. Without this, a
+      // self-consistent forged post-genesis version (or an unprovable degraded
+      // version) in env.resources would load undetected while the fold reports
+      // the genuine hash. Fail closed — the verified log is the source of truth.
+      for (const res of env.resources) {
+        const version = typeof res.version === 'number' ? res.version : 1;
+        if (version < 2) continue;
+        const match = folded.resourceUpdates.find(
+          u => u.resourceId === res.id && u.toVersion === version
+        );
+        if (!match) {
+          throw new StructuredError(
+            'ASSET_LOAD_VERIFICATION_FAILED',
+            `Resource ${res.id} v${version} is not backed by a verified update event on the log (unprovable or forged post-genesis version).`,
+            { verification }
+          );
+        }
+        if (match.toHash.toLowerCase() !== String(res.hash).toLowerCase()) {
+          throw new StructuredError(
+            'ASSET_LOAD_VERIFICATION_FAILED',
+            `Resource ${res.id} v${version}: envelope hash (${res.hash}) does not match the verified log's derived hash (${match.toHash}).`,
+            { verification }
+          );
+        }
+      }
+
       // 5) Cross-checks: the fold IS the source of truth for identity/bindings;
       // an envelope's advisory DID docs must not disagree with it — a swapped
       // doc is exactly the attack the envelope invites. did:cel is bound by the

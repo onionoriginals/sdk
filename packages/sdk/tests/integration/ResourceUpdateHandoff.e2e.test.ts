@@ -44,6 +44,46 @@ describe('Resource-update handoff (e2e)', () => {
     await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow();
   });
 
+  test('forged post-genesis env.resource (self-consistent) is rejected at load even though the log verifies', async () => {
+    // Greptile #401 gap: the LOG's update event keeps its genuine content (so
+    // verifyEventLog passes), but the envelope's CAPTURED resource snapshot for
+    // v2 is swapped for self-consistent forged content (content AND its own hash
+    // both changed). Step-4 self-consistency passes; without the 4b post-genesis
+    // binding, the buyer would restore forged content while the fold reports the
+    // genuine hash. Must fail closed.
+    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    const asset = await creator.lifecycle.createAsset([
+      { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+    ]);
+    await asset.addResourceVersion('note', 'v2', 'text/plain');
+    const envelope = asset.serialize();
+
+    // Log update event is UNTOUCHED (still genuine → verifyEventLog passes).
+    // Tamper ONLY the captured v2 resource snapshot, self-consistently.
+    const v2 = envelope.resources.find(r => r.id === 'note' && r.version === 2)!;
+    v2.content = 'forged-v2';
+    v2.hash = h('forged-v2'); // self-consistent: content matches its own hash
+
+    const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow(/does not match the verified log/);
+  });
+
+  test('unprovable (degraded) post-genesis version in an envelope is rejected at load', async () => {
+    // A keyless creator advances v2 in-memory but appends NO update event. If it
+    // serializes and hands off, that v2 is unprovable — indistinguishable from a
+    // forgery. The buyer must not silently accept it (fail closed on a v≥2
+    // resource with no backing verified update event).
+    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519' });
+    const asset = await creator.lifecycle.createAsset([
+      { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+    ]);
+    await asset.addResourceVersion('note', 'v2', 'text/plain'); // degrades (no signer)
+    expect(asset.celLog!.events.some(e => e.type === 'update')).toBe(false);
+
+    const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    await expect(buyer.lifecycle.loadAsset(asset.serialize())).rejects.toThrow(/not backed by a verified update event/);
+  });
+
   test('degrade: keyless creator emits cel:append-skipped and the update is not on the log', async () => {
     // No keyStore ⇒ createAsset drops the controller key ⇒ appends degrade.
     const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519' });
@@ -93,9 +133,11 @@ describe('Resource-update handoff (e2e)', () => {
 
     // The log is still verifiable — no unverifiable event was ever appended.
     expect(await asset.verify()).toBe(true);
+    // But the envelope now carries UNPROVABLE in-memory v2/v3 (degraded, never
+    // logged); a buyer must fail closed rather than restore unverifiable
+    // versions (#401 post-genesis binding). The log soundness is proven above.
     const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
-    const { verification } = await buyer.lifecycle.loadAsset(asset.serialize());
-    expect(verification?.verified).toBe(true);
+    await expect(buyer.lifecycle.loadAsset(asset.serialize())).rejects.toThrow(/not backed by a verified update event/);
   });
 
   test('concurrent same-resource updates serialize into a valid chain (Finding 2)', async () => {
