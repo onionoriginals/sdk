@@ -301,7 +301,11 @@ export class BtcoCelManager {
         return Buffer.from(JSON.stringify(btcoDoc));
       },
       'application/did+json',
-      this.config.feeRate
+      this.config.feeRate,
+      // Key the shared money-lock by the asset's stable identity so a concurrent
+      // inscription of the same asset (even from another manager) is rejected
+      // before broadcast rather than double-paying (mirrors LifecycleManager, #303).
+      { lockKey: didCel ?? currentDid }
     ) as {
       txid: string;
       inscriptionId: string;
@@ -319,10 +323,13 @@ export class BtcoCelManager {
     // critically — if it diverges from the sat signed into `data.to`: the sat
     // signed, the sat the witness proof carries, and the sat the inscription
     // landed on MUST all agree, or the log would anchor to the wrong sat.
-    const satoshi = inscription.satoshi;
-    if (!satoshi) {
+    // Normalise to a string: the verifier only recognises bitcoin witness proofs
+    // whose `satoshi` is a string, so a provider that returns a numeric sat would
+    // otherwise produce a paid-for but permanently unverifiable log.
+    if (inscription.satoshi === undefined || inscription.satoshi === null || (inscription.satoshi as unknown) === '') {
       throw new Error('Bitcoin inscription did not return a satoshi ordinal (required for the did:btco anchor)');
     }
+    const satoshi = String(inscription.satoshi);
     if (signedTo !== btcoDidFromSatoshi(satoshi, network)) {
       throw new Error(
         `Anchoring sat mismatch: migrate event signed ${signedTo} but the inscription landed on satoshi ${satoshi}`
