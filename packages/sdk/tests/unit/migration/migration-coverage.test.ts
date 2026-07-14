@@ -80,7 +80,7 @@ function makeAuditRecord(overrides: Partial<MigrationAuditRecord> = {}): Migrati
 // The createAsset guard requires at least one resource.
 // ---------------------------------------------------------------------------
 
-describe.skip('CORE-MIG-EVENTS-002/boundary: createAsset with zero resources', () => {
+describe('CORE-MIG-EVENTS-002/boundary: createAsset with zero resources', () => {
   it('throws a structured error when resources array is empty', async () => {
     const sdk = makeSdk();
     await expect(sdk.lifecycle.createAsset([])).rejects.toThrow(/At least one resource/i);
@@ -100,7 +100,7 @@ describe.skip('CORE-MIG-EVENTS-002/boundary: createAsset with zero resources', (
 // No wall-clock assertion — this is purely a behavioral completeness check.
 // ---------------------------------------------------------------------------
 
-describe.skip('CORE-MIG-EVENTS-002/performance: createAsset with large resource set', () => {
+describe('CORE-MIG-EVENTS-002/performance: createAsset with large resource set', () => {
   it('creates asset with 50 resources; all are accessible on the returned asset', async () => {
     const sdk = makeSdk();
     const resources = Array.from({ length: 50 }, (_, i) => ({

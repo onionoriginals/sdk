@@ -202,8 +202,10 @@ describeSignet('OriginalsSDK with signet provider', () => {
   test('SDK DID operations work alongside signet provider', async () => {
     // Verify asset creation (did:cel genesis) works when the signet provider is
     // configured. did:peer creation was removed (did:peer purge, did:cel Phase 4·5/5).
+    // Hash-only resource (no inline content) so createAsset's content↔hash
+    // check (#347) is skipped; 'a'*64 is a valid hex hash.
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'r1', type: 'data', contentType: 'text/plain', hash: 'a'.repeat(64), content: 'x' },
+      { id: 'r1', type: 'data', contentType: 'text/plain', hash: 'a'.repeat(64) },
     ]);
     expect(asset.id).toMatch(/^did:cel:/);
   });
