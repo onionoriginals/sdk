@@ -31,12 +31,14 @@ export class DocumentLoader {
       // The DID itself did not resolve. For fragment (verification method)
       // lookups, fall back to keys explicitly registered out-of-band via
       // registerVerificationMethod — but ONLY for self-certifying methods
-      // (did:key) whose key material is bound into the identifier and which
-      // have no hosted, revocable authoritative state. For hosted methods
-      // (did:webvh) or on-chain methods (did:btco), an unreachable document
-      // must fail closed: trusting a registry entry would bypass deactivation
-      // and key rotation published by the authoritative source.
-      const isSelfCertifying = did.startsWith('did:key:');
+      // (did:key, did:peer) whose key material is bound into the identifier
+      // and which have no hosted, revocable authoritative state. For hosted
+      // methods (did:webvh) or on-chain methods (did:btco), an unreachable
+      // document must fail closed: trusting a registry entry would bypass
+      // deactivation and key rotation published by the authoritative source.
+      // (did:peer creation was removed in the did:peer purge, did:cel Phase
+      // 4·5/5, but verifying LEGACY did:peer credentials stays — read path.)
+      const isSelfCertifying = did.startsWith('did:key:') || did.startsWith('did:peer:');
       // did:key is FULLY self-certifying: the identifier IS the public
       // multikey, so the key node can be synthesized locally with no
       // resolution — did:key:{mk}#{mk} always denotes the key {mk}. Only the
@@ -144,13 +146,13 @@ export class DocumentLoader {
         };
       }
       // Fallback ONLY when the DID document does not itself publish this
-      // verification method, and ONLY for self-certifying methods (did:key)
-      // whose key material is bound into the identifier. For hosted
+      // verification method, and ONLY for self-certifying methods (did:key,
+      // did:peer) whose key material is bound into the identifier. For hosted
       // (did:webvh) or on-chain (did:btco) methods the resolved document is
       // authoritative: a key the controller REMOVED (a common rotation style)
       // must not be resurrected from the process-global registry, or a
       // rotated-out key would keep verifying signatures indefinitely.
-      const isSelfCertifyingMethod = did.startsWith('did:key:');
+      const isSelfCertifyingMethod = did.startsWith('did:key:') || did.startsWith('did:peer:');
       if (isSelfCertifyingMethod) {
         const cached = verificationMethodRegistry.get(didUrl);
         if (cached) {
