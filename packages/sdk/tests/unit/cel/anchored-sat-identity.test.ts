@@ -9,6 +9,7 @@ import { multikey } from '../../../src/crypto/Multikey';
 import { canonicalizeEvent, canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
 import { computeDigestMultibase } from '../../../src/cel/hash';
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { deriveDidCel } from '../../../src/cel/celDid';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { appendEvent } from '../../../src/cel/algorithms/appendEvent';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
@@ -33,17 +34,17 @@ async function makeKey() {
 type Key = Awaited<ReturnType<typeof makeKey>>;
 const chainDigest = (e: LogEntry) => computeDigestMultibase(canonicalizeEntryForChain(e));
 
-function btcoDoc(satoshi: string, headDigestMultibase: string) {
+function btcoDoc(satoshi: string, headDigestMultibase: string, didCel?: string) {
   const id = `did:btco:reg:${satoshi}`;
-  return { '@context': ['https://www.w3.org/ns/did/v1'], id, service: [{ id: `${id}#cel`, type: 'OriginalsCelAnchor', serviceEndpoint: { headDigestMultibase } }] };
+  return { '@context': ['https://www.w3.org/ns/did/v1'], id, ...(didCel ? { alsoKnownAs: [didCel] } : {}), service: [{ id: `${id}#cel`, type: 'OriginalsCelAnchor', serviceEndpoint: { headDigestMultibase } }] };
 }
 function attachWitness(log: EventLog, insc: { inscriptionId: string; txid: string }, satoshi: string): EventLog {
   const last = log.events[log.events.length - 1];
   const witnessProof = { type: 'DataIntegrityProof', cryptosuite: 'bitcoin-ordinals-2024', created: 'x', verificationMethod: 'did:btco:witness', proofPurpose: 'assertionMethod', proofValue: `z${insc.inscriptionId}`, witnessedAt: 'x', txid: insc.txid, satoshi, inscriptionId: insc.inscriptionId };
   return { events: [...log.events.slice(0, -1), { ...last, proof: [...last.proof, witnessProof] }] };
 }
-async function inscribeDoc(provider: OrdMockProvider, satoshi: string, headDigest: string) {
-  const res = await provider.createInscription({ data: Buffer.from(JSON.stringify(btcoDoc(satoshi, headDigest))), contentType: 'application/did+json', targetSatoshi: satoshi });
+async function inscribeDoc(provider: OrdMockProvider, satoshi: string, headDigest: string, didCel?: string) {
+  const res = await provider.createInscription({ data: Buffer.from(JSON.stringify(btcoDoc(satoshi, headDigest, didCel))), contentType: 'application/did+json', targetSatoshi: satoshi });
   return { inscriptionId: res.inscriptionId, txid: res.txid };
 }
 const SAT = '1234567890';
@@ -59,7 +60,7 @@ async function makeAnchoredLog(provider: OrdMockProvider, a: Key, sat = SAT) {
     { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', to: `did:btco:reg:${sat}`, migratedAt: '2026-07-13T00:00:00Z' },
     { signer: a.signer, verificationMethod: a.vm }
   );
-  const insc = await inscribeDoc(provider, sat, chainDigest(log.events[log.events.length - 1]));
+  const insc = await inscribeDoc(provider, sat, chainDigest(log.events[log.events.length - 1]), deriveDidCel(log));
   return { log: attachWitness(log, insc, sat), inscriptionId: insc.inscriptionId };
 }
 

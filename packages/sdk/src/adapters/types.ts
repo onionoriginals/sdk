@@ -72,6 +72,18 @@ export interface OrdinalsProvider {
    * must never rewrite the inscribed DID document from it.
    */
   getSatOwnership?(satoshi: string): Promise<{ address: string; outpoint: string } | null>;
+  /**
+   * Enumerate every on-chain btco DID-doc anchoring whose `alsoKnownAs`
+   * back-links this did:cel (first-anchor-wins uniqueness). Production
+   * providers implement this via a content/metadata index (an `ord` instance
+   * or a service such as the QuickNode Ordinals add-on). `blockHeight` is the
+   * canonical ordering signal; a missing height fails uniqueness closed.
+   */
+  getAnchoringsForDidCel?(didCel: string): Promise<Array<{
+    satoshi: string;
+    inscriptionId: string;
+    blockHeight?: number;
+  }>>;
   transferInscription(
     inscriptionId: string,
     toAddress: string,

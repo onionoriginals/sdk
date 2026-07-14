@@ -123,8 +123,13 @@ provider: `getAnchoringsForDidCel(Z)` → `[{X, 100}, {Y, 200}]` → canonical `
 → `Y !== X` → `NON_CANONICAL_ANCHOR`. Bob's log fails; he is protected. Alice's
 `X`-branch verifies as canonical. The controller cannot reorder history — the
 first anchor is immutable — and cannot sell the single canonical sat twice (a sat
-is owned by one UTXO holder). A non-controller cannot pre-empt with an earlier
-anchor because anchoring requires the controller key.
+is owned by one UTXO holder). A non-controller cannot *steal*: making a rival
+branch itself verify requires forging the genesis controller's signatures, which
+they cannot. Note the asymmetry, though — canonicality is computed from *any*
+inscription that back-links `Z` in `alsoKnownAs`, and enumeration does not check
+that the anchoring is controller-signed or commits to a valid head of this log.
+So while a non-controller cannot steal, they *can deny* (see §7, third-party
+denial): this is a fail-closed griefing vector, not a theft vector.
 
 ## 7. Residuals
 
@@ -137,6 +142,20 @@ anchor because anchoring requires the controller key.
   provider's content index. A provider that fails to return an existing earlier
   anchoring could wrongly bless a dupe. This is the same trust already placed in
   the provider for witness/ownership reads; out of scope to eliminate here.
+- **Third-party denial (griefing):** `getAnchoringsForDidCel` enumerates *any*
+  inscription whose `alsoKnownAs` back-links `Z`, with no requirement that the
+  inscription be controller-signed or that its `OriginalsCelAnchor` commit to a
+  valid head of this log. So a non-controller who inscribes
+  `{alsoKnownAs:["did:cel:Z"]}` on their own sat at the same block as (→
+  `AMBIGUOUS_CANONICAL`) or, by front-running before confirmation, an earlier
+  block than the honest first anchoring (→ `NON_CANONICAL_ANCHOR`) can
+  permanently DENY the honest log. This is **deny-only** — the attacker cannot
+  make their own branch verify (that needs the genesis controller's signatures),
+  so no theft/duping is opened, and already-confirmed anchorings cannot be
+  retro-denied (block heights are immutable); the exposure is mempool
+  front-running of *new* mints into a permanent brick, fail-closed. Eliminating
+  it is a follow-up: require competitor anchorings to be controller-authenticated
+  or to head-commit to this log before they count toward canonicality.
 
 ## 8. Testing spine
 
