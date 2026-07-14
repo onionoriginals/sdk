@@ -23,9 +23,20 @@ const createMockSigner = () => {
   });
 };
 
+// BtcoCelManager now pins the sat first: it inscribes via a buildContent(satoshi)
+// callback (so the migrate body can sign `to: did:btco:<sat>`). A mock inscribeData
+// must therefore invoke the callback with the returned satoshi, mirroring OrdMockProvider.
+const mockInscribeData = (result: { txid: string; inscriptionId: string; satoshi: string; blockHeight?: number }) =>
+  vi.fn(async (data: unknown) => {
+    if (typeof data === 'function') {
+      await (data as (s: string) => Buffer | Promise<Buffer>)(result.satoshi);
+    }
+    return result;
+  });
+
 // Mock BitcoinManager
 const createMockBitcoinManager = (): BitcoinManager => ({
-  inscribeData: vi.fn().mockResolvedValue({
+  inscribeData: mockInscribeData({
     txid: 'abc123def456',
     inscriptionId: 'abc123def456i0',
     satoshi: '1234567890',
@@ -220,7 +231,7 @@ describe('BtcoCelManager', () => {
       // createBtcoDidDocument — otherwise a regtest/signet asset resolves
       // against the mainnet ordinals namespace.
       const regtestBitcoin = {
-        inscribeData: vi.fn().mockResolvedValue({
+        inscribeData: mockInscribeData({
           txid: 'abc123def456',
           inscriptionId: 'abc123def456i0',
           satoshi: '1234567890',
@@ -247,7 +258,7 @@ describe('BtcoCelManager', () => {
       // the mainnet form. The network is recorded in the signed data, so replay
       // must be deterministic regardless of the replaying manager's network.
       const regtestBitcoin = {
-        inscribeData: vi.fn().mockResolvedValue({
+        inscribeData: mockInscribeData({
           txid: 'abc123def456',
           inscriptionId: 'abc123def456i0',
           satoshi: '1234567890',

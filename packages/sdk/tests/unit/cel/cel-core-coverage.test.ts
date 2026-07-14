@@ -61,12 +61,19 @@ const createMockSigner = () =>
 /** BitcoinManager mock that returns deterministic inscription data. */
 const createMockBitcoinManager = (): BitcoinManager =>
   ({
-    inscribeData: async () => ({
-      txid: 'deadbeef01020304',
-      inscriptionId: 'deadbeef01020304i0',
-      satoshi: '9876543210',
-      blockHeight: 840000,
-    }),
+    network: 'mainnet',
+    // BtcoCelManager pins the sat first: invoke the buildContent(satoshi) callback.
+    inscribeData: async (data: unknown) => {
+      if (typeof data === 'function') {
+        await (data as (s: string) => Buffer | Promise<Buffer>)('9876543210');
+      }
+      return {
+        txid: 'deadbeef01020304',
+        inscriptionId: 'deadbeef01020304i0',
+        satoshi: '9876543210',
+        blockHeight: 840000,
+      };
+    },
   } as unknown as BitcoinManager);
 
 /** Build a webvh-layer event log (peer → webvh migration). */

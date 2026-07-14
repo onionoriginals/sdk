@@ -61,12 +61,21 @@ function createMockSigner(): CelSigner {
  */
 function createMockBitcoinManager() {
   return {
-    inscribeData: vi.fn(async () => ({
-      txid: 'mock-txid-' + Math.random().toString(36).substring(7),
-      inscriptionId: 'mock-inscription-' + Math.random().toString(36).substring(7),
-      satoshi: 1000,
-      blockHeight: 800000,
-    })),
+    network: 'mainnet',
+    // BtcoCelManager pins the sat first via a buildContent(satoshi) callback;
+    // invoke it (mirrors OrdMockProvider) so the migrate body can sign `to`.
+    inscribeData: vi.fn(async (data: unknown) => {
+      const satoshi = 1000;
+      if (typeof data === 'function') {
+        await (data as (s: string) => Buffer | Promise<Buffer>)(String(satoshi));
+      }
+      return {
+        txid: 'mock-txid-' + Math.random().toString(36).substring(7),
+        inscriptionId: 'mock-inscription-' + Math.random().toString(36).substring(7),
+        satoshi,
+        blockHeight: 800000,
+      };
+    }),
   } as any;
 }
 
