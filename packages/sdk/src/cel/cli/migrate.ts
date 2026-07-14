@@ -273,12 +273,20 @@ function createMockBitcoinManager(): any {
   // For CLI use, we create a minimal mock that satisfies the interface
   // Real Bitcoin integration requires additional configuration
   return {
-    // eslint-disable-next-line @typescript-eslint/require-await
-    inscribeData: async (_data: unknown) => {
+    network: 'mainnet',
+    inscribeData: async (data: unknown) => {
       // Generate mock Bitcoin transaction details
       const timestamp = Date.now();
       const mockTxid = `cli_mock_tx_${timestamp.toString(16)}`;
       const mockInscriptionId = `cli_mock_inscription_${timestamp.toString(16)}i0`;
+      const satoshi = 10000;
+
+      // BtcoCelManager pins the sat first: it inscribes via a buildContent(satoshi)
+      // callback so the migrate body can sign `to: did:btco:<sat>`. Invoke it with
+      // the satoshi we will return (mirrors OrdMockProvider/BitcoinManager).
+      if (typeof data === 'function') {
+        await (data as (s: string) => Buffer | Promise<Buffer>)(String(satoshi));
+      }
 
       console.error('\n⚠️  Note: Using mock Bitcoin manager for CLI migration.');
       console.error('    For real Bitcoin inscriptions, use the SDK programmatically.\n');
@@ -286,7 +294,7 @@ function createMockBitcoinManager(): any {
       return {
         txid: mockTxid,
         inscriptionId: mockInscriptionId,
-        satoshi: 10000,
+        satoshi,
         blockHeight: 0, // Will be set when confirmed
       };
     },

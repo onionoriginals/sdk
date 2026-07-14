@@ -23,9 +23,20 @@ const createMockSigner = () => {
   });
 };
 
+// BtcoCelManager now pins the sat first: it inscribes via a buildContent(satoshi)
+// callback (so the migrate body can sign `to: did:btco:<sat>`). A mock inscribeData
+// must therefore invoke the callback with the returned satoshi, mirroring OrdMockProvider.
+const mockInscribeData = (result: { txid: string; inscriptionId: string; satoshi: string; blockHeight?: number }) =>
+  vi.fn(async (data: unknown) => {
+    if (typeof data === 'function') {
+      await (data as (s: string) => Buffer | Promise<Buffer>)(result.satoshi);
+    }
+    return result;
+  });
+
 // Mock BitcoinManager
 const createMockBitcoinManager = (): BitcoinManager => ({
-  inscribeData: vi.fn().mockResolvedValue({
+  inscribeData: mockInscribeData({
     txid: 'abc123def456',
     inscriptionId: 'abc123def456i0',
     satoshi: '1234567890',
@@ -220,7 +231,7 @@ describe('BtcoCelManager', () => {
       // createBtcoDidDocument — otherwise a regtest/signet asset resolves
       // against the mainnet ordinals namespace.
       const regtestBitcoin = {
-        inscribeData: vi.fn().mockResolvedValue({
+        inscribeData: mockInscribeData({
           txid: 'abc123def456',
           inscriptionId: 'abc123def456i0',
           satoshi: '1234567890',
@@ -247,7 +258,7 @@ describe('BtcoCelManager', () => {
       // the mainnet form. The network is recorded in the signed data, so replay
       // must be deterministic regardless of the replaying manager's network.
       const regtestBitcoin = {
-        inscribeData: vi.fn().mockResolvedValue({
+        inscribeData: mockInscribeData({
           txid: 'abc123def456',
           inscriptionId: 'abc123def456i0',
           satoshi: '1234567890',
@@ -509,6 +520,33 @@ describe('BtcoCelManager', () => {
       const state = manager.getCurrentState(log);
       expect(state.metadata?.network).toBe('my-app-network');
       expect(state.name).toBe('B');
+    });
+
+    it('preserves an application-defined `to` field on an ordinary update', async () => {
+      // Regression (#397 greptile P2): `to` is the SIGNED btco-anchor field, so it
+      // must be stripped from metadata only on btco migration events — not globally.
+      // An ordinary update carrying an application-defined `to` must keep it.
+      const log = {
+        events: [
+          { type: 'create', data: { did: 'did:peer:abc', name: 'A', layer: 'peer', resources: [] } },
+          { type: 'update', data: { name: 'B', to: 'application-defined-target', updatedAt: '2020-01-01T00:00:00.000Z' } },
+        ],
+      } as unknown as EventLog;
+
+      const state = manager.getCurrentState(log);
+      expect(state.metadata?.to).toBe('application-defined-target');
+      expect(state.name).toBe('B');
+    });
+
+    it('strips the signed `to` anchor from metadata on a btco migration event', async () => {
+      // The complement: on a real btco migration, `to` is consumed to derive the
+      // did:btco identity and must NOT leak into metadata.
+      const webvhLog = await createWebvhLog();
+      const btcoLog = await manager.migrate(webvhLog);
+      const migrationData = btcoLog.events[2].data as Record<string, unknown>;
+      expect(migrationData.to).toBe('did:btco:1234567890'); // signed into the body
+      const state = manager.getCurrentState(btcoLog);
+      expect(state.metadata?.to).toBeUndefined(); // but not surfaced as metadata
     });
 
     it('should not be deactivated after migration', async () => {

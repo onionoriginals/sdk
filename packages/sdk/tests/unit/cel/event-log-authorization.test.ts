@@ -50,40 +50,49 @@ function makeSigner() {
 // the inscription exists, sits on the claimed satoshi, and commits to the
 // event digest.
 const mockBitcoin = (): { manager: BitcoinManager; ordinalsProvider: any } => {
-  let lastPayload: unknown;
+  const satoshi = '1234567890';
+  const inscriptionId = 'abc123def456i0';
+  const txid = 'abc123def456';
+  const blockHeight = 800000;
+  // BtcoCelManager pins the sat first: it inscribes via a buildContent(satoshi)
+  // callback, so capture what that callback produced (the btco DID document that
+  // IS the witness artifact) and serve it back from the ordinals lookup.
+  let lastContent: Buffer | undefined;
   const manager = {
     network: 'mainnet',
     inscribeData: async (data: unknown) => {
-      lastPayload = data;
-      return {
-        txid: 'abc123def456',
-        inscriptionId: 'abc123def456i0',
-        satoshi: '1234567890',
-        blockHeight: 800000,
-      };
+      lastContent = typeof data === 'function'
+        ? Buffer.from(await (data as (s: string) => Buffer | Promise<Buffer>)(satoshi))
+        : Buffer.from(JSON.stringify(data));
+      return { txid, inscriptionId, satoshi, blockHeight };
     },
   } as unknown as BitcoinManager;
   const ordinalsProvider = {
     getInscriptionById: async (id: string) =>
-      id === 'abc123def456i0'
+      id === inscriptionId
         ? {
             inscriptionId: id,
-            content: Buffer.from(JSON.stringify(lastPayload)),
-            contentType: 'application/json',
-            txid: 'abc123def456',
-            satoshi: '1234567890',
+            content: lastContent,
+            contentType: 'application/did+json',
+            txid,
+            satoshi,
           }
         : null,
+    // First-anchor-wins uniqueness: enumerate this sat's anchoring iff the
+    // inscribed doc back-links the queried did:cel (mirrors OrdMockProvider).
+    getAnchoringsForDidCel: async (didCel: string) => {
+      const parsed = lastContent ? JSON.parse(lastContent.toString()) : null;
+      const aka = (parsed as { alsoKnownAs?: unknown } | null)?.alsoKnownAs;
+      return Array.isArray(aka) && aka.includes(didCel)
+        ? [{ satoshi, inscriptionId, blockHeight }]
+        : [];
+    },
   };
   return { manager, ordinalsProvider };
 };
 
 describe('CEL event-log authorization and btco verifiability', () => {
-  // QUARANTINED (#397): BtcoCelManager.migrate (via the WitnessService digest-first
-  // path) cannot yet sign the anchoring sat into the migrate body, so the anchored-sat
-  // verifier (design 2026-07-13, Part A) rejects its logs with UNBOUND_ANCHOR. Re-enable
-  // once BtcoCelManager gains a pin-sat-first inscribe / converges with LifecycleManager.
-  it.skip('a real webvh→btco migration produces a verifiable log', async () => {
+  it('a real webvh→btco migration produces a verifiable log', async () => {
     const signer = makeSigner();
     const peer = new PeerCelManager(signer as any);
     let { log } = await peer.create('Asset', [{ digestMultibase: 'uHash', mediaType: 'image/png' }]);
@@ -109,6 +118,51 @@ describe('CEL event-log authorization and btco verifiability', () => {
     expect((last.data as any).targetDid).toBeUndefined();
     const state = new BtcoCelManager(makeSigner() as any, mockBitcoin().manager).getCurrentState(btcoLog);
     expect(/^did:btco:[0-9]+$/.test(state.did)).toBe(true);
+  });
+
+  it('signs the anchoring sat into data.to and the witness proof carries the same sat (#397)', async () => {
+    // The sat signed into the migrate body, the sat the bitcoin witness proof
+    // carries, and the sat the inscription landed on must all agree — this is
+    // the anchored-sat binding the Part A verifier enforces.
+    const signer = makeSigner();
+    let { log } = await new PeerCelManager(signer as any).create('Asset', []);
+    log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
+    const { manager } = mockBitcoin(); // network 'mainnet', satoshi '1234567890'
+    const btcoLog = await new BtcoCelManager(signer as any, manager).migrate(log);
+
+    const last = btcoLog.events[btcoLog.events.length - 1];
+    expect(last.type).toBe('migrate');
+    // The SIGNED body carries the resolvable did:btco anchor (mainnet is bare).
+    expect((last.data as any).to).toBe('did:btco:1234567890');
+    // The bitcoin witness proof carries the SAME sat.
+    const bp = (last.proof as any[]).find(p => p.cryptosuite === 'bitcoin-ordinals-2024');
+    expect(bp).toBeDefined();
+    expect(bp.satoshi).toBe('1234567890');
+    // `to` is a signed field (covered by the controller proof over {type,data,previousEvent}).
+    const controllerProof = (last.proof as any[]).find(p => p.cryptosuite === 'eddsa-jcs-2022');
+    const reverified = await ed25519.verifyAsync(
+      multikey.decodeMultibase(controllerProof.proofValue),
+      canonicalizeEvent({ type: last.type, data: last.data, previousEvent: (last as any).previousEvent }),
+      multikey.decodePublicKey(controllerProof.verificationMethod.split('#')[0].slice('did:key:'.length)).key
+    );
+    expect(reverified).toBe(true);
+  });
+
+  it('fails closed if the inscription lands on a different sat than was signed (#397)', async () => {
+    // If the reveal returns a sat that disagrees with the one signed into
+    // data.to, the migrate must throw rather than emit a mis-anchored log.
+    const signer = makeSigner();
+    let { log } = await new PeerCelManager(signer as any).create('Asset', []);
+    log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
+    // Manager whose buildContent pins one sat but whose reveal returns another.
+    const treacherous = {
+      network: 'mainnet',
+      inscribeData: async (data: unknown) => {
+        if (typeof data === 'function') await (data as (s: string) => any)('1111111111');
+        return { txid: 'tx', inscriptionId: 'txi0', satoshi: '9999999999', blockHeight: 1 };
+      },
+    } as unknown as BitcoinManager;
+    await expect(new BtcoCelManager(signer as any, treacherous).migrate(log)).rejects.toThrow(/Anchoring sat mismatch/);
   });
 
   it('reports a clear "content is missing" diagnostic when the witness inscription has no content', async () => {
