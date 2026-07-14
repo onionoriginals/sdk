@@ -56,42 +56,8 @@ async function makeTempDir(): Promise<{ dir: string; cleanup: () => Promise<void
 // DID-001 — create did:peer with empty resources → valid DID doc
 // ---------------------------------------------------------------------------
 
-describe('DID-001 — did:peer with empty resources', () => {
-  test('createDIDPeer with empty resource list produces valid DID document', async () => {
-    const manager = new DIDManager(baseConfig);
-
-    // Resources are passed to the lifecycle layer, NOT stored in the DID doc itself.
-    // An empty resource list should still produce a well-formed did:peer document.
-    const didDoc = await manager.createDIDPeer([]);
-
-    // Must be a real DID document
-    expect(didDoc).toBeDefined();
-    expect(typeof didDoc.id).toBe('string');
-    expect(didDoc.id).toMatch(/^did:peer:/);
-    expect(Array.isArray(didDoc['@context'])).toBe(true);
-    expect(didDoc['@context'].length).toBeGreaterThan(0);
-
-    // Must carry at least one verification method
-    expect(Array.isArray(didDoc.verificationMethod)).toBe(true);
-    expect((didDoc.verificationMethod ?? []).length).toBeGreaterThan(0);
-
-    // The DID doc must NOT contain a "resources" field — resources are external
-    expect((didDoc as Record<string, unknown>)['resources']).toBeUndefined();
-  }, 10000);
-
-  test('createDIDPeer with empty resources returns keyPair when requested', async () => {
-    const manager = new DIDManager(baseConfig);
-    const result = await manager.createDIDPeer([], true);
-
-    expect(result).toHaveProperty('didDocument');
-    expect(result).toHaveProperty('keyPair');
-    const { didDocument, keyPair } = result;
-
-    expect(didDocument.id).toMatch(/^did:peer:/);
-    expect(keyPair.publicKey).toMatch(/^z/);
-    expect(keyPair.privateKey).toMatch(/^z/);
-  }, 10000);
-});
+// DID-001 removed (did:peer purge, did:cel Phase 4·5/5): createDIDPeer and the
+// did:peer creation path are gone; did:cel is the sole genesis layer.
 
 // ---------------------------------------------------------------------------
 // DID-006 — create did:webvh with mock external signer
