@@ -385,7 +385,7 @@ describe('Batch Operations Integration', () => {
       // Verify complete provenance chain
       for (const asset of inscribedAssets) {
         const provenance = asset.getProvenance();
-        expect(provenance.migrations).toHaveLength(2); // peer -> webvh -> btco
+        expect(provenance.migrations).toHaveLength(2); // cel -> webvh -> btco
         expect(provenance.migrations[0].from).toBe('did:cel');
         expect(provenance.migrations[0].to).toBe('did:webvh');
         expect(provenance.migrations[1].from).toBe('did:webvh');

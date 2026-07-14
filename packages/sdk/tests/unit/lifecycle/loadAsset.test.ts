@@ -59,7 +59,8 @@ describe('loadAsset — round-trip', () => {
     expect(verification?.verified).toBe(true);
     expect(warnings).toEqual([]);
 
-    // Identity + layer restored (ctor would have derived 'did:peer' for did:cel).
+    // Identity + layer restored (ctor derives the genesis 'did:cel'; restore()
+    // overrides it with the folded post-migration layer 'did:btco').
     expect(loaded.id).toBe(asset.id);
     expect(loaded.currentLayer).toBe('did:btco');
     expect(loaded.currentLayer).toBe(asset.currentLayer);

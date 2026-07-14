@@ -17,7 +17,7 @@ const resources = [
 
 describe('LifecycleManager - Clean API', () => {
   describe('createDraft', () => {
-    test('creates a peer-layer asset', async () => {
+    test('creates a did:cel-layer asset', async () => {
       const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const asset = await sdk.lifecycle.createDraft(resources);
       expect(asset.currentLayer).toBe('did:cel');

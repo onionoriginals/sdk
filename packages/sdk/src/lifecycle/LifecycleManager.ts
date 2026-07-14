@@ -1670,6 +1670,10 @@ export class LifecycleManager {
         id: asset.id,
         migratedTo,
         resourceId: asset.resources[0].id,
+        // TODO(did:cel sub-project 5): frozen at 'did:peer' by the layer-label-rename
+        // spec non-goal (credentials untouched). For a did:cel genesis this now
+        // disagrees with the asset:migrated event / getProvenance().from ('did:cel');
+        // reconcile when credentials are unfrozen.
         fromLayer: 'did:peer' as const,
         toLayer: 'did:webvh' as const,
         migratedAt: new Date().toISOString()
