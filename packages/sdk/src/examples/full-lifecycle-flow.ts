@@ -3,7 +3,7 @@
  * 
  * This comprehensive example demonstrates the complete lifecycle of an Original:
  * 
- * 1. Create a draft (did:peer) - Private, offline creation
+ * 1. Create a draft (did:cel) - Private, offline creation
  * 2. Validate and estimate costs
  * 3. Publish to web (did:webvh) - Public discovery
  * 4. Inscribe on Bitcoin (did:btco) - Permanent ownership
@@ -118,10 +118,10 @@ Date: ${new Date().toISOString()}
 }
 
 /**
- * Step 2: Create a draft asset (did:peer layer)
+ * Step 2: Create a draft asset (did:cel genesis layer)
  */
 async function createDraft(sdk: OriginalsSDK): Promise<OriginalsAsset> {
-  console.log('\n📝 STEP 2: Creating Draft Asset (did:peer)\n');
+  console.log('\n📝 STEP 2: Creating Draft Asset (did:cel)\n');
 
   const content = `
 {
@@ -441,7 +441,7 @@ async function main(): Promise<void> {
   console.log('╔════════════════════════════════════════════════════════════════╗');
   console.log('║           ORIGINALS SDK - FULL LIFECYCLE FLOW                 ║');
   console.log('║                                                                ║');
-  console.log('║   did:peer → did:webvh → did:btco → Transfer                  ║');
+  console.log('║   did:cel → did:webvh → did:btco → Transfer                  ║');
   console.log('╚════════════════════════════════════════════════════════════════╝');
 
   try {
