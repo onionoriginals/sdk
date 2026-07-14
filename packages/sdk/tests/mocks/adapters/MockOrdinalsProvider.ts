@@ -1,18 +1,31 @@
-import type { OrdinalsProvider } from '../../../src/adapters/types';
+import type { OrdinalsProvider, InscriptionParts } from '../../../src/adapters/types';
 
 export class MockOrdinalsProvider implements OrdinalsProvider {
   async createInscription(params: {
     data?: Buffer;
-    buildContent?: (satoshi: string) => Buffer | Promise<Buffer>;
+    buildContent?: (satoshi: string) => InscriptionParts | Promise<InscriptionParts>;
     contentType: string;
     feeRate?: number;
+    metadata?: Record<string, unknown>;
     targetSatoshi?: string;
   }) {
-    // Pin the sat first, then invoke deferred content with it (Task 1/2 API).
+    // Pin the sat first, then invoke deferred content with it. The deferred
+    // builder may return a bare Buffer or `{ content, metadata }` (#407 phase 2).
     const satoshi = params.targetSatoshi ?? '123';
-    const content = params.buildContent
-      ? Buffer.from(await params.buildContent(satoshi))
-      : (params.data as Buffer);
+    let content: Buffer;
+    let deferredMetadata: Record<string, unknown> | undefined;
+    if (params.buildContent) {
+      const built = await params.buildContent(satoshi);
+      if (Buffer.isBuffer(built)) {
+        content = Buffer.from(built);
+      } else {
+        content = Buffer.from(built.content);
+        deferredMetadata = built.metadata;
+      }
+    } else {
+      content = params.data as Buffer;
+    }
+    const metadata = deferredMetadata ?? params.metadata;
     return {
       inscriptionId: 'insc-mock',
       revealTxId: 'tx-reveal-mock',
@@ -23,7 +36,8 @@ export class MockOrdinalsProvider implements OrdinalsProvider {
       blockHeight: 1,
       content,
       contentType: params.contentType,
-      feeRate: params.feeRate
+      feeRate: params.feeRate,
+      ...(metadata !== undefined ? { metadata } : {})
     };
   }
 

@@ -1957,26 +1957,21 @@ export class LifecycleManager {
    * phase 2): the most-recent resource's inline bytes + its MIME type. The head
    * is derived from the LOG (mostRecentResourceHead) — the same source the
    * verifier uses — then matched by hash to the in-memory resources array to
-   * recover the bytes. Fails closed when the head cannot be derived or the
-   * matched resource carries no inline content (media we do not hold cannot be
-   * inscribed on-chain).
+   * recover the bytes.
+   *
+   * Returns null when no inline media is available (the head resource is a pure
+   * reference — hosted/hash-only, no inline bytes). Provenance still rides in
+   * metadata; the caller falls back to inscribing the DID document as content,
+   * so such assets carry NO media on-chain (honest, per the reference-only
+   * pattern this SDK supports — content-as-ordinal applies to inline media only).
    */
-  private resolveHeadMediaForInscription(asset: OriginalsAsset): { content: Buffer; contentType: string } {
+  private tryResolveHeadMedia(asset: OriginalsAsset): { content: Buffer; contentType: string } | null {
     const log = asset.celLog;
-    if (!log) {
-      throw new StructuredError('INVALID_STATE', 'Cannot inscribe: asset has no CEL log to derive the current media from.');
-    }
+    if (!log) return null;
     const head = mostRecentResourceHead(log);
-    if (!head) {
-      throw new StructuredError('INVALID_STATE', 'Cannot inscribe: no resource head could be derived from the log.');
-    }
+    if (!head) return null;
     const res = asset.resources.find(r => r.hash === head.hash);
-    if (!res || typeof res.content !== 'string') {
-      throw new StructuredError(
-        'CONTENT_UNAVAILABLE',
-        `Cannot inscribe the current media on-chain: the most-recent resource (${head.resourceId || '(unknown)'}, hash ${head.hash}) has no inline content to embed.`
-      );
-    }
+    if (!res || typeof res.content !== 'string') return null;
     return {
       content: Buffer.from(res.content, 'utf8'),
       contentType: res.contentType ?? head.contentType ?? 'application/octet-stream'
@@ -2065,9 +2060,11 @@ export class LifecycleManager {
     // current media (the most-recent resource's bytes), resolved from the LOG so
     // writer and verifier agree; its METADATA carries the byte-light provenance
     // (DID doc + CEL log). The media is sat-independent, so resolve it before the
-    // deferred window; a most-recent resource with no inline content fails closed
-    // (we cannot put media we do not hold on-chain).
-    const headMedia = this.resolveHeadMediaForInscription(asset);
+    // deferred window. When the head resource is a pure reference (no inline
+    // bytes), fall back to inscribing the DID document as content — provenance is
+    // still in metadata, just no media on-chain.
+    const headMedia = this.tryResolveHeadMedia(asset);
+    const inscriptionContentType = headMedia ? headMedia.contentType : 'application/did+json';
     // Held locally, not captured into the asset yet: buildContent runs BEFORE
     // the inscription is confirmed (satoshi known, asset.migrate succeeded).
     // Capturing here would leave a stale doc in #didDocuments with no rollback
@@ -2108,14 +2105,14 @@ export class LifecycleManager {
         // Metadata = { didDocument, celLog }. Snapshot the log AFTER the migrate
         // append so the embedded celLog head equals the #cel anchor digest.
         return {
-          content: headMedia.content,
+          content: headMedia ? headMedia.content : Buffer.from(JSON.stringify(btcoDoc)),
           metadata: {
             didDocument: btcoDoc,
             ...(asset.celLog ? { celLog: JSON.parse(serializeEventLogJson(asset.celLog)) as Record<string, unknown> } : {})
           }
         };
       },
-      headMedia.contentType,
+      inscriptionContentType,
       feeRate,
       // Key the shared money-lock by the asset's current DID so a concurrent
       // MigrationManager.migrate of the same DID is blocked at inscribe (issue #303).
@@ -2515,16 +2512,17 @@ export class LifecycleManager {
     // metadata = { didDocument: rotatedDoc, celLog }. The sat is already known
     // (reinscription targets it), so both are built synchronously; snapshot the
     // log now — the caller has already appended the rotateKey + embedded the
-    // fresh #cel anchor, so the celLog head equals that anchor.
-    const headMedia = this.resolveHeadMediaForInscription(asset);
+    // fresh #cel anchor, so the celLog head equals that anchor. No inline media
+    // (pure-reference head) → fall back to the DID document as content.
+    const headMedia = this.tryResolveHeadMedia(asset);
     const metadata: Record<string, unknown> = {
       didDocument: rotatedDoc,
       ...(asset.celLog ? { celLog: JSON.parse(serializeEventLogJson(asset.celLog)) as Record<string, unknown> } : {})
     };
     try {
       return await bitcoinManager.inscribeData(
-        headMedia.content,
-        headMedia.contentType,
+        headMedia ? headMedia.content : Buffer.from(JSON.stringify(rotatedDoc)),
+        headMedia ? headMedia.contentType : 'application/did+json',
         feeRate,
         { targetSatoshi: satoshi, metadata }
       );
