@@ -161,9 +161,13 @@ describeRegtest('OriginalsSDK with regtest provider', () => {
     expect(sdk.lifecycle).toBeTruthy();
   });
 
-  test('DID peer creation works alongside regtest provider', async () => {
-    const didDoc = await sdk.did.createDIDPeer();
-    expect(didDoc.id).toMatch(/^did:peer:/);
+  test('asset creation (did:cel genesis) works alongside regtest provider', async () => {
+    // did:peer creation was removed (did:peer purge, did:cel Phase 4·5/5);
+    // did:cel is the sole genesis layer.
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r1', type: 'data', contentType: 'text/plain', hash: 'a'.repeat(64), content: 'x' },
+    ]);
+    expect(asset.id).toMatch(/^did:cel:/);
   });
 
   test('bitcoin.trackInscription returns null for nonexistent', async () => {

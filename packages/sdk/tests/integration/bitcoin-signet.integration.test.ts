@@ -200,9 +200,12 @@ describeSignet('OriginalsSDK with signet provider', () => {
   });
 
   test('SDK DID operations work alongside signet provider', async () => {
-    // Verify DID creation still works when signet provider is configured
-    const didDoc = await sdk.did.createDIDPeer();
-    expect(didDoc.id).toMatch(/^did:peer:/);
+    // Verify asset creation (did:cel genesis) works when the signet provider is
+    // configured. did:peer creation was removed (did:peer purge, did:cel Phase 4·5/5).
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r1', type: 'data', contentType: 'text/plain', hash: 'a'.repeat(64), content: 'x' },
+    ]);
+    expect(asset.id).toMatch(/^did:cel:/);
   });
 });
 
