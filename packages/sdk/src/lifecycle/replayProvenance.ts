@@ -99,6 +99,9 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
       // fields and are skipped.
       const resourceId = typeof data.resourceId === 'string' ? data.resourceId : undefined;
       const previousVersionHash = typeof data.previousVersionHash === 'string' ? data.previousVersionHash : undefined;
+      // An empty-string toHash folds here but is rejected upstream by
+      // checkResourceUpdateContinuity (loadAsset verifies before consuming the
+      // fold), so no unbacked head reaches the resource-binding gate.
       const toHash = typeof data.toHash === 'string' ? data.toHash : undefined;
       if (resourceId && previousVersionHash && toHash !== undefined) {
         const toVersion = typeof data.toVersion === 'number' ? data.toVersion : NaN;

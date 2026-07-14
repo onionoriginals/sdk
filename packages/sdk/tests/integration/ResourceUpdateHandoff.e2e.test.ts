@@ -73,6 +73,46 @@ describe('Resource-update handoff (e2e)', () => {
     await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow();
   });
 
+  test('injected never-signed resource (labeled v1) is rejected at load (#407 total binding)', async () => {
+    // An attacker appends a self-consistent, never-signed resource to the
+    // envelope and labels it version 1. The genesis subset-binding passes (the
+    // genuine genesis digest is still present) and the v≥2 gate skips it, so
+    // without a TOTAL resource↔log binding it would restore as genuine content
+    // and flow into the buyer's published/inscribed identity. Must fail closed.
+    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    const asset = await creator.lifecycle.createAsset([
+      { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+    ]);
+    const envelope = asset.serialize();
+    envelope.resources.push({
+      id: 'injected', type: 'text', content: 'attacker-payload',
+      contentType: 'text/plain', hash: h('attacker-payload'), version: 1
+    } as (typeof envelope.resources)[number]);
+
+    const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow(/not declared by the log/);
+  });
+
+  test('downgrade: a genuine v2 blob relabeled to v1 with forged content is rejected at load (#407)', async () => {
+    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    const asset = await creator.lifecycle.createAsset([
+      { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+    ]);
+    await asset.addResourceVersion('note', 'v2', 'text/plain');
+    const envelope = asset.serialize();
+
+    // Take the v2 blob, forge its content self-consistently, and relabel it v1 to
+    // dodge the v≥2 event-backing gate. Its hash matches neither the genesis digest
+    // nor the update toHash → rejected.
+    const v2 = envelope.resources.find(r => r.id === 'note' && r.version === 2)!;
+    v2.version = 1;
+    v2.content = 'forged';
+    v2.hash = h('forged');
+
+    const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow(/not declared by the log/);
+  });
+
   test('forged post-genesis env.resource (self-consistent) is rejected at load even though the log verifies', async () => {
     // Greptile #401 gap: the LOG's update event keeps its genuine content (so
     // verifyEventLog passes), but the envelope's CAPTURED resource snapshot for
