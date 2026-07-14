@@ -14,7 +14,7 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
   };
 
   const createAssetAtLayer = (layer: string, id?: string) => {
-    const didId = id ?? (layer === 'did:peer' ? 'did:peer:z6MkTestPeer1' : 'did:webvh:example.com:asset1');
+    const didId = id ?? (layer === 'did:cel' ? 'did:cel:z6MkTestPeer1' : 'did:webvh:example.com:asset1');
     return new OriginalsAsset(
       [{ id: 'res1', type: 'image', contentType: 'image/png', hash: 'abc123' }],
       { '@context': ['https://www.w3.org/ns/did/v1'], id: didId } as any,
@@ -33,9 +33,9 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
     expect(result).toBe(asset); // Returns same asset object, mutated
   });
 
-  test('inscribes did:peer asset directly to did:btco', async () => {
+  test('inscribes did:cel asset directly to did:btco', async () => {
     const sdk = createSDK();
-    const asset = createAssetAtLayer('did:peer');
+    const asset = createAssetAtLayer('did:cel');
     const result = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
 
     expect(result.currentLayer).toBe('did:btco');

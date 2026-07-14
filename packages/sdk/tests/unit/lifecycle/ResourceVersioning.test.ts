@@ -147,7 +147,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
     
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     
     expect(asset.resources.length).toBe(1);
     expect(asset.resources[0].version).toBe(1);
@@ -165,7 +165,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     const newResource = await asset.addResourceVersion('res1', 'hello world', 'text/plain', 'Added world');
     
     expect(asset.resources.length).toBe(2);
@@ -190,7 +190,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
 
     await expect(asset.addResourceVersion('res1', 'hello', 'text/plain')).rejects.toThrow('Content unchanged');
   });
@@ -206,7 +206,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
 
     await expect(asset.addResourceVersion('nonexistent', 'content', 'text/plain')).rejects.toThrow('Resource with id nonexistent not found');
   });
@@ -222,7 +222,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     await asset.addResourceVersion('res1', 'v2', 'text/plain');
     await asset.addResourceVersion('res1', 'v3', 'text/plain');
 
@@ -244,7 +244,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     await asset.addResourceVersion('res1', 'v2', 'text/plain');
 
     const history = asset.getResourceHistory('res1');
@@ -265,7 +265,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     await asset.addResourceVersion('res1', 'v2', 'text/plain');
     await asset.addResourceVersion('res1', 'v3', 'text/plain');
 
@@ -291,7 +291,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
     
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     
     let eventEmitted = false;
     let capturedEvent: any = null;
@@ -327,7 +327,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     const skipped: unknown[] = [];
     asset.on('cel:append-skipped', (e) => skipped.push(e));
 
@@ -358,7 +358,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
     
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     const newResource = await asset.addResourceVersion('res1', content2, 'text/plain');
 
     expect(newResource.hash).toBe(hash2);
@@ -376,7 +376,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     const buffer2 = Buffer.from('binary content 2', 'utf-8');
     // Buffer content used to be accepted but only its hash was stored — the
     // bytes were unrecoverably lost. It now throws so the loss is impossible.
@@ -386,7 +386,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       .rejects.toThrow(/binary \(Buffer\) content/);
   });
 
-  test('versioning works across all layers (did:peer)', async () => {
+  test('versioning works across all layers (did:cel)', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -397,8 +397,8 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    expect(asset.currentLayer).toBe('did:peer');
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
+    expect(asset.currentLayer).toBe('did:cel');
 
     const newResource = await asset.addResourceVersion('res1', 'v2', 'text/plain');
     expect(newResource.version).toBe(2);
@@ -458,7 +458,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
 
     await asset.addResourceVersion('res1', 'res1-v2', 'text/plain');
     await asset.addResourceVersion('res2', 'res2-v2', 'text/plain');
@@ -482,7 +482,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     const beforeTime = new Date().toISOString();
 
     const newResource = await asset.addResourceVersion('res1', 'v2', 'text/plain');
@@ -533,7 +533,7 @@ describe('OriginalsAsset - Unsorted Resource Loading', () => {
       }
     ];
     
-    const asset = new OriginalsAsset(unsortedResources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(unsortedResources, buildDid('did:cel:xyz'), emptyCreds);
     
     // Verify version history is correct despite unsorted input
     const history = asset.getResourceHistory('res1');
@@ -606,7 +606,7 @@ describe('OriginalsAsset - Unsorted Resource Loading', () => {
       }
     ];
     
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     
     // Verify both resources have correct version chains
     const res1History = asset.getResourceHistory('res1');
@@ -633,7 +633,7 @@ describe('OriginalsAsset - Credential Integration', () => {
       }
     ];
     
-    const didDoc = buildDid('did:peer:xyz');
+    const didDoc = buildDid('did:cel:xyz');
     const asset = new OriginalsAsset(resources, didDoc, emptyCreds);
     
     // Create credential manager

@@ -94,13 +94,8 @@ describe('Playground REPL', () => {
     expect(output).toContain('sat/vB');
   });
 
-  test('creates a standalone did:peer', async () => {
-    const output = await runRepl(['did-peer TestPeer', 'exit']);
-    expect(output).toContain('Created did:peer');
-    expect(output).toContain('DID: did:peer:');
-    expect(output).toContain('Document:');
-    expect(output).toContain('verificationMethod');
-  });
+  // The standalone `did-peer` REPL command was removed with the did:peer purge
+  // (did:cel Phase 4·5/5); did:cel genesis is created via `create` (covered above).
 
   test('publishes an asset to web', async () => {
     const output = await runRepl(['create', 'publish a1', 'exit']);

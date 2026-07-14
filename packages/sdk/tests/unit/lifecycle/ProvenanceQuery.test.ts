@@ -27,8 +27,8 @@ describe('ProvenanceQuery', () => {
   let asset: OriginalsAsset;
 
   beforeEach(() => {
-    // Create asset with did:peer
-    asset = new OriginalsAsset(resources, buildDid('did:peer:abc123'), emptyCreds);
+    // Create asset with did:cel genesis (did:peer purge, Phase 4·5/5)
+    asset = new OriginalsAsset(resources, buildDid('did:cel:abc123'), emptyCreds);
 
     // Simulate publishing to web (peer → webvh)
     asset.migrate('did:webvh', { transactionId: 'tx-web-123' });
@@ -73,13 +73,13 @@ describe('ProvenanceQuery', () => {
     });
 
     test('should return null for first when no results', () => {
-      const emptyAsset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+      const emptyAsset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
       const first = emptyAsset.queryProvenance().first();
       expect(first).toBeNull();
     });
 
     test('should return null for last when no results', () => {
-      const emptyAsset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+      const emptyAsset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
       const last = emptyAsset.queryProvenance().last();
       expect(last).toBeNull();
     });
@@ -89,7 +89,7 @@ describe('ProvenanceQuery', () => {
     test('should query all migrations', () => {
       const migrations = asset.queryProvenance().migrations().all();
       expect(migrations).toHaveLength(2); // peer→webvh, webvh→btco
-      expect(migrations[0].from).toBe('did:peer');
+      expect(migrations[0].from).toBe('did:cel');
       expect(migrations[0].to).toBe('did:webvh');
       expect(migrations[1].from).toBe('did:webvh');
       expect(migrations[1].to).toBe('did:btco');
@@ -103,10 +103,10 @@ describe('ProvenanceQuery', () => {
     test('should filter by fromLayer', () => {
       const fromPeer = asset.queryProvenance()
         .migrations()
-        .fromLayer('did:peer')
+        .fromLayer('did:cel')
         .all();
       expect(fromPeer).toHaveLength(1);
-      expect(fromPeer[0].from).toBe('did:peer');
+      expect(fromPeer[0].from).toBe('did:cel');
       expect(fromPeer[0].to).toBe('did:webvh');
     });
 
@@ -141,11 +141,11 @@ describe('ProvenanceQuery', () => {
     test('should chain multiple filters', () => {
       const result = asset.queryProvenance()
         .migrations()
-        .fromLayer('did:peer')
+        .fromLayer('did:cel')
         .toLayer('did:webvh')
         .all();
       expect(result).toHaveLength(1);
-      expect(result[0].from).toBe('did:peer');
+      expect(result[0].from).toBe('did:cel');
       expect(result[0].to).toBe('did:webvh');
     });
 
@@ -165,7 +165,7 @@ describe('ProvenanceQuery', () => {
     test('should get first migration', () => {
       const first = asset.queryProvenance().migrations().first();
       expect(first).toBeDefined();
-      expect(first?.from).toBe('did:peer');
+      expect(first?.from).toBe('did:cel');
     });
 
     test('should get last migration', () => {
@@ -255,7 +255,7 @@ describe('ProvenanceQuery', () => {
       const result = asset.queryProvenance()
         .after(yesterday)
         .migrations()
-        .fromLayer('did:peer')
+        .fromLayer('did:cel')
         .all();
       expect(result.length).toBe(1);
     });
@@ -279,7 +279,7 @@ describe('ProvenanceQuery', () => {
     });
 
     test('getMigrationsToLayer should return empty array when no matches', () => {
-      const result = asset.getMigrationsToLayer('did:peer');
+      const result = asset.getMigrationsToLayer('did:cel');
       expect(result).toHaveLength(0);
     });
 
@@ -287,20 +287,20 @@ describe('ProvenanceQuery', () => {
       const summary = asset.getProvenanceSummary();
       expect(summary.migrationCount).toBe(2);
       expect(summary.currentLayer).toBe('did:btco');
-      expect(summary.creator).toBe('did:peer:abc123');
+      expect(summary.creator).toBe('did:cel:abc123');
       expect(summary.created).toBeDefined();
       expect(summary.lastActivity).toBeDefined();
     });
 
     test('getProvenanceSummary should use migration timestamp when migrations exist', () => {
-      const newAsset = new OriginalsAsset(resources, buildDid('did:peer:test'), emptyCreds);
+      const newAsset = new OriginalsAsset(resources, buildDid('did:cel:test'), emptyCreds);
       newAsset.migrate('did:webvh', { transactionId: 'tx1' });
       const summary = newAsset.getProvenanceSummary();
       expect(summary.lastActivity).toBe(newAsset.getProvenance().migrations[0].timestamp);
     });
 
     test('getProvenanceSummary should use createdAt when no migrations', () => {
-      const newAsset = new OriginalsAsset(resources, buildDid('did:peer:test'), emptyCreds);
+      const newAsset = new OriginalsAsset(resources, buildDid('did:cel:test'), emptyCreds);
       const summary = newAsset.getProvenanceSummary();
       expect(summary.lastActivity).toBe(summary.created);
     });
@@ -333,7 +333,7 @@ describe('ProvenanceQuery', () => {
     test('should allow calling migrations() on MigrationQuery (fluent)', () => {
       const result = asset.queryProvenance()
         .migrations()
-        .fromLayer('did:peer')
+        .fromLayer('did:cel')
         .migrations()
         .all();
       expect(result.length).toBe(1);
@@ -342,7 +342,7 @@ describe('ProvenanceQuery', () => {
 
   describe('edge cases', () => {
     test('should handle empty provenance chain', () => {
-      const emptyAsset = new OriginalsAsset(resources, buildDid('did:peer:empty'), emptyCreds);
+      const emptyAsset = new OriginalsAsset(resources, buildDid('did:cel:empty'), emptyCreds);
       const migrations = emptyAsset.queryProvenance().migrations().all();
       expect(migrations).toHaveLength(0);
     });
@@ -351,14 +351,14 @@ describe('ProvenanceQuery', () => {
       const result = asset.queryProvenance()
         .migrations()
         .fromLayer('did:btco')
-        .toLayer('did:peer')
+        .toLayer('did:cel')
         .all();
 
       expect(result).toHaveLength(0);
     });
 
     test('should handle undefined transaction IDs in filters', () => {
-      const newAsset = new OriginalsAsset(resources, buildDid('did:peer:test2'), emptyCreds);
+      const newAsset = new OriginalsAsset(resources, buildDid('did:cel:test2'), emptyCreds);
       newAsset.migrate('did:webvh'); // No transaction ID
 
       const result = newAsset.queryProvenance()
