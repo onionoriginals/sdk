@@ -678,7 +678,7 @@ export class OriginalsAsset {
     };
 
     // Append a signed `update` CEL event (or degrade). The body is the fixed
-    // resource-update shape; toHash is derived at verify/fold time.
+    // reference-shaped resource-update: it carries the signed toHash, not bytes.
     let appended = false;
     if (this.#celAppender) {
       // Finding 1: the verifier chains continuity from the ON-LOG head, but our
@@ -696,11 +696,15 @@ export class OriginalsAsset {
         });
         // Do NOT also call the appender — exactly one cel:append-skipped per call.
       } else {
+        // Reference-shaped body (#407 phase 1): the event carries the SIGNED
+        // `toHash`, never the bytes. Content lives in the resources array /
+        // serialize() envelope blobs (content-addressed store), keyed by hash.
+        // This keeps the log byte-light so it can be inscribed cheaply (phase 2).
         const digest = await this.#celAppender('update', {
           resourceId,
-          content: newContent,
           contentType,
           previousVersionHash: currentResource.hash,
+          toHash: newHash,
           toVersion: newVersion
         });
         appended = digest !== null; // null ⇒ the manager already emitted cel:append-skipped

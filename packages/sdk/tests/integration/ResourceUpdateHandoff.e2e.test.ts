@@ -28,7 +28,34 @@ describe('Resource-update handoff (e2e)', () => {
     expect(loaded.getProvenance().resourceUpdates.some(u => u.toVersion === 2)).toBe(true);
   });
 
-  test('content-tamper in the envelope is rejected at load', async () => {
+  test('byte-light log: the update event carries no content, and log size is independent of content size', async () => {
+    const mk = async (bytes: number) => {
+      const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+      const asset = await creator.lifecycle.createAsset([
+        { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+      ]);
+      const big = 'x'.repeat(bytes);
+      await asset.addResourceVersion('note', big, 'text/plain');
+      return asset;
+    };
+
+    const small = await mk(10);
+    const large = await mk(50_000);
+
+    // The signed update event references content by hash only — no bytes.
+    const ev = small.celLog!.events.find(e => e.type === 'update')!;
+    expect((ev.data as Record<string, unknown>).content).toBeUndefined();
+    expect(typeof (ev.data as { toHash?: unknown }).toHash).toBe('string');
+
+    // The log serialization does not grow with content size (bytes live in the
+    // content-addressed store, not the log) — the whole point of #407.
+    const logSize = (a: typeof small) => JSON.stringify(a.serialize().eventLog).length;
+    expect(Math.abs(logSize(large) - logSize(small))).toBeLessThan(200);
+    // The envelope's resource BLOB, by contrast, does carry the large content.
+    expect(large.serialize().resources.some(r => r.content && r.content.length >= 50_000)).toBe(true);
+  });
+
+  test('content-tamper in the envelope blob (hash(blob) != toHash) is rejected at load', async () => {
     const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
@@ -36,12 +63,74 @@ describe('Resource-update handoff (e2e)', () => {
     await asset.addResourceVersion('note', 'v2', 'text/plain');
     const envelope = asset.serialize();
 
-    // Flip the embedded content of the update event.
-    const updateEv = envelope.eventLog.events.find(e => e.type === 'update')!;
-    (updateEv.data as { content: string }).content = 'tampered';
+    // The bytes no longer live in the log event (#407) — they travel as a
+    // content-addressed blob in envelope.resources. Flip that blob (leaving the
+    // signed toHash on the log untouched): hash(blob) != toHash → fail closed.
+    const v2 = envelope.resources.find(r => r.id === 'note' && r.version === 2)!;
+    v2.content = 'tampered';
 
     const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow();
+  });
+
+  test('injected never-signed resource (labeled v1) is rejected at load (#407 total binding)', async () => {
+    // An attacker appends a self-consistent, never-signed resource to the
+    // envelope and labels it version 1. The genesis subset-binding passes (the
+    // genuine genesis digest is still present) and the v≥2 gate skips it, so
+    // without a TOTAL resource↔log binding it would restore as genuine content
+    // and flow into the buyer's published/inscribed identity. Must fail closed.
+    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    const asset = await creator.lifecycle.createAsset([
+      { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+    ]);
+    const envelope = asset.serialize();
+    envelope.resources.push({
+      id: 'injected', type: 'text', content: 'attacker-payload',
+      contentType: 'text/plain', hash: h('attacker-payload'), version: 1
+    } as (typeof envelope.resources)[number]);
+
+    const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow(/not declared by the log/);
+  });
+
+  test('downgrade: a genuine v2 blob relabeled to v1 with forged content is rejected at load (#407)', async () => {
+    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    const asset = await creator.lifecycle.createAsset([
+      { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+    ]);
+    await asset.addResourceVersion('note', 'v2', 'text/plain');
+    const envelope = asset.serialize();
+
+    // Take the v2 blob, forge its content self-consistently, and relabel it v1 to
+    // dodge the v≥2 event-backing gate. Its hash matches neither the genesis digest
+    // nor the update toHash → rejected.
+    const v2 = envelope.resources.find(r => r.id === 'note' && r.version === 2)!;
+    v2.version = 1;
+    v2.content = 'forged';
+    v2.hash = h('forged');
+
+    const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow(/not declared by the log/);
+  });
+
+  test('version-relabel: a GENUINE signed v2 blob relabeled to v1 is rejected at load (#407 version-exact binding)', async () => {
+    // Greptile P1: the v2 blob is genuine (its content IS the signed toVersion:2
+    // content), so a hash-MEMBERSHIP-only 4c would accept it at v1. But (id, v1)
+    // must bind to the genesis digest, not "any update toHash for this id" — a
+    // signed hash placed at the wrong version is a provenance-integrity break.
+    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    const asset = await creator.lifecycle.createAsset([
+      { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+    ]);
+    await asset.addResourceVersion('note', 'v2', 'text/plain');
+    const envelope = asset.serialize();
+
+    // Relabel the genuine v2 blob to version 1 (content and hash untouched).
+    const v2 = envelope.resources.find(r => r.id === 'note' && r.version === 2)!;
+    v2.version = 1;
+
+    const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow(/not declared by the log genesis/);
   });
 
   test('forged post-genesis env.resource (self-consistent) is rejected at load even though the log verifies', async () => {

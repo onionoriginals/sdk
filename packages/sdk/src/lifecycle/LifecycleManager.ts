@@ -31,7 +31,7 @@ import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
 import { appendEvent } from '../cel/algorithms/appendEvent.js';
-import { computeDigestMultibase } from '../cel/hash.js';
+import { computeDigestMultibase, digestMultibaseEquals } from '../cel/hash.js';
 import { canonicalizeEntryForChain } from '../cel/canonicalize.js';
 import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
 import type { EventLog, LogEntry, ExternalReference, WitnessProof, OrdinalsLookup, VerificationResult } from '../cel/types.js';
@@ -514,15 +514,19 @@ export class LifecycleManager {
         }
       }
 
-      // 4b) Post-genesis resource binding (#401). Genesis (v1) resources are
-      // bound by checkGenesisResourceBinding above; every resource version ≥ 2
-      // MUST instead be backed by a VERIFIED `update` log event with the SAME
-      // resourceId, version, and derived content hash. The step-4 loop only
-      // proves each resource is self-consistent (content ↔ its own hash), NOT
-      // that its content is the one the controller signed. Without this, a
-      // self-consistent forged post-genesis version (or an unprovable degraded
-      // version) in env.resources would load undetected while the fold reports
-      // the genuine hash. Fail closed — the verified log is the source of truth.
+      // 4b) Post-genesis resource binding (#401, generalized for #407). Genesis
+      // (v1) resources are bound by checkGenesisResourceBinding + the step-4
+      // content↔hash check above; every resource version ≥ 2 MUST instead be
+      // backed by a VERIFIED `update` log event with the SAME resourceId and
+      // version, and its blob content MUST hash to that event's SIGNED `toHash`.
+      //
+      // This is where CONTENT INTEGRITY now lives (#407): the verifier no longer
+      // recomputes hash(content) — the bytes are not in the event — so the load
+      // is the sole gate binding a content-addressed blob to the signed hash the
+      // controller committed to. We bind blob→toHash DIRECTLY (not transitively
+      // via the envelope-controlled res.hash): a forged blob (hash(content) ≠
+      // toHash), a self-consistent forgery (content and res.hash both swapped),
+      // and an unprovable degraded version (no backing event) all fail closed.
       for (const res of env.resources) {
         const version = typeof res.version === 'number' ? res.version : 1;
         if (version < 2) continue;
@@ -539,9 +543,64 @@ export class LifecycleManager {
         if (match.toHash.toLowerCase() !== String(res.hash).toLowerCase()) {
           throw new StructuredError(
             'ASSET_LOAD_VERIFICATION_FAILED',
-            `Resource ${res.id} v${version}: envelope hash (${res.hash}) does not match the verified log's derived hash (${match.toHash}).`,
+            `Resource ${res.id} v${version}: envelope hash (${res.hash}) does not match the verified log's signed hash (${match.toHash}).`,
             { verification }
           );
+        }
+        // Bind the actual blob to the signed toHash. The content-addressed store
+        // carries the bytes inline (AssetResource.content); a resource that omits
+        // them is a pure reference and rides on the res.hash↔toHash match above.
+        if (typeof res.content === 'string') {
+          const computed = hashResource(Buffer.from(res.content, 'utf8'));
+          if (computed.toLowerCase() !== match.toHash.toLowerCase()) {
+            throw new StructuredError(
+              'ASSET_LOAD_VERIFICATION_FAILED',
+              `Resource ${res.id} v${version}: blob content hashes to ${computed}, not the log's signed toHash (${match.toHash}).`,
+              { verification }
+            );
+          }
+        }
+      }
+
+      // 4c) EVERY genesis (version-1) envelope resource must match the LOG's
+      // genesis digest for its id EXACTLY (#407 — content integrity now lives at
+      // load, so the binding must be total AND version-exact). checkGenesisResource
+      // Binding above is subset-only (genesis ⊆ present) and step 4b keys off the
+      // attacker-controlled `res.version`, so a resource labeled `version:1` would
+      // otherwise skip 4b and be restored with zero backing. Version ≥ 2 resources
+      // are bound by 4b to their EXACT `toVersion` update event, so they are left
+      // to 4b here — binding v1 by mere hash-MEMBERSHIP (any update toHash for the
+      // id) would let a genuine higher-version blob be relabeled to v1 and survive
+      // (Greptile P1). Matching neither fails closed. Skipped only for legacy
+      // (data.did) geneses with no resources array (they predate this contract).
+      const genesisResources = (log.events[0]?.data as { resources?: unknown } | undefined)?.resources;
+      if (Array.isArray(genesisResources)) {
+        const genesisDigestById = new Map<string, string>();
+        const genesisDigestsIdless = new Set<string>();
+        for (const ref of genesisResources) {
+          const dm = (ref as { digestMultibase?: unknown })?.digestMultibase;
+          if (typeof dm !== 'string' || dm.length === 0) continue;
+          const id = (ref as { id?: unknown })?.id;
+          if (typeof id === 'string' && id.length > 0) genesisDigestById.set(id, dm);
+          else genesisDigestsIdless.add(dm);
+        }
+        for (const res of env.resources) {
+          const version = typeof res.version === 'number' ? res.version : 1;
+          if (version >= 2) continue; // bound version-exactly by 4b above
+          const resDigest = hexSha256ToDigestMultibase(String(res.hash));
+          const boundGenesis = genesisDigestById.get(res.id);
+          // id-bound genesis (#401): only THAT id's digest; id-less legacy genesis
+          // falls back to matching any genesis digest.
+          const matchesGenesis = boundGenesis !== undefined
+            ? digestMultibaseEquals(resDigest, boundGenesis)
+            : [...genesisDigestsIdless].some(d => digestMultibaseEquals(resDigest, d));
+          if (!matchesGenesis) {
+            throw new StructuredError(
+              'ASSET_LOAD_VERIFICATION_FAILED',
+              `Resource ${res.id} v${version} (hash ${res.hash}) is not declared by the log genesis; refusing to restore unbacked content.`,
+              { verification }
+            );
+          }
         }
       }
 
@@ -587,6 +646,26 @@ export class LifecycleManager {
         'Loaded a btco-anchored asset without an ordinals provider: head freshness was NOT checked, so a ' +
         'truncated (pre-rotation) authoring record cannot be ruled out. Re-load with a provider to verify freshness.'
       );
+    }
+    // Missing head blob (#407): the log folds a resource head (latest toHash per
+    // resourceId) that no envelope blob backs. Not a forgery — the signed hash
+    // chain is intact and a substituted blob would fail 4c — but the buyer would
+    // silently carry stale/absent content for the current version. Warn (like the
+    // freshness gap), fetchable-by-hash from the content-addressed store later.
+    if (!opts?.skipVerification) {
+      const headByResource = new Map<string, string>();
+      for (const u of folded.resourceUpdates) headByResource.set(u.resourceId, u.toHash);
+      for (const [resourceId, headHash] of headByResource) {
+        const backed = env.resources.some(
+          r => r.id === resourceId && String(r.hash).toLowerCase() === headHash.toLowerCase()
+        );
+        if (!backed) {
+          warnings.push(
+            `Resource ${resourceId}: the log's current version (toHash ${headHash}) has no backing blob in the ` +
+            `envelope; the loaded asset carries only an older version. Retrieve the current content by hash.`
+          );
+        }
+      }
     }
     const provenance = this.buildRestoredProvenance(log, folded, env, warnings);
 

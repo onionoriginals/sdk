@@ -24,7 +24,7 @@
  *    history is the sat's UTXO chain on Bitcoin, not the CEL.
  *  - `rotateKey` / `deactivate` → no provenance entries. Key rotation is
  *    custody, not provenance, for this fold. Resource-shaped `update` events
- *    (`resourceId` + `previousVersionHash` + inline `content`) fold into
+ *    (`resourceId` + `previousVersionHash` + signed `toHash`, #407) fold into
  *    `resourceUpdates`; generic/migration-ish `update` events do not.
  *
  * KNOWN, DOCUMENTED DIVERGENCE from the live in-memory caches
@@ -43,7 +43,6 @@
 import type { EventLog } from '../cel/types.js';
 import { deriveDidCel } from '../cel/celDid.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
-import { hashResource } from '../utils/validation.js';
 
 /** Honest sentinel: a btco migration whose satoshi cannot be recovered from the log. */
 export const BTCO_SATOSHI_UNKNOWN = 'did:btco:?';
@@ -94,12 +93,16 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
 
     if (event.type === 'update') {
       // Resource-update events (resourceId + previousVersionHash) fold into the
-      // resource-version history. toHash is DERIVED from inline content, never
-      // stored. Generic/migration-ish updates lack these fields and are skipped.
+      // resource-version history. toHash is the SIGNED field on the event (#407);
+      // content is no longer embedded. Generic/migration-ish updates lack these
+      // fields and are skipped.
       const resourceId = typeof data.resourceId === 'string' ? data.resourceId : undefined;
       const previousVersionHash = typeof data.previousVersionHash === 'string' ? data.previousVersionHash : undefined;
-      const content = typeof data.content === 'string' ? data.content : undefined;
-      if (resourceId && previousVersionHash && content !== undefined) {
+      // Require a NON-EMPTY toHash: replayProvenance is a public export, so a
+      // direct caller must not get an empty-hash resource head folded in (an
+      // empty-string toHash is a malformed update — the verifier rejects it too).
+      const toHash = typeof data.toHash === 'string' && data.toHash.length > 0 ? data.toHash : undefined;
+      if (resourceId && previousVersionHash && toHash !== undefined) {
         const toVersion = typeof data.toVersion === 'number' ? data.toVersion : NaN;
         const proofs = event.proof as ReadonlyArray<{ created?: unknown; witnessedAt?: unknown }> | undefined;
         const controllerProof = proofs?.find((p) => !(p && typeof p === 'object' && 'witnessedAt' in p));
@@ -107,7 +110,7 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
         const entry: ReplayedProvenance['resourceUpdates'][number] = {
           resourceId,
           fromHash: previousVersionHash,
-          toHash: hashResource(Buffer.from(content, 'utf-8')),
+          toHash,
           timestamp,
         };
         // Omit the version fields entirely for foreign logs whose update event
