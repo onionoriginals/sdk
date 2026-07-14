@@ -362,9 +362,9 @@ describe('LifecycleManager Key Management', () => {
 
       // Check credential structure
       const credential = published.credentials[0];
-      expect(credential.issuer).toBe(asset.id); // Peer DID is the issuer (#365)
+      expect(credential.issuer).toBe(asset.id); // genesis (did:cel) DID is the issuer (#365)
       expect(credential.type).toContain('ResourceMigrated');
-      expect((credential.credentialSubject as any).fromLayer).toBe('did:peer');
+      expect((credential.credentialSubject as any).fromLayer).toBe('did:cel');
       expect((credential.credentialSubject as any).toLayer).toBe('did:webvh');
       // Subject records the DID the asset migrated TO (the minted webvh DID).
       expect((credential.credentialSubject as any).migratedTo).toBe(published.bindings!['did:webvh']);
