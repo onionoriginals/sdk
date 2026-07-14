@@ -33,8 +33,8 @@ describe('OriginalsAsset', () => {
     expect(new OriginalsAsset(resources, buildDid('did:btco:123'), emptyCreds).currentLayer).toBe('did:btco');
   });
 
-  test('treats did:cel as the genesis-layer synonym for did:peer', () => {
-    expect(new OriginalsAsset(resources, buildDid('did:cel:uEiAabc'), emptyCreds).currentLayer).toBe('did:peer');
+  test('maps a did:cel genesis to the did:cel layer', () => {
+    expect(new OriginalsAsset(resources, buildDid('did:cel:uEiAabc'), emptyCreds).currentLayer).toBe('did:cel');
   });
 
   test('rejects invalid migration path', async () => {

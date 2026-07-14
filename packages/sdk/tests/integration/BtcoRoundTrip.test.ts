@@ -166,6 +166,6 @@ describe('inscribeOnBitcoin commits to the CEL head digest (#365)', () => {
     await expect(sdk.lifecycle.inscribeOnBitcoin(asset)).rejects.toThrow('broadcast failed');
     // Pure in-memory restore — nothing was paid before broadcast failed.
     expect(asset.celLog).toBe(logBefore);
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
   });
 });

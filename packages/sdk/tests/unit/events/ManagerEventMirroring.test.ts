@@ -42,7 +42,7 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
 
     expect(events.length).toBe(1);
-    expect(events[0].asset.fromLayer).toBe('did:peer');
+    expect(events[0].asset.fromLayer).toBe('did:cel');
     expect(events[0].asset.toLayer).toBe('did:webvh');
     expect(events[0].asset.id).toBe(asset.id);
   });

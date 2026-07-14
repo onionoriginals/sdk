@@ -149,7 +149,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
       // Verify asset creation
       expect(asset).toBeInstanceOf(OriginalsAsset);
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
       expect(asset.id).toMatch(/^did:cel:/);
       expect(asset.resources).toHaveLength(2);
       expect(asset.resources[0].id).toBe('resource-1');
@@ -196,7 +196,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify provenance after web migration
       const webProvenance = webAsset.getProvenance();
       expect(webProvenance.migrations).toHaveLength(1);
-      expect(webProvenance.migrations[0].from).toBe('did:peer');
+      expect(webProvenance.migrations[0].from).toBe('did:cel');
       expect(webProvenance.migrations[0].to).toBe('did:webvh');
       expect(webProvenance.migrations[0].timestamp).toBeDefined();
 
@@ -276,7 +276,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(finalProvenance.migrations).toHaveLength(2);
 
       // Verify migration chain
-      expect(finalProvenance.migrations[0].from).toBe('did:peer');
+      expect(finalProvenance.migrations[0].from).toBe('did:cel');
       expect(finalProvenance.migrations[0].to).toBe('did:webvh');
       expect(finalProvenance.migrations[1].from).toBe('did:webvh');
       expect(finalProvenance.migrations[1].to).toBe('did:btco');
@@ -303,7 +303,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       ];
 
       const asset = await sdk.lifecycle.createAsset(resources);
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
 
       // Inscribe directly to Bitcoin (skip webvh)
       const requestedFeeRate = 10;
@@ -314,7 +314,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       
       const provenance = btcoAsset.getProvenance();
       expect(provenance.migrations).toHaveLength(1);
-      expect(provenance.migrations[0].from).toBe('did:peer');
+      expect(provenance.migrations[0].from).toBe('did:cel');
       expect(provenance.migrations[0].to).toBe('did:btco');
       expect(provenance.migrations[0].feeRate).toBe(10); // Explicit rate wins over the oracle
 
@@ -685,7 +685,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(provenance.migrations).toHaveLength(2);
       
       const webMigration = provenance.migrations[0];
-      expect(webMigration.from).toBe('did:peer');
+      expect(webMigration.from).toBe('did:cel');
       expect(webMigration.to).toBe('did:webvh');
       expect(webMigration.timestamp).toBeDefined();
       expect(new Date(webMigration.timestamp).getTime()).toBeGreaterThanOrEqual(startTime);

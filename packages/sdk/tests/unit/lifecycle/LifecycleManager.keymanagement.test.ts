@@ -113,7 +113,7 @@ describe('LifecycleManager Key Management', () => {
     test('should automatically register key when keyStore is provided', async () => {
       const asset = await lifecycleManager.createAsset(resources);
 
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
       expect(asset.did.verificationMethod).toBeDefined();
       expect(asset.did.verificationMethod!.length).toBeGreaterThan(0);
 
@@ -132,7 +132,7 @@ describe('LifecycleManager Key Management', () => {
       const lifecycleWithoutKeyStore = new LifecycleManager(config, didManager, credentialManager);
       const asset = await lifecycleWithoutKeyStore.createAsset(resources);
 
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
       expect(asset.did.verificationMethod).toBeDefined();
     });
   });

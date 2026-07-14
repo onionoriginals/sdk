@@ -30,7 +30,7 @@ function makeSdkWithKeyStore() {
 }
 
 describe('createAsset mints did:cel genesis (#Phase2)', () => {
-  test('asset.id is the derived did:cel; log verifies; layer label is did:peer', async () => {
+  test('asset.id is the derived did:cel; log verifies; layer label is did:cel', async () => {
     const sdk = makeSdkWithKeyStore();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res-1', type: 'data', contentType: 'text/plain', hash: 'ab'.repeat(32) }
@@ -38,7 +38,7 @@ describe('createAsset mints did:cel genesis (#Phase2)', () => {
     expect(asset.id.startsWith('did:cel:u')).toBe(true);
     expect(asset.celLog).toBeDefined();
     expect(deriveDidCel(asset.celLog!)).toBe(asset.id);
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.currentLayer).toBe('did:cel');
     const result = await verifyEventLog(asset.celLog!, { expectedDid: asset.id });
     expect(result.verified).toBe(true);
     // genesis resource digest matches the AssetResource hash (bridged)

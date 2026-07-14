@@ -98,8 +98,8 @@ async function handlePublish(state: SessionState, args: string[]): Promise<void>
     return;
   }
 
-  if (asset.currentLayer !== 'did:peer') {
-    console.log(`  Asset is already at layer "${asset.currentLayer}". Can only publish from did:peer.`);
+  if (asset.currentLayer !== 'did:cel' && asset.currentLayer !== 'did:peer') {
+    console.log(`  Asset is already at layer "${asset.currentLayer}". Can only publish from the genesis layer (did:cel, or legacy did:peer).`);
     return;
   }
 
