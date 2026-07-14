@@ -562,18 +562,17 @@ export class LifecycleManager {
         }
       }
 
-      // 4c) EVERY envelope resource must match a LOG-DECLARED hash for its id
-      // (#407 — content integrity now lives at load, so the binding must be
-      // total, not just the v≥2 slice 4b covers). checkGenesisResourceBinding
-      // above is subset-only (genesis ⊆ present) and 4b keys off the
-      // attacker-controlled `res.version`, so an injected resource labeled
-      // `version:1` — or a genuine later blob relabeled to v1 — would otherwise be
-      // restored with ZERO provenance backing and then flow into the buyer's
-      // published/inscribed identity. Bind each resource's declared hash to a
-      // genesis digest (id-bound per #401; id-less genesis falls back to any) OR a
-      // folded update `toHash` for the SAME resourceId — matching NEITHER fails
-      // closed. Skipped only for legacy (data.did) geneses that carry no resources
-      // array (they predate this contract, mirroring checkGenesisResourceBinding).
+      // 4c) EVERY genesis (version-1) envelope resource must match the LOG's
+      // genesis digest for its id EXACTLY (#407 — content integrity now lives at
+      // load, so the binding must be total AND version-exact). checkGenesisResource
+      // Binding above is subset-only (genesis ⊆ present) and step 4b keys off the
+      // attacker-controlled `res.version`, so a resource labeled `version:1` would
+      // otherwise skip 4b and be restored with zero backing. Version ≥ 2 resources
+      // are bound by 4b to their EXACT `toVersion` update event, so they are left
+      // to 4b here — binding v1 by mere hash-MEMBERSHIP (any update toHash for the
+      // id) would let a genuine higher-version blob be relabeled to v1 and survive
+      // (Greptile P1). Matching neither fails closed. Skipped only for legacy
+      // (data.did) geneses with no resources array (they predate this contract).
       const genesisResources = (log.events[0]?.data as { resources?: unknown } | undefined)?.resources;
       if (Array.isArray(genesisResources)) {
         const genesisDigestById = new Map<string, string>();
@@ -586,18 +585,19 @@ export class LifecycleManager {
           else genesisDigestsIdless.add(dm);
         }
         for (const res of env.resources) {
+          const version = typeof res.version === 'number' ? res.version : 1;
+          if (version >= 2) continue; // bound version-exactly by 4b above
           const resDigest = hexSha256ToDigestMultibase(String(res.hash));
           const boundGenesis = genesisDigestById.get(res.id);
+          // id-bound genesis (#401): only THAT id's digest; id-less legacy genesis
+          // falls back to matching any genesis digest.
           const matchesGenesis = boundGenesis !== undefined
             ? digestMultibaseEquals(resDigest, boundGenesis)
             : [...genesisDigestsIdless].some(d => digestMultibaseEquals(resDigest, d));
-          const matchesUpdate = folded.resourceUpdates.some(
-            u => u.resourceId === res.id && u.toHash.toLowerCase() === String(res.hash).toLowerCase()
-          );
-          if (!matchesGenesis && !matchesUpdate) {
+          if (!matchesGenesis) {
             throw new StructuredError(
               'ASSET_LOAD_VERIFICATION_FAILED',
-              `Resource ${res.id} (hash ${res.hash}) is not declared by the log — it matches neither a genesis digest nor a signed update toHash for this resourceId; refusing to restore unbacked content.`,
+              `Resource ${res.id} v${version} (hash ${res.hash}) is not declared by the log genesis; refusing to restore unbacked content.`,
               { verification }
             );
           }

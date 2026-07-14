@@ -113,6 +113,26 @@ describe('Resource-update handoff (e2e)', () => {
     await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow(/not declared by the log/);
   });
 
+  test('version-relabel: a GENUINE signed v2 blob relabeled to v1 is rejected at load (#407 version-exact binding)', async () => {
+    // Greptile P1: the v2 blob is genuine (its content IS the signed toVersion:2
+    // content), so a hash-MEMBERSHIP-only 4c would accept it at v1. But (id, v1)
+    // must bind to the genesis digest, not "any update toHash for this id" — a
+    // signed hash placed at the wrong version is a provenance-integrity break.
+    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    const asset = await creator.lifecycle.createAsset([
+      { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+    ]);
+    await asset.addResourceVersion('note', 'v2', 'text/plain');
+    const envelope = asset.serialize();
+
+    // Relabel the genuine v2 blob to version 1 (content and hash untouched).
+    const v2 = envelope.resources.find(r => r.id === 'note' && r.version === 2)!;
+    v2.version = 1;
+
+    const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+    await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow(/not declared by the log genesis/);
+  });
+
   test('forged post-genesis env.resource (self-consistent) is rejected at load even though the log verifies', async () => {
     // Greptile #401 gap: the LOG's update event keeps its genuine content (so
     // verifyEventLog passes), but the envelope's CAPTURED resource snapshot for

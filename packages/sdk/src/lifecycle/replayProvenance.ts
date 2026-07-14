@@ -99,10 +99,10 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
       // fields and are skipped.
       const resourceId = typeof data.resourceId === 'string' ? data.resourceId : undefined;
       const previousVersionHash = typeof data.previousVersionHash === 'string' ? data.previousVersionHash : undefined;
-      // An empty-string toHash folds here but is rejected upstream by
-      // checkResourceUpdateContinuity (loadAsset verifies before consuming the
-      // fold), so no unbacked head reaches the resource-binding gate.
-      const toHash = typeof data.toHash === 'string' ? data.toHash : undefined;
+      // Require a NON-EMPTY toHash: replayProvenance is a public export, so a
+      // direct caller must not get an empty-hash resource head folded in (an
+      // empty-string toHash is a malformed update — the verifier rejects it too).
+      const toHash = typeof data.toHash === 'string' && data.toHash.length > 0 ? data.toHash : undefined;
       if (resourceId && previousVersionHash && toHash !== undefined) {
         const toVersion = typeof data.toVersion === 'number' ? data.toVersion : NaN;
         const proofs = event.proof as ReadonlyArray<{ created?: unknown; witnessedAt?: unknown }> | undefined;
