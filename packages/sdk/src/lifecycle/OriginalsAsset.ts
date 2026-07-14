@@ -140,7 +140,8 @@ export class OriginalsAsset {
    * @internal — reconstruct an asset from a persisted envelope (loadAsset, #377).
    *
    * The public constructor FIGHTS restoration: `determineCurrentLayer` derives
-   * `'did:peer'` for a published did:cel asset (wrong layer), and it fabricates
+   * `'did:cel'` for a published did:cel asset (the genesis layer, not the
+   * current `'did:webvh'`/`'did:btco'`), and it fabricates
    * `provenance.createdAt = new Date()`. restore() constructs, then OVERWRITES
    * `currentLayer` / `bindings` / `#provenance` with values the caller folded
    * from the (already-verified) log + genesis data. It emits NO events and its
@@ -284,6 +285,7 @@ export class OriginalsAsset {
     // Handle migration between layers
     const validTransitions: Record<LayerType, LayerType[]> = {
       'did:peer': ['did:webvh', 'did:btco'],
+      'did:cel': ['did:webvh', 'did:btco'], // did:cel genesis (same targets as legacy did:peer)
       'did:webvh': ['did:btco'],
       'did:btco': [] // No further migrations possible
     };
@@ -788,8 +790,7 @@ export class OriginalsAsset {
 
   private determineCurrentLayer(didId: string): LayerType {
     if (didId.startsWith('did:peer:')) return 'did:peer';
-    // did:cel is the genesis-layer synonym for did:peer (Phase-4 may introduce a dedicated layer).
-    if (didId.startsWith('did:cel:')) return 'did:peer';
+    if (didId.startsWith('did:cel:')) return 'did:cel';
     if (didId.startsWith('did:webvh:')) return 'did:webvh';
     if (didId.startsWith('did:btco:')) return 'did:btco';
     throw new Error('Unknown DID method');
