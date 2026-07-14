@@ -28,8 +28,8 @@ const resources: AssetResource[] = [
 
 describe('OriginalsAsset', () => {
   test('determines current layer from DID id', () => {
-    // did:peer is no longer a layer (did:peer purge, Phase 4·5/5); did:cel
-    // genesis is covered by the test below.
+    // did:peer is no longer a layer (did:peer purge, Phase 4·5/5); did:cel is genesis.
+    expect(new OriginalsAsset(resources, buildDid('did:cel:uEiAabc'), emptyCreds).currentLayer).toBe('did:cel');
     expect(new OriginalsAsset(resources, buildDid('did:webvh:example.com:xyz'), emptyCreds).currentLayer).toBe('did:webvh');
     expect(new OriginalsAsset(resources, buildDid('did:btco:123'), emptyCreds).currentLayer).toBe('did:btco');
   });
@@ -41,7 +41,8 @@ describe('OriginalsAsset', () => {
   test('rejects invalid migration path', async () => {
     const asset = new OriginalsAsset(resources, buildDid('did:webvh:example.com:xyz'), emptyCreds);
     // Migrating to a removed/unsupported layer (did:peer) is rejected.
-    await expect(asset.migrate('did:peer' as LayerType)).rejects.toThrow('Invalid migration');
+    // did:peer is no longer in LayerType, so cast through unknown.
+    await expect(asset.migrate('did:peer' as unknown as LayerType)).rejects.toThrow('Invalid migration');
   });
 
   test('migrates along valid path and updates layer (expected to fail until implemented)', async () => {
