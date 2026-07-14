@@ -1,4 +1,4 @@
-import { DIDDocument, OriginalsConfig, AssetResource, KeyPair, ExternalSigner, ExternalVerifier } from '../types/index.js';
+import { DIDDocument, OriginalsConfig, KeyPair, ExternalSigner, ExternalVerifier } from '../types/index.js';
 import { getNetworkDomain, DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH } from '../types/network.js';
 import { BtcoDidResolver } from './BtcoDidResolver.js';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient.js';
@@ -7,7 +7,6 @@ import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProvide
 import { OrdinalsProviderResolverAdapter } from './providers/OrdinalsProviderResolverAdapter.js';
 import { StructuredError } from '../utils/telemetry.js';
 import { multikey } from '../crypto/Multikey.js';
-import { KeyManager } from './KeyManager.js';
 import { WebVHManager } from './WebVHManager.js';
 import { Ed25519Verifier } from './Ed25519Verifier.js';
 import type {
@@ -128,9 +127,9 @@ export class DIDManager {
    * migrated DID unhostable and un-updatable. Provide either `keyPair` OR
    * `externalSigner` in `options`, never both.
    *
-   * The peer document's verification methods are carried over as
+   * The source document's verification methods are carried over as
    * verification-only keys, its services are preserved, and the original
-   * did:peer is recorded in `alsoKnownAs`. The `keyAgreement`,
+   * source DID is recorded in `alsoKnownAs`. The `keyAgreement`,
    * `capabilityInvocation`, and `capabilityDelegation` relationships each key
    * held in the source document are preserved (#299). `authentication` and
    * `assertionMethod` are re-assigned to the new signing key (`#key-0`) in the
@@ -187,7 +186,7 @@ export class DIDManager {
       ? rawSlug
       : Buffer.from(sha256(new TextEncoder().encode(originalSuffix))).toString('hex').slice(0, 32);
 
-    // Carry the peer document's multikey verification methods over as
+    // Carry the source document's multikey verification methods over as
     // verification-only keys (they do not become updateKeys — log updates are
     // authorized by the signing key generated/provided below). Each carried key
     // also keeps the verification relationship it held in the source document
@@ -571,13 +570,6 @@ export class DIDManager {
 
   validateDIDDocument(didDoc: DIDDocument): boolean {
     return !!didDoc.id && Array.isArray(didDoc['@context']);
-  }
-
-  private getLayerFromDID(did: string): 'did:peer' | 'did:webvh' | 'did:btco' {
-    if (did.startsWith('did:peer:')) return 'did:peer';
-    if (did.startsWith('did:webvh:')) return 'did:webvh';
-    if (did.startsWith('did:btco:')) return 'did:btco';
-    throw new Error('Unsupported DID method');
   }
 
   createBtcoDidDocument(
