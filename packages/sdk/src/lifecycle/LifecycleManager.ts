@@ -32,6 +32,7 @@ import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
 import { appendEvent } from '../cel/algorithms/appendEvent.js';
 import { computeDigestMultibase, digestMultibaseEquals } from '../cel/hash.js';
+import { mostRecentResourceHead } from '../cel/resourceHead.js';
 import { canonicalizeEntryForChain } from '../cel/canonicalize.js';
 import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
 import type { EventLog, LogEntry, ExternalReference, WitnessProof, OrdinalsLookup, VerificationResult } from '../cel/types.js';
@@ -1951,6 +1952,37 @@ export class LifecycleManager {
     return null;
   }
 
+  /**
+   * Resolve the media the anchoring inscription will carry as CONTENT (#407
+   * phase 2): the most-recent resource's inline bytes + its MIME type. The head
+   * is derived from the LOG (mostRecentResourceHead) — the same source the
+   * verifier uses — then matched by hash to the in-memory resources array to
+   * recover the bytes. Fails closed when the head cannot be derived or the
+   * matched resource carries no inline content (media we do not hold cannot be
+   * inscribed on-chain).
+   */
+  private resolveHeadMediaForInscription(asset: OriginalsAsset): { content: Buffer; contentType: string } {
+    const log = asset.celLog;
+    if (!log) {
+      throw new StructuredError('INVALID_STATE', 'Cannot inscribe: asset has no CEL log to derive the current media from.');
+    }
+    const head = mostRecentResourceHead(log);
+    if (!head) {
+      throw new StructuredError('INVALID_STATE', 'Cannot inscribe: no resource head could be derived from the log.');
+    }
+    const res = asset.resources.find(r => r.hash === head.hash);
+    if (!res || typeof res.content !== 'string') {
+      throw new StructuredError(
+        'CONTENT_UNAVAILABLE',
+        `Cannot inscribe the current media on-chain: the most-recent resource (${head.resourceId || '(unknown)'}, hash ${head.hash}) has no inline content to embed.`
+      );
+    }
+    return {
+      content: Buffer.from(res.content, 'utf8'),
+      contentType: res.contentType ?? head.contentType ?? 'application/octet-stream'
+    };
+  }
+
   async inscribeOnBitcoin(
     asset: OriginalsAsset,
     feeRate?: number
@@ -2029,6 +2061,13 @@ export class LifecycleManager {
       (d, i, arr): d is string => typeof d === 'string' && arr.indexOf(d) === i
     );
 
+    // #407 phase 2: the anchoring inscription IS the asset. Its CONTENT is the
+    // current media (the most-recent resource's bytes), resolved from the LOG so
+    // writer and verifier agree; its METADATA carries the byte-light provenance
+    // (DID doc + CEL log). The media is sat-independent, so resolve it before the
+    // deferred window; a most-recent resource with no inline content fails closed
+    // (we cannot put media we do not hold on-chain).
+    const headMedia = this.resolveHeadMediaForInscription(asset);
     // Held locally, not captured into the asset yet: buildContent runs BEFORE
     // the inscription is confirmed (satoshi known, asset.migrate succeeded).
     // Capturing here would leave a stale doc in #didDocuments with no rollback
@@ -2066,9 +2105,17 @@ export class LifecycleManager {
           }] : [])
         ];
         inscribedBtcoDoc = btcoDoc;
-        return Buffer.from(JSON.stringify(btcoDoc));
+        // Metadata = { didDocument, celLog }. Snapshot the log AFTER the migrate
+        // append so the embedded celLog head equals the #cel anchor digest.
+        return {
+          content: headMedia.content,
+          metadata: {
+            didDocument: btcoDoc,
+            ...(asset.celLog ? { celLog: JSON.parse(serializeEventLogJson(asset.celLog)) as Record<string, unknown> } : {})
+          }
+        };
       },
-      'application/did+json',
+      headMedia.contentType,
       feeRate,
       // Key the shared money-lock by the asset's current DID so a concurrent
       // MigrationManager.migrate of the same DID is blocked at inscribe (issue #303).
@@ -2081,6 +2128,7 @@ export class LifecycleManager {
       satoshi?: string;
       feeRate?: number;
       content?: Buffer;
+      metadata?: Record<string, unknown>;
     };
     const revealTxId = inscription.revealTxId ?? inscription.txid;
     const commitTxId = inscription.commitTxId;
@@ -2168,21 +2216,17 @@ export class LifecycleManager {
     // migrateToDIDBTCO (explicit network wins over the webvhNetwork mapping,
     // #247), so a tier-only config can't drift into a prefix mismatch.
     const bindingValue = `${btcoDidPrefix(this.getConfiguredBitcoinNetwork())}:${inscription.satoshi}`;
-    // Parse the echoed content ONLY as an integrity cross-check: if it parses
-    // and disagrees with the computed binding, the provider may have altered
-    // the inscription — log it (payment already happened, state is migrated;
-    // do NOT throw, the caller has the inscriptionId to investigate). Missing
-    // or non-JSON content is fine — no cross-check possible.
-    if (inscription.content) {
-      let inscribedDoc: { id?: unknown } | undefined;
-      try {
-        inscribedDoc = JSON.parse(inscription.content.toString()) as { id?: unknown };
-      } catch {
-        inscribedDoc = undefined;
-      }
+    // Cross-check the echoed METADATA DID document (#407 phase 2 moved the doc
+    // from content→metadata): if the provider echoed a didDocument whose id
+    // disagrees with the computed binding, it may have altered the inscription —
+    // log it (payment already happened, state is migrated; do NOT throw, the
+    // caller has the inscriptionId to investigate). Missing metadata is fine —
+    // no cross-check possible.
+    {
+      const inscribedDoc = (inscription.metadata as { didDocument?: { id?: unknown } } | undefined)?.didDocument;
       if (inscribedDoc && inscribedDoc.id !== bindingValue) {
         this.logger.error(
-          'Inscribed DID document id does not match expected binding — provider may have altered the inscription content',
+          'Inscribed DID document id does not match expected binding — provider may have altered the inscription metadata',
           undefined,
           { expected: bindingValue, inscribed: inscribedDoc.id, inscriptionId: inscription.inscriptionId }
         );
@@ -2467,12 +2511,22 @@ export class LifecycleManager {
     restoreLog: EventLog | undefined
   ): Promise<{ inscriptionId: string; satoshi?: string; txid?: string; revealTxId?: string }> {
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+    // #407 phase 2: the reinscription IS the asset. Content = current media;
+    // metadata = { didDocument: rotatedDoc, celLog }. The sat is already known
+    // (reinscription targets it), so both are built synchronously; snapshot the
+    // log now — the caller has already appended the rotateKey + embedded the
+    // fresh #cel anchor, so the celLog head equals that anchor.
+    const headMedia = this.resolveHeadMediaForInscription(asset);
+    const metadata: Record<string, unknown> = {
+      didDocument: rotatedDoc,
+      ...(asset.celLog ? { celLog: JSON.parse(serializeEventLogJson(asset.celLog)) as Record<string, unknown> } : {})
+    };
     try {
       return await bitcoinManager.inscribeData(
-        Buffer.from(JSON.stringify(rotatedDoc)),
-        'application/did+json',
+        headMedia.content,
+        headMedia.contentType,
         feeRate,
-        { targetSatoshi: satoshi }
+        { targetSatoshi: satoshi, metadata }
       );
     } catch (error) {
       // Reinscription failed after the append — restore the pre-append log
