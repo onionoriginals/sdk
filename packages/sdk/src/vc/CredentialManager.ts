@@ -694,8 +694,8 @@ export class CredentialManager {
    * ```typescript
    * const credential = await credentialManager.issueResourceCredential(
    *   resource,
-   *   'did:peer:abc...',
-   *   'did:peer:creator...'
+   *   'did:cel:abc...',
+   *   'did:cel:creator...'
    * );
    * // Sign the credential with your key
    * const signed = await credentialManager.signCredential(credential, privateKey, vmId);
@@ -804,9 +804,9 @@ export class CredentialManager {
    * @example
    * ```typescript
    * const credential = await credentialManager.issueMigrationCredential(
-   *   'did:peer:abc...',
+   *   'did:cel:abc...',
    *   'did:webvh:example.com:asset',
-   *   'did:peer',
+   *   'did:cel',
    *   'did:webvh',
    *   'did:webvh:example.com:publisher'
    * );

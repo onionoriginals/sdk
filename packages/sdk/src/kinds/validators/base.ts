@@ -44,7 +44,7 @@ export class ValidationUtils {
    */
   static isValidDID(did: string): boolean {
     // DID format: did:method:identifier (identifier can contain : for path segments)
-    // Examples: did:peer:123, did:webvh:example.com:user, did:btco:12345
+    // Examples: did:cel:123, did:webvh:example.com:user, did:btco:12345
     const didRegex = /^did:[a-z0-9]+:[a-zA-Z0-9._:%-]+$/;
     return didRegex.test(did);
   }

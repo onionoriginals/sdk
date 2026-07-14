@@ -977,7 +977,7 @@ export class LifecycleManager {
     
     // Add inscription manifest overhead
     const inscriptionManifest = {
-      assetId: `did:peer:placeholder`,
+      assetId: `did:cel:placeholder`,
       kind: manifest.kind,
       name: manifest.name,
       version: manifest.version,
@@ -1050,8 +1050,8 @@ export class LifecycleManager {
     const metricsStart = performance.now();
 
     try {
-      if (asset.currentLayer !== 'did:cel' && asset.currentLayer !== 'did:peer') {
-        throw new StructuredError('INVALID_STATE', 'Asset must be in the genesis layer (did:cel, or legacy did:peer) to publish to web.');
+      if (asset.currentLayer !== 'did:cel') {
+        throw new StructuredError('INVALID_STATE', 'Asset must be in the genesis layer (did:cel) to publish to web.');
       }
 
       // Concurrency guard (issue #255): the layer check above is
@@ -1084,8 +1084,8 @@ export class LifecycleManager {
       }));
       const writtenObjects: Array<{ domain: string; relativePath: string }> = [];
 
-      // Capture the layer before migration (the genesis layer — 'did:cel', or
-      // legacy 'did:peer' — per the guard above; captured dynamically).
+      // Capture the layer before migration (the genesis layer — 'did:cel' —
+      // per the guard above; captured dynamically).
       const priorLayer = asset.currentLayer;
 
       // Snapshot the CEL log so a mid-publish failure after the migrate append
@@ -1670,11 +1670,10 @@ export class LifecycleManager {
         id: asset.id,
         migratedTo,
         resourceId: asset.resources[0].id,
-        // TODO(did:cel sub-project 5): frozen at 'did:peer' by the layer-label-rename
-        // spec non-goal (credentials untouched). For a did:cel genesis this now
-        // disagrees with the asset:migrated event / getProvenance().from ('did:cel');
-        // reconcile when credentials are unfrozen.
-        fromLayer: 'did:peer' as const,
+        // did:cel is the sole genesis layer (did:peer purged, Phase 4 · 5/5);
+        // this now matches the asset:migrated event / getProvenance().from.
+        // Deeper credential-derivation reconciliation remains #405.
+        fromLayer: 'did:cel' as const,
         toLayer: 'did:webvh' as const,
         migratedAt: new Date().toISOString()
       };
@@ -1906,8 +1905,8 @@ export class LifecycleManager {
     if (typeof asset.migrate !== 'function') {
       throw new StructuredError('NOT_IMPLEMENTED', 'Asset inscription is not yet implemented for this asset type. Use a standard OriginalsAsset created via lifecycle.createAsset().');
     }
-    if (asset.currentLayer !== 'did:webvh' && asset.currentLayer !== 'did:cel' && asset.currentLayer !== 'did:peer') {
-      throw new StructuredError('NOT_IMPLEMENTED', 'Asset inscription is not yet implemented for this layer. Assets must be in the genesis layer (did:cel, or legacy did:peer) or did:webvh layer to inscribe.');
+    if (asset.currentLayer !== 'did:webvh' && asset.currentLayer !== 'did:cel') {
+      throw new StructuredError('NOT_IMPLEMENTED', 'Asset inscription is not yet implemented for this layer. Assets must be in the genesis layer (did:cel) or did:webvh layer to inscribe.');
     }
     // Concurrency guard (issue #255): the layer check above is check-then-act
     // across the awaits below — two overlapping calls would both pass it,
@@ -2817,14 +2816,14 @@ export class LifecycleManager {
   // backward compatibility with the existing methods.
 
   /**
-   * Create a draft asset (did:peer layer)
+   * Create a draft asset (did:cel genesis layer)
    * 
    * This is the entry point for creating new Originals. Draft assets are
    * stored locally and can be published or inscribed later.
    * 
    * @param resources - Array of resources to include in the asset
    * @param options - Optional configuration including progress callback
-   * @returns The newly created OriginalsAsset in did:peer layer
+   * @returns The newly created OriginalsAsset in did:cel genesis layer
    * 
    * @example
    * ```typescript
@@ -2882,10 +2881,10 @@ export class LifecycleManager {
   /**
    * Publish an asset to the web (did:webvh layer)
    * 
-   * Migrates a draft asset from did:peer to did:webvh, making it publicly
+   * Migrates a draft asset from did:cel to did:webvh, making it publicly
    * discoverable via HTTPS.
    * 
-   * @param asset - The asset to publish (must be in did:peer layer)
+   * @param asset - The asset to publish (must be in did:cel genesis layer)
    * @param publisherDidOrSigner - Publisher's DID or external signer
    * @param options - Optional configuration including progress callback
    * @returns The published OriginalsAsset in did:webvh layer
@@ -2963,7 +2962,7 @@ export class LifecycleManager {
    * Permanently anchors an asset on the Bitcoin blockchain via Ordinals inscription.
    * This is an irreversible operation.
    * 
-   * @param asset - The asset to inscribe (must be in did:peer or did:webvh layer)
+   * @param asset - The asset to inscribe (must be in did:cel genesis or did:webvh layer)
    * @param options - Optional configuration including fee rate and progress callback
    * @returns The inscribed OriginalsAsset in did:btco layer
    * 
@@ -3331,7 +3330,6 @@ export class LifecycleManager {
     
     // Check layer transition validity
     const validTransitions: Record<LayerType, LayerType[]> = {
-      'did:peer': ['did:webvh', 'did:btco'],
       'did:cel': ['did:webvh', 'did:btco'],
       'did:webvh': ['did:btco'],
       'did:btco': []

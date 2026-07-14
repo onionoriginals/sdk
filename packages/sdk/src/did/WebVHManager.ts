@@ -197,11 +197,11 @@ export interface CreateWebVHOptions {
   prerotation?: boolean;
   /**
    * Extra verification methods to publish in the DID document alongside the
-   * signing key (e.g. keys carried over from a migrated did:peer document).
+   * signing key (e.g. keys carried over from a migrated genesis document).
    * These do NOT become updateKeys — they are published for verification only.
    */
   additionalVerificationMethods?: VerificationMethod[];
-  /** alsoKnownAs identifiers to record (e.g. the pre-migration did:peer). */
+  /** alsoKnownAs identifiers to record (e.g. the pre-migration source DID). */
   alsoKnownAs?: string[];
   /** Service endpoints to carry into the DID document. */
   services?: Array<Record<string, unknown>>;

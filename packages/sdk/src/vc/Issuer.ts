@@ -89,7 +89,7 @@ export class Issuer {
     const documentLoader = options.documentLoader || createDocumentLoader(this.didManager);
     // Best-effort existence check only: the Issuer signs with its own
     // verification method, so an unresolvable DID (e.g. a key registered
-    // out-of-band, or an offline did:peer) must not block issuance.
+    // out-of-band, or an unhosted did:cel) must not block issuance.
     // A RETIRED (revoked/compromised) verification method is different —
     // signing with it must fail closed, so that loader error propagates.
     try {

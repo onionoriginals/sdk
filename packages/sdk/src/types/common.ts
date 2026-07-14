@@ -7,7 +7,7 @@ import type { DIDCacheConfig } from '../did/DIDCache.js';
 import type { OperationLock } from '../utils/OperationLock.js';
 
 // Base types for the Originals protocol
-export type LayerType = 'did:peer' | 'did:cel' | 'did:webvh' | 'did:btco';
+export type LayerType = 'did:cel' | 'did:webvh' | 'did:btco';
 
 export interface OriginalsConfig {
   network: 'mainnet' | 'regtest' | 'signet';
