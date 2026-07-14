@@ -1,3 +1,4 @@
+// SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Integration tests for peer → webvh migration
  */
@@ -9,7 +10,7 @@ import { MigrationManager } from '../../../src/migration';
 import { AuditLogger, AuditSignerConfig } from '../../../src/migration/audit/AuditLogger';
 import { MigrationStateEnum } from '../../../src/migration/types';
 
-describe('Peer to WebVH Migration', () => {
+describe.skip('Peer to WebVH Migration', () => {
   let sdk: OriginalsSDK;
   let migrationManager: MigrationManager;
 

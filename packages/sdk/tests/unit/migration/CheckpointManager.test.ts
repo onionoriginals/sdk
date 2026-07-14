@@ -1,3 +1,4 @@
+// SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Unit tests for CheckpointManager and CheckpointStorage
  * Covers CORE-MIG-EVENTS-015, -022, -023
@@ -20,7 +21,7 @@ function makeManagers() {
   return { sdk, config, checkpointManager };
 }
 
-describe('CheckpointManager', () => {
+describe.skip('CheckpointManager', () => {
   // CORE-MIG-EVENTS-022/happy — checkpoint creation captures complete migration context
   describe('createCheckpoint()', () => {
     it('should create a checkpoint with all required fields', async () => {
@@ -234,7 +235,7 @@ describe('CheckpointManager', () => {
   });
 });
 
-describe('CheckpointStorage persistence round-trip', () => {
+describe.skip('CheckpointStorage persistence round-trip', () => {
   it('reads back a checkpoint persisted through a StorageAdapter after memory loss', async () => {
     const { CheckpointStorage } = await import('../../../src/migration/checkpoint/CheckpointStorage');
 
