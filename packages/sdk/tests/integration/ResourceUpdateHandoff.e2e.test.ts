@@ -28,7 +28,34 @@ describe('Resource-update handoff (e2e)', () => {
     expect(loaded.getProvenance().resourceUpdates.some(u => u.toVersion === 2)).toBe(true);
   });
 
-  test('content-tamper in the envelope is rejected at load', async () => {
+  test('byte-light log: the update event carries no content, and log size is independent of content size', async () => {
+    const mk = async (bytes: number) => {
+      const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
+      const asset = await creator.lifecycle.createAsset([
+        { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
+      ]);
+      const big = 'x'.repeat(bytes);
+      await asset.addResourceVersion('note', big, 'text/plain');
+      return asset;
+    };
+
+    const small = await mk(10);
+    const large = await mk(50_000);
+
+    // The signed update event references content by hash only — no bytes.
+    const ev = small.celLog!.events.find(e => e.type === 'update')!;
+    expect((ev.data as Record<string, unknown>).content).toBeUndefined();
+    expect(typeof (ev.data as { toHash?: unknown }).toHash).toBe('string');
+
+    // The log serialization does not grow with content size (bytes live in the
+    // content-addressed store, not the log) — the whole point of #407.
+    const logSize = (a: typeof small) => JSON.stringify(a.serialize().eventLog).length;
+    expect(Math.abs(logSize(large) - logSize(small))).toBeLessThan(200);
+    // The envelope's resource BLOB, by contrast, does carry the large content.
+    expect(large.serialize().resources.some(r => r.content && r.content.length >= 50_000)).toBe(true);
+  });
+
+  test('content-tamper in the envelope blob (hash(blob) != toHash) is rejected at load', async () => {
     const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
@@ -36,9 +63,11 @@ describe('Resource-update handoff (e2e)', () => {
     await asset.addResourceVersion('note', 'v2', 'text/plain');
     const envelope = asset.serialize();
 
-    // Flip the embedded content of the update event.
-    const updateEv = envelope.eventLog.events.find(e => e.type === 'update')!;
-    (updateEv.data as { content: string }).content = 'tampered';
+    // The bytes no longer live in the log event (#407) — they travel as a
+    // content-addressed blob in envelope.resources. Flip that blob (leaving the
+    // signed toHash on the log untouched): hash(blob) != toHash → fail closed.
+    const v2 = envelope.resources.find(r => r.id === 'note' && r.version === 2)!;
+    v2.content = 'tampered';
 
     const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow();

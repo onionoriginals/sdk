@@ -23,7 +23,6 @@ import { multikey } from '../../crypto/Multikey.js';
 import { deriveDidCelFromGenesis, didCelMatchesLog } from '../celDid.js';
 import { parseSatoshiIdentifier } from '../../utils/satoshi-validation.js';
 import { hexSha256ToDigestMultibase } from '../signerAdapter.js';
-import { hashResource } from '../../utils/validation.js';
 
 /**
  * Validates the structural requirements of a DataIntegrityProof (field presence,
@@ -935,7 +934,7 @@ async function resolveControllerKeyHex(
  * @returns EventVerification result
  */
 /**
- * Resource-update continuity + content binding (#Phase-4 resource events).
+ * Resource-update chain continuity (#407 phase 1 — content-addressed separation).
  *
  * A resource-shaped `update` event (`data.resourceId` + `data.previousVersionHash`
  * present) MUST chain forward from the last-known hash of its resourceId:
@@ -943,27 +942,31 @@ async function resolveControllerKeyHex(
  *    (ExternalReference carried an `id`, #401), `previousVersionHash` must match
  *    THAT digest specifically; otherwise (legacy id-less genesis) it may match
  *    ANY genesis digest;
- *  - subsequent updates: it must match the prior update's DERIVED hash.
- * The new current hash is `hashResource(content)` (derived, never stored). All
- * hashes are compared as digestMultibase. On success the per-resourceId map is
- * advanced; on any failure an error string is returned (fail closed) and the map
- * is left untouched.
+ *  - subsequent updates: it must match the prior update's `toHash`.
+ * The new current hash is the SIGNED `data.toHash` field — NOT recomputed from
+ * content, which no longer lives in the event (#407): the bytes travel in the
+ * content-addressed store (resources array / envelope blobs), and CONTENT
+ * INTEGRITY (does a blob actually hash to `toHash`) is bound at load time by
+ * loadAsset. Here we check only the hash chain over the signed hashes. All hashes
+ * are compared as digestMultibase. On success the per-resourceId map is advanced;
+ * on any failure an error string is returned (fail closed) and the map is left
+ * untouched.
  */
 function checkResourceUpdateContinuity(
-  data: { resourceId: unknown; previousVersionHash: unknown; content?: unknown },
+  data: { resourceId: unknown; previousVersionHash: unknown; toHash?: unknown },
   genesisDigests: Set<string>,
   genesisDigestById: Map<string, string>,
   currentResourceHash: Map<string, string>
 ): string | null {
   const resourceId = data.resourceId as string;
-  if (typeof data.content !== 'string') {
-    return `resource update for ${resourceId} has non-string content; cannot verify`;
+  if (typeof data.toHash !== 'string' || data.toHash.length === 0) {
+    return `resource update for ${resourceId} is missing a signed toHash; cannot verify continuity`;
   }
   let prevDigest: string;
   let newDigest: string;
   try {
     prevDigest = hexSha256ToDigestMultibase(data.previousVersionHash as string);
-    newDigest = hexSha256ToDigestMultibase(hashResource(Buffer.from(data.content, 'utf-8')));
+    newDigest = hexSha256ToDigestMultibase(data.toHash);
   } catch (e) {
     return `resource update for ${resourceId} has an unparseable hash: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -1451,12 +1454,12 @@ export async function verifyEventLog(
     // proof semantics). Only engage for resource-shaped updates that otherwise
     // verified — a failed proof/chain already fails the event.
     if (!options?.verifier && event.type === 'update' && eventResult.proofValid && eventResult.chainValid) {
-      const rd = event.data as { resourceId?: unknown; previousVersionHash?: unknown; content?: unknown } | null;
+      const rd = event.data as { resourceId?: unknown; previousVersionHash?: unknown; toHash?: unknown } | null;
       if (rd && typeof rd.resourceId === 'string' && typeof rd.previousVersionHash === 'string') {
         // Rebuild as a literal: narrowing on rd's optional props doesn't
         // propagate to the whole-object type expected by the helper below.
         const err = checkResourceUpdateContinuity(
-          { resourceId: rd.resourceId, previousVersionHash: rd.previousVersionHash, content: rd.content },
+          { resourceId: rd.resourceId, previousVersionHash: rd.previousVersionHash, toHash: rd.toHash },
           genesisResourceDigests,
           genesisResourceDigestById,
           currentResourceHash

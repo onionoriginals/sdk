@@ -2,6 +2,9 @@ import { describe, test, expect } from 'bun:test';
 import { OriginalsAsset } from '../../../src/lifecycle/OriginalsAsset';
 import type { AssetResource, DIDDocument } from '../../../src/types';
 import type { CelAppendSkippedEvent } from '../../../src/events/types';
+import { hashResource } from '../../../src/utils/validation';
+
+const h = (s: string) => hashResource(Buffer.from(s, 'utf-8'));
 
 function makeAsset(): OriginalsAsset {
   const did: DIDDocument = { id: 'did:peer:zabc' } as DIDDocument;
@@ -29,9 +32,11 @@ describe('addResourceVersion: injected CEL appender', () => {
     expect(calls.length).toBe(1);
     expect(calls[0].type).toBe('update');
     expect(calls[0].data.resourceId).toBe('r');
-    expect(calls[0].data.content).toBe('v2');
+    // Reference-shaped event (#407 phase 1): the signed body carries toHash, NOT bytes.
+    expect(calls[0].data.content).toBeUndefined();
+    expect(calls[0].data.toHash).toBe(h('v2'));
+    expect(calls[0].data.previousVersionHash).toBe(h('v1'));
     expect(calls[0].data.contentType).toBe('text/plain');
-    expect(typeof calls[0].data.previousVersionHash).toBe('string');
     expect(calls[0].data.toVersion).toBe(2);
     // In-memory resources updated.
     expect(asset.getResourceVersion('r', 2)?.content).toBe('v2');

@@ -514,15 +514,19 @@ export class LifecycleManager {
         }
       }
 
-      // 4b) Post-genesis resource binding (#401). Genesis (v1) resources are
-      // bound by checkGenesisResourceBinding above; every resource version ≥ 2
-      // MUST instead be backed by a VERIFIED `update` log event with the SAME
-      // resourceId, version, and derived content hash. The step-4 loop only
-      // proves each resource is self-consistent (content ↔ its own hash), NOT
-      // that its content is the one the controller signed. Without this, a
-      // self-consistent forged post-genesis version (or an unprovable degraded
-      // version) in env.resources would load undetected while the fold reports
-      // the genuine hash. Fail closed — the verified log is the source of truth.
+      // 4b) Post-genesis resource binding (#401, generalized for #407). Genesis
+      // (v1) resources are bound by checkGenesisResourceBinding + the step-4
+      // content↔hash check above; every resource version ≥ 2 MUST instead be
+      // backed by a VERIFIED `update` log event with the SAME resourceId and
+      // version, and its blob content MUST hash to that event's SIGNED `toHash`.
+      //
+      // This is where CONTENT INTEGRITY now lives (#407): the verifier no longer
+      // recomputes hash(content) — the bytes are not in the event — so the load
+      // is the sole gate binding a content-addressed blob to the signed hash the
+      // controller committed to. We bind blob→toHash DIRECTLY (not transitively
+      // via the envelope-controlled res.hash): a forged blob (hash(content) ≠
+      // toHash), a self-consistent forgery (content and res.hash both swapped),
+      // and an unprovable degraded version (no backing event) all fail closed.
       for (const res of env.resources) {
         const version = typeof res.version === 'number' ? res.version : 1;
         if (version < 2) continue;
@@ -539,9 +543,22 @@ export class LifecycleManager {
         if (match.toHash.toLowerCase() !== String(res.hash).toLowerCase()) {
           throw new StructuredError(
             'ASSET_LOAD_VERIFICATION_FAILED',
-            `Resource ${res.id} v${version}: envelope hash (${res.hash}) does not match the verified log's derived hash (${match.toHash}).`,
+            `Resource ${res.id} v${version}: envelope hash (${res.hash}) does not match the verified log's signed hash (${match.toHash}).`,
             { verification }
           );
+        }
+        // Bind the actual blob to the signed toHash. The content-addressed store
+        // carries the bytes inline (AssetResource.content); a resource that omits
+        // them is a pure reference and rides on the res.hash↔toHash match above.
+        if (typeof res.content === 'string') {
+          const computed = hashResource(Buffer.from(res.content, 'utf8'));
+          if (computed.toLowerCase() !== match.toHash.toLowerCase()) {
+            throw new StructuredError(
+              'ASSET_LOAD_VERIFICATION_FAILED',
+              `Resource ${res.id} v${version}: blob content hashes to ${computed}, not the log's signed toHash (${match.toHash}).`,
+              { verification }
+            );
+          }
         }
       }
 

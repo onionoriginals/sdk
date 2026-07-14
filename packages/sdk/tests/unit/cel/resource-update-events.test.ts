@@ -52,20 +52,20 @@ describe('verifyEventLog: resource-update events', () => {
     log = await appendEvent(
       log,
       'update',
-      { resourceId: 'r', content: 'v2', contentType: 'text/plain', previousVersionHash: hex('v1'), toVersion: 2 },
+      { resourceId: 'r', contentType: 'text/plain', previousVersionHash: hex('v1'), toHash: hex('v2'), toVersion: 2 },
       { signer: a.signer, verificationMethod: a.vm }
     );
     expect((await verifyEventLog(log)).verified).toBe(true);
   });
 
-  test('second update chains from the first derived hash', async () => {
+  test('second update chains from the first toHash', async () => {
     const a = await makeRealSigner();
     let log = await genesisWith('v1', a);
     log = await appendEvent(log, 'update',
-      { resourceId: 'r', content: 'v2', contentType: 'text/plain', previousVersionHash: hex('v1'), toVersion: 2 },
+      { resourceId: 'r', contentType: 'text/plain', previousVersionHash: hex('v1'), toHash: hex('v2'), toVersion: 2 },
       { signer: a.signer, verificationMethod: a.vm });
     log = await appendEvent(log, 'update',
-      { resourceId: 'r', content: 'v3', contentType: 'text/plain', previousVersionHash: hex('v2'), toVersion: 3 },
+      { resourceId: 'r', contentType: 'text/plain', previousVersionHash: hex('v2'), toHash: hex('v3'), toVersion: 3 },
       { signer: a.signer, verificationMethod: a.vm });
     expect((await verifyEventLog(log)).verified).toBe(true);
   });
@@ -74,21 +74,23 @@ describe('verifyEventLog: resource-update events', () => {
     const a = await makeRealSigner();
     let log = await genesisWith('v1', a);
     log = await appendEvent(log, 'update',
-      { resourceId: 'r', content: 'v2', contentType: 'text/plain', previousVersionHash: hex('not-the-genesis'), toVersion: 2 },
+      { resourceId: 'r', contentType: 'text/plain', previousVersionHash: hex('not-the-genesis'), toHash: hex('v2'), toVersion: 2 },
       { signer: a.signer, verificationMethod: a.vm });
     const result = await verifyEventLog(log);
     expect(result.verified).toBe(false);
     expect(result.errors.join(' ')).toContain('resource');
   });
 
-  test('content-tamper: flipping content after signing breaks the proof', async () => {
+  test('toHash-tamper: flipping the signed toHash after signing breaks the proof', async () => {
     const a = await makeRealSigner();
     let log = await genesisWith('v1', a);
     log = await appendEvent(log, 'update',
-      { resourceId: 'r', content: 'v2', contentType: 'text/plain', previousVersionHash: hex('v1'), toVersion: 2 },
+      { resourceId: 'r', contentType: 'text/plain', previousVersionHash: hex('v1'), toHash: hex('v2'), toVersion: 2 },
       { signer: a.signer, verificationMethod: a.vm });
-    // Mutate the embedded content AFTER it was signed.
-    (log.events[1].data as { content: string }).content = 'tampered';
+    // Mutate the SIGNED toHash AFTER it was signed — the controller signature
+    // covers toHash, so the proof no longer verifies. (Content integrity of the
+    // blob itself is bound separately, at loadAsset.)
+    (log.events[1].data as { toHash: string }).toHash = hex('tampered');
     expect((await verifyEventLog(log)).verified).toBe(false);
   });
 
@@ -97,7 +99,7 @@ describe('verifyEventLog: resource-update events', () => {
     const mallory = await makeRealSigner();
     let log = await genesisWith('v1', a);
     log = await appendEvent(log, 'update',
-      { resourceId: 'r', content: 'v2', contentType: 'text/plain', previousVersionHash: hex('v1'), toVersion: 2 },
+      { resourceId: 'r', contentType: 'text/plain', previousVersionHash: hex('v1'), toHash: hex('v2'), toVersion: 2 },
       { signer: mallory.signer, verificationMethod: mallory.vm });
     expect((await verifyEventLog(log)).verified).toBe(false);
   });
@@ -121,12 +123,12 @@ describe('verifyEventLog: resource-update events', () => {
       { signer: a.signer, verificationMethod: a.vm });
 
     const good = await appendEvent(base, 'update',
-      { resourceId: 'r', content: 'v2', contentType: 'text/plain', previousVersionHash: hex('v1'), toVersion: 2 },
+      { resourceId: 'r', contentType: 'text/plain', previousVersionHash: hex('v1'), toHash: hex('v2'), toVersion: 2 },
       { signer: b.signer, verificationMethod: b.vm });
     expect((await verifyEventLog(good)).verified).toBe(true);
 
     const bad = await appendEvent(base, 'update',
-      { resourceId: 'r', content: 'v2', contentType: 'text/plain', previousVersionHash: hex('v1'), toVersion: 2 },
+      { resourceId: 'r', contentType: 'text/plain', previousVersionHash: hex('v1'), toHash: hex('v2'), toVersion: 2 },
       { signer: a.signer, verificationMethod: a.vm });
     expect((await verifyEventLog(bad)).verified).toBe(false);
   });
@@ -158,7 +160,7 @@ describe('verifyEventLog: resource-update events', () => {
     // First update for resourceId 'A', but previousVersionHash = B's genesis hash.
     // With per-id binding, A must chain from A's own genesis digest → rejected.
     log = await appendEvent(log, 'update',
-      { resourceId: 'A', content: 'a2', contentType: 'text/plain', previousVersionHash: hex('b1'), toVersion: 2 },
+      { resourceId: 'A', contentType: 'text/plain', previousVersionHash: hex('b1'), toHash: hex('a2'), toVersion: 2 },
       { signer: s.signer, verificationMethod: s.vm });
     const result = await verifyEventLog(log);
     expect(result.verified).toBe(false);
@@ -169,7 +171,7 @@ describe('verifyEventLog: resource-update events', () => {
     const s = await makeRealSigner();
     let log = await genesisWithTwoIds({ id: 'A', content: 'a1' }, { id: 'B', content: 'b1' }, s);
     log = await appendEvent(log, 'update',
-      { resourceId: 'A', content: 'a2', contentType: 'text/plain', previousVersionHash: hex('a1'), toVersion: 2 },
+      { resourceId: 'A', contentType: 'text/plain', previousVersionHash: hex('a1'), toHash: hex('a2'), toVersion: 2 },
       { signer: s.signer, verificationMethod: s.vm });
     expect((await verifyEventLog(log)).verified).toBe(true);
   });
@@ -179,8 +181,19 @@ describe('verifyEventLog: resource-update events', () => {
     const s = await makeRealSigner();
     let log = await genesisWith('v1', s);
     log = await appendEvent(log, 'update',
-      { resourceId: 'r', content: 'v2', contentType: 'text/plain', previousVersionHash: hex('v1'), toVersion: 2 },
+      { resourceId: 'r', contentType: 'text/plain', previousVersionHash: hex('v1'), toHash: hex('v2'), toVersion: 2 },
       { signer: s.signer, verificationMethod: s.vm });
     expect((await verifyEventLog(log)).verified).toBe(true);
+  });
+
+  test('missing toHash: a resource-shaped update with no signed toHash is rejected', async () => {
+    const a = await makeRealSigner();
+    let log = await genesisWith('v1', a);
+    log = await appendEvent(log, 'update',
+      { resourceId: 'r', contentType: 'text/plain', previousVersionHash: hex('v1'), toVersion: 2 },
+      { signer: a.signer, verificationMethod: a.vm });
+    const result = await verifyEventLog(log);
+    expect(result.verified).toBe(false);
+    expect(result.errors.join(' ')).toContain('toHash');
   });
 });

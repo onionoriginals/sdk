@@ -235,14 +235,14 @@ async function makeReplaySigner() {
 const rhex = (s: string) => hashResource(Buffer.from(s, 'utf-8'));
 
 describe('replayProvenance: resourceUpdates fold', () => {
-  test('folds update events into resourceUpdates with derived toHash', async () => {
+  test('folds update events into resourceUpdates with the signed toHash', async () => {
     const a = await makeReplaySigner();
     let log = await createEventLog(
       { name: 'r', controller: a.didKey, resources: [{ digestMultibase: hexSha256ToDigestMultibase(rhex('v1')) }], createdAt: 'x', nonce: 'z1' },
       { signer: a.signer, verificationMethod: a.vm }
     );
     log = await appendEvent(log, 'update',
-      { resourceId: 'r', content: 'v2', contentType: 'text/plain', previousVersionHash: rhex('v1'), toVersion: 2 },
+      { resourceId: 'r', contentType: 'text/plain', previousVersionHash: rhex('v1'), toHash: rhex('v2'), toVersion: 2 },
       { signer: a.signer, verificationMethod: a.vm });
 
     const folded = replayProvenance(log);
