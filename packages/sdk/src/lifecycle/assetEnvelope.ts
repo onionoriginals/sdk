@@ -5,9 +5,10 @@
  * and `bindings` / `currentLayer` / `migrations` are deliberately NOT
  * first-class fields — they are folds over the log (see replayProvenance).
  * Ownership history is the sat's UTXO chain on Bitcoin, never the envelope.
- * Anything the log cannot derive (commitTxId, feeRate, post-genesis resource
- * updates, a btco binding not yet anchored by a witness proof) rides in the
- * `unverified` HONESTY SECTION: advisory-only, never trusted at load/verify time.
+ * Anything the log cannot derive (commitTxId, feeRate, a btco binding not yet
+ * anchored by a witness proof) rides in the `unverified` HONESTY SECTION:
+ * advisory-only, never trusted at load/verify time. Post-genesis resource
+ * updates are signed `update` log events (#Phase 4) — folded from the log, not advisory.
  */
 import type { AssetResource, DIDDocument, VerifiableCredential } from '../types/index.js';
 import type { EventLog } from '../cel/types.js';
@@ -35,15 +36,6 @@ export interface AssetEnvelope {
   unverified?: {
     commitTxId?: string;
     feeRate?: number;
-    resourceUpdates?: Array<{
-      resourceId: string;
-      fromVersion: number;
-      toVersion: number;
-      fromHash: string;
-      toHash: string;
-      timestamp: string;
-      changes?: string;
-    }>;
     /** Live-cache btco binding, present ONLY when the fold can't derive it from the log. */
     bindings?: Record<string, string>;
   };

@@ -287,8 +287,13 @@ export class LifecycleManager {
     const controllerKp = await new KeyManager().generateKeyPair('Ed25519');
     const { signer, verificationMethod } = celSignerFromKeyPair(controllerKp);
 
-    // Bridge AssetResource hashes (hex sha256) to CEL ExternalReferences.
+    // Bridge AssetResource hashes (hex sha256) to CEL ExternalReferences. The
+    // resource id is bound into the genesis reference (#401) so the verifier can
+    // require a resource's first `update` to chain from ITS OWN genesis digest,
+    // not any genesis digest. (resource.id is validated as a non-empty string
+    // above.)
     const externalRefs: ExternalReference[] = resources.map((r) => ({
+      id: r.id,
       digestMultibase: hexSha256ToDigestMultibase(r.hash),
       ...(r.contentType ? { mediaType: r.contentType } : {})
     }));
@@ -321,6 +326,9 @@ export class LifecycleManager {
     }
 
     const asset = new OriginalsAsset(resources, didDoc, [], log);
+    // Bind the controller append path so addResourceVersion can write signed
+    // `update` events with the same degrade contract as the other authorship ops.
+    asset._bindCelAppender((type, data) => this.appendCelEventOrSkip(asset, type, data));
 
     // Persist the genesis CEL at the conventional cel/<suffix>.json key so
     // the did:cel resolves from storage immediately (best-effort, never gates).
@@ -506,6 +514,37 @@ export class LifecycleManager {
         }
       }
 
+      // 4b) Post-genesis resource binding (#401). Genesis (v1) resources are
+      // bound by checkGenesisResourceBinding above; every resource version ≥ 2
+      // MUST instead be backed by a VERIFIED `update` log event with the SAME
+      // resourceId, version, and derived content hash. The step-4 loop only
+      // proves each resource is self-consistent (content ↔ its own hash), NOT
+      // that its content is the one the controller signed. Without this, a
+      // self-consistent forged post-genesis version (or an unprovable degraded
+      // version) in env.resources would load undetected while the fold reports
+      // the genuine hash. Fail closed — the verified log is the source of truth.
+      for (const res of env.resources) {
+        const version = typeof res.version === 'number' ? res.version : 1;
+        if (version < 2) continue;
+        const match = folded.resourceUpdates.find(
+          u => u.resourceId === res.id && u.toVersion === version
+        );
+        if (!match) {
+          throw new StructuredError(
+            'ASSET_LOAD_VERIFICATION_FAILED',
+            `Resource ${res.id} v${version} is not backed by a verified update event on the log (unprovable or forged post-genesis version).`,
+            { verification }
+          );
+        }
+        if (match.toHash.toLowerCase() !== String(res.hash).toLowerCase()) {
+          throw new StructuredError(
+            'ASSET_LOAD_VERIFICATION_FAILED',
+            `Resource ${res.id} v${version}: envelope hash (${res.hash}) does not match the verified log's derived hash (${match.toHash}).`,
+            { verification }
+          );
+        }
+      }
+
       // 5) Cross-checks: the fold IS the source of truth for identity/bindings;
       // an envelope's advisory DID docs must not disagree with it — a swapped
       // doc is exactly the attack the envelope invites. did:cel is bound by the
@@ -612,6 +651,7 @@ export class LifecycleManager {
       log,
       { currentLayer: folded.currentLayer, bindings: folded.bindings, provenance }
     );
+    asset._bindCelAppender((type, data) => this.appendCelEventOrSkip(asset, type, data));
 
     // Repopulate captured DID docs so re-serializing a loaded asset is
     // lossless. Only for layers cross-checked against the fold in step 5
@@ -745,7 +785,9 @@ export class LifecycleManager {
       }
     }
 
-    const resourceUpdates = (env.unverified?.resourceUpdates ?? []).map(u => ({ ...u }));
+    // Resource versions are now signed `update` log events — fold them from the
+    // (verified) log, never from the advisory envelope section (removed).
+    const resourceUpdates = folded.resourceUpdates.map(u => ({ ...u }));
 
     // txid: the btco migration's witnessed reveal txid (ownership moves live on
     // the sat's UTXO chain, not the CEL — no transfers to derive a txid from).

@@ -46,8 +46,8 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const btcoBinding = asset.bindings!['did:btco'];
 
-    // A post-genesis resource version → rides envelope-only (no CEL event until Phase 4).
-    asset.addResourceVersion('note', 'hello originals v2', 'text/plain', 'edit');
+    // A post-genesis resource version → appends a signed `update` CEL event.
+    await asset.addResourceVersion('note', 'hello originals v2', 'text/plain', 'edit');
 
     const env = asset.serialize();
 
@@ -57,8 +57,9 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     expect(env.assetDid).toBe(didCel);
 
     // eventLog is THE provenance encoding, embedded as a parsed object. The
-    // trailing update is the btco migrate's acknowledgeWitness (map §5.1).
-    expect(env.eventLog.events.map(e => e.type)).toEqual(['create', 'migrate', 'migrate', 'update']);
+    // first update is the btco migrate's acknowledgeWitness (map §5.1); the
+    // second is the signed resource-version update appended above.
+    expect(env.eventLog.events.map(e => e.type)).toEqual(['create', 'migrate', 'migrate', 'update', 'update']);
     const folded = replayProvenance(env.eventLog);
     expect(folded.bindings['did:cel']).toBe(didCel);
     expect(folded.bindings['did:webvh']).toBe(webvhBinding);
@@ -74,11 +75,30 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     expect(note.some(r => r.content === content)).toBe(true);
     expect(note.some(r => r.content === 'hello originals v2')).toBe(true);
 
-    // Honesty section: btco IS log-derivable → no advisory bindings. feeRate +
-    // resourceUpdates ride from the provenance cache.
+    // Honesty section: btco IS log-derivable → no advisory bindings. feeRate
+    // rides the provenance cache; resourceUpdates is no longer advisory (hard
+    // cutover — it's folded from the signed `update` log event instead).
     expect(env.unverified?.bindings).toBeUndefined();
     expect(typeof env.unverified?.feeRate).toBe('number');
-    expect(env.unverified?.resourceUpdates?.some(u => u.resourceId === 'note' && u.toVersion === 2)).toBe(true);
+    expect(folded.resourceUpdates.some(u => u.resourceId === 'note' && u.toVersion === 2)).toBe(true);
+  });
+
+  test('serialize no longer emits unverified.resourceUpdates; loadAsset folds versions from the log', async () => {
+    const sdk = makeSDK();
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'note', type: 'text', content: 'hello v1', contentType: 'text/plain', hash: hashResource(Buffer.from('hello v1', 'utf-8')) }
+    ]);
+    await asset.addResourceVersion('note', 'hello v2', 'text/plain', 'edit');
+
+    const env = asset.serialize();
+    // Cutover: the advisory array is gone.
+    expect((env.unverified as any)?.resourceUpdates).toBeUndefined();
+    // The update event is on the log.
+    expect(env.eventLog.events.some(e => e.type === 'update')).toBe(true);
+    // A fresh SDK (no keys) loads and the folded provenance shows the version.
+    const fresh = makeSDK(false);
+    const { asset: loaded } = await fresh.lifecycle.loadAsset(env);
+    expect(loaded.getProvenance().resourceUpdates.some(u => u.resourceId === 'note' && u.toVersion === 2)).toBe(true);
   });
 
   test('serialize is JSON-safe: JSON.parse(JSON.stringify(env)) deep-equals', async () => {

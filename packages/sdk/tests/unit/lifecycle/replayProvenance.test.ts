@@ -21,8 +21,13 @@ import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter'
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { deriveDidCel } from '../../../src/cel/celDid';
 import { appendEvent } from '../../../src/cel/algorithms/appendEvent';
-import { createKeyStoreCelSigner, currentControllerVm } from '../../../src/cel/signerAdapter';
+import { createKeyStoreCelSigner, currentControllerVm, hexSha256ToDigestMultibase } from '../../../src/cel/signerAdapter';
 import { replayProvenance } from '../../../src/lifecycle/replayProvenance';
+import { hashResource } from '../../../src/utils/validation';
+import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
+import { multikey } from '../../../src/crypto/Multikey';
+import { canonicalizeEvent } from '../../../src/cel/canonicalize';
+import * as ed25519 from '@noble/ed25519';
 
 const VALID_ADDR = 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx';
 
@@ -211,5 +216,53 @@ describe('replayProvenance pure fold (#Phase2 Task7)', () => {
     const folded = replayProvenance(log);
     expect(folded.currentLayer).toBe('did:btco');
     expect(folded.bindings['did:btco']).toBe('did:btco:reg:111'); // signed, not the witness 999
+  });
+});
+
+async function makeReplaySigner() {
+  const priv = crypto.getRandomValues(new Uint8Array(32));
+  const pub = await ed25519.getPublicKeyAsync(priv);
+  const pubMb = multikey.encodePublicKey(pub, 'Ed25519');
+  const didKey = `did:key:${pubMb}`;
+  const vm = `${didKey}#${pubMb}`;
+  const signer = async (data: unknown) => ({
+    type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022', created: '2021-05-05T00:00:00Z',
+    verificationMethod: vm, proofPurpose: 'assertionMethod',
+    proofValue: multikey.encodeMultibase(new Uint8Array(await ed25519.signAsync(canonicalizeEvent(data), priv))),
+  });
+  return { signer, didKey, vm };
+}
+const rhex = (s: string) => hashResource(Buffer.from(s, 'utf-8'));
+
+describe('replayProvenance: resourceUpdates fold', () => {
+  test('folds update events into resourceUpdates with derived toHash', async () => {
+    const a = await makeReplaySigner();
+    let log = await createEventLog(
+      { name: 'r', controller: a.didKey, resources: [{ digestMultibase: hexSha256ToDigestMultibase(rhex('v1')) }], createdAt: 'x', nonce: 'z1' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+    log = await appendEvent(log, 'update',
+      { resourceId: 'r', content: 'v2', contentType: 'text/plain', previousVersionHash: rhex('v1'), toVersion: 2 },
+      { signer: a.signer, verificationMethod: a.vm });
+
+    const folded = replayProvenance(log);
+    expect(folded.resourceUpdates.length).toBe(1);
+    const u = folded.resourceUpdates[0];
+    expect(u.resourceId).toBe('r');
+    expect(u.fromVersion).toBe(1);
+    expect(u.toVersion).toBe(2);
+    expect(u.fromHash).toBe(rhex('v1'));
+    expect(u.toHash).toBe(rhex('v2'));
+    expect(u.timestamp).toBe('2021-05-05T00:00:00Z');
+  });
+
+  test('generic and migration-ish updates do NOT fold into resourceUpdates', async () => {
+    const a = await makeReplaySigner();
+    let log = await createEventLog(
+      { name: 'r', controller: a.didKey, resources: [{ digestMultibase: hexSha256ToDigestMultibase(rhex('v1')) }], createdAt: 'x', nonce: 'z2' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+    log = await appendEvent(log, 'update', { note: 'generic' }, { signer: a.signer, verificationMethod: a.vm });
+    expect(replayProvenance(log).resourceUpdates.length).toBe(0);
   });
 });

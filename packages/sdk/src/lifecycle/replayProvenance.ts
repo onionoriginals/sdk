@@ -22,8 +22,10 @@
  *    is the honest sentinel `'did:btco:?'` rather than a fabricated DID.
  *  - `transfer` (legacy, no longer written) → no provenance entries. Ownership
  *    history is the sat's UTXO chain on Bitcoin, not the CEL.
- *  - `rotateKey` / `update` / `deactivate` → no provenance entries. Key
- *    rotation is custody, not provenance, for this fold.
+ *  - `rotateKey` / `deactivate` → no provenance entries. Key rotation is
+ *    custody, not provenance, for this fold. Resource-shaped `update` events
+ *    (`resourceId` + `previousVersionHash` + inline `content`) fold into
+ *    `resourceUpdates`; generic/migration-ish `update` events do not.
  *
  * KNOWN, DOCUMENTED DIVERGENCE from the live in-memory caches
  * (`OriginalsAsset.getProvenance()` / `asset.bindings`):
@@ -41,6 +43,7 @@
 import type { EventLog } from '../cel/types.js';
 import { deriveDidCel } from '../cel/celDid.js';
 import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
+import { hashResource } from '../utils/validation.js';
 
 /** Honest sentinel: a btco migration whose satoshi cannot be recovered from the log. */
 export const BTCO_SATOSHI_UNKNOWN = 'did:btco:?';
@@ -49,6 +52,17 @@ export interface ReplayedProvenance {
   currentLayer: 'did:peer' | 'did:webvh' | 'did:btco';
   bindings: Record<string, string>;
   migrations: Array<{ from: string; to: string; timestamp: string }>;
+  resourceUpdates: Array<{
+    resourceId: string;
+    // Omitted for foreign/legacy update events that carry no numeric toVersion
+    // (folding them as NaN serialized to null, poisoning the interchange shape).
+    fromVersion?: number;
+    toVersion?: number;
+    fromHash: string;
+    toHash: string;
+    timestamp: string;
+    changes?: string;
+  }>;
 }
 
 export function replayProvenance(log: EventLog): ReplayedProvenance {
@@ -65,6 +79,7 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
     currentLayer: 'did:peer',
     bindings: {},
     migrations: [],
+    resourceUpdates: [],
   };
 
   const genesisData = genesis.data as Record<string, unknown>;
@@ -76,8 +91,38 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
     const event = log.events[i];
     const data = (event.data ?? {}) as Record<string, unknown>;
 
+    if (event.type === 'update') {
+      // Resource-update events (resourceId + previousVersionHash) fold into the
+      // resource-version history. toHash is DERIVED from inline content, never
+      // stored. Generic/migration-ish updates lack these fields and are skipped.
+      const resourceId = typeof data.resourceId === 'string' ? data.resourceId : undefined;
+      const previousVersionHash = typeof data.previousVersionHash === 'string' ? data.previousVersionHash : undefined;
+      const content = typeof data.content === 'string' ? data.content : undefined;
+      if (resourceId && previousVersionHash && content !== undefined) {
+        const toVersion = typeof data.toVersion === 'number' ? data.toVersion : NaN;
+        const proofs = event.proof as ReadonlyArray<{ created?: unknown; witnessedAt?: unknown }> | undefined;
+        const controllerProof = proofs?.find((p) => !(p && typeof p === 'object' && 'witnessedAt' in p));
+        const timestamp = typeof controllerProof?.created === 'string' ? controllerProof.created : '';
+        const entry: ReplayedProvenance['resourceUpdates'][number] = {
+          resourceId,
+          fromHash: previousVersionHash,
+          toHash: hashResource(Buffer.from(content, 'utf-8')),
+          timestamp,
+        };
+        // Omit the version fields entirely for foreign logs whose update event
+        // carries no numeric toVersion (rather than fold them as NaN → null), or
+        // whose toVersion is < 2 (would yield a nonsensical fromVersion:0).
+        if (Number.isFinite(toVersion) && toVersion >= 2) {
+          entry.fromVersion = toVersion - 1;
+          entry.toVersion = toVersion;
+        }
+        result.resourceUpdates.push(entry);
+      }
+      continue;
+    }
+
     if (event.type !== 'migrate') {
-      // transfer (legacy) / rotateKey / update / deactivate: not provenance.
+      // transfer (legacy) / rotateKey / deactivate: not provenance.
       // Ownership history is the sat's UTXO chain, not the CEL.
       continue;
     }

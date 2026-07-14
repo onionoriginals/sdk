@@ -22,6 +22,8 @@ import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize.js
 import { multikey } from '../../crypto/Multikey.js';
 import { deriveDidCelFromGenesis, didCelMatchesLog } from '../celDid.js';
 import { parseSatoshiIdentifier } from '../../utils/satoshi-validation.js';
+import { hexSha256ToDigestMultibase } from '../signerAdapter.js';
+import { hashResource } from '../../utils/validation.js';
 
 /**
  * Validates the structural requirements of a DataIntegrityProof (field presence,
@@ -932,6 +934,63 @@ async function resolveControllerKeyHex(
  * @param resolveKey - Optional key resolver for non-did:key proofs
  * @returns EventVerification result
  */
+/**
+ * Resource-update continuity + content binding (#Phase-4 resource events).
+ *
+ * A resource-shaped `update` event (`data.resourceId` + `data.previousVersionHash`
+ * present) MUST chain forward from the last-known hash of its resourceId:
+ *  - first update for a resourceId: if genesis BOUND that resourceId to a digest
+ *    (ExternalReference carried an `id`, #401), `previousVersionHash` must match
+ *    THAT digest specifically; otherwise (legacy id-less genesis) it may match
+ *    ANY genesis digest;
+ *  - subsequent updates: it must match the prior update's DERIVED hash.
+ * The new current hash is `hashResource(content)` (derived, never stored). All
+ * hashes are compared as digestMultibase. On success the per-resourceId map is
+ * advanced; on any failure an error string is returned (fail closed) and the map
+ * is left untouched.
+ */
+function checkResourceUpdateContinuity(
+  data: { resourceId: unknown; previousVersionHash: unknown; content?: unknown },
+  genesisDigests: Set<string>,
+  genesisDigestById: Map<string, string>,
+  currentResourceHash: Map<string, string>
+): string | null {
+  const resourceId = data.resourceId as string;
+  if (typeof data.content !== 'string') {
+    return `resource update for ${resourceId} has non-string content; cannot verify`;
+  }
+  let prevDigest: string;
+  let newDigest: string;
+  try {
+    prevDigest = hexSha256ToDigestMultibase(data.previousVersionHash as string);
+    newDigest = hexSha256ToDigestMultibase(hashResource(Buffer.from(data.content, 'utf-8')));
+  } catch (e) {
+    return `resource update for ${resourceId} has an unparseable hash: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  const known = currentResourceHash.get(resourceId);
+  let matches: boolean;
+  if (known !== undefined) {
+    // Subsequent update: chain from this resource's prior derived hash.
+    matches = digestMultibaseEquals(prevDigest, known);
+  } else {
+    // First update. If genesis bound this resourceId (#401), it MUST chain from
+    // that specific digest — not any genesis resource's digest (which would let
+    // a fabricated/mismatched resourceId anchor off an unrelated resource). Only
+    // an id-less legacy genesis falls back to matching any genesis digest.
+    const boundDigest = genesisDigestById.get(resourceId);
+    matches = boundDigest !== undefined
+      ? digestMultibaseEquals(prevDigest, boundDigest)
+      : [...genesisDigests].some((d) => digestMultibaseEquals(prevDigest, d));
+  }
+  if (!matches) {
+    return `resource update for ${resourceId}: previousVersionHash does not match the last-known hash (chain-continuity broken)`;
+  }
+
+  currentResourceHash.set(resourceId, newDigest);
+  return null;
+}
+
 async function verifyEvent(
   event: LogEntry,
   index: number,
@@ -1264,6 +1323,29 @@ export async function verifyEventLog(
     ? genesisData.controller
     : undefined;
 
+  // Seed for resource-update continuity from the genesis resource digests
+  // (ExternalReference.digestMultibase). Two seeds (#401):
+  //  - `genesisResourceDigestById`: when a genesis ref carries its resource `id`,
+  //    that resource's FIRST update MUST chain from ITS OWN genesis digest.
+  //  - `genesisResourceDigests` (flat): legacy/hand-built geneses whose refs have
+  //    no `id` fall back to matching ANY genesis digest (the pre-#401 behavior).
+  // Subsequent updates always chain from the prior derived hash.
+  const genesisResourceDigests = new Set<string>();
+  const genesisResourceDigestById = new Map<string, string>();
+  {
+    const genesisResources = (createEvent.data as { resources?: unknown } | null | undefined)?.resources;
+    if (Array.isArray(genesisResources)) {
+      for (const r of genesisResources) {
+        const dm = (r as { digestMultibase?: unknown })?.digestMultibase;
+        if (typeof dm !== 'string' || dm.length === 0) continue;
+        genesisResourceDigests.add(dm);
+        const id = (r as { id?: unknown })?.id;
+        if (typeof id === 'string' && id.length > 0) genesisResourceDigestById.set(id, dm);
+      }
+    }
+  }
+  const currentResourceHash = new Map<string, string>();
+
   let authorizedKeyIds = new Set<string>();
   let authorityError: string | undefined;
   if (!options?.verifier) {
@@ -1364,6 +1446,27 @@ export async function verifyEventLog(
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
     const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds, options?.ordinalsProvider, anchoredSat);
+
+    // Resource-update continuity (default path only; a custom verifier owns
+    // proof semantics). Only engage for resource-shaped updates that otherwise
+    // verified — a failed proof/chain already fails the event.
+    if (!options?.verifier && event.type === 'update' && eventResult.proofValid && eventResult.chainValid) {
+      const rd = event.data as { resourceId?: unknown; previousVersionHash?: unknown; content?: unknown } | null;
+      if (rd && typeof rd.resourceId === 'string' && typeof rd.previousVersionHash === 'string') {
+        // Rebuild as a literal: narrowing on rd's optional props doesn't
+        // propagate to the whole-object type expected by the helper below.
+        const err = checkResourceUpdateContinuity(
+          { resourceId: rd.resourceId, previousVersionHash: rd.previousVersionHash, content: rd.content },
+          genesisResourceDigests,
+          genesisResourceDigestById,
+          currentResourceHash
+        );
+        if (err) {
+          eventResult.proofValid = false;
+          eventResult.errors.push(`Event ${i}: ${err}`);
+        }
+      }
+    }
 
     // rotateKey hand-off. Order matters: the rotation event must pass ALL its
     // checks (chain link, signature, CURRENT-set authorization, gating witness

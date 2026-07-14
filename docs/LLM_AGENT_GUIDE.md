@@ -772,12 +772,16 @@ asset.queryProvenance(): ProvenanceQuery  // Fluent API for queries
 // newContent must be a string: AssetResource stores inline content as a string,
 // so Buffer input throws StructuredError('BINARY_CONTENT_UNSUPPORTED') rather
 // than silently dropping the bytes. Encode binary content (e.g. base64) first.
-asset.addResourceVersion(
+// Async: appends a signed `update` CEL event via the bound controller appender
+// (must `await`). When no signer is available (no keyStore / key absent) it
+// degrades — advances the in-memory version but emits `cel:append-skipped` and
+// writes no provable event. Concurrent calls are serialized per asset.
+await asset.addResourceVersion(
   resourceId: string,
   newContent: string,
   contentType: string,
   changes?: string
-): AssetResource
+): Promise<AssetResource>
 
 asset.getResourceVersion(resourceId: string, version: number): AssetResource | null
 asset.getAllVersions(resourceId: string): AssetResource[]
