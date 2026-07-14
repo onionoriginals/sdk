@@ -1084,8 +1084,8 @@ export class LifecycleManager {
       }));
       const writtenObjects: Array<{ domain: string; relativePath: string }> = [];
 
-      // Capture the layer before migration (always 'did:peer' here due to the
-      // guard above, but captured dynamically for correctness).
+      // Capture the layer before migration (the genesis layer — 'did:cel', or
+      // legacy 'did:peer' — per the guard above; captured dynamically).
       const priorLayer = asset.currentLayer;
 
       // Snapshot the CEL log so a mid-publish failure after the migrate append
