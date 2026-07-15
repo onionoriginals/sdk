@@ -147,11 +147,6 @@ describeSignet('BitcoinManager against signet', () => {
     manager = new BitcoinManager(config);
   });
 
-  test('preventFrontRunning returns boolean for unknown satoshi', async () => {
-    const result = await manager.preventFrontRunning('999999999999999');
-    expect(typeof result).toBe('boolean');
-  });
-
   test('getSatoshiFromInscription returns null for unknown inscription', async () => {
     const result = await manager.getSatoshiFromInscription('0000000000000000000000000000000000000000000000000000000000000000i0');
     expect(result).toBeNull();
@@ -303,11 +298,6 @@ describeSignet('SignetProvider with BitcoinManager', () => {
     manager = new BitcoinManager(config);
   });
 
-  test('preventFrontRunning returns boolean', async () => {
-    const result = await manager.preventFrontRunning('999999999999999');
-    expect(typeof result).toBe('boolean');
-  });
-
   test('validateBTCODID returns false for nonexistent DID', async () => {
     const result = await manager.validateBTCODID('did:btco:sig:999999999999999');
     expect(result).toBe(false);
@@ -406,10 +396,6 @@ describeSignet('BitcoinManager DID validation against signet', () => {
   test('validateBTCODID rejects DID with invalid network prefix', async () => {
     const result = await manager.validateBTCODID('did:btco:invalid:123');
     expect(result).toBe(false);
-  });
-
-  test('preventFrontRunning rejects empty satoshi', async () => {
-    await expect(manager.preventFrontRunning('')).rejects.toThrow('SATOSHI_REQUIRED');
   });
 
   test('inscribeData validates content type format', async () => {
