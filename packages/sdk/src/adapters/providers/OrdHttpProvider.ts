@@ -111,13 +111,6 @@ export class OrdHttpProvider implements OrdinalsProvider {
       vout = Number(v) || 0;
     }
 
-    // #407 phase 3: decode the inscription's CBOR metadata (`{ didDocument,
-    // celLog | events }`) so a real chain can be reconstructed. Absent metadata
-    // is fine (undefined); metadata BYTES that fail to decode fail closed — a
-    // provider that cannot read present metadata must never yield a silent
-    // partial reconstruction.
-    const metadata = await this.fetchMetadata(id, data);
-
     const contentType = data.content_type || 'application/octet-stream';
     // The content URL may come from the (untrusted) indexer response. Pin it to
     // baseUrl's origin before fetching so a malicious endpoint cannot redirect
@@ -129,6 +122,14 @@ export class OrdHttpProvider implements OrdinalsProvider {
     const buf = (globalThis as any).Buffer
       ? (globalThis as any).Buffer.from(content.bytes)
       : content.bytes as any;
+
+    // #407 phase 3: decode the inscription's CBOR metadata (`{ didDocument,
+    // celLog | events }`) so a real chain can be reconstructed. Fetched AFTER the
+    // content (so the content SSRF/size guards run first). Absent metadata is fine
+    // (undefined) — the resolver fails closed when an anchoring inscription lacks
+    // provenance metadata; an explicit inline `metadata` field that fails to decode
+    // is a hard error (present-but-undecodable).
+    const metadata = await this.fetchMetadata(id, data);
 
     return {
       inscriptionId: data.inscription_id || id,
@@ -151,29 +152,37 @@ export class OrdHttpProvider implements OrdinalsProvider {
    * that cannot read present metadata must not silently drop provenance.
    */
   private async fetchMetadata(id: string, indexerJson: any): Promise<Record<string, unknown> | undefined> {
-    let hex: string | undefined;
+    // An INLINE hex `metadata` field is an EXPLICIT provenance declaration:
+    // present-but-undecodable is a hard fail-closed error.
     if (typeof indexerJson?.metadata === 'string' && indexerJson.metadata.length > 0) {
-      hex = indexerJson.metadata;
-    } else {
-      const url = buildUrl(this.baseUrl, `/r/metadata/${id}`);
-      const result = await fetchBytesWithLimit(url, this.maxJsonBytes, { headers: { 'Accept': 'application/json' } });
-      if (!result) return undefined; // no metadata endpoint / 404 → legitimately none
-      let text = new TextDecoder().decode(result.bytes).trim();
-      if (text.length === 0) return undefined;
-      if (text.startsWith('"') && text.endsWith('"')) {
-        try { text = JSON.parse(text) as string; } catch { /* keep raw */ }
+      try {
+        return decodeCbor<Record<string, unknown>>(hexToBytes(indexerJson.metadata));
+      } catch (e) {
+        throw new StructuredError(
+          'ORD_METADATA_UNDECODABLE',
+          `OrdHttpProvider: inscription ${id} carries an inline metadata field that could not be hex/CBOR decoded (${e instanceof Error ? e.message : String(e)}); refusing to reconstruct from partial provenance`,
+          { inscriptionId: id }
+        );
       }
-      hex = text;
     }
-    if (!hex) return undefined;
+    // The ord recursive `/r/metadata/<id>` route serves hex CBOR ONLY when
+    // metadata exists. A 404, an empty body, or a non-hex/undecodable body all
+    // mean "no CBOR metadata in the expected form" → undefined. This is not a
+    // silent security hole: the resolver fails closed when an anchoring
+    // inscription lacks provenance metadata, and a malicious endpoint could
+    // equally 404 the route.
+    const url = buildUrl(this.baseUrl, `/r/metadata/${id}`);
+    const result = await fetchBytesWithLimit(url, this.maxJsonBytes, { headers: { 'Accept': 'application/json' } });
+    if (!result) return undefined;
+    let text = new TextDecoder().decode(result.bytes).trim();
+    if (text.length === 0) return undefined;
+    if (text.startsWith('"') && text.endsWith('"')) {
+      try { text = JSON.parse(text) as string; } catch { /* keep raw */ }
+    }
     try {
-      return decodeCbor<Record<string, unknown>>(hexToBytes(hex));
-    } catch (e) {
-      throw new StructuredError(
-        'ORD_METADATA_UNDECODABLE',
-        `OrdHttpProvider: inscription ${id} carries metadata that could not be hex/CBOR decoded (${e instanceof Error ? e.message : String(e)}); refusing to reconstruct from partial provenance`,
-        { inscriptionId: id }
-      );
+      return decodeCbor<Record<string, unknown>>(hexToBytes(text));
+    } catch {
+      return undefined;
     }
   }
 
