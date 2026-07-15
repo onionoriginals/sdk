@@ -1,6 +1,7 @@
 import { describe, it, expect, mock } from 'bun:test';
 import * as btc from '@scure/btc-signer';
 import { inscribeOnSat } from '../../../src/bitcoin/inscribe-on-sat';
+import { getScureNetwork } from '../../../src/bitcoin/transactions/commit';
 import { sampleUtxo, sampleChangeAddress } from '../../fixtures/bitcoin';
 
 // A realistic signer: parses the commit PSBT and returns broadcast-ready tx hex
@@ -81,6 +82,53 @@ describe('inscribeOnSat', () => {
     const badSigner = { signCommitPsbt: async (p: string) => p };
     await expect(inscribeOnSat({ ...baseParams(), satSigner: badSigner, provider: providerDouble() }))
       .rejects.toMatchObject({ code: 'COMMIT_TX_INVALID' });
+  });
+
+  it('throws COMMIT_TX_MISMATCH (and broadcasts nothing) when the signed tx spends a different input than fundingUtxo', async () => {
+    // A validly-parseable tx, but its input[0] is NOT fundingUtxo — e.g. a signer
+    // bug that funded from the wrong UTXO. Must be rejected before any broadcast.
+    const wrongInputSigner = {
+      signCommitPsbt: async () => {
+        const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true });
+        tx.addInput({
+          txid: 'ff'.repeat(32),
+          index: 0,
+          sequence: 0xfffffffd,
+          witnessUtxo: { amount: BigInt(sampleUtxo.value), script: Buffer.from(sampleUtxo.scriptPubKey, 'hex') }
+        });
+        tx.addOutputAddress(sampleChangeAddress, 852n, getScureNetwork('regtest'));
+        return Buffer.from(tx.toBytes(true, false)).toString('hex');
+      }
+    };
+    const broadcastTransaction = mock(async () => 'cc'.repeat(32));
+    const provider = providerDouble({ broadcastTransaction });
+    await expect(inscribeOnSat({ ...baseParams(), satSigner: wrongInputSigner, provider }))
+      .rejects.toMatchObject({ code: 'COMMIT_TX_MISMATCH' });
+    expect(broadcastTransaction).not.toHaveBeenCalled();
+  });
+
+  it('throws COMMIT_TX_MISMATCH (and broadcasts nothing) when the signed tx pays the wrong output', async () => {
+    // Correct input, but output[0] doesn't match the commit output the SDK built
+    // (wrong destination address here, standing in for wrong amount/script).
+    const wrongOutputSigner = {
+      signCommitPsbt: async () => {
+        const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true });
+        tx.addInput({
+          txid: sampleUtxo.txid,
+          index: sampleUtxo.vout,
+          sequence: 0xfffffffd,
+          witnessUtxo: { amount: BigInt(sampleUtxo.value), script: Buffer.from(sampleUtxo.scriptPubKey, 'hex') }
+        });
+        // Pays the change address instead of the commit (P2TR) output.
+        tx.addOutputAddress(sampleChangeAddress, 852n, getScureNetwork('regtest'));
+        return Buffer.from(tx.toBytes(true, false)).toString('hex');
+      }
+    };
+    const broadcastTransaction = mock(async () => 'cc'.repeat(32));
+    const provider = providerDouble({ broadcastTransaction });
+    await expect(inscribeOnSat({ ...baseParams(), satSigner: wrongOutputSigner, provider }))
+      .rejects.toMatchObject({ code: 'COMMIT_TX_MISMATCH' });
+    expect(broadcastTransaction).not.toHaveBeenCalled();
   });
 
   it('attaches recovery data (revealTxHex + commitTxId) when the reveal broadcast fails', async () => {

@@ -5,6 +5,7 @@ import { OrdinalsProvider } from '../adapters/types.js';
 import { StructuredError } from '../utils/telemetry.js';
 import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
 import { createCommitTransaction, createRevealTransaction } from './transactions/commit.js';
+import { scriptPubKeyForAddress } from './transfer.js';
 
 export interface InscribeOnSatParams {
   buildContent: (satoshi: string) => Promise<{ content: Buffer; contentType: string; metadata?: Record<string, unknown> }>;
@@ -34,7 +35,9 @@ export interface InscribeOnSatResult {
  * would spuriously fail after real BTC was spent. The caller owns confirmation
  * monitoring. Both txs are built (and the commit txid computed locally) BEFORE
  * broadcasting, and a post-commit reveal failure returns recovery data so the
- * committed funds are never stranded.
+ * committed funds are never stranded. The signer's returned commit is checked
+ * (input[0]==fundingUtxo, output[0]==the built commit output) before that
+ * broadcast, so a buggy/malicious signer can't silently redirect the DID sat.
  */
 export async function inscribeOnSat(params: InscribeOnSatParams): Promise<InscribeOnSatResult> {
   const { buildContent, fundingUtxo, satSigner, changeAddress, feeRate, network, provider } = params;
@@ -65,8 +68,9 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
   // segwit, so the txid is witness-independent — never trust a provider-returned
   // txid to build the reveal's prevout.
   let commitTxId: string;
+  let parsed: btc.Transaction;
   try {
-    const parsed = btc.Transaction.fromRaw(Buffer.from(signedCommit, 'hex'), {
+    parsed = btc.Transaction.fromRaw(Buffer.from(signedCommit, 'hex'), {
       allowUnknownInputs: true,
       allowUnknownOutputs: true
     });
@@ -74,6 +78,32 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
   } catch (e) {
     throw new StructuredError('COMMIT_TX_INVALID',
       `Signer returned a commit transaction that could not be parsed as broadcast-ready hex: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // 5b) Invariant: the signed tx must actually BE the commit we built for this
+  // funding UTXO, not merely something parseable. A buggy/malicious signer could
+  // return a different, validly-formed tx (wrong input, wrong output) which would
+  // silently land the DID on the wrong sat. Check input[0]==fundingUtxo and
+  // output[0]==the commit output (amount + scriptPubKey) BEFORE broadcasting.
+  const mismatchDetails = { fundingUtxo, commitAmount: commit.commitAmount, commitAddress: commit.commitAddress };
+  if (parsed.inputsLength < 1 || parsed.outputsLength < 1) {
+    throw new StructuredError('COMMIT_TX_MISMATCH',
+      'The signed commit does not match the commit built for this funding UTXO; refusing to broadcast (the DID sat would be wrong).',
+      mismatchDetails);
+  }
+  const input0 = parsed.getInput(0);
+  const output0 = parsed.getOutput(0);
+  // TransactionInput.txid is stored in the same display-order hex convention as
+  // Utxo.txid (verified: fromRaw round-trips it unreversed), so a direct hex compare is correct.
+  const input0TxidHex = Buffer.from(input0.txid ?? new Uint8Array()).toString('hex').toLowerCase();
+  const inputMatches = input0TxidHex === fundingUtxo.txid.toLowerCase() && input0.index === fundingUtxo.vout;
+  const expectedCommitScriptHex = scriptPubKeyForAddress(commit.commitAddress, network);
+  const output0ScriptHex = Buffer.from(output0.script ?? new Uint8Array()).toString('hex');
+  const outputMatches = output0.amount === BigInt(commit.commitAmount) && output0ScriptHex === expectedCommitScriptHex;
+  if (!inputMatches || !outputMatches) {
+    throw new StructuredError('COMMIT_TX_MISMATCH',
+      'The signed commit does not match the commit built for this funding UTXO; refusing to broadcast (the DID sat would be wrong).',
+      mismatchDetails);
   }
 
   // 6) Build + self-sign the reveal spending the commit output (vout 0) BEFORE
