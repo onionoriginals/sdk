@@ -447,8 +447,8 @@ export class OriginalsAsset {
         }
         // Anchored: the hash must be entirely hex. An unanchored test would
         // accept any string merely containing a hex character (e.g.
-        // "not-a-real-hash"), which for URL-only resources with no fetch
-        // provided is the only integrity check performed.
+        // "not-a-real-hash"); this structural gate runs before the content/URL
+        // integrity checks below.
         if (typeof res.hash !== 'string' || !/^[0-9a-f]+$/i.test(res.hash)) {
           return false;
         }
@@ -464,8 +464,14 @@ export class OriginalsAsset {
           continue;
         }
 
-        // If URL present and fetch is provided, attempt to fetch and hash
-        if (typeof res.url === 'string' && deps?.fetch) {
+        // Hosted (URL-only) resource: integrity is verifiable ONLY by fetching
+        // and hashing. Fail closed if we can't positively confirm it (#368) —
+        // a hosted resource whose bytes we can't match is not verified.
+        if (typeof res.url === 'string') {
+          // No fetcher → hosted content is unverifiable → fail closed.
+          if (!deps?.fetch) {
+            return false;
+          }
           try {
             const response = await deps.fetch(res.url);
             const buf = Buffer.from(await response.arrayBuffer());
@@ -475,8 +481,8 @@ export class OriginalsAsset {
               return false;
             }
           } catch {
-            // On fetch error, treat as unverifiable but do not fail the entire asset
-            // Fall back to structural validation only
+            // Fetch error on a hosted resource → unverifiable → fail closed.
+            return false;
           }
         }
       }

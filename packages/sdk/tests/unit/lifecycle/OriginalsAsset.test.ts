@@ -142,13 +142,42 @@ describe('OriginalsAsset', () => {
     spy.mockRestore();
   });
 
-  test('verify does not fail if fetch throws when URL present', async () => {
+  test('verify fails closed when fetch throws for a hosted (URL-only) resource (#368)', async () => {
+    // A hosted resource we cannot fetch is unverifiable → fail closed.
     const resWithUrl: AssetResource = {
       id: 'r3', type: 'text', url: 'https://example.com/missing', contentType: 'text/plain', hash: resources[0].hash
     };
     const asset = new OriginalsAsset([resWithUrl], buildDid('did:cel:abc'), emptyCreds);
     const failingFetch = async () => { throw new Error('network'); };
-    await expect(asset.verify({ fetch: failingFetch as any })).resolves.toBe(true);
+    await expect(asset.verify({ fetch: failingFetch as any })).resolves.toBe(false);
+  });
+
+  test('verify fails closed for a hosted (URL-only) resource when no fetcher is provided (#368)', async () => {
+    // did:webvh's whole point is hash-addressed hosted bytes; without a fetcher
+    // the integrity of hosted content cannot be confirmed → fail closed.
+    const resWithUrl: AssetResource = {
+      id: 'r-hosted-nofetch',
+      type: 'text',
+      url: 'https://example.com/x',
+      contentType: 'text/plain',
+      hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' // valid hex, sha256 of empty
+    };
+    const asset = new OriginalsAsset([resWithUrl], buildDid('did:cel:abc'), emptyCreds);
+    await expect(asset.verify()).resolves.toBe(false);
+  });
+
+  test('verify passes for a resource with BOTH inline content and url via the inline path, no fetcher (#368)', async () => {
+    // Inline content is authoritative; presence of a url must not force a fetch.
+    const resBoth: AssetResource = {
+      id: 'r-both',
+      type: 'text',
+      content: 'hello',
+      url: 'https://example.com/hello',
+      contentType: 'text/plain',
+      hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
+    };
+    const asset = new OriginalsAsset([resBoth], buildDid('did:cel:abc'), emptyCreds);
+    await expect(asset.verify()).resolves.toBe(true);
   });
 
   test('verify returns false when resource has invalid id type', async () => {
