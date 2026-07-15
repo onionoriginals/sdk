@@ -101,6 +101,34 @@ describe('OrdHttpProvider SSRF / size hardening (#265)', () => {
     expect(inits.every((c) => c.init?.redirect === 'error')).toBe(true);
   });
 
+  test('a 5xx on /r/metadata fails closed (does not silently drop provenance — Greptile/I2)', async () => {
+    installFetch(async (url) => {
+      if (url.includes('/r/metadata/')) {
+        return { ok: false, status: 503, headers: { get: () => null }, async arrayBuffer() { return new ArrayBuffer(0); } };
+      }
+      if (url.includes('/inscription/')) {
+        return jsonResponse({ content_url: `${BASE}/content/abc`, content_type: 'text/plain', sat: '123' });
+      }
+      return bytesResponse(new Uint8Array([104, 105])); // "hi"
+    });
+    const provider = new OrdHttpProvider({ baseUrl: BASE });
+    await expect(provider.getInscriptionById('abc')).rejects.toThrow(/ORD_METADATA_UNAVAILABLE|HTTP 503/);
+  });
+
+  test('a 404 on /r/metadata degrades to no metadata (not an error)', async () => {
+    installFetch(async (url) => {
+      if (url.includes('/r/metadata/')) return notFoundResponse();
+      if (url.includes('/inscription/')) {
+        return jsonResponse({ content_url: `${BASE}/content/abc`, content_type: 'text/plain', sat: '123' });
+      }
+      return bytesResponse(new Uint8Array([104, 105]));
+    });
+    const provider = new OrdHttpProvider({ baseUrl: BASE });
+    const res = await provider.getInscriptionById('abc');
+    expect(res).not.toBeNull();
+    expect((res as any).metadata).toBeUndefined();
+  });
+
   test('rejects an oversized content body (declared Content-Length)', async () => {
     installFetch(async (url) => {
       if (url.includes('/inscription/')) {

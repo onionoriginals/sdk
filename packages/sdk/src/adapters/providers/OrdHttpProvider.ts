@@ -166,15 +166,32 @@ export class OrdHttpProvider implements OrdinalsProvider {
       }
     }
     // The ord recursive `/r/metadata/<id>` route serves hex CBOR ONLY when
-    // metadata exists. A 404 / empty body → no metadata (undefined). But a
-    // PRESENT non-empty body that does not hex/CBOR decode is a hard fail-closed
-    // error: swallowing it to undefined would let a transient fault or a
-    // garbage-serving endpoint drop a real anchoring inscription and silently
-    // truncate the chain tail. Fable I2.
+    // metadata exists. Distinguish the status EXPLICITLY (Greptile): ONLY a 404
+    // (genuinely no metadata) or an empty body degrades to undefined; a 5xx /
+    // other transient fault must THROW — swallowing it would let a flaky endpoint
+    // drop a real anchoring inscription and silently truncate the chain tail
+    // (I2). A present non-empty body that does not hex/CBOR decode is likewise a
+    // hard fail-closed error. Direct fetch so the status code is visible
+    // (fetchBytesWithLimit collapses every non-ok to null).
     const url = buildUrl(this.baseUrl, `/r/metadata/${id}`);
-    const result = await fetchBytesWithLimit(url, this.maxJsonBytes, { headers: { 'Accept': 'application/json' } });
-    if (!result) return undefined;
-    let text = new TextDecoder().decode(result.bytes).trim();
+    const res = await (globalThis as any).fetch(url, { redirect: 'error', headers: { 'Accept': 'application/json' } });
+    if (res.status === 404) return undefined; // genuinely no metadata on this inscription
+    if (!res.ok) {
+      throw new StructuredError(
+        'ORD_METADATA_UNAVAILABLE',
+        `OrdHttpProvider: inscription ${id} /r/metadata returned HTTP ${res.status}; refusing to reconstruct from possibly-incomplete provenance`,
+        { inscriptionId: id }
+      );
+    }
+    const lenHeader = res.headers?.get?.('content-length');
+    if (lenHeader && Number(lenHeader) > this.maxJsonBytes) {
+      throw new Error(`OrdHttpProvider: /r/metadata response exceeds ${this.maxJsonBytes} bytes (Content-Length ${lenHeader})`);
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength > this.maxJsonBytes) {
+      throw new Error(`OrdHttpProvider: /r/metadata response body exceeds ${this.maxJsonBytes} bytes`);
+    }
+    let text = new TextDecoder().decode(bytes).trim();
     if (text.length === 0) return undefined;
     if (text.startsWith('"') && text.endsWith('"')) {
       try { text = JSON.parse(text) as string; } catch { /* keep raw */ }
