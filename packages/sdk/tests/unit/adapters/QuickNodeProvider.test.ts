@@ -195,6 +195,57 @@ describe('getInscriptionById', () => {
   });
 });
 
+describe('getFirstSatOfOutput', () => {
+  const provider = () => new QuickNodeProvider({ endpoint: ENDPOINT });
+
+  test('parses ord_getOutput sat_ranges into the first (lowest) sat', async () => {
+    mockRpc('ord_getOutput', { sat_ranges: [[125866034480298, 125866034480398], [999, 1099]] });
+    const sat = await provider().getFirstSatOfOutput({ txid: TXID, vout: 0 });
+    expect(sat).toBe('125866034480298');
+    expect(requests[0]).toMatchObject({ jsonrpc: '2.0', method: 'ord_getOutput', params: [`${TXID}:0`] });
+  });
+
+  test('accepts string-encoded range bounds', async () => {
+    mockRpc('ord_getOutput', { sat_ranges: [['125866034480298', '125866034480398']] });
+    const sat = await provider().getFirstSatOfOutput({ txid: TXID, vout: 2 });
+    expect(sat).toBe('125866034480298');
+    expect(requests[0]).toMatchObject({ params: [`${TXID}:2`] });
+  });
+
+  test('throws SAT_INDEX_UNAVAILABLE on an RPC error instead of guessing a sat', async () => {
+    mockRpcError('ord_getOutput', { code: -32000, message: 'output not found' });
+    const err = await provider()
+      .getFirstSatOfOutput({ txid: TXID, vout: 0 })
+      .then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(StructuredError);
+    expect((err as StructuredError).code).toBe('SAT_INDEX_UNAVAILABLE');
+  });
+
+  test('throws SAT_INDEX_UNAVAILABLE when sat_ranges is empty (sat index not enabled)', async () => {
+    mockRpc('ord_getOutput', { sat_ranges: [] });
+    const err = await provider()
+      .getFirstSatOfOutput({ txid: TXID, vout: 0 })
+      .then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(StructuredError);
+    expect((err as StructuredError).code).toBe('SAT_INDEX_UNAVAILABLE');
+  });
+
+  test('throws SAT_INDEX_UNAVAILABLE when sat_ranges is absent from the response', async () => {
+    mockRpc('ord_getOutput', {});
+    const err = await provider()
+      .getFirstSatOfOutput({ txid: TXID, vout: 0 })
+      .then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(StructuredError);
+    expect((err as StructuredError).code).toBe('SAT_INDEX_UNAVAILABLE');
+  });
+
+  test('rejects a malformed outpoint without any RPC call', async () => {
+    await expect(provider().getFirstSatOfOutput({ txid: 'not-hex', vout: 0 })).rejects.toThrow(StructuredError);
+    await expect(provider().getFirstSatOfOutput({ txid: TXID, vout: -1 })).rejects.toThrow(StructuredError);
+    expect(requests.length).toBe(0);
+  });
+});
+
 describe('getInscriptionsBySatoshi', () => {
   const provider = () => new QuickNodeProvider({ endpoint: ENDPOINT });
 

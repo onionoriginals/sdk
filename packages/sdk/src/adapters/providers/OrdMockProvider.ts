@@ -43,6 +43,18 @@ export class OrdMockProvider implements OrdinalsProvider {
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
+  async getFirstSatOfOutput(outpoint: { txid: string; vout: number }): Promise<string> {
+    // Deterministic pseudo-sat from the outpoint so tests can assert the
+    // derived did:btco identity without a real sat index. Not a real ordinal
+    // calculation — a stable, unique-per-outpoint integer in a plausible range.
+    let h = 2166136261 >>> 0; // FNV-1a
+    const s = `${outpoint.txid}:${outpoint.vout}`;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    // Keep it well inside the 0..2.1e15 sat supply range.
+    return String(100000000 + (h % 2000000000000000));
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getInscriptionsBySatoshi(satoshi: string) {
     const list = this.state.inscriptionsBySatoshi.get(satoshi) || [];
     return list.map((inscriptionId) => ({ inscriptionId }));
