@@ -3,7 +3,7 @@ import {
   OrdinalsInscription,
   BitcoinTransaction
 } from '../types/index.js';
-import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters/index.js';
+import type { FeeOracleAdapter, OrdinalsProvider, InscriptionParts } from '../adapters/index.js';
 import type { OperationLock } from '../utils/OperationLock.js';
 import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
@@ -127,6 +127,12 @@ export class BitcoinManager {
        * different manager — is rejected rather than double-paying (issue #303).
        */
       lockKey?: string;
+      /**
+       * Static CBOR metadata to attach to the inscription (#407 phase 2). On the
+       * deferred (`buildContent`) path, a `{ content, metadata }` result from the
+       * builder takes precedence over this.
+       */
+      metadata?: Record<string, unknown>;
     }
   ): Promise<OrdinalsInscription> {
     // Input validation
@@ -172,15 +178,17 @@ export class BitcoinManager {
     const performInscription = async (): Promise<OrdinalsInscription> => {
     const creation = typeof data === 'function'
       ? await ord.createInscription({
-          buildContent: data as (satoshi: string) => Buffer | Promise<Buffer>,
+          buildContent: data as (satoshi: string) => InscriptionParts | Promise<InscriptionParts>,
           contentType,
           feeRate: effectiveFeeRate,
+          ...(options?.metadata ? { metadata: options.metadata } : {}),
           ...(options?.targetSatoshi ? { targetSatoshi: options.targetSatoshi } : {})
         })
       : await ord.createInscription({
           data,
           contentType,
           feeRate: effectiveFeeRate,
+          ...(options?.metadata ? { metadata: options.metadata } : {}),
           ...(options?.targetSatoshi ? { targetSatoshi: options.targetSatoshi } : {})
         });
     const txid = creation.txid ?? creation.revealTxId;
@@ -247,7 +255,8 @@ export class BitcoinManager {
       blockHeight: creation.blockHeight,
       revealTxId: creation.revealTxId,
       commitTxId: creation.commitTxId,
-      feeRate: recordedFeeRate
+      feeRate: recordedFeeRate,
+      ...(creation.metadata !== undefined ? { metadata: creation.metadata } : {})
     };
 
     return inscription;
@@ -271,7 +280,8 @@ export class BitcoinManager {
         contentType: info.contentType,
         txid: info.txid,
         vout: info.vout,
-        blockHeight: info.blockHeight
+        blockHeight: info.blockHeight,
+        ...(info.metadata !== undefined ? { metadata: info.metadata } : {})
       };
     }
     return null;

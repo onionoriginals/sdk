@@ -1,3 +1,10 @@
+/**
+ * Deferred inscription build result (#407 phase 2): either bare content bytes,
+ * or content plus the CBOR metadata to attach (the anchoring inscription's
+ * `{ didDocument, celLog }` provenance).
+ */
+export type InscriptionParts = Buffer | { content: Buffer; metadata?: Record<string, unknown> };
+
 export interface StoragePutOptions {
   contentType?: string;
   cacheControl?: string;
@@ -29,6 +36,10 @@ export interface OrdinalsProvider {
     vout: number;
     satoshi?: string;
     blockHeight?: number;
+    // Inscription CBOR metadata (#407 phase 2): the anchoring inscription's
+    // content is the asset media, and its metadata carries the byte-light
+    // provenance (`{ didDocument, celLog }`). Absent for content-only inscriptions.
+    metadata?: Record<string, unknown>;
   } | null>;
   /**
    * MUST return inscription ids oldest-first (on-chain inscription order).
@@ -45,12 +56,20 @@ export interface OrdinalsProvider {
     data?: Buffer;
     /**
      * Deferred content: called with the pinned satoshi between commit and
-     * reveal, so content that must embed its own sat (a did:btco DID
-     * document) can be constructed. Provide exactly one of data / buildContent.
+     * reveal, so content (and metadata) that must embed its own sat (a did:btco
+     * DID document / the byte-light celLog) can be constructed. Provide exactly
+     * one of data / buildContent. May return a bare Buffer (content only) or
+     * `{ content, metadata }` — the returned metadata wins over the static
+     * `metadata` param below (#407 phase 2).
      */
-    buildContent?: (satoshi: string) => Buffer | Promise<Buffer>;
+    buildContent?: (satoshi: string) => InscriptionParts | Promise<InscriptionParts>;
     contentType: string;
     feeRate?: number;
+    /**
+     * Inscription CBOR metadata (#407 phase 2). Threaded to the `metadata`
+     * envelope tag. Ignored when `buildContent` returns its own metadata.
+     */
+    metadata?: Record<string, unknown>;
     /** Reinscribe on an existing sat (key rotation / DID update). */
     targetSatoshi?: string;
   }): Promise<{
@@ -64,6 +83,7 @@ export interface OrdinalsProvider {
     content?: Buffer;
     contentType?: string;
     feeRate?: number;
+    metadata?: Record<string, unknown>;
   }>;
   /**
    * Current ownership of the UTXO carrying this satoshi. Optional: providers

@@ -23,6 +23,30 @@ import { multikey } from '../../crypto/Multikey.js';
 import { deriveDidCelFromGenesis, didCelMatchesLog } from '../celDid.js';
 import { parseSatoshiIdentifier } from '../../utils/satoshi-validation.js';
 import { hexSha256ToDigestMultibase } from '../signerAdapter.js';
+import { hashResource } from '../../utils/validation.js';
+import { mostRecentResourceHead } from '../resourceHead.js';
+
+/** getInscriptionById result shape (narrowed for reuse). */
+type FetchedInscription = Awaited<ReturnType<OrdinalsLookup['getInscriptionById']>>;
+
+/**
+ * Extracts the asset DID document an anchoring inscription carries. Under #407
+ * phase 2 the DID document rides in the inscription's CBOR METADATA
+ * (`metadata.didDocument`) — its content is the asset media. Legacy phase-1
+ * inscriptions carried the DID document as JSON CONTENT, so this falls back to
+ * parsing content when no metadata document is present. Returns undefined when
+ * neither source yields an object.
+ */
+function didDocumentFromInscription(inscription: FetchedInscription): unknown {
+  const metaDoc = (inscription?.metadata as { didDocument?: unknown } | undefined)?.didDocument;
+  if (metaDoc && typeof metaDoc === 'object') return metaDoc;
+  if (inscription?.content === undefined) return undefined;
+  try {
+    return JSON.parse(inscription.content.toString('utf8'));
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Validates the structural requirements of a DataIntegrityProof (field presence,
@@ -391,30 +415,38 @@ async function verifyBitcoinWitnessProof(
     return `bitcoin witness proof txid (${record.txid}) does not match the inscription's txid (${inscription.txid})`;
   }
 
-  // The inscription content must commit to the event's digest — the exact
-  // digest witnessEvent computed over the committed fields (computed once by
-  // the caller and shared with ordinary witness verification).
-  if (inscription.content === undefined) {
+  // The inscription must commit to the event's digest — the exact digest
+  // witnessEvent computed over the committed fields (computed once by the caller
+  // and shared with ordinary witness verification). Two accepted shapes:
+  //  (a) a witness ATTESTATION with a top-level `digestMultibase` inscribed as
+  //      JSON CONTENT (BitcoinWitness / BtcoCelManager), or
+  //  (b) the asset's own inscribed DID document carrying an OriginalsCelAnchor
+  //      service whose headDigestMultibase is this event's chain digest — under
+  //      #407 phase 2 that document rides in inscription METADATA (content is
+  //      the asset media); phase-1 inscriptions carried it as content.
+  //      (LifecycleManager.inscribeOnBitcoin — the anchoring inscription IS the
+  //      witness artifact, #367.)
+  // Anything else fails closed.
+  const metaDoc = (inscription.metadata as { didDocument?: unknown } | undefined)?.didDocument;
+  // No commitment source at all (no content AND no metadata DID doc): a clear,
+  // non-alarming diagnostic (distinct from "content is not valid JSON", which
+  // implies tampering).
+  if (inscription.content === undefined && !metaDoc) {
     return `bitcoin witness inscription ${inscriptionId} content is missing`;
   }
-  let content: unknown;
-  try {
-    content = JSON.parse(inscription.content.toString('utf8'));
-  } catch {
-    return `bitcoin witness inscription ${inscriptionId} content is not valid JSON`;
+  let attestation: unknown;
+  if (inscription.content !== undefined) {
+    try {
+      attestation = JSON.parse(inscription.content.toString('utf8'));
+    } catch {
+      attestation = undefined; // content is media (phase 2) — shape (a) N/A
+    }
   }
-  // Two accepted commitment shapes, each requiring an exact digest match:
-  //  (a) witness attestation JSON with a top-level `digestMultibase`
-  //      (BitcoinWitness / BtcoCelManager inscribe this), or
-  //  (b) the asset's own inscribed DID document carrying an OriginalsCelAnchor
-  //      service whose headDigestMultibase is this event's chain digest
-  //      (LifecycleManager.inscribeOnBitcoin — the DID-doc inscription IS the
-  //      witness artifact, #367).
-  // Anything else fails closed.
-  const attested = (content as { digestMultibase?: unknown } | null)?.digestMultibase;
+  const attested = (attestation as { digestMultibase?: unknown } | null)?.digestMultibase;
+  const didDoc = didDocumentFromInscription(inscription);
   const commits =
     (typeof attested === 'string' && digestMultibaseEquals(attested, expectedDigest)) ||
-    didDocumentCommitsToDigest(content, expectedDigest);
+    didDocumentCommitsToDigest(didDoc, expectedDigest);
   if (!commits) {
     return `bitcoin witness inscription ${inscriptionId} does not commit to this event's digest`;
   }
@@ -490,76 +522,81 @@ function extractCelAnchorHeadDigest(content: unknown): string | undefined {
  *
  * Returns a `STALE_LOG`-coded error string on failure, or null when fresh.
  */
+/**
+ * Selects the NEWEST OriginalsCelAnchor-bearing inscription on a satoshi, chosen
+ * by per-inscription block HEIGHT (via getInscriptionById), NOT list-tail
+ * position — otherwise a provider violating the oldest-first contract (returning
+ * newest-first) could make a tail-walk pick the OLDEST anchor (#395). Fail-closed
+ * throughout: no enumeration capability, an enumeration/fetch that throws, no
+ * anchor on the sat, or any anchor candidate missing a confirmed block height all
+ * return `{ error }`. Same-block ties fall back to list-tail order (the
+ * documented oldest-first residual, unprovable intra-block).
+ *
+ * Under #407 phase 2 the anchor DID document rides in inscription metadata
+ * (content is the asset media); phase-1 inscriptions carried it as content —
+ * didDocumentFromInscription handles both.
+ *
+ * Shared by head-freshness and the content-as-ordinal gate so BOTH agree on which
+ * inscription is the current anchor (a cooperative rotation leaves `anchoredSat`
+ * pointing at the migrate inscription, so neither may rely on it).
+ */
+export async function selectNewestAnchorInscription(
+  satoshi: string,
+  ordinalsProvider: OrdinalsLookup | undefined
+): Promise<{ inscription: NonNullable<FetchedInscription>; digest: string } | { error: string }> {
+  if (!ordinalsProvider || typeof ordinalsProvider.getInscriptionsBySatoshi !== 'function') {
+    return { error: `the ordinals provider cannot enumerate inscriptions on satoshi ${satoshi}` };
+  }
+  let onSat: Array<{ inscriptionId: string }>;
+  try {
+    onSat = await ordinalsProvider.getInscriptionsBySatoshi(satoshi);
+  } catch (e) {
+    return { error: `failed to enumerate inscriptions on satoshi ${satoshi}: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  const anchors: Array<{ height: number | undefined; listIdx: number; digest: string; inscription: NonNullable<FetchedInscription> }> = [];
+  for (let idx = 0; idx < onSat.length; idx++) {
+    const inscriptionId = onSat[idx].inscriptionId;
+    let inscription: FetchedInscription;
+    try {
+      inscription = await ordinalsProvider.getInscriptionById(inscriptionId);
+    } catch (e) {
+      return { error: `failed to fetch inscription ${inscriptionId} on satoshi ${satoshi}: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    if (!inscription) continue;
+    const doc = didDocumentFromInscription(inscription);
+    const digest = extractCelAnchorHeadDigest(doc);
+    if (digest !== undefined) {
+      anchors.push({ height: inscriptionBlockHeight(inscription), listIdx: idx, digest, inscription });
+    }
+  }
+  if (anchors.length === 0) {
+    return { error: `no OriginalsCelAnchor DID document found on satoshi ${satoshi}` };
+  }
+  if (anchors.some((c) => c.height === undefined)) {
+    return { error: `an OriginalsCelAnchor inscription on satoshi ${satoshi} has no confirmed block height; the newest anchor is unprovable` };
+  }
+  let head = anchors[0];
+  for (const c of anchors) {
+    if (c.height! > head.height! || (c.height! === head.height! && c.listIdx > head.listIdx)) head = c;
+  }
+  return { inscription: head.inscription, digest: head.digest };
+}
+
 async function verifyHeadFreshness(
   log: EventLog,
   anchoredSat: AnchoredSat,
   ordinalsProvider: OrdinalsLookup | undefined
 ): Promise<string | null> {
-  if (!ordinalsProvider || typeof ordinalsProvider.getInscriptionsBySatoshi !== 'function') {
-    return `STALE_LOG: head freshness was requested but the ordinals provider cannot enumerate inscriptions on satoshi ${anchoredSat.satoshi}; cannot confirm the log is not truncated`;
+  const newest = await selectNewestAnchorInscription(anchoredSat.satoshi, ordinalsProvider);
+  if ('error' in newest) {
+    return `STALE_LOG: ${newest.error}; cannot confirm the presented log is not truncated`;
   }
-
-  let onSat: Array<{ inscriptionId: string }>;
-  try {
-    onSat = await ordinalsProvider.getInscriptionsBySatoshi(anchoredSat.satoshi);
-  } catch (e) {
-    return `STALE_LOG: failed to enumerate inscriptions on satoshi ${anchoredSat.satoshi} for the head-freshness check: ${e instanceof Error ? e.message : String(e)}`;
-  }
-
-  // The "newest" anchor is chosen by per-inscription block HEIGHT (via
-  // getInscriptionById), NOT by list-tail position — otherwise a provider
-  // violating the oldest-first contract (returning newest-first) would make a
-  // tail-walk pick the OLDEST anchor, present even in a truncated prefix →
-  // fail-open (#395 sibling of the non-cooperative-rotation ordering fix).
-  // So collect EVERY anchor-carrying inscription with its height + list index.
-  // Non-anchor / non-JSON inscriptions are skipped; a genuine FETCH failure
-  // fails closed rather than silently skipping a real head.
-  const anchors: Array<{ height: number | undefined; listIdx: number; digest: string }> = [];
-  for (let idx = 0; idx < onSat.length; idx++) {
-    const inscriptionId = onSat[idx].inscriptionId;
-    let inscription: Awaited<ReturnType<OrdinalsLookup['getInscriptionById']>>;
-    try {
-      inscription = await ordinalsProvider.getInscriptionById(inscriptionId);
-    } catch (e) {
-      return `STALE_LOG: failed to fetch inscription ${inscriptionId} on satoshi ${anchoredSat.satoshi} during the head-freshness check: ${e instanceof Error ? e.message : String(e)}`;
-    }
-    if (!inscription || inscription.content === undefined) continue;
-    let content: unknown;
-    try {
-      content = JSON.parse(inscription.content.toString('utf8'));
-    } catch {
-      continue;
-    }
-    const digest = extractCelAnchorHeadDigest(content);
-    if (digest !== undefined) {
-      anchors.push({ height: inscriptionBlockHeight(inscription), listIdx: idx, digest });
-    }
-  }
-
-  if (anchors.length === 0) {
-    return `STALE_LOG: no OriginalsCelAnchor DID document found on satoshi ${anchoredSat.satoshi}; cannot confirm the presented log is current`;
-  }
-  // Ordering must be provable: if any anchor candidate lacks a block height, we
-  // cannot identify the genuinely-newest one — fail closed (consistent with the
-  // non-cooperative rotation ordering check).
-  if (anchors.some((c) => c.height === undefined)) {
-    return `STALE_LOG: an OriginalsCelAnchor inscription on satoshi ${anchoredSat.satoshi} has no confirmed block height; the newest anchor is unprovable, so head freshness cannot be confirmed`;
-  }
-  // Highest block wins; same-block ties fall back to list-tail order (highest
-  // list index) — the documented oldest-first residual, unprovable intra-block.
-  let head = anchors[0];
-  for (const c of anchors) {
-    if (c.height! > head.height! || (c.height! === head.height! && c.listIdx > head.listIdx)) head = c;
-  }
-  const headDigest = head.digest;
-
   const present = log.events.some(
-    (ev) => digestMultibaseEquals(headDigest, computeDigestMultibase(canonicalizeEntryForChain(ev)))
+    (ev) => digestMultibaseEquals(newest.digest, computeDigestMultibase(canonicalizeEntryForChain(ev)))
   );
   if (!present) {
-    return `STALE_LOG: the newest on-chain anchor on satoshi ${anchoredSat.satoshi} commits to head digest ${headDigest}, which is absent from the presented log; the log is truncated or stale`;
+    return `STALE_LOG: the newest on-chain anchor on satoshi ${anchoredSat.satoshi} commits to head digest ${newest.digest}, which is absent from the presented log; the log is truncated or stale`;
   }
-
   return null;
 }
 
@@ -637,6 +674,73 @@ async function verifyUniqueness(
   }
 
   return null;
+}
+
+/**
+ * Content-as-ordinal integrity (#407 phase 2). The anchoring inscription IS the
+ * asset: its CONTENT is the asset's current media. When the anchor inscription
+ * carries media, its content MUST hash to the log's most-recent-resource hash —
+ * so a chain-reconstructed asset cannot present media that disagrees with its
+ * signed provenance. A tampered/wrong-media content fails closed.
+ *
+ * The single legitimate non-media shape: a pure-reference asset (the head
+ * resource has no inline bytes) whose writer inscribed the DID document itself
+ * as content (no media on-chain). That is accepted iff the content parses as the
+ * anchor's OWN DID document (id == metadata.didDocument.id) — anything else is a
+ * mismatch. It cannot be abused to forge media: fake media never hashes to the
+ * head, and substituting the DID document only DECLINES to prove media (which
+ * only the sat holder, re-inscribing, could do — an honest owner choice).
+ *
+ * Skipped for phase-1 inscriptions (no metadata DID document) and when the
+ * provider omits content (availability gap, not a mismatch; the resolver, which
+ * needs the bytes, gates that separately). Runs only once an `anchoredSat` is
+ * established (which already required a verified bitcoin witness proof → a
+ * provider).
+ *
+ * Returns a `CONTENT_MISMATCH`-coded error string on failure, or null.
+ */
+async function verifyAnchorContentMatchesHead(
+  log: EventLog,
+  anchoredSat: AnchoredSat,
+  ordinalsProvider: OrdinalsLookup | undefined
+): Promise<string | null> {
+  if (!ordinalsProvider) return null;
+  // Check the CURRENT anchor — the newest anchor inscription on the sat, not
+  // `anchoredSat` (a cooperative rotation leaves that at the migrate inscription,
+  // whose media predates any later resource update / reinscription).
+  const newest = await selectNewestAnchorInscription(anchoredSat.satoshi, ordinalsProvider);
+  if ('error' in newest) {
+    // No enumerable anchor to check the media against. Not a content mismatch —
+    // the witness-proof path already gated the anchor's DID document, and the
+    // resolver (which needs the bytes) gates media strictly on its own path.
+    return null;
+  }
+  const inscription = newest.inscription;
+  const inscriptionId = inscription.inscriptionId;
+  // Only phase-2 inscriptions (DID document in metadata) bind media as content.
+  const metaDoc = (inscription.metadata as { didDocument?: { id?: unknown } } | undefined)?.didDocument;
+  if (!metaDoc) return null;
+  // Provider omitted content → availability gap, not a mismatch.
+  if (inscription.content === undefined) return null;
+  const head = mostRecentResourceHead(log);
+  // Media match: content hashes to the log's current resource head.
+  if (head && hashResource(inscription.content).toLowerCase() === head.hash.toLowerCase()) {
+    return null;
+  }
+  // No-media fallback: content is the anchor's own DID document (pure-reference
+  // asset — no inline media to inscribe).
+  let asJson: unknown;
+  try {
+    asJson = JSON.parse(inscription.content.toString('utf8'));
+  } catch {
+    asJson = undefined;
+  }
+  const contentDocId = (asJson as { id?: unknown } | undefined)?.id;
+  if (typeof contentDocId === 'string' && contentDocId === metaDoc.id) {
+    return null;
+  }
+  const contentHash = hashResource(inscription.content);
+  return `CONTENT_MISMATCH: anchor inscription ${inscriptionId} content hashes to ${contentHash}, which is neither the log's most-recent-resource hash ${head ? head.hash : '(none)'} nor the anchor's own DID document`;
 }
 
 /**
@@ -818,12 +922,19 @@ async function evaluateNonCooperativeRotation(
     let rotationHeight: number | undefined;
     try {
       const inscription = await (ordinalsProvider as OrdinalsLookup).getInscriptionById(candidate.inscriptionId);
-      if (!inscription || inscription.content === undefined) {
-        reason = `inscription ${candidate.inscriptionId} content is missing`;
+      if (!inscription) {
+        reason = `inscription ${candidate.inscriptionId} not found`;
         continue;
       }
       rotationHeight = inscriptionBlockHeight(inscription);
-      announced = ed25519KeyHexesFromDidDocument(JSON.parse(inscription.content.toString('utf8')));
+      // #407 phase 2: the reinscribed DID document rides in metadata (content is
+      // the asset media); phase-1 reinscriptions carried it as content.
+      const doc = didDocumentFromInscription(inscription);
+      if (doc === undefined) {
+        reason = `inscription ${candidate.inscriptionId} carries no DID document`;
+        continue;
+      }
+      announced = ed25519KeyHexesFromDidDocument(doc);
     } catch (e) {
       reason = `failed to inspect inscription ${candidate.inscriptionId}: ${e instanceof Error ? e.message : String(e)}`;
       continue;
@@ -1591,6 +1702,15 @@ export async function verifyEventLog(
     uniquenessError = (await verifyUniqueness(assetDid, anchoredSat, options?.ordinalsProvider)) ?? undefined;
   }
 
+  // Content-as-ordinal integrity (#407 phase 2): a phase-2 anchor inscription's
+  // media content must hash to the log's most-recent-resource hash. Part of the
+  // btco verification contract (not opt-in); skipped on the custom-verifier path
+  // (which owns proof semantics and never establishes `anchoredSat`).
+  let contentMismatchError: string | undefined;
+  if (!options?.verifier && anchoredSat) {
+    contentMismatchError = (await verifyAnchorContentMatchesHead(log, anchoredSat, options?.ordinalsProvider)) ?? undefined;
+  }
+
   // expectedDid: reject a log that does not back the caller's expected DID.
   // Scoped to the non-custom-verifier path — that path owns proof semantics and
   // the authority binding above is skipped there. did:cel is matched by suffix
@@ -1622,9 +1742,12 @@ export async function verifyEventLog(
   if (uniquenessError) {
     errors.push(uniquenessError);
   }
+  if (contentMismatchError) {
+    errors.push(contentMismatchError);
+  }
 
   return {
-    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !expectedDidError && !staleLogError && !uniquenessError,
+    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !expectedDidError && !staleLogError && !uniquenessError && !contentMismatchError,
     errors,
     events: eventVerifications,
     ...(assetDid !== undefined ? { assetDid } : {}),

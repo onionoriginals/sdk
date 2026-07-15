@@ -246,12 +246,15 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const inscription = await ordinalsProvider.getInscriptionById(inscriptionId!);
       expect(inscription).not.toBeNull();
       expect(inscription?.inscriptionId).toBe(inscriptionId);
-      // The inscription is now the btco DID document itself (#375), not a bare manifest.
-      expect(inscription?.contentType).toBe('application/did+json');
-      const inscribedDoc = JSON.parse(inscription!.content.toString());
+      // #407 phase 2: the inscription CONTENT is now the current media (the
+      // most-recent resource's bytes), and the btco DID document + resource
+      // manifest ride in the inscription METADATA.
+      expect(inscription?.contentType).toBe('image/png');
+      expect(inscription!.content!.toString()).toBe('mock-image-data');
+      const inscribedDoc = (inscription!.metadata as { didDocument: { id: string; service: Array<{ type: string; serviceEndpoint: { resources: unknown[] } }> } }).didDocument;
       expect(inscribedDoc.id).toMatch(/^did:btco:/);
-      const inscribedManifest = inscribedDoc.service.find((s: { type: string }) => s.type === 'OriginalsResourceManifest');
-      expect(inscribedManifest.serviceEndpoint.resources.length).toBeGreaterThan(0);
+      const inscribedManifest = inscribedDoc.service.find((s) => s.type === 'OriginalsResourceManifest');
+      expect(inscribedManifest!.serviceEndpoint.resources.length).toBeGreaterThan(0);
 
       // ===== PHASE 4: Transfer Ownership =====
       const recipientAddress = 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx';

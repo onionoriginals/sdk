@@ -9,6 +9,9 @@ export interface OrdinalsInscription {
   txid: string;
   vout: number;
   blockHeight?: number;
+  // Inscription CBOR metadata (#407 phase 2): `{ didDocument, celLog }` for
+  // anchoring inscriptions whose content is the asset media.
+  metadata?: Record<string, unknown>;
 }
 
 export interface BitcoinTransaction {

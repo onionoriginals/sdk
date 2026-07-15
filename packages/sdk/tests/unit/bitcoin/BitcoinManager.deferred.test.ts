@@ -23,6 +23,32 @@ describe('BitcoinManager.inscribeData deferred content', () => {
     expect(second.satoshi).toBe(first.satoshi);
   });
 
+  test('threads static metadata through to the inscription (#407 phase 2)', async () => {
+    const bm = new BitcoinManager(config);
+    const metadata = { didDocument: { id: 'did:btco:reg:9' }, celLog: { events: [] } };
+    const inscription = await bm.inscribeData(
+      Buffer.from('media'),
+      'image/png',
+      undefined,
+      { metadata }
+    );
+    expect(inscription.metadata).toEqual(metadata);
+  });
+
+  test('surfaces metadata a deferred { content, metadata } builder returns', async () => {
+    const bm = new BitcoinManager(config);
+    const inscription = await bm.inscribeData(
+      (sat: string) => ({
+        content: Buffer.from('media'),
+        metadata: { didDocument: { id: `did:btco:reg:${sat}` } }
+      }),
+      'image/png'
+    );
+    expect(inscription.content?.toString()).toBe('media');
+    expect((inscription.metadata as { didDocument: { id: string } }).didDocument.id)
+      .toBe(`did:btco:reg:${inscription.satoshi}`);
+  });
+
   test('never leaks the content-builder function into inscription.content', async () => {
     // Conformant provider: supports buildContent but omits `content` in its
     // response. The builder FUNCTION must not fall through into content.

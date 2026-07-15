@@ -1,5 +1,5 @@
 /* istanbul ignore file */
-import type { OrdinalsProvider } from '../types.js';
+import type { OrdinalsProvider, InscriptionParts } from '../types.js';
 import { StructuredError } from '../../utils/telemetry.js';
 
 interface HttpProviderOptions {
@@ -172,9 +172,10 @@ export class OrdHttpProvider implements OrdinalsProvider {
 
   createInscription(params: {
     data?: Buffer;
-    buildContent?: (satoshi: string) => Buffer | Promise<Buffer>;
+    buildContent?: (satoshi: string) => InscriptionParts | Promise<InscriptionParts>;
     contentType: string;
     feeRate?: number;
+    metadata?: Record<string, unknown>;
     targetSatoshi?: string;
   }): Promise<{
     inscriptionId: string;
@@ -187,6 +188,7 @@ export class OrdHttpProvider implements OrdinalsProvider {
     content?: Buffer;
     contentType?: string;
     feeRate?: number;
+    metadata?: Record<string, unknown>;
   }> {
     if (params.buildContent || params.targetSatoshi) {
       return Promise.reject(new StructuredError(

@@ -22,16 +22,17 @@ import {
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
 import { hashResource, validateCredential } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
-import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
+import { parseSatoshiIdentifier, validateSatoshiNumber } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix, btcoDidFromSatoshi } from '../cel/btcoDid.js';
 import { KeyManager } from '../did/KeyManager.js';
 import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
 import { createCelDidDocument, didCelMatchesLog, deriveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
-import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
+import { verifyEventLog, selectNewestAnchorInscription } from '../cel/algorithms/verifyEventLog.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
 import { appendEvent } from '../cel/algorithms/appendEvent.js';
-import { computeDigestMultibase, digestMultibaseEquals } from '../cel/hash.js';
+import { computeDigestMultibase, digestMultibaseEquals, decodeDigestMultibase } from '../cel/hash.js';
+import { mostRecentResourceHead } from '../cel/resourceHead.js';
 import { canonicalizeEntryForChain } from '../cel/canonicalize.js';
 import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
 import type { EventLog, LogEntry, ExternalReference, WitnessProof, OrdinalsLookup, VerificationResult } from '../cel/types.js';
@@ -743,6 +744,207 @@ export class LifecycleManager {
     }
 
     return { asset, verification, warnings };
+  }
+
+  /**
+   * Resolve + VERIFY a complete Originals asset from a bare satoshi — the #407
+   * phase-2 chain-recovery path. Reads the NEWEST anchoring inscription on the
+   * sat, reconstructs a byte-light {@link AssetEnvelope} from its metadata
+   * (`{ didDocument, celLog }`) and content (the current media), and runs it
+   * through {@link loadAsset} — so a chain-reconstructed asset verifies with the
+   * SAME gate an envelope-loaded one does (verifyEventLog + resource binding +
+   * head freshness + uniqueness + content-as-ordinal). Provenance is recoverable
+   * from Bitcoin alone.
+   *
+   * Fail-closed: no provider, an invalid satoshi, no anchor inscription, an
+   * unprovable-newest (missing block height) inscription, missing provenance
+   * metadata, an embedded celLog head that disagrees with the on-chain `#cel`
+   * anchor, or a failed loadAsset all throw. The reconstructed head media is
+   * bound to the log's signed hash by loadAsset (a tampered media fails closed).
+   *
+   * @param satoshi - The bare satoshi number carrying the asset.
+   * @param opts.ordinalsProvider - Defaults to `config.ordinalsProvider`.
+   */
+  async resolveAssetFromSat(
+    satoshi: string,
+    opts?: { ordinalsProvider?: OrdinalsLookup }
+  ): Promise<{ asset: OriginalsAsset; verification?: VerificationResult; warnings: string[] }> {
+    const provider = opts?.ordinalsProvider ?? this.config.ordinalsProvider;
+    if (!provider) {
+      throw new StructuredError('ORD_PROVIDER_REQUIRED', 'Ordinals provider must be configured to resolve an asset from a satoshi.');
+    }
+    const sat = String(satoshi);
+    {
+      const v = validateSatoshiNumber(sat);
+      if (!v.valid) throw new StructuredError('INVALID_SATOSHI', `Invalid satoshi identifier: ${v.error}`);
+    }
+
+    // 1) Newest anchoring inscription by confirmed block height — reuses the
+    // verifier's selection so the resolver picks the SAME inscription
+    // head-freshness / the content gate check against (fail-closed on missing
+    // height, per-height newest, list-tail same-block residual).
+    const selected = await selectNewestAnchorInscription(sat, provider);
+    if ('error' in selected) {
+      throw new StructuredError('CHAIN_ASSET_NOT_FOUND', `Cannot resolve an asset from satoshi ${sat}: ${selected.error}.`);
+    }
+    const chosen = selected.inscription;
+
+    // 2) Read provenance (metadata) + media (content).
+    const metadata = chosen.metadata as { didDocument?: unknown; celLog?: unknown } | undefined;
+    const btcoDoc = metadata?.didDocument;
+    const rawCelLog = metadata?.celLog;
+    if (!btcoDoc || typeof btcoDoc !== 'object' || rawCelLog === undefined || rawCelLog === null) {
+      throw new StructuredError(
+        'CHAIN_ASSET_INVALID',
+        `Inscription ${chosen.inscriptionId} on satoshi ${sat} carries no provenance metadata (didDocument + celLog); not a phase-2 anchoring inscription.`
+      );
+    }
+
+    // 3) Parse the embedded byte-light CEL log through the JSON gate.
+    let log: EventLog;
+    try {
+      log = parseEventLogJson(JSON.stringify(rawCelLog));
+    } catch (e) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} celLog is not a valid CEL log: ${(e as Error).message}`);
+    }
+    if (!Array.isArray(log.events) || log.events.length === 0) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} celLog has no events.`);
+    }
+
+    // 4) The embedded celLog head MUST equal the on-chain `#cel` anchor
+    // (else the inscription is internally inconsistent). Defense-in-depth: the
+    // witness path re-derives this too, but a clear early error is worth it.
+    const anchorDigest = this.extractCelAnchorFromDoc(btcoDoc);
+    const headDigest = computeDigestMultibase(canonicalizeEntryForChain(log.events[log.events.length - 1]));
+    if (anchorDigest === undefined) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} DID document carries no OriginalsCelAnchor; cannot confirm the embedded log head.`);
+    }
+    if (!digestMultibaseEquals(anchorDigest, headDigest)) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId}: embedded celLog head (${headDigest}) does not equal the #cel anchor (${anchorDigest}).`);
+    }
+
+    // 5) Reconstruct the byte-light AssetEnvelope. The head event needs its OWN
+    // bitcoin witness proof reattached — the writer inscribes the doc/log BEFORE
+    // the inscription id exists, so the head's witness (which names this
+    // inscription) is never in the embedded snapshot. It is fully re-verified
+    // against the chain by verifyBitcoinWitnessProof inside loadAsset.
+    const headTxid = typeof chosen.txid === 'string' ? chosen.txid : undefined;
+    const headWitness: WitnessProof & { txid?: string; satoshi: string; inscriptionId: string } = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'bitcoin-ordinals-2024',
+      created: new Date().toISOString(),
+      verificationMethod: 'did:btco:witness',
+      proofPurpose: 'assertionMethod',
+      proofValue: `z${chosen.inscriptionId}`,
+      witnessedAt: new Date().toISOString(),
+      txid: headTxid,
+      satoshi: sat,
+      inscriptionId: chosen.inscriptionId
+    };
+    const headIdx = log.events.length - 1;
+    const events = log.events.slice();
+    events[headIdx] = { ...events[headIdx], proof: [...events[headIdx].proof, headWitness] };
+    const reconstructedLog: EventLog = { ...log, events };
+
+    // Resources from the log + the on-chain media as the head blob.
+    const resources = this.reconstructResourcesFromLog(reconstructedLog, chosen.content);
+
+    // did:cel document is DERIVED (loadAsset re-derives it anyway; supply a
+    // structurally valid one). did:btco is the on-chain metadata doc.
+    const assetDid = deriveDidCel(reconstructedLog);
+    const genesisController = (reconstructedLog.events[0]?.data as { controller?: unknown })?.controller;
+    if (typeof genesisController !== 'string' || !genesisController.startsWith('did:key:')) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} genesis controller is not a did:key (only did:key controllers are supported by resolveAssetFromSat; got: ${String(genesisController)}).`);
+    }
+    const celDoc = createCelDidDocument(assetDid, genesisController.slice('did:key:'.length));
+
+    const envelope: AssetEnvelope = {
+      format: ASSET_ENVELOPE_FORMAT,
+      version: ASSET_ENVELOPE_VERSION,
+      assetDid,
+      eventLog: reconstructedLog,
+      didDocuments: {
+        'did:cel': celDoc,
+        'did:btco': btcoDoc as DIDDocument
+      },
+      resources
+    };
+
+    // 6) loadAsset runs the full verification gate (incl. content-as-ordinal via
+    // the head blob's hash binding). checkHeadFreshness is engaged by the
+    // provider passthrough.
+    return this.loadAsset(envelope, { ordinalsProvider: provider });
+  }
+
+  /** Extracts the first OriginalsCelAnchor headDigestMultibase from a DID doc. */
+  private extractCelAnchorFromDoc(doc: unknown): string | undefined {
+    const services = (doc as { service?: unknown })?.service;
+    if (!Array.isArray(services)) return undefined;
+    for (const entry of services) {
+      const svc = entry as { type?: unknown; serviceEndpoint?: unknown };
+      if (svc?.type !== 'OriginalsCelAnchor') continue;
+      const head = (svc.serviceEndpoint as { headDigestMultibase?: unknown } | undefined)?.headDigestMultibase;
+      if (typeof head === 'string' && head.length > 0) return head;
+    }
+    return undefined;
+  }
+
+  /**
+   * Rebuild the byte-light resources array from a CEL log (#407 phase 2
+   * chain-recovery): every genesis resource (v1) + every resource-shaped update
+   * (v≥2), matched to the shapes loadAsset's genesis/version binding expects.
+   * Only the head resource gets inline content (the on-chain media), and only
+   * when it hashes to the log's most-recent-resource hash — so loadAsset's
+   * blob↔toHash gate (which independently re-checks it) passes; a
+   * non-utf8-roundtrippable or mismatched blob is left as a pure reference.
+   */
+  private reconstructResourcesFromLog(log: EventLog, headContent: Buffer | undefined): AssetResource[] {
+    const resources: AssetResource[] = [];
+    const genesis = log.events[0]?.data as { resources?: unknown } | undefined;
+    const gres: Array<Record<string, unknown>> = Array.isArray(genesis?.resources) ? genesis.resources : [];
+    for (const ref of gres) {
+      const dm = ref.digestMultibase;
+      if (typeof dm !== 'string') continue;
+      let hash: string;
+      try { hash = Buffer.from(decodeDigestMultibase(dm)).toString('hex'); } catch { continue; }
+      const url = Array.isArray(ref.url) && typeof ref.url[0] === 'string' ? ref.url[0] : undefined;
+      resources.push({
+        id: typeof ref.id === 'string' ? ref.id : '',
+        type: 'data',
+        contentType: typeof ref.mediaType === 'string' ? ref.mediaType : 'application/octet-stream',
+        hash,
+        version: 1,
+        ...(url ? { url } : {})
+      });
+    }
+    for (let i = 1; i < log.events.length; i++) {
+      const ev = log.events[i];
+      if (ev.type !== 'update') continue;
+      const d = (ev.data ?? {}) as Record<string, unknown>;
+      const resourceId = typeof d.resourceId === 'string' ? d.resourceId : undefined;
+      const previousVersionHash = typeof d.previousVersionHash === 'string' ? d.previousVersionHash : undefined;
+      const toHash = typeof d.toHash === 'string' && d.toHash.length > 0 ? d.toHash : undefined;
+      if (!resourceId || !previousVersionHash || !toHash) continue;
+      resources.push({
+        id: resourceId,
+        type: 'data',
+        contentType: typeof d.contentType === 'string' ? d.contentType : 'application/octet-stream',
+        hash: toHash,
+        ...(typeof d.toVersion === 'number' ? { version: d.toVersion } : {}),
+        previousVersionHash
+      });
+    }
+    // Attach the on-chain media to the head resource, iff it round-trips to the
+    // head hash (loadAsset re-verifies hash(content) == signed toHash).
+    const head = mostRecentResourceHead(log);
+    if (headContent && head) {
+      const contentStr = headContent.toString('utf8');
+      if (hashResource(Buffer.from(contentStr, 'utf8')).toLowerCase() === head.hash.toLowerCase()) {
+        const target = resources.find(r => (!head.resourceId || r.id === head.resourceId) && r.hash === head.hash && r.content === undefined);
+        if (target) target.content = contentStr;
+      }
+    }
+    return resources;
   }
 
   /**
@@ -1951,6 +2153,32 @@ export class LifecycleManager {
     return null;
   }
 
+  /**
+   * Resolve the media the anchoring inscription will carry as CONTENT (#407
+   * phase 2): the most-recent resource's inline bytes + its MIME type. The head
+   * is derived from the LOG (mostRecentResourceHead) — the same source the
+   * verifier uses — then matched by hash to the in-memory resources array to
+   * recover the bytes.
+   *
+   * Returns null when no inline media is available (the head resource is a pure
+   * reference — hosted/hash-only, no inline bytes). Provenance still rides in
+   * metadata; the caller falls back to inscribing the DID document as content,
+   * so such assets carry NO media on-chain (honest, per the reference-only
+   * pattern this SDK supports — content-as-ordinal applies to inline media only).
+   */
+  private tryResolveHeadMedia(asset: OriginalsAsset): { content: Buffer; contentType: string } | null {
+    const log = asset.celLog;
+    if (!log) return null;
+    const head = mostRecentResourceHead(log);
+    if (!head) return null;
+    const res = asset.resources.find(r => (!head.resourceId || r.id === head.resourceId) && r.hash === head.hash);
+    if (!res || typeof res.content !== 'string') return null;
+    return {
+      content: Buffer.from(res.content, 'utf8'),
+      contentType: res.contentType ?? head.contentType ?? 'application/octet-stream'
+    };
+  }
+
   async inscribeOnBitcoin(
     asset: OriginalsAsset,
     feeRate?: number
@@ -2029,6 +2257,15 @@ export class LifecycleManager {
       (d, i, arr): d is string => typeof d === 'string' && arr.indexOf(d) === i
     );
 
+    // #407 phase 2: the anchoring inscription IS the asset. Its CONTENT is the
+    // current media (the most-recent resource's bytes), resolved from the LOG so
+    // writer and verifier agree; its METADATA carries the byte-light provenance
+    // (DID doc + CEL log). The media is sat-independent, so resolve it before the
+    // deferred window. When the head resource is a pure reference (no inline
+    // bytes), fall back to inscribing the DID document as content — provenance is
+    // still in metadata, just no media on-chain.
+    const headMedia = this.tryResolveHeadMedia(asset);
+    const inscriptionContentType = headMedia ? headMedia.contentType : 'application/did+json';
     // Held locally, not captured into the asset yet: buildContent runs BEFORE
     // the inscription is confirmed (satoshi known, asset.migrate succeeded).
     // Capturing here would leave a stale doc in #didDocuments with no rollback
@@ -2066,9 +2303,17 @@ export class LifecycleManager {
           }] : [])
         ];
         inscribedBtcoDoc = btcoDoc;
-        return Buffer.from(JSON.stringify(btcoDoc));
+        // Metadata = { didDocument, celLog }. Snapshot the log AFTER the migrate
+        // append so the embedded celLog head equals the #cel anchor digest.
+        return {
+          content: headMedia ? headMedia.content : Buffer.from(JSON.stringify(btcoDoc)),
+          metadata: {
+            didDocument: btcoDoc,
+            ...(asset.celLog ? { celLog: JSON.parse(serializeEventLogJson(asset.celLog)) as Record<string, unknown> } : {})
+          }
+        };
       },
-      'application/did+json',
+      inscriptionContentType,
       feeRate,
       // Key the shared money-lock by the asset's current DID so a concurrent
       // MigrationManager.migrate of the same DID is blocked at inscribe (issue #303).
@@ -2081,6 +2326,7 @@ export class LifecycleManager {
       satoshi?: string;
       feeRate?: number;
       content?: Buffer;
+      metadata?: Record<string, unknown>;
     };
     const revealTxId = inscription.revealTxId ?? inscription.txid;
     const commitTxId = inscription.commitTxId;
@@ -2168,21 +2414,17 @@ export class LifecycleManager {
     // migrateToDIDBTCO (explicit network wins over the webvhNetwork mapping,
     // #247), so a tier-only config can't drift into a prefix mismatch.
     const bindingValue = `${btcoDidPrefix(this.getConfiguredBitcoinNetwork())}:${inscription.satoshi}`;
-    // Parse the echoed content ONLY as an integrity cross-check: if it parses
-    // and disagrees with the computed binding, the provider may have altered
-    // the inscription — log it (payment already happened, state is migrated;
-    // do NOT throw, the caller has the inscriptionId to investigate). Missing
-    // or non-JSON content is fine — no cross-check possible.
-    if (inscription.content) {
-      let inscribedDoc: { id?: unknown } | undefined;
-      try {
-        inscribedDoc = JSON.parse(inscription.content.toString()) as { id?: unknown };
-      } catch {
-        inscribedDoc = undefined;
-      }
+    // Cross-check the echoed METADATA DID document (#407 phase 2 moved the doc
+    // from content→metadata): if the provider echoed a didDocument whose id
+    // disagrees with the computed binding, it may have altered the inscription —
+    // log it (payment already happened, state is migrated; do NOT throw, the
+    // caller has the inscriptionId to investigate). Missing metadata is fine —
+    // no cross-check possible.
+    {
+      const inscribedDoc = (inscription.metadata as { didDocument?: { id?: unknown } } | undefined)?.didDocument;
       if (inscribedDoc && inscribedDoc.id !== bindingValue) {
         this.logger.error(
-          'Inscribed DID document id does not match expected binding — provider may have altered the inscription content',
+          'Inscribed DID document id does not match expected binding — provider may have altered the inscription metadata',
           undefined,
           { expected: bindingValue, inscribed: inscribedDoc.id, inscriptionId: inscription.inscriptionId }
         );
@@ -2467,12 +2709,23 @@ export class LifecycleManager {
     restoreLog: EventLog | undefined
   ): Promise<{ inscriptionId: string; satoshi?: string; txid?: string; revealTxId?: string }> {
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+    // #407 phase 2: the reinscription IS the asset. Content = current media;
+    // metadata = { didDocument: rotatedDoc, celLog }. The sat is already known
+    // (reinscription targets it), so both are built synchronously; snapshot the
+    // log now — the caller has already appended the rotateKey + embedded the
+    // fresh #cel anchor, so the celLog head equals that anchor. No inline media
+    // (pure-reference head) → fall back to the DID document as content.
+    const headMedia = this.tryResolveHeadMedia(asset);
+    const metadata: Record<string, unknown> = {
+      didDocument: rotatedDoc,
+      ...(asset.celLog ? { celLog: JSON.parse(serializeEventLogJson(asset.celLog)) as Record<string, unknown> } : {})
+    };
     try {
       return await bitcoinManager.inscribeData(
-        Buffer.from(JSON.stringify(rotatedDoc)),
-        'application/did+json',
+        headMedia ? headMedia.content : Buffer.from(JSON.stringify(rotatedDoc)),
+        headMedia ? headMedia.contentType : 'application/did+json',
         feeRate,
-        { targetSatoshi: satoshi }
+        { targetSatoshi: satoshi, metadata }
       );
     } catch (error) {
       // Reinscription failed after the append — restore the pre-append log

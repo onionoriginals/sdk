@@ -167,6 +167,10 @@ export interface OrdinalsLookup {
     contentType: string;
     txid?: string;
     satoshi?: string;
+    blockHeight?: number;
+    // Inscription CBOR metadata (#407 phase 2): carries `{ didDocument, celLog }`
+    // for anchoring inscriptions whose content is the asset media.
+    metadata?: Record<string, unknown>;
   } | null>;
   /**
    * MUST return inscription ids oldest-first (on-chain inscription order).
