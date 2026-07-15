@@ -856,7 +856,7 @@ export class LifecycleManager {
       });
     }
     if (links.length === 0) {
-      throw new StructuredError('CHAIN_ASSET_NOT_FOUND', `No Originals anchoring inscription found on satoshi ${sat}.`);
+      throw new StructuredError('CHAIN_ASSET_NOT_FOUND', `Cannot resolve an asset from satoshi ${sat}: no Originals anchoring inscription found.`);
     }
     links.sort((a, b) => a.blockHeight - b.blockHeight || a.listIdx - b.listIdx);
 

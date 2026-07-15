@@ -426,9 +426,13 @@ export class QuickNodeProvider implements OrdinalsProvider {
       let raw: unknown;
       try {
         raw = await this.rpcCall<unknown>('ord_getMetadata', [id]);
-      } catch (err) {
-        if (QuickNodeProvider.isNotFound(err)) return undefined;
-        throw err;
+      } catch {
+        // The endpoint may not expose ord_getMetadata (older ord add-on), or the
+        // inscription simply has none. Metadata-UNAVAILABLE degrades to undefined:
+        // the resolver then fails closed (an anchoring inscription lacking
+        // provenance metadata is rejected) — only PRESENT-but-undecodable bytes
+        // (the decode branch below) are a hard provider-level error.
+        return undefined;
       }
       if (raw === null || raw === undefined) return undefined;
       if (typeof raw === 'object') {
