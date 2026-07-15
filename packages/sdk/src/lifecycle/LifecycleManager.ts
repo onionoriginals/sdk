@@ -943,7 +943,9 @@ export class LifecycleManager {
     if (head) {
       for (let i = links.length - 1; i >= 0; i--) {
         const c = links[i].content;
-        if (c && hashResource(Buffer.from(c.toString('utf8'), 'utf8')).toLowerCase() === head.hash.toLowerCase()) {
+        // Hash the RAW bytes — a utf8 decode/encode round-trip would corrupt
+        // binary media (JPEG/PNG) and silently drop it (Greptile P1).
+        if (c && hashResource(c).toLowerCase() === head.hash.toLowerCase()) {
           headContent = c;
           break;
         }
@@ -2336,11 +2338,13 @@ export class LifecycleManager {
       metadata.celLog = JSON.parse(serializeEventLogJson(log)) as Record<string, unknown>;
     }
 
+    // Resolve the BitcoinManager ONCE so the surfaced cost estimate and the
+    // actual inscription share one instance / fee-rate lookup (Greptile P2).
+    const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const headMedia = this.tryResolveHeadMedia(asset);
     // Cost surfacing (spec §0/§5): estimate + emit BEFORE the paid broadcast.
-    await this.emitInscribeCost(asset, headMedia?.content ?? Buffer.from(JSON.stringify(btcoDoc)));
+    await this.emitInscribeCost(bitcoinManager, asset, headMedia?.content ?? Buffer.from(JSON.stringify(btcoDoc)));
 
-    const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     let inscription: { inscriptionId: string; satoshi?: string; txid?: string; revealTxId?: string };
     try {
       inscription = await bitcoinManager.inscribeData(
@@ -2353,10 +2357,19 @@ export class LifecycleManager {
       // Failed after the append (nothing paid before broadcast) — restore the
       // PRE-append log AND re-persist it: appendCelEventOrSkip already advanced the
       // hosted copy, so without this the stored log would stay ahead of the chain
-      // and every future update would degrade UNPROVABLE_BASE. Fable I1.
+      // and every future update would degrade UNPROVABLE_BASE. Fable I1. The
+      // re-persist is best-effort and MUST NOT mask the original broadcast error
+      // (Greptile P2), so it is guarded independently.
       if (celLogBefore) {
         asset._replaceCelLog(celLogBefore);
-        await this.persistCelArtifacts(asset);
+        try {
+          await this.persistCelArtifacts(asset);
+        } catch (persistErr) {
+          this.logger.warn('rollback re-persist failed (non-gating)', {
+            assetId: asset.id,
+            error: (persistErr as Error)?.message ?? String(persistErr)
+          });
+        }
       }
       throw error;
     }
@@ -2389,9 +2402,8 @@ export class LifecycleManager {
    * cost (fee rate × rough vsize). Never gates — an estimator failure must not
    * block the paid op the caller already intends.
    */
-  private async emitInscribeCost(asset: OriginalsAsset, content: Buffer): Promise<void> {
+  private async emitInscribeCost(bitcoinManager: BitcoinManager, asset: OriginalsAsset, content: Buffer): Promise<void> {
     try {
-      const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
       const feeRate = await bitcoinManager.estimateFeeRate();
       // Rough commit+reveal vsize: content bytes / 4 (witness discount) + ~200
       // vB overhead. A ballpark for cost-awareness, not a billing figure.
