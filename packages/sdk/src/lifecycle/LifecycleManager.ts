@@ -897,27 +897,35 @@ export class LifecycleManager {
       throw new StructuredError('CHAIN_ASSET_INVALID', `Newest inscription ${newest.inscriptionId}: reconstructed log head (${headDigest}) does not equal its #cel anchor (${anchorDigest}); the chain is truncated or inconsistent.`);
     }
 
-    // 5) Reconstruct the byte-light AssetEnvelope. The head event needs its OWN
-    // bitcoin witness proof reattached — the writer inscribes the doc/log BEFORE
-    // the inscription id exists, so the head's witness (which names the newest
-    // inscription) is never in the embedded snapshot/delta. It is fully
-    // re-verified against the chain by verifyBitcoinWitnessProof inside loadAsset.
-    const headTxid = typeof newest.txid === 'string' ? newest.txid : undefined;
-    const headWitness: WitnessProof & { txid?: string; satoshi: string; inscriptionId: string } = {
-      type: 'DataIntegrityProof',
-      cryptosuite: 'bitcoin-ordinals-2024',
-      created: new Date().toISOString(),
-      verificationMethod: 'did:btco:witness',
-      proofPurpose: 'assertionMethod',
-      proofValue: `z${newest.inscriptionId}`,
-      witnessedAt: new Date().toISOString(),
-      txid: headTxid,
-      satoshi: sat,
-      inscriptionId: newest.inscriptionId
-    };
-    const headIdx = log.events.length - 1;
+    // 5) Reconstruct the byte-light AssetEnvelope. Each inscription witnessed the
+    // event its own `#cel` anchor commits to (migrate, a resource-update, a
+    // rotation), but that event's bitcoin witness proof is never in the embedded
+    // snapshot/delta — the writer inscribes the doc/log BEFORE the inscription id
+    // exists. Reattach, PER LINK, the witness to the event its anchor commits to,
+    // so every on-chain-anchored event carries its proof (not just the head). Each
+    // is fully re-verified against the chain by verifyBitcoinWitnessProof inside
+    // loadAsset (it must commit to that event's digest, or verification fails).
+    const eventDigests = log.events.map(ev => computeDigestMultibase(canonicalizeEntryForChain(ev)));
     const events = log.events.slice();
-    events[headIdx] = { ...events[headIdx], proof: [...events[headIdx].proof, headWitness] };
+    for (const link of links) {
+      const linkAnchor = this.extractCelAnchorFromDoc(link.didDocument);
+      if (linkAnchor === undefined) continue;
+      const evIdx = eventDigests.findIndex(d => digestMultibaseEquals(linkAnchor, d));
+      if (evIdx < 0) continue; // anchor commits to an event not in the reconstructed log
+      const witness: WitnessProof & { txid?: string; satoshi: string; inscriptionId: string } = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'bitcoin-ordinals-2024',
+        created: new Date().toISOString(),
+        verificationMethod: 'did:btco:witness',
+        proofPurpose: 'assertionMethod',
+        proofValue: `z${link.inscriptionId}`,
+        witnessedAt: new Date().toISOString(),
+        ...(typeof link.txid === 'string' ? { txid: link.txid } : {}),
+        satoshi: sat,
+        inscriptionId: link.inscriptionId
+      };
+      events[evIdx] = { ...events[evIdx], proof: [...events[evIdx].proof, witness] };
+    }
     const reconstructedLog: EventLog = { ...log, events };
 
     // Current media = the newest inscription content that hashes to the log's
@@ -2403,6 +2411,16 @@ export class LifecycleManager {
     if (!log) return null;
     const head = mostRecentResourceHead(log);
     if (!head) return null;
+    // Prefer the in-flight new-version media (#407 phase 3): during a btco
+    // resource-update inscription the log head already points at the new version,
+    // but asset.resources has not advanced yet — the bytes live in pendingHeadMedia.
+    const pending = asset.pendingHeadMedia;
+    if (pending && pending.hash === head.hash && (!head.resourceId || pending.resourceId === head.resourceId)) {
+      return {
+        content: Buffer.from(pending.content, 'utf8'),
+        contentType: pending.contentType ?? head.contentType ?? 'application/octet-stream'
+      };
+    }
     const res = asset.resources.find(r => (!head.resourceId || r.id === head.resourceId) && r.hash === head.hash);
     if (!res || typeof res.content !== 'string') return null;
     return {
