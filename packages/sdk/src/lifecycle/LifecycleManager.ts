@@ -27,7 +27,7 @@ import { btcoDidPrefix, btcoDidFromSatoshi } from '../cel/btcoDid.js';
 import { KeyManager } from '../did/KeyManager.js';
 import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
 import { createCelDidDocument, didCelMatchesLog, deriveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
-import { verifyEventLog, selectNewestAnchorInscription } from '../cel/algorithms/verifyEventLog.js';
+import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
 import { appendEvent } from '../cel/algorithms/appendEvent.js';
@@ -790,82 +790,158 @@ export class LifecycleManager {
       if (!v.valid) throw new StructuredError('INVALID_SATOSHI', `Invalid satoshi identifier: ${v.error}`);
     }
 
-    // 1) Newest anchoring inscription by confirmed block height — reuses the
-    // verifier's selection so the resolver picks the SAME inscription
-    // head-freshness / the content gate check against (fail-closed on missing
-    // height, per-height newest, list-tail same-block residual).
-    const selected = await selectNewestAnchorInscription(sat, provider);
-    if ('error' in selected) {
-      throw new StructuredError('CHAIN_ASSET_NOT_FOUND', `Cannot resolve an asset from satoshi ${sat}: ${selected.error}.`);
+    // 1) Enumerate the sat's inscription chain (#407 phase 3). Each btco
+    // authorship append adds one inscription; walking them in confirmed-block
+    // order reconstructs the ALWAYS-CURRENT log — not just phase-2's point-in-time
+    // newest snapshot.
+    if (typeof provider.getInscriptionsBySatoshi !== 'function') {
+      throw new StructuredError('ORD_PROVIDER_REQUIRED', `The ordinals provider cannot enumerate inscriptions on satoshi ${sat}.`);
     }
-    const chosen = selected.inscription;
-
-    // 2) Read provenance (metadata) + media (content).
-    const metadata = chosen.metadata as { didDocument?: unknown; celLog?: unknown } | undefined;
-    const btcoDoc = metadata?.didDocument;
-    const rawCelLog = metadata?.celLog;
-    if (!btcoDoc || typeof btcoDoc !== 'object' || rawCelLog === undefined || rawCelLog === null) {
-      throw new StructuredError(
-        'CHAIN_ASSET_INVALID',
-        `Inscription ${chosen.inscriptionId} on satoshi ${sat} carries no provenance metadata (didDocument + celLog); not a phase-2 anchoring inscription.`
-      );
+    let onSat: Array<{ inscriptionId: string }>;
+    try {
+      onSat = await provider.getInscriptionsBySatoshi(sat);
+    } catch (e) {
+      throw new StructuredError('CHAIN_ASSET_NOT_FOUND', `Failed to enumerate inscriptions on satoshi ${sat}: ${e instanceof Error ? e.message : String(e)}.`);
     }
 
-    // 3) Parse the embedded byte-light CEL log through the JSON gate.
+    // 2) Fetch each, keeping OUR anchoring inscriptions (metadata carries a
+    // didDocument AND either a full celLog snapshot or an events delta). Order
+    // strictly by confirmed block height (list index as the documented
+    // same-block residual). A missing block height on any anchoring inscription
+    // fails closed — the chain order would be unprovable.
+    type Link = {
+      inscriptionId: string;
+      listIdx: number;
+      blockHeight: number;
+      didDocument: unknown;
+      snapshotEvents?: unknown[]; // full celLog (checkpoint) → REPLACE
+      deltaEvents?: unknown[];    // events delta → APPEND
+      content?: Buffer;
+      txid?: string;
+    };
+    const links: Link[] = [];
+    for (let idx = 0; idx < onSat.length; idx++) {
+      const inscriptionId = onSat[idx].inscriptionId;
+      let insc: Awaited<ReturnType<OrdinalsLookup['getInscriptionById']>>;
+      try {
+        insc = await provider.getInscriptionById(inscriptionId);
+      } catch (e) {
+        // A metadata-undecodable error (or any fetch failure) fails closed: a
+        // provider that cannot read an inscription must not yield a silent
+        // partial reconstruction.
+        throw new StructuredError('CHAIN_ASSET_INVALID', `Failed to fetch inscription ${inscriptionId} on satoshi ${sat}: ${e instanceof Error ? e.message : String(e)}.`);
+      }
+      if (!insc) continue;
+      const meta = insc.metadata as { didDocument?: unknown; celLog?: unknown; events?: unknown } | undefined;
+      if (!meta || !meta.didDocument || typeof meta.didDocument !== 'object') continue;
+      const snapshot = meta.celLog !== undefined && meta.celLog !== null
+        ? (meta.celLog as { events?: unknown }).events
+        : undefined;
+      const delta = Array.isArray(meta.events) ? meta.events : undefined;
+      if (snapshot === undefined && delta === undefined) continue; // not an anchoring inscription
+      const rawHeight = (insc as { blockHeight?: unknown }).blockHeight;
+      const height = typeof rawHeight === 'number' && Number.isInteger(rawHeight) && rawHeight >= 0 ? rawHeight : undefined;
+      if (height === undefined) {
+        throw new StructuredError('CHAIN_ASSET_INVALID', `Anchoring inscription ${inscriptionId} on satoshi ${sat} has no confirmed block height; the chain order is unprovable.`);
+      }
+      links.push({
+        inscriptionId,
+        listIdx: idx,
+        blockHeight: height,
+        didDocument: meta.didDocument,
+        ...(Array.isArray(snapshot) ? { snapshotEvents: snapshot } : {}),
+        ...(delta ? { deltaEvents: delta } : {}),
+        ...(insc.content !== undefined ? { content: insc.content } : {}),
+        ...(typeof insc.txid === 'string' ? { txid: insc.txid } : {})
+      });
+    }
+    if (links.length === 0) {
+      throw new StructuredError('CHAIN_ASSET_NOT_FOUND', `No Originals anchoring inscription found on satoshi ${sat}.`);
+    }
+    links.sort((a, b) => a.blockHeight - b.blockHeight || a.listIdx - b.listIdx);
+
+    // 3) Walk oldest→newest, concatenating events: a full celLog snapshot is a
+    // checkpoint (REPLACE); an events delta extends (APPEND). The result is the
+    // full current log; verifyEventLog (below, via loadAsset) enforces contiguous
+    // hash-chain continuity, so any gap or mis-ordered same-block link fails
+    // closed there — the resolver never trusts the concatenation blindly.
+    let rawEvents: unknown[] = [];
+    for (const link of links) {
+      if (link.snapshotEvents) {
+        rawEvents = link.snapshotEvents.slice();
+      } else if (link.deltaEvents) {
+        rawEvents = rawEvents.concat(link.deltaEvents);
+      }
+    }
+    const newest = links[links.length - 1];
+    const btcoDoc = newest.didDocument;
+
     let log: EventLog;
     try {
-      log = parseEventLogJson(JSON.stringify(rawCelLog));
+      log = parseEventLogJson(JSON.stringify({ events: rawEvents }));
     } catch (e) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} celLog is not a valid CEL log: ${(e as Error).message}`);
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Reconstructed log from satoshi ${sat} is not a valid CEL log: ${(e as Error).message}`);
     }
     if (!Array.isArray(log.events) || log.events.length === 0) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} celLog has no events.`);
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Reconstructed log from satoshi ${sat} has no events.`);
     }
 
-    // 4) The embedded celLog head MUST equal the on-chain `#cel` anchor
-    // (else the inscription is internally inconsistent). Defense-in-depth: the
-    // witness path re-derives this too, but a clear early error is worth it.
+    // 4) The newest inscription's `#cel` anchor MUST equal the reconstructed log
+    // head (else the newest link is inconsistent with the concatenated chain).
     const anchorDigest = this.extractCelAnchorFromDoc(btcoDoc);
     const headDigest = computeDigestMultibase(canonicalizeEntryForChain(log.events[log.events.length - 1]));
     if (anchorDigest === undefined) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} DID document carries no OriginalsCelAnchor; cannot confirm the embedded log head.`);
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Newest inscription ${newest.inscriptionId} DID document carries no OriginalsCelAnchor; cannot confirm the reconstructed log head.`);
     }
     if (!digestMultibaseEquals(anchorDigest, headDigest)) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId}: embedded celLog head (${headDigest}) does not equal the #cel anchor (${anchorDigest}).`);
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Newest inscription ${newest.inscriptionId}: reconstructed log head (${headDigest}) does not equal its #cel anchor (${anchorDigest}); the chain is truncated or inconsistent.`);
     }
 
     // 5) Reconstruct the byte-light AssetEnvelope. The head event needs its OWN
     // bitcoin witness proof reattached — the writer inscribes the doc/log BEFORE
-    // the inscription id exists, so the head's witness (which names this
-    // inscription) is never in the embedded snapshot. It is fully re-verified
-    // against the chain by verifyBitcoinWitnessProof inside loadAsset.
-    const headTxid = typeof chosen.txid === 'string' ? chosen.txid : undefined;
+    // the inscription id exists, so the head's witness (which names the newest
+    // inscription) is never in the embedded snapshot/delta. It is fully
+    // re-verified against the chain by verifyBitcoinWitnessProof inside loadAsset.
+    const headTxid = typeof newest.txid === 'string' ? newest.txid : undefined;
     const headWitness: WitnessProof & { txid?: string; satoshi: string; inscriptionId: string } = {
       type: 'DataIntegrityProof',
       cryptosuite: 'bitcoin-ordinals-2024',
       created: new Date().toISOString(),
       verificationMethod: 'did:btco:witness',
       proofPurpose: 'assertionMethod',
-      proofValue: `z${chosen.inscriptionId}`,
+      proofValue: `z${newest.inscriptionId}`,
       witnessedAt: new Date().toISOString(),
       txid: headTxid,
       satoshi: sat,
-      inscriptionId: chosen.inscriptionId
+      inscriptionId: newest.inscriptionId
     };
     const headIdx = log.events.length - 1;
     const events = log.events.slice();
     events[headIdx] = { ...events[headIdx], proof: [...events[headIdx].proof, headWitness] };
     const reconstructedLog: EventLog = { ...log, events };
 
-    // Resources from the log + the on-chain media as the head blob.
-    const resources = this.reconstructResourcesFromLog(reconstructedLog, chosen.content);
+    // Current media = the newest inscription content that hashes to the log's
+    // most-recent-resource head (a rotation's newest inscription carries no new
+    // media, so the media may live in an earlier resource-update inscription).
+    const head = mostRecentResourceHead(reconstructedLog);
+    let headContent: Buffer | undefined;
+    if (head) {
+      for (let i = links.length - 1; i >= 0; i--) {
+        const c = links[i].content;
+        if (c && hashResource(Buffer.from(c.toString('utf8'), 'utf8')).toLowerCase() === head.hash.toLowerCase()) {
+          headContent = c;
+          break;
+        }
+      }
+    }
+    const resources = this.reconstructResourcesFromLog(reconstructedLog, headContent);
 
     // did:cel document is DERIVED (loadAsset re-derives it anyway; supply a
     // structurally valid one). did:btco is the on-chain metadata doc.
     const assetDid = deriveDidCel(reconstructedLog);
     const genesisController = (reconstructedLog.events[0]?.data as { controller?: unknown })?.controller;
     if (typeof genesisController !== 'string' || !genesisController.startsWith('did:key:')) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} genesis controller is not a did:key (only did:key controllers are supported by resolveAssetFromSat; got: ${String(genesisController)}).`);
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Reconstructed genesis controller is not a did:key (only did:key controllers are supported by resolveAssetFromSat; got: ${String(genesisController)}).`);
     }
     const celDoc = createCelDidDocument(assetDid, genesisController.slice('did:key:'.length));
 
