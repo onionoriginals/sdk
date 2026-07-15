@@ -18,6 +18,7 @@ import {
   type BatchInscriptionOptions,
   type BatchProgressSnapshot,
 } from './BatchOperations.js';
+import type { InscribeOnBitcoinOptions } from './LifecycleManager.js';
 
 /**
  * The single-asset lifecycle operations that batch operations orchestrate over.
@@ -27,7 +28,7 @@ import {
 export interface LifecycleCoreOperations {
   createAsset(resources: AssetResource[]): Promise<OriginalsAsset>;
   publishToWeb(asset: OriginalsAsset, publisherDidOrSigner: any): Promise<OriginalsAsset>;
-  inscribeOnBitcoin(asset: OriginalsAsset, feeRate?: number): Promise<OriginalsAsset>;
+  inscribeOnBitcoin(asset: OriginalsAsset, opts?: number | InscribeOnBitcoinOptions): Promise<OriginalsAsset>;
   transferOwnership(asset: OriginalsAsset, to: string): Promise<BitcoinTransaction>;
 }
 

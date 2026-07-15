@@ -9,6 +9,9 @@ import {
   DIDDocument
 } from '../types/index.js';
 import { BitcoinManager, MAX_REASONABLE_FEE_RATE } from '../bitcoin/BitcoinManager.js';
+import { inscribeOnSat } from '../bitcoin/inscribe-on-sat.js';
+import type { Utxo } from '../types/bitcoin.js';
+import type { BitcoinSigner } from '../types/common.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { CredentialManager } from '../vc/CredentialManager.js';
 import { OriginalsAsset, type ProvenanceChain } from './OriginalsAsset.js';
@@ -130,6 +133,24 @@ export interface LifecycleProgress {
     transactionId?: string;
     confirmations?: number;
   };
+}
+
+/**
+ * Options for `inscribeOnBitcoin` (#369). A bare number is legacy shorthand
+ * for `{ feeRate }`. Providing `fundingUtxo` switches to the sat-selected
+ * path: the genesis did:btco lands on that UTXO's first sat (derived from
+ * the provider's sat index, never caller-asserted, and verified fail-closed
+ * against the landed inscription) instead of an arbitrary provider-picked sat.
+ */
+export interface InscribeOnBitcoinOptions {
+  /** Fee rate for the inscription (sat/vB). */
+  feeRate?: number;
+  /** Caller-selected funding UTXO whose first sat becomes the did:btco identity. */
+  fundingUtxo?: Utxo;
+  /** Signs the commit PSBT spending fundingUtxo. Required alongside fundingUtxo. */
+  satSigner?: BitcoinSigner;
+  /** Change/reveal destination address. Required alongside fundingUtxo. */
+  changeAddress?: string;
 }
 
 /**
@@ -2181,11 +2202,14 @@ export class LifecycleManager {
 
   async inscribeOnBitcoin(
     asset: OriginalsAsset,
-    feeRate?: number
+    opts?: number | InscribeOnBitcoinOptions
   ): Promise<OriginalsAsset> {
+    // Normalize: a bare number is legacy `{ feeRate }` shorthand (#369).
+    const options = typeof opts === 'number' ? { feeRate: opts } : (opts ?? {});
+    const feeRate = options.feeRate;
     const stopTimer = this.logger.startTimer('inscribeOnBitcoin');
     const metricsStart = performance.now();
-    this.logger.info('Inscribing asset on Bitcoin', { assetId: asset.id, feeRate });
+    this.logger.info('Inscribing asset on Bitcoin', { assetId: asset.id, feeRate, satSelected: !!options.fundingUtxo });
     // Method-scoped so the outer catch can restore the pre-append log on any
     // failure after the append (in-memory only). Fires pre-broadcast (nothing
     // paid) AND post-broadcast — notably ORD_SATOSHI_UNKNOWN, where the
@@ -2199,6 +2223,14 @@ export class LifecycleManager {
       // Input validation
       if (!asset || typeof asset !== 'object') {
         throw new StructuredError('INVALID_INPUT', 'Invalid asset: must be a valid OriginalsAsset');
+      }
+      // Sat-selected path (#369): inscribeOnSat needs both to build/sign the
+      // commit spending fundingUtxo — reject early rather than half-validate.
+      if (options.fundingUtxo) {
+        if (!options.satSigner || !options.changeAddress) {
+          throw new StructuredError('INVALID_INPUT',
+            'Sat-selected inscription requires satSigner and changeAddress alongside fundingUtxo.');
+        }
       }
       if (feeRate !== undefined) {
         if (typeof feeRate !== 'number' || feeRate <= 0 || !Number.isFinite(feeRate)) {
@@ -2272,53 +2304,53 @@ export class LifecycleManager {
     // if the operation fails afterward (e.g. ORD_SATOSHI_UNKNOWN) — mirrors
     // rotateBtcoKeys' post-success capture.
     let inscribedBtcoDoc: DIDDocument | undefined;
-    const inscription = await bitcoinManager.inscribeData(
-      async (satoshi: string) => {
-        // Sign the migrate event NOW that the sat is pinned: the body carries
-        // the resolvable did:btco anchor, and the DID doc's #cel commits to
-        // this event's digest — so the append MUST precede doc construction.
-        celHeadDigest = await this.appendCelEventOrSkip(asset, 'migrate', {
-          sourceDid: asset.bindings?.['did:webvh'] ?? asset.id,
-          layer: 'btco',
-          network,
-          to: btcoDidFromSatoshi(satoshi, network),
-          migratedAt: new Date().toISOString()
-        });
-        const btcoDoc = await this.didManager.migrateToDIDBTCO(asset.did, satoshi);
-        btcoDoc.alsoKnownAs = backLinks;
-        btcoDoc.service = [
-          ...(btcoDoc.service || []),
-          {
-            id: `${btcoDoc.id}#resources`,
-            type: 'OriginalsResourceManifest',
-            serviceEndpoint: manifestEndpoint
-          },
-          // On-chain commitment to the entire signed history (#365): anchors
-          // the CEL head so the log cannot be swapped or truncated post-hoc.
-          // Absent when the append degraded — the doc simply lacks the anchor.
-          ...(celHeadDigest !== null ? [{
-            id: `${btcoDoc.id}#cel`,
-            type: 'OriginalsCelAnchor',
-            serviceEndpoint: { headDigestMultibase: celHeadDigest }
-          }] : [])
-        ];
-        inscribedBtcoDoc = btcoDoc;
-        // Metadata = { didDocument, celLog }. Snapshot the log AFTER the migrate
-        // append so the embedded celLog head equals the #cel anchor digest.
-        return {
-          content: headMedia ? headMedia.content : Buffer.from(JSON.stringify(btcoDoc)),
-          metadata: {
-            didDocument: btcoDoc,
-            ...(asset.celLog ? { celLog: JSON.parse(serializeEventLogJson(asset.celLog)) as Record<string, unknown> } : {})
-          }
-        };
-      },
-      inscriptionContentType,
-      feeRate,
-      // Key the shared money-lock by the asset's current DID so a concurrent
-      // MigrationManager.migrate of the same DID is blocked at inscribe (issue #303).
-      { lockKey: asset.id }
-    ) as {
+    // Named (not inline) so BOTH branches below — the legacy
+    // bitcoinManager.inscribeData call and the sat-selected inscribeOnSat call
+    // — share the exact same content builder; the migrate CEL event is
+    // appended identically regardless of which one runs (#369).
+    const buildContentForSat = async (satoshi: string) => {
+      // Sign the migrate event NOW that the sat is pinned: the body carries
+      // the resolvable did:btco anchor, and the DID doc's #cel commits to
+      // this event's digest — so the append MUST precede doc construction.
+      celHeadDigest = await this.appendCelEventOrSkip(asset, 'migrate', {
+        sourceDid: asset.bindings?.['did:webvh'] ?? asset.id,
+        layer: 'btco',
+        network,
+        to: btcoDidFromSatoshi(satoshi, network),
+        migratedAt: new Date().toISOString()
+      });
+      const btcoDoc = await this.didManager.migrateToDIDBTCO(asset.did, satoshi);
+      btcoDoc.alsoKnownAs = backLinks;
+      btcoDoc.service = [
+        ...(btcoDoc.service || []),
+        {
+          id: `${btcoDoc.id}#resources`,
+          type: 'OriginalsResourceManifest',
+          serviceEndpoint: manifestEndpoint
+        },
+        // On-chain commitment to the entire signed history (#365): anchors
+        // the CEL head so the log cannot be swapped or truncated post-hoc.
+        // Absent when the append degraded — the doc simply lacks the anchor.
+        ...(celHeadDigest !== null ? [{
+          id: `${btcoDoc.id}#cel`,
+          type: 'OriginalsCelAnchor',
+          serviceEndpoint: { headDigestMultibase: celHeadDigest }
+        }] : [])
+      ];
+      inscribedBtcoDoc = btcoDoc;
+      // Metadata = { didDocument, celLog }. Snapshot the log AFTER the migrate
+      // append so the embedded celLog head equals the #cel anchor digest.
+      return {
+        content: headMedia ? headMedia.content : Buffer.from(JSON.stringify(btcoDoc)),
+        contentType: inscriptionContentType,
+        metadata: {
+          didDocument: btcoDoc,
+          ...(asset.celLog ? { celLog: JSON.parse(serializeEventLogJson(asset.celLog)) as Record<string, unknown> } : {})
+        }
+      };
+    };
+
+    let inscription: {
       revealTxId?: string;
       txid: string;
       commitTxId?: string;
@@ -2328,6 +2360,78 @@ export class LifecycleManager {
       content?: Buffer;
       metadata?: Record<string, unknown>;
     };
+    if (options.fundingUtxo) {
+      // Sat-selected path (#369): the caller picks the funding UTXO, the
+      // provider's sat index derives the DID sat, and inscribeOnSat verifies
+      // fail-closed that the landed inscription sits on that sat.
+      const provider = bitcoinManager.ordinalsProvider;
+      if (!provider) {
+        throw new StructuredError(
+          'ORD_PROVIDER_REQUIRED',
+          'Ordinals provider must be configured to inscribe data on Bitcoin. ' +
+          'Please provide an ordinalsProvider in your SDK configuration.'
+        );
+      }
+      // inscribeOnSat needs a concrete fee rate up front (it builds its own
+      // commit/reveal rather than going through bitcoinManager.inscribeData,
+      // which resolves this internally) — mirror estimateCost's fee-source
+      // order: explicit > feeOracle > ordinalsProvider estimate > default.
+      let effectiveFeeRate = feeRate;
+      if (!effectiveFeeRate) {
+        if (this.config.feeOracle) {
+          try {
+            effectiveFeeRate = this.capEstimatedFeeRate(await this.config.feeOracle.estimateFeeRate(1));
+          } catch {
+            // Fallback to next source
+          }
+        }
+        if (!effectiveFeeRate) {
+          try {
+            effectiveFeeRate = this.capEstimatedFeeRate(await provider.estimateFee(1));
+          } catch {
+            // Fallback to default
+          }
+        }
+        if (!effectiveFeeRate) {
+          effectiveFeeRate = 10; // Conservative default, matches estimateCost
+        }
+      }
+      const result = await inscribeOnSat({
+        buildContent: buildContentForSat,
+        fundingUtxo: options.fundingUtxo,
+        satSigner: options.satSigner!,
+        changeAddress: options.changeAddress!,
+        feeRate: effectiveFeeRate,
+        network,
+        provider
+      });
+      inscription = {
+        satoshi: result.satoshi,
+        inscriptionId: result.inscriptionId,
+        commitTxId: result.commitTxId,
+        revealTxId: result.revealTxId,
+        txid: result.revealTxId,
+        feeRate: effectiveFeeRate
+      };
+    } else {
+      inscription = await bitcoinManager.inscribeData(
+        buildContentForSat,
+        inscriptionContentType,
+        feeRate,
+        // Key the shared money-lock by the asset's current DID so a concurrent
+        // MigrationManager.migrate of the same DID is blocked at inscribe (issue #303).
+        { lockKey: asset.id }
+      ) as {
+        revealTxId?: string;
+        txid: string;
+        commitTxId?: string;
+        inscriptionId: string;
+        satoshi?: string;
+        feeRate?: number;
+        content?: Buffer;
+        metadata?: Record<string, unknown>;
+      };
+    }
     const revealTxId = inscription.revealTxId ?? inscription.txid;
     const commitTxId = inscription.commitTxId;
     const usedFeeRate = typeof inscription.feeRate === 'number' ? inscription.feeRate : feeRate;
