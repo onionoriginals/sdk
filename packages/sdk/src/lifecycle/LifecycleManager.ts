@@ -3861,6 +3861,12 @@ export class LifecycleManager {
    * `emitInscribeCost` (content/4 witness discount + ~200 vB overhead), so the
    * quote tracks the cost the subsequent real append incurs.
    *
+   * For a STANDALONE `'update'` quote (not driven by the confirm gate), pass the
+   * intended new bytes as `opts.content` — otherwise the estimate is
+   * content-agnostic: with no in-flight `pendingHeadMedia` it sizes the CURRENT
+   * head media as a proxy and will underquote a larger upgrade. The confirm gate
+   * always sizes correctly (pendingHeadMedia is set before it runs).
+   *
    * @throws StructuredError('ORD_PROVIDER_REQUIRED') when no ordinalsProvider is
    *   configured — a btco op cannot be quoted without one.
    */
@@ -3876,15 +3882,19 @@ export class LifecycleManager {
         'An ordinalsProvider must be configured to estimate a did:btco append cost.'
       );
     }
-    const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     // Same resolveFeeRate chain the real inscription uses (explicit override wins,
-    // else feeOracle→provider, absurd sources skipped). Conservative default when nothing resolves,
-    // so the quote is always a usable number for the confirm callback (matches
-    // estimateCost's fallback).
-    const resolved = await bitcoinManager.estimateFeeRate();
-    const feeRate = (typeof opts?.feeRate === 'number' && Number.isFinite(opts.feeRate) && opts.feeRate > 0)
-      ? opts.feeRate
-      : (typeof resolved === 'number' && resolved > 0 ? resolved : 10);
+    // else feeOracle→provider, absurd sources skipped). Conservative default when
+    // nothing resolves, so the quote is always a usable number for the confirm
+    // callback (matches estimateCost's fallback). Short-circuit an explicit
+    // opts.feeRate so we skip the fee-oracle round-trip it would only override.
+    let feeRate: number;
+    if (typeof opts?.feeRate === 'number' && Number.isFinite(opts.feeRate) && opts.feeRate > 0) {
+      feeRate = opts.feeRate;
+    } else {
+      const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+      const resolved = await bitcoinManager.estimateFeeRate();
+      feeRate = (typeof resolved === 'number' && resolved > 0) ? resolved : 10;
+    }
     const contentBytes = this.resolveAppendPayloadBytes(asset, appendKind, opts);
     // Ballpark commit+reveal vsize (mirrors emitInscribeCost): a cost-awareness
     // figure, not a billing number.
