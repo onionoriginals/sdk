@@ -3909,6 +3909,13 @@ export class LifecycleManager {
    * caller-supplied content → in-flight new media (`pendingHeadMedia`, the
    * confirm-gate case, since the log head has not advanced yet) → current head
    * media → the DID document (pure-reference-head fallback). Pure/read-only.
+   *
+   * For `'rotate'`, this deliberately sizes the head MEDIA (when present), NOT the
+   * rotated DID doc: `reinscribeRotatedDoc` inscribes `headMedia.content` as the
+   * ordinal CONTENT and carries the rotated doc in METADATA, falling back to the
+   * DID doc as content only for a pure-reference head. So media size IS the paid
+   * cost of a rotation on an asset with media; the DID-doc fallback below applies
+   * to both kinds only when there is no inline media.
    */
   private resolveAppendPayloadBytes(
     asset: OriginalsAsset,
@@ -3922,6 +3929,8 @@ export class LifecycleManager {
     if (appendKind === 'update' && asset.pendingHeadMedia) {
       return Buffer.from(asset.pendingHeadMedia.content, 'utf8').byteLength;
     }
+    // Head media is the inscribed CONTENT for BOTH kinds when present (update:
+    // reinscribeCelAppend; rotate: reinscribeRotatedDoc) — so this is the paid size.
     const headMedia = this.tryResolveHeadMedia(asset);
     if (headMedia) return headMedia.content.byteLength;
     // Pure-reference head → the inscribe path falls back to the DID document as

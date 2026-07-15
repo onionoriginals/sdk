@@ -166,6 +166,18 @@ describe('fee preview + confirm (#407 phase 4)', () => {
     expect(inssOnSat(ordinalsProvider, sat)!.length).toBe(before + 1);
   });
 
+  test("rotate estimate sizes the PAID content (head media), matching reinscribeRotatedDoc — not the DID doc", async () => {
+    const { sdk } = makeSDK();
+    // Media large enough that DID-doc size and media size are unambiguously different.
+    const media = 'M'.repeat(4096);
+    const { asset } = await btcoAsset(sdk, media);
+
+    const est = await sdk.lifecycle.estimateAppendCost(asset, 'rotate');
+    // reinscribeRotatedDoc inscribes headMedia.content as CONTENT (doc rides in
+    // metadata), so the paid content size IS the head media — not the DID doc.
+    expect(est.contentBytes).toBe(Buffer.from(media, 'utf8').byteLength);
+  });
+
   test('rotateBtcoKeys is gated: decline aborts cleanly; a subsequent rotation with true inscribes', async () => {
     const { sdk, ordinalsProvider } = makeSDK();
     const { asset, sat } = await btcoAsset(sdk);
