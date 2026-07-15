@@ -930,8 +930,9 @@ const tx = await sdk.bitcoin.transferInscription(
 // Validate did:btco exists on Bitcoin
 const isValid = await sdk.bitcoin.validateBTCODID(didId: string): Promise<boolean>
 
-// Check for front-running attacks
-const isSafe = await sdk.bitcoin.preventFrontRunning(satoshi: string): Promise<boolean>
+// Anti-front-running is not an sdk.bitcoin call — it's enforced fail-closed
+// at resolution: verifyEventLog uses first-anchor-wins via the provider's
+// getAnchoringsForDidCel(didCelId), rejecting any non-first anchor.
 
 // Get satoshi from inscription
 const satoshi = await sdk.bitcoin.getSatoshiFromInscription(

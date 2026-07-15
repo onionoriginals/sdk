@@ -313,20 +313,20 @@ if (inscription) {
 }
 ```
 
-**Note:** To query all inscriptions on a specific satoshi, you would need to access the Ordinals provider directly. The SDK's `preventFrontRunning()` method uses this functionality internally to check for multiple inscriptions.
+**Note:** To query all inscriptions on a specific satoshi, access the Ordinals provider directly.
 
 ### Front-Running Protection
 
-Multiple inscriptions can exist on the same satoshi. The SDK provides front-running detection:
+Uniqueness/anti-front-running for a did:cel sat is not a client-side check —
+it's enforced fail-closed at resolution. `verifyEventLog` applies
+**first-anchor-wins**: the provider's `getAnchoringsForDidCel()` is queried and
+the first inscription to anchor a given did:cel sat is treated as canonical;
+any later inscription anchoring the same sat is rejected during verification.
 
 ```typescript
-const isSafe = await sdk.bitcoin.preventFrontRunning(satoshi);
-
-if (!isSafe) {
-  console.warn('WARNING: Multiple inscriptions detected!');
-  console.warn('This satoshi may have been front-run');
-  console.warn('Use external Ordinals explorer to inspect all inscriptions');
-}
+// Inspect anchorings to see which inscription is canonical:
+const anchorings = await ordinalsProvider.getAnchoringsForDidCel(didCelId);
+console.log(anchorings); // anchorings[0] is the first (canonical) anchor
 ```
 
 ### Transferring Inscriptions

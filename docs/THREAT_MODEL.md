@@ -29,7 +29,7 @@ External signers  ───→  Interface contract   ───→  Credential is
 | T2 | Fee rate manipulation drains wallet | `BitcoinManager`, `fee-calculation.ts` | High | Mitigated — max fee rate enforced in BitcoinManager |
 | T3 | UTXO double-spend via concurrent selection | `utxo-selection.ts` | High | Known limitation — wallet-level locking required |
 | T4 | Private key leakage via logging/errors | `Signer.ts`, `commit.ts`, `eddsa.ts` | Medium | Mitigated — no keys in logs/errors currently |
-| T5 | Inscription front-running | `commit.ts` | Medium | Mitigated — random keypair per reveal tx |
+| T5 | Reveal-tx front-running (mempool precomputes reveal address) | `commit.ts` | Medium | Mitigated — random keypair per reveal tx. Protocol-level did:cel sat uniqueness is a separate mechanism: first-anchor-wins, verified fail-closed in `verifyEventLog` |
 | T6 | Spending inscription-bearing UTXOs | `utxo-selection.ts` | High | Mitigated — `hasResource` flag filtering |
 | T7 | Integer overflow in satoshi math | `satoshi-validation.ts` | Medium | Mitigated — BigInt used, max supply enforced |
 | T8 | DID document injection | `DIDManager`, `validation.ts` | Low | Partially mitigated — see F5 |
@@ -168,7 +168,8 @@ The SDK demonstrates strong security practices in several areas:
 - **Satoshi number validation** — Comprehensive: regex, range (0 to 2.1 quadrillion), type checks
 - **Fee rate bounds** — Max 10,000 sat/vB in BitcoinManager prevents accidental fund drain
 - **Dust limit handling** — Sub-546-sat change added to fee instead of creating dust outputs
-- **Front-running protection** — Random reveal keypair per inscription
+- **Reveal-tx front-running protection** — Random reveal keypair per inscription
+- **did:cel sat uniqueness** — First-anchor-wins, verified fail-closed at resolution in `verifyEventLog` via the provider's `getAnchoringsForDidCel`
 - **Inscription UTXO protection** — `hasResource` flag prevents spending inscription-bearing UTXOs
 - **Error message sanitization** — No private keys or sensitive data in error messages
 - **Comprehensive security tests** — 11 categories in `tests/security/bitcoin-penetration-tests.test.ts`
