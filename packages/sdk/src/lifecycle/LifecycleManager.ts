@@ -139,8 +139,10 @@ export interface LifecycleProgress {
  * Options for `inscribeOnBitcoin` (#369). A bare number is legacy shorthand
  * for `{ feeRate }`. Providing `fundingUtxo` switches to the sat-selected
  * path: the genesis did:btco lands on that UTXO's first sat (derived from
- * the provider's sat index, never caller-asserted, and verified fail-closed
- * against the landed inscription) instead of an arbitrary provider-picked sat.
+ * the provider's sat index, never caller-asserted) instead of an arbitrary
+ * provider-picked sat. This is fire-and-forget: the commit/reveal are
+ * deterministically constructed to land on the derived sat, with no
+ * post-broadcast re-check — the caller owns confirmation monitoring.
  */
 export interface InscribeOnBitcoinOptions {
   /** Fee rate for the inscription (sat/vB). */
@@ -2362,8 +2364,9 @@ export class LifecycleManager {
     };
     if (options.fundingUtxo) {
       // Sat-selected path (#369): the caller picks the funding UTXO, the
-      // provider's sat index derives the DID sat, and inscribeOnSat verifies
-      // fail-closed that the landed inscription sits on that sat.
+      // provider's sat index derives the DID sat, and the commit/reveal are
+      // deterministically constructed to land on it. Fire-and-forget — no
+      // post-broadcast re-check (the caller owns confirmation monitoring).
       const provider = bitcoinManager.ordinalsProvider;
       if (!provider) {
         throw new StructuredError(
