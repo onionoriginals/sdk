@@ -27,6 +27,16 @@ function jsonResponse(body: unknown) {
   };
 }
 
+function notFoundResponse() {
+  return {
+    ok: false,
+    status: 404,
+    headers: { get: () => null },
+    async arrayBuffer() { return new ArrayBuffer(0); },
+    async text() { return ''; }
+  };
+}
+
 function bytesResponse(bytes: Uint8Array, contentLength?: number) {
   return {
     ok: true,
@@ -61,6 +71,7 @@ describe('OrdHttpProvider SSRF / size hardening (#265)', () => {
 
   test('accepts a same-origin content_url', async () => {
     installFetch(async (url) => {
+      if (url.includes('/r/metadata/')) return notFoundResponse(); // no CBOR metadata
       if (url.includes('/inscription/')) {
         return jsonResponse({ content_url: `${BASE}/content/abc`, content_type: 'text/plain', sat: '123' });
       }
@@ -76,6 +87,7 @@ describe('OrdHttpProvider SSRF / size hardening (#265)', () => {
     const inits: any[] = [];
     installFetch(async (url, init) => {
       inits.push({ url, init });
+      if (url.includes('/r/metadata/')) return notFoundResponse();
       if (url.includes('/inscription/')) {
         return jsonResponse({ content_url: `${BASE}/content/abc`, content_type: 'text/plain', sat: '123' });
       }

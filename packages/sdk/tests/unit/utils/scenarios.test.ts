@@ -337,6 +337,10 @@ describe('UTILS-VERIFY-020: OrdHttpProvider URL construction', () => {
 
     (globalThis as any).fetch = async (url: string) => {
       fetchedUrls.push(url);
+      // The ord recursive CBOR-metadata route has no metadata here → 404.
+      if (url.includes('/r/metadata/')) {
+        return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+      }
       // Return a minimal valid response for metadata call
       const body = JSON.stringify({
         inscription_id: 'abc123',
@@ -373,6 +377,9 @@ describe('UTILS-VERIFY-020: OrdHttpProvider URL construction', () => {
 
     (globalThis as any).fetch = async (url: string) => {
       fetchedUrls.push(url);
+      if (url.includes('/r/metadata/')) {
+        return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+      }
       const body = JSON.stringify({
         inscription_id: 'xyz',
         content_type: 'text/plain',

@@ -166,11 +166,11 @@ export class OrdHttpProvider implements OrdinalsProvider {
       }
     }
     // The ord recursive `/r/metadata/<id>` route serves hex CBOR ONLY when
-    // metadata exists. A 404, an empty body, or a non-hex/undecodable body all
-    // mean "no CBOR metadata in the expected form" → undefined. This is not a
-    // silent security hole: the resolver fails closed when an anchoring
-    // inscription lacks provenance metadata, and a malicious endpoint could
-    // equally 404 the route.
+    // metadata exists. A 404 / empty body → no metadata (undefined). But a
+    // PRESENT non-empty body that does not hex/CBOR decode is a hard fail-closed
+    // error: swallowing it to undefined would let a transient fault or a
+    // garbage-serving endpoint drop a real anchoring inscription and silently
+    // truncate the chain tail. Fable I2.
     const url = buildUrl(this.baseUrl, `/r/metadata/${id}`);
     const result = await fetchBytesWithLimit(url, this.maxJsonBytes, { headers: { 'Accept': 'application/json' } });
     if (!result) return undefined;
@@ -181,8 +181,12 @@ export class OrdHttpProvider implements OrdinalsProvider {
     }
     try {
       return decodeCbor<Record<string, unknown>>(hexToBytes(text));
-    } catch {
-      return undefined;
+    } catch (e) {
+      throw new StructuredError(
+        'ORD_METADATA_UNDECODABLE',
+        `OrdHttpProvider: inscription ${id} /r/metadata response is present but could not be hex/CBOR decoded (${e instanceof Error ? e.message : String(e)}); refusing to reconstruct from partial provenance`,
+        { inscriptionId: id }
+      );
     }
   }
 

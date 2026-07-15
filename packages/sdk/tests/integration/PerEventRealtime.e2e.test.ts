@@ -160,6 +160,51 @@ describe('per-event real-time chain recovery (#407 phase 3)', () => {
     expect(costs[0].estVsize).toBeGreaterThan(0);
   });
 
+  test('rollback (fable I1): an inscribe failure restores the pre-append log and does not brick future updates', async () => {
+    const { sdk, ordinalsProvider } = makeSDK();
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'art', type: 'image', contentType: 'image/png', hash: contentHash('r0'), content: 'r0' }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+    const lenBefore = asset.celLog!.events.length;
+
+    // Force the paid inscription to fail AFTER the hosted append.
+    const realCreate = ordinalsProvider.createInscription.bind(ordinalsProvider);
+    (ordinalsProvider as any).createInscription = async () => { throw new Error('broadcast failed'); };
+    await expect(asset.addResourceVersion('art', 'r1', 'image/png', 'to r1')).rejects.toThrow();
+    // The signed update was rolled back — the log is NOT ahead of the chain.
+    expect(asset.celLog!.events.length).toBe(lenBefore);
+
+    // Recovery: with the provider healthy again, the next update appends+inscribes
+    // cleanly (no permanent UNPROVABLE_BASE brick), and resolves from the sat.
+    (ordinalsProvider as any).createInscription = realCreate;
+    await asset.addResourceVersion('art', 'r1', 'image/png', 'retry to r1');
+    expect(asset.celLog!.events.length).toBe(lenBefore + 1);
+    const sat = asset.bindings!['did:btco'].split(':').pop()!;
+    const { asset: recovered, verification } = await sdk.lifecycle.resolveAssetFromSat(sat);
+    expect(verification?.verified).toBe(true);
+    expect(recovered.resources.find(r => r.hash === contentHash('r1'))?.content).toBe('r1');
+  });
+
+  test('tail truncation (fable I2): a listed-but-unfetchable newest inscription fails closed, not a stale resolve', async () => {
+    const { sdk, ordinalsProvider } = makeSDK();
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'art', type: 'image', contentType: 'image/png', hash: contentHash('s0'), content: 's0' }
+    ]);
+    await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+    const sat = asset.bindings!['did:btco'].split(':').pop()!;
+    await asset.addResourceVersion('art', 's1', 'image/png', 'to s1');
+
+    // Simulate a transient fault: the provider still LISTS the newest inscription
+    // but returns null when fetched (as OrdHttp would on a 500). Dropping it would
+    // truncate the tail to a self-consistent STALE (s0) asset — must fail closed.
+    const newestId = inssOnSat(ordinalsProvider, sat)!.slice(-1)[0];
+    const realGet = ordinalsProvider.getInscriptionById.bind(ordinalsProvider);
+    (ordinalsProvider as any).getInscriptionById = async (id: string) =>
+      id === newestId ? null : realGet(id);
+    await expect(sdk.lifecycle.resolveAssetFromSat(sat)).rejects.toThrow(/CHAIN_ASSET_INVALID|could not be fetched/);
+  });
+
   test('degrade: a btco asset in a provider-less manager appends to the host and signals the skipped inscription', async () => {
     const keyStore = new MockKeyStore();
     const { sdk, ordinalsProvider } = makeSDK(keyStore);

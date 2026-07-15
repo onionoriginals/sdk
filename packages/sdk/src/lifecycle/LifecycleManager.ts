@@ -831,7 +831,14 @@ export class LifecycleManager {
         // partial reconstruction.
         throw new StructuredError('CHAIN_ASSET_INVALID', `Failed to fetch inscription ${inscriptionId} on satoshi ${sat}: ${e instanceof Error ? e.message : String(e)}.`);
       }
-      if (!insc) continue;
+      // The provider JUST listed this id, so a null (fetch miss / transient
+      // fault the provider swallowed to null) is NOT "not an anchor" — it could
+      // be the newest inscription, and silently skipping it would truncate the
+      // chain tail to a self-consistent STALE log that still verifies. Fail
+      // closed. Fable I2.
+      if (!insc) {
+        throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${inscriptionId} listed on satoshi ${sat} could not be fetched; refusing to reconstruct from a possibly-truncated chain.`);
+      }
       const meta = insc.metadata as { didDocument?: unknown; celLog?: unknown; events?: unknown } | undefined;
       if (!meta || !meta.didDocument || typeof meta.didDocument !== 'object') continue;
       const snapshot = meta.celLog !== undefined && meta.celLog !== null
@@ -2267,6 +2274,11 @@ export class LifecycleManager {
     type: 'migrate' | 'rotateKey' | 'update',
     data: unknown
   ): Promise<string | null> {
+    // Snapshot the pre-append log BEFORE appendCelEventOrSkip advances it — the
+    // inscribe-failure rollback restores THIS (capturing after the append would
+    // restore the log to itself, leaving it permanently ahead of the chain and
+    // bricking future updates via UNPROVABLE_BASE). Fable I1.
+    const celLogBefore = asset.celLog;
     const digest = await this.appendCelEventOrSkip(asset, type, data);
     // Only inscribe genuine authorship appends that LANDED on a btco asset.
     if (digest === null || asset.currentLayer !== 'did:btco') {
@@ -2284,7 +2296,7 @@ export class LifecycleManager {
       });
       return digest;
     }
-    await this.inscribeCelAppend(asset, digest);
+    await this.inscribeCelAppend(asset, digest, celLogBefore);
     return digest;
   }
 
@@ -2297,7 +2309,7 @@ export class LifecycleManager {
    * before broadcast) the pre-append log is restored so the in-memory log never
    * runs ahead of the chain.
    */
-  private async inscribeCelAppend(asset: OriginalsAsset, headDigest: string): Promise<void> {
+  private async inscribeCelAppend(asset: OriginalsAsset, headDigest: string, celLogBefore: EventLog | undefined): Promise<void> {
     const log = asset.celLog;
     const btcoDid = asset.bindings?.['did:btco'];
     if (!log || !btcoDid) return; // defensive: btco asset always has both
@@ -2328,7 +2340,6 @@ export class LifecycleManager {
     // Cost surfacing (spec §0/§5): estimate + emit BEFORE the paid broadcast.
     await this.emitInscribeCost(asset, headMedia?.content ?? Buffer.from(JSON.stringify(btcoDoc)));
 
-    const celLogBefore = log;
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     let inscription: { inscriptionId: string; satoshi?: string; txid?: string; revealTxId?: string };
     try {
@@ -2339,8 +2350,14 @@ export class LifecycleManager {
         { targetSatoshi: satoshi, metadata, lockKey: asset.id }
       );
     } catch (error) {
-      // Failed after the append — restore the pre-append log (nothing was paid).
-      asset._replaceCelLog(celLogBefore);
+      // Failed after the append (nothing paid before broadcast) — restore the
+      // PRE-append log AND re-persist it: appendCelEventOrSkip already advanced the
+      // hosted copy, so without this the stored log would stay ahead of the chain
+      // and every future update would degrade UNPROVABLE_BASE. Fable I1.
+      if (celLogBefore) {
+        asset._replaceCelLog(celLogBefore);
+        await this.persistCelArtifacts(asset);
+      }
       throw error;
     }
 

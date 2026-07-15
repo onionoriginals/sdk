@@ -58,6 +58,7 @@ const DEFAULT_MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
 /** Bitcoin Core RPC error code for "No such mempool or blockchain transaction". */
 const RPC_INVALID_ADDRESS_OR_KEY = -5;
+const JSON_RPC_METHOD_NOT_FOUND = -32601;
 
 interface JsonRpcError {
   code?: number;
@@ -235,6 +236,19 @@ export class QuickNodeProvider implements OrdinalsProvider {
     const rpcMessage = err.details?.rpcMessage;
     if (typeof rpcMessage !== 'string') return false;
     return /^(?:inscription|sat(?:oshi)?|output|content|transaction|tx)\b[^]*\bnot found\.?$/i.test(rpcMessage.trim());
+  }
+
+  /**
+   * True when the endpoint does not implement an RPC method (JSON-RPC -32601 or
+   * an ord/gateway "method not found" message) — distinct from a transient
+   * transport fault, which must propagate. Used so a missing `ord_getMetadata`
+   * (older ord add-on) degrades to "no metadata" while a 500/timeout does not.
+   */
+  private static isMethodNotFound(err: unknown): boolean {
+    if (!(err instanceof StructuredError) || err.code !== 'QUICKNODE_RPC_ERROR') return false;
+    if (err.details?.rpcCode === JSON_RPC_METHOD_NOT_FOUND) return true;
+    const rpcMessage = err.details?.rpcMessage;
+    return typeof rpcMessage === 'string' && /method not found/i.test(rpcMessage);
   }
 
   /**
@@ -426,13 +440,15 @@ export class QuickNodeProvider implements OrdinalsProvider {
       let raw: unknown;
       try {
         raw = await this.rpcCall<unknown>('ord_getMetadata', [id]);
-      } catch {
-        // The endpoint may not expose ord_getMetadata (older ord add-on), or the
-        // inscription simply has none. Metadata-UNAVAILABLE degrades to undefined:
-        // the resolver then fails closed (an anchoring inscription lacking
-        // provenance metadata is rejected) — only PRESENT-but-undecodable bytes
-        // (the decode branch below) are a hard provider-level error.
-        return undefined;
+      } catch (err) {
+        // ONLY degrade to undefined when the metadata genuinely isn't there:
+        // the endpoint lacks ord_getMetadata (older add-on → JSON-RPC method
+        // not found) or the inscription has none (isNotFound). A transient
+        // fault (HTTP 500, timeout, rate-limit) must PROPAGATE — swallowing it
+        // would let the resolver silently truncate the chain to a stale log.
+        // Fable I2.
+        if (QuickNodeProvider.isNotFound(err) || QuickNodeProvider.isMethodNotFound(err)) return undefined;
+        throw err;
       }
       if (raw === null || raw === undefined) return undefined;
       if (typeof raw === 'object') {
