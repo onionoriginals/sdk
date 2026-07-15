@@ -1,6 +1,8 @@
 /* istanbul ignore file */
 import type { OrdinalsProvider, InscriptionParts } from '../types.js';
 import { StructuredError } from '../../utils/telemetry.js';
+import { decode as decodeCbor } from '../../utils/cbor.js';
+import { hexToBytes } from '../../utils/encoding.js';
 
 interface HttpProviderOptions {
   baseUrl: string;
@@ -109,6 +111,13 @@ export class OrdHttpProvider implements OrdinalsProvider {
       vout = Number(v) || 0;
     }
 
+    // #407 phase 3: decode the inscription's CBOR metadata (`{ didDocument,
+    // celLog | events }`) so a real chain can be reconstructed. Absent metadata
+    // is fine (undefined); metadata BYTES that fail to decode fail closed — a
+    // provider that cannot read present metadata must never yield a silent
+    // partial reconstruction.
+    const metadata = await this.fetchMetadata(id, data);
+
     const contentType = data.content_type || 'application/octet-stream';
     // The content URL may come from the (untrusted) indexer response. Pin it to
     // baseUrl's origin before fetching so a malicious endpoint cannot redirect
@@ -128,8 +137,43 @@ export class OrdHttpProvider implements OrdinalsProvider {
       txid,
       vout,
       satoshi: String(data.sat ?? ''),
-      blockHeight: data.block_height
+      blockHeight: data.block_height,
+      ...(metadata !== undefined ? { metadata } : {})
     };
+  }
+
+  /**
+   * Fetch + CBOR-decode an inscription's metadata (#407 phase 3). Prefers an
+   * inline hex `metadata` field on the indexer JSON, else the ord recursive
+   * endpoint `/r/metadata/<id>` (same-origin, capped). Returns `undefined` when
+   * no metadata exists (a 404 / absent field). Throws a clear fail-closed error
+   * when metadata bytes are PRESENT but cannot be hex/CBOR decoded — a provider
+   * that cannot read present metadata must not silently drop provenance.
+   */
+  private async fetchMetadata(id: string, indexerJson: any): Promise<Record<string, unknown> | undefined> {
+    let hex: string | undefined;
+    if (typeof indexerJson?.metadata === 'string' && indexerJson.metadata.length > 0) {
+      hex = indexerJson.metadata;
+    } else {
+      const url = buildUrl(this.baseUrl, `/r/metadata/${id}`);
+      const result = await fetchBytesWithLimit(url, this.maxJsonBytes, { headers: { 'Accept': 'application/json' } });
+      if (!result) return undefined; // no metadata endpoint / 404 → legitimately none
+      let text = new TextDecoder().decode(result.bytes).trim();
+      if (text.length === 0) return undefined;
+      if (text.startsWith('"') && text.endsWith('"')) {
+        try { text = JSON.parse(text) as string; } catch { /* keep raw */ }
+      }
+      hex = text;
+    }
+    try {
+      return decodeCbor<Record<string, unknown>>(hexToBytes(hex));
+    } catch (e) {
+      throw new StructuredError(
+        'ORD_METADATA_UNDECODABLE',
+        `OrdHttpProvider: inscription ${id} carries metadata that could not be hex/CBOR decoded (${e instanceof Error ? e.message : String(e)}); refusing to reconstruct from partial provenance`,
+        { inscriptionId: id }
+      );
+    }
   }
 
   async getInscriptionsBySatoshi(satoshi: string) {

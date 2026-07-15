@@ -1,6 +1,8 @@
 import type { OrdinalsProvider, InscriptionParts } from '../types.js';
 import { StructuredError } from '../../utils/telemetry.js';
 import { validateSatoshiNumber } from '../../utils/satoshi-validation.js';
+import { decode as decodeCbor } from '../../utils/cbor.js';
+import { hexToBytes } from '../../utils/encoding.js';
 
 export interface QuickNodeProviderOptions {
   /**
@@ -391,6 +393,11 @@ export class QuickNodeProvider implements OrdinalsProvider {
       ? info.height
       : (typeof info.genesis_height === 'number' ? info.genesis_height : undefined);
 
+    // #407 phase 3: decode the inscription's CBOR metadata so a real chain can
+    // be walked/reconstructed. Absent → undefined; present-but-undecodable →
+    // fail closed (never a silent partial reconstruction).
+    const metadata = await this.fetchMetadata(id, info);
+
     return {
       inscriptionId,
       content,
@@ -399,7 +406,52 @@ export class QuickNodeProvider implements OrdinalsProvider {
       vout,
       satoshi,
       blockHeight,
+      ...(metadata !== undefined ? { metadata } : {}),
     };
+  }
+
+  /**
+   * Fetch + CBOR-decode an inscription's metadata (#407 phase 3). Prefers an
+   * inline hex `metadata` field on the `ord_getInscription` result, else the
+   * `ord_getMetadata` RPC. Returns `undefined` when no metadata exists (RPC
+   * not-found / absent field). Throws a clear fail-closed error when metadata
+   * bytes are PRESENT but cannot be hex/CBOR decoded.
+   */
+  private async fetchMetadata(id: string, info: QuickNodeInscription): Promise<Record<string, unknown> | undefined> {
+    let hex: string | undefined;
+    const inlineMeta = (info as { metadata?: unknown }).metadata;
+    if (typeof inlineMeta === 'string' && inlineMeta.length > 0) {
+      hex = inlineMeta;
+    } else {
+      let raw: unknown;
+      try {
+        raw = await this.rpcCall<unknown>('ord_getMetadata', [id]);
+      } catch (err) {
+        if (QuickNodeProvider.isNotFound(err)) return undefined;
+        throw err;
+      }
+      if (raw === null || raw === undefined) return undefined;
+      if (typeof raw === 'object') {
+        const obj = raw as Record<string, unknown>;
+        const inner = obj.metadata ?? obj.hex ?? obj.data;
+        if (typeof inner === 'string') hex = inner;
+        else return raw as Record<string, unknown>; // already decoded object
+      } else if (typeof raw === 'string') {
+        hex = raw;
+      } else {
+        return undefined;
+      }
+    }
+    if (!hex) return undefined;
+    try {
+      return decodeCbor<Record<string, unknown>>(hexToBytes(hex));
+    } catch (e) {
+      throw new StructuredError(
+        'QUICKNODE_METADATA_UNDECODABLE',
+        `QuickNodeProvider: inscription ${id} carries metadata that could not be hex/CBOR decoded (${e instanceof Error ? e.message : String(e)}); refusing to reconstruct from partial provenance`,
+        { inscriptionId: id }
+      );
+    }
   }
 
   async getInscriptionsBySatoshi(satoshi: string) {
