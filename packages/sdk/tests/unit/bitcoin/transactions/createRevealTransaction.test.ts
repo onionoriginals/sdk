@@ -8,6 +8,7 @@ import {
 } from '../../../../src/bitcoin/transactions/commit.js';
 import type { Utxo } from '../../../../src/types/bitcoin.js';
 import * as btc from '@scure/btc-signer';
+import * as ordinals from 'micro-ordinals';
 
 // A funded, spendable regtest P2WPKH utxo + change address, mirroring the
 // inline fixtures used by commit.test.ts (no shared fixture module exists).
@@ -21,10 +22,12 @@ const sampleUtxo: Utxo = {
 const sampleChangeAddress = 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080';
 
 describe('createRevealTransaction', () => {
-  it('builds a finalized reveal that spends the commit output and yields an inscriptionId', async () => {
+  it('builds a finalized reveal that actually reveals the inscription (3-item script-path witness)', async () => {
+    const content = Buffer.from('hello', 'utf8');
+    const contentType = 'text/plain';
     const commit = await createCommitTransaction({
-      content: Buffer.from('hello', 'utf8'),
-      contentType: 'text/plain',
+      content,
+      contentType,
       utxos: [sampleUtxo],
       changeAddress: sampleChangeAddress,
       feeRate: 2,
@@ -49,8 +52,21 @@ describe('createRevealTransaction', () => {
     const tx = btc.Transaction.fromRaw(Buffer.from(reveal.revealTxHex, 'hex'), { allowUnknownInputs: true });
     expect(tx.inputsLength).toBe(1);
     expect(tx.outputsLength).toBe(1);
-    // The single input must carry a finalized witness (script-path spend).
-    expect(tx.getInput(0).finalScriptWitness).toBeDefined();
+
+    // CRITICAL: prove this is a SCRIPT-PATH spend that reveals the inscription,
+    // not a key-path spend that only moves the sat. A key-path witness is a
+    // single 64-byte signature; the reveal must carry the 3-item envelope
+    // stack [schnorr sig, envelope script, control block].
+    const witness = tx.getInput(0).finalScriptWitness;
+    expect(witness).toBeDefined();
+    expect(witness!.length).toBe(3);
+
+    // The parsed inscription must round-trip to exactly what was committed.
+    const parsed = ordinals.parseWitness(witness!);
+    expect(parsed).toBeDefined();
+    expect(parsed!.length).toBe(1);
+    expect(parsed![0].tags.contentType).toBe(contentType);
+    expect(Buffer.from(parsed![0].body).equals(content)).toBe(true);
   });
 
   it('throws when the commit amount cannot cover the reveal fee + dust', async () => {

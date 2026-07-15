@@ -218,7 +218,7 @@ export async function createRevealTransaction(
   // Reconstruct the committed P2TR payment from the single-leaf inscription
   // tree. p2tr_ord_reveal returns `{ type: 'tr', script }`, and the commit
   // builder stored that leaf script — so this rebuilds an identical payment
-  // (scriptPubKey, tapInternalKey, tapLeafScript) without re-deriving it.
+  // (scriptPubKey, tapLeafScript) without re-deriving it.
   const commitP2tr = btc.p2tr(
     internalKey,
     { type: 'tr', script: leafScript },
@@ -230,11 +230,17 @@ export async function createRevealTransaction(
   // customScripts must be enabled so finalize() knows how to assemble the
   // tr_ord_reveal witness (signature + envelope script + control block).
   const tx = new btc.Transaction({ customScripts: [ordinals.OutOrdinalReveal] });
+  // Force a SCRIPT-PATH spend: feed ONLY witnessUtxo + tapLeafScript, never
+  // tapInternalKey. If the internal key is present, @scure signs the key-path
+  // too (setting tapKeySig) and finalize() prefers it — emitting a 1-item
+  // key-path witness that moves the sat but never reveals the inscription.
+  // With just tapLeafScript, sign() produces only tapScriptSig and finalize()
+  // takes the OutOrdinalReveal branch → 3-item envelope witness.
   tx.addInput({
-    ...commitP2tr,
     txid: commitTxId,
     index: commitVout,
-    witnessUtxo: { script: commitP2tr.script, amount: BigInt(commitAmount) }
+    witnessUtxo: { script: commitP2tr.script, amount: BigInt(commitAmount) },
+    tapLeafScript: commitP2tr.tapLeafScript
   });
 
   tx.addOutputAddress(destinationAddress, BigInt(postageValue), scureNetwork);
