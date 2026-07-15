@@ -24,7 +24,9 @@ export type AppendKind = 'update' | 'rotate';
 export interface AppendCostEstimate {
   /** Estimated total inscription cost (sats) = feeRate × vbytes. */
   satoshis: number;
-  /** The (capped) fee rate used (sat/vB). */
+  /** The fee rate used (sat/vB), from the same resolver the real inscribe path
+   * uses (feeOracle→provider, absurd >MAX_REASONABLE_FEE_RATE sources skipped; an
+   * explicit override passes through). */
   feeRate: number;
   /** Estimated commit+reveal virtual size (vB). */
   vbytes: number;
@@ -39,6 +41,10 @@ export interface AppendCostEstimate {
  * proceeds and inscribes; `false` cleanly ABORTS the whole append (no event
  * appended, nothing inscribed — a byte-identical no-op that throws
  * `PROVENANCE_APPEND_DECLINED` and emits `cel:inscribe-declined`).
+ *
+ * The callback runs INSIDE the asset's append turn; it must not call another
+ * mutating op on the SAME asset (e.g. `addResourceVersion`/`rotateBtcoKeys`),
+ * which would queue behind its own turn and deadlock. Inspect and decide only.
  */
 export type InscribeConfirm =
   | 'now'
@@ -60,8 +66,9 @@ export interface OriginalsConfig {
   ordinalsProvider?: OrdinalsProvider;
   // Default confirm-gate policy for paid did:btco authorship appends (#407 phase
   // 4). Omitted/'now' = inscribe immediately (phase-3 behavior); a callback is
-  // consulted before each btco append and can cleanly abort it. Overridable per
-  // call (e.g. addResourceVersion's opts.inscribeConfirm).
+  // consulted before each gated paid btco append (addResourceVersion,
+  // rotateBtcoKeys) and can cleanly abort it. Overridable per call (their
+  // opts.inscribeConfirm).
   inscribeConfirm?: InscribeConfirm;
   // Shared keyed lock coordinating money-spending inscriptions across managers
   // (issue #303). OriginalsSDK injects one instance so all managers share it.

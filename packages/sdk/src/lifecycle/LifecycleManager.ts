@@ -3144,7 +3144,8 @@ export class LifecycleManager {
   async rotateBtcoKeys(
     asset: OriginalsAsset,
     newVerificationMethod: { publicKeyMultibase: string; privateKey?: string },
-    feeRate?: number
+    feeRate?: number,
+    opts?: { inscribeConfirm?: InscribeConfirm }
   ): Promise<{ inscriptionId: string; did: string }> {
     if (asset.currentLayer !== 'did:btco') {
       throw new StructuredError('INVALID_STATE', 'Key rotation requires the asset to be on the did:btco layer.');
@@ -3170,6 +3171,31 @@ export class LifecycleManager {
     const satoshi = btcoDid.split(':').pop()!;
     // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
     const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, newVerificationMethod.publicKeyMultibase);
+
+    // Confirm gate (#407 phase 4): a cooperative rotation reinscribes on-chain
+    // (paid), so consent to the cost BEFORE any mutation (log OR keyStore) — same
+    // abort-before-mutate contract as the update path. A provider is guaranteed
+    // here (btco asset). On decline, throw before the rotateKey append and before
+    // registering the incoming key; the finally releases the concurrency claim,
+    // leaving the asset byte-identical.
+    const rotateConfirm = opts?.inscribeConfirm ?? this.config.inscribeConfirm ?? 'now';
+    if (typeof rotateConfirm === 'function') {
+      const estimate = await this.estimateAppendCost(asset, 'rotate', { feeRate });
+      const approved = await rotateConfirm(estimate);
+      if (!approved) {
+        await this.eventEmitter.emit({
+          type: 'cel:inscribe-declined',
+          timestamp: new Date().toISOString(),
+          asset: { id: asset.id },
+          appendKind: 'rotate',
+          estimate
+        });
+        throw new StructuredError(
+          'PROVENANCE_APPEND_DECLINED',
+          'The inscribeConfirm gate declined the paid did:btco key rotation; nothing was appended or inscribed.'
+        );
+      }
+    }
 
     // Append-first (#365): rotateKey signed by the CURRENT controller — the
     // cooperative-rotation contract (the verifier only accepts rotations
@@ -3828,9 +3854,10 @@ export class LifecycleManager {
    * (new media) or `'rotate'` (event-only reinscription) without signing,
    * appending, or inscribing anything — pure quote.
    *
-   * Fee rate comes from the SAME source/cap as the real inscribe path
-   * (`bitcoinManager.estimateFeeRate` → feeOracle→provider, `MAX_REASONABLE_FEE_RATE`
-   * cap; an explicit `opts.feeRate` wins). The vsize ballpark mirrors
+   * Fee rate comes from the SAME resolver the real inscribe path uses
+   * (`bitcoinManager.estimateFeeRate` → feeOracle→provider, absurd
+   * >`MAX_REASONABLE_FEE_RATE` sources skipped; an explicit `opts.feeRate` wins).
+   * The vsize ballpark mirrors
    * `emitInscribeCost` (content/4 witness discount + ~200 vB overhead), so the
    * quote tracks the cost the subsequent real append incurs.
    *
@@ -3851,7 +3878,7 @@ export class LifecycleManager {
     }
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     // Same resolveFeeRate chain the real inscription uses (explicit override wins,
-    // else feeOracle→provider, capped). Conservative default when nothing resolves,
+    // else feeOracle→provider, absurd sources skipped). Conservative default when nothing resolves,
     // so the quote is always a usable number for the confirm callback (matches
     // estimateCost's fallback).
     const resolved = await bitcoinManager.estimateFeeRate();

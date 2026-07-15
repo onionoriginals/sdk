@@ -14,9 +14,10 @@ consented to.
   fee-rate source and `MAX_REASONABLE_FEE_RATE` cap as the real inscribe path, so
   the quote tracks reality. Zero side effects — no signing, appending, or
   inscription. Throws `ORD_PROVIDER_REQUIRED` without an ordinalsProvider.
-- `inscribeConfirm` gate — a per-call option on `addResourceVersion` and a config
-  default on `OriginalsConfig`. `'now'` (default) is the phase-3 behavior (inscribe
-  immediately). A callback is awaited with the estimate BEFORE any log mutation:
+- `inscribeConfirm` gate — a per-call option on `addResourceVersion` and
+  `rotateBtcoKeys`, plus a config default on `OriginalsConfig`. `'now'` (default)
+  is the phase-3 behavior (inscribe immediately). A callback is awaited with the
+  estimate BEFORE any log mutation:
   `true` proceeds; `false` cleanly ABORTS the whole append — no event appended,
   nothing inscribed, the asset left byte-identical (abort-before-mutate). A declined
   append throws `PROVENANCE_APPEND_DECLINED` and emits the new `cel:inscribe-declined`

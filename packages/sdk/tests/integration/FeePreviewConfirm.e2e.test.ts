@@ -10,6 +10,7 @@ import { OriginalsSDK } from '../../src';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';
+import { KeyManager } from '../../src/did/KeyManager';
 import { hashResource } from '../../src/utils/validation';
 import type { AppendCostEstimate } from '../../src/types';
 
@@ -163,6 +164,42 @@ describe('fee preview + confirm (#407 phase 4)', () => {
     const before = inssOnSat(ordinalsProvider, sat)!.length;
     await asset.addResourceVersion('art', 'v2', 'image/png', 'to v2');
     expect(inssOnSat(ordinalsProvider, sat)!.length).toBe(before + 1);
+  });
+
+  test('rotateBtcoKeys is gated: decline aborts cleanly; a subsequent rotation with true inscribes', async () => {
+    const { sdk, ordinalsProvider } = makeSDK();
+    const { asset, sat } = await btcoAsset(sdk);
+    const eventsBefore = asset.celLog!.events.length;
+    const inssBefore = inssOnSat(ordinalsProvider, sat)!.length;
+
+    let declined: any;
+    sdk.lifecycle.on('cel:inscribe-declined', (e: any) => { declined = e; });
+
+    const k1 = await new KeyManager().generateKeyPair('Ed25519');
+    await expect(
+      sdk.lifecycle.rotateBtcoKeys(
+        asset,
+        { publicKeyMultibase: k1.publicKey, privateKey: k1.privateKey },
+        5,
+        { inscribeConfirm: () => false }
+      )
+    ).rejects.toMatchObject({ code: 'PROVENANCE_APPEND_DECLINED' });
+
+    // Byte-identical: no rotateKey event appended, no reinscription.
+    expect(asset.celLog!.events.length).toBe(eventsBefore);
+    expect(inssOnSat(ordinalsProvider, sat)!.length).toBe(inssBefore);
+    expect(declined?.appendKind).toBe('rotate');
+
+    // A subsequent rotation proceeds (concurrency claim was released on abort).
+    const k2 = await new KeyManager().generateKeyPair('Ed25519');
+    const res = await sdk.lifecycle.rotateBtcoKeys(
+      asset,
+      { publicKeyMultibase: k2.publicKey, privateKey: k2.privateKey },
+      5,
+      { inscribeConfirm: () => true }
+    );
+    expect(res.inscriptionId).toBeDefined();
+    expect(inssOnSat(ordinalsProvider, sat)!.length).toBe(inssBefore + 1);
   });
 
   test('off-btco append IGNORES the gate (no inscription, callback never consulted)', async () => {
