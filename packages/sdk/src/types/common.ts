@@ -9,6 +9,41 @@ import type { OperationLock } from '../utils/OperationLock.js';
 // Base types for the Originals protocol
 export type LayerType = 'did:cel' | 'did:webvh' | 'did:btco';
 
+/**
+ * Which kind of did:btco authorship append a cost preview is for (#407 phase 4):
+ * `'update'` sizes the new media (a resource-version inscription); `'rotate'`
+ * sizes the event-only reinscription (the rotated DID document).
+ */
+export type AppendKind = 'update' | 'rotate';
+
+/**
+ * Non-mutating cost quote for the NEXT did:btco authorship append (#407 phase 4).
+ * Same fee-rate source/cap as the real inscribe path, so it tracks reality; a
+ * ballpark for cost-awareness/consent, not a billing figure.
+ */
+export interface AppendCostEstimate {
+  /** Estimated total inscription cost (sats) = feeRate × vbytes. */
+  satoshis: number;
+  /** The (capped) fee rate used (sat/vB). */
+  feeRate: number;
+  /** Estimated commit+reveal virtual size (vB). */
+  vbytes: number;
+  /** Size of the media/content being inscribed (bytes). */
+  contentBytes: number;
+}
+
+/**
+ * Confirm-gate policy for a paid did:btco authorship append (#407 phase 4).
+ * `'now'` (default) inscribes immediately (phase-3 behavior). A callback is
+ * awaited with the {@link AppendCostEstimate} BEFORE any log mutation: `true`
+ * proceeds and inscribes; `false` cleanly ABORTS the whole append (no event
+ * appended, nothing inscribed — a byte-identical no-op that throws
+ * `PROVENANCE_APPEND_DECLINED` and emits `cel:inscribe-declined`).
+ */
+export type InscribeConfirm =
+  | 'now'
+  | ((estimate: AppendCostEstimate) => boolean | Promise<boolean>);
+
 export interface OriginalsConfig {
   network: 'mainnet' | 'regtest' | 'signet';
   bitcoinRpcUrl?: string;
@@ -23,6 +58,11 @@ export interface OriginalsConfig {
   didCache?: DIDCacheConfig;
   feeOracle?: FeeOracleAdapter;
   ordinalsProvider?: OrdinalsProvider;
+  // Default confirm-gate policy for paid did:btco authorship appends (#407 phase
+  // 4). Omitted/'now' = inscribe immediately (phase-3 behavior); a callback is
+  // consulted before each btco append and can cleanly abort it. Overridable per
+  // call (e.g. addResourceVersion's opts.inscribeConfirm).
+  inscribeConfirm?: InscribeConfirm;
   // Shared keyed lock coordinating money-spending inscriptions across managers
   // (issue #303). OriginalsSDK injects one instance so all managers share it.
   operationLock?: OperationLock;
