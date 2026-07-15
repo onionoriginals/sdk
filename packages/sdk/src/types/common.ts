@@ -113,4 +113,14 @@ export interface ExternalVerifier {
   verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): Promise<boolean>;
 }
 
+/**
+ * Signer for the commit transaction funding inputs of a sat-selected
+ * inscription (see `inscribeOnSat`). The reveal is self-signed by an
+ * ephemeral key generated internally — only the commit needs the caller.
+ */
+export interface BitcoinSigner {
+  /** Signs the commit PSBT; returns a signed PSBT base64 OR signed tx hex, ready to broadcast. */
+  signCommitPsbt(psbtBase64: string): Promise<string>;
+  getFundingAddress(): Promise<string> | string;
+}
 
