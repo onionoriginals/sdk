@@ -93,12 +93,11 @@ A minimal new interface (`src/types/common.ts`, beside `ExternalSigner`):
 
 ```ts
 interface BitcoinSigner {
-  /** Sign the commit transaction's funding input(s). Returns the signed PSBT
-   *  (base64) or a fully-signed tx hex ready to broadcast. */
+  /** Sign the commit transaction's funding input(s). Returns a fully-signed,
+   *  finalized, broadcast-ready tx HEX (not a base64 PSBT) — the SDK passes it
+   *  straight to broadcastTransaction and parses it locally for the commit txid;
+   *  production providers reject anything that is not raw tx hex. */
   signCommitPsbt(psbtBase64: string): Promise<string>;
-  /** The address funding the commit (used to validate the funding UTXO's
-   *  scriptPubKey belongs to the signer, and as commit-change fallback). */
-  getFundingAddress(): Promise<string> | string;
 }
 ```
 
@@ -124,29 +123,51 @@ to a focused helper, e.g. `bitcoin/inscribe-on-sat.ts`, to keep
    sat) flows funding → commit output → reveal output as the first sat, so no
    pointer is needed. Returns the unsigned commit PSBT + reveal key + inscription
    script.
-4. **Sign + broadcast commit.** `signed = await satSigner.signCommitPsbt(
-   commitPsbtBase64)`; `await provider.broadcastTransaction(signed)`.
-5. **Build + broadcast reveal.** Assemble the reveal spending the commit output
-   using the ephemeral reveal key + inscription script/control block; self-sign;
-   `broadcastTransaction`.
-6. **Fail-closed verify (§5).**
-7. **Commit identity.** Only after verification: `migrateToDIDBTCO(asset.did, X)`
-   and the CEL append/anchor land exactly as today.
+4. **Sign commit.** `signed = await satSigner.signCommitPsbt(commitPsbtBase64)` —
+   `signed` MUST be broadcast-ready tx hex.
+5. **Compute commit txid LOCALLY.** Parse `signed` (`btc.Transaction.fromRaw`)
+   and read `.id`. The funding input is segwit, so the txid is witness-
+   independent — never trust a provider-returned txid to build the reveal.
+   Unparseable → `COMMIT_TX_INVALID` before anything is broadcast.
+6. **Build reveal BEFORE broadcasting.** Assemble + self-sign the reveal spending
+   the commit output (vout 0, `commitTxId` = the local txid) using the ephemeral
+   reveal key + inscription script/control block. Building first means a
+   construction failure costs no on-chain funds.
+7. **Broadcast commit, then reveal.** `broadcastTransaction(signed)`, then
+   `broadcastTransaction(reveal.revealTxHex)`. If the reveal broadcast fails the
+   commit is already on-chain, so throw `REVEAL_BROADCAST_FAILED` carrying
+   recovery data (`commitTxId`, `revealTxId`, `revealTxHex`, `satoshi`) — the
+   caller rebroadcasts `revealTxHex` to complete the inscription; funds are never
+   stranded.
+8. **Commit identity.** `migrateToDIDBTCO(asset.did, X)` and the CEL append/anchor
+   land exactly as today. FIRE-AND-FORGET: there is NO post-broadcast re-check
+   (§5); the caller owns confirmation monitoring.
 
-## 5. Fail-closed sat verification
+## 5. Correctness model: verified at derive time (fire-and-forget)
 
-After the reveal is broadcast (and, where the provider supports confirmation
-lookup, confirmed), the SDK reads the actual inscription's sat back from the
-provider (`getInscriptionById(id).satoshi` / `getSatoshiFromInscription`) and
-asserts it equals the derived `X`.
+Correctness rests on two things established BEFORE any BTC is spent:
 
-- On mismatch, unconfirmable sat, or missing inscription → throw `SAT_MISMATCH`
-  (a `StructuredError`), roll back the in-memory CEL append using
-  `inscribeOnBitcoin`'s EXISTING rollback (`celLogBefore` restore), and commit
-  nothing. The asset's layer/DID is not advanced.
-- This is the load-bearing safety net: even if the funding UTXO's real first sat
-  differed from what the provider reported, or the tx did not land as modelled,
-  the DID is never silently bound to the wrong sat.
+1. **The provider's honest sat index.** `X = getFirstSatOfOutput(fundingUtxo)`
+   is derived and `validateSatoshiNumber`-checked up front (§4 step 1). This is
+   the authoritative DID sat — the caller can never assert a wrong one.
+2. **Deterministic tx construction.** A single funding input whose first sat is
+   `X`, a commit output at vout 0, and a reveal spending vout 0 make `X` flow
+   funding → commit → reveal as the first sat by construction (no pointer). The
+   commit txid is computed LOCALLY from the signed tx (§4 step 5), so the reveal's
+   prevout binds to the real commit, not a provider-returned value.
+
+There is **NO post-broadcast sat re-check.** The earlier design re-read the
+landed inscription's sat via `getInscriptionById` and threw `SAT_MISMATCH` on a
+mismatch. That check queried the SAME provider the sat is DERIVED from, and on a
+real ord-indexed provider the inscription is not queryable until confirmed
+(minutes-hours) → the lookup returned null → a spurious `SAT_MISMATCH` AFTER real
+BTC had already been spent. It is removed.
+
+Post-commit safety is instead a **recovery contract**: the reveal is built (and
+the commit txid computed) before broadcasting, and a failed reveal broadcast
+throws `REVEAL_BROADCAST_FAILED` carrying `{ commitTxId, revealTxId, revealTxHex,
+satoshi }` so the caller rebroadcasts `revealTxHex` to complete the inscription —
+committed funds are never stranded. The caller owns confirmation monitoring.
 
 ## 6. Backward compatibility
 
