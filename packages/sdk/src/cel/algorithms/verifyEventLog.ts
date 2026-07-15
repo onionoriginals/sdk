@@ -522,73 +522,81 @@ function extractCelAnchorHeadDigest(content: unknown): string | undefined {
  *
  * Returns a `STALE_LOG`-coded error string on failure, or null when fresh.
  */
+/**
+ * Selects the NEWEST OriginalsCelAnchor-bearing inscription on a satoshi, chosen
+ * by per-inscription block HEIGHT (via getInscriptionById), NOT list-tail
+ * position — otherwise a provider violating the oldest-first contract (returning
+ * newest-first) could make a tail-walk pick the OLDEST anchor (#395). Fail-closed
+ * throughout: no enumeration capability, an enumeration/fetch that throws, no
+ * anchor on the sat, or any anchor candidate missing a confirmed block height all
+ * return `{ error }`. Same-block ties fall back to list-tail order (the
+ * documented oldest-first residual, unprovable intra-block).
+ *
+ * Under #407 phase 2 the anchor DID document rides in inscription metadata
+ * (content is the asset media); phase-1 inscriptions carried it as content —
+ * didDocumentFromInscription handles both.
+ *
+ * Shared by head-freshness and the content-as-ordinal gate so BOTH agree on which
+ * inscription is the current anchor (a cooperative rotation leaves `anchoredSat`
+ * pointing at the migrate inscription, so neither may rely on it).
+ */
+export async function selectNewestAnchorInscription(
+  satoshi: string,
+  ordinalsProvider: OrdinalsLookup | undefined
+): Promise<{ inscription: NonNullable<FetchedInscription>; digest: string } | { error: string }> {
+  if (!ordinalsProvider || typeof ordinalsProvider.getInscriptionsBySatoshi !== 'function') {
+    return { error: `the ordinals provider cannot enumerate inscriptions on satoshi ${satoshi}` };
+  }
+  let onSat: Array<{ inscriptionId: string }>;
+  try {
+    onSat = await ordinalsProvider.getInscriptionsBySatoshi(satoshi);
+  } catch (e) {
+    return { error: `failed to enumerate inscriptions on satoshi ${satoshi}: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  const anchors: Array<{ height: number | undefined; listIdx: number; digest: string; inscription: NonNullable<FetchedInscription> }> = [];
+  for (let idx = 0; idx < onSat.length; idx++) {
+    const inscriptionId = onSat[idx].inscriptionId;
+    let inscription: FetchedInscription;
+    try {
+      inscription = await ordinalsProvider.getInscriptionById(inscriptionId);
+    } catch (e) {
+      return { error: `failed to fetch inscription ${inscriptionId} on satoshi ${satoshi}: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    if (!inscription) continue;
+    const doc = didDocumentFromInscription(inscription);
+    const digest = extractCelAnchorHeadDigest(doc);
+    if (digest !== undefined) {
+      anchors.push({ height: inscriptionBlockHeight(inscription), listIdx: idx, digest, inscription });
+    }
+  }
+  if (anchors.length === 0) {
+    return { error: `no OriginalsCelAnchor DID document found on satoshi ${satoshi}` };
+  }
+  if (anchors.some((c) => c.height === undefined)) {
+    return { error: `an OriginalsCelAnchor inscription on satoshi ${satoshi} has no confirmed block height; the newest anchor is unprovable` };
+  }
+  let head = anchors[0];
+  for (const c of anchors) {
+    if (c.height! > head.height! || (c.height! === head.height! && c.listIdx > head.listIdx)) head = c;
+  }
+  return { inscription: head.inscription, digest: head.digest };
+}
+
 async function verifyHeadFreshness(
   log: EventLog,
   anchoredSat: AnchoredSat,
   ordinalsProvider: OrdinalsLookup | undefined
 ): Promise<string | null> {
-  if (!ordinalsProvider || typeof ordinalsProvider.getInscriptionsBySatoshi !== 'function') {
-    return `STALE_LOG: head freshness was requested but the ordinals provider cannot enumerate inscriptions on satoshi ${anchoredSat.satoshi}; cannot confirm the log is not truncated`;
+  const newest = await selectNewestAnchorInscription(anchoredSat.satoshi, ordinalsProvider);
+  if ('error' in newest) {
+    return `STALE_LOG: ${newest.error}; cannot confirm the presented log is not truncated`;
   }
-
-  let onSat: Array<{ inscriptionId: string }>;
-  try {
-    onSat = await ordinalsProvider.getInscriptionsBySatoshi(anchoredSat.satoshi);
-  } catch (e) {
-    return `STALE_LOG: failed to enumerate inscriptions on satoshi ${anchoredSat.satoshi} for the head-freshness check: ${e instanceof Error ? e.message : String(e)}`;
-  }
-
-  // The "newest" anchor is chosen by per-inscription block HEIGHT (via
-  // getInscriptionById), NOT by list-tail position — otherwise a provider
-  // violating the oldest-first contract (returning newest-first) would make a
-  // tail-walk pick the OLDEST anchor, present even in a truncated prefix →
-  // fail-open (#395 sibling of the non-cooperative-rotation ordering fix).
-  // So collect EVERY anchor-carrying inscription with its height + list index.
-  // Non-anchor / non-JSON inscriptions are skipped; a genuine FETCH failure
-  // fails closed rather than silently skipping a real head.
-  const anchors: Array<{ height: number | undefined; listIdx: number; digest: string }> = [];
-  for (let idx = 0; idx < onSat.length; idx++) {
-    const inscriptionId = onSat[idx].inscriptionId;
-    let inscription: Awaited<ReturnType<OrdinalsLookup['getInscriptionById']>>;
-    try {
-      inscription = await ordinalsProvider.getInscriptionById(inscriptionId);
-    } catch (e) {
-      return `STALE_LOG: failed to fetch inscription ${inscriptionId} on satoshi ${anchoredSat.satoshi} during the head-freshness check: ${e instanceof Error ? e.message : String(e)}`;
-    }
-    if (!inscription) continue;
-    // #407 phase 2: the anchor DID document rides in inscription metadata
-    // (content is the asset media); phase-1 inscriptions carried it as content.
-    const doc = didDocumentFromInscription(inscription);
-    const digest = extractCelAnchorHeadDigest(doc);
-    if (digest !== undefined) {
-      anchors.push({ height: inscriptionBlockHeight(inscription), listIdx: idx, digest });
-    }
-  }
-
-  if (anchors.length === 0) {
-    return `STALE_LOG: no OriginalsCelAnchor DID document found on satoshi ${anchoredSat.satoshi}; cannot confirm the presented log is current`;
-  }
-  // Ordering must be provable: if any anchor candidate lacks a block height, we
-  // cannot identify the genuinely-newest one — fail closed (consistent with the
-  // non-cooperative rotation ordering check).
-  if (anchors.some((c) => c.height === undefined)) {
-    return `STALE_LOG: an OriginalsCelAnchor inscription on satoshi ${anchoredSat.satoshi} has no confirmed block height; the newest anchor is unprovable, so head freshness cannot be confirmed`;
-  }
-  // Highest block wins; same-block ties fall back to list-tail order (highest
-  // list index) — the documented oldest-first residual, unprovable intra-block.
-  let head = anchors[0];
-  for (const c of anchors) {
-    if (c.height! > head.height! || (c.height! === head.height! && c.listIdx > head.listIdx)) head = c;
-  }
-  const headDigest = head.digest;
-
   const present = log.events.some(
-    (ev) => digestMultibaseEquals(headDigest, computeDigestMultibase(canonicalizeEntryForChain(ev)))
+    (ev) => digestMultibaseEquals(newest.digest, computeDigestMultibase(canonicalizeEntryForChain(ev)))
   );
   if (!present) {
-    return `STALE_LOG: the newest on-chain anchor on satoshi ${anchoredSat.satoshi} commits to head digest ${headDigest}, which is absent from the presented log; the log is truncated or stale`;
+    return `STALE_LOG: the newest on-chain anchor on satoshi ${anchoredSat.satoshi} commits to head digest ${newest.digest}, which is absent from the presented log; the log is truncated or stale`;
   }
-
   return null;
 }
 
@@ -697,20 +705,22 @@ async function verifyAnchorContentMatchesHead(
   ordinalsProvider: OrdinalsLookup | undefined
 ): Promise<string | null> {
   if (!ordinalsProvider) return null;
-  let inscription: FetchedInscription;
-  try {
-    inscription = await ordinalsProvider.getInscriptionById(anchoredSat.inscriptionId);
-  } catch (e) {
-    return `CONTENT_MISMATCH: failed to fetch anchor inscription ${anchoredSat.inscriptionId} to verify its media content: ${e instanceof Error ? e.message : String(e)}`;
+  // Check the CURRENT anchor — the newest anchor inscription on the sat, not
+  // `anchoredSat` (a cooperative rotation leaves that at the migrate inscription,
+  // whose media predates any later resource update / reinscription).
+  const newest = await selectNewestAnchorInscription(anchoredSat.satoshi, ordinalsProvider);
+  if ('error' in newest) {
+    // No enumerable anchor to check the media against. Not a content mismatch —
+    // the witness-proof path already gated the anchor's DID document, and the
+    // resolver (which needs the bytes) gates media strictly on its own path.
+    return null;
   }
-  if (!inscription) {
-    return `CONTENT_MISMATCH: anchor inscription ${anchoredSat.inscriptionId} not found on chain`;
-  }
+  const inscription = newest.inscription;
+  const inscriptionId = inscription.inscriptionId;
   // Only phase-2 inscriptions (DID document in metadata) bind media as content.
   const metaDoc = (inscription.metadata as { didDocument?: { id?: unknown } } | undefined)?.didDocument;
   if (!metaDoc) return null;
-  // Provider omitted content → availability gap, not a mismatch (the witness
-  // proof already gated the metadata DID doc). The resolver gates media strictly.
+  // Provider omitted content → availability gap, not a mismatch.
   if (inscription.content === undefined) return null;
   const head = mostRecentResourceHead(log);
   // Media match: content hashes to the log's current resource head.
@@ -730,7 +740,7 @@ async function verifyAnchorContentMatchesHead(
     return null;
   }
   const contentHash = hashResource(inscription.content);
-  return `CONTENT_MISMATCH: anchor inscription ${anchoredSat.inscriptionId} content hashes to ${contentHash}, which is neither the log's most-recent-resource hash ${head ? head.hash : '(none)'} nor the anchor's own DID document`;
+  return `CONTENT_MISMATCH: anchor inscription ${inscriptionId} content hashes to ${contentHash}, which is neither the log's most-recent-resource hash ${head ? head.hash : '(none)'} nor the anchor's own DID document`;
 }
 
 /**

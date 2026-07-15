@@ -22,16 +22,16 @@ import {
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
 import { hashResource, validateCredential } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
-import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
+import { parseSatoshiIdentifier, validateSatoshiNumber } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix, btcoDidFromSatoshi } from '../cel/btcoDid.js';
 import { KeyManager } from '../did/KeyManager.js';
 import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
 import { createCelDidDocument, didCelMatchesLog, deriveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
-import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
+import { verifyEventLog, selectNewestAnchorInscription } from '../cel/algorithms/verifyEventLog.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
 import { appendEvent } from '../cel/algorithms/appendEvent.js';
-import { computeDigestMultibase, digestMultibaseEquals } from '../cel/hash.js';
+import { computeDigestMultibase, digestMultibaseEquals, decodeDigestMultibase } from '../cel/hash.js';
 import { mostRecentResourceHead } from '../cel/resourceHead.js';
 import { canonicalizeEntryForChain } from '../cel/canonicalize.js';
 import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
@@ -744,6 +744,207 @@ export class LifecycleManager {
     }
 
     return { asset, verification, warnings };
+  }
+
+  /**
+   * Resolve + VERIFY a complete Originals asset from a bare satoshi — the #407
+   * phase-2 chain-recovery path. Reads the NEWEST anchoring inscription on the
+   * sat, reconstructs a byte-light {@link AssetEnvelope} from its metadata
+   * (`{ didDocument, celLog }`) and content (the current media), and runs it
+   * through {@link loadAsset} — so a chain-reconstructed asset verifies with the
+   * SAME gate an envelope-loaded one does (verifyEventLog + resource binding +
+   * head freshness + uniqueness + content-as-ordinal). Provenance is recoverable
+   * from Bitcoin alone.
+   *
+   * Fail-closed: no provider, an invalid satoshi, no anchor inscription, an
+   * unprovable-newest (missing block height) inscription, missing provenance
+   * metadata, an embedded celLog head that disagrees with the on-chain `#cel`
+   * anchor, or a failed loadAsset all throw. The reconstructed head media is
+   * bound to the log's signed hash by loadAsset (a tampered media fails closed).
+   *
+   * @param satoshi - The bare satoshi number carrying the asset.
+   * @param opts.ordinalsProvider - Defaults to `config.ordinalsProvider`.
+   */
+  async resolveAssetFromSat(
+    satoshi: string,
+    opts?: { ordinalsProvider?: OrdinalsLookup }
+  ): Promise<{ asset: OriginalsAsset; verification?: VerificationResult; warnings: string[] }> {
+    const provider = opts?.ordinalsProvider ?? this.config.ordinalsProvider;
+    if (!provider) {
+      throw new StructuredError('ORD_PROVIDER_REQUIRED', 'Ordinals provider must be configured to resolve an asset from a satoshi.');
+    }
+    const sat = String(satoshi);
+    {
+      const v = validateSatoshiNumber(sat);
+      if (!v.valid) throw new StructuredError('INVALID_SATOSHI', `Invalid satoshi identifier: ${v.error}`);
+    }
+
+    // 1) Newest anchoring inscription by confirmed block height — reuses the
+    // verifier's selection so the resolver picks the SAME inscription
+    // head-freshness / the content gate check against (fail-closed on missing
+    // height, per-height newest, list-tail same-block residual).
+    const selected = await selectNewestAnchorInscription(sat, provider);
+    if ('error' in selected) {
+      throw new StructuredError('CHAIN_ASSET_NOT_FOUND', `Cannot resolve an asset from satoshi ${sat}: ${selected.error}.`);
+    }
+    const chosen = selected.inscription;
+
+    // 2) Read provenance (metadata) + media (content).
+    const metadata = chosen.metadata as { didDocument?: unknown; celLog?: unknown } | undefined;
+    const btcoDoc = metadata?.didDocument;
+    const rawCelLog = metadata?.celLog;
+    if (!btcoDoc || typeof btcoDoc !== 'object' || rawCelLog === undefined || rawCelLog === null) {
+      throw new StructuredError(
+        'CHAIN_ASSET_INVALID',
+        `Inscription ${chosen.inscriptionId} on satoshi ${sat} carries no provenance metadata (didDocument + celLog); not a phase-2 anchoring inscription.`
+      );
+    }
+
+    // 3) Parse the embedded byte-light CEL log through the JSON gate.
+    let log: EventLog;
+    try {
+      log = parseEventLogJson(JSON.stringify(rawCelLog));
+    } catch (e) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} celLog is not a valid CEL log: ${(e as Error).message}`);
+    }
+    if (!Array.isArray(log.events) || log.events.length === 0) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} celLog has no events.`);
+    }
+
+    // 4) The embedded celLog head MUST equal the on-chain `#cel` anchor
+    // (else the inscription is internally inconsistent). Defense-in-depth: the
+    // witness path re-derives this too, but a clear early error is worth it.
+    const anchorDigest = this.extractCelAnchorFromDoc(btcoDoc);
+    const headDigest = computeDigestMultibase(canonicalizeEntryForChain(log.events[log.events.length - 1]));
+    if (anchorDigest === undefined) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} DID document carries no OriginalsCelAnchor; cannot confirm the embedded log head.`);
+    }
+    if (!digestMultibaseEquals(anchorDigest, headDigest)) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId}: embedded celLog head (${headDigest}) does not equal the #cel anchor (${anchorDigest}).`);
+    }
+
+    // 5) Reconstruct the byte-light AssetEnvelope. The head event needs its OWN
+    // bitcoin witness proof reattached — the writer inscribes the doc/log BEFORE
+    // the inscription id exists, so the head's witness (which names this
+    // inscription) is never in the embedded snapshot. It is fully re-verified
+    // against the chain by verifyBitcoinWitnessProof inside loadAsset.
+    const headTxid = typeof chosen.txid === 'string' ? chosen.txid : '';
+    const headWitness: WitnessProof & { txid: string; satoshi: string; inscriptionId: string } = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'bitcoin-ordinals-2024',
+      created: new Date().toISOString(),
+      verificationMethod: 'did:btco:witness',
+      proofPurpose: 'assertionMethod',
+      proofValue: `z${chosen.inscriptionId}`,
+      witnessedAt: new Date().toISOString(),
+      txid: headTxid,
+      satoshi: sat,
+      inscriptionId: chosen.inscriptionId
+    };
+    const headIdx = log.events.length - 1;
+    const events = log.events.slice();
+    events[headIdx] = { ...events[headIdx], proof: [...events[headIdx].proof, headWitness] };
+    const reconstructedLog: EventLog = { ...log, events };
+
+    // Resources from the log + the on-chain media as the head blob.
+    const resources = this.reconstructResourcesFromLog(reconstructedLog, chosen.content);
+
+    // did:cel document is DERIVED (loadAsset re-derives it anyway; supply a
+    // structurally valid one). did:btco is the on-chain metadata doc.
+    const assetDid = deriveDidCel(reconstructedLog);
+    const genesisController = (reconstructedLog.events[0]?.data as { controller?: unknown })?.controller;
+    if (typeof genesisController !== 'string' || !genesisController.startsWith('did:key:')) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} genesis controller is not a did:key.`);
+    }
+    const celDoc = createCelDidDocument(assetDid, genesisController.slice('did:key:'.length));
+
+    const envelope: AssetEnvelope = {
+      format: ASSET_ENVELOPE_FORMAT,
+      version: ASSET_ENVELOPE_VERSION,
+      assetDid,
+      eventLog: reconstructedLog,
+      didDocuments: {
+        'did:cel': celDoc,
+        'did:btco': btcoDoc as DIDDocument
+      },
+      resources
+    };
+
+    // 6) loadAsset runs the full verification gate (incl. content-as-ordinal via
+    // the head blob's hash binding). checkHeadFreshness is engaged by the
+    // provider passthrough.
+    return this.loadAsset(envelope, { ordinalsProvider: provider });
+  }
+
+  /** Extracts the first OriginalsCelAnchor headDigestMultibase from a DID doc. */
+  private extractCelAnchorFromDoc(doc: unknown): string | undefined {
+    const services = (doc as { service?: unknown })?.service;
+    if (!Array.isArray(services)) return undefined;
+    for (const entry of services) {
+      const svc = entry as { type?: unknown; serviceEndpoint?: unknown };
+      if (svc?.type !== 'OriginalsCelAnchor') continue;
+      const head = (svc.serviceEndpoint as { headDigestMultibase?: unknown } | undefined)?.headDigestMultibase;
+      if (typeof head === 'string' && head.length > 0) return head;
+    }
+    return undefined;
+  }
+
+  /**
+   * Rebuild the byte-light resources array from a CEL log (#407 phase 2
+   * chain-recovery): every genesis resource (v1) + every resource-shaped update
+   * (v≥2), matched to the shapes loadAsset's genesis/version binding expects.
+   * Only the head resource gets inline content (the on-chain media), and only
+   * when it hashes to the log's most-recent-resource hash — so loadAsset's
+   * blob↔toHash gate (which independently re-checks it) passes; a
+   * non-utf8-roundtrippable or mismatched blob is left as a pure reference.
+   */
+  private reconstructResourcesFromLog(log: EventLog, headContent: Buffer | undefined): AssetResource[] {
+    const resources: AssetResource[] = [];
+    const genesis = log.events[0]?.data as { resources?: unknown } | undefined;
+    const gres = Array.isArray(genesis?.resources) ? genesis!.resources as Array<Record<string, unknown>> : [];
+    for (const ref of gres) {
+      const dm = ref.digestMultibase;
+      if (typeof dm !== 'string') continue;
+      let hash: string;
+      try { hash = Buffer.from(decodeDigestMultibase(dm)).toString('hex'); } catch { continue; }
+      const url = Array.isArray(ref.url) && typeof ref.url[0] === 'string' ? ref.url[0] as string : undefined;
+      resources.push({
+        id: typeof ref.id === 'string' ? ref.id : '',
+        type: 'data',
+        contentType: typeof ref.mediaType === 'string' ? ref.mediaType : 'application/octet-stream',
+        hash,
+        version: 1,
+        ...(url ? { url } : {})
+      });
+    }
+    for (let i = 1; i < log.events.length; i++) {
+      const ev = log.events[i];
+      if (ev.type !== 'update') continue;
+      const d = (ev.data ?? {}) as Record<string, unknown>;
+      const resourceId = typeof d.resourceId === 'string' ? d.resourceId : undefined;
+      const previousVersionHash = typeof d.previousVersionHash === 'string' ? d.previousVersionHash : undefined;
+      const toHash = typeof d.toHash === 'string' && d.toHash.length > 0 ? d.toHash : undefined;
+      if (!resourceId || !previousVersionHash || !toHash) continue;
+      resources.push({
+        id: resourceId,
+        type: 'data',
+        contentType: typeof d.contentType === 'string' ? d.contentType : 'application/octet-stream',
+        hash: toHash,
+        ...(typeof d.toVersion === 'number' ? { version: d.toVersion } : {}),
+        previousVersionHash
+      });
+    }
+    // Attach the on-chain media to the head resource, iff it round-trips to the
+    // head hash (loadAsset re-verifies hash(content) == signed toHash).
+    const head = mostRecentResourceHead(log);
+    if (headContent && head) {
+      const contentStr = headContent.toString('utf8');
+      if (hashResource(Buffer.from(contentStr, 'utf8')) === head.hash) {
+        const target = resources.find(r => r.hash === head.hash && r.content === undefined);
+        if (target) target.content = contentStr;
+      }
+    }
+    return resources;
   }
 
   /**
