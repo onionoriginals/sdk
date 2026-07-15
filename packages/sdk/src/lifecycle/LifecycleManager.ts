@@ -901,13 +901,13 @@ export class LifecycleManager {
   private reconstructResourcesFromLog(log: EventLog, headContent: Buffer | undefined): AssetResource[] {
     const resources: AssetResource[] = [];
     const genesis = log.events[0]?.data as { resources?: unknown } | undefined;
-    const gres = Array.isArray(genesis?.resources) ? genesis!.resources as Array<Record<string, unknown>> : [];
+    const gres: Array<Record<string, unknown>> = Array.isArray(genesis?.resources) ? genesis.resources : [];
     for (const ref of gres) {
       const dm = ref.digestMultibase;
       if (typeof dm !== 'string') continue;
       let hash: string;
       try { hash = Buffer.from(decodeDigestMultibase(dm)).toString('hex'); } catch { continue; }
-      const url = Array.isArray(ref.url) && typeof ref.url[0] === 'string' ? ref.url[0] as string : undefined;
+      const url = Array.isArray(ref.url) && typeof ref.url[0] === 'string' ? ref.url[0] : undefined;
       resources.push({
         id: typeof ref.id === 'string' ? ref.id : '',
         type: 'data',
