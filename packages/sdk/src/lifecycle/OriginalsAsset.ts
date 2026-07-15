@@ -1,8 +1,9 @@
-import { 
-  AssetResource, 
-  DIDDocument, 
-  VerifiableCredential, 
-  LayerType 
+import {
+  AssetResource,
+  DIDDocument,
+  VerifiableCredential,
+  LayerType,
+  InscribeConfirm
 } from '../types/index.js';
 import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation.js';
 import { StructuredError } from '../utils/telemetry.js';
@@ -72,7 +73,11 @@ export class OriginalsAsset {
   // event via the manager's degrade-aware path and returns the new head digest,
   // or null when the append was skipped (no keyStore / no signing key). Undefined
   // for assets constructed outside the lifecycle (they degrade in-memory only).
-  #celAppender?: (type: 'migrate' | 'rotateKey' | 'update', data: unknown) => Promise<string | null>;
+  #celAppender?: (
+    type: 'migrate' | 'rotateKey' | 'update',
+    data: unknown,
+    opts?: { inscribeConfirm?: InscribeConfirm }
+  ) => Promise<string | null>;
   // Per-asset serialization for addResourceVersion: the sync→async cutover made
   // the shared #celLog read-modify-write span await points, so concurrent calls
   // raced (a later _replaceCelLog clobbered an earlier signed append, or landed
@@ -195,7 +200,11 @@ export class OriginalsAsset {
    * contract (cel:append-skipped) as the other authorship ops.
    */
   _bindCelAppender(
-    fn: (type: 'migrate' | 'rotateKey' | 'update', data: unknown) => Promise<string | null>
+    fn: (
+      type: 'migrate' | 'rotateKey' | 'update',
+      data: unknown,
+      opts?: { inscribeConfirm?: InscribeConfirm }
+    ) => Promise<string | null>
   ): void {
     this.#celAppender = fn;
   }
@@ -597,7 +606,8 @@ export class OriginalsAsset {
     resourceId: string,
     newContent: string,
     contentType: string,
-    changes?: string
+    changes?: string,
+    opts?: { inscribeConfirm?: InscribeConfirm }
   ): Promise<AssetResource> {
     // AssetResource.content is a string; a Buffer used to be silently dropped
     // (only its hash was stored), unrecoverably losing the binary content
@@ -617,7 +627,7 @@ export class OriginalsAsset {
     // second queued call re-reads the head INSIDE its turn, so it chains from
     // the first call's committed result rather than a stale snapshot (Finding 2).
     const run = this.#appendChain.then(() =>
-      this.#addResourceVersionCritical(resourceId, newContent, contentType, changes)
+      this.#addResourceVersionCritical(resourceId, newContent, contentType, changes, opts)
     );
     // Keep the chain alive across a rejected turn without swallowing it for the caller.
     this.#appendChain = run.catch(() => {});
@@ -649,7 +659,8 @@ export class OriginalsAsset {
     resourceId: string,
     newContent: string,
     contentType: string,
-    changes?: string
+    changes?: string,
+    opts?: { inscribeConfirm?: InscribeConfirm }
   ): Promise<AssetResource> {
     // RE-READ the current head inside the turn (a prior queued call may have
     // just committed a new version).
@@ -723,7 +734,7 @@ export class OriginalsAsset {
             previousVersionHash: currentResource.hash,
             toHash: newHash,
             toVersion: newVersion
-          });
+          }, opts);
         } finally {
           this.#pendingHeadMedia = undefined;
         }

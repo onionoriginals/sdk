@@ -416,6 +416,26 @@ export interface CelInscribeCostEvent extends BaseEvent {
 }
 
 /**
+ * Emitted (#407 phase 4) when an `inscribeConfirm` callback returns false and a
+ * paid did:btco authorship append is cleanly ABORTED before any log mutation:
+ * no event appended, nothing inscribed, the asset left byte-identical. Carries
+ * the estimate the caller declined.
+ */
+export interface CelInscribeDeclinedEvent extends BaseEvent {
+  type: 'cel:inscribe-declined';
+  asset: { id: string };
+  /** Which append kind was declined. */
+  appendKind: 'update' | 'rotate';
+  /** The cost estimate presented to (and rejected by) the confirm callback. */
+  estimate: {
+    satoshis: number;
+    feeRate: number;
+    vbytes: number;
+    contentBytes: number;
+  };
+}
+
+/**
  * Emitted (#407 phase 3) after a did:btco authorship append is inscribed on the
  * anchoring sat, making the on-chain log current for that event.
  */
@@ -456,6 +476,7 @@ export type OriginalsEvent =
   | CelAppendSkippedEvent
   | CelAppendInscribeSkippedEvent
   | CelInscribeCostEvent
+  | CelInscribeDeclinedEvent
   | ResourceInscribedEvent
   | CelHostFailedEvent
   | KeyRotatedEvent;
@@ -495,6 +516,7 @@ export interface EventTypeMap {
   'cel:append-skipped': CelAppendSkippedEvent;
   'cel:append-inscribe-skipped': CelAppendInscribeSkippedEvent;
   'cel:inscribe-cost': CelInscribeCostEvent;
+  'cel:inscribe-declined': CelInscribeDeclinedEvent;
   'resource:inscribed': ResourceInscribedEvent;
   'cel:host-failed': CelHostFailedEvent;
   'key:rotated': KeyRotatedEvent;

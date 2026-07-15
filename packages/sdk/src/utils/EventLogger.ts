@@ -43,6 +43,7 @@ export interface EventLoggingConfig {
   'cel:append-skipped'?: LogLevel | false;
   'cel:append-inscribe-skipped'?: LogLevel | false;
   'cel:inscribe-cost'?: LogLevel | false;
+  'cel:inscribe-declined'?: LogLevel | false;
   'resource:inscribed'?: LogLevel | false;
   'cel:host-failed'?: LogLevel | false;
   'key:rotated'?: LogLevel | false;
@@ -78,6 +79,7 @@ const DEFAULT_EVENT_CONFIG: EventLoggingConfig = {
   'cel:append-skipped': 'warn',
   'cel:append-inscribe-skipped': 'warn',
   'cel:inscribe-cost': 'info',
+  'cel:inscribe-declined': 'warn',
   'resource:inscribed': 'info',
   'cel:host-failed': 'warn',
   'key:rotated': 'info'
@@ -132,6 +134,7 @@ export class EventLogger {
       'cel:append-skipped',
       'cel:append-inscribe-skipped',
       'cel:inscribe-cost',
+      'cel:inscribe-declined',
       'resource:inscribed',
       'cel:host-failed',
       'key:rotated'
@@ -255,6 +258,15 @@ export class EventLogger {
         data = {
           assetId: event.asset.id,
           reason: event.reason
+        };
+        break;
+
+      case 'cel:inscribe-declined':
+        message = 'Paid btco append declined at confirm gate';
+        data = {
+          assetId: event.asset.id,
+          appendKind: event.appendKind,
+          estimate: event.estimate
         };
         break;
 

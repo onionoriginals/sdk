@@ -6,7 +6,10 @@ import {
   ExternalSigner,
   VerifiableCredential,
   LayerType,
-  DIDDocument
+  DIDDocument,
+  AppendKind,
+  AppendCostEstimate,
+  InscribeConfirm
 } from '../types/index.js';
 import { BitcoinManager, MAX_REASONABLE_FEE_RATE } from '../bitcoin/BitcoinManager.js';
 import { DIDManager } from '../did/DIDManager.js';
@@ -340,7 +343,7 @@ export class LifecycleManager {
     const asset = new OriginalsAsset(resources, didDoc, [], log);
     // Bind the controller append path so addResourceVersion can write signed
     // `update` events with the same degrade contract as the other authorship ops.
-    asset._bindCelAppender((type, data) => this.appendCelEventAndMaybeInscribe(asset, type, data));
+    asset._bindCelAppender((type, data, opts) => this.appendCelEventAndMaybeInscribe(asset, type, data, opts));
 
     // Persist the genesis CEL at the conventional cel/<suffix>.json key so
     // the did:cel resolves from storage immediately (best-effort, never gates).
@@ -742,7 +745,7 @@ export class LifecycleManager {
       log,
       { currentLayer: folded.currentLayer, bindings: folded.bindings, provenance }
     );
-    asset._bindCelAppender((type, data) => this.appendCelEventAndMaybeInscribe(asset, type, data));
+    asset._bindCelAppender((type, data, opts) => this.appendCelEventAndMaybeInscribe(asset, type, data, opts));
 
     // Repopulate captured DID docs so re-serializing a loaded asset is
     // lossless. Only for layers cross-checked against the fold in step 5
@@ -2274,8 +2277,41 @@ export class LifecycleManager {
   private async appendCelEventAndMaybeInscribe(
     asset: OriginalsAsset,
     type: 'migrate' | 'rotateKey' | 'update',
-    data: unknown
+    data: unknown,
+    opts?: { inscribeConfirm?: InscribeConfirm }
   ): Promise<string | null> {
+    // Confirm gate (#407 phase 4): consent to the unavoidable on-chain cost BEFORE
+    // any log mutation. Only paid appends prompt — a btco asset WITH a provider (the
+    // ones that actually inscribe below). Off-btco / provider-absent appends inscribe
+    // nothing, so there is no cost to consent to and the gate is a no-op.
+    const gateProvider = this.config.ordinalsProvider ?? this.deps?.bitcoinManager?.ordinalsProvider;
+    const willInscribe = asset.currentLayer === 'did:btco' && !!gateProvider;
+    const confirm = opts?.inscribeConfirm ?? this.config.inscribeConfirm ?? 'now';
+    if (willInscribe && typeof confirm === 'function') {
+      const appendKind: AppendKind = type === 'rotateKey' ? 'rotate' : 'update';
+      // Estimate reflects THIS append (for 'update', pendingHeadMedia is already set
+      // by addResourceVersion and the log head has not advanced yet → sized correctly).
+      const estimate = await this.estimateAppendCost(asset, appendKind);
+      const approved = await confirm(estimate);
+      if (!approved) {
+        // Abort-before-mutate (spec §3): nothing was appended or inscribed, so the
+        // asset is byte-identical. THROW rather than return null — addResourceVersion
+        // pushes the new resource version unconditionally once the appender RETURNS
+        // (OriginalsAsset.ts), so only a throw guarantees a clean no-op.
+        await this.eventEmitter.emit({
+          type: 'cel:inscribe-declined',
+          timestamp: new Date().toISOString(),
+          asset: { id: asset.id },
+          appendKind,
+          estimate
+        });
+        throw new StructuredError(
+          'PROVENANCE_APPEND_DECLINED',
+          'The inscribeConfirm gate declined the paid did:btco append; nothing was appended or inscribed.'
+        );
+      }
+    }
+
     // Snapshot the pre-append log BEFORE appendCelEventOrSkip advances it — the
     // inscribe-failure rollback restores THIS (capturing after the append would
     // restore the log to itself, leaving it permanently ahead of the chain and
@@ -3108,7 +3144,8 @@ export class LifecycleManager {
   async rotateBtcoKeys(
     asset: OriginalsAsset,
     newVerificationMethod: { publicKeyMultibase: string; privateKey?: string },
-    feeRate?: number
+    feeRate?: number,
+    opts?: { inscribeConfirm?: InscribeConfirm }
   ): Promise<{ inscriptionId: string; did: string }> {
     if (asset.currentLayer !== 'did:btco') {
       throw new StructuredError('INVALID_STATE', 'Key rotation requires the asset to be on the did:btco layer.');
@@ -3134,6 +3171,31 @@ export class LifecycleManager {
     const satoshi = btcoDid.split(':').pop()!;
     // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
     const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, newVerificationMethod.publicKeyMultibase);
+
+    // Confirm gate (#407 phase 4): a cooperative rotation reinscribes on-chain
+    // (paid), so consent to the cost BEFORE any mutation (log OR keyStore) — same
+    // abort-before-mutate contract as the update path. A provider is guaranteed
+    // here (btco asset). On decline, throw before the rotateKey append and before
+    // registering the incoming key; the finally releases the concurrency claim,
+    // leaving the asset byte-identical.
+    const rotateConfirm = opts?.inscribeConfirm ?? this.config.inscribeConfirm ?? 'now';
+    if (typeof rotateConfirm === 'function') {
+      const estimate = await this.estimateAppendCost(asset, 'rotate', { feeRate });
+      const approved = await rotateConfirm(estimate);
+      if (!approved) {
+        await this.eventEmitter.emit({
+          type: 'cel:inscribe-declined',
+          timestamp: new Date().toISOString(),
+          asset: { id: asset.id },
+          appendKind: 'rotate',
+          estimate
+        });
+        throw new StructuredError(
+          'PROVENANCE_APPEND_DECLINED',
+          'The inscribeConfirm gate declined the paid did:btco key rotation; nothing was appended or inscribed.'
+        );
+      }
+    }
 
     // Append-first (#365): rotateKey signed by the CURRENT controller — the
     // cooperative-rotation contract (the verifier only accepts rotations
@@ -3787,8 +3849,107 @@ export class LifecycleManager {
   }
 
   /**
+   * Non-mutating cost preview for the NEXT did:btco authorship append (#407 phase
+   * 4). Returns `{ satoshis, feeRate, vbytes, contentBytes }` for an `'update'`
+   * (new media) or `'rotate'` (event-only reinscription) without signing,
+   * appending, or inscribing anything — pure quote.
+   *
+   * Fee rate comes from the SAME resolver the real inscribe path uses
+   * (`bitcoinManager.estimateFeeRate` → feeOracle→provider, absurd
+   * >`MAX_REASONABLE_FEE_RATE` sources skipped; an explicit `opts.feeRate` wins).
+   * The vsize ballpark mirrors
+   * `emitInscribeCost` (content/4 witness discount + ~200 vB overhead), so the
+   * quote tracks the cost the subsequent real append incurs.
+   *
+   * For a STANDALONE `'update'` quote (not driven by the confirm gate), pass the
+   * intended new bytes as `opts.content` — otherwise the estimate is
+   * content-agnostic: with no in-flight `pendingHeadMedia` it sizes the CURRENT
+   * head media as a proxy and will underquote a larger upgrade. The confirm gate
+   * always sizes correctly (pendingHeadMedia is set before it runs).
+   *
+   * @throws StructuredError('ORD_PROVIDER_REQUIRED') when no ordinalsProvider is
+   *   configured — a btco op cannot be quoted without one.
+   */
+  async estimateAppendCost(
+    asset: OriginalsAsset,
+    appendKind: AppendKind,
+    opts?: { content?: string | Buffer; contentType?: string; feeRate?: number }
+  ): Promise<AppendCostEstimate> {
+    const provider = this.config.ordinalsProvider ?? this.deps?.bitcoinManager?.ordinalsProvider;
+    if (!provider) {
+      throw new StructuredError(
+        'ORD_PROVIDER_REQUIRED',
+        'An ordinalsProvider must be configured to estimate a did:btco append cost.'
+      );
+    }
+    // Same resolveFeeRate chain the real inscription uses (explicit override wins,
+    // else feeOracle→provider, absurd sources skipped). Conservative default when
+    // nothing resolves, so the quote is always a usable number for the confirm
+    // callback (matches estimateCost's fallback). Short-circuit an explicit
+    // opts.feeRate so we skip the fee-oracle round-trip it would only override.
+    let feeRate: number;
+    if (typeof opts?.feeRate === 'number' && Number.isFinite(opts.feeRate) && opts.feeRate > 0) {
+      feeRate = opts.feeRate;
+    } else {
+      const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+      const resolved = await bitcoinManager.estimateFeeRate();
+      feeRate = (typeof resolved === 'number' && resolved > 0) ? resolved : 10;
+    }
+    const contentBytes = this.resolveAppendPayloadBytes(asset, appendKind, opts);
+    // Ballpark commit+reveal vsize (mirrors emitInscribeCost): a cost-awareness
+    // figure, not a billing number.
+    const vbytes = Math.ceil(contentBytes / 4) + 200;
+    const satoshis = Math.ceil(feeRate * vbytes);
+    return { satoshis, feeRate, vbytes, contentBytes };
+  }
+
+  /**
+   * Byte size of the content the next btco append would inscribe (#407 phase 4).
+   * Mirrors the real inscribe path's content selection so the estimate matches:
+   * caller-supplied content → in-flight new media (`pendingHeadMedia`, the
+   * confirm-gate case, since the log head has not advanced yet) → current head
+   * media → the DID document (pure-reference-head fallback). Pure/read-only.
+   *
+   * For `'rotate'`, this deliberately sizes the head MEDIA (when present), NOT the
+   * rotated DID doc: `reinscribeRotatedDoc` inscribes `headMedia.content` as the
+   * ordinal CONTENT and carries the rotated doc in METADATA, falling back to the
+   * DID doc as content only for a pure-reference head. So media size IS the paid
+   * cost of a rotation on an asset with media; the DID-doc fallback below applies
+   * to both kinds only when there is no inline media.
+   */
+  private resolveAppendPayloadBytes(
+    asset: OriginalsAsset,
+    appendKind: AppendKind,
+    opts?: { content?: string | Buffer }
+  ): number {
+    if (opts?.content !== undefined) {
+      const buf = Buffer.isBuffer(opts.content) ? opts.content : Buffer.from(String(opts.content), 'utf8');
+      return buf.byteLength;
+    }
+    if (appendKind === 'update' && asset.pendingHeadMedia) {
+      return Buffer.from(asset.pendingHeadMedia.content, 'utf8').byteLength;
+    }
+    // Head media is the inscribed CONTENT for BOTH kinds when present (update:
+    // reinscribeCelAppend; rotate: reinscribeRotatedDoc) — so this is the paid size.
+    const headMedia = this.tryResolveHeadMedia(asset);
+    if (headMedia) return headMedia.content.byteLength;
+    // Pure-reference head → the inscribe path falls back to the DID document as
+    // content; size the current btco doc (rebuilt with the current controller key).
+    const log = asset.celLog;
+    const btcoDid = asset.bindings?.['did:btco'];
+    if (log && btcoDid) {
+      const satoshi = btcoDid.split(':').pop()!;
+      const vm = currentControllerVm(log);
+      const controllerPubMb = vm.split('#')[0].slice('did:key:'.length);
+      const btcoDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, controllerPubMb);
+      return Buffer.from(JSON.stringify(btcoDoc)).byteLength;
+    }
+    return 0;
+  }
+
+  /**
    * Estimate the cost of migrating an asset to a target layer
-   * 
+   *
    * Returns a detailed breakdown of expected costs for Bitcoin operations.
    * For did:webvh migrations, costs are minimal (only hosting).
    * 
