@@ -6,7 +6,10 @@ import {
   ExternalSigner,
   VerifiableCredential,
   LayerType,
-  DIDDocument
+  DIDDocument,
+  AppendKind,
+  AppendCostEstimate,
+  InscribeConfirm
 } from '../types/index.js';
 import { BitcoinManager, MAX_REASONABLE_FEE_RATE } from '../bitcoin/BitcoinManager.js';
 import { DIDManager } from '../did/DIDManager.js';
@@ -3787,8 +3790,87 @@ export class LifecycleManager {
   }
 
   /**
+   * Non-mutating cost preview for the NEXT did:btco authorship append (#407 phase
+   * 4). Returns `{ satoshis, feeRate, vbytes, contentBytes }` for an `'update'`
+   * (new media) or `'rotate'` (event-only reinscription) without signing,
+   * appending, or inscribing anything — pure quote.
+   *
+   * Fee rate comes from the SAME source/cap as the real inscribe path
+   * (`bitcoinManager.estimateFeeRate` → feeOracle→provider, `MAX_REASONABLE_FEE_RATE`
+   * cap; an explicit `opts.feeRate` wins). The vsize ballpark mirrors
+   * `emitInscribeCost` (content/4 witness discount + ~200 vB overhead), so the
+   * quote tracks the cost the subsequent real append incurs.
+   *
+   * @throws StructuredError('ORD_PROVIDER_REQUIRED') when no ordinalsProvider is
+   *   configured — a btco op cannot be quoted without one.
+   */
+  async estimateAppendCost(
+    asset: OriginalsAsset,
+    appendKind: AppendKind,
+    opts?: { content?: string | Buffer; contentType?: string; feeRate?: number }
+  ): Promise<AppendCostEstimate> {
+    const provider = this.config.ordinalsProvider ?? this.deps?.bitcoinManager?.ordinalsProvider;
+    if (!provider) {
+      throw new StructuredError(
+        'ORD_PROVIDER_REQUIRED',
+        'An ordinalsProvider must be configured to estimate a did:btco append cost.'
+      );
+    }
+    const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+    // Same resolveFeeRate chain the real inscription uses (explicit override wins,
+    // else feeOracle→provider, capped). Conservative default when nothing resolves,
+    // so the quote is always a usable number for the confirm callback (matches
+    // estimateCost's fallback).
+    const resolved = await bitcoinManager.estimateFeeRate();
+    const feeRate = (typeof opts?.feeRate === 'number' && Number.isFinite(opts.feeRate) && opts.feeRate > 0)
+      ? opts.feeRate
+      : (typeof resolved === 'number' && resolved > 0 ? resolved : 10);
+    const contentBytes = this.resolveAppendPayloadBytes(asset, appendKind, opts);
+    // Ballpark commit+reveal vsize (mirrors emitInscribeCost): a cost-awareness
+    // figure, not a billing number.
+    const vbytes = Math.ceil(contentBytes / 4) + 200;
+    const satoshis = Math.ceil(feeRate * vbytes);
+    return { satoshis, feeRate, vbytes, contentBytes };
+  }
+
+  /**
+   * Byte size of the content the next btco append would inscribe (#407 phase 4).
+   * Mirrors the real inscribe path's content selection so the estimate matches:
+   * caller-supplied content → in-flight new media (`pendingHeadMedia`, the
+   * confirm-gate case, since the log head has not advanced yet) → current head
+   * media → the DID document (pure-reference-head fallback). Pure/read-only.
+   */
+  private resolveAppendPayloadBytes(
+    asset: OriginalsAsset,
+    appendKind: AppendKind,
+    opts?: { content?: string | Buffer }
+  ): number {
+    if (opts?.content !== undefined) {
+      const buf = Buffer.isBuffer(opts.content) ? opts.content : Buffer.from(String(opts.content), 'utf8');
+      return buf.byteLength;
+    }
+    if (appendKind === 'update' && asset.pendingHeadMedia) {
+      return Buffer.from(asset.pendingHeadMedia.content, 'utf8').byteLength;
+    }
+    const headMedia = this.tryResolveHeadMedia(asset);
+    if (headMedia) return headMedia.content.byteLength;
+    // Pure-reference head → the inscribe path falls back to the DID document as
+    // content; size the current btco doc (rebuilt with the current controller key).
+    const log = asset.celLog;
+    const btcoDid = asset.bindings?.['did:btco'];
+    if (log && btcoDid) {
+      const satoshi = btcoDid.split(':').pop()!;
+      const vm = currentControllerVm(log);
+      const controllerPubMb = vm.split('#')[0].slice('did:key:'.length);
+      const btcoDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, controllerPubMb);
+      return Buffer.from(JSON.stringify(btcoDoc)).byteLength;
+    }
+    return 0;
+  }
+
+  /**
    * Estimate the cost of migrating an asset to a target layer
-   * 
+   *
    * Returns a detailed breakdown of expected costs for Bitcoin operations.
    * For did:webvh migrations, costs are minimal (only hosting).
    * 
