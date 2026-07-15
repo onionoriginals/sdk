@@ -81,12 +81,11 @@ export default defineConfig({
   },
   define: {
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
-    'process.env': '{}'
-  },
-  optimizeDeps: {
-    esbuildOptions: {
-      define: { global: 'globalThis' }
-    }
+    'process.env': '{}',
+    // Some deps (buffer polyfill) reference bare `global`. In Vite 8 the
+    // Rolldown dep optimizer inherits top-level `define`, so this replaces the
+    // now-deprecated optimizeDeps.esbuildOptions.define.
+    global: 'globalThis'
   },
   build: {
     target: 'es2022',
