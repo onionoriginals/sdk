@@ -2374,8 +2374,11 @@ export class LifecycleManager {
       }
       // inscribeOnSat needs a concrete fee rate up front (it builds its own
       // commit/reveal rather than going through bitcoinManager.inscribeData,
-      // which resolves this internally) — mirror estimateCost's fee-source
-      // order: explicit > feeOracle > ordinalsProvider estimate > default.
+      // which resolves this internally) — resolve explicit > feeOracle >
+      // ordinalsProvider estimate. On this real-broadcast path we REFUSE to
+      // guess a fee: an underfunded commit strands the reveal key in memory
+      // with real BTC committed, so with no explicit rate and no working
+      // estimate we throw rather than default.
       let effectiveFeeRate = feeRate;
       if (!effectiveFeeRate) {
         if (this.config.feeOracle) {
@@ -2389,11 +2392,12 @@ export class LifecycleManager {
           try {
             effectiveFeeRate = this.capEstimatedFeeRate(await provider.estimateFee(1));
           } catch {
-            // Fallback to default
+            // Fall through to the fail-closed throw below
           }
         }
         if (!effectiveFeeRate) {
-          effectiveFeeRate = 10; // Conservative default, matches estimateCost
+          throw new StructuredError('FEE_RATE_REQUIRED',
+            'Sat-selected inscription requires an explicit feeRate or a working fee estimate; refusing to guess a fee on a real-spend path.');
         }
       }
       const result = await inscribeOnSat({

@@ -119,8 +119,12 @@ export interface ExternalVerifier {
  * ephemeral key generated internally — only the commit needs the caller.
  */
 export interface BitcoinSigner {
-  /** Signs the commit PSBT; returns a signed PSBT base64 OR signed tx hex, ready to broadcast. */
+  /**
+   * Signs the commit PSBT and returns a fully-signed, finalized, broadcast-ready
+   * transaction **hex** (NOT a base64 PSBT). The SDK passes this return value
+   * straight to `broadcastTransaction` and parses it locally to compute the
+   * commit txid; production providers reject anything that is not raw tx hex.
+   */
   signCommitPsbt(psbtBase64: string): Promise<string>;
-  getFundingAddress(): Promise<string> | string;
 }
 
