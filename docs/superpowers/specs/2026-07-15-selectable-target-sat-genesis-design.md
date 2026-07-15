@@ -201,9 +201,19 @@ effort is needed beyond that cleanup.
   was called with the commit, not the reveal).
 - **End-to-end lands on the intended sat.** create → publish → sat-selected
   inscribe → resolve/verify → the asset's anchoring sat == the derived sat.
-- **Sat mismatch → fail closed.** A provider whose post-hoc inscription sat
-  differs from the derived sat → `SAT_MISMATCH`, in-memory log rolled back,
-  layer/DID not advanced, no partial state.
+- **Fire-and-forget, no post-broadcast re-check.** Correctness rests on
+  derive-time checks only (§5); there is no `getInscriptionById` lookup or
+  `SAT_MISMATCH` after broadcast.
+- **Signed commit must match what was built → `COMMIT_TX_MISMATCH`.** Before
+  broadcasting anything, the signer's returned tx is checked against the built
+  commit: input[0] must spend `fundingUtxo` and output[0] must equal the commit
+  output (amount + scriptPubKey). A signer that returns a validly-parseable but
+  different tx (wrong input or output) is rejected pre-broadcast — nothing is
+  sent to the network.
+- **Reveal-broadcast failure carries recovery data.** If the commit broadcasts
+  but the reveal fails, `REVEAL_BROADCAST_FAILED` carries `{ commitTxId,
+  revealTxId, revealTxHex, satoshi }` so the caller can rebroadcast and complete
+  the inscription — no rollback, since the commit is already on-chain.
 - **Provider without sat index → `SAT_INDEX_UNSUPPORTED`** on the sat-selected
   path (fail closed, nothing broadcast).
 - **Missing signer/changeAddress with `fundingUtxo` → `INVALID_INPUT`.**
@@ -225,7 +235,11 @@ effort is needed beyond that cleanup.
 
 `@originals/sdk` **minor** — `inscribeOnBitcoin` can now inscribe the genesis
 did:btco onto a caller-chosen funding UTXO whose first sat becomes the DID: the
-sat is derived from the provider's sat index, the commit is signed by a caller
-`BitcoinSigner`, and the result is verified fail-closed against the intended sat
-(`SAT_MISMATCH` rolls back). Callers control the permanent `did:btco:<sat>`
+sat is derived from the provider's sat index and the commit/reveal are
+deterministically constructed to land on it (§5, fire-and-forget — no
+post-broadcast re-check). The commit is signed by a caller `BitcoinSigner`;
+before broadcasting, the SDK checks the signed tx against the commit it built
+(`COMMIT_TX_MISMATCH` if the signer returned something else) and a failed
+reveal broadcast returns recovery data (`REVEAL_BROADCAST_FAILED`) rather than
+stranding committed funds. Callers control the permanent `did:btco:<sat>`
 identity instead of accepting an arbitrary provider-selected sat (#369).
