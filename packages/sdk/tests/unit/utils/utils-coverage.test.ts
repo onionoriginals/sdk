@@ -275,8 +275,11 @@ describe('[UTILS-VERIFY-017] OrdHttpProvider — fetch stub; URL + parsed result
 
   test('getInscriptionsBySatoshi hits correct URL and returns parsed inscription ids', async () => {
     const capturedUrls: string[] = [];
+    // Well-formed inscription ids (`<64-hex>i<vout>`) — provider filters malformed ids.
+    const idA = 'a'.repeat(64) + 'i0';
+    const idB = 'b'.repeat(64) + 'i0';
     const mockResponse = {
-      inscription_ids: ['insc-aaa', 'insc-bbb'],
+      inscription_ids: [idA, idB],
     };
 
     (globalThis as Record<string, unknown>).fetch = async (url: string, _opts?: unknown) => {
@@ -297,8 +300,8 @@ describe('[UTILS-VERIFY-017] OrdHttpProvider — fetch stub; URL + parsed result
 
     // Parsed result should map inscription_ids to objects
     expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({ inscriptionId: 'insc-aaa' });
-    expect(result[1]).toEqual({ inscriptionId: 'insc-bbb' });
+    expect(result[0]).toEqual({ inscriptionId: idA });
+    expect(result[1]).toEqual({ inscriptionId: idB });
   });
 
   test('getInscriptionsBySatoshi returns [] when server responds not-ok', async () => {

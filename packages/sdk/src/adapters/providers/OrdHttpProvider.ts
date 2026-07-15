@@ -15,6 +15,11 @@ interface HttpProviderOptions {
 const DEFAULT_MAX_JSON_BYTES = 1 * 1024 * 1024;
 const DEFAULT_MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
+// Inscription id shape (`<64-hex txid>i<vout>`). Ids arrive from the untrusted
+// indexer JSON and are interpolated into URL paths; a format guard closes a
+// path-traversal gap (e.g. `../../admin`) consistently with QuickNodeProvider.
+const INSCRIPTION_ID_RE = /^[0-9a-f]{64}i\d+$/i;
+
 /**
  * Documentation placeholder — never a reachable host. createOrdinalsProviderFromEnv
  * refuses to build a live provider pointed at it (issue #328).
@@ -99,6 +104,10 @@ export class OrdHttpProvider implements OrdinalsProvider {
 
   async getInscriptionById(id: string) {
     if (!id) return null;
+    // Guard the id BEFORE it reaches any URL path (`/inscription`, `/content`,
+    // `/r/metadata`): a compromised indexer could otherwise return a crafted id
+    // (`../../admin`) that resolves to a different same-origin path.
+    if (!INSCRIPTION_ID_RE.test(id)) return null;
     const data = await fetchJson<any>(buildUrl(this.baseUrl, `/inscription/${id}`), this.maxJsonBytes);
     if (!data) return null;
     // Expecting a shape similar to Ordinals indexers; adapt minimally
@@ -211,7 +220,10 @@ export class OrdHttpProvider implements OrdinalsProvider {
     if (!satoshi) return [];
     const data = await fetchJson<any>(buildUrl(this.baseUrl, `/sat/${satoshi}`), this.maxJsonBytes);
     const ids: string[] = Array.isArray(data?.inscription_ids) ? data.inscription_ids : [];
-    return ids.map((inscriptionId) => ({ inscriptionId }));
+    // Drop malformed ids at the source so they never enter the chain walk / a URL path.
+    return ids
+      .filter((inscriptionId) => typeof inscriptionId === 'string' && INSCRIPTION_ID_RE.test(inscriptionId))
+      .map((inscriptionId) => ({ inscriptionId }));
   }
 
   // Transaction submission, status, fee estimation and inscription

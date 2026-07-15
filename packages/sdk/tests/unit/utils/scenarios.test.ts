@@ -334,6 +334,7 @@ describe('UTILS-VERIFY-020: OrdHttpProvider URL construction', () => {
   test('builds inscription URL correctly from baseUrl without trailing slash', async () => {
     const fetchedUrls: string[] = [];
     const originalFetch = (globalThis as any).fetch;
+    const id = 'a'.repeat(64) + 'i0'; // well-formed inscription id (provider rejects malformed ids pre-fetch)
 
     (globalThis as any).fetch = async (url: string) => {
       fetchedUrls.push(url);
@@ -343,9 +344,9 @@ describe('UTILS-VERIFY-020: OrdHttpProvider URL construction', () => {
       }
       // Return a minimal valid response for metadata call
       const body = JSON.stringify({
-        inscription_id: 'abc123',
+        inscription_id: id,
         content_type: 'text/plain',
-        content_url: 'http://ord.local/content/abc123',
+        content_url: `http://ord.local/content/${id}`,
         txid: 'txidabc',
         vout: 0,
         sat: 12345,
@@ -361,19 +362,20 @@ describe('UTILS-VERIFY-020: OrdHttpProvider URL construction', () => {
 
     try {
       const provider = new OrdHttpProvider({ baseUrl: 'http://ord.local' });
-      await provider.getInscriptionById('abc123');
+      await provider.getInscriptionById(id);
     } finally {
       (globalThis as any).fetch = originalFetch;
     }
 
     expect(fetchedUrls.length).toBeGreaterThan(0);
     // First call should be the metadata endpoint
-    expect(fetchedUrls[0]).toBe('http://ord.local/inscription/abc123');
+    expect(fetchedUrls[0]).toBe(`http://ord.local/inscription/${id}`);
   });
 
   test('strips trailing slash from baseUrl', async () => {
     const fetchedUrls: string[] = [];
     const originalFetch = (globalThis as any).fetch;
+    const id = 'b'.repeat(64) + 'i0'; // well-formed inscription id (provider rejects malformed ids pre-fetch)
 
     (globalThis as any).fetch = async (url: string) => {
       fetchedUrls.push(url);
@@ -381,9 +383,9 @@ describe('UTILS-VERIFY-020: OrdHttpProvider URL construction', () => {
         return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
       }
       const body = JSON.stringify({
-        inscription_id: 'xyz',
+        inscription_id: id,
         content_type: 'text/plain',
-        content_url: 'http://ord.local/content/xyz',
+        content_url: `http://ord.local/content/${id}`,
         txid: 'txidxyz',
         vout: 0,
         sat: 99,
@@ -399,13 +401,13 @@ describe('UTILS-VERIFY-020: OrdHttpProvider URL construction', () => {
 
     try {
       const provider = new OrdHttpProvider({ baseUrl: 'http://ord.local/' });
-      await provider.getInscriptionById('xyz');
+      await provider.getInscriptionById(id);
     } finally {
       (globalThis as any).fetch = originalFetch;
     }
 
     // Should NOT produce double slash
-    expect(fetchedUrls[0]).toBe('http://ord.local/inscription/xyz');
+    expect(fetchedUrls[0]).toBe(`http://ord.local/inscription/${id}`);
   });
 
   test('estimateFee throws NOT_IMPLEMENTED instead of returning a fabricated rate (#318)', async () => {
