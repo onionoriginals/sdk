@@ -343,7 +343,7 @@ export class LifecycleManager {
     const asset = new OriginalsAsset(resources, didDoc, [], log);
     // Bind the controller append path so addResourceVersion can write signed
     // `update` events with the same degrade contract as the other authorship ops.
-    asset._bindCelAppender((type, data) => this.appendCelEventAndMaybeInscribe(asset, type, data));
+    asset._bindCelAppender((type, data, opts) => this.appendCelEventAndMaybeInscribe(asset, type, data, opts));
 
     // Persist the genesis CEL at the conventional cel/<suffix>.json key so
     // the did:cel resolves from storage immediately (best-effort, never gates).
@@ -745,7 +745,7 @@ export class LifecycleManager {
       log,
       { currentLayer: folded.currentLayer, bindings: folded.bindings, provenance }
     );
-    asset._bindCelAppender((type, data) => this.appendCelEventAndMaybeInscribe(asset, type, data));
+    asset._bindCelAppender((type, data, opts) => this.appendCelEventAndMaybeInscribe(asset, type, data, opts));
 
     // Repopulate captured DID docs so re-serializing a loaded asset is
     // lossless. Only for layers cross-checked against the fold in step 5
@@ -2277,8 +2277,41 @@ export class LifecycleManager {
   private async appendCelEventAndMaybeInscribe(
     asset: OriginalsAsset,
     type: 'migrate' | 'rotateKey' | 'update',
-    data: unknown
+    data: unknown,
+    opts?: { inscribeConfirm?: InscribeConfirm }
   ): Promise<string | null> {
+    // Confirm gate (#407 phase 4): consent to the unavoidable on-chain cost BEFORE
+    // any log mutation. Only paid appends prompt — a btco asset WITH a provider (the
+    // ones that actually inscribe below). Off-btco / provider-absent appends inscribe
+    // nothing, so there is no cost to consent to and the gate is a no-op.
+    const gateProvider = this.config.ordinalsProvider ?? this.deps?.bitcoinManager?.ordinalsProvider;
+    const willInscribe = asset.currentLayer === 'did:btco' && !!gateProvider;
+    const confirm = opts?.inscribeConfirm ?? this.config.inscribeConfirm ?? 'now';
+    if (willInscribe && typeof confirm === 'function') {
+      const appendKind: AppendKind = type === 'rotateKey' ? 'rotate' : 'update';
+      // Estimate reflects THIS append (for 'update', pendingHeadMedia is already set
+      // by addResourceVersion and the log head has not advanced yet → sized correctly).
+      const estimate = await this.estimateAppendCost(asset, appendKind);
+      const approved = await confirm(estimate);
+      if (!approved) {
+        // Abort-before-mutate (spec §3): nothing was appended or inscribed, so the
+        // asset is byte-identical. THROW rather than return null — addResourceVersion
+        // pushes the new resource version unconditionally once the appender RETURNS
+        // (OriginalsAsset.ts), so only a throw guarantees a clean no-op.
+        await this.eventEmitter.emit({
+          type: 'cel:inscribe-declined',
+          timestamp: new Date().toISOString(),
+          asset: { id: asset.id },
+          appendKind,
+          estimate
+        });
+        throw new StructuredError(
+          'PROVENANCE_APPEND_DECLINED',
+          'The inscribeConfirm gate declined the paid did:btco append; nothing was appended or inscribed.'
+        );
+      }
+    }
+
     // Snapshot the pre-append log BEFORE appendCelEventOrSkip advances it — the
     // inscribe-failure rollback restores THIS (capturing after the append would
     // restore the log to itself, leaving it permanently ahead of the chain and
