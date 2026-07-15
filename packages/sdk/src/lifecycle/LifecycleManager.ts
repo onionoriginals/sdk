@@ -828,8 +828,8 @@ export class LifecycleManager {
     // the inscription id exists, so the head's witness (which names this
     // inscription) is never in the embedded snapshot. It is fully re-verified
     // against the chain by verifyBitcoinWitnessProof inside loadAsset.
-    const headTxid = typeof chosen.txid === 'string' ? chosen.txid : '';
-    const headWitness: WitnessProof & { txid: string; satoshi: string; inscriptionId: string } = {
+    const headTxid = typeof chosen.txid === 'string' ? chosen.txid : undefined;
+    const headWitness: WitnessProof & { txid?: string; satoshi: string; inscriptionId: string } = {
       type: 'DataIntegrityProof',
       cryptosuite: 'bitcoin-ordinals-2024',
       created: new Date().toISOString(),
@@ -854,7 +854,7 @@ export class LifecycleManager {
     const assetDid = deriveDidCel(reconstructedLog);
     const genesisController = (reconstructedLog.events[0]?.data as { controller?: unknown })?.controller;
     if (typeof genesisController !== 'string' || !genesisController.startsWith('did:key:')) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} genesis controller is not a did:key.`);
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} genesis controller is not a did:key (only did:key controllers are supported by resolveAssetFromSat; got: ${String(genesisController)}).`);
     }
     const celDoc = createCelDidDocument(assetDid, genesisController.slice('did:key:'.length));
 
@@ -939,8 +939,8 @@ export class LifecycleManager {
     const head = mostRecentResourceHead(log);
     if (headContent && head) {
       const contentStr = headContent.toString('utf8');
-      if (hashResource(Buffer.from(contentStr, 'utf8')) === head.hash) {
-        const target = resources.find(r => r.hash === head.hash && r.content === undefined);
+      if (hashResource(Buffer.from(contentStr, 'utf8')).toLowerCase() === head.hash.toLowerCase()) {
+        const target = resources.find(r => (!head.resourceId || r.id === head.resourceId) && r.hash === head.hash && r.content === undefined);
         if (target) target.content = contentStr;
       }
     }
@@ -2171,7 +2171,7 @@ export class LifecycleManager {
     if (!log) return null;
     const head = mostRecentResourceHead(log);
     if (!head) return null;
-    const res = asset.resources.find(r => r.hash === head.hash);
+    const res = asset.resources.find(r => (!head.resourceId || r.id === head.resourceId) && r.hash === head.hash);
     if (!res || typeof res.content !== 'string') return null;
     return {
       content: Buffer.from(res.content, 'utf8'),
