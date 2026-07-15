@@ -1,6 +1,8 @@
 import type { OrdinalsProvider, InscriptionParts } from '../types.js';
 import { StructuredError } from '../../utils/telemetry.js';
 import { validateSatoshiNumber } from '../../utils/satoshi-validation.js';
+import { decode as decodeCbor } from '../../utils/cbor.js';
+import { hexToBytes } from '../../utils/encoding.js';
 
 export interface QuickNodeProviderOptions {
   /**
@@ -56,6 +58,7 @@ const DEFAULT_MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
 /** Bitcoin Core RPC error code for "No such mempool or blockchain transaction". */
 const RPC_INVALID_ADDRESS_OR_KEY = -5;
+const JSON_RPC_METHOD_NOT_FOUND = -32601;
 
 interface JsonRpcError {
   code?: number;
@@ -236,6 +239,19 @@ export class QuickNodeProvider implements OrdinalsProvider {
   }
 
   /**
+   * True when the endpoint does not implement an RPC method (JSON-RPC -32601 or
+   * an ord/gateway "method not found" message) — distinct from a transient
+   * transport fault, which must propagate. Used so a missing `ord_getMetadata`
+   * (older ord add-on) degrades to "no metadata" while a 500/timeout does not.
+   */
+  private static isMethodNotFound(err: unknown): boolean {
+    if (!(err instanceof StructuredError) || err.code !== 'QUICKNODE_RPC_ERROR') return false;
+    if (err.details?.rpcCode === JSON_RPC_METHOD_NOT_FOUND) return true;
+    const rpcMessage = err.details?.rpcMessage;
+    return typeof rpcMessage === 'string' && /method not found/i.test(rpcMessage);
+  }
+
+  /**
    * Decode the `ord_getContent` result into raw bytes. QuickNode returns the
    * inscription content base64-encoded inside the JSON-RPC result (either as
    * a bare string or wrapped in an object). Content that doesn't decode as
@@ -391,6 +407,11 @@ export class QuickNodeProvider implements OrdinalsProvider {
       ? info.height
       : (typeof info.genesis_height === 'number' ? info.genesis_height : undefined);
 
+    // #407 phase 3: decode the inscription's CBOR metadata so a real chain can
+    // be walked/reconstructed. Absent → undefined; present-but-undecodable →
+    // fail closed (never a silent partial reconstruction).
+    const metadata = await this.fetchMetadata(id, info);
+
     return {
       inscriptionId,
       content,
@@ -399,7 +420,58 @@ export class QuickNodeProvider implements OrdinalsProvider {
       vout,
       satoshi,
       blockHeight,
+      ...(metadata !== undefined ? { metadata } : {}),
     };
+  }
+
+  /**
+   * Fetch + CBOR-decode an inscription's metadata (#407 phase 3). Prefers an
+   * inline hex `metadata` field on the `ord_getInscription` result, else the
+   * `ord_getMetadata` RPC. Returns `undefined` when no metadata exists (RPC
+   * not-found / absent field). Throws a clear fail-closed error when metadata
+   * bytes are PRESENT but cannot be hex/CBOR decoded.
+   */
+  private async fetchMetadata(id: string, info: QuickNodeInscription): Promise<Record<string, unknown> | undefined> {
+    let hex: string | undefined;
+    const inlineMeta = (info as { metadata?: unknown }).metadata;
+    if (typeof inlineMeta === 'string' && inlineMeta.length > 0) {
+      hex = inlineMeta;
+    } else {
+      let raw: unknown;
+      try {
+        raw = await this.rpcCall<unknown>('ord_getMetadata', [id]);
+      } catch (err) {
+        // ONLY degrade to undefined when the metadata genuinely isn't there:
+        // the endpoint lacks ord_getMetadata (older add-on → JSON-RPC method
+        // not found) or the inscription has none (isNotFound). A transient
+        // fault (HTTP 500, timeout, rate-limit) must PROPAGATE — swallowing it
+        // would let the resolver silently truncate the chain to a stale log.
+        // Fable I2.
+        if (QuickNodeProvider.isNotFound(err) || QuickNodeProvider.isMethodNotFound(err)) return undefined;
+        throw err;
+      }
+      if (raw === null || raw === undefined) return undefined;
+      if (typeof raw === 'object') {
+        const obj = raw as Record<string, unknown>;
+        const inner = obj.metadata ?? obj.hex ?? obj.data;
+        if (typeof inner === 'string') hex = inner;
+        else return raw as Record<string, unknown>; // already decoded object
+      } else if (typeof raw === 'string') {
+        hex = raw;
+      } else {
+        return undefined;
+      }
+    }
+    if (!hex) return undefined;
+    try {
+      return decodeCbor<Record<string, unknown>>(hexToBytes(hex));
+    } catch (e) {
+      throw new StructuredError(
+        'QUICKNODE_METADATA_UNDECODABLE',
+        `QuickNodeProvider: inscription ${id} carries metadata that could not be hex/CBOR decoded (${e instanceof Error ? e.message : String(e)}); refusing to reconstruct from partial provenance`,
+        { inscriptionId: id }
+      );
+    }
   }
 
   async getInscriptionsBySatoshi(satoshi: string) {

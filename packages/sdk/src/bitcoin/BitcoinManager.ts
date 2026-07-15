@@ -47,6 +47,15 @@ export class BitcoinManager {
     return this.ord;
   }
 
+  /**
+   * Public fee-rate estimate (sat/vB) via the same feeOracle→provider fallback
+   * the paid inscribe path uses. Returns undefined when no source yields a
+   * plausible rate. Used to surface btco-append cost (#407 phase 3).
+   */
+  async estimateFeeRate(targetBlocks = 1): Promise<number | undefined> {
+    return this.resolveFeeRate(targetBlocks);
+  }
+
   private async resolveFeeRate(targetBlocks = 1, provided?: number): Promise<number | undefined> {
     // 1) An explicitly provided fee rate always wins: estimators must not
     // silently override what the caller asked to pay.
