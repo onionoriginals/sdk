@@ -165,6 +165,7 @@ export class OrdHttpProvider implements OrdinalsProvider {
       }
       hex = text;
     }
+    if (!hex) return undefined;
     try {
       return decodeCbor<Record<string, unknown>>(hexToBytes(hex));
     } catch (e) {

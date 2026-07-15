@@ -41,6 +41,9 @@ export interface EventLoggingConfig {
   'key:unpersisted'?: LogLevel | false;
   'did:log-unhosted'?: LogLevel | false;
   'cel:append-skipped'?: LogLevel | false;
+  'cel:append-inscribe-skipped'?: LogLevel | false;
+  'cel:inscribe-cost'?: LogLevel | false;
+  'resource:inscribed'?: LogLevel | false;
   'cel:host-failed'?: LogLevel | false;
   'key:rotated'?: LogLevel | false;
 }
@@ -73,6 +76,9 @@ const DEFAULT_EVENT_CONFIG: EventLoggingConfig = {
   'key:unpersisted': 'warn',
   'did:log-unhosted': 'warn',
   'cel:append-skipped': 'warn',
+  'cel:append-inscribe-skipped': 'warn',
+  'cel:inscribe-cost': 'info',
+  'resource:inscribed': 'info',
   'cel:host-failed': 'warn',
   'key:rotated': 'info'
 };
@@ -124,6 +130,9 @@ export class EventLogger {
       'key:unpersisted',
       'did:log-unhosted',
       'cel:append-skipped',
+      'cel:append-inscribe-skipped',
+      'cel:inscribe-cost',
+      'resource:inscribed',
       'cel:host-failed',
       'key:rotated'
     ];

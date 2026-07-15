@@ -387,6 +387,46 @@ export interface KeyRotatedEvent extends BaseEvent {
 }
 
 /**
+ * Emitted (#407 phase 3) when a did:btco authorship append (addResourceVersion)
+ * cannot inscribe on the anchoring sat because no ordinals provider is
+ * configured: the hosted log still advanced, but the ALWAYS-CURRENT on-chain log
+ * did NOT — surfaced so the degrade is never silent.
+ */
+export interface CelAppendInscribeSkippedEvent extends BaseEvent {
+  type: 'cel:append-inscribe-skipped';
+  asset: { id: string };
+  /** Why the on-chain inscription was skipped. */
+  reason: 'NO_ORDINALS_PROVIDER';
+}
+
+/**
+ * Emitted (#407 phase 3) with a cost estimate BEFORE a paid btco append
+ * inscription, so callers are cost-aware (every btco authorship append is now a
+ * paid Bitcoin op). Best-effort/ballpark — not a billing figure.
+ */
+export interface CelInscribeCostEvent extends BaseEvent {
+  type: 'cel:inscribe-cost';
+  asset: { id: string };
+  /** Resolved fee rate (sat/vB), when an estimator was available. */
+  feeRate?: number;
+  /** Rough commit+reveal virtual size (vB). */
+  estVsize: number;
+  /** Approximate total cost (sats) = feeRate × estVsize, when feeRate resolved. */
+  estSats?: number;
+}
+
+/**
+ * Emitted (#407 phase 3) after a did:btco authorship append is inscribed on the
+ * anchoring sat, making the on-chain log current for that event.
+ */
+export interface ResourceInscribedEvent extends BaseEvent {
+  type: 'resource:inscribed';
+  asset: { id: string };
+  did: string;
+  inscriptionId: string;
+}
+
+/**
  * Union type of all possible events
  */
 export type OriginalsEvent =
@@ -414,6 +454,9 @@ export type OriginalsEvent =
   | KeyUnpersistedEvent
   | DidLogUnhostedEvent
   | CelAppendSkippedEvent
+  | CelAppendInscribeSkippedEvent
+  | CelInscribeCostEvent
+  | ResourceInscribedEvent
   | CelHostFailedEvent
   | KeyRotatedEvent;
 
@@ -450,6 +493,9 @@ export interface EventTypeMap {
   'key:unpersisted': KeyUnpersistedEvent;
   'did:log-unhosted': DidLogUnhostedEvent;
   'cel:append-skipped': CelAppendSkippedEvent;
+  'cel:append-inscribe-skipped': CelAppendInscribeSkippedEvent;
+  'cel:inscribe-cost': CelInscribeCostEvent;
+  'resource:inscribed': ResourceInscribedEvent;
   'cel:host-failed': CelHostFailedEvent;
   'key:rotated': KeyRotatedEvent;
 }
