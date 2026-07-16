@@ -26,6 +26,15 @@ const server = Bun.serve({
   hostname: '0.0.0.0',
   async fetch(req) {
     const url = new URL(req.url);
+    // The auth API is a separate service — never SPA-fallback /api/* to
+    // index.html, or the client parses HTML as JSON ("Unexpected token '<'").
+    // Return a clear JSON 404 so a missing backend is obvious.
+    if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+      return new Response(
+        JSON.stringify({ error: 'Auth API not available on the static site — deploy the auth server (server/index.ts) as a separate service.' }),
+        { status: 404, headers: { 'content-type': 'application/json' } }
+      );
+    }
     // Strip leading slashes, normalize, and reject path traversal.
     const rel = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.(\/|\\|$))+/, '').replace(/^\/+/, '');
     if (rel.includes('..')) return new Response('Bad request', { status: 400 });
