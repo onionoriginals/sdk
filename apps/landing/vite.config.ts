@@ -22,6 +22,11 @@ export default defineConfig({
     },
   },
   resolve: {
+    // Force ONE instance of these so the SDK's raw-served dist and the app's
+    // own imports share it — otherwise @noble/ed25519's `hashes` export reads
+    // undefined when the SDK's noble-init runs, and it crashes trying to define
+    // `hashes` on the frozen ESM namespace ("Cannot redefine property: hashes").
+    dedupe: ['@noble/ed25519'],
     alias: [
       { find: /^(node:)?fs\/promises$/, replacement: shim('fs-promises') },
       { find: /^(node:)?fs$/, replacement: shim('fs') },
@@ -36,6 +41,9 @@ export default defineConfig({
     'process.env': '{}'
   },
   optimizeDeps: {
+    // Serve @noble/ed25519 as raw ESM (not esbuild-prebundled) so its `hashes`
+    // export is populated when the SDK's noble-init mutates it.
+    exclude: ['@noble/ed25519'],
     esbuildOptions: {
       define: { global: 'globalThis' }
     }
