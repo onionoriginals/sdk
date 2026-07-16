@@ -42,6 +42,14 @@ export interface OrdinalsProvider {
     metadata?: Record<string, unknown>;
   } | null>;
   /**
+   * The first (lowest-offset) satoshi contained in the given output, per the
+   * provider's sat index. This is the sat an inscription funded by this output
+   * lands on (no pointer). Used to derive the did:btco identity BEFORE building
+   * the inscription. Providers without a sat index omit it; the sat-selected
+   * genesis path then fails closed with SAT_INDEX_UNSUPPORTED.
+   */
+  getFirstSatOfOutput?(outpoint: { txid: string; vout: number }): Promise<string>;
+  /**
    * MUST return inscription ids oldest-first (on-chain inscription order).
    * The non-cooperative rotation rule's later-than-anchor check depends on
    * this ordering; a provider violating it can make that check accept

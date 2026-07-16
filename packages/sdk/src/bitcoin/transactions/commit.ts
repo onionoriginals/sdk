@@ -118,6 +118,149 @@ export interface CommitTransactionResult {
 }
 
 /**
+ * Parameters for creating a reveal transaction
+ */
+export interface RevealTransactionParams {
+  /** txid of the broadcast/signed commit transaction */
+  commitTxId: string;
+  /** vout of the inscription-bearing commit output (0) */
+  commitVout: number;
+  /** value (sats) of that commit output */
+  commitAmount: number;
+  /** hex, from CommitTransactionResult */
+  revealPrivateKey: string;
+  /** hex, from CommitTransactionResult (taproot internal / reveal key) */
+  revealPublicKey: string;
+  /** inscription leaf from the commit result */
+  inscriptionScript: { script: Uint8Array; controlBlock: Uint8Array; leafVersion: number };
+  /** where the inscribed sat (postage) goes */
+  destinationAddress: string;
+  /** sats/vB */
+  feeRate: number;
+  /** Bitcoin network configuration */
+  network: BitcoinNetwork;
+}
+
+/**
+ * Result of the reveal transaction creation
+ */
+export interface RevealTransactionResult {
+  /** fully-signed, finalized reveal tx hex */
+  revealTxHex: string;
+  revealTxId: string;
+  /** `${revealTxId}i0` */
+  inscriptionId: string;
+  /** commitAmount - reveal fee (>= dust) */
+  postageValue: number;
+}
+
+/**
+ * Builds, signs and finalizes the reveal transaction: a taproot script-path
+ * spend of the commit output that carries the inscription envelope. The reveal
+ * is self-signed by the ephemeral `revealPrivateKey` from the commit result —
+ * no caller signature is involved (only the commit funding inputs need that).
+ *
+ * The committed P2TR output is reconstructed exactly as createCommitTransaction
+ * built it: same reveal internal key + single-leaf inscription tree
+ * (`{ type: 'tr', script }`) + the `OutOrdinalReveal` custom script. That yields
+ * an identical scriptPubKey, tapInternalKey and tapLeafScript, so the payment
+ * object can be spread straight into the spending input.
+ *
+ * @param params - Parameters for the reveal transaction
+ * @returns The signed reveal tx hex, txid, inscription id and postage value
+ * @throws Error if the destination address is wrong-network or the commit
+ *   amount cannot cover the reveal fee plus a dust postage output
+ */
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function createRevealTransaction(
+  params: RevealTransactionParams
+): Promise<RevealTransactionResult> {
+  const {
+    commitTxId,
+    commitVout,
+    commitAmount,
+    revealPrivateKey,
+    revealPublicKey,
+    inscriptionScript,
+    destinationAddress,
+    feeRate,
+    network
+  } = params;
+
+  // Fail fast on a wrong-network destination before any keygen / signing work.
+  // validateBitcoinAddress accepts 'mainnet' | 'regtest' | 'signet'; testnet
+  // shares signet's prefix (mirrors createCommitTransaction).
+  const validateNetwork: 'mainnet' | 'regtest' | 'signet' =
+    network === 'testnet' ? 'signet' : network;
+  validateBitcoinAddress(destinationAddress, validateNetwork);
+
+  if (feeRate <= 0) {
+    throw new Error(`Invalid fee rate: ${feeRate}`);
+  }
+
+  const leafScript = inscriptionScript.script;
+  const controlBlock = inscriptionScript.controlBlock;
+  const leafVersion = inscriptionScript.leafVersion ?? 0xc0;
+
+  // Reveal fee from the real serialized leaf + control block (witness-discounted).
+  const revealFee = Number(calculateFee(estimateRevealTxSize(leafScript.length, controlBlock.length), feeRate));
+  const postageValue = commitAmount - revealFee;
+  if (postageValue < MIN_DUST_LIMIT) {
+    throw new Error(
+      `Commit amount ${commitAmount} cannot cover reveal fee ${revealFee} + dust postage ${MIN_DUST_LIMIT}.`
+    );
+  }
+
+  const scureNetwork = getScureNetwork(network);
+  const internalKey = Buffer.from(revealPublicKey, 'hex');
+  const privKey = Buffer.from(revealPrivateKey, 'hex');
+
+  // Reconstruct the committed P2TR payment from the single-leaf inscription
+  // tree. p2tr_ord_reveal returns `{ type: 'tr', script }`, and the commit
+  // builder stored that leaf script — so this rebuilds an identical payment
+  // (scriptPubKey, tapLeafScript) without re-deriving it.
+  const commitP2tr = btc.p2tr(
+    internalKey,
+    { type: 'tr', script: leafScript },
+    scureNetwork,
+    false,
+    [ordinals.OutOrdinalReveal]
+  );
+
+  // customScripts must be enabled so finalize() knows how to assemble the
+  // tr_ord_reveal witness (signature + envelope script + control block).
+  const tx = new btc.Transaction({ customScripts: [ordinals.OutOrdinalReveal] });
+  // Force a SCRIPT-PATH spend: feed ONLY witnessUtxo + tapLeafScript, never
+  // tapInternalKey. If the internal key is present, @scure signs the key-path
+  // too (setting tapKeySig) and finalize() prefers it — emitting a 1-item
+  // key-path witness that moves the sat but never reveals the inscription.
+  // With just tapLeafScript, sign() produces only tapScriptSig and finalize()
+  // takes the OutOrdinalReveal branch → 3-item envelope witness.
+  tx.addInput({
+    txid: commitTxId,
+    index: commitVout,
+    witnessUtxo: { script: commitP2tr.script, amount: BigInt(commitAmount) },
+    tapLeafScript: commitP2tr.tapLeafScript
+  });
+
+  tx.addOutputAddress(destinationAddress, BigInt(postageValue), scureNetwork);
+
+  // Deterministic (zero) aux randomness for the schnorr signature.
+  tx.sign(privKey, undefined, new Uint8Array(32));
+  tx.finalize();
+
+  const revealTxHex = Buffer.from(tx.extract()).toString('hex');
+  const revealTxId = tx.id;
+
+  return {
+    revealTxHex,
+    revealTxId,
+    inscriptionId: `${revealTxId}i0`,
+    postageValue
+  };
+}
+
+/**
  * Estimates the size of a commit transaction.
  *
  * Inputs are sized by script class (P2WPKH 68 vB, P2TR 57.5 vB, P2WSH a

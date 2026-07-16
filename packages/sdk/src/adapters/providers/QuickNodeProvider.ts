@@ -425,6 +425,53 @@ export class QuickNodeProvider implements OrdinalsProvider {
   }
 
   /**
+   * The first (lowest-offset) sat in an output, per the Ordinals & Runes API's
+   * sat-range index (mirrors ord's `/output/<OUTPOINT>` `sat_ranges`). Used to
+   * derive a did:btco identity BEFORE building the inscription that will land
+   * on it, so an empty/error response must fail loudly rather than fabricate
+   * a sat that would mint a wrong DID.
+   */
+  async getFirstSatOfOutput(outpoint: { txid: string; vout: number }): Promise<string> {
+    if (!TXID_RE.test(outpoint.txid) || !Number.isInteger(outpoint.vout) || outpoint.vout < 0) {
+      throw new StructuredError(
+        'QUICKNODE_INVALID_OUTPOINT',
+        'QuickNodeProvider.getFirstSatOfOutput requires a valid { txid, vout } outpoint'
+      );
+    }
+    await this.ensureExpectedNetwork();
+    const outpointStr = `${outpoint.txid}:${outpoint.vout}`;
+    let info: { sat_ranges?: Array<[number | string, number | string]> } | null;
+    try {
+      info = await this.rpcCall<{ sat_ranges?: Array<[number | string, number | string]> } | null>(
+        'ord_getOutput',
+        [outpointStr]
+      );
+    } catch (err) {
+      // Any RPC/transport failure — including "not found" — means the sat
+      // index has nothing for this output. Never guess a sat here.
+      throw new StructuredError(
+        'SAT_INDEX_UNAVAILABLE',
+        `QuickNodeProvider: could not fetch sat index for output ${outpointStr}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    const ranges = info?.sat_ranges;
+    if (!Array.isArray(ranges) || ranges.length === 0 || !Array.isArray(ranges[0])) {
+      throw new StructuredError(
+        'SAT_INDEX_UNAVAILABLE',
+        `QuickNodeProvider: no sat ranges returned for output ${outpointStr} (sat index may not be enabled on this endpoint)`
+      );
+    }
+    const satoshi = String(ranges[0][0]);
+    if (!validateSatoshiNumber(satoshi).valid) {
+      throw new StructuredError(
+        'SAT_INDEX_UNAVAILABLE',
+        `QuickNodeProvider: sat index returned an invalid sat number (${satoshi}) for output ${outpointStr}`
+      );
+    }
+    return satoshi;
+  }
+
+  /**
    * Fetch + CBOR-decode an inscription's metadata (#407 phase 3). Prefers an
    * inline hex `metadata` field on the `ord_getInscription` result, else the
    * `ord_getMetadata` RPC. Returns `undefined` when no metadata exists (RPC

@@ -123,10 +123,10 @@ Key files: `src/types/common.ts`, `src/did/WebVHManager.ts`
 - `transferDID()` - Transfer did:btco ownership (updates DID document)
 
 **Commit-Reveal Pattern (bitcoin/transactions/commit.ts)**
-- Bitcoin inscriptions use two-phase commit for front-running protection
-- Commit transaction: Creates unique satoshi assignment
+- Commit transaction: uses a random reveal keypair, so the reveal address can't be precomputed/front-run from the mempool
 - Reveal transaction: Inscribes actual data on that satoshi
 - UTXO selection (utxo-selection.ts) ensures ordinal-awareness
+- Protocol-level uniqueness (did:cel sat) is NOT a commit-pointer mechanism — it's first-anchor-wins, verified fail-closed at resolution in `verifyEventLog` via the provider's `getAnchoringsForDidCel`
 
 **OrdinalsProvider Interface (adapters/types.ts)**
 - Abstract interface for Bitcoin operations

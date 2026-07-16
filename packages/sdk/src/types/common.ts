@@ -160,4 +160,21 @@ export interface ExternalVerifier {
   verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): Promise<boolean>;
 }
 
+/**
+ * Signer for the commit transaction funding inputs of a sat-selected
+ * inscription (see `inscribeOnSat`). The reveal is self-signed by an
+ * ephemeral key generated internally — only the commit needs the caller.
+ */
+export interface BitcoinSigner {
+  /**
+   * Signs AND FINALIZES the commit PSBT, returning a fully-signed, finalized,
+   * broadcast-ready transaction **hex** (NOT a base64 PSBT). The name says
+   * "AndFinalize" precisely because returning a still-unfinalized PSBT is a
+   * runtime error: the SDK passes this return value straight to
+   * `broadcastTransaction` and parses it locally to compute the commit txid
+   * (a PSBT fails to parse → `COMMIT_TX_INVALID`), and production providers
+   * reject anything that is not raw tx hex.
+   */
+  signAndFinalizeCommitPsbt(psbtBase64: string): Promise<string>;
+}
 

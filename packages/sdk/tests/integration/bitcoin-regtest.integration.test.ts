@@ -106,11 +106,6 @@ describeRegtest('BitcoinManager against regtest', () => {
     manager = new BitcoinManager(config);
   });
 
-  test('preventFrontRunning returns true for unknown satoshi', async () => {
-    const result = await manager.preventFrontRunning('999999999999999');
-    expect(result).toBe(true);
-  });
-
   test('getSatoshiFromInscription returns null for unknown', async () => {
     const result = await manager.getSatoshiFromInscription(
       '0000000000000000000000000000000000000000000000000000000000000000i0'

@@ -366,16 +366,6 @@ export class BitcoinManager {
     };
   }
 
-  async preventFrontRunning(satoshi: string): Promise<boolean> {
-    if (!satoshi) throw new StructuredError('SATOSHI_REQUIRED', 'Satoshi identifier is required');
-    // Naive implementation: check for multiple inscriptions on same satoshi via provider
-    if (this.ord) {
-      const list = await this.ord.getInscriptionsBySatoshi(satoshi);
-      return list.length <= 1;
-    }
-    return true;
-  }
-
   /**
    * Resolve the inscription id currently recorded on a satoshi, or null if the
    * provider reports none. Used to back a transfer with a real inscription id

@@ -202,40 +202,6 @@ if (inscription) {
 
 ---
 
-### preventFrontRunning()
-
-Checks if a satoshi has multiple inscriptions (front-running detection).
-
-```typescript
-async preventFrontRunning(
-  satoshi: string
-): Promise<boolean>
-```
-
-**Parameters:**
-- `satoshi` (string): Satoshi identifier to check
-
-**Returns:**
-- `Promise<boolean>`: `true` if safe (0-1 inscriptions), `false` if front-run (2+ inscriptions)
-
-**Note:** This method uses the configured Ordinals provider's `getInscriptionsBySatoshi()` method internally. To query inscriptions on a satoshi directly, use `provider.getInscriptionsBySatoshi()` instead (see [OrdinalsProvider Interface](#ordinalsProvider-interface)).
-
-**Example:**
-```typescript
-const isSafe = await sdk.bitcoin.preventFrontRunning(
-  inscription.satoshi
-);
-
-if (!isSafe) {
-  console.warn('WARNING: Front-running detected!');
-  console.warn('Multiple inscriptions on same satoshi');
-}
-```
-
-**Location:** `src/bitcoin/BitcoinManager.ts:249`
-
----
-
 ### validateBitcoinAddress()
 
 Validates a Bitcoin address for a specific network.
