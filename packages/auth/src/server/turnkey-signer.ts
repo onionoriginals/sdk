@@ -99,7 +99,7 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
       const cleanR = r.startsWith('0x') ? r.slice(2) : r;
       const cleanS = s.startsWith('0x') ? s.slice(2) : s;
       const cleanSig = cleanR + cleanS;
-      const signatureBytes = Buffer.from(cleanSig, 'hex');
+      const signatureBytes = Uint8Array.from(Buffer.from(cleanSig, 'hex'));
 
       // Ed25519 signatures must be exactly 64 bytes (32-byte r + 32-byte s).
       // Never truncate: a 65-byte value is not a valid Ed25519 signature with a
