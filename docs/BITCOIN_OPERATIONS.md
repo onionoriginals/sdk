@@ -830,7 +830,7 @@ provenance truth.
 ```typescript
 // Provenance accrues automatically as you drive the lifecycle:
 const asset = await sdk.lifecycle.createAsset(resources);   // create event
-await sdk.lifecycle.publishToWeb(asset, publisherDid);      // migrate event (domain comes from webvhNetwork config)
+await sdk.lifecycle.publishToWeb(asset, 'example.com');      // migrate event → did:webvh (a domain string, a did:webvh DID, or an ExternalSigner)
 await sdk.lifecycle.inscribeOnBitcoin(asset);               // migrate event (+ #cel anchor)
 
 // Verify the whole signed chain (needs an ordinalsProvider to check the btco witness):
