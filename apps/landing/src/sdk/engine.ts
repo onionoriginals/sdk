@@ -4,8 +4,9 @@
  * Everything here calls the real @originals/sdk — the same package a
  * developer gets from `npm install @originals/sdk`. Nothing is canned:
  * DIDs, hashes, credentials, events and provenance all come back from
- * actual SDK calls. Bitcoin operations run against OrdMockProvider, the
- * SDK's own in-memory Ordinals provider, so no wallet or node is needed.
+ * actual SDK calls. Publishing hosts the signed did:webvh log at this origin
+ * over real HTTP(S) and the SDK's real resolver fetches it back. Bitcoin
+ * operations still run against OrdMockProvider (no wallet or node needed).
  *
  * Every SDK event is mirrored to the browser console (prefixed
  * "[originals-sdk]") so anyone can open devtools and watch the protocol
@@ -115,12 +116,12 @@ export class DemoEngine {
     };
 
     forward('asset:created', (e: { asset: { id: string } }) =>
-      `Asset created as ${short(e.asset.id)} — a private did:peer identity, generated entirely offline`
+      `Asset created as ${short(e.asset.id)} — a did:cel genesis (a signed event log), generated entirely offline in this tab`
     );
     forward(
       'resource:published',
       (e: { resource: { id: string } }) =>
-        `Resource "${e.resource.id}" published to hosted storage`
+        `Resource "${e.resource.id}" hosted over HTTP at this origin — its did:webvh log is now resolvable`
     );
     forward(
       'credential:issued',

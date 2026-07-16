@@ -118,7 +118,7 @@ export const demo = {
       title: 'Create',
       layer: 'did:peer',
       description:
-        'Hashes the artwork’s bytes and mints a did:peer identity — entirely in this tab, no server involved.'
+        'Hashes the artwork’s bytes and mints its did:cel genesis — a signed event log, entirely in this tab, no server involved.'
     },
     {
       id: 'publish',
@@ -127,7 +127,7 @@ export const demo = {
       title: 'Publish',
       layer: 'did:webvh',
       description:
-        'Migrates the asset to did:webvh, publishes its resources, and signs a publication credential.'
+        'Migrates the asset to did:webvh and hosts the signed DID log at this origin — the SDK’s real resolver then fetches it back over HTTP(S).'
     },
     {
       id: 'inscribe',
