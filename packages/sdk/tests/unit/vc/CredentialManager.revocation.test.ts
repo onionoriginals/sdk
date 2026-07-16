@@ -246,7 +246,7 @@ describe('CredentialManager - Revocation', () => {
       const resource = {
         id: 'main.ts',
         type: 'code',
-        hash: 'abc123',
+        hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
         contentType: 'application/typescript',
         content: '',
       };
@@ -281,7 +281,7 @@ describe('CredentialManager - Revocation', () => {
       const resource = {
         id: 'index.html',
         type: 'text',
-        hash: 'def456',
+        hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
         contentType: 'text/html',
         content: '',
       };

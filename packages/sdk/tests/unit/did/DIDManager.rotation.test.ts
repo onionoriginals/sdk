@@ -237,9 +237,9 @@ describe('DIDManager - Key Recovery', () => {
       });
 
       const cred = recoveryResult.recoveryCredential;
-      expect(cred['@context']).toContain('https://www.w3.org/2018/credentials/v1');
+      expect(cred['@context']).toContain('https://www.w3.org/ns/credentials/v2');
       expect(cred.issuer).toBeDefined();
-      expect(cred.issuanceDate).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(cred.validFrom).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       expect(cred.credentialSubject.previousVerificationMethods).toBeDefined();
       expect(Array.isArray(cred.credentialSubject.previousVerificationMethods)).toBe(true);
       expect(cred.credentialSubject.newVerificationMethod).toBeDefined();

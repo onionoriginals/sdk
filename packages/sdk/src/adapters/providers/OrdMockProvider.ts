@@ -1,4 +1,4 @@
-import { OrdinalsProvider } from '../types.js';
+import { OrdinalsProvider, InscriptionParts } from '../types.js';
 
 export interface OrdMockState {
   inscriptionsById: Map<string, {
@@ -9,8 +9,10 @@ export interface OrdMockState {
     vout: number;
     satoshi?: string;
     blockHeight?: number;
+    metadata?: Record<string, unknown>;
   }>;
   inscriptionsBySatoshi: Map<string, string[]>;
+  ownershipBySatoshi: Map<string, { address: string; outpoint: string }>;
   feeRate: number;
 }
 
@@ -21,15 +23,35 @@ export class OrdMockProvider implements OrdinalsProvider {
     this.state = {
       inscriptionsById: new Map(),
       inscriptionsBySatoshi: new Map(),
+      ownershipBySatoshi: new Map(),
       feeRate: 5,
       ...state
-    } as OrdMockState;
+    };
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async getInscriptionById(id: string) {
     const rec = this.state.inscriptionsById.get(id);
-    return rec ? { ...rec } : null;
+    if (!rec) return null;
+    // Clone metadata so a reader mutating the result cannot corrupt stored state.
+    return {
+      ...rec,
+      ...(rec.metadata !== undefined
+        ? { metadata: structuredClone(rec.metadata) as Record<string, unknown> }
+        : {})
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getFirstSatOfOutput(outpoint: { txid: string; vout: number }): Promise<string> {
+    // Deterministic pseudo-sat from the outpoint so tests can assert the
+    // derived did:btco identity without a real sat index. Not a real ordinal
+    // calculation — a stable, unique-per-outpoint integer in a plausible range.
+    let h = 2166136261 >>> 0; // FNV-1a
+    const s = `${outpoint.txid}:${outpoint.vout}`;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    // Keep it well inside the 0..2.1e15 sat supply range.
+    return String(100000000 + (h % 2000000000000000));
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -53,26 +75,61 @@ export class OrdMockProvider implements OrdinalsProvider {
     return Math.max(1, this.state.feeRate - (blocks - 1));
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async createInscription(params: { data: Buffer; contentType: string; feeRate?: number; }) {
+  async createInscription(params: {
+    data?: Buffer;
+    buildContent?: (satoshi: string) => InscriptionParts | Promise<InscriptionParts>;
+    contentType: string;
+    feeRate?: number;
+    metadata?: Record<string, unknown>;
+    targetSatoshi?: string;
+  }) {
+    if ((params.data === undefined) === (params.buildContent === undefined)) {
+      throw new Error('createInscription requires exactly one of data or buildContent');
+    }
     const inscriptionId = `insc-${Math.random().toString(36).slice(2)}`;
     const txid = `tx-${Math.random().toString(36).slice(2)}`;
-    // Generate a valid numeric satoshi identifier (not sat-123 format)
-    const satoshi = `${Math.floor(Math.random() * 1e12)}`;
+    // Pin the sat FIRST (mirrors real commit-phase sat assignment), then let
+    // deferred content embed it.
+    const satoshi = params.targetSatoshi ?? `${Math.floor(Math.random() * 1e12)}`;
+    // Normalize the deferred build result: a bare Buffer (content only) or
+    // `{ content, metadata }` (#407 phase 2). Deferred metadata wins over the
+    // static `metadata` param.
+    let content: Buffer;
+    let deferredMetadata: Record<string, unknown> | undefined;
+    if (params.buildContent) {
+      const built = await params.buildContent(satoshi);
+      if (Buffer.isBuffer(built)) {
+        content = Buffer.from(built);
+      } else {
+        content = Buffer.from(built.content);
+        deferredMetadata = built.metadata;
+      }
+    } else {
+      content = params.data!;
+    }
+    const metadata = deferredMetadata ?? params.metadata;
     const vout = 0;
+    // Round-trip metadata as a structural clone so a caller mutating its input
+    // object after inscription cannot retroactively change the stored copy
+    // (mirrors a real CBOR encode/decode boundary).
+    const storedMetadata = metadata !== undefined
+      ? (structuredClone(metadata) as Record<string, unknown>)
+      : undefined;
     const record = {
       inscriptionId,
-      content: params.data,
+      content,
       contentType: params.contentType,
       txid,
       vout,
       satoshi,
-      blockHeight: 1
+      blockHeight: 1,
+      ...(storedMetadata !== undefined ? { metadata: storedMetadata } : {})
     };
     this.state.inscriptionsById.set(inscriptionId, record);
     const list = this.state.inscriptionsBySatoshi.get(satoshi) || [];
     list.push(inscriptionId);
     this.state.inscriptionsBySatoshi.set(satoshi, list);
+    this.state.ownershipBySatoshi.set(satoshi, { address: 'bcrt1qmockowner', outpoint: `${txid}:${vout}` });
     return {
       inscriptionId,
       revealTxId: txid,
@@ -81,18 +138,55 @@ export class OrdMockProvider implements OrdinalsProvider {
       txid,
       vout,
       blockHeight: 1,
-      content: params.data,
+      content,
       contentType: params.contentType,
-      feeRate: params.feeRate
+      feeRate: params.feeRate,
+      ...(storedMetadata !== undefined ? { metadata: structuredClone(storedMetadata) as Record<string, unknown> } : {})
     };
   }
 
-  async transferInscription(inscriptionId: string, _toAddress: string, _options?: { feeRate?: number }) {
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getSatOwnership(satoshi: string): Promise<{ address: string; outpoint: string } | null> {
+    return this.state.ownershipBySatoshi.get(satoshi) ?? null;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getAnchoringsForDidCel(didCel: string): Promise<Array<{
+    satoshi: string;
+    inscriptionId: string;
+    blockHeight?: number;
+  }>> {
+    const out: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number }> = [];
+    for (const rec of this.state.inscriptionsById.values()) {
+      if (rec.satoshi === undefined) continue;
+      // #407 phase 2: the DID document rides in inscription METADATA (content is
+      // the asset media). Prefer metadata.didDocument; fall back to parsing the
+      // content as a DID document JSON (phase-1 content-as-DID-doc inscriptions).
+      let doc: unknown = (rec.metadata as { didDocument?: unknown } | undefined)?.didDocument;
+      if (doc === undefined) {
+        try {
+          doc = JSON.parse(rec.content.toString('utf8'));
+        } catch {
+          continue; // non-JSON, no metadata DID doc — not an anchoring inscription
+        }
+      }
+      const aka = (doc as { alsoKnownAs?: unknown } | null)?.alsoKnownAs;
+      if (Array.isArray(aka) && aka.includes(didCel)) {
+        out.push({ satoshi: rec.satoshi, inscriptionId: rec.inscriptionId, blockHeight: rec.blockHeight });
+      }
+    }
+    return out;
+  }
+
+  async transferInscription(inscriptionId: string, toAddress: string, _options?: { feeRate?: number }) {
     const rec = this.state.inscriptionsById.get(inscriptionId);
     if (!rec) {
       return Promise.reject(new Error('inscription not found'));
     }
     const txid = `tx-${Math.random().toString(36).slice(2)}`;
+    if (rec.satoshi) {
+      this.state.ownershipBySatoshi.set(rec.satoshi, { address: toAddress, outpoint: `${txid}:0` });
+    }
     return {
       txid,
       vin: [{ txid: rec.txid, vout: rec.vout }],

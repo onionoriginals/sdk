@@ -38,13 +38,13 @@ describe('validateCredential VC 2.0 support (issue #264)', () => {
     expect(validateCredential(vc)).toBe(true);
   });
 
-  test('still accepts a v1-context credential with issuanceDate', () => {
+  test('rejects a v1-context credential (VCDM 1.1 no longer accepted, issue #300)', () => {
     const vc = {
       ...base,
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       issuanceDate: new Date().toISOString(),
     } as unknown as VerifiableCredential;
-    expect(validateCredential(vc)).toBe(true);
+    expect(validateCredential(vc)).toBe(false);
   });
 
   test('rejects a credential without a v1 or v2 credentials context', () => {

@@ -10,7 +10,7 @@ describe('serialization utils', () => {
   });
 
   test('serialize/deserialize VC roundtrip', () => {
-    const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:peer:abc', issuanceDate: new Date().toISOString(), credentialSubject: { id: 'did:peer:abc' } };
+    const vc: any = { '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:peer:abc', validFrom: new Date().toISOString(), credentialSubject: { id: 'did:peer:abc' } };
     const ser = serializeCredential(vc);
     const round = deserializeCredential(ser);
     expect(round).toEqual(vc);

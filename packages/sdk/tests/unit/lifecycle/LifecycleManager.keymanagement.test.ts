@@ -16,7 +16,7 @@ const resources = [
     type: 'text',
     content: 'hello world',
     contentType: 'text/plain',
-    hash: 'deadbeef'
+    hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
   }
 ];
 
@@ -113,7 +113,7 @@ describe('LifecycleManager Key Management', () => {
     test('should automatically register key when keyStore is provided', async () => {
       const asset = await lifecycleManager.createAsset(resources);
 
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
       expect(asset.did.verificationMethod).toBeDefined();
       expect(asset.did.verificationMethod!.length).toBeGreaterThan(0);
 
@@ -132,7 +132,7 @@ describe('LifecycleManager Key Management', () => {
       const lifecycleWithoutKeyStore = new LifecycleManager(config, didManager, credentialManager);
       const asset = await lifecycleWithoutKeyStore.createAsset(resources);
 
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
       expect(asset.did.verificationMethod).toBeDefined();
     });
   });
@@ -157,11 +157,13 @@ describe('LifecycleManager Key Management', () => {
       const credential = published.credentials[0];
       expect(credential.proof).toBeDefined();
       expect(credential.type).toContain('ResourceMigrated');
-      expect(credential.issuer).toBe(publisherDid); // Publisher DID is the issuer
-      
+      // The peer->webvh migration credential is countersigned by the PREVIOUS
+      // layer's key: issuer = the asset's peer DID (#365).
+      expect(credential.issuer).toBe(asset.id);
+
       const proof = credential.proof as any;
-      // Verification method should be from the publisher DID, not the asset
-      expect(proof.verificationMethod).toContain(publisherDid);
+      // Verification method belongs to the asset's peer DID, not the publisher.
+      expect(proof.verificationMethod).toContain(asset.id);
     });
 
     test('should not add credential when keyStore not provided', async () => {
@@ -219,8 +221,8 @@ describe('LifecycleManager Key Management', () => {
       expect(published.credentials.length).toBe(1);
       const credential = published.credentials[0];
       const proof = credential.proof as any;
-      // Verification method should be from the publisher DID
-      expect(proof.verificationMethod).toContain(publisherDid);
+      // Verification method belongs to the asset's peer DID (#365).
+      expect(proof.verificationMethod).toContain(asset.id);
     });
 
     test('should use correct verification method from DID document', async () => {
@@ -237,63 +239,69 @@ describe('LifecycleManager Key Management', () => {
       const credential = published.credentials[0];
       const proof = credential.proof as any;
 
-      // Verify the VM ID references the publisher DID document
-      expect(proof.verificationMethod).toContain(publisherDid);
+      // The signing VM and issuer are the asset's peer DID (#365).
+      expect(proof.verificationMethod).toContain(asset.id);
       expect(vmId).toContain(asset.id); // Asset's VM ID contains asset ID
-      expect(credential.issuer).toBe(publisherDid); // Publisher is the issuer
+      expect(credential.issuer).toBe(asset.id);
     });
   });
 
   describe('Revoked / compromised verification method selection (regression for plan 030)', () => {
+    // The migration credential is signed by the asset's PEER key (#365), so the
+    // retirement check runs against the PEER DID's document (the signing DID).
     // After a key rotation/recovery, KeyManager places retired keys FIRST and
     // the new active key LAST in the DID document. signWithKeyStore must select
     // the active key, never blindly verificationMethod[0].
-    async function buildRotatedDoc(retireField: 'revoked' | 'compromised') {
+    async function publishWithRotatedPeerDoc(retireField: 'revoked' | 'compromised') {
       const keyManager = new KeyManager();
       const oldKeyPair = await keyManager.generateKeyPair('Ed25519');
       const newKeyPair = await keyManager.generateKeyPair('Ed25519');
 
-      const oldVmId = `${publisherDid}#key-0`;
-      const newVmId = `${publisherDid}#key-1`;
+      // Create the asset first (with a real peer DID) so the rotated document
+      // can be keyed to it — the peer DID is what signWithKeyStore resolves.
+      const rotatedKeyStore = new MockKeyStore();
+      const lm = new LifecycleManager(config, didManager, credentialManager, undefined, rotatedKeyStore);
+      const asset = await lm.createAsset(resources);
+      const peerDid = asset.id;
+
+      const oldVmId = `${peerDid}#key-0`;
+      const newVmId = `${peerDid}#key-1`;
 
       const didDoc = {
         '@context': ['https://www.w3.org/ns/did/v1'],
-        id: publisherDid,
+        id: peerDid,
         verificationMethod: [
           {
             id: oldVmId,
             type: 'Multikey',
-            controller: publisherDid,
+            controller: peerDid,
             publicKeyMultibase: oldKeyPair.publicKey,
             [retireField]: '2024-01-01T00:00:00Z'
           },
           {
             id: newVmId,
             type: 'Multikey',
-            controller: publisherDid,
+            controller: peerDid,
             publicKeyMultibase: newKeyPair.publicKey
           }
         ]
       };
 
-      // Fresh keyStore that holds BOTH keys: the retired key is still present
-      // (it was registered before rotation) alongside the new active key. The
-      // old key is inserted FIRST so a naive "first match" scan would pick it.
-      const rotatedKeyStore = new MockKeyStore();
+      // keyStore holds BOTH keys: the retired key is inserted FIRST (overwriting
+      // createAsset's auto-registered peer key) so a naive "first match" scan
+      // would pick it; the new active key is registered alongside it.
       await rotatedKeyStore.setPrivateKey(oldVmId, oldKeyPair.privateKey);
       await rotatedKeyStore.setPrivateKey(newVmId, newKeyPair.privateKey);
 
-      const lm = new LifecycleManager(config, didManager, credentialManager, undefined, rotatedKeyStore);
-      // Stub resolution to return the rotated document.
+      // Resolve the peer DID (the signing DID) to the rotated document.
       (didManager as any).resolveDID = async () => didDoc;
 
-      return { lm, oldVmId, newVmId };
+      const published = await lm.publishToWeb(asset, publisherDid);
+      return { published, oldVmId, newVmId };
     }
 
     test('should NOT sign with a revoked verificationMethod[0]', async () => {
-      const { lm, oldVmId, newVmId } = await buildRotatedDoc('revoked');
-      const asset = await lm.createAsset(resources);
-      const published = await lm.publishToWeb(asset, publisherDid);
+      const { published, oldVmId, newVmId } = await publishWithRotatedPeerDoc('revoked');
 
       expect(published.credentials.length).toBe(1);
       const proof = published.credentials[0].proof as any;
@@ -302,9 +310,7 @@ describe('LifecycleManager Key Management', () => {
     });
 
     test('should NOT sign with a compromised verificationMethod[0]', async () => {
-      const { lm, oldVmId, newVmId } = await buildRotatedDoc('compromised');
-      const asset = await lm.createAsset(resources);
-      const published = await lm.publishToWeb(asset, publisherDid);
+      const { published, oldVmId, newVmId } = await publishWithRotatedPeerDoc('compromised');
 
       expect(published.credentials.length).toBe(1);
       const proof = published.credentials[0].proof as any;
@@ -313,34 +319,16 @@ describe('LifecycleManager Key Management', () => {
     });
 
     test('should still sign when the only verification method is active (no over-rejection)', async () => {
-      const keyManager = new KeyManager();
-      const activeKeyPair = await keyManager.generateKeyPair('Ed25519');
-      const activeVmId = `${publisherDid}#key-0`;
-
-      const didDoc = {
-        '@context': ['https://www.w3.org/ns/did/v1'],
-        id: publisherDid,
-        verificationMethod: [
-          {
-            id: activeVmId,
-            type: 'Multikey',
-            controller: publisherDid,
-            publicKeyMultibase: activeKeyPair.publicKey
-          }
-        ]
-      };
-
+      // A single active peer VM (createAsset's auto-registered key) must not be
+      // rejected — the credential is signed with the peer DID's key-0.
       const activeKeyStore = new MockKeyStore();
-      await activeKeyStore.setPrivateKey(activeVmId, activeKeyPair.privateKey);
       const lm = new LifecycleManager(config, didManager, credentialManager, undefined, activeKeyStore);
-      (didManager as any).resolveDID = async () => didDoc;
-
       const asset = await lm.createAsset(resources);
       const published = await lm.publishToWeb(asset, publisherDid);
 
       expect(published.credentials.length).toBe(1);
       const proof = published.credentials[0].proof as any;
-      expect(proof.verificationMethod).toBe(activeVmId);
+      expect(proof.verificationMethod).toBe(`${asset.id}#key-0`);
     });
   });
 
@@ -374,16 +362,17 @@ describe('LifecycleManager Key Management', () => {
 
       // Check credential structure
       const credential = published.credentials[0];
-      expect(credential.issuer).toBe(publisherDid); // Publisher is the issuer
+      expect(credential.issuer).toBe(asset.id); // genesis (did:cel) DID is the issuer (#365)
       expect(credential.type).toContain('ResourceMigrated');
-      expect((credential.credentialSubject as any).fromLayer).toBe('did:peer');
+      expect((credential.credentialSubject as any).fromLayer).toBe('did:cel');
       expect((credential.credentialSubject as any).toLayer).toBe('did:webvh');
-      
-      // Verify proof is present with publisher's VM
+      // Subject records the DID the asset migrated TO (the minted webvh DID).
+      expect((credential.credentialSubject as any).migratedTo).toBe(published.bindings!['did:webvh']);
+
+      // Verify proof is present with the peer DID's VM.
       expect(credential.proof).toBeDefined();
       const proof = credential.proof as any;
-      // Verification method should be from publisher DID
-      expect(proof.verificationMethod).toContain(publisherDid);
+      expect(proof.verificationMethod).toContain(asset.id);
     });
   });
 

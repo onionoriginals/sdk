@@ -28,45 +28,32 @@ describe('DID Peer to WebVH Publication Flow', () => {
     await keyStore.setPrivateKey('did:webvh:localhost%3A5000:user#key-0', publisherKey.privateKey);
   });
 
-  test('complete flow: createDIDPeer -> publishToWeb -> resolve resource URL', async () => {
-    // Step 1: Create a DID peer with resources
+  test('complete flow: createAsset -> publishToWeb -> resolve resource URL', async () => {
     const resources: AssetResource[] = [
       {
         id: 'resource-1',
         type: 'data',
         contentType: 'text/plain',
-        hash: 'abc123def456',
+        hash: '86c08faf3a17b36d3922b3b012d0b9188724aef3356336e0fc518c1f04bac2af',
         content: 'Hello, World! This is test content.'
       },
       {
         id: 'resource-2',
         type: 'metadata',
         contentType: 'application/json',
-        hash: 'aea789ab',
+        hash: '84560ef4bdb3414957ce03b69503ff86804fed1ba7e71cd76008134b35c737fb',
         content: JSON.stringify({ title: 'Test Asset', version: '1.0' })
       }
     ];
 
-    console.log('\n🔧 Step 1: Creating DID peer...');
-    const { didDocument: peerDoc, keyPair } = await sdk.did.createDIDPeer(resources, true);
-    
-    // Verify DID peer was created
-    expect(peerDoc).toBeDefined();
-    expect(peerDoc.id).toMatch(/^did:peer:/);
-    expect(keyPair).toBeDefined();
-    expect(keyPair.publicKey).toBeTruthy();
-    expect(keyPair.privateKey).toBeTruthy();
-    
-    console.log(`✅ DID Peer created: ${peerDoc.id}`);
-    console.log(`   Public Key: ${keyPair.publicKey.substring(0, 20)}...`);
-
-    // Step 2: Create an asset using the DID peer
-    console.log('\n🔧 Step 2: Creating asset with DID peer...');
+    // Step 1: Create an asset (mints a did:cel genesis; did:peer creation was
+    // removed in the did:peer purge, did:cel Phase 4·5/5).
+    console.log('\n🔧 Step 1: Creating asset (did:cel genesis)...');
     const asset = await sdk.lifecycle.createAsset(resources);
     
     expect(asset).toBeDefined();
-    expect(asset.id).toMatch(/^did:peer:/);
-    expect(asset.currentLayer).toBe('did:peer');
+    expect(asset.id).toMatch(/^did:cel:/);
+    expect(asset.currentLayer).toBe('did:cel');
     expect(asset.resources).toHaveLength(2);
     
     console.log(`✅ Asset created: ${asset.id}`);
@@ -84,7 +71,8 @@ describe('DID Peer to WebVH Publication Flow', () => {
     const bindings = (publishedAsset as any).bindings;
     expect(bindings).toBeDefined();
     expect(bindings['did:webvh']).toBeDefined();
-    expect(bindings['did:webvh']).toMatch(new RegExp(`^did:webvh:${domain.replace(':', '%3A')}:`));
+    // Minted DID is did:webvh:{SCID}:{domain}[:slug] — SCID segment now precedes the domain.
+    expect(bindings['did:webvh']).toMatch(new RegExp(`^did:webvh:[^:]+:${domain.replace(':', '%3A')}`));
     
     const webvhDid = bindings['did:webvh'];
     console.log(`✅ Asset published to web!`);
@@ -117,7 +105,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
     
     const webvhMigration = provenance.migrations.find((m: any) => m.to === 'did:webvh');
     expect(webvhMigration).toBeDefined();
-    expect(webvhMigration.from).toBe('did:peer');
+    expect(webvhMigration.from).toBe('did:cel');
     expect(webvhMigration.to).toBe('did:webvh');
     expect(webvhMigration.timestamp).toBeDefined();
     
@@ -186,7 +174,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'res-format-test',
         type: 'data',
         contentType: 'application/octet-stream',
-        hash: 'e5a1234560',
+        hash: '81303f93ff97cf116ed9b3343e7b5029c5ed9aa3151f9be8adfa0fd53dfc764b',
         content: 'test data for URL format verification'
       }
     ];
@@ -221,7 +209,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'binding-test',
         type: 'data',
         contentType: 'text/plain',
-        hash: 'b1d1234560',
+        hash: '0508c90ba760ab4f833db3263ec28084a2ff11ed9b78b3069b6100366c5ca7fa',
         content: 'binding test content'
       }
     ];
@@ -232,18 +220,18 @@ describe('DID Peer to WebVH Publication Flow', () => {
     const published = await sdk.lifecycle.publishToWeb(asset, domain);
     const bindings = (published as any).bindings;
 
-    // Should have both peer and webvh bindings
-    expect(bindings['did:peer']).toBeDefined();
+    // Should have both source (did:cel) and webvh bindings
+    expect(bindings['did:cel']).toBeDefined();
     expect(bindings['did:webvh']).toBeDefined();
-    
-    // Peer binding should match original asset ID
-    expect(bindings['did:peer']).toBe(originalId);
-    
+
+    // Source binding should match original asset ID (did:cel genesis)
+    expect(bindings['did:cel']).toBe(originalId);
+
     // WebVH binding should be a valid did:webvh
     expect(bindings['did:webvh']).toMatch(/^did:webvh:/);
-    
+
     console.log(`\n✅ Bindings verified:`);
-    console.log(`   did:peer: ${bindings['did:peer']}`);
+    console.log(`   did:cel: ${bindings['did:cel']}`);
     console.log(`   did:webvh: ${bindings['did:webvh']}`);
     console.log(`   Previous DID: ${(published as any).previousDid}`);
   });
@@ -254,28 +242,28 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'multi-1',
         type: 'data',
         contentType: 'text/plain',
-        hash: 'a51001',
+        hash: 'd1988cd3019824f075f61677e1a6f54b16035868488e4051757dde53adeef80f',
         content: 'content 1'
       },
       {
         id: 'multi-2',
         type: 'data',
         contentType: 'application/json',
-        hash: 'a51002',
+        hash: '9724c1e20e6e3e4d7f57ed25f9d4efb006e508590d528c90da597f6a775c13e5',
         content: '{"key": "value"}'
       },
       {
         id: 'multi-3',
         type: 'metadata',
         contentType: 'text/html',
-        hash: 'a51003',
+        hash: '5f1abb282216d522dc687b9b43746439b6f1702f800316a47cb306396fe8039c',
         content: '<html><body>test</body></html>'
       },
       {
         id: 'multi-4',
         type: 'data',
         contentType: 'image/svg+xml',
-        hash: 'a51004',
+        hash: 'b12e0d83ce2357d80b89c57694814d0a3abdaf8c40724f2049af8b7f01b7812b',
         content: '<svg></svg>'
       }
     ];
@@ -305,7 +293,7 @@ describe('DID Peer to WebVH Publication Flow', () => {
         id: 'preserve-test',
         type: 'data',
         contentType: 'text/markdown',
-        hash: 'e5e1ea00',
+        hash: 'cc56914595e92466c95951c3f888fbf7f9fc43b0d13bcd2e9bcb4ecf4993008c',
         content: '# Test Document\nThis should be preserved.'
       }
     ];
@@ -336,11 +324,11 @@ describe('DID Peer to WebVH Publication Flow', () => {
     
     // Verify layer changed
     expect(published.currentLayer).toBe('did:webvh');
-    expect(originalLayer).toBe('did:peer');
+    expect(originalLayer).toBe('did:cel');
     
     // Verify bindings preserve original ID
     const bindings = (published as any).bindings;
-    expect(bindings['did:peer']).toBe(originalId);
+    expect(bindings['did:cel']).toBe(originalId);
     
     console.log(`\n✅ Data preservation verified:`);
     console.log(`   All resource fields preserved: true`);

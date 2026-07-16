@@ -232,15 +232,6 @@ describe('BitcoinManager integration with providers', () => {
     await expect(sdk.bitcoin.validateBTCODID('did:btco:regtest:123456789')).resolves.toBe(false);
   });
 
-  test('preventFrontRunning returns false when multiple inscriptions exist on same satoshi', async () => {
-    const provider = createMockProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
-    await sdk.bitcoin.inscribeData(Buffer.from('payload1'), 'text/plain');
-    await sdk.bitcoin.inscribeData(Buffer.from('payload2'), 'text/plain');
-    const canProceed = await sdk.bitcoin.preventFrontRunning('123456789');
-    expect(canProceed).toBe(false);
-  });
-
   test('resolveFeeRate honors an explicitly provided fee rate over estimators', async () => {
     const provider = createMockProvider();
     const sdk = OriginalsSDK.create({

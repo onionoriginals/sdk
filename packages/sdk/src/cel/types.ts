@@ -23,6 +23,15 @@ export interface WitnessProof extends DataIntegrityProof {
  * Used for large resources that shouldn't be embedded in the log
  */
 export interface ExternalReference {
+  /**
+   * Optional logical resource id (AssetResource.id). When present at genesis it
+   * BINDS this digest to a specific resourceId, so a resource's first on-log
+   * `update` must chain from ITS OWN genesis digest — not any genesis digest
+   * (#401). Omitted by legacy/hand-built geneses, which fall back to unkeyed
+   * matching. Additive: it does not affect the digest, only the did:cel
+   * derivation of assets that include it.
+   */
+  id?: string;
   /** Optional URLs where the data can be retrieved */
   url?: string[];
   /** Optional MIME type of the data */
@@ -34,7 +43,7 @@ export interface ExternalReference {
 /**
  * Event type for log entries
  */
-export type EventType = 'create' | 'update' | 'deactivate';
+export type EventType = 'create' | 'update' | 'deactivate' | 'migrate' | 'transfer' | 'rotateKey';
 
 /**
  * Log Entry - a single event in the cryptographic event log
@@ -89,6 +98,14 @@ export interface EventVerification {
    * when the event carries no witness proofs.
    */
   witnessProofs?: { verificationMethod: string; verified: boolean }[];
+  /**
+   * Present when this rotateKey event was accepted via the NON-COOPERATIVE
+   * path (#366): its controller proof was not authorized by the current key
+   * set, but a fully verified reinscription on the log's anchored satoshi
+   * attested the authority hand-off. Carries the rotation's inscriptionId
+   * (the new on-sat authority anchor). Absent for cooperative rotations.
+   */
+  nonCooperativeRotation?: { inscriptionId: string };
   /** Any errors encountered during verification */
   errors: string[];
 }
@@ -103,6 +120,13 @@ export interface VerificationResult {
   errors: string[];
   /** Per-event verification details */
   events: EventVerification[];
+  /**
+   * The asset DID this log backs, when derivable from the genesis event:
+   * the DERIVED `did:cel:<digest>` for new-shape (`data.controller`) logs, or
+   * the declared `data.did` for legacy logs. Absent for shapeless logs.
+   * Informational: it is a trust statement only when `verified` is true.
+   */
+  assetDid?: string;
 }
 
 /**
@@ -111,7 +135,11 @@ export interface VerificationResult {
 export interface CreateOptions {
   /** Signer function that produces a proof */
   signer: (data: unknown) => Promise<DataIntegrityProof>;
-  /** The verification method DID URL */
+  /**
+   * The verification method DID URL — advisory: the recorded VM comes from
+   * the signer's proof; managers use this only to construct fallback VM
+   * strings.
+   */
   verificationMethod: string;
   /** The proof purpose (defaults to "assertionMethod") */
   proofPurpose?: string;
@@ -134,12 +162,42 @@ export type DeactivateOptions = CreateOptions;
 export interface OrdinalsLookup {
   getInscriptionById(id: string): Promise<{
     inscriptionId: string;
-    content: Buffer;
+    // Optional: deferred-content providers may not echo built content back.
+    content?: Buffer;
     contentType: string;
     txid?: string;
     satoshi?: string;
+    blockHeight?: number;
+    // Inscription CBOR metadata (#407 phase 2): carries `{ didDocument, celLog }`
+    // for anchoring inscriptions whose content is the asset media.
+    metadata?: Record<string, unknown>;
   } | null>;
+  /**
+   * MUST return inscription ids oldest-first (on-chain inscription order).
+   * The non-cooperative rotation rule orders inscriptions primarily by their
+   * confirmed block heights (via getInscriptionById, provider-order-
+   * independent) and trusts this list order only as a same-block tiebreak —
+   * a provider violating the contract can therefore no longer make that
+   * check accept a pre-anchor inscription from an earlier block, but
+   * same-block tiebreaks and the head-freshness check still rely on it.
+   * Providers whose getInscriptionById results omit `blockHeight` cannot
+   * prove ordering at all: non-cooperative rotations then fail closed.
+   */
   getInscriptionsBySatoshi?(satoshi: string): Promise<Array<{ inscriptionId: string }>>;
+  /**
+   * Enumerate every on-chain btco DID-doc anchoring whose `alsoKnownAs`
+   * back-links this did:cel. `blockHeight` is the canonical ordering signal
+   * (first-anchor-wins). Required for btco-anchored did:cel verification: a
+   * btco log already needs a provider, so a provider that cannot enumerate
+   * fails uniqueness CLOSED (`UNIQUENESS_UNVERIFIABLE`). Multiple inscriptions
+   * on the SAME sat (migrate + rotation reinscriptions) are expected and do
+   * not compete — only a different, earlier sat wins.
+   */
+  getAnchoringsForDidCel?(didCel: string): Promise<Array<{
+    satoshi: string;
+    inscriptionId: string;
+    blockHeight?: number;
+  }>>;
 }
 
 /**
@@ -165,6 +223,31 @@ export interface VerifyOptions {
    * `verifier` path, where the caller owns proof semantics.)
    */
   ordinalsProvider?: OrdinalsLookup;
+  /**
+   * When set, the log must back this exact asset DID or verification fails.
+   * did:cel expected DIDs are compared via suffix derivation
+   * (`didCelMatchesLog`); legacy DIDs by string equality against `data.did`.
+   * Ignored on the custom `verifier` path (which owns proof semantics).
+   */
+  expectedDid?: string;
+  /**
+   * Truncated-log defense (#366). Default FALSE — pure-algorithm semantics are
+   * preserved for existing callers. When TRUE and the walk anchored the log to
+   * a satoshi, the NEWEST OriginalsCelAnchor DID document on that sat must
+   * commit (via `headDigestMultibase`) to the chain digest of SOME event
+   * PRESENT in the log; otherwise verification fails with a `STALE_LOG`-coded
+   * error. This closes the seller-hands-buyer-a-pre-rotation-prefix attack: the
+   * prefix verifies on its own, but the on-chain head betrays the omission.
+   *
+   * The rule is present-in-log, not is-the-head — a legitimate holder may have
+   * appended events not yet re-inscribed, so a mid-log match passes. Fail-closed
+   * on inability to check (no provider, no enumeration capability, a throwing
+   * lookup, or no anchor doc on the sat): the caller ASKED for freshness. A log
+   * that never anchored to a sat has nothing to be fresh against — the flag is a
+   * no-op. Incompatible with a custom `verifier` (which skips the authority walk
+   * head freshness is checked against): requesting both fails closed.
+   */
+  checkHeadFreshness?: boolean;
 }
 
 /**
@@ -181,6 +264,8 @@ export interface AssetState {
   resources: ExternalReference[];
   /** Creator DID */
   creator?: string;
+  /** Current controller key DID: genesis `controller`, handed off by rotateKey */
+  controller?: string;
   /** Creation timestamp */
   createdAt?: string;
   /** Last update timestamp */

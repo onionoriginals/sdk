@@ -3,7 +3,7 @@
  * 
  * This comprehensive example demonstrates the complete lifecycle of an Original:
  * 
- * 1. Create a draft (did:peer) - Private, offline creation
+ * 1. Create a draft (did:cel) - Private, offline creation
  * 2. Validate and estimate costs
  * 3. Publish to web (did:webvh) - Public discovery
  * 4. Inscribe on Bitcoin (did:btco) - Permanent ownership
@@ -118,10 +118,10 @@ Date: ${new Date().toISOString()}
 }
 
 /**
- * Step 2: Create a draft asset (did:peer layer)
+ * Step 2: Create a draft asset (did:cel genesis layer)
  */
 async function createDraft(sdk: OriginalsSDK): Promise<OriginalsAsset> {
-  console.log('\n📝 STEP 2: Creating Draft Asset (did:peer)\n');
+  console.log('\n📝 STEP 2: Creating Draft Asset (did:cel)\n');
 
   const content = `
 {
@@ -319,15 +319,8 @@ async function transferOwnership(sdk: OriginalsSDK, asset: OriginalsAsset): Prom
   console.log(`  Transaction ID: ${tx.txid}`);
   console.log(`  New Owner: ${newOwner}`);
   console.log(`  Fee: ${tx.fee} sats`);
-
-  // Check final provenance
-  const provenance = asset.getProvenance();
-  console.log(`\n  Transfer history: ${provenance.transfers.length} transfer(s)`);
-  provenance.transfers.forEach((transfer, i) => {
-    console.log(`    ${i + 1}. ${transfer.from.substring(0, 20)}... → ${transfer.to.substring(0, 20)}...`);
-    console.log(`       TX: ${transfer.transactionId}`);
-    console.log(`       At: ${transfer.timestamp}`);
-  });
+  // Ownership history lives on the sat's UTXO chain (Bitcoin), not the CEL —
+  // a transfer is a pure sat move and appends nothing to provenance.
 }
 
 /**
@@ -344,7 +337,6 @@ function viewProvenance(asset: OriginalsAsset): void {
   console.log(`  Creator: ${summary.creator.substring(0, 40)}...`);
   console.log(`  Current Layer: ${summary.currentLayer}`);
   console.log(`  Migration Count: ${summary.migrationCount}`);
-  console.log(`  Transfer Count: ${summary.transferCount}`);
   console.log(`  Last Activity: ${summary.lastActivity}`);
 
   console.log('\nMigration History:');
@@ -359,17 +351,8 @@ function viewProvenance(asset: OriginalsAsset): void {
     }
   });
 
-  console.log('\nTransfer History:');
-  if (provenance.transfers.length === 0) {
-    console.log('  No transfers recorded');
-  } else {
-    provenance.transfers.forEach((transfer, i) => {
-      console.log(`  ${i + 1}. ${transfer.timestamp}`);
-      console.log(`     From: ${transfer.from}`);
-      console.log(`     To: ${transfer.to}`);
-      console.log(`     TX: ${transfer.transactionId}`);
-    });
-  }
+  // Ownership history is the sat's UTXO chain on Bitcoin, not the CEL — there
+  // is no transfer history in provenance to print.
 
   console.log('\nResource Updates:');
   if (provenance.resourceUpdates.length === 0) {
@@ -458,7 +441,7 @@ async function main(): Promise<void> {
   console.log('╔════════════════════════════════════════════════════════════════╗');
   console.log('║           ORIGINALS SDK - FULL LIFECYCLE FLOW                 ║');
   console.log('║                                                                ║');
-  console.log('║   did:peer → did:webvh → did:btco → Transfer                  ║');
+  console.log('║   did:cel → did:webvh → did:btco → Transfer                  ║');
   console.log('╚════════════════════════════════════════════════════════════════╝');
 
   try {

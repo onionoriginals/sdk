@@ -35,35 +35,17 @@ describe('LifecycleManager.transferOwnership comprehensive', () => {
     expect(tx.txid.length).toBeGreaterThan(0);
   });
 
-  test('records transfer in provenance', async () => {
+  test('transfer is a pure sat move: provenance is untouched', async () => {
     const sdk = createSDK();
     const asset = createBtcoAsset();
+    const before = asset.getProvenance();
+    const migrationsBefore = before.migrations.length;
     await sdk.lifecycle.transferOwnership(asset, ADDR_A);
 
+    // Ownership history is the sat's UTXO chain on Bitcoin, not the CEL — the
+    // transfer appends nothing to provenance.
     const prov = asset.getProvenance();
-    expect(prov.transfers.length).toBe(1);
-    expect(prov.transfers[0].to).toBe(ADDR_A);
-    expect(prov.transfers[0].transactionId).toBeTruthy();
-  });
-
-  test('provenance transfer includes from address', async () => {
-    const sdk = createSDK();
-    const asset = createBtcoAsset();
-    await sdk.lifecycle.transferOwnership(asset, ADDR_A);
-
-    const prov = asset.getProvenance();
-    expect(prov.transfers[0].from).toBe('did:btco:42');
-  });
-
-  test('provenance transfer includes timestamp', async () => {
-    const sdk = createSDK();
-    const asset = createBtcoAsset();
-    await sdk.lifecycle.transferOwnership(asset, ADDR_A);
-
-    const prov = asset.getProvenance();
-    expect(prov.transfers[0].timestamp).toBeTruthy();
-    // Should be valid ISO date
-    expect(new Date(prov.transfers[0].timestamp).getTime()).not.toBeNaN();
+    expect(prov.migrations.length).toBe(migrationsBefore);
   });
 
   test('asset remains on did:btco layer after transfer', async () => {
@@ -92,34 +74,21 @@ describe('LifecycleManager.transferOwnership comprehensive', () => {
     const tx1 = await sdk.lifecycle.transferOwnership(asset, ADDR_A);
     const tx2 = await sdk.lifecycle.transferOwnership(asset, ADDR_B);
 
-    const prov = asset.getProvenance();
-    expect(prov.transfers.length).toBe(2);
-    expect(prov.transfers[0].to).toBe(ADDR_A);
-    expect(prov.transfers[1].to).toBe(ADDR_B);
+    // Each transfer is an independent sat move returning its own txid.
     expect(typeof tx1.txid).toBe('string');
     expect(typeof tx2.txid).toBe('string');
-  });
-
-  test('provenance chain is ordered chronologically', async () => {
-    const sdk = createSDK();
-    const asset = createBtcoAsset();
-
-    await sdk.lifecycle.transferOwnership(asset, ADDR_A);
-    await sdk.lifecycle.transferOwnership(asset, ADDR_B);
-
-    const prov = asset.getProvenance();
-    const t1 = new Date(prov.transfers[0].timestamp).getTime();
-    const t2 = new Date(prov.transfers[1].timestamp).getTime();
-    expect(t2).toBeGreaterThanOrEqual(t1);
+    expect(asset.getProvenance().migrations.length).toBe(0);
   });
 
   // --- Layer validation ---
 
-  test('throws if asset is on did:peer', async () => {
+  test('throws if asset is on did:cel (genesis)', async () => {
+    // did:cel is the genesis layer (did:peer purge, Phase 4·5/5); a genesis
+    // asset is not yet inscribed and cannot be transferred.
     const sdk = createSDK();
     const asset = new OriginalsAsset(
       [{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'h' }],
-      { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:z6MkTest1' } as any,
+      { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:z6MkTest1' } as any,
       []
     );
     await expect(
@@ -211,13 +180,10 @@ describe('LifecycleManager.transferOwnership comprehensive', () => {
 
     const prov = asset.getProvenance();
     expect(prov.migrations.length).toBeGreaterThanOrEqual(1);
-    expect(prov.transfers.length).toBe(1);
 
-    // Migration should show webvh -> btco
+    // Migration should show webvh -> btco. The transfer is a pure sat move and
+    // adds nothing to provenance (ownership history is the sat's UTXO chain).
     const lastMigration = prov.migrations[prov.migrations.length - 1];
     expect(lastMigration.to).toBe('did:btco');
-
-    // Transfer should reference the new owner
-    expect(prov.transfers[0].to).toBe(ADDR_A);
   });
 });

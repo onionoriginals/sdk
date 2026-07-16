@@ -43,8 +43,8 @@ describe('Playground REPL', () => {
     const output = await runRepl(['create', 'exit']);
     expect(output).toContain('Created "Asset 1"');
     expect(output).toContain('Alias:  a1');
-    expect(output).toContain('did:peer:');
-    expect(output).toContain('Layer:  did:peer');
+    expect(output).toContain('did:cel:');
+    expect(output).toContain('Layer:  did:cel');
   });
 
   test('creates an asset with custom name', async () => {
@@ -65,7 +65,7 @@ describe('Playground REPL', () => {
     expect(output).toContain('Session Assets:');
     expect(output).toContain('a1');
     expect(output).toContain('a2');
-    expect(output).toContain('did:peer');
+    expect(output).toContain('did:cel');
   });
 
   test('shows empty assets message', async () => {
@@ -76,7 +76,7 @@ describe('Playground REPL', () => {
   test('inspects an asset', async () => {
     const output = await runRepl(['create InspectMe', 'inspect a1', 'exit']);
     expect(output).toContain('Asset: a1');
-    expect(output).toContain('Layer:         did:peer');
+    expect(output).toContain('Layer:         did:cel');
     expect(output).toContain('Resources:     1');
     expect(output).toContain('Provenance:');
     expect(output).toContain('Migrations:  0');
@@ -94,13 +94,8 @@ describe('Playground REPL', () => {
     expect(output).toContain('sat/vB');
   });
 
-  test('creates a standalone did:peer', async () => {
-    const output = await runRepl(['did-peer TestPeer', 'exit']);
-    expect(output).toContain('Created did:peer');
-    expect(output).toContain('DID: did:peer:');
-    expect(output).toContain('Document:');
-    expect(output).toContain('verificationMethod');
-  });
+  // The standalone `did-peer` REPL command was removed with the did:peer purge
+  // (did:cel Phase 4·5/5); did:cel genesis is created via `create` (covered above).
 
   test('publishes an asset to web', async () => {
     const output = await runRepl(['create', 'publish a1', 'exit']);

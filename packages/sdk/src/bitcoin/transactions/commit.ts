@@ -13,8 +13,9 @@ import { schnorr } from '@noble/curves/secp256k1.js';
 import { Utxo, ResourceUtxo } from '../../types/bitcoin.js';
 import { calculateFee } from '../fee-calculation.js';
 import { selectUtxos, SimpleUtxoSelectionOptions } from '../utxo-selection.js';
-import { isSegwitScriptPubKey } from '../utxo.js';
+import { isSegwitScriptPubKey, inputVBytesForScriptPubKey, outputVBytesForAddress } from '../utxo.js';
 import { validateBitcoinAddress } from '../../utils/bitcoin-address.js';
+import { scriptPubKeyForAddress } from '../transfer.js';
 
 // Define minimum dust limit (satoshis)
 const MIN_DUST_LIMIT = 546;
@@ -117,22 +118,171 @@ export interface CommitTransactionResult {
 }
 
 /**
- * Estimates the size of a commit transaction
+ * Parameters for creating a reveal transaction
+ */
+export interface RevealTransactionParams {
+  /** txid of the broadcast/signed commit transaction */
+  commitTxId: string;
+  /** vout of the inscription-bearing commit output (0) */
+  commitVout: number;
+  /** value (sats) of that commit output */
+  commitAmount: number;
+  /** hex, from CommitTransactionResult */
+  revealPrivateKey: string;
+  /** hex, from CommitTransactionResult (taproot internal / reveal key) */
+  revealPublicKey: string;
+  /** inscription leaf from the commit result */
+  inscriptionScript: { script: Uint8Array; controlBlock: Uint8Array; leafVersion: number };
+  /** where the inscribed sat (postage) goes */
+  destinationAddress: string;
+  /** sats/vB */
+  feeRate: number;
+  /** Bitcoin network configuration */
+  network: BitcoinNetwork;
+}
+
+/**
+ * Result of the reveal transaction creation
+ */
+export interface RevealTransactionResult {
+  /** fully-signed, finalized reveal tx hex */
+  revealTxHex: string;
+  revealTxId: string;
+  /** `${revealTxId}i0` */
+  inscriptionId: string;
+  /** commitAmount - reveal fee (>= dust) */
+  postageValue: number;
+}
+
+/**
+ * Builds, signs and finalizes the reveal transaction: a taproot script-path
+ * spend of the commit output that carries the inscription envelope. The reveal
+ * is self-signed by the ephemeral `revealPrivateKey` from the commit result —
+ * no caller signature is involved (only the commit funding inputs need that).
  *
- * @param inputCount - Number of transaction inputs
+ * The committed P2TR output is reconstructed exactly as createCommitTransaction
+ * built it: same reveal internal key + single-leaf inscription tree
+ * (`{ type: 'tr', script }`) + the `OutOrdinalReveal` custom script. That yields
+ * an identical scriptPubKey, tapInternalKey and tapLeafScript, so the payment
+ * object can be spread straight into the spending input.
+ *
+ * @param params - Parameters for the reveal transaction
+ * @returns The signed reveal tx hex, txid, inscription id and postage value
+ * @throws Error if the destination address is wrong-network or the commit
+ *   amount cannot cover the reveal fee plus a dust postage output
+ */
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function createRevealTransaction(
+  params: RevealTransactionParams
+): Promise<RevealTransactionResult> {
+  const {
+    commitTxId,
+    commitVout,
+    commitAmount,
+    revealPrivateKey,
+    revealPublicKey,
+    inscriptionScript,
+    destinationAddress,
+    feeRate,
+    network
+  } = params;
+
+  // Fail fast on a wrong-network destination before any keygen / signing work.
+  // validateBitcoinAddress accepts 'mainnet' | 'regtest' | 'signet'; testnet
+  // shares signet's prefix (mirrors createCommitTransaction).
+  const validateNetwork: 'mainnet' | 'regtest' | 'signet' =
+    network === 'testnet' ? 'signet' : network;
+  validateBitcoinAddress(destinationAddress, validateNetwork);
+
+  if (feeRate <= 0) {
+    throw new Error(`Invalid fee rate: ${feeRate}`);
+  }
+
+  const leafScript = inscriptionScript.script;
+  const controlBlock = inscriptionScript.controlBlock;
+  const leafVersion = inscriptionScript.leafVersion ?? 0xc0;
+
+  // Reveal fee from the real serialized leaf + control block (witness-discounted).
+  const revealFee = Number(calculateFee(estimateRevealTxSize(leafScript.length, controlBlock.length), feeRate));
+  const postageValue = commitAmount - revealFee;
+  if (postageValue < MIN_DUST_LIMIT) {
+    throw new Error(
+      `Commit amount ${commitAmount} cannot cover reveal fee ${revealFee} + dust postage ${MIN_DUST_LIMIT}.`
+    );
+  }
+
+  const scureNetwork = getScureNetwork(network);
+  const internalKey = Buffer.from(revealPublicKey, 'hex');
+  const privKey = Buffer.from(revealPrivateKey, 'hex');
+
+  // Reconstruct the committed P2TR payment from the single-leaf inscription
+  // tree. p2tr_ord_reveal returns `{ type: 'tr', script }`, and the commit
+  // builder stored that leaf script — so this rebuilds an identical payment
+  // (scriptPubKey, tapLeafScript) without re-deriving it.
+  const commitP2tr = btc.p2tr(
+    internalKey,
+    { type: 'tr', script: leafScript },
+    scureNetwork,
+    false,
+    [ordinals.OutOrdinalReveal]
+  );
+
+  // customScripts must be enabled so finalize() knows how to assemble the
+  // tr_ord_reveal witness (signature + envelope script + control block).
+  const tx = new btc.Transaction({ customScripts: [ordinals.OutOrdinalReveal] });
+  // Force a SCRIPT-PATH spend: feed ONLY witnessUtxo + tapLeafScript, never
+  // tapInternalKey. If the internal key is present, @scure signs the key-path
+  // too (setting tapKeySig) and finalize() prefers it — emitting a 1-item
+  // key-path witness that moves the sat but never reveals the inscription.
+  // With just tapLeafScript, sign() produces only tapScriptSig and finalize()
+  // takes the OutOrdinalReveal branch → 3-item envelope witness.
+  tx.addInput({
+    txid: commitTxId,
+    index: commitVout,
+    witnessUtxo: { script: commitP2tr.script, amount: BigInt(commitAmount) },
+    tapLeafScript: commitP2tr.tapLeafScript
+  });
+
+  tx.addOutputAddress(destinationAddress, BigInt(postageValue), scureNetwork);
+
+  // Deterministic (zero) aux randomness for the schnorr signature.
+  tx.sign(privKey, undefined, new Uint8Array(32));
+  tx.finalize();
+
+  const revealTxHex = Buffer.from(tx.extract()).toString('hex');
+  const revealTxId = tx.id;
+
+  return {
+    revealTxHex,
+    revealTxId,
+    inscriptionId: `${revealTxId}i0`,
+    postageValue
+  };
+}
+
+/**
+ * Estimates the size of a commit transaction.
+ *
+ * Inputs are sized by script class (P2WPKH 68 vB, P2TR 57.5 vB, P2WSH a
+ * conservative 120 vB) rather than assuming P2WPKH for every segwit input —
+ * a 2-of-3 P2WSH input is ~105 vB, so the old flat 68 vB built commits that
+ * paid below the requested fee rate and could stall in the mempool with the
+ * reveal key stranded in memory (issue #344). When uncertain, overestimate.
+ *
+ * @param inputs - The UTXOs funding the transaction
  * @param outputCount - Number of transaction outputs (including commit and change)
+ * @param changeOutputVBytes - Size of one change output, per the change address's script class
  * @returns Estimated transaction size in virtual bytes
  */
-function estimateCommitTxSize(inputCount: number, outputCount: number): number {
+function estimateCommitTxSize(inputs: Utxo[], outputCount: number, changeOutputVBytes: number): number {
   // Transaction overhead
   const overhead = 10.5;
 
-  // P2WPKH inputs (assuming most common case)
-  const inputSize = 68 * inputCount;
+  const inputSize = inputs.reduce((sum, u) => sum + inputVBytesForScriptPubKey(u.scriptPubKey), 0);
 
-  // P2TR output for commit and P2WPKH for change
+  // P2TR output for commit; change output sized by the change address type
   const commitOutputSize = 43; // P2TR output
-  const changeOutputSize = outputCount > 1 ? 31 * (outputCount - 1) : 0; // P2WPKH outputs for change
+  const changeOutputSize = outputCount > 1 ? changeOutputVBytes * (outputCount - 1) : 0;
 
   return Math.ceil(overhead + inputSize + commitOutputSize + changeOutputSize);
 }
@@ -414,8 +564,17 @@ export async function createCommitTransaction(
   let estimatedFee = 0;
   let iteration = 0;
 
-  // Start with initial estimate (1 input, 2 outputs)
-  let targetAmount = commitOutputValue + Number(calculateFee(estimateCommitTxSize(1, 2), feeRate));
+  // Change output sized by the change address's script class (P2WPKH 31 vB,
+  // P2TR/P2WSH 43 vB) instead of a flat P2WPKH assumption.
+  const changeOutputVBytes = outputVBytesForAddress(changeAddress);
+
+  // Start with initial estimate (1 input, 2 outputs). The input is not known
+  // yet, so seed with the widest input class present among the candidates —
+  // a conservative seed only affects the first selection pass; the loop
+  // below re-estimates from the actually selected UTXOs.
+  const widestInputVBytes = Math.max(...validUtxos.map(u => inputVBytesForScriptPubKey(u.scriptPubKey)));
+  const initialVBytes = Math.ceil(10.5 + widestInputVBytes + 43 + changeOutputVBytes);
+  let targetAmount = commitOutputValue + Number(calculateFee(initialVBytes, feeRate));
 
   while (iteration < MAX_SELECTION_ITERATIONS) {
     iteration++;
@@ -437,10 +596,10 @@ export async function createCommitTransaction(
       );
     }
 
-    // Calculate accurate fee based on actual selected input count
-    // Assume 2 outputs (commit + change) for now - we'll adjust later if no change
-    const actualInputCount = selectedUtxos.length;
-    const estimatedVBytes = estimateCommitTxSize(actualInputCount, 2);
+    // Calculate accurate fee based on the actually selected inputs (sized by
+    // script class). Assume 2 outputs (commit + change) for now - we'll
+    // adjust later if no change
+    const estimatedVBytes = estimateCommitTxSize(selectedUtxos, 2, changeOutputVBytes);
     estimatedFee = Number(calculateFee(estimatedVBytes, feeRate));
 
     // Check if we need to account for no change output
@@ -450,7 +609,7 @@ export async function createCommitTransaction(
     if (potentialChange < MIN_DUST_LIMIT) {
       // No change output, recalculate fee with 1 output
       finalOutputCount = 1;
-      const adjustedVBytes = estimateCommitTxSize(actualInputCount, finalOutputCount);
+      const adjustedVBytes = estimateCommitTxSize(selectedUtxos, finalOutputCount, changeOutputVBytes);
       estimatedFee = Number(calculateFee(adjustedVBytes, feeRate));
     }
 
@@ -521,7 +680,6 @@ export async function createCommitTransaction(
   }
 
   // Step 8: Calculate final fee based on actual transaction structure
-  const actualInputCount = tx.inputsLength;
 
   // Determine if we'll have a change output
   const preliminaryChange = totalInputValue - commitOutputValue - estimatedFee;
@@ -529,7 +687,7 @@ export async function createCommitTransaction(
   const finalOutputCount = willHaveChange ? 2 : 1;
 
   // Calculate final fee with correct output count
-  const finalVBytes = estimateCommitTxSize(actualInputCount, finalOutputCount);
+  const finalVBytes = estimateCommitTxSize(selectedUtxos, finalOutputCount, changeOutputVBytes);
   const finalFee = Number(calculateFee(finalVBytes, feeRate));
 
   // CRITICAL: Final validation that inputs cover outputs + fees
@@ -552,13 +710,19 @@ export async function createCommitTransaction(
     scureNetwork
   );
 
-  // Step 10: Add change output if above dust limit
+  // Step 10: Add change output if above dust limit. The change script is
+  // derived via scriptPubKeyForAddress rather than tx.addOutputAddress:
+  // validateBitcoinAddress deliberately accepts testnet-format (`tb1…`)
+  // change addresses on regtest, but addOutputAddress decodes strictly
+  // against `bcrt` and would throw a cryptic @scure error here — after all
+  // the keygen/selection/fee work the early validation exists to protect
+  // (issue #351). scriptPubKeyForAddress carries the same regtest→testnet
+  // decode fallback transfer.ts already uses.
   if (finalChange >= MIN_DUST_LIMIT) {
-    tx.addOutputAddress(
-      changeAddress,
-      BigInt(finalChange),
-      scureNetwork
-    );
+    tx.addOutput({
+      script: Buffer.from(scriptPubKeyForAddress(changeAddress, network), 'hex'),
+      amount: BigInt(finalChange)
+    });
   } else if (finalChange > 0) {
     // If change is below dust limit, it's effectively added to the fee
     console.log(

@@ -14,7 +14,7 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
   };
 
   const createAssetAtLayer = (layer: string, id?: string) => {
-    const didId = id ?? (layer === 'did:peer' ? 'did:peer:z6MkTestPeer1' : 'did:webvh:example.com:asset1');
+    const didId = id ?? (layer === 'did:cel' ? 'did:cel:z6MkTestPeer1' : 'did:webvh:example.com:asset1');
     return new OriginalsAsset(
       [{ id: 'res1', type: 'image', contentType: 'image/png', hash: 'abc123' }],
       { '@context': ['https://www.w3.org/ns/did/v1'], id: didId } as any,
@@ -33,9 +33,9 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
     expect(result).toBe(asset); // Returns same asset object, mutated
   });
 
-  test('inscribes did:peer asset directly to did:btco', async () => {
+  test('inscribes did:cel asset directly to did:btco', async () => {
     const sdk = createSDK();
-    const asset = createAssetAtLayer('did:peer');
+    const asset = createAssetAtLayer('did:cel');
     const result = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
 
     expect(result.currentLayer).toBe('did:btco');
@@ -208,5 +208,89 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
     const sdk = createSDK();
     const asset = createAssetAtLayer('did:webvh');
     await expect(sdk.lifecycle.inscribeOnBitcoin(asset, 1000000)).rejects.toThrow();
+  });
+
+  // --- Deferred-content provider (buildContent, no `content` in response) ---
+
+  test('sets prefix-derived btco binding when provider omits inscription content', async () => {
+    // Conformant provider: supports buildContent but returns no `content`.
+    // The binding derivation must not choke parsing a missing/function content;
+    // it falls back to the prefix-derived did:btco id without throwing.
+    let sat = 5000;
+    const provider = {
+      async createInscription({ buildContent }: { buildContent: (s: string) => Buffer | Promise<Buffer> }) {
+        const satoshi = String(sat++);
+        await buildContent(satoshi);
+        return { inscriptionId: `insc-${satoshi}`, txid: `tx-${satoshi}`, satoshi };
+      }
+    };
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const asset = createAssetAtLayer('did:webvh');
+    const result = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+
+    expect(result.currentLayer).toBe('did:btco');
+    const binding = asset.bindings?.['did:btco'];
+    expect(binding).toBeDefined();
+    expect(binding!.startsWith('did:btco:reg:')).toBe(true);
+  });
+
+  // --- Provider-echo integrity: never trust the echoed DID id for the binding ---
+
+  test('ignores tampered echoed content: binding is derivation-computed, not the provider echo', async () => {
+    // Compromised provider echoes a DID id it did not create ("did:btco:999999999")
+    // while the real inscription lands on a different satoshi. The binding must be
+    // computed from the configured network + real satoshi, NOT the echoed id.
+    let sat = 7000;
+    const provider = {
+      async createInscription({ buildContent }: { buildContent: (s: string) => Buffer | Promise<Buffer> }) {
+        const satoshi = String(sat++);
+        // Provider is asked to build honest content but returns tampered bytes.
+        await buildContent(satoshi);
+        return {
+          inscriptionId: `insc-${satoshi}`,
+          txid: `tx-${satoshi}`,
+          satoshi,
+          content: Buffer.from(JSON.stringify({ id: 'did:btco:999999999' })),
+        };
+      }
+    };
+    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const asset = createAssetAtLayer('did:webvh');
+    const result = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+
+    expect(result.currentLayer).toBe('did:btco');
+    const binding = asset.bindings?.['did:btco'];
+    // The real satoshi assigned was 7000 (first allocation).
+    expect(binding).toBe('did:btco:reg:7000');
+    expect(binding).not.toBe('did:btco:999999999');
+  });
+
+  // --- Review fix: ORD_SATOSHI_UNKNOWN must not leave a captured btco doc behind ---
+
+  test('ORD_SATOSHI_UNKNOWN: no did:btco doc is captured for serialize() after rollback', async () => {
+    // Provider's createInscription invokes buildContent (so the btco DID doc IS
+    // built, mirroring the real inscribeData deferred-content path) but returns
+    // no satoshi and offers no way to resolve one — the real BitcoinManager
+    // throws ORD_SATOSHI_UNKNOWN in that case. The doc must never have been
+    // captured into the asset's #didDocuments (no rollback exists for it).
+    const provider = {
+      async createInscription({ buildContent }: { buildContent: (s: string) => Buffer | Promise<Buffer> }) {
+        await buildContent('999999');
+        return { inscriptionId: 'insc-nosat', txid: 'tx-nosat' };
+      }
+    };
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      ordinalsProvider: provider,
+      keyStore: new (await import('../../mocks/MockKeyStore')).MockKeyStore()
+    } as any);
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
+    ]);
+
+    await expect(sdk.lifecycle.inscribeOnBitcoin(asset, 5)).rejects.toThrow();
+
+    const env = asset.serialize();
+    expect(env.didDocuments['did:btco']).toBeUndefined();
   });
 });

@@ -147,14 +147,14 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
     
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     
     expect(asset.resources.length).toBe(1);
     expect(asset.resources[0].version).toBe(1);
     expect(asset.resources[0].previousVersionHash).toBeUndefined();
   });
 
-  test('addResourceVersion creates new version and preserves old', () => {
+  test('addResourceVersion creates new version and preserves old', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -164,9 +164,9 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(Buffer.from('hello', 'utf-8'))
       }
     ];
-    
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    const newResource = asset.addResourceVersion('res1', 'hello world', 'text/plain', 'Added world');
+
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
+    const newResource = await asset.addResourceVersion('res1', 'hello world', 'text/plain', 'Added world');
     
     expect(asset.resources.length).toBe(2);
     expect(newResource.version).toBe(2);
@@ -179,7 +179,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
     expect(v1!.content).toBe('hello');
   });
 
-  test('addResourceVersion throws error if content unchanged', () => {
+  test('addResourceVersion throws error if content unchanged', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -189,15 +189,13 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(Buffer.from('hello', 'utf-8'))
       }
     ];
-    
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    
-    expect(() => {
-      asset.addResourceVersion('res1', 'hello', 'text/plain');
-    }).toThrow('Content unchanged');
+
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
+
+    await expect(asset.addResourceVersion('res1', 'hello', 'text/plain')).rejects.toThrow('Content unchanged');
   });
 
-  test('addResourceVersion throws error if resource not found', () => {
+  test('addResourceVersion throws error if resource not found', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -207,15 +205,13 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(Buffer.from('hello', 'utf-8'))
       }
     ];
-    
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    
-    expect(() => {
-      asset.addResourceVersion('nonexistent', 'content', 'text/plain');
-    }).toThrow('Resource with id nonexistent not found');
+
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
+
+    await expect(asset.addResourceVersion('nonexistent', 'content', 'text/plain')).rejects.toThrow('Resource with id nonexistent not found');
   });
 
-  test('getAllVersions returns all versions sorted', () => {
+  test('getAllVersions returns all versions sorted', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -225,11 +221,11 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(Buffer.from('v1', 'utf-8'))
       }
     ];
-    
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    asset.addResourceVersion('res1', 'v2', 'text/plain');
-    asset.addResourceVersion('res1', 'v3', 'text/plain');
-    
+
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
+    await asset.addResourceVersion('res1', 'v2', 'text/plain');
+    await asset.addResourceVersion('res1', 'v3', 'text/plain');
+
     const versions = asset.getAllVersions('res1');
     expect(versions.length).toBe(3);
     expect(versions[0].version || 1).toBe(1);
@@ -237,7 +233,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
     expect(versions[2].version).toBe(3);
   });
 
-  test('getResourceHistory returns complete history', () => {
+  test('getResourceHistory returns complete history', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -247,10 +243,10 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(Buffer.from('v1', 'utf-8'))
       }
     ];
-    
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    asset.addResourceVersion('res1', 'v2', 'text/plain');
-    
+
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
+    await asset.addResourceVersion('res1', 'v2', 'text/plain');
+
     const history = asset.getResourceHistory('res1');
     expect(history).not.toBeNull();
     expect(history!.resourceId).toBe('res1');
@@ -258,7 +254,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
     expect(history!.currentVersion.version).toBe(2);
   });
 
-  test('version chain integrity is verifiable', () => {
+  test('version chain integrity is verifiable', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -268,11 +264,11 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(Buffer.from('v1', 'utf-8'))
       }
     ];
-    
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    asset.addResourceVersion('res1', 'v2', 'text/plain');
-    asset.addResourceVersion('res1', 'v3', 'text/plain');
-    
+
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
+    await asset.addResourceVersion('res1', 'v2', 'text/plain');
+    await asset.addResourceVersion('res1', 'v3', 'text/plain');
+
     // Access internal version manager for testing
     const history = asset.getResourceHistory('res1');
     expect(history).not.toBeNull();
@@ -295,7 +291,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
     
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     
     let eventEmitted = false;
     let capturedEvent: any = null;
@@ -305,8 +301,8 @@ describe('OriginalsAsset - Resource Versioning', () => {
       capturedEvent = event;
     });
     
-    asset.addResourceVersion('res1', 'v2', 'text/plain', 'Test changes');
-    
+    await asset.addResourceVersion('res1', 'v2', 'text/plain', 'Test changes');
+
     // Wait for microtask to complete
     await new Promise(resolve => setImmediate(resolve));
     
@@ -319,40 +315,32 @@ describe('OriginalsAsset - Resource Versioning', () => {
     expect(capturedEvent.changes).toBe('Test changes');
   });
 
-  test('provenance tracks resource updates', () => {
+  test('directly-constructed asset degrades: no appender ⇒ no provenance, emits cel:append-skipped', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
         type: 'text',
         content: 'v1',
         contentType: 'text/plain',
-        hash: hashResource(Buffer.from('v1', 'utf-8'))
+        hash: hashResource(Buffer.from('v1', 'utf-8')),
+        version: 1
       }
     ];
-    
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    const v1Hash = resources[0].hash;
-    
-    asset.addResourceVersion('res1', 'v2', 'text/plain', 'First update');
-    asset.addResourceVersion('res1', 'v3', 'text/plain', 'Second update');
-    
-    const provenance = asset.getProvenance();
-    expect(provenance.resourceUpdates.length).toBe(2);
-    
-    const update1 = provenance.resourceUpdates[0];
-    expect(update1.resourceId).toBe('res1');
-    expect(update1.fromVersion).toBe(1);
-    expect(update1.toVersion).toBe(2);
-    expect(update1.fromHash).toBe(v1Hash);
-    expect(update1.changes).toBe('First update');
-    
-    const update2 = provenance.resourceUpdates[1];
-    expect(update2.fromVersion).toBe(2);
-    expect(update2.toVersion).toBe(3);
-    expect(update2.changes).toBe('Second update');
+
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
+    const skipped: unknown[] = [];
+    asset.on('cel:append-skipped', (e) => skipped.push(e));
+
+    await asset.addResourceVersion('res1', 'v2', 'text/plain', 'First update');
+    await asset.addResourceVersion('res1', 'v3', 'text/plain', 'Second update');
+
+    // In-memory versions advanced, but nothing provable was recorded.
+    expect(asset.getAllVersions('res1').map(r => r.version)).toEqual([1, 2, 3]);
+    expect(asset.getProvenance().resourceUpdates.length).toBe(0);
+    expect(skipped.length).toBe(2);
   });
 
-  test('hash-based content addressing validated', () => {
+  test('hash-based content addressing validated', async () => {
     const content1 = 'content 1';
     const content2 = 'content 2';
     const hash1 = hashResource(Buffer.from(content1, 'utf-8'));
@@ -370,14 +358,14 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
     
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    const newResource = asset.addResourceVersion('res1', content2, 'text/plain');
-    
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
+    const newResource = await asset.addResourceVersion('res1', content2, 'text/plain');
+
     expect(newResource.hash).toBe(hash2);
     expect(newResource.hash).not.toBe(hash1);
   });
 
-  test('addResourceVersion rejects Buffer content instead of silently dropping it (issue #276)', () => {
+  test('addResourceVersion rejects Buffer content instead of silently dropping it (issue #276)', async () => {
     const buffer1 = Buffer.from('binary content 1', 'utf-8');
     const resources: AssetResource[] = [
       {
@@ -388,15 +376,17 @@ describe('OriginalsAsset - Resource Versioning', () => {
       }
     ];
 
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     const buffer2 = Buffer.from('binary content 2', 'utf-8');
     // Buffer content used to be accepted but only its hash was stored — the
     // bytes were unrecoverably lost. It now throws so the loss is impossible.
-    expect(() => asset.addResourceVersion('res1', buffer2, 'application/octet-stream'))
-      .toThrow(/binary \(Buffer\) content/);
+    // The parameter is declared `string` since issue #311, so JS callers
+    // (modelled with the cast) still hit the runtime guard.
+    await expect(asset.addResourceVersion('res1', buffer2 as unknown as string, 'application/octet-stream'))
+      .rejects.toThrow(/binary \(Buffer\) content/);
   });
 
-  test('versioning works across all layers (did:peer)', () => {
+  test('versioning works across all layers (did:cel)', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -406,15 +396,15 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(Buffer.from('v1', 'utf-8'))
       }
     ];
-    
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    expect(asset.currentLayer).toBe('did:peer');
-    
-    const newResource = asset.addResourceVersion('res1', 'v2', 'text/plain');
+
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
+    expect(asset.currentLayer).toBe('did:cel');
+
+    const newResource = await asset.addResourceVersion('res1', 'v2', 'text/plain');
     expect(newResource.version).toBe(2);
   });
 
-  test('versioning works across all layers (did:webvh)', () => {
+  test('versioning works across all layers (did:webvh)', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -424,15 +414,15 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(Buffer.from('v1', 'utf-8'))
       }
     ];
-    
+
     const asset = new OriginalsAsset(resources, buildDid('did:webvh:example.com:xyz'), emptyCreds);
     expect(asset.currentLayer).toBe('did:webvh');
-    
-    const newResource = asset.addResourceVersion('res1', 'v2', 'text/plain');
+
+    const newResource = await asset.addResourceVersion('res1', 'v2', 'text/plain');
     expect(newResource.version).toBe(2);
   });
 
-  test('versioning works across all layers (did:btco)', () => {
+  test('versioning works across all layers (did:btco)', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -442,15 +432,15 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(Buffer.from('v1', 'utf-8'))
       }
     ];
-    
+
     const asset = new OriginalsAsset(resources, buildDid('did:btco:123'), emptyCreds);
     expect(asset.currentLayer).toBe('did:btco');
-    
-    const newResource = asset.addResourceVersion('res1', 'v2', 'text/plain');
+
+    const newResource = await asset.addResourceVersion('res1', 'v2', 'text/plain');
     expect(newResource.version).toBe(2);
   });
 
-  test('multiple resources can be versioned independently', () => {
+  test('multiple resources can be versioned independently', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -467,21 +457,21 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(Buffer.from('res2-v1', 'utf-8'))
       }
     ];
-    
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
-    
-    asset.addResourceVersion('res1', 'res1-v2', 'text/plain');
-    asset.addResourceVersion('res2', 'res2-v2', 'text/plain');
-    asset.addResourceVersion('res1', 'res1-v3', 'text/plain');
-    
+
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
+
+    await asset.addResourceVersion('res1', 'res1-v2', 'text/plain');
+    await asset.addResourceVersion('res2', 'res2-v2', 'text/plain');
+    await asset.addResourceVersion('res1', 'res1-v3', 'text/plain');
+
     const res1Versions = asset.getAllVersions('res1');
     const res2Versions = asset.getAllVersions('res2');
-    
+
     expect(res1Versions.length).toBe(3);
     expect(res2Versions.length).toBe(2);
   });
 
-  test('timestamp is recorded for each version', () => {
+  test('timestamp is recorded for each version', async () => {
     const resources: AssetResource[] = [
       {
         id: 'res1',
@@ -491,11 +481,11 @@ describe('OriginalsAsset - Resource Versioning', () => {
         hash: hashResource(Buffer.from('v1', 'utf-8'))
       }
     ];
-    
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     const beforeTime = new Date().toISOString();
-    
-    const newResource = asset.addResourceVersion('res1', 'v2', 'text/plain');
+
+    const newResource = await asset.addResourceVersion('res1', 'v2', 'text/plain');
     const afterTime = new Date().toISOString();
     
     expect(newResource.createdAt).toBeDefined();
@@ -543,7 +533,7 @@ describe('OriginalsAsset - Unsorted Resource Loading', () => {
       }
     ];
     
-    const asset = new OriginalsAsset(unsortedResources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(unsortedResources, buildDid('did:cel:xyz'), emptyCreds);
     
     // Verify version history is correct despite unsorted input
     const history = asset.getResourceHistory('res1');
@@ -616,7 +606,7 @@ describe('OriginalsAsset - Unsorted Resource Loading', () => {
       }
     ];
     
-    const asset = new OriginalsAsset(resources, buildDid('did:peer:xyz'), emptyCreds);
+    const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     
     // Verify both resources have correct version chains
     const res1History = asset.getResourceHistory('res1');
@@ -643,7 +633,7 @@ describe('OriginalsAsset - Credential Integration', () => {
       }
     ];
     
-    const didDoc = buildDid('did:peer:xyz');
+    const didDoc = buildDid('did:cel:xyz');
     const asset = new OriginalsAsset(resources, didDoc, emptyCreds);
     
     // Create credential manager

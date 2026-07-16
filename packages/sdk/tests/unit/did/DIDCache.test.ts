@@ -1,12 +1,30 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { DIDCache, type DIDCacheStorage, type DIDCacheEntry } from '../../../src/did/DIDCache';
 import { MetricsCollector } from '../../../src/utils/MetricsCollector';
+import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import type { DIDDocument } from '../../../src/types';
 
 const makeDIDDoc = (id: string): DIDDocument => ({
   '@context': ['https://www.w3.org/ns/did/v1'],
   id,
 });
+
+// Build an OrdMockProvider that resolves a specific did:btco:<sat> to `doc`.
+// The DIDManager cache-integration tests below need a DID with a real
+// cache-miss → fetch path; did:peer creation is gone (did:peer purge,
+// did:cel Phase 4·5/5), so we use a resolvable did:btco instead.
+const makeBtcoProvider = (sat: string, doc: DIDDocument): OrdMockProvider =>
+  new OrdMockProvider({
+    inscriptionsById: new Map([[`insc-${sat}`, {
+      inscriptionId: `insc-${sat}`,
+      content: Buffer.from(JSON.stringify(doc), 'utf8'),
+      contentType: 'application/json',
+      txid: `tx-${sat}`,
+      vout: 0,
+      satoshi: sat,
+    }]]),
+    inscriptionsBySatoshi: new Map([[sat, [`insc-${sat}`]]]),
+  });
 
 describe('DIDCache', () => {
   let cache: DIDCache;
@@ -399,7 +417,11 @@ describe('DIDCache', () => {
         clear: async () => { storageMap.clear(); },
       };
 
+      const sat = '700001';
+      const did = `did:btco:${sat}`;
       const sdk = OriginalsSDK.create({
+        network: 'mainnet',
+        ordinalsProvider: makeBtcoProvider(sat, makeDIDDoc(did)),
         didCache: {
           ttlMs: 5000,
           maxEntries: 50,
@@ -408,12 +430,10 @@ describe('DIDCache', () => {
       });
 
       // Resolve a DID — it should persist to our storage
-      const resources = [{ id: 'r1', type: 'data', contentType: 'application/json', hash: 'abc' }];
-      const peerDoc = await sdk.did.createDIDPeer(resources);
-      await sdk.did.resolveDID(peerDoc.id);
+      await sdk.did.resolveDID(did);
 
-      expect(storageMap.has(peerDoc.id)).toBe(true);
-      const entry = storageMap.get(peerDoc.id)!;
+      expect(storageMap.has(did)).toBe(true);
+      const entry = storageMap.get(did)!;
       expect(entry.ttlMs).toBe(5000);
     });
   });
@@ -423,20 +443,12 @@ describe('DIDCache', () => {
       // Import DIDManager
       const { DIDManager } = await import('../../../src/did/DIDManager');
       const metrics = new MetricsCollector();
+      const sat = '700002';
+      const did = `did:btco:${sat}`;
       const didManager = new DIDManager(
-        { network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'magby' },
+        { network: 'mainnet', defaultKeyType: 'Ed25519', ordinalsProvider: makeBtcoProvider(sat, makeDIDDoc(did)) },
         metrics
       );
-
-      // Resolve a DID
-      const resources = [{
-        id: 'main.js',
-        type: 'code',
-        contentType: 'application/javascript',
-        hash: 'abc123',
-      }];
-      const didDoc = await didManager.createDIDPeer(resources);
-      const did = didDoc.id;
 
       // First resolve (cache miss, fetches)
       const resolved1 = await didManager.resolveDID(did);
@@ -458,19 +470,12 @@ describe('DIDCache', () => {
     test('should skip cache when skipCache option is set', async () => {
       const { DIDManager } = await import('../../../src/did/DIDManager');
       const metrics = new MetricsCollector();
+      const sat = '700003';
+      const did = `did:btco:${sat}`;
       const didManager = new DIDManager(
-        { network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'magby' },
+        { network: 'mainnet', defaultKeyType: 'Ed25519', ordinalsProvider: makeBtcoProvider(sat, makeDIDDoc(did)) },
         metrics
       );
-
-      const resources = [{
-        id: 'main.js',
-        type: 'code',
-        contentType: 'application/javascript',
-        hash: 'abc123',
-      }];
-      const didDoc = await didManager.createDIDPeer(resources);
-      const did = didDoc.id;
 
       // Resolve and cache
       await didManager.resolveDID(did);
@@ -501,18 +506,11 @@ describe('DIDCache', () => {
 
     test('should support pinning via DIDManager cache', async () => {
       const { DIDManager } = await import('../../../src/did/DIDManager');
+      const sat = '700004';
+      const did = `did:btco:${sat}`;
       const didManager = new DIDManager(
-        { network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'magby' }
+        { network: 'mainnet', defaultKeyType: 'Ed25519', ordinalsProvider: makeBtcoProvider(sat, makeDIDDoc(did)) }
       );
-
-      const resources = [{
-        id: 'main.js',
-        type: 'code',
-        contentType: 'application/javascript',
-        hash: 'abc123',
-      }];
-      const didDoc = await didManager.createDIDPeer(resources);
-      const did = didDoc.id;
 
       // Resolve, then pin
       await didManager.resolveDID(did);
@@ -520,5 +518,65 @@ describe('DIDCache', () => {
       expect(didManager.cache.isPinned(did)).toBe(true);
       expect(didManager.cache.listPinned()).toContain(did);
     });
+  });
+});
+
+describe('LRU eviction is memory-only (issue #313)', () => {
+  test('hydrating reads beyond maxEntries do not delete entries from persistent storage', async () => {
+    const storageMap = new Map<string, DIDCacheEntry>();
+    const storage: DIDCacheStorage = {
+      get: async (key: string) => storageMap.get(key) ?? null,
+      set: async (key: string, entry: DIDCacheEntry) => { storageMap.set(key, entry); },
+      delete: async (key: string) => { storageMap.delete(key); },
+      keys: async () => Array.from(storageMap.keys()),
+      clear: async () => { storageMap.clear(); },
+    };
+
+    // Persistent store holds more entries than the memory cap.
+    const dids = ['did:peer:a', 'did:peer:b', 'did:peer:c', 'did:peer:d'];
+    for (const did of dids) {
+      storageMap.set(did, {
+        did,
+        document: makeDIDDoc(did),
+        resolvedAt: Date.now(),
+        ttlMs: 60_000,
+        pinned: false,
+      });
+    }
+
+    const cache = new DIDCache({ storage, maxEntries: 2 });
+    // Each get() hydrates from storage; beyond maxEntries this triggers LRU
+    // eviction, which previously ALSO deleted the evicted entry from the
+    // persistent store — reads shrank the persistent cache.
+    for (const did of dids) {
+      expect(await cache.get(did)).not.toBeNull();
+    }
+
+    // Every entry is still in persistent storage and still resolvable.
+    expect(storageMap.size).toBe(4);
+    for (const did of dids) {
+      expect(await cache.get(did)).not.toBeNull();
+    }
+  });
+
+  test('set() eviction keeps the evicted entry in persistent storage', async () => {
+    const storageMap = new Map<string, DIDCacheEntry>();
+    const storage: DIDCacheStorage = {
+      get: async (key: string) => storageMap.get(key) ?? null,
+      set: async (key: string, entry: DIDCacheEntry) => { storageMap.set(key, entry); },
+      delete: async (key: string) => { storageMap.delete(key); },
+      keys: async () => Array.from(storageMap.keys()),
+      clear: async () => { storageMap.clear(); },
+    };
+
+    const cache = new DIDCache({ storage, maxEntries: 2 });
+    await cache.set('did:peer:a', makeDIDDoc('did:peer:a'));
+    await cache.set('did:peer:b', makeDIDDoc('did:peer:b'));
+    await cache.set('did:peer:c', makeDIDDoc('did:peer:c')); // evicts 'a' from memory
+
+    expect(storageMap.has('did:peer:a')).toBe(true);
+    // Explicit invalidation still deletes from storage.
+    await cache.delete('did:peer:a');
+    expect(storageMap.has('did:peer:a')).toBe(false);
   });
 });

@@ -10,7 +10,28 @@ import type {
   EscrowPolicy,
   CorporatePolicy,
   OriginalsConfig,
+  ExternalSigner,
 } from '../../../src/types';
+import * as ed25519 from '@noble/ed25519';
+import { multikey } from '../../../src/crypto/Multikey';
+
+/**
+ * Build a signBytes-capable external signer backed by a real Ed25519 key
+ * (issue #310). It signs exactly the bytes the SDK hands it — the document
+ * level sign() throws to prove multi-sig never routes through it.
+ */
+function ed25519ExternalSigner(privateKeyMultibase: string, vm: string): ExternalSigner {
+  return {
+    getVerificationMethodId: () => vm,
+    sign: async () => { throw new Error('document-level sign() must not be used for multi-sig'); },
+    signBytes: async (data: Uint8Array) => {
+      const dec = multikey.decodePrivateKey(privateKeyMultibase);
+      const key = dec.key.length === 64 ? dec.key.slice(0, 32) : dec.key;
+      const signature = await (ed25519 as any).signAsync(data, key);
+      return { signature: new Uint8Array(signature) };
+    },
+  };
+}
 
 describe('MultiSigManager', () => {
   const config: OriginalsConfig = {
@@ -302,25 +323,16 @@ describe('MultiSigManager', () => {
       expect((signed.proof as any[]).length).toBe(2);
     });
 
-    test('signs with external signers', async () => {
+    test('signs with external signers (signBytes) and the contributions verify (#310)', async () => {
       const policy: MultiSigPolicy = {
         required: 2,
         total: 3,
         signerVerificationMethods: [vms[0], vms[1], vms[2]],
       };
 
-      const mockSigner1 = {
-        sign: async () => ({ proofValue: 'u' + Buffer.from('sig1').toString('base64') }),
-        getVerificationMethodId: () => vms[0],
-      };
-      const mockSigner2 = {
-        sign: async () => ({ proofValue: 'u' + Buffer.from('sig2').toString('base64') }),
-        getVerificationMethodId: () => vms[1],
-      };
-
-      const externalSigners = new Map([
-        [vms[0], mockSigner1],
-        [vms[1], mockSigner2],
+      const externalSigners = new Map<string, ExternalSigner>([
+        [vms[0], ed25519ExternalSigner(keys[0].privateKey, vms[0])],
+        [vms[1], ed25519ExternalSigner(keys[1].privateKey, vms[1])],
       ]);
 
       const signed = await manager.signCredentialMultiSig(baseVC, {
@@ -330,6 +342,134 @@ describe('MultiSigManager', () => {
 
       expect(Array.isArray(signed.proof)).toBe(true);
       expect((signed.proof as any[]).length).toBe(2);
+
+      // The whole point of #310: an externally-signed contribution must
+      // actually verify (previously the signer's JCS bytes never matched the
+      // RDFC verification hash, so the threshold could never be met).
+      const result = await manager.verifyMultiSig(signed, policy);
+      expect(result.verified).toBe(true);
+      expect(result.validSignatures).toBe(2);
+      expect([...result.validSigners].sort()).toEqual([vms[0], vms[1]].sort());
+    });
+
+    test('#310 external signer without signBytes is rejected with a clear error', async () => {
+      const policy: MultiSigPolicy = {
+        required: 1,
+        total: 1,
+        signerVerificationMethods: [vms[0]],
+      };
+      // A document-level-only signer (the didwebvh-ts/Turnkey shape): its JCS
+      // signature can never verify against the RDFC multi-sig hash, so it must
+      // be refused up front rather than producing an unverifiable proof.
+      const legacySigner: ExternalSigner = {
+        getVerificationMethodId: () => vms[0],
+        sign: async () => ({ proofValue: 'u' + Buffer.from('sig').toString('base64') }),
+      };
+      const externalSigners = new Map([[vms[0], legacySigner]]);
+
+      await expect(
+        manager.signCredentialMultiSig(baseVC, { policy, externalSigners })
+      ).rejects.toThrow(/must implement signBytes/);
+      await expect(
+        manager.signCredentialMultiSig(baseVC, { policy, externalSigners })
+      ).rejects.toThrow(/issue #310/);
+    });
+
+    test('#310 external signer returning a wrong-length (non-64-byte) signature is rejected at sign time', async () => {
+      const policy: MultiSigPolicy = {
+        required: 1,
+        total: 1,
+        signerVerificationMethods: [vms[0]],
+      };
+      const badLengthSigner: ExternalSigner = {
+        getVerificationMethodId: () => vms[0],
+        sign: async () => { throw new Error('unused'); },
+        // 32 bytes — a plausible mistake (e.g. returning a hash/seed) that would
+        // otherwise base58-encode into a syntactically valid, never-verifiable proof.
+        signBytes: async () => ({ signature: new Uint8Array(32) }),
+      };
+      const externalSigners = new Map([[vms[0], badLengthSigner]]);
+
+      await expect(
+        manager.signCredentialMultiSig(baseVC, { policy, externalSigners })
+      ).rejects.toThrow(/64 bytes/);
+    });
+
+    test('#310 a contribution signed over the WRONG bytes (JCS-style) fails verification', async () => {
+      const policy: MultiSigPolicy = {
+        required: 1,
+        total: 1,
+        signerVerificationMethods: [vms[0]],
+      };
+      // Simulate a signer that signs a different canonicalization than the
+      // SDK's RDFC hash — exactly the failure #310 fixes. signBytes exists (so
+      // signing succeeds) but signs the wrong preimage, so verification fails.
+      const wrongSigner: ExternalSigner = {
+        getVerificationMethodId: () => vms[0],
+        sign: async () => { throw new Error('unused'); },
+        signBytes: async () => {
+          const dec = multikey.decodePrivateKey(keys[0].privateKey);
+          const key = dec.key.length === 64 ? dec.key.slice(0, 32) : dec.key;
+          const wrong = new TextEncoder().encode('not the sdk rdfc hash');
+          const signature = await (ed25519 as any).signAsync(wrong, key);
+          return { signature: new Uint8Array(signature) };
+        },
+      };
+      const externalSigners = new Map([[vms[0], wrongSigner]]);
+
+      const signed = await manager.signCredentialMultiSig(baseVC, { policy, externalSigners });
+      const result = await manager.verifyMultiSig(signed, policy);
+      expect(result.verified).toBe(false);
+      expect(result.validSignatures).toBe(0);
+    });
+  });
+
+  // ===== #306: clear key-type / legacy-proof errors =====
+
+  describe('#306 key-type and legacy-proof errors', () => {
+    test('signing with a non-Ed25519 (ES256K) key throws a clear upfront error', async () => {
+      const es256k = await keyManager.generateKeyPair('ES256K');
+      const vm = `did:key:${es256k.publicKey}#${es256k.publicKey}`;
+      const policy: MultiSigPolicy = {
+        required: 1,
+        total: 1,
+        signerVerificationMethods: [vm],
+      };
+      const privateKeys = new Map([[vm, es256k.privateKey]]);
+
+      // Must be the actionable message, NOT the deep cryptosuite-internal
+      // 'Invalid key type for EdDSA'.
+      await expect(
+        manager.signCredentialMultiSig(baseVC, { policy, privateKeys })
+      ).rejects.toThrow(/requires an Ed25519 signer key/);
+      await expect(
+        manager.signCredentialMultiSig(baseVC, { policy, privateKeys })
+      ).rejects.toThrow(/issue #306/);
+    });
+
+    test('verifying a legacy (cryptosuite-less) proof reports a distinguishing error, not "Invalid signature"', async () => {
+      const policy: MultiSigPolicy = {
+        required: 2,
+        total: 3,
+        signerVerificationMethods: [vms[0], vms[1], vms[2]],
+      };
+      const signed = await manager.signCredentialMultiSig(baseVC, {
+        policy,
+        privateKeys: new Map([
+          [vms[0], keys[0].privateKey],
+          [vms[1], keys[1].privateKey],
+        ]),
+      });
+
+      // Simulate a legacy proof from an older SDK release: strip cryptosuite.
+      const proofs = signed.proof as Array<Record<string, unknown>>;
+      delete proofs[0].cryptosuite;
+
+      const result = await manager.verifyMultiSig(signed, policy);
+      expect(result.errors.some(e => /Unsupported multi-sig proof format/.test(e))).toBe(true);
+      expect(result.errors.some(e => /must be re-signed|issue #306/.test(e))).toBe(true);
+      // The stripped proof must NOT be reported with the generic message.
+      expect(result.errors.some(e => e === `Invalid signature from ${vms[0]}`)).toBe(false);
     });
   });
 
@@ -355,6 +495,35 @@ describe('MultiSigManager', () => {
       expect(result.verified).toBe(true);
       expect(result.validSignatures).toBe(2);
       expect(result.validSigners).toEqual([vms[0], vms[1]]);
+      expect(result.errors.length).toBe(0);
+    });
+
+    test('#305 verifies proofs concurrently but reports validSigners in deterministic proof order', async () => {
+      // Proofs are verified concurrently now; the seen-signer accounting must
+      // still be a deterministic post-collection pass, so validSigners follows
+      // the PROOF order regardless of which verification resolves first. A
+      // naive push-on-resolve parallelization would make this order flaky.
+      const policy: MultiSigPolicy = {
+        required: 4,
+        total: 5,
+        signerVerificationMethods: [vms[0], vms[1], vms[2], vms[3], vms[4]],
+      };
+      const signed = await manager.signCredentialMultiSig(baseVC, {
+        policy,
+        privateKeys: new Map([
+          [vms[0], keys[0].privateKey],
+          [vms[1], keys[1].privateKey],
+          [vms[2], keys[2].privateKey],
+          [vms[3], keys[3].privateKey],
+        ]),
+      });
+
+      // Reverse the proof order; validSigners must mirror the new order exactly.
+      const reordered = { ...signed, proof: [...(signed.proof as any[])].reverse() } as VerifiableCredential;
+      const result = await manager.verifyMultiSig(reordered, policy);
+      expect(result.verified).toBe(true);
+      expect(result.validSignatures).toBe(4);
+      expect(result.validSigners).toEqual([vms[3], vms[2], vms[1], vms[0]]);
       expect(result.errors.length).toBe(0);
     });
 

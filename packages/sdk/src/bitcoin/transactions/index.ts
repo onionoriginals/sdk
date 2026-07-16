@@ -8,6 +8,9 @@
 // Export commit transaction functionality
 export {
   createCommitTransaction,
+  createRevealTransaction,
   type CommitTransactionParams,
-  type CommitTransactionResult
+  type CommitTransactionResult,
+  type RevealTransactionParams,
+  type RevealTransactionResult
 } from './commit.js';

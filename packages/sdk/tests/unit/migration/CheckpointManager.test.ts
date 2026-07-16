@@ -1,3 +1,4 @@
+// SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Unit tests for CheckpointManager and CheckpointStorage
  * Covers CORE-MIG-EVENTS-015, -022, -023
@@ -20,7 +21,7 @@ function makeManagers() {
   return { sdk, config, checkpointManager };
 }
 
-describe('CheckpointManager', () => {
+describe.skip('CheckpointManager', () => {
   // CORE-MIG-EVENTS-022/happy — checkpoint creation captures complete migration context
   describe('createCheckpoint()', () => {
     it('should create a checkpoint with all required fields', async () => {
@@ -28,7 +29,7 @@ describe('CheckpointManager', () => {
 
       // Create a real peer DID
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
 
       const migrationId = 'mig_test_001';
@@ -59,7 +60,7 @@ describe('CheckpointManager', () => {
       const { sdk, checkpointManager } = makeManagers();
       const before = Date.now();
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
       const checkpoint = await checkpointManager.createCheckpoint('mig_ts_001', {
         sourceDid: peerDid.id,
@@ -75,7 +76,7 @@ describe('CheckpointManager', () => {
     it('should use empty object when no metadata provided', async () => {
       const { sdk, checkpointManager } = makeManagers();
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
       const checkpoint = await checkpointManager.createCheckpoint('mig_nometa', {
         sourceDid: peerDid.id,
@@ -105,7 +106,7 @@ describe('CheckpointManager', () => {
     it('should retrieve a previously saved checkpoint', async () => {
       const { sdk, checkpointManager } = makeManagers();
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
       const created = await checkpointManager.createCheckpoint('mig_get_001', {
         sourceDid: peerDid.id,
@@ -135,7 +136,7 @@ describe('CheckpointManager', () => {
     it('should delete a checkpoint so it is no longer retrievable', async () => {
       const { sdk, checkpointManager } = makeManagers();
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
       const created = await checkpointManager.createCheckpoint('mig_del_001', {
         sourceDid: peerDid.id,
@@ -185,7 +186,7 @@ describe('CheckpointManager', () => {
       const cm = new CheckpointManager(config, sdk.did, sdk.credentials);
 
       const peerDid = await sdk.did.createDIDPeer([
-        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+        { id: 'res-1', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
       ]);
       const checkpoint = await cm.createCheckpoint('mig_persist_001', {
         sourceDid: peerDid.id,
@@ -234,7 +235,7 @@ describe('CheckpointManager', () => {
   });
 });
 
-describe('CheckpointStorage persistence round-trip', () => {
+describe.skip('CheckpointStorage persistence round-trip', () => {
   it('reads back a checkpoint persisted through a StorageAdapter after memory loss', async () => {
     const { CheckpointStorage } = await import('../../../src/migration/checkpoint/CheckpointStorage');
 

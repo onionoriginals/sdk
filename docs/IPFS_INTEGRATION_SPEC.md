@@ -350,6 +350,8 @@ IPFS does not guarantee content availability. Unpinned content may be garbage-co
 - Consider `HybridStorageAdapter` with an HTTPS fallback.
 - For did:btco assets, the Bitcoin inscription is the permanent record; IPFS serves as a convenience layer for large payloads.
 
+IPFS is a redundancy and content-addressing layer. It does not satisfy the did:btco permanence claim: pinning is a service dependency, and only inline-inscribed bytes inherit Bitcoin's availability guarantees.
+
 ### 8.4 Privacy
 
 Content added to IPFS is public and content-addressed. Anyone with the CID can retrieve it. Do NOT store private or sensitive content on IPFS unless it is encrypted before storage. The adapter does not provide encryption — this is the caller's responsibility.

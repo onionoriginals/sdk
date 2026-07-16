@@ -1,11 +1,13 @@
 /**
  * Native prefix enumeration on the shipped concrete adapters.
  *
- * `listObjects(domain, prefix)` is an extra capability on the concrete
- * classes (NOT part of the public StorageAdapter interface): both shipped
- * backends are fully enumerable, and exposing that lets MigrationStorage
- * discover persisted keys natively instead of maintaining a shared mutable
- * index object (the source of the cross-process audit-index race).
+ * `listObjects(domain, prefix)` is now an OPTIONAL member of the public
+ * StorageAdapter interface (issue #329): both shipped backends are fully
+ * enumerable, and exposing that lets MigrationStorage discover persisted keys
+ * natively instead of maintaining a shared mutable index object (the source of
+ * the cross-process audit-index race). Making it a documented, optional
+ * interface member — rather than a hidden concrete-only capability — lets
+ * third-party adapter authors discover and implement the race-free hook.
  */
 import { describe, test, expect, beforeEach } from 'bun:test';
 import * as fs from 'fs';
@@ -13,6 +15,26 @@ import * as os from 'os';
 import * as path from 'path';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { LocalStorageAdapter } from '../../../src/storage/LocalStorageAdapter';
+import type { StorageAdapter } from '../../../src/storage/StorageAdapter';
+
+describe('StorageAdapter.listObjects (optional interface member, #329)', () => {
+  beforeEach(() => {
+    MemoryStorageAdapter.clear();
+  });
+
+  test('is reachable through the StorageAdapter interface type', async () => {
+    // Typing the adapter as the public interface (not the concrete class)
+    // and calling listObjects through it is the regression guard: before
+    // #329, listObjects was not on the interface, so this reference would
+    // not typecheck. A third-party adapter author following the interface
+    // can now discover and implement the enumeration hook.
+    const adapter: StorageAdapter = new MemoryStorageAdapter();
+    await adapter.putObject('iface-mem.example', 'audit/migrations/m1/a.json', '1');
+    expect(typeof adapter.listObjects).toBe('function');
+    const listed = await adapter.listObjects!('iface-mem.example', 'audit/migrations/');
+    expect(listed).toEqual(['audit/migrations/m1/a.json']);
+  });
+});
 
 describe('MemoryStorageAdapter.listObjects', () => {
   beforeEach(() => {

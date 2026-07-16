@@ -115,8 +115,24 @@ export class RollbackManager implements IRollbackManager {
       ]);
       const failedBeforeAnchoring =
         context?.stateAtFailure !== undefined && preAnchoringStates.has(context.stateAtFailure);
-      if (checkpoint.targetLayer === 'btco' && !failedBeforeAnchoring) {
-        const artifactDetails = this.extractBitcoinArtifacts(context);
+
+      // Positive broadcast signal (issue #302). The `preAnchoringStates`
+      // inference above is a NEGATIVE, choreography-coupled heuristic: it
+      // trusts that broadcast only ever happens after the ANCHORING
+      // transition. A future operation (or a refactor) that broadcasts while
+      // the tracked state is still IN_PROGRESS — or that adds its ANCHORING
+      // transition AFTER inscribeData — would make that inference report a
+      // clean ROLLED_BACK for a migration that actually spent fees, and the
+      // caller would retry and pay for a second inscription (the #237 bug this
+      // logic prevents). So when the failing error carries on-chain artifacts
+      // (txids/inscriptionId from BitcoinManager.inscribeData), that is direct
+      // evidence a broadcast happened: force partial rollback regardless of
+      // the tracked state. This override can only make the report MORE
+      // conservative, never less.
+      const broadcastArtifacts = this.extractBitcoinArtifacts(context);
+      const broadcastConfirmed = broadcastArtifacts !== undefined;
+      if (checkpoint.targetLayer === 'btco' && (!failedBeforeAnchoring || broadcastConfirmed)) {
+        const artifactDetails = broadcastArtifacts;
         return {
           success: false,
           migrationId,

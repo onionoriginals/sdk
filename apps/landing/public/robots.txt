@@ -1,0 +1,8 @@
+# Originals SDK landing page — everything is crawlable.
+# The absolute URL below must match site.url in src/content.ts (the single
+# production-URL constant, placeholder until issue #330 picks the domain).
+# The vite build fails if the two drift.
+User-agent: *
+Allow: /
+
+Sitemap: https://originals.example.com/sitemap.xml

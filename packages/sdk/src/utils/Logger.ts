@@ -79,11 +79,39 @@ export class ConsoleLogOutput implements LogOutput {
  */
 type AppendFileFn = (typeof import('node:fs/promises'))['appendFile'];
 let appendFilePromise: Promise<AppendFileFn> | null = null;
+// Sync fs module, loaded together with the async one so the process 'exit'
+// hook (which cannot await) can flush any trailing buffered lines.
+let fsSyncModule: typeof import('node:fs') | null = null;
 function loadAppendFile(): Promise<AppendFileFn> {
   if (!appendFilePromise) {
     appendFilePromise = import('node:fs/promises').then((fs) => fs.appendFile);
+    void import('node:fs').then((fs) => { fsSyncModule = fs; }).catch(() => { /* sync exit flush unavailable */ });
   }
   return appendFilePromise;
+}
+
+/**
+ * All live FileLogOutput instances, flushed by ONE shared pair of process
+ * exit hooks. Per-instance listeners would accumulate on `process` (listener
+ * leak + MaxListenersExceeded warnings) for apps or test suites that create
+ * many file outputs.
+ */
+const fileOutputRegistry = new Set<FileLogOutput>();
+let exitHooksInstalled = false;
+function registerFileOutputForExitFlush(output: FileLogOutput): void {
+  fileOutputRegistry.add(output);
+  if (exitHooksInstalled) return;
+  const proc = (globalThis as { process?: { on?: (event: string, listener: () => void) => unknown } }).process;
+  if (!proc || typeof proc.on !== 'function') return;
+  exitHooksInstalled = true;
+  // beforeExit can run async work; 'exit' cannot, so it uses the sync fs
+  // module (loaded on first flush) as a last resort for hard exits.
+  proc.on('beforeExit', () => {
+    for (const out of fileOutputRegistry) void out.flushForExit();
+  });
+  proc.on('exit', () => {
+    for (const out of fileOutputRegistry) out.flushSyncForExit();
+  });
 }
 
 /**
@@ -95,6 +123,9 @@ export class FileLogOutput implements LogOutput {
   private buffer: string[] = [];
   private flushTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly flushInterval = 1000; // Flush every 1 second
+  // Bound on lines retained across failed writes so an unwritable file
+  // cannot grow the buffer without limit.
+  private static readonly MAX_BUFFERED_LINES = 10_000;
 
   constructor(private filePath: string) {}
 
@@ -102,6 +133,11 @@ export class FileLogOutput implements LogOutput {
     // Format as JSON line
     const line = JSON.stringify(entry) + '\n';
     this.buffer.push(line);
+    // Flush trailing buffered lines at process exit: without this, up to
+    // flushInterval worth of the most recent (often most important) log
+    // lines was always lost on shutdown (issue #352). Browser/edge runtimes
+    // have no `process`, so this is a no-op there.
+    registerFileOutputForExitFlush(this);
 
     // Schedule flush
     if (!this.flushTimeout) {
@@ -110,24 +146,45 @@ export class FileLogOutput implements LogOutput {
       }, this.flushInterval);
     }
   }
-  
+
+  /** @internal Called by the shared 'beforeExit' hook. */
+  flushForExit(): Promise<void> {
+    return this.flush();
+  }
+
+  /** @internal Called by the shared 'exit' hook, which cannot await. */
+  flushSyncForExit(): void {
+    if (this.buffer.length === 0 || !fsSyncModule) return;
+    try {
+      fsSyncModule.appendFileSync(this.filePath, this.buffer.join(''), 'utf8');
+      this.buffer = [];
+    } catch {
+      // best effort — the process is exiting
+    }
+  }
+
   private async flush(): Promise<void> {
     if (this.buffer.length === 0) {
       return;
     }
-    
-    const lines = this.buffer.join('');
+
+    // Snapshot and clear; on write failure the snapshot is restored so the
+    // batch is retried on the next flush instead of silently dropped
+    // (issue #352). Writes that arrive while the append is in flight land in
+    // the fresh buffer and schedule their own flush.
+    const lines = this.buffer;
     this.buffer = [];
     this.flushTimeout = null;
-    
+
     try {
       // Append via node:fs/promises so file logging works under both Node and Bun.
       // appendFile creates the file if it does not exist and avoids the
       // read-whole-file-then-rewrite pattern. The module is imported lazily
       // (memoized) so non-Node bundles never evaluate it.
       const appendFile = await loadAppendFile();
-      await appendFile(this.filePath, lines, 'utf8');
+      await appendFile(this.filePath, lines.join(''), 'utf8');
     } catch (err) {
+      this.buffer = lines.concat(this.buffer).slice(-FileLogOutput.MAX_BUFFERED_LINES);
       // Fallback to console on file write error
       console.error('Failed to write log file:', err);
     }
@@ -257,8 +314,20 @@ export class Logger {
       return;
     }
     
-    // Sanitize data if needed
-    const sanitizedData = this.sanitizeLogs ? this.sanitize(data) : data;
+    // Sanitize data if needed. Sanitization must never crash the calling SDK
+    // operation: a pathological payload (e.g. exotic exotic proxies/getters)
+    // degrades to a placeholder instead of throwing out of the log call
+    // (issue #349).
+    let sanitizedData: unknown;
+    if (this.sanitizeLogs) {
+      try {
+        sanitizedData = this.sanitize(data, new WeakSet());
+      } catch {
+        sanitizedData = '[unsanitizable]';
+      }
+    } else {
+      sanitizedData = data;
+    }
     
     // Create log entry
     const entry: LogEntry = {
@@ -293,46 +362,72 @@ export class Logger {
   }
   
   /**
-   * Sanitize sensitive data from logs
+   * Sanitize sensitive data from logs.
+   *
+   * Cycle-safe: circular references (common in HTTP client errors carrying
+   * request/response cycles) are replaced with '[Circular]' instead of
+   * recursing until the stack overflows (issue #349).
    */
-  private sanitize(data: unknown): unknown {
+  private sanitize(data: unknown, seen: WeakSet<object>): unknown {
     if (!data) {
       return data;
     }
 
-    // Handle arrays
-    if (Array.isArray(data)) {
-      return data.map(item => this.sanitize(item));
+    // Cycle guard for anything object-shaped (arrays included). `seen` tracks
+    // the CURRENT traversal path (entries are removed on the way back up), so
+    // only true cycles — not shared references — collapse to '[Circular]'.
+    if (typeof data === 'object') {
+      if (seen.has(data)) {
+        return '[Circular]';
+      }
+      seen.add(data);
     }
 
-    // Handle objects
-    if (typeof data === 'object') {
-      const sanitized: Record<string, unknown> = {};
-      
-      for (const [key, value] of Object.entries(data)) {
-        const lowerKey = key.toLowerCase();
-        
-        // Sanitize sensitive keys
-        if (
-          lowerKey.includes('private') ||
-          lowerKey.includes('key') ||
-          lowerKey.includes('secret') ||
-          lowerKey.includes('password') ||
-          lowerKey.includes('token') ||
-          lowerKey.includes('credential')
-        ) {
-          sanitized[key] = '[REDACTED]';
-        } else {
-          // Recursively sanitize nested objects
-          sanitized[key] = this.sanitize(value);
-        }
+    try {
+      // Handle arrays
+      if (Array.isArray(data)) {
+        return data.map(item => this.sanitize(item, seen));
       }
-      
-      return sanitized;
+
+      // Handle objects
+      if (typeof data === 'object') {
+        // Dates and byte arrays carry no key names to redact; flattening them
+        // through Object.entries would reduce them to '{}' / index maps.
+        if (data instanceof Date || data instanceof Uint8Array) {
+          return data;
+        }
+
+        const sanitized: Record<string, unknown> = {};
+
+        for (const [key, value] of Object.entries(data)) {
+          const lowerKey = key.toLowerCase();
+
+          // Sanitize sensitive keys
+          if (
+            lowerKey.includes('private') ||
+            lowerKey.includes('key') ||
+            lowerKey.includes('secret') ||
+            lowerKey.includes('password') ||
+            lowerKey.includes('token') ||
+            lowerKey.includes('credential')
+          ) {
+            sanitized[key] = '[REDACTED]';
+          } else {
+            // Recursively sanitize nested objects
+            sanitized[key] = this.sanitize(value, seen);
+          }
+        }
+
+        return sanitized;
+      }
+
+      // Return primitive values as-is
+      return data;
+    } finally {
+      if (typeof data === 'object' && data !== null) {
+        seen.delete(data);
+      }
     }
-    
-    // Return primitive values as-is
-    return data;
   }
 }
 

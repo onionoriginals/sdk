@@ -15,7 +15,7 @@
  *   signer: async (data) => createEdDsaProof(data, privateKey),
  * });
  * 
- * const log = await cel.create('My Asset', [
+ * const { log, did } = await cel.create('My Asset', [
  *   { digestMultibase: 'uXYZ...', mediaType: 'image/png' }
  * ]);
  * 
@@ -187,19 +187,19 @@ export class OriginalsCel {
    * 
    * @param name - Human-readable name for the asset
    * @param resources - External resources associated with the asset
-   * @returns Promise resolving to an EventLog with the create event
-   * 
+   * @returns The genesis EventLog and the derived did:cel identifier
+   *
    * @throws Error if signer produces invalid proof
    * @throws Error if trying to create at non-peer layer
-   * 
+   *
    * @example
    * ```typescript
-   * const log = await cel.create('My Asset', [
+   * const { log, did } = await cel.create('My Asset', [
    *   createExternalReference(imageData, 'image/png')
    * ]);
    * ```
    */
-  async create(name: string, resources: ExternalReference[]): Promise<EventLog> {
+  async create(name: string, resources: ExternalReference[]): Promise<{ log: EventLog; did: string }> {
     // Assets can only be created at the peer layer
     // Other layers require migration from peer
     if (this.layer !== 'peer') {
@@ -445,11 +445,16 @@ export class OriginalsCel {
       
       if (event.type === 'create') {
         currentLayer = (eventData.layer as CelLayer) || 'peer';
-      } else if (event.type === 'update' && eventData.sourceDid && eventData.layer && eventData.migratedAt) {
-        // This is a migration event. Both webvh and btco migrations carry
-        // {sourceDid, layer}; only webvh additionally carries targetDid, so
-        // keying off targetDid silently skipped btco migrations (added in the
-        // #228 refactor) and left the log detected as still at webvh.
+      } else if (
+        // Type-first: first-class 'migrate' events are migrations by type.
+        (event.type === 'migrate' && eventData?.layer) ||
+        // Legacy sniff kept verbatim: old logs record migrations as 'update'
+        // events. Both webvh and btco migrations carry {sourceDid, layer};
+        // only webvh additionally carries targetDid, so keying off targetDid
+        // silently skipped btco migrations (added in the #228 refactor) and
+        // left the log detected as still at webvh.
+        (event.type === 'update' && eventData.sourceDid && eventData.layer && eventData.migratedAt)
+      ) {
         currentLayer = eventData.layer as CelLayer;
       }
     }

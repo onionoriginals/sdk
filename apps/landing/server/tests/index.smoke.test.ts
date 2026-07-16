@@ -5,7 +5,7 @@ import { route } from '../router';
 
 describe('index route table', () => {
   test('health + auth routes are registered', async () => {
-    process.env.JWT_SECRET = 'test-secret';
+    process.env.JWT_SECRET = 'test-secret-please-change-to-at-least-32ch';
     const routes = buildRoutes({
       turnkey: { apiClient: () => ({}) } as any,
       sessions: createInMemorySessionStorage(),

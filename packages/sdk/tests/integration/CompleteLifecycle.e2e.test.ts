@@ -28,6 +28,11 @@ import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { StorageAdapter as ConfigStorageAdapter } from '../../src/adapters/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import { KeyManager } from '../../src/did/KeyManager';
+import { createHash as __cryptoCreateHash } from 'crypto';
+// Real content hash — createAsset/publish now verify content against the
+// declared hash (issue #347), so fixtures must declare the true sha256.
+const contentHash = (c: string) => __cryptoCreateHash('sha256').update(c, 'utf8').digest('hex');
+
 
 /**
  * Helper to generate valid SHA-256 hashes (64 hex characters)
@@ -122,20 +127,20 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
   describe('Complete Lifecycle: peer → webvh → btco → transfer', () => {
     test('successfully executes full lifecycle with provenance tracking', async () => {
-      // ===== PHASE 1: Create Asset (did:peer) =====
+      // ===== PHASE 1: Create Asset (did:cel) =====
       const resources: AssetResource[] = [
         {
           id: 'resource-1',
           type: 'image',
           contentType: 'image/png',
-          hash: 'deadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678',
+          hash: 'cef9d30aa874f055b67820f138fe0efc59511dfd10e16dfd187611f202ce4420',
           content: 'mock-image-data'
         },
         {
           id: 'resource-2',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'cafebabe1234567890abcdef1234567890abcdef1234567890abcdef12345678',
+          hash: 'b5434f89a784a99900d2c801ad5988cfe8bee61fbc98c44577f8f8d8fe4b0d94',
           content: 'Hello, Originals Protocol!'
         }
       ];
@@ -144,8 +149,8 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
       // Verify asset creation
       expect(asset).toBeInstanceOf(OriginalsAsset);
-      expect(asset.currentLayer).toBe('did:peer');
-      expect(asset.id).toMatch(/^did:peer:/);
+      expect(asset.currentLayer).toBe('did:cel');
+      expect(asset.id).toMatch(/^did:cel:/);
       expect(asset.resources).toHaveLength(2);
       expect(asset.resources[0].id).toBe('resource-1');
       expect(asset.resources[1].id).toBe('resource-2');
@@ -154,7 +159,6 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const initialProvenance = asset.getProvenance();
       expect(initialProvenance.creator).toBe(asset.id);
       expect(initialProvenance.migrations).toHaveLength(0);
-      expect(initialProvenance.transfers).toHaveLength(0);
       expect(initialProvenance.createdAt).toBeDefined();
 
       // ===== PHASE 2: Publish to Web (did:webvh) =====
@@ -168,7 +172,8 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify did:webvh binding
       const bindings = (webAsset as any).bindings;
       expect(bindings).toBeDefined();
-      expect(bindings['did:webvh']).toMatch(new RegExp(`^did:webvh:${domain}:`));
+      // Minted DID is did:webvh:{SCID}:{domain}[:slug] — SCID segment now precedes the domain.
+      expect(bindings['did:webvh']).toMatch(new RegExp(`^did:webvh:[^:]+:${domain}:`));
 
       // Verify resources have URLs from storage adapter
       for (const resource of webAsset.resources) {
@@ -180,9 +185,9 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify storage adapter actually stored the resources
       for (const resource of webAsset.resources) {
         const url = resource.url as string;
-        // URL format is: did:webvh:domain:path/resources/hash
+        // URL format is: did:webvh:{SCID}:domain:path/resources/hash
         const urlParts = url.split(':');
-        const path = urlParts.slice(3).join(':');
+        const path = urlParts.slice(4).join(':');
         const stored = await memoryStorage.getObject(domain, path);
         expect(stored).not.toBeNull();
         expect(stored?.content).toBeDefined();
@@ -191,7 +196,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify provenance after web migration
       const webProvenance = webAsset.getProvenance();
       expect(webProvenance.migrations).toHaveLength(1);
-      expect(webProvenance.migrations[0].from).toBe('did:peer');
+      expect(webProvenance.migrations[0].from).toBe('did:cel');
       expect(webProvenance.migrations[0].to).toBe('did:webvh');
       expect(webProvenance.migrations[0].timestamp).toBeDefined();
 
@@ -205,7 +210,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       );
       expect(publicationCred).toBeDefined();
       expect(publicationCred.credentialSubject).toBeDefined();
-      expect(publicationCred.credentialSubject.fromLayer).toBe('did:peer');
+      expect(publicationCred.credentialSubject.fromLayer).toBe('did:cel');
       expect(publicationCred.credentialSubject.toLayer).toBe('did:webvh');
 
       // ===== PHASE 3: Inscribe on Bitcoin (did:btco) =====
@@ -241,7 +246,15 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const inscription = await ordinalsProvider.getInscriptionById(inscriptionId!);
       expect(inscription).not.toBeNull();
       expect(inscription?.inscriptionId).toBe(inscriptionId);
-      expect(inscription?.contentType).toBe('application/json');
+      // #407 phase 2: the inscription CONTENT is now the current media (the
+      // most-recent resource's bytes), and the btco DID document + resource
+      // manifest ride in the inscription METADATA.
+      expect(inscription?.contentType).toBe('image/png');
+      expect(inscription!.content!.toString()).toBe('mock-image-data');
+      const inscribedDoc = (inscription!.metadata as { didDocument: { id: string; service: Array<{ type: string; serviceEndpoint: { resources: unknown[] } }> } }).didDocument;
+      expect(inscribedDoc.id).toMatch(/^did:btco:/);
+      const inscribedManifest = inscribedDoc.service.find((s) => s.type === 'OriginalsResourceManifest');
+      expect(inscribedManifest!.serviceEndpoint.resources.length).toBeGreaterThan(0);
 
       // ===== PHASE 4: Transfer Ownership =====
       const recipientAddress = 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx';
@@ -255,35 +268,29 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(transferResult.vout).toBeDefined();
       expect(transferResult.fee).toBeDefined();
 
-      // Verify provenance after transfer
+      // Verify provenance after transfer. Ownership history is the sat's UTXO
+      // chain on Bitcoin, not the CEL — the transfer is a pure sat move that
+      // appends nothing to provenance; txid stays at the btco reveal txid.
       const finalProvenance = btcoAsset.getProvenance();
-      expect(finalProvenance.transfers).toHaveLength(1);
-      expect(finalProvenance.transfers[0].from).toBe(btcoAsset.id);
-      expect(finalProvenance.transfers[0].to).toBe(recipientAddress);
-      expect(finalProvenance.transfers[0].transactionId).toBe(transferResult.txid);
-      expect(finalProvenance.transfers[0].timestamp).toBeDefined();
-      expect(finalProvenance.txid).toBe(transferResult.txid);
+      expect(finalProvenance.txid).toBe(finalProvenance.migrations[1].transactionId);
 
       // ===== FINAL VERIFICATION: Complete provenance chain =====
       expect(finalProvenance.creator).toBe(asset.id);
       expect(finalProvenance.migrations).toHaveLength(2);
-      expect(finalProvenance.transfers).toHaveLength(1);
-      
+
       // Verify migration chain
-      expect(finalProvenance.migrations[0].from).toBe('did:peer');
+      expect(finalProvenance.migrations[0].from).toBe('did:cel');
       expect(finalProvenance.migrations[0].to).toBe('did:webvh');
       expect(finalProvenance.migrations[1].from).toBe('did:webvh');
       expect(finalProvenance.migrations[1].to).toBe('did:btco');
-      
+
       // Verify all timestamps are in correct order
       const createdAt = new Date(finalProvenance.createdAt).getTime();
       const migration1Time = new Date(finalProvenance.migrations[0].timestamp).getTime();
       const migration2Time = new Date(finalProvenance.migrations[1].timestamp).getTime();
-      const transferTime = new Date(finalProvenance.transfers[0].timestamp).getTime();
-      
+
       expect(migration1Time).toBeGreaterThanOrEqual(createdAt);
       expect(migration2Time).toBeGreaterThanOrEqual(migration1Time);
-      expect(transferTime).toBeGreaterThanOrEqual(migration2Time);
     });
 
     test('handles peer → btco direct migration (skipping webvh)', async () => {
@@ -293,13 +300,13 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'resource-direct',
           type: 'data',
           contentType: 'application/json',
-          hash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+          hash: '40b61fe1b15af0a4d5402735b26343e8cf8a045f4d81710e6108a21d91eaf366',
           content: '{"test": "data"}'
         }
       ];
 
       const asset = await sdk.lifecycle.createAsset(resources);
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
 
       // Inscribe directly to Bitcoin (skip webvh)
       const requestedFeeRate = 10;
@@ -310,7 +317,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       
       const provenance = btcoAsset.getProvenance();
       expect(provenance.migrations).toHaveLength(1);
-      expect(provenance.migrations[0].from).toBe('did:peer');
+      expect(provenance.migrations[0].from).toBe('did:cel');
       expect(provenance.migrations[0].to).toBe('did:btco');
       expect(provenance.migrations[0].feeRate).toBe(10); // Explicit rate wins over the oracle
 
@@ -320,7 +327,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
         'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7'
       );
       expect(transferResult.txid).toBeDefined();
-      expect(provenance.transfers).toHaveLength(1);
+      // Transfer is a pure sat move; provenance carries migrations only.
     });
 
     test('validates complete asset integrity throughout lifecycle', async () => {
@@ -331,7 +338,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'integrity-test',
           type: 'text',
           contentType: 'text/plain',
-          hash: 'aaaa5678901234567890abcdef1234567890abcdef1234567890abcdef1234'
+          hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
           // No content property - verify will skip content hash check
         }
       ];
@@ -344,11 +351,13 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const webAsset = await sdk.lifecycle.publishToWeb(asset, 'integrity.test');
       expect(await webAsset.verify()).toBe(true);
 
+      // Post-inscription the CEL log carries a bitcoin witness proof (#367):
+      // verify() now gates on the chain, so the ordinals provider is required.
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
-      expect(await btcoAsset.verify()).toBe(true);
+      expect(await btcoAsset.verify({ ordinalsProvider })).toBe(true);
 
       await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
-      expect(await btcoAsset.verify()).toBe(true);
+      expect(await btcoAsset.verify({ ordinalsProvider })).toBe(true);
     });
   });
 
@@ -393,7 +402,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       
       // Verify fee oracle is used in lifecycle
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'fee-test', type: 'data', contentType: 'text/plain', hash: makeHash('fee123'), content: 'test' }
+        { id: 'fee-test', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
       
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(asset, undefined);
@@ -447,7 +456,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'adapter-integration',
           type: 'text',
           contentType: 'text/html',
-          hash: makeHash('html123456789abcdef1234567890abcdef1234567890abcdef12'),
+          hash: contentHash('<html><body>Test</body></html>'),
           content: '<html><body>Test</body></html>'
         }
       ]);
@@ -461,16 +470,16 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(resourceUrl).toMatch(/^did:webvh:/);
 
       // Verify content is retrievable through adapter
-      // URL format is: did:webvh:domain:path/resources/hash
+      // URL format is: did:webvh:{SCID}:domain:path/resources/hash
       const urlParts = (resourceUrl as string).split(':');
-      const pathPart = urlParts.slice(3).join(':');
+      const pathPart = urlParts.slice(4).join(':');
       const stored = await memoryStorage.getObject(domain, pathPart);
       expect(stored).not.toBeNull();
     });
 
     test('adapters work together in inscribeOnBitcoin', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'btc-test', type: 'data', contentType: 'application/json', hash: makeHash('btc123'), content: '{}' }
+        { id: 'btc-test', type: 'data', contentType: 'application/json', hash: contentHash('{}'), content: '{}' }
       ]);
 
       // Inscribe without specifying fee rate - should use oracle
@@ -490,7 +499,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
   describe('Error Handling and Edge Cases', () => {
     test('throws error when transferring non-btco asset', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'error-test', type: 'data', contentType: 'text/plain', hash: makeHash('err123'), content: 'test' }
+        { id: 'error-test', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
 
       // Try to transfer peer layer asset
@@ -507,7 +516,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
     test('handles multiple transfers correctly', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'multi-transfer', type: 'data', contentType: 'text/plain', hash: makeHash('multi123'), content: 'test' }
+        { id: 'multi-transfer', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
 
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
@@ -523,12 +532,11 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(tx2.txid).toBeDefined();
       expect(tx2.txid).not.toBe(tx1.txid);
 
-      // Verify both transfers in provenance
+      // Each transfer is an independent sat move with its own txid. Ownership
+      // history is the sat's UTXO chain, not the CEL — provenance carries no
+      // transfers, and its txid stays anchored to the btco migration reveal.
       const provenance = btcoAsset.getProvenance();
-      expect(provenance.transfers).toHaveLength(2);
-      expect(provenance.transfers[0].to).toBe(recipient1);
-      expect(provenance.transfers[1].to).toBe(recipient2);
-      expect(provenance.txid).toBe(tx2.txid); // Latest txid
+      expect(provenance.txid).toBe(provenance.migrations[0].transactionId);
     });
 
     test('handles empty resources array', async () => {
@@ -538,10 +546,10 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
     test('handles multiple resources with different content types', async () => {
       const resources: AssetResource[] = [
-        { id: 'img', type: 'image', contentType: 'image/jpeg', hash: makeHash('img123'), content: 'jpeg-data' },
-        { id: 'txt', type: 'text', contentType: 'text/plain', hash: makeHash('txt123'), content: 'text-data' },
-        { id: 'json', type: 'data', contentType: 'application/json', hash: makeHash('json123'), content: '{"key":"value"}' },
-        { id: 'html', type: 'document', contentType: 'text/html', hash: makeHash('html123'), content: '<div>test</div>' }
+        { id: 'img', type: 'image', contentType: 'image/jpeg', hash: contentHash('jpeg-data'), content: 'jpeg-data' },
+        { id: 'txt', type: 'text', contentType: 'text/plain', hash: contentHash('text-data'), content: 'text-data' },
+        { id: 'json', type: 'data', contentType: 'application/json', hash: contentHash('{"key":"value"}'), content: '{"key":"value"}' },
+        { id: 'html', type: 'document', contentType: 'text/html', hash: contentHash('<div>test</div>'), content: '<div>test</div>' }
       ];
 
       const asset = await sdk.lifecycle.createAsset(resources);
@@ -558,9 +566,9 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify all are stored
       for (const resource of webAsset.resources) {
         const url = resource.url!;
-        // URL format is now: did:webvh:domain:path/resources/hash
+        // URL format is now: did:webvh:{SCID}:domain:path/resources/hash
         const urlParts = url.split(':');
-        const path = urlParts.slice(3).join(':'); // Get everything after did:webvh:domain
+        const path = urlParts.slice(4).join(':'); // Get everything after did:webvh:{SCID}:domain
         const stored = await memoryStorage.getObject('multi-type.test', path);
         expect(stored).not.toBeNull();
       }
@@ -568,7 +576,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
     test('preserves bindings throughout lifecycle', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'binding-test', type: 'data', contentType: 'text/plain', hash: makeHash('bind123'), content: 'test' }
+        { id: 'binding-test', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
 
       // After webvh
@@ -600,7 +608,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
           id: 'large-resource',
           type: 'data',
           contentType: 'application/octet-stream',
-          hash: makeHash('large123456789abcdef1234567890abcdef1234567890abcdef1'),
+          hash: contentHash(largeContent),
           content: largeContent
         }
       ];
@@ -610,9 +618,9 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       
       // Verify storage
       const url = webAsset.resources[0].url!;
-      // URL format is now: did:webvh:domain:path/resources/hash
+      // URL format is now: did:webvh:{SCID}:domain:path/resources/hash
       const urlParts = url.split(':');
-      const path = urlParts.slice(3).join(':'); // Get everything after did:webvh:domain
+      const path = urlParts.slice(4).join(':'); // Get everything after did:webvh:{SCID}:domain
       const stored = await memoryStorage.getObject('large.test', path);
       expect(stored?.content.length).toBeGreaterThan(99000);
 
@@ -626,7 +634,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
         id: `resource-${i}`,
         type: 'data',
         contentType: 'text/plain',
-        hash: makeHash(`res${i}`),
+        hash: contentHash(`Content ${i}`),
         content: `Content ${i}`
       }));
 
@@ -641,10 +649,10 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // Verify all are stored
       for (const resource of webAsset.resources) {
         const url = resource.url!;
-        // URL format is now: did:webvh:domain:path/resources/hash
+        // URL format is now: did:webvh:{SCID}:domain:path/resources/hash
         // Extract the path part after the domain
         const urlParts = url.split(':');
-        const pathPart = urlParts.slice(3).join(':'); // Get everything after did:webvh:domain
+        const pathPart = urlParts.slice(4).join(':'); // Get everything after did:webvh:{SCID}:domain
         const stored = await memoryStorage.getObject('many.test', pathPart);
         expect(stored).not.toBeNull();
       }
@@ -660,7 +668,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
   describe('Provenance Chain Validation', () => {
     test('maintains complete audit trail with all metadata', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'audit-test', type: 'data', contentType: 'text/plain', hash: makeHash('audit123'), content: 'test' }
+        { id: 'audit-test', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
 
       const startTime = Date.now();
@@ -680,7 +688,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(provenance.migrations).toHaveLength(2);
       
       const webMigration = provenance.migrations[0];
-      expect(webMigration.from).toBe('did:peer');
+      expect(webMigration.from).toBe('did:cel');
       expect(webMigration.to).toBe('did:webvh');
       expect(webMigration.timestamp).toBeDefined();
       expect(new Date(webMigration.timestamp).getTime()).toBeGreaterThanOrEqual(startTime);
@@ -695,18 +703,13 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       expect(btcoMigration.revealTxId).toBeDefined();
       expect(btcoMigration.feeRate).toBe(8); // Explicitly requested rate wins over the oracle
 
-      // Verify transfer metadata
-      expect(provenance.transfers).toHaveLength(1);
-      const transfer = provenance.transfers[0];
-      expect(transfer.from).toBeDefined();
-      expect(transfer.to).toBe('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
-      expect(transfer.timestamp).toBeDefined();
-      expect(transfer.transactionId).toBeDefined();
+      // The transfer is a pure sat move; ownership history is the sat's UTXO
+      // chain on Bitcoin, not the CEL — provenance carries no transfer metadata.
     });
 
     test('timestamps are monotonically increasing', async () => {
       const asset = await sdk.lifecycle.createAsset([
-        { id: 'time-test', type: 'data', contentType: 'text/plain', hash: makeHash('time123'), content: 'test' }
+        { id: 'time-test', type: 'data', contentType: 'text/plain', hash: contentHash('test'), content: 'test' }
       ]);
 
       await new Promise(resolve => setTimeout(resolve, 10)); // Small delay
@@ -716,15 +719,16 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       const btcoAsset = await sdk.lifecycle.inscribeOnBitcoin(webAsset, 5);
       
       await new Promise(resolve => setTimeout(resolve, 10)); // Small delay
+      // Transfer is a pure sat move (no provenance entry); it still must not
+      // disturb the monotonic migration timestamps below.
       await sdk.lifecycle.transferOwnership(btcoAsset, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
 
       const provenance = btcoAsset.getProvenance();
-      
+
       const times = [
         new Date(provenance.createdAt).getTime(),
         new Date(provenance.migrations[0].timestamp).getTime(),
-        new Date(provenance.migrations[1].timestamp).getTime(),
-        new Date(provenance.transfers[0].timestamp).getTime()
+        new Date(provenance.migrations[1].timestamp).getTime()
       ];
 
       for (let i = 1; i < times.length; i++) {

@@ -14,6 +14,11 @@ import { FeeOracleMock } from '../../src/adapters/FeeOracleMock';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { StorageAdapter as ConfigStorageAdapter } from '../../src/adapters/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';
+import { createHash as __cryptoCreateHash } from 'crypto';
+// Real content hash — createAsset/publish now verify content against the
+// declared hash (issue #347), so fixtures must declare the true sha256.
+const contentHash = (c: string) => __cryptoCreateHash('sha256').update(c, 'utf8').digest('hex');
+
 
 function makeHash(prefix: string): string {
   const hexOnly = prefix.split('').map(c => {
@@ -83,7 +88,7 @@ describe('Batch Operations Performance', () => {
 
       for (const size of sizes) {
         const resourcesList = Array.from({ length: size }, (_, i) => [
-          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
         ]);
 
         const startTime = Date.now();
@@ -127,7 +132,7 @@ describe('Batch Operations Performance', () => {
         const assets: OriginalsAsset[] = [];
         for (let i = 0; i < size; i++) {
           const asset = await sdk.lifecycle.createAsset([
-            { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+            { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
           ]);
           assets.push(asset);
         }
@@ -163,7 +168,7 @@ describe('Batch Operations Performance', () => {
     test('should handle large batches without memory issues', async () => {
       const size = 200;
       const resourcesList = Array.from({ length: size }, (_, i) => [
-        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
       ]);
 
       // Monitor memory usage (if available)
@@ -186,7 +191,7 @@ describe('Batch Operations Performance', () => {
     test('should process very large batches with chunking', async () => {
       const size = 500;
       const resourcesList = Array.from({ length: size }, (_, i) => [
-        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
       ]);
 
       const startTime = Date.now();
@@ -210,7 +215,7 @@ describe('Batch Operations Performance', () => {
       
       for (let i = 0; i < size; i++) {
         const asset = await sdk.lifecycle.createAsset([
-          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+          { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
         ]);
         assets.push(asset);
       }
@@ -242,7 +247,7 @@ describe('Batch Operations Performance', () => {
         const assets: OriginalsAsset[] = [];
         for (let i = 0; i < size; i++) {
           const asset = await sdk.lifecycle.createAsset([
-            { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+            { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
           ]);
           assets.push(asset);
         }
@@ -288,7 +293,7 @@ describe('Batch Operations Performance', () => {
     test.skip('concurrent processing should be faster than sequential', async () => {
       const size = 20;
       const resourcesList = Array.from({ length: size }, (_, i) => [
-        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
       ]);
 
       // Sequential processing
@@ -300,7 +305,7 @@ describe('Batch Operations Performance', () => {
 
       // Create new assets for concurrent test
       const resourcesList2 = Array.from({ length: size }, (_, i) => [
-        { id: `res2-${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt2-${i}`), content: `text${i}` }
+        { id: `res2-${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
       ]);
 
       // Concurrent processing
@@ -332,7 +337,7 @@ describe('Batch Operations Performance', () => {
       const results = [];
       for (let b = 0; b < batches; b++) {
         const resourcesList = Array.from({ length: batchSize }, (_, i) => [
-          { id: `batch${b}-res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`b${b}txt${i}`), content: `text${i}` }
+          { id: `batch${b}-res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
         ]);
 
         const result = await sdk.lifecycle.batchCreateAssets(resourcesList, {
@@ -355,7 +360,7 @@ describe('Batch Operations Performance', () => {
       
       // Create assets
       const resourcesList = Array.from({ length: size }, (_, i) => [
-        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: makeHash(`txt${i}`), content: `text${i}` }
+        { id: `res${i}`, type: 'text', contentType: 'text/plain', hash: contentHash(`text${i}`), content: `text${i}` }
       ]);
       
       const startTime = Date.now();

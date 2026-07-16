@@ -37,12 +37,23 @@ import type { WitnessProof } from '../types.js';
 export interface WitnessService {
   /**
    * Witnesses a digest and returns a proof of attestation.
-   * 
+   *
    * The witness should:
    * 1. Record the digest at the current point in time
    * 2. Generate a cryptographic proof of the attestation
    * 3. Include a witnessedAt timestamp in the proof
-   * 
+   *
+   * ## Signing-byte contract (issue #314)
+   *
+   * For signature-based witness proofs, the signature MUST be computed over
+   * `witnessSigningBytes(digestMultibase)` — the UTF-8 bytes of the
+   * JSON-*quoted* digest string (`"uEiD…"`, surrounding quotes included), NOT
+   * the raw/decoded digest bytes. `verifyEventLog` reconstructs the preimage
+   * as `canonicalizeEvent(digestMultibase)`, so a witness that signs the
+   * decoded bytes (or the unquoted string) produces a proof that fails
+   * verification with no hint why. Use the exported `witnessSigningBytes`
+   * helper to obtain the exact preimage.
+   *
    * @param digestMultibase - The Multibase-encoded digest to witness (from computeDigestMultibase)
    * @returns A WitnessProof containing the attestation and witnessedAt timestamp
    * @throws Error if the witness service is unavailable or fails

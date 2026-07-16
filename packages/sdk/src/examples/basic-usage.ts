@@ -21,10 +21,10 @@ async function basicExample() {
   }];
 
   try {
-    // Create asset in did:peer layer (private, offline)
+    // Create asset in did:cel genesis layer (private, offline)
     const asset = await sdk.lifecycle.createAsset(resources);
     console.log('Created asset:', asset.id);
-    console.log('Current layer:', asset.currentLayer); // 'did:peer'
+    console.log('Current layer:', asset.currentLayer); // 'did:cel'
     
     // Publish to web for discovery (did:webvh layer)
     await sdk.lifecycle.publishToWeb(asset, 'example.com');

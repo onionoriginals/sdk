@@ -35,6 +35,52 @@ export interface StatusCheckResult {
 // Minimum bitstring length per W3C spec
 const MINIMUM_BITSTRING_LENGTH = 131072;
 
+const VCDM_V1_CONTEXT = 'https://www.w3.org/2018/credentials/v1';
+const VCDM_V2_CONTEXT = 'https://www.w3.org/ns/credentials/v2';
+
+/**
+ * Normalize a status-list credential's @context to VCDM 2.0 when re-issuing it
+ * (issue #300). setStatus/batchSetStatus rewrite `validFrom` and re-sign, so a
+ * legacy credential carrying the dropped 1.1 context must be upgraded to v2 —
+ * otherwise the returned document would be re-signable but rejected by the SDK's
+ * own validateCredential gate. The 1.1 context is stripped; any other contexts
+ * (e.g. status-list extensions) are preserved.
+ */
+function toV2Context(context: unknown): string[] {
+  const list: string[] = Array.isArray(context) ? context.filter((c): c is string => typeof c === 'string') : [];
+  const withoutV1 = list.filter((c) => c !== VCDM_V1_CONTEXT);
+  return withoutV1.includes(VCDM_V2_CONTEXT) ? withoutV1 : [VCDM_V2_CONTEXT, ...withoutV1];
+}
+
+/**
+ * Re-issue a status-list credential after mutating its bitstring (#300). The
+ * result is always a valid VCDM 2.0 document regardless of the input's vintage:
+ * the @context is normalized to 2.0, a fresh `validFrom` is written, and the
+ * deprecated 1.1 date fields are removed so a genuinely legacy input (created
+ * with `issuanceDate`/`expirationDate`) cannot leave those terms on a v2
+ * document — the v2 context does not define them, which breaks safe-mode JSON-LD
+ * canonicalization. `expirationDate` is migrated to `validUntil` to preserve any
+ * expiry. The now-stale proof is stripped so the caller must re-sign.
+ */
+function reissueStatusList(
+  base: VerifiableCredential,
+  newSubject: BitstringStatusListSubject
+): VerifiableCredential {
+  const result = {
+    ...base,
+    '@context': toV2Context(base['@context']),
+    credentialSubject: newSubject,
+    validFrom: new Date().toISOString(),
+  } as VerifiableCredential & Record<string, unknown>;
+  if (result.expirationDate && !result.validUntil) {
+    result.validUntil = result.expirationDate;
+  }
+  delete result.issuanceDate;
+  delete result.expirationDate;
+  delete result.proof;
+  return result;
+}
+
 // Upper bound for decompressed encodedList payloads. A legitimate status list
 // is a few MiB at most (the spec minimum is 16 KiB); 16 MiB covers 134M
 // entries while keeping a hostile gzip bomb from exhausting memory.
@@ -118,7 +164,7 @@ export class StatusListManager {
       type: ['VerifiableCredential', 'BitstringStatusListCredential'],
       id: options.id,
       issuer: options.issuer,
-      issuanceDate: new Date().toISOString(),
+      validFrom: new Date().toISOString(),
       credentialSubject: {
         type: 'BitstringStatusList',
         statusPurpose: options.statusPurpose,
@@ -198,18 +244,12 @@ export class StatusListManager {
       encodedList: StatusListManager.encodeBitstring(updated),
     };
 
-    // Strip any existing proof: the bitstring (and issuanceDate) just changed,
+    // Strip any existing proof: the bitstring (and validFrom) just changed,
     // so the prior signature no longer covers this document. Returning it with
     // the stale proof intact would let a publisher host an unverifiable list
     // (every credential in it then fails a proof-checking verifier). Forcing a
     // re-sign is the only safe contract.
-    const result = {
-      ...statusListCredential,
-      credentialSubject: newSubject,
-      issuanceDate: new Date().toISOString(),
-    } as VerifiableCredential & { proof?: unknown };
-    delete result.proof;
-    return result;
+    return reissueStatusList(statusListCredential, newSubject);
   }
 
   /**
@@ -299,13 +339,7 @@ export class StatusListManager {
 
     // Strip any existing proof — see setStatus: the mutated bitstring
     // invalidates the prior signature, so the caller must re-sign.
-    const result = {
-      ...statusListCredential,
-      credentialSubject: newSubject,
-      issuanceDate: new Date().toISOString(),
-    } as VerifiableCredential & { proof?: unknown };
-    delete result.proof;
-    return result;
+    return reissueStatusList(statusListCredential, newSubject);
   }
 
   /**

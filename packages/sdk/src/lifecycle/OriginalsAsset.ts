@@ -1,17 +1,29 @@
-import { 
-  AssetResource, 
-  DIDDocument, 
-  VerifiableCredential, 
-  LayerType 
+import {
+  AssetResource,
+  DIDDocument,
+  VerifiableCredential,
+  LayerType,
+  InscribeConfirm
 } from '../types/index.js';
 import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation.js';
 import { StructuredError } from '../utils/telemetry.js';
 import { CredentialManager } from '../vc/CredentialManager.js';
 import { DIDManager } from '../did/DIDManager.js';
-import { ProvenanceQuery, Migration, Transfer } from './ProvenanceQuery.js';
+import { ProvenanceQuery, Migration } from './ProvenanceQuery.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning.js';
+import type { EventLog, OrdinalsLookup } from '../cel/types.js';
+import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
+import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
+import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
+import { replayProvenance } from './replayProvenance.js';
+import { checkGenesisResourceBinding } from './genesisBinding.js';
+import {
+  ASSET_ENVELOPE_FORMAT,
+  ASSET_ENVELOPE_VERSION,
+  type AssetEnvelope
+} from './assetEnvelope.js';
 
 export interface ProvenanceChain {
   createdAt: string;
@@ -28,16 +40,12 @@ export interface ProvenanceChain {
     revealTxId?: string;
     feeRate?: number;
   }>;
-  transfers: Array<{
-    from: string;
-    to: string;
-    timestamp: string;
-    transactionId: string;
-  }>;
   resourceUpdates: Array<{
     resourceId: string;
-    fromVersion: number;
-    toVersion: number;
+    // Optional: foreign/legacy update events may carry no numeric version (see
+    // replayProvenance — omitted rather than folded as NaN).
+    fromVersion?: number;
+    toVersion?: number;
     fromHash: string;
     toHash: string;
     timestamp: string;
@@ -55,13 +63,48 @@ export class OriginalsAsset {
   private provenance: ProvenanceChain;
   private eventEmitter: EventEmitter;
   private versionManager: ResourceVersionManager;
+  // The CEL event log backing this asset's provenance. Present for assets minted
+  // via createAsset (did:cel genesis); undefined for legacy constructions.
+  #celLog?: EventLog;
+  // Per-layer DID documents captured at operation time (publish/inscribe/rotate).
+  // These are discarded by the live flow otherwise; serialize() needs them.
+  #didDocuments: Map<'did:webvh' | 'did:btco', DIDDocument> = new Map();
+  // Injected by LifecycleManager (createAsset / loadAsset). Appends a signed CEL
+  // event via the manager's degrade-aware path and returns the new head digest,
+  // or null when the append was skipped (no keyStore / no signing key). Undefined
+  // for assets constructed outside the lifecycle (they degrade in-memory only).
+  #celAppender?: (
+    type: 'migrate' | 'rotateKey' | 'update',
+    data: unknown,
+    opts?: { inscribeConfirm?: InscribeConfirm }
+  ) => Promise<string | null>;
+  // Per-asset serialization for addResourceVersion: the sync→async cutover made
+  // the shared #celLog read-modify-write span await points, so concurrent calls
+  // raced (a later _replaceCelLog clobbered an earlier signed append, or landed
+  // a stale-chained unverifiable event). A promise-chain mutex forces each call
+  // to run its critical section — re-read head, base-check, append — to
+  // completion before the next begins.
+  #appendChain: Promise<unknown> = Promise.resolve();
+  // #407 phase 3: the new version's inline bytes, exposed transiently WHILE the
+  // bound appender runs (addResourceVersion appends+inscribes BEFORE pushing the
+  // new resource, so the per-event inscription can carry the new media as
+  // content). Set before the appender, cleared in a finally — so a failed append
+  // never leaves resources/pending advanced past the log.
+  #pendingHeadMedia?: { resourceId: string; hash: string; content: string; contentType: string };
+
+  /** #407 phase 3: the pending new-version media, if an append is in flight. */
+  get pendingHeadMedia(): { resourceId: string; hash: string; content: string; contentType: string } | undefined {
+    return this.#pendingHeadMedia;
+  }
 
   constructor(
     resources: AssetResource[],
     did: DIDDocument,
-    credentials: VerifiableCredential[]
+    credentials: VerifiableCredential[],
+    eventLog?: EventLog
   ) {
     this.id = did.id;
+    this.#celLog = eventLog;
     this.resources = resources;
     this.did = did;
     this.credentials = credentials;
@@ -70,7 +113,6 @@ export class OriginalsAsset {
       createdAt: new Date().toISOString(),
       creator: did.id,
       migrations: [],
-      transfers: [],
       resourceUpdates: []
     };
     this.eventEmitter = new EventEmitter();
@@ -110,6 +152,145 @@ export class OriginalsAsset {
     }
   }
 
+  /**
+   * @internal — reconstruct an asset from a persisted envelope (loadAsset, #377).
+   *
+   * The public constructor FIGHTS restoration: `determineCurrentLayer` derives
+   * `'did:cel'` for a published did:cel asset (the genesis layer, not the
+   * current `'did:webvh'`/`'did:btco'`), and it fabricates
+   * `provenance.createdAt = new Date()`. restore() constructs, then OVERWRITES
+   * `currentLayer` / `bindings` / `#provenance` with values the caller folded
+   * from the (already-verified) log + genesis data. It emits NO events and its
+   * own logic reads NO clock — the restored state is a pure function of the log.
+   */
+  static restore(
+    resources: AssetResource[],
+    did: DIDDocument,
+    credentials: VerifiableCredential[],
+    log: EventLog,
+    restored: {
+      currentLayer: LayerType;
+      bindings: Record<string, string>;
+      provenance: ProvenanceChain;
+    }
+  ): OriginalsAsset {
+    const asset = new OriginalsAsset(resources, did, credentials, log);
+    asset.currentLayer = restored.currentLayer;
+    asset.bindings = restored.bindings;
+    asset.provenance = restored.provenance;
+    return asset;
+  }
+
+  /** The CEL event log backing this asset, if minted via createAsset. */
+  get celLog(): EventLog | undefined {
+    return this.#celLog;
+  }
+
+  /**
+   * @internal — LifecycleManager owns appends. Swaps the attached CEL log
+   * (e.g. after appending a migrate/transfer event).
+   */
+  _replaceCelLog(log: EventLog): void {
+    this.#celLog = log;
+  }
+
+  /**
+   * @internal — LifecycleManager binds the controller append path so
+   * addResourceVersion can write signed `update` events with the same degrade
+   * contract (cel:append-skipped) as the other authorship ops.
+   */
+  _bindCelAppender(
+    fn: (
+      type: 'migrate' | 'rotateKey' | 'update',
+      data: unknown,
+      opts?: { inscribeConfirm?: InscribeConfirm }
+    ) => Promise<string | null>
+  ): void {
+    this.#celAppender = fn;
+  }
+
+  /**
+   * @internal — LifecycleManager captures the per-layer DID document built at
+   * operation time (publishToWeb, inscribeOnBitcoin, rotateBtcoKeys), which the
+   * live flow otherwise discards. serialize() emits them under `didDocuments`.
+   * A later capture for the SAME layer replaces the earlier one (e.g. a rotate
+   * replaces the inscription-time btco doc).
+   */
+  _captureDidDocument(layer: 'did:webvh' | 'did:btco', doc: DIDDocument): void {
+    // Clone at capture time: the caller may keep and later mutate `doc` (it
+    // built it locally moments before), which must not corrupt this cache.
+    this.#didDocuments.set(layer, structuredClone(doc));
+  }
+
+  /**
+   * Serialize this asset into a versioned, JSON-safe {@link AssetEnvelope} (#377).
+   *
+   * Sync and pure: the envelope's provenance IS the CEL (`eventLog`); everything
+   * the log cannot derive (commitTxId, feeRate, post-genesis resource updates, a
+   * btco binding not yet anchored by a witness proof) rides in the `unverified`
+   * honesty section — advisory only, never trusted at load/verify time.
+   *
+   * @throws StructuredError('ASSET_NOT_SERIALIZABLE') for legacy assets that have
+   *   no CEL log (constructed without an eventLog) — there is no provenance to
+   *   encode.
+   */
+  serialize(): AssetEnvelope {
+    if (!this.#celLog) {
+      throw new StructuredError(
+        'ASSET_NOT_SERIALIZABLE',
+        'Asset has no CEL event log to serialize. Only assets minted via ' +
+        'createAsset (did:cel genesis) carry the provenance an envelope encodes.'
+      );
+    }
+
+    // Round-trip through the JSON serialization gate: validates the log and
+    // yields a clean, JSON-safe parsed object (preserving witness-proof
+    // extension fields) decoupled from the live #celLog reference.
+    const eventLog = parseEventLogJson(serializeEventLogJson(this.#celLog));
+
+    // Clone every doc handed out: these are LIVE readonly state (`this.did`)
+    // or the per-layer capture cache — a caller mutating the returned envelope
+    // must never be able to corrupt the signing-key material asset.migrate
+    // and inscribeOnBitcoin consume.
+    const didDocuments: AssetEnvelope['didDocuments'] = { 'did:cel': structuredClone(this.did) };
+    const webvhDoc = this.#didDocuments.get('did:webvh');
+    if (webvhDoc) didDocuments['did:webvh'] = structuredClone(webvhDoc);
+    const btcoDoc = this.#didDocuments.get('did:btco');
+    if (btcoDoc) didDocuments['did:btco'] = structuredClone(btcoDoc);
+
+    // Honesty section — assembled from the live in-memory caches only.
+    const unverified: NonNullable<AssetEnvelope['unverified']> = {};
+    // commitTxId / feeRate live only on the ProvenanceChain (never in the log).
+    // The btco migration is the sole carrier of both.
+    const btcoMigration = this.provenance.migrations.find(m => m.to === 'did:btco');
+    if (btcoMigration?.commitTxId) unverified.commitTxId = btcoMigration.commitTxId;
+    if (typeof btcoMigration?.feeRate === 'number') unverified.feeRate = btcoMigration.feeRate;
+    // Degraded binding: the fold can't derive did:btco (no witness proof in the
+    // log) but the live cache holds it — surface the whole live binding snapshot
+    // as advisory. Do NOT promote it: loadAsset must not trust it.
+    const foldedBtco = replayProvenance(this.#celLog).bindings['did:btco'];
+    const liveBtco = this.bindings?.['did:btco'];
+    if (!foldedBtco && liveBtco) {
+      unverified.bindings = { ...this.bindings };
+    }
+
+    const envelope: AssetEnvelope = {
+      format: ASSET_ENVELOPE_FORMAT,
+      version: ASSET_ENVELOPE_VERSION,
+      assetDid: this.id,
+      eventLog,
+      didDocuments,
+      resources: this.resources.map(r => ({ ...r }))
+    };
+    if (this.credentials.length > 0) {
+      envelope.credentials = this.credentials.map(c => ({ ...c }));
+    }
+    if (Object.keys(unverified).length > 0) {
+      envelope.unverified = unverified;
+    }
+    return envelope;
+  }
+
   async migrate(
     toLayer: LayerType,
     details?: {
@@ -123,7 +304,7 @@ export class OriginalsAsset {
   ): Promise<void> {
     // Handle migration between layers
     const validTransitions: Record<LayerType, LayerType[]> = {
-      'did:peer': ['did:webvh', 'did:btco'],
+      'did:cel': ['did:webvh', 'did:btco'], // did:cel genesis
       'did:webvh': ['did:btco'],
       'did:btco': [] // No further migrations possible
     };
@@ -167,29 +348,6 @@ export class OriginalsAsset {
     return this.provenance;
   }
 
-  async recordTransfer(from: string, to: string, transactionId: string): Promise<void> {
-    this.provenance.transfers.push({
-      from,
-      to,
-      timestamp: new Date().toISOString(),
-      transactionId
-    });
-    this.provenance.txid = transactionId;
-    
-    // Emit transfer event and await handlers
-    await this.eventEmitter.emit({
-      type: 'asset:transferred',
-      timestamp: new Date().toISOString(),
-      asset: {
-        id: this.id,
-        layer: this.currentLayer
-      },
-      from,
-      to,
-      transactionId
-    });
-  }
-
   /**
    * Query provenance with fluent API
    */
@@ -205,20 +363,6 @@ export class OriginalsAsset {
   }
 
   /**
-   * Get all transfers from an address
-   */
-  getTransfersFrom(address: string): Transfer[] {
-    return this.provenance.transfers.filter(t => t.from === address);
-  }
-
-  /**
-   * Get all transfers to an address
-   */
-  getTransfersTo(address: string): Transfer[] {
-    return this.provenance.transfers.filter(t => t.to === address);
-  }
-
-  /**
    * Get provenance summary
    */
   getProvenanceSummary(): {
@@ -226,31 +370,24 @@ export class OriginalsAsset {
     creator: string;
     currentLayer: LayerType;
     migrationCount: number;
-    transferCount: number;
     lastActivity: string;
   } {
     const lastMigration = this.provenance.migrations[this.provenance.migrations.length - 1];
-    const lastTransfer = this.provenance.transfers[this.provenance.transfers.length - 1];
-    
+
     return {
       created: this.provenance.createdAt,
       creator: this.id,
       currentLayer: this.currentLayer,
       migrationCount: this.provenance.migrations.length,
-      transferCount: this.provenance.transfers.length,
-      lastActivity: lastTransfer?.timestamp || lastMigration?.timestamp || this.provenance.createdAt
+      lastActivity: lastMigration?.timestamp || this.provenance.createdAt
     };
   }
 
   /**
-   * Find migration or transfer by transaction ID
+   * Find migration by transaction ID
    */
-  findByTransactionId(txId: string): Migration | Transfer | null {
-    const migration = this.provenance.migrations.find(m => m.transactionId === txId);
-    if (migration) return migration;
-    
-    const transfer = this.provenance.transfers.find(t => t.transactionId === txId);
-    return transfer || null;
+  findByTransactionId(txId: string): Migration | null {
+    return this.provenance.migrations.find(m => m.transactionId === txId) || null;
   }
 
   /**
@@ -264,8 +401,60 @@ export class OriginalsAsset {
     didManager?: DIDManager;
     credentialManager?: CredentialManager;
     fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
+    /**
+     * Required to verify `bitcoin-ordinals-2024` witness proofs in the CEL log
+     * (btco-anchored assets). Without it, a log carrying a bitcoin witness
+     * proof fails closed — see VerifyOptions.ordinalsProvider.
+     */
+    ordinalsProvider?: OrdinalsLookup;
+  }): Promise<boolean> {
+    const result = await this.runVerificationChecks(deps);
+    // 'verification:completed' is part of the public EventTypeMap and is
+    // subscribed by EventLogger; it was declared but never emitted (issue #352).
+    await this.eventEmitter.emit({
+      type: 'verification:completed',
+      timestamp: new Date().toISOString(),
+      asset: { id: this.id },
+      result
+    });
+    return result;
+  }
+
+  private async runVerificationChecks(deps?: {
+    didManager?: DIDManager;
+    credentialManager?: CredentialManager;
+    fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
+    ordinalsProvider?: OrdinalsLookup;
   }): Promise<boolean> {
     try {
+      // 0) GATING: whole-chain CEL verification. `expectedDid: this.id` is the
+      // binding check for _replaceCelLog — a swapped-in foreign log (even one
+      // valid on its own terms) does not back this asset's DID and fails here.
+      // Assets without a celLog (legacy constructions) skip this entirely.
+      if (this.#celLog) {
+        const celResult = await verifyEventLog(this.#celLog, {
+          expectedDid: this.id,
+          resolveKey: deps?.didManager ? createDidManagerKeyResolver(deps.didManager) : undefined,
+          ordinalsProvider: deps?.ordinalsProvider,
+          // With a provider we can (and must) reject a truncated pre-rotation
+          // log whose on-chain head betrays the omission (#366). No provider ⇒
+          // the flag is a no-op (btco witnesses fail closed without one anyway).
+          checkHeadFreshness: deps?.ordinalsProvider !== undefined
+        });
+        if (!celResult.verified) {
+          return false;
+        }
+
+        // Bind the in-memory resources to the verified genesis: every resource
+        // digest recorded at genesis must still be present among the current
+        // resources. Without this, an asset holding the genuine log but swapped
+        // resources passes (the log verifies, the resources don't back it).
+        // Shared with loadAsset via the extracted pure helper.
+        if (!checkGenesisResourceBinding(this.#celLog, this.resources)) {
+          return false;
+        }
+      }
+
       // 1) DID Document validation (structure + supported method via validateDID)
       if (!validateDIDDocument(this.did)) {
         return false;
@@ -278,8 +467,8 @@ export class OriginalsAsset {
         }
         // Anchored: the hash must be entirely hex. An unanchored test would
         // accept any string merely containing a hex character (e.g.
-        // "not-a-real-hash"), which for URL-only resources with no fetch
-        // provided is the only integrity check performed.
+        // "not-a-real-hash"); this structural gate runs before the content/URL
+        // integrity checks below.
         if (typeof res.hash !== 'string' || !/^[0-9a-f]+$/i.test(res.hash)) {
           return false;
         }
@@ -295,8 +484,14 @@ export class OriginalsAsset {
           continue;
         }
 
-        // If URL present and fetch is provided, attempt to fetch and hash
-        if (typeof res.url === 'string' && deps?.fetch) {
+        // Hosted (URL-only) resource: integrity is verifiable ONLY by fetching
+        // and hashing. Fail closed if we can't positively confirm it (#368) —
+        // a hosted resource whose bytes we can't match is not verified.
+        if (typeof res.url === 'string') {
+          // No fetcher → hosted content is unverifiable → fail closed.
+          if (!deps?.fetch) {
+            return false;
+          }
           try {
             const response = await deps.fetch(res.url);
             const buf = Buffer.from(await response.arrayBuffer());
@@ -306,8 +501,8 @@ export class OriginalsAsset {
               return false;
             }
           } catch {
-            // On fetch error, treat as unverifiable but do not fail the entire asset
-            // Fall back to structural validation only
+            // Fetch error on a hosted resource → unverifiable → fail closed.
+            return false;
           }
         }
       }
@@ -386,9 +581,21 @@ export class OriginalsAsset {
   }
 
   /**
-   * Add a new version of a resource (immutable versioning).
-   * Creates a new AssetResource with incremented version number and links it to the previous version.
-   * 
+   * Add a new version of a resource (immutable versioning) as a signed CEL
+   * `update` event.
+   *
+   * Async: the new version is appended to the CEL log via the injected
+   * controller appender (bound by LifecycleManager). On success the in-memory
+   * resources advance and `provenance.resourceUpdates` is re-folded from the log.
+   * Degraded mode (no appender bound, or the appender skips because no signing
+   * key is available): the in-memory resources still advance so the object is
+   * usable, but NO event is appended (the version is not provable) and a
+   * `cel:append-skipped` is emitted.
+   *
+   * `changes` is retained for the emitted `resource:version:created` event only;
+   * it is NOT part of the signed CEL body (the log is the source of truth and its
+   * body is fixed — see the design contract).
+   *
    * @param resourceId - The logical resource ID
    * @param newContent - The new content. Must be a string: AssetResource can
    *   only carry inline string content, so Buffer input is rejected rather
@@ -398,18 +605,21 @@ export class OriginalsAsset {
    * @param contentType - The content type
    * @param changes - Optional description of changes
    * @returns The newly created AssetResource
-   * @throws Error if content is unchanged, resource not found, or newContent is a Buffer
+   * @throws StructuredError('BINARY_CONTENT_UNSUPPORTED') for Buffer content (#276)
+   * @throws Error if content is unchanged or the resource is not found
    */
-  addResourceVersion(
+  async addResourceVersion(
     resourceId: string,
-    newContent: string | Buffer,
+    newContent: string,
     contentType: string,
-    changes?: string
-  ): AssetResource {
+    changes?: string,
+    opts?: { inscribeConfirm?: InscribeConfirm }
+  ): Promise<AssetResource> {
     // AssetResource.content is a string; a Buffer used to be silently dropped
     // (only its hash was stored), unrecoverably losing the binary content
-    // while the caller believed it was versioned (issue #276). Fail loudly
-    // instead.
+    // while the caller believed it was versioned (issue #276). The parameter
+    // is now declared `string` so TypeScript callers get a compile-time error
+    // (issue #311); the runtime guard stays for JS callers.
     if (typeof newContent !== 'string') {
       throw new StructuredError(
         'BINARY_CONTENT_UNSUPPORTED',
@@ -418,28 +628,69 @@ export class OriginalsAsset {
         'or host the bytes externally and reference them by hash.'
       );
     }
-    // Find the current version of the resource by id
+    // Serialize the whole read-modify-write of #celLog per asset: acquire this
+    // asset's append turn, run the critical section to completion, release. A
+    // second queued call re-reads the head INSIDE its turn, so it chains from
+    // the first call's committed result rather than a stale snapshot (Finding 2).
+    const run = this.#appendChain.then(() =>
+      this.#addResourceVersionCritical(resourceId, newContent, contentType, changes, opts)
+    );
+    // Keep the chain alive across a rejected turn without swallowing it for the caller.
+    this.#appendChain = run.catch(() => {});
+    return run;
+  }
+
+  /**
+   * The on-log provable head hex hash for a resourceId — the base the verifier
+   * will chain the next update from: the last on-log update's derived `toHash`,
+   * or (no on-log update yet) the genesis version-1 resource's `.hash`. Returns
+   * undefined when there is no CEL log (nothing to prove against). Used to
+   * detect an in-memory head that has diverged from the log (Finding 1).
+   */
+  #onLogProvableHead(resourceId: string): string | undefined {
+    if (!this.#celLog) return undefined;
+    const updates = replayProvenance(this.#celLog).resourceUpdates.filter(
+      u => u.resourceId === resourceId
+    );
+    if (updates.length > 0) return updates[updates.length - 1].toHash;
+    // Genesis entries are never removed, only appended — the lowest version is v1.
+    const genesis = this.resources
+      .filter(r => r.id === resourceId)
+      .sort((a, b) => (a.version || 1) - (b.version || 1))[0];
+    return genesis?.hash;
+  }
+
+  /** Critical section of addResourceVersion — runs one-at-a-time via #appendChain. */
+  async #addResourceVersionCritical(
+    resourceId: string,
+    newContent: string,
+    contentType: string,
+    changes?: string,
+    opts?: { inscribeConfirm?: InscribeConfirm }
+  ): Promise<AssetResource> {
+    // RE-READ the current head inside the turn (a prior queued call may have
+    // just committed a new version).
     const currentResources = this.resources.filter(r => r.id === resourceId);
     if (currentResources.length === 0) {
       throw new Error(`Resource with id ${resourceId} not found`);
     }
-    
+
     // Get the latest version
     const currentResource = currentResources.sort((a, b) => {
       const versionA = a.version || 1;
       const versionB = b.version || 1;
       return versionB - versionA;
     })[0];
-    
+
     // Compute new hash
     const contentBuffer = Buffer.from(newContent, 'utf-8');
     const newHash = hashResource(contentBuffer);
-    
+
     // Check if content has actually changed
     if (newHash === currentResource.hash) {
       throw new Error('Content unchanged - new version would be identical to current version');
     }
-    
+
     // Create new resource version
     const newVersion = (currentResource.version || 1) + 1;
     const newResource: AssetResource = {
@@ -453,12 +704,61 @@ export class OriginalsAsset {
       previousVersionHash: currentResource.hash,
       createdAt: new Date().toISOString()
     };
-    
-    // Add to resources array (immutable - don't modify old resource)
+
+    // Append a signed `update` CEL event (or degrade). The body is the fixed
+    // reference-shaped resource-update: it carries the signed toHash, not bytes.
+    let appended = false;
+    if (this.#celAppender) {
+      // Finding 1: the verifier chains continuity from the ON-LOG head, but our
+      // base is the IN-MEMORY head. They diverge once a prior update degraded
+      // (in-memory advanced, log did not). Appending now would chain from a base
+      // that isn't on the log → the event (and every later one) is permanently
+      // unverifiable. Detect the divergence and degrade instead of poisoning.
+      const onLogHead = this.#onLogProvableHead(resourceId);
+      if (onLogHead !== undefined && onLogHead !== currentResource.hash) {
+        await this.eventEmitter.emit({
+          type: 'cel:append-skipped',
+          timestamp: new Date().toISOString(),
+          asset: { id: this.id },
+          reason: 'UNPROVABLE_BASE'
+        });
+        // Do NOT also call the appender — exactly one cel:append-skipped per call.
+      } else {
+        // Reference-shaped body (#407 phase 1): the event carries the SIGNED
+        // `toHash`, never the bytes. Content lives in the resources array /
+        // serialize() envelope blobs (content-addressed store), keyed by hash.
+        // This keeps the log byte-light so it can be inscribed cheaply (phase 2).
+        // Expose the new bytes transiently so a btco per-event inscription (phase
+        // 3) can carry them as content — resources itself advances only AFTER a
+        // successful append, so pending is the only pre-push view of the new media.
+        this.#pendingHeadMedia = { resourceId, hash: newHash, content: newContent, contentType };
+        let digest: string | null;
+        try {
+          digest = await this.#celAppender('update', {
+            resourceId,
+            contentType,
+            previousVersionHash: currentResource.hash,
+            toHash: newHash,
+            toVersion: newVersion
+          }, opts);
+        } finally {
+          this.#pendingHeadMedia = undefined;
+        }
+        appended = digest !== null; // null ⇒ the manager already emitted cel:append-skipped
+      }
+    } else {
+      // No manager bound: degrade in-memory only. Surface the honesty signal on
+      // the asset emitter (the manager path uses its own emitter).
+      await this.eventEmitter.emit({
+        type: 'cel:append-skipped',
+        timestamp: new Date().toISOString(),
+        asset: { id: this.id },
+        reason: this.#celLog ? 'NO_SIGNING_KEY' : 'NO_CEL_LOG'
+      });
+    }
+
+    // In-memory resources advance in BOTH the appended and degraded cases.
     this.resources.push(newResource);
-    
-    // Track in version manager, using the resource's own next version number so
-    // the manager numbering matches getResourceVersion(id, newVersion).
     this.versionManager.addVersion(
       resourceId,
       newHash,
@@ -467,26 +767,18 @@ export class OriginalsAsset {
       changes,
       newVersion
     );
-    
-    // Update provenance
+
+    // Provenance.resourceUpdates is the source-of-truth fold of the log — only
+    // populated when the event actually landed (provable). Re-fold from the log.
+    if (appended && this.#celLog) {
+      this.provenance.resourceUpdates = replayProvenance(this.#celLog).resourceUpdates;
+    }
+
     const timestamp = new Date().toISOString();
-    this.provenance.resourceUpdates.push({
-      resourceId,
-      fromVersion: currentResource.version || 1,
-      toVersion: newVersion,
-      fromHash: currentResource.hash,
-      toHash: newHash,
-      timestamp,
-      changes
-    });
-    
-    // Emit version-created event
     const event = {
       type: 'resource:version:created' as const,
       timestamp,
-      asset: {
-        id: this.id
-      },
+      asset: { id: this.id },
       resource: {
         id: resourceId,
         fromVersion: currentResource.version || 1,
@@ -496,12 +788,10 @@ export class OriginalsAsset {
       },
       changes
     };
-    
-    // Emit asynchronously (don't block)
     queueMicrotask(() => {
       void this.eventEmitter.emit(event);
     });
-    
+
     return newResource;
   }
 
@@ -539,7 +829,13 @@ export class OriginalsAsset {
   }
 
   private determineCurrentLayer(didId: string): LayerType {
-    if (didId.startsWith('did:peer:')) return 'did:peer';
+    // did:peer was purged as a genesis layer (did:cel Phase 4 · 5/5). A did:peer
+    // id can no longer be constructed, so encountering one is a caller error —
+    // fail loudly rather than silently mislabel it.
+    if (didId.startsWith('did:peer:')) {
+      throw new Error('did:peer is no longer a supported layer; use did:cel genesis (createAsset)');
+    }
+    if (didId.startsWith('did:cel:')) return 'did:cel';
     if (didId.startsWith('did:webvh:')) return 'did:webvh';
     if (didId.startsWith('did:btco:')) return 'did:btco';
     throw new Error('Unknown DID method');

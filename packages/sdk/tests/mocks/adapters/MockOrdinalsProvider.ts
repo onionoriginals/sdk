@@ -1,18 +1,43 @@
-import type { OrdinalsProvider } from '../../../src/adapters/types';
+import type { OrdinalsProvider, InscriptionParts } from '../../../src/adapters/types';
 
 export class MockOrdinalsProvider implements OrdinalsProvider {
-  async createInscription(params: { data: Buffer; contentType: string; feeRate?: number }) {
+  async createInscription(params: {
+    data?: Buffer;
+    buildContent?: (satoshi: string) => InscriptionParts | Promise<InscriptionParts>;
+    contentType: string;
+    feeRate?: number;
+    metadata?: Record<string, unknown>;
+    targetSatoshi?: string;
+  }) {
+    // Pin the sat first, then invoke deferred content with it. The deferred
+    // builder may return a bare Buffer or `{ content, metadata }` (#407 phase 2).
+    const satoshi = params.targetSatoshi ?? '123';
+    let content: Buffer;
+    let deferredMetadata: Record<string, unknown> | undefined;
+    if (params.buildContent) {
+      const built = await params.buildContent(satoshi);
+      if (Buffer.isBuffer(built)) {
+        content = Buffer.from(built);
+      } else {
+        content = Buffer.from(built.content);
+        deferredMetadata = built.metadata;
+      }
+    } else {
+      content = params.data as Buffer;
+    }
+    const metadata = deferredMetadata ?? params.metadata;
     return {
       inscriptionId: 'insc-mock',
       revealTxId: 'tx-reveal-mock',
       commitTxId: 'tx-commit-mock',
-      satoshi: '123',
+      satoshi,
       txid: 'tx-mock',
       vout: 0,
       blockHeight: 1,
-      content: params.data,
+      content,
       contentType: params.contentType,
-      feeRate: params.feeRate
+      feeRate: params.feeRate,
+      ...(metadata !== undefined ? { metadata } : {})
     };
   }
 

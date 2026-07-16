@@ -1,6 +1,8 @@
 /* istanbul ignore file */
-import type { OrdinalsProvider } from '../types.js';
+import type { OrdinalsProvider, InscriptionParts } from '../types.js';
 import { StructuredError } from '../../utils/telemetry.js';
+import { decode as decodeCbor } from '../../utils/cbor.js';
+import { hexToBytes } from '../../utils/encoding.js';
 
 interface HttpProviderOptions {
   baseUrl: string;
@@ -12,6 +14,17 @@ interface HttpProviderOptions {
 
 const DEFAULT_MAX_JSON_BYTES = 1 * 1024 * 1024;
 const DEFAULT_MAX_CONTENT_BYTES = 5 * 1024 * 1024;
+
+// Inscription id shape (`<64-hex txid>i<vout>`). Ids arrive from the untrusted
+// indexer JSON and are interpolated into URL paths; a format guard closes a
+// path-traversal gap (e.g. `../../admin`) consistently with QuickNodeProvider.
+const INSCRIPTION_ID_RE = /^[0-9a-f]{64}i\d+$/i;
+
+/**
+ * Documentation placeholder — never a reachable host. createOrdinalsProviderFromEnv
+ * refuses to build a live provider pointed at it (issue #328).
+ */
+const PLACEHOLDER_ORD_BASE_URL = 'https://ord.example.com/api';
 
 function buildUrl(baseUrl: string, path: string): string {
   const base = baseUrl.replace(/\/$/, '');
@@ -91,6 +104,10 @@ export class OrdHttpProvider implements OrdinalsProvider {
 
   async getInscriptionById(id: string) {
     if (!id) return null;
+    // Guard the id BEFORE it reaches any URL path (`/inscription`, `/content`,
+    // `/r/metadata`): a compromised indexer could otherwise return a crafted id
+    // (`../../admin`) that resolves to a different same-origin path.
+    if (!INSCRIPTION_ID_RE.test(id)) return null;
     const data = await fetchJson<any>(buildUrl(this.baseUrl, `/inscription/${id}`), this.maxJsonBytes);
     if (!data) return null;
     // Expecting a shape similar to Ordinals indexers; adapt minimally
@@ -115,6 +132,14 @@ export class OrdHttpProvider implements OrdinalsProvider {
       ? (globalThis as any).Buffer.from(content.bytes)
       : content.bytes as any;
 
+    // #407 phase 3: decode the inscription's CBOR metadata (`{ didDocument,
+    // celLog | events }`) so a real chain can be reconstructed. Fetched AFTER the
+    // content (so the content SSRF/size guards run first). Absent metadata is fine
+    // (undefined) — the resolver fails closed when an anchoring inscription lacks
+    // provenance metadata; an explicit inline `metadata` field that fails to decode
+    // is a hard error (present-but-undecodable).
+    const metadata = await this.fetchMetadata(id, data);
+
     return {
       inscriptionId: data.inscription_id || id,
       content: buf,
@@ -122,15 +147,83 @@ export class OrdHttpProvider implements OrdinalsProvider {
       txid,
       vout,
       satoshi: String(data.sat ?? ''),
-      blockHeight: data.block_height
+      blockHeight: data.block_height,
+      ...(metadata !== undefined ? { metadata } : {})
     };
+  }
+
+  /**
+   * Fetch + CBOR-decode an inscription's metadata (#407 phase 3). Prefers an
+   * inline hex `metadata` field on the indexer JSON, else the ord recursive
+   * endpoint `/r/metadata/<id>` (same-origin, capped). Returns `undefined` when
+   * no metadata exists (a 404 / absent field). Throws a clear fail-closed error
+   * when metadata bytes are PRESENT but cannot be hex/CBOR decoded — a provider
+   * that cannot read present metadata must not silently drop provenance.
+   */
+  private async fetchMetadata(id: string, indexerJson: any): Promise<Record<string, unknown> | undefined> {
+    // An INLINE hex `metadata` field is an EXPLICIT provenance declaration:
+    // present-but-undecodable is a hard fail-closed error.
+    if (typeof indexerJson?.metadata === 'string' && indexerJson.metadata.length > 0) {
+      try {
+        return decodeCbor<Record<string, unknown>>(hexToBytes(indexerJson.metadata));
+      } catch (e) {
+        throw new StructuredError(
+          'ORD_METADATA_UNDECODABLE',
+          `OrdHttpProvider: inscription ${id} carries an inline metadata field that could not be hex/CBOR decoded (${e instanceof Error ? e.message : String(e)}); refusing to reconstruct from partial provenance`,
+          { inscriptionId: id }
+        );
+      }
+    }
+    // The ord recursive `/r/metadata/<id>` route serves hex CBOR ONLY when
+    // metadata exists. Distinguish the status EXPLICITLY (Greptile): ONLY a 404
+    // (genuinely no metadata) or an empty body degrades to undefined; a 5xx /
+    // other transient fault must THROW — swallowing it would let a flaky endpoint
+    // drop a real anchoring inscription and silently truncate the chain tail
+    // (I2). A present non-empty body that does not hex/CBOR decode is likewise a
+    // hard fail-closed error. Direct fetch so the status code is visible
+    // (fetchBytesWithLimit collapses every non-ok to null).
+    const url = buildUrl(this.baseUrl, `/r/metadata/${id}`);
+    const res = await (globalThis as any).fetch(url, { redirect: 'error', headers: { 'Accept': 'application/json' } });
+    if (res.status === 404) return undefined; // genuinely no metadata on this inscription
+    if (!res.ok) {
+      throw new StructuredError(
+        'ORD_METADATA_UNAVAILABLE',
+        `OrdHttpProvider: inscription ${id} /r/metadata returned HTTP ${res.status}; refusing to reconstruct from possibly-incomplete provenance`,
+        { inscriptionId: id }
+      );
+    }
+    const lenHeader = res.headers?.get?.('content-length');
+    if (lenHeader && Number(lenHeader) > this.maxJsonBytes) {
+      throw new Error(`OrdHttpProvider: /r/metadata response exceeds ${this.maxJsonBytes} bytes (Content-Length ${lenHeader})`);
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength > this.maxJsonBytes) {
+      throw new Error(`OrdHttpProvider: /r/metadata response body exceeds ${this.maxJsonBytes} bytes`);
+    }
+    let text = new TextDecoder().decode(bytes).trim();
+    if (text.length === 0) return undefined;
+    if (text.startsWith('"') && text.endsWith('"')) {
+      try { text = JSON.parse(text) as string; } catch { /* keep raw */ }
+    }
+    try {
+      return decodeCbor<Record<string, unknown>>(hexToBytes(text));
+    } catch (e) {
+      throw new StructuredError(
+        'ORD_METADATA_UNDECODABLE',
+        `OrdHttpProvider: inscription ${id} /r/metadata response is present but could not be hex/CBOR decoded (${e instanceof Error ? e.message : String(e)}); refusing to reconstruct from partial provenance`,
+        { inscriptionId: id }
+      );
+    }
   }
 
   async getInscriptionsBySatoshi(satoshi: string) {
     if (!satoshi) return [];
     const data = await fetchJson<any>(buildUrl(this.baseUrl, `/sat/${satoshi}`), this.maxJsonBytes);
     const ids: string[] = Array.isArray(data?.inscription_ids) ? data.inscription_ids : [];
-    return ids.map((inscriptionId) => ({ inscriptionId }));
+    // Drop malformed ids at the source so they never enter the chain walk / a URL path.
+    return ids
+      .filter((inscriptionId) => typeof inscriptionId === 'string' && INSCRIPTION_ID_RE.test(inscriptionId))
+      .map((inscriptionId) => ({ inscriptionId }));
   }
 
   // Transaction submission, status, fee estimation and inscription
@@ -164,7 +257,14 @@ export class OrdHttpProvider implements OrdinalsProvider {
     ));
   }
 
-  createInscription(_params: { data: Buffer; contentType: string; feeRate?: number; }): Promise<{
+  createInscription(params: {
+    data?: Buffer;
+    buildContent?: (satoshi: string) => InscriptionParts | Promise<InscriptionParts>;
+    contentType: string;
+    feeRate?: number;
+    metadata?: Record<string, unknown>;
+    targetSatoshi?: string;
+  }): Promise<{
     inscriptionId: string;
     revealTxId: string;
     commitTxId?: string;
@@ -175,7 +275,14 @@ export class OrdHttpProvider implements OrdinalsProvider {
     content?: Buffer;
     contentType?: string;
     feeRate?: number;
+    metadata?: Record<string, unknown>;
   }> {
+    if (params.buildContent || params.targetSatoshi) {
+      return Promise.reject(new StructuredError(
+        'ORD_PROVIDER_UNSUPPORTED',
+        'This provider does not support deferred content (buildContent) or sat-targeted reinscription (targetSatoshi). Build the inscription locally and submit via broadcastTransaction.'
+      ));
+    }
     return Promise.reject(new StructuredError(
       'ORD_CREATE_INSCRIPTION_NOT_IMPLEMENTED',
       'OrdHttpProvider.createInscription is not implemented: no inscription was created and no transaction was broadcast. Configure an OrdinalsProvider with real inscription support.'
@@ -198,17 +305,41 @@ export class OrdHttpProvider implements OrdinalsProvider {
   }
 }
 
-export async function createOrdinalsProviderFromEnv(): Promise<OrdinalsProvider> {
+export async function createOrdinalsProviderFromEnv(
+  options?: { network?: 'mainnet' | 'testnet' | 'signet' | 'regtest' }
+): Promise<OrdinalsProvider> {
   // A configured QuickNode endpoint takes precedence: it is the only
   // env-selectable provider with real broadcast/status/fee support.
   const quickNodeEndpoint = ((globalThis as any).process?.env?.QUICKNODE_ENDPOINT) || '';
   if (quickNodeEndpoint) {
     const mod = await import('./QuickNodeProvider.js');
-    return new mod.QuickNodeProvider({ endpoint: quickNodeEndpoint });
+    // Pass the SDK's network through so the provider verifies the endpoint's
+    // chain on first RPC use (issue #350). Falls back to BITCOIN_NETWORK; when
+    // neither is set, no chain check is performed (unchanged behavior).
+    const envNetworkRaw = String(((globalThis as any).process?.env?.BITCOIN_NETWORK) || '');
+    const envNetwork = (['mainnet', 'testnet', 'signet', 'regtest'] as const).find((n) => n === envNetworkRaw);
+    const expectedNetwork = options?.network ?? envNetwork;
+    return new mod.QuickNodeProvider({ endpoint: quickNodeEndpoint, expectedNetwork });
   }
   const useLive = String(((globalThis as any).process?.env?.USE_LIVE_ORD_PROVIDER) || '').toLowerCase() === 'true';
   if (useLive) {
-    const baseUrl = ((globalThis as any).process?.env?.ORD_PROVIDER_BASE_URL) || 'https://ord.example.com/api';
+    // USE_LIVE_ORD_PROVIDER opts into real network I/O, so the base URL must
+    // point at a real ord server. Previously this silently defaulted to the
+    // placeholder https://ord.example.com/api when ORD_PROVIDER_BASE_URL was
+    // unset — quietly aiming every read at a nonexistent host and risking
+    // failures/garbage being written into provenance. Fail fast instead so
+    // misconfiguration surfaces at startup rather than mid-lifecycle (#328).
+    const baseUrl = String(((globalThis as any).process?.env?.ORD_PROVIDER_BASE_URL) || '').trim();
+    if (!baseUrl || baseUrl === PLACEHOLDER_ORD_BASE_URL) {
+      const reason = !baseUrl
+        ? 'it is not set or is blank'
+        : `it is left at the documentation placeholder ${PLACEHOLDER_ORD_BASE_URL}`;
+      throw new StructuredError(
+        'ORD_PROVIDER_BASE_URL_REQUIRED',
+        'USE_LIVE_ORD_PROVIDER=true requires ORD_PROVIDER_BASE_URL to be set to a real ord ' +
+        `server URL, but ${reason}.`
+      );
+    }
     return new OrdHttpProvider({ baseUrl });
   }
   const mod = await import('./OrdMockProvider.js');

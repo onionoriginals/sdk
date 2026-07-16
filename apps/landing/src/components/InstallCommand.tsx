@@ -5,7 +5,7 @@ import './install-command.css';
 /** Copyable `npm install @originals/sdk` chip. */
 export function InstallCommand({ size = 'md' }: { size?: 'md' | 'lg' }) {
   const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const copy = async () => {
     try {

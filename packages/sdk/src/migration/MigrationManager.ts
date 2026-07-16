@@ -29,6 +29,15 @@ import { PeerToBtcoMigration } from './operations/PeerToBtcoMigration.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 
+/**
+ * @experimental Not the production migration path. `OriginalsSDK` and
+ * `LifecycleManager` do NOT use `MigrationManager`; they implement their own
+ * migrate/publish/inscribe flow with independent validation. This subsystem's
+ * checkpoint / rollback / audit / state-machine machinery therefore protects no
+ * production code path, and its validators can diverge from LifecycleManager's
+ * (issue #279). It is intentionally excluded from the package's public exports.
+ * Treat the API as unstable — it may change or be removed without a major bump.
+ */
 export class MigrationManager {
   private static instance: MigrationManager | null = null;
 

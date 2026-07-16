@@ -623,47 +623,32 @@ try {
 
 ---
 
-### Error: Front-Running Detected
+### Error: Verification Rejects a did:cel Anchoring (STALE_LOG / non-canonical anchor)
 
-**Symptom:**
-```typescript
-const isSafe = await sdk.bitcoin.preventFrontRunning(satoshi);
-console.log(isSafe); // false
-```
+**Symptom:** `asset.verify()` / `lifecycle.loadAsset()` rejects an inscription that anchors a did:cel sat which was already anchored by an earlier inscription.
 
 **Diagnosis:**
 
-```typescript
-// The preventFrontRunning method detected multiple inscriptions
-console.log(`Front-running detected on satoshi ${satoshi}`);
-console.log('Multiple inscriptions exist on this satoshi');
+Uniqueness/anti-front-running is not a method you call — it's enforced fail-closed
+at resolution time. `verifyEventLog` applies **first-anchor-wins**: it calls the
+configured `ordinalsProvider.getAnchoringsForDidCel()` and treats the first
+inscription to anchor a given did:cel sat as canonical. Any later inscription
+attempting to anchor the same sat is rejected as non-canonical, whether or not it
+came from you.
 
-// To inspect all inscriptions, use an Ordinals explorer:
-// - https://ordinals.com/sat/{satoshi}
-// - Or access the provider directly if you have it configured
+```typescript
+// Inspect all anchorings for the did:cel to see which one is canonical:
+const anchorings = await ordinalsProvider.getAnchoringsForDidCel(didCelId);
+console.log(anchorings); // ordered; anchorings[0] is the canonical (first) one
 ```
 
 **Solutions:**
 
-1. **Use different satoshi**
-   ```typescript
-   // Re-inscribe on a fresh satoshi
-   const newInscription = await sdk.bitcoin.inscribeData(data, contentType);
-   const isSafe = await sdk.bitcoin.preventFrontRunning(newInscription.satoshi);
-
-   if (!isSafe) {
-     throw new Error('Front-run again - possible network issue');
-   }
-   ```
-
-2. **Accept the front-running**
-   ```typescript
-   // Front-running may not always be malicious
-   // If your inscription was successfully created, you can proceed
-   // Use Ordinals explorers to verify which inscription is first
-   console.log('Inscription created, but satoshi has multiple inscriptions');
-   console.log('Verify your inscription at: https://ordinals.com');
-   ```
+1. **Re-anchor on a fresh sat.** If your inscription lost the race, inscribe the
+   did:cel on a different, previously-unanchored satoshi.
+2. **Confirm you're resolving against the right anchor.** If you expected your
+   inscription to be canonical but it wasn't, check broadcast order — the
+   protocol has no notion of "intended" winner, only first-confirmed.
 
 ---
 

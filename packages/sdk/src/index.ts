@@ -16,6 +16,11 @@ export type {
 } from './core/OriginalsSDK.js';
 export { OriginalsAsset } from './lifecycle/OriginalsAsset.js';
 export type { ProvenanceChain } from './lifecycle/OriginalsAsset.js';
+export { replayProvenance, BTCO_SATOSHI_UNKNOWN } from './lifecycle/replayProvenance.js';
+export type { ReplayedProvenance } from './lifecycle/replayProvenance.js';
+export { ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION } from './lifecycle/assetEnvelope.js';
+export type { AssetEnvelope } from './lifecycle/assetEnvelope.js';
+export { checkGenesisResourceBinding } from './lifecycle/genesisBinding.js';
 
 // Type exports
 export * from './types/index.js';
@@ -92,9 +97,18 @@ export type { MultikeyType } from './crypto/Multikey.js';
 // Event system exports
 export * from './events/index.js';
 
-// Migration system exports
-export { MigrationManager } from './migration/index.js';
-export * from './migration/types.js';
+// Migration system (EXPERIMENTAL — intentionally NOT part of the public API).
+//
+// The `MigrationManager` subsystem (validation pipeline, checkpoints, rollback,
+// audit log, state machine) is experimental and is NOT the migration path used
+// in production: `OriginalsSDK`/`LifecycleManager` run their own
+// migrate/publish/inscribe flow and never instantiate `MigrationManager`
+// (issue #279). Re-exporting it from the package entry point advertised unused
+// machinery as a supported API, so it is deliberately not exported here. It
+// remains importable from its module path for experimentation, at the caller's
+// own risk. Only `MigrationError` is surfaced, because the public event API
+// (`MigrationFailedEvent.error`) references it.
+export type { MigrationError } from './migration/types.js';
 
 // Batch operations exports
 export {
@@ -155,6 +169,7 @@ export { Logger } from './utils/Logger.js';
 export type { LogLevel, LogOutput } from './utils/Logger.js';
 export { EventLogger } from './utils/EventLogger.js';
 export type { EventLoggingConfig } from './utils/EventLogger.js';
+export { OperationLock } from './utils/OperationLock.js';
 
 // Utility exports
 export * from './utils/validation.js';
@@ -211,11 +226,26 @@ export {
   decodeDigestMultibase,
   digestMultibaseEquals,
 } from './cel/hash.js';
+export { witnessSigningBytes } from './cel/canonicalize.js';
+export {
+  DID_CEL_PREFIX,
+  deriveDidCel,
+  deriveDidCelFromGenesis,
+  isDidCel,
+  didCelMatchesLog,
+  createCelDidDocument,
+  resolveDidCel,
+} from './cel/celDid.js';
 export {
   createExternalReference,
   verifyExternalReference,
 } from './cel/ExternalReferenceManager.js';
-export { PeerCelManager } from './cel/layers/PeerCelManager.js';
+export {
+  PeerCelManager,
+  type CelAssetData,
+  type PeerAssetData,
+  type PeerCelConfig,
+} from './cel/layers/PeerCelManager.js';
 export { WebVHCelManager } from './cel/layers/WebVHCelManager.js';
 export { BtcoCelManager } from './cel/layers/BtcoCelManager.js';
 export type { WitnessService } from './cel/witnesses/WitnessService.js';
@@ -229,6 +259,11 @@ export {
   serializeEventLogCbor,
   parseEventLogCbor,
 } from './cel/serialization/cbor.js';
+export {
+  celSignerFromKeyPair,
+  createKeyStoreCelSigner,
+  hexSha256ToDigestMultibase,
+} from './cel/signerAdapter.js';
 
 // Default export
 export default OriginalsSDK;

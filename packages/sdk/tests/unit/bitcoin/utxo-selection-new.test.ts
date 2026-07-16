@@ -395,10 +395,14 @@ describe('selectResourceUtxos - Resource-Aware Selection', () => {
     });
 
     test('fee increases with more inputs', () => {
+      // Explicit P2WPKH scripts: inputs without a scriptPubKey are now priced
+      // at conservative legacy width (issue #344), which this small wallet
+      // could not fund.
+      const p2wpkh = '0014' + 'ab'.repeat(20);
       const utxos: ResourceUtxo[] = [
-        createResourceUtxo(5000, false),
-        createResourceUtxo(5000, false),
-        createResourceUtxo(5000, false)
+        { ...createResourceUtxo(5000, false), scriptPubKey: p2wpkh },
+        { ...createResourceUtxo(5000, false), scriptPubKey: p2wpkh },
+        { ...createResourceUtxo(5000, false), scriptPubKey: p2wpkh }
       ];
       
       const result = selectResourceUtxos(utxos, {

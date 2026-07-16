@@ -491,6 +491,8 @@ const asset = await sdk.lifecycle.createAsset(
 ): Promise<OriginalsAsset>
 ```
 
+> The created asset's `id` is a `did:cel:…` derived from its signed CEL genesis event, while `asset.currentLayer` reports the `'did:peer'` layer label (did:cel is the genesis-layer synonym).
+
 **AssetResource interface:**
 ```typescript
 interface AssetResource {
@@ -589,11 +591,22 @@ const inscribedAsset = await sdk.lifecycle.inscribeOnBitcoin(
 
 ### Transferring Ownership
 
+Ownership **IS** control of the asset's anchoring sat; the CEL is authorship only.
+`transferOwnership` is a thin Bitcoin sat move — it writes **nothing** to the CEL
+(the `transfer` event type is legacy/read-only: verifiers still accept it in old
+logs, but the SDK no longer emits it). Receiving an asset = receiving the sat; no
+inscription or log write is required to become the owner.
+
 ```typescript
 const tx = await sdk.lifecycle.transferOwnership(
   asset: OriginalsAsset,
   newOwner: string               // Bitcoin address
-): Promise<BitcoinTransaction>
+): Promise<BitcoinTransaction>   // txid at tx.txid; the CEL is untouched
+
+// Read live ownership from the sat (never reconstructed from a log event):
+const owner = await sdk.lifecycle.getCurrentOwner(asset);
+// → { address, outpoint } | null   (null before did:btco / no owner index;
+//   throws ORD_PROVIDER_REQUIRED if no ordinalsProvider is configured)
 ```
 
 ### Key Registration
@@ -604,6 +617,70 @@ await sdk.lifecycle.registerKey(
   privateKey: string             // Multibase-encoded private key
 ): Promise<void>
 ```
+
+### Interchange: serialize / loadAsset (creator→buyer hand-off)
+
+The provenance travels as a self-describing `AssetEnvelope` (the signed CEL log
+plus captured DID docs, resources, and an advisory `unverified` section).
+
+```typescript
+// Creator: emit the envelope after building provenance on-log.
+const envelope = asset.serialize();          // AssetEnvelope (throws ASSET_NOT_SERIALIZABLE for legacy assets)
+const wire = JSON.stringify(envelope);       // deliver over any channel
+
+// Buyer: reconstruct + VERIFY BY DEFAULT (no keys needed — verification is
+// public-key-only). Fails closed on any tamper/swap/mismatch/stale prefix.
+const { asset, verification, warnings } = await sdk.lifecycle.loadAsset(wire, {
+  // ordinalsProvider defaults to config.ordinalsProvider; with one present,
+  // loadAsset sets checkHeadFreshness and rejects a truncated pre-rotation
+  // hand-off as STALE_LOG (#366). btco-anchored logs fail closed WITHOUT one.
+  skipVerification: false                     // default; true skips crypto ONLY, not structural checks
+});
+// verification.verified === true; warnings notes e.g. an unchecked btco freshness.
+```
+
+- `loadAsset` throws `ENVELOPE_INVALID` / `ENVELOPE_VERSION_UNSUPPORTED` for
+  malformed or too-new envelopes, and `ASSET_LOAD_VERIFICATION_FAILED`
+  (carrying `.details.verification`) when the log, resource↔genesis binding, or
+  DID-doc↔fold cross-checks fail.
+- The `unverified.*` honesty section (commitTxId/feeRate/resourceUpdates/degraded
+  bindings) is advisory ONLY — never promoted to trusted state; a binding the
+  fold cannot derive surfaces in `warnings`, not in `asset.bindings`.
+- **Honest gap:** post-genesis resource versions ride `unverified.resourceUpdates`
+  and are UNverifiable until Phase 4 puts resource-update events on the log.
+
+### Ownership transfer + optional author-enablement
+
+Ownership moves with the sat alone — `transferOwnership` writes nothing to the CEL,
+and the new holder is the owner the moment they hold the sat (confirm with
+`getCurrentOwner`). Authoring *new* provenance is a separate, **optional** step: to
+append signed events the new holder must establish a signing key in the log.
+
+```typescript
+// OWNERSHIP: a pure sat move. Nothing is written to the CEL.
+await sdk.lifecycle.transferOwnership(asset, newOwnerBtcAddress);
+const owner = await sdk.lifecycle.getCurrentOwner(asset);  // { address, outpoint }
+
+// AUTHORING (optional) — COOPERATIVE: the outgoing controller signs the rotateKey,
+// rotating the incoming key in so the new holder can author.
+await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase, privateKey });
+
+// AUTHORING (optional) — NON-COOPERATIVE: the new holder cannot get the seller's
+// signature. authorizeSigner reinscribes the did:btco doc with THEIR key and
+// SELF-SIGNS the rotateKey; the reinscription witness proves sat control, so the
+// verifier accepts the otherwise-unauthorized rotation. privateKey is REQUIRED.
+// It does NOT grant ownership (the sat already does) — it enables authoring.
+const { inscriptionId, did } = await sdk.lifecycle.authorizeSigner(asset, {
+  publicKeyMultibase, privateKey
+});
+// After authorizeSigner the holder is the current controller: their subsequent
+// CEL appends (e.g. update, further rotation) SIGN instead of degrading.
+```
+
+A holder who owns the sat but has not enabled authoring (holds no controller key)
+still owns the asset and can transfer it freely; they simply see log appends
+DEGRADE with a `cel:append-skipped` (`NO_SIGNING_KEY`) event — verification is
+public, but WRITING to the log needs the key.
 
 ### Batch Operations
 
@@ -682,24 +759,29 @@ await asset.migrate(
   details?: { transactionId?, inscriptionId?, satoshi?, commitTxId?, revealTxId?, feeRate? }
 ): Promise<void>
 
-// Record ownership transfer
-await asset.recordTransfer(from: string, to: string, transactionId: string): Promise<void>
+// Ownership is the sat, not the log — transfer via sdk.lifecycle.transferOwnership
+// (a pure sat move) and read it live via sdk.lifecycle.getCurrentOwner(asset).
+// The asset carries no transfer history (removed with .transfers).
 
 // Provenance
 asset.getProvenance(): ProvenanceChain
-asset.getProvenanceSummary(): { created, creator, currentLayer, migrationCount, transferCount, lastActivity }
+asset.getProvenanceSummary(): { created, creator, currentLayer, migrationCount, lastActivity }
 asset.queryProvenance(): ProvenanceQuery  // Fluent API for queries
 
 // Resource versioning
 // newContent must be a string: AssetResource stores inline content as a string,
 // so Buffer input throws StructuredError('BINARY_CONTENT_UNSUPPORTED') rather
 // than silently dropping the bytes. Encode binary content (e.g. base64) first.
-asset.addResourceVersion(
+// Async: appends a signed `update` CEL event via the bound controller appender
+// (must `await`). When no signer is available (no keyStore / key absent) it
+// degrades — advances the in-memory version but emits `cel:append-skipped` and
+// writes no provable event. Concurrent calls are serialized per asset.
+await asset.addResourceVersion(
   resourceId: string,
   newContent: string,
   contentType: string,
   changes?: string
-): AssetResource
+): Promise<AssetResource>
 
 asset.getResourceVersion(resourceId: string, version: number): AssetResource | null
 asset.getAllVersions(resourceId: string): AssetResource[]
@@ -710,8 +792,11 @@ await asset.verify(deps?: {
   didManager?: DIDManager;
   credentialManager?: CredentialManager;
   fetch?: (url: string) => Promise<Response>;
+  ordinalsProvider?: OrdinalsProvider;  // Required to verify inscribed (did:btco) assets
 }): Promise<boolean>
 ```
+
+> Inscribed assets carry a Bitcoin witness proof in their CEL log; verifying one **requires** passing `{ ordinalsProvider }`, or verification fails closed.
 
 ### ProvenanceChain Structure
 
@@ -731,12 +816,8 @@ interface ProvenanceChain {
     revealTxId?: string;
     feeRate?: number;
   }>;
-  transfers: Array<{
-    from: string;
-    to: string;
-    timestamp: string;
-    transactionId: string;
-  }>;
+  // No `transfers`: ownership is the sat (a transfer writes nothing to provenance);
+  // read it live via sdk.lifecycle.getCurrentOwner(asset).
   resourceUpdates: Array<{
     resourceId: string;
     fromVersion: number;
@@ -938,8 +1019,9 @@ const tx = await sdk.bitcoin.transferInscription(
 // Validate did:btco exists on Bitcoin
 const isValid = await sdk.bitcoin.validateBTCODID(didId: string): Promise<boolean>
 
-// Check for front-running attacks
-const isSafe = await sdk.bitcoin.preventFrontRunning(satoshi: string): Promise<boolean>
+// Anti-front-running is not an sdk.bitcoin call — it's enforced fail-closed
+// at resolution: verifyEventLog uses first-anchor-wins via the provider's
+// getAnchoringsForDidCel(didCelId), rejecting any non-first anchor.
 
 // Get satoshi from inscription
 const satoshi = await sdk.bitcoin.getSatoshiFromInscription(
@@ -1178,9 +1260,9 @@ const resources = [{
   size: contentBuffer.length,
 }];
 
-// 3. Create asset (did:peer layer)
+// 3. Create asset (genesis layer; currentLayer label is 'did:peer')
 const asset = await sdk.lifecycle.createAsset(resources);
-console.log('Created:', asset.id); // did:peer:4z...
+console.log('Created:', asset.id); // did:cel:u...
 
 // 4. Subscribe to events
 asset.on('asset:migrated', (event) => {

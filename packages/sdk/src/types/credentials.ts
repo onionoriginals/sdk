@@ -6,7 +6,17 @@ export interface VerifiableCredential {
   type: string[];
   id?: string;
   issuer: string | Issuer;
-  issuanceDate: string;
+  /**
+   * VCDM 2.0 issuance timestamp. The SDK standardizes on VCDM 2.0 and emits
+   * `validFrom` (issue #300). `issuanceDate` is retained (optional) only so
+   * previously-issued VCDM 1.1 credentials can still be read/verified.
+   */
+  validFrom?: string;
+  /** VCDM 2.0 expiry timestamp (replaces the 1.1 `expirationDate`). */
+  validUntil?: string;
+  /** @deprecated VCDM 1.1 issuance timestamp — read-only legacy field; emit `validFrom`. */
+  issuanceDate?: string;
+  /** @deprecated VCDM 1.1 expiry timestamp — read-only legacy field; emit `validUntil`. */
   expirationDate?: string;
   credentialSubject: CredentialSubject;
   credentialStatus?: CredentialStatus;

@@ -4,9 +4,51 @@ import type { LogLevel, LogOutput } from '../utils/Logger.js';
 import type { EventLoggingConfig } from '../utils/EventLogger.js';
 import type { WebVHNetworkName } from './network.js';
 import type { DIDCacheConfig } from '../did/DIDCache.js';
+import type { OperationLock } from '../utils/OperationLock.js';
 
 // Base types for the Originals protocol
-export type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';
+export type LayerType = 'did:cel' | 'did:webvh' | 'did:btco';
+
+/**
+ * Which kind of did:btco authorship append a cost preview is for (#407 phase 4):
+ * `'update'` sizes the new media (a resource-version inscription); `'rotate'`
+ * sizes the event-only reinscription (the rotated DID document).
+ */
+export type AppendKind = 'update' | 'rotate';
+
+/**
+ * Non-mutating cost quote for the NEXT did:btco authorship append (#407 phase 4).
+ * Same fee-rate source/cap as the real inscribe path, so it tracks reality; a
+ * ballpark for cost-awareness/consent, not a billing figure.
+ */
+export interface AppendCostEstimate {
+  /** Estimated total inscription cost (sats) = feeRate × vbytes. */
+  satoshis: number;
+  /** The fee rate used (sat/vB), from the same resolver the real inscribe path
+   * uses (feeOracle→provider, absurd >MAX_REASONABLE_FEE_RATE sources skipped; an
+   * explicit override passes through). */
+  feeRate: number;
+  /** Estimated commit+reveal virtual size (vB). */
+  vbytes: number;
+  /** Size of the media/content being inscribed (bytes). */
+  contentBytes: number;
+}
+
+/**
+ * Confirm-gate policy for a paid did:btco authorship append (#407 phase 4).
+ * `'now'` (default) inscribes immediately (phase-3 behavior). A callback is
+ * awaited with the {@link AppendCostEstimate} BEFORE any log mutation: `true`
+ * proceeds and inscribes; `false` cleanly ABORTS the whole append (no event
+ * appended, nothing inscribed — a byte-identical no-op that throws
+ * `PROVENANCE_APPEND_DECLINED` and emits `cel:inscribe-declined`).
+ *
+ * The callback runs INSIDE the asset's append turn; it must not call another
+ * mutating op on the SAME asset (e.g. `addResourceVersion`/`rotateBtcoKeys`),
+ * which would queue behind its own turn and deadlock. Inspect and decide only.
+ */
+export type InscribeConfirm =
+  | 'now'
+  | ((estimate: AppendCostEstimate) => boolean | Promise<boolean>);
 
 export interface OriginalsConfig {
   network: 'mainnet' | 'regtest' | 'signet';
@@ -22,6 +64,15 @@ export interface OriginalsConfig {
   didCache?: DIDCacheConfig;
   feeOracle?: FeeOracleAdapter;
   ordinalsProvider?: OrdinalsProvider;
+  // Default confirm-gate policy for paid did:btco authorship appends (#407 phase
+  // 4). Omitted/'now' = inscribe immediately (phase-3 behavior); a callback is
+  // consulted before each gated paid btco append (addResourceVersion,
+  // rotateBtcoKeys) and can cleanly abort it. Overridable per call (their
+  // opts.inscribeConfirm).
+  inscribeConfirm?: InscribeConfirm;
+  // Shared keyed lock coordinating money-spending inscriptions across managers
+  // (issue #303). OriginalsSDK injects one instance so all managers share it.
+  operationLock?: OperationLock;
   // Optional telemetry hooks
   telemetry?: TelemetryHooks;
   // Enhanced logging configuration
@@ -70,7 +121,24 @@ export interface ExternalSigner {
    * @returns The proof value (typically multibase-encoded signature)
    */
   sign(input: { document: Record<string, unknown>; proof: Record<string, unknown> }): Promise<{ proofValue: string }>;
-  
+
+  /**
+   * OPTIONAL: sign pre-canonicalized, pre-hashed bytes (issue #310).
+   *
+   * Required for multi-sig `eddsa-rdfc-2022` contributions
+   * (`MultiSigManager.signWithExternalSigner`), where the SDK — not the signer
+   * — canonicalizes and hashes with RDFC-2022, and the signer must sign
+   * exactly those bytes. The document-level {@link ExternalSigner.sign} above
+   * lets the signer choose its own canonicalization (didwebvh-ts signers use
+   * JCS), which does NOT match multi-sig verification; a `sign()`-only signer's
+   * multi-sig contribution can never verify. Signers that back multi-sig must
+   * implement this and return the raw signature bytes.
+   *
+   * @param data - The exact bytes to sign (already canonicalized + hashed).
+   * @returns The raw signature bytes.
+   */
+  signBytes?(data: Uint8Array): Promise<{ signature: Uint8Array }>;
+
   /**
    * Get the verification method ID for this signer
    * @returns The verification method ID (e.g., "did:key:z6Mk...")
@@ -92,4 +160,21 @@ export interface ExternalVerifier {
   verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): Promise<boolean>;
 }
 
+/**
+ * Signer for the commit transaction funding inputs of a sat-selected
+ * inscription (see `inscribeOnSat`). The reveal is self-signed by an
+ * ephemeral key generated internally — only the commit needs the caller.
+ */
+export interface BitcoinSigner {
+  /**
+   * Signs AND FINALIZES the commit PSBT, returning a fully-signed, finalized,
+   * broadcast-ready transaction **hex** (NOT a base64 PSBT). The name says
+   * "AndFinalize" precisely because returning a still-unfinalized PSBT is a
+   * runtime error: the SDK passes this return value straight to
+   * `broadcastTransaction` and parses it locally to compute the commit txid
+   * (a PSBT fails to parse → `COMMIT_TX_INVALID`), and production providers
+   * reject anything that is not raw tx hex.
+   */
+  signAndFinalizeCommitPsbt(psbtBase64: string): Promise<string>;
+}
 

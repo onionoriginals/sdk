@@ -9,21 +9,8 @@ const resources: AssetResource[] = [
 describe('DIDManager', () => {
   const sdk = OriginalsSDK.create();
 
-  test('createDIDPeer returns a valid DID document (expected to fail until implemented)', async () => {
-    const didDoc = await sdk.did.createDIDPeer(resources);
-    expect(didDoc.id.startsWith('did:peer:')).toBe(true);
-    expect(didDoc['@context']).toBeDefined();
-    // Includes Multikey verification method
-    expect(Array.isArray(didDoc.verificationMethod)).toBe(true);
-    const vm = didDoc.verificationMethod![0];
-    expect(vm.type).toBe('Multikey');
-    expect(vm.publicKeyMultibase[0]).toBe('z');
-    const decoded = multikey.decodePublicKey(vm.publicKeyMultibase);
-    expect(decoded && decoded.key instanceof Uint8Array).toBe(true);
-    // Relationships reference by fragment
-    expect(didDoc.authentication).toContain(vm.id);
-    expect(didDoc.assertionMethod).toContain(vm.id);
-  });
+  // createDIDPeer removed (did:peer purge, did:cel Phase 4·5/5): did:cel is the
+  // sole genesis layer; the did:peer creation path and its unit tests are gone.
 
   test('migrateToDIDWebVH converts to did:webvh (expected to fail until implemented)', async () => {
     const didDoc: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:xyz' };
@@ -55,9 +42,11 @@ describe('DIDManager', () => {
     // The peer verification method is carried over (verification-only)
     const carried = (web.verificationMethod || []).map(vm => vm.publicKeyMultibase);
     expect(carried).toContain(peer.verificationMethod![0].publicKeyMultibase);
-    // All VM ids/controllers are rooted at the new did:webvh
+    // All VM ids/controllers are rooted at the new did:webvh. A relative
+    // fragment id (e.g. the signing key's '#key-0', issue #334) resolves
+    // against the document id per DID Core, so it is equally rooted.
     for (const vm of web.verificationMethod || []) {
-      expect(vm.id!.startsWith(web.id)).toBe(true);
+      expect(vm.id!.startsWith(web.id) || vm.id!.startsWith('#')).toBe(true);
       expect(vm.controller).toBe(web.id);
     }
     // Services preserved, old DID recorded in alsoKnownAs
@@ -88,9 +77,11 @@ describe('DIDManager', () => {
       assertionMethod: ['did:peer:abc123#0']
     };
     const web = (await sdk.did.migrateToDIDWebVH(peer, 'example.com')).didDocument;
-    // No reference to the retired did:peer remains outside alsoKnownAs
+    // No reference to the retired did:peer remains outside alsoKnownAs.
+    // Relative fragment ids ('#key-0') resolve against the document id per
+    // DID Core, so they carry no did:peer reference either (issue #334).
     for (const vm of web.verificationMethod || []) {
-      expect(vm.id!.startsWith(web.id)).toBe(true);
+      expect(vm.id!.startsWith(web.id) || vm.id!.startsWith('#')).toBe(true);
       expect(vm.controller).toBe(web.id);
     }
     const rels = ([] as unknown[]).concat(web.authentication || [], web.assertionMethod || []);
@@ -162,13 +153,6 @@ describe('DIDManager', () => {
     expect(btcoDoc.id.startsWith('did:btco:')).toBe(true);
   });
 
-  test('resolveDID resolves a real did:peer document', async () => {
-    const created = await sdk.did.createDIDPeer();
-    const doc = await sdk.did.resolveDID(created.id);
-    expect(doc).not.toBeNull();
-    expect(doc?.id).toBe(created.id);
-  });
-
   test('resolveDID returns null for an unresolvable did:peer instead of a stub', async () => {
     const doc = await sdk.did.resolveDID('did:peer:abc');
     expect(doc).toBeNull();
@@ -199,35 +183,10 @@ describe('DIDManager.createBtcoDidDocument method', () => {
 
 
 
-/** Inlined from DIDManager.getLayer.throw.part.ts */
 import { DIDManager } from '../../../src/did/DIDManager';
 
-describe('DIDManager.getLayerFromDID error branch', () => {
-  test('throws Unsupported DID method', () => {
-    const dm: any = new DIDManager({} as any);
-    expect(() => dm["getLayerFromDID"]('did:example:xyz')).toThrow('Unsupported DID method');
-  });
-});
-
-
-
-
-/** Inlined from DIDManager.private.part.ts */
-
-describe('DIDManager private getLayerFromDID', () => {
-  const sdk = OriginalsSDK.create();
-  const dm: any = sdk.did as any;
-
-  test('returns correct layer for each DID method (expected to pass)', () => {
-    expect(dm["getLayerFromDID"]('did:peer:abc')).toBe('did:peer');
-    expect(dm["getLayerFromDID"]('did:webvh:example.com:abc')).toBe('did:webvh');
-    expect(dm["getLayerFromDID"]('did:btco:123')).toBe('did:btco');
-  });
-
-  test('throws on unsupported method (expected to pass)', () => {
-    expect(() => dm["getLayerFromDID"]('did:web:example.com')).toThrow('Unsupported DID method');
-  });
-});
+// getLayerFromDID removed (did:peer purge, did:cel Phase 4·5/5): the private
+// layer-from-DID helper is gone; layer is derived by OriginalsAsset.determineCurrentLayer.
 
 
 
@@ -358,5 +317,34 @@ describe('DIDManager.validateDIDDocument false branch', () => {
     const dm = new DIDManager({} as any);
     const res = dm.validateDIDDocument({ id: 'did:peer:xyz' } as any);
     expect(res).toBe(false);
+  });
+});
+
+
+import { createCelDidDocument } from '../../../src/cel/celDid';
+
+describe('DIDManager.resolveDID did:cel branch (#Phase2 Task 8)', () => {
+  test('returns null on a cache miss — no fake resolution', async () => {
+    const dm = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: false } as any);
+    expect(await dm.resolveDID('did:cel:uEiUnknownDigest')).toBeNull();
+  });
+
+  test('returns a cached did:cel document (cache-only resolution)', async () => {
+    const dm = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: false } as any);
+    const did = 'did:cel:uEiCachedDigest';
+    const doc = createCelDidDocument(did, 'z6MkfakePublicKey');
+    await dm.cache.set(did, doc);
+    expect(await dm.resolveDID(did)).toEqual(doc);
+  });
+
+  test('warns naming resolveDidCel(did, log) when logging is enabled', async () => {
+    const dm = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: true } as any);
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(await dm.resolveDID('did:cel:uEiUnknownDigest')).toBeNull();
+      expect(warnSpy.mock.calls.some(args => args.join(' ').includes('resolveDidCel'))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

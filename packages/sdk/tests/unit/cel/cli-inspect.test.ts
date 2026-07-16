@@ -12,6 +12,8 @@ import { inspectCommand, InspectFlags } from '../../../src/cel/cli/inspect';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
 import { deactivateEventLog } from '../../../src/cel/algorithms/deactivateEventLog';
+import { appendEvent } from '../../../src/cel/algorithms/appendEvent';
+import { deriveDidCel } from '../../../src/cel/celDid';
 import { serializeEventLogJson } from '../../../src/cel/serialization/json';
 import { serializeEventLogCbor } from '../../../src/cel/serialization/cbor';
 import type { DataIntegrityProof, WitnessProof, EventLog, ExternalReference } from '../../../src/cel/types';
@@ -28,7 +30,8 @@ function createMockSigner(verificationMethod: string = 'did:key:z6MkTest#key-1')
   });
 }
 
-// Create an asset data object similar to what PeerCelManager creates
+// LEGACY genesis shape (pre-did:cel): embeds did/layer/creator.
+// Kept as the legacy-fixture per behavior; the write path emits CelAssetData.
 function createPeerAssetData(name: string, resources: ExternalReference[] = []) {
   return {
     name,
@@ -37,6 +40,17 @@ function createPeerAssetData(name: string, resources: ExternalReference[] = []) 
     resources,
     creator: 'did:peer:4z123456789abcdef',
     createdAt: new Date().toISOString(),
+  };
+}
+
+// New-shape genesis (CelAssetData): identity is DERIVED (did:cel), never embedded.
+function createCelAssetData(name: string, resources: ExternalReference[] = []) {
+  return {
+    name,
+    controller: 'did:key:z6MkTest',
+    resources,
+    createdAt: new Date().toISOString(),
+    nonce: 'uVGVzdE5vbmNlMTIzNDU2',
   };
 }
 
@@ -115,7 +129,7 @@ describe('CLI Inspect Command', () => {
         proofPurpose: 'assertionMethod',
       };
       
-      const assetData = createPeerAssetData('Original Name');
+      const assetData = createCelAssetData('Original Name');
       let log = await createEventLog(assetData, options);
       log = await updateEventLog(log, { name: 'Updated Name', description: 'A description' }, options);
       log = await updateEventLog(log, { version: 2 }, options);
@@ -161,21 +175,25 @@ describe('CLI Inspect Command', () => {
       const resources: ExternalReference[] = [
         { digestMultibase: 'uXYZ123', mediaType: 'image/png' }
       ];
-      const assetData = createPeerAssetData('Asset With Resources', resources);
+      const assetData = createCelAssetData('Asset With Resources', resources);
       const log = await createEventLog(assetData, {
         signer,
         verificationMethod: 'did:key:z6MkTest#key-1',
         proofPurpose: 'assertionMethod',
       });
-      
+
       const filePath = path.join(tempDir, 'with-resources.cel.json');
       fs.writeFileSync(filePath, serializeEventLogJson(log));
-      
+
       const result = await inspectCommand({ log: filePath });
-      
+
       expect(result.success).toBe(true);
       expect(result.state?.resources).toHaveLength(1);
       expect(result.state?.resources[0].mediaType).toBe('image/png');
+      // New-shape genesis: the DID is derived (did:cel), the creator is the controller.
+      expect(result.state?.did).toBe(deriveDidCel(log));
+      expect(result.state?.creator).toBe('did:key:z6MkTest');
+      expect(result.state?.layer).toBe('peer');
     });
     
     it('shows deactivated state correctly', async () => {
@@ -186,7 +204,7 @@ describe('CLI Inspect Command', () => {
         proofPurpose: 'assertionMethod',
       };
       
-      const assetData = createPeerAssetData('To Be Deactivated');
+      const assetData = createCelAssetData('To Be Deactivated');
       let log = await createEventLog(assetData, options);
       log = await deactivateEventLog(log, 'No longer needed', options);
       
@@ -222,8 +240,36 @@ describe('CLI Inspect Command', () => {
       expect(result.state?.name).toBe('Version 3');
       expect(result.state?.metadata?.custom).toBe('value');
     });
+
+    it('does not let a stray did/layer field on an update event clobber a new-shape derived identity', async () => {
+      const signer = createMockSigner();
+      const options = {
+        signer,
+        verificationMethod: 'did:key:z6MkTest#key-1',
+        proofPurpose: 'assertionMethod',
+      };
+
+      const assetData = createCelAssetData('Genesis Asset');
+      let log = await createEventLog(assetData, options);
+      const expectedDid = deriveDidCel(log);
+
+      // Stray did/layer fields on a plain update must be ignored for new-shape logs.
+      log = await updateEventLog(log, {
+        layer: 'btco',
+        did: 'did:btco:999',
+      }, options);
+
+      const filePath = path.join(tempDir, 'new-shape-stray-update.cel.json');
+      fs.writeFileSync(filePath, serializeEventLogJson(log));
+
+      const result = await inspectCommand({ log: filePath });
+
+      expect(result.success).toBe(true);
+      expect(result.state?.did).toBe(expectedDid);
+      expect(result.state?.layer).toBe('peer');
+    });
   });
-  
+
   describe('witness attestations', () => {
     it('extracts witness proofs from events', async () => {
       const signer = createMockSigner();
@@ -344,18 +390,18 @@ describe('CLI Inspect Command', () => {
       expect(result.state?.metadata?.sourceDid).toBe('did:peer:4z123456789abcdef');
     });
     
-    it('shows full migration path from peer to btco', async () => {
+    it('shows full migration path from peer to btco (legacy update-sniffed events)', async () => {
       const signer = createMockSigner();
       const options = {
         signer,
         verificationMethod: 'did:key:z6MkTest#key-1',
         proofPurpose: 'assertionMethod',
       };
-      
+
       // Create initial peer asset
       const assetData = createPeerAssetData('Full Migration Asset');
       let log = await createEventLog(assetData, options);
-      
+
       // Simulate webvh migration
       log = await updateEventLog(log, {
         sourceDid: 'did:peer:4z123456789abcdef',
@@ -364,7 +410,7 @@ describe('CLI Inspect Command', () => {
         domain: 'example.com',
         migratedAt: '2026-01-20T10:00:00Z',
       }, options);
-      
+
       // Simulate btco migration
       log = await updateEventLog(log, {
         sourceDid: 'did:webvh:example.com:asset123',
@@ -374,16 +420,241 @@ describe('CLI Inspect Command', () => {
         inscriptionId: 'inscription123',
         migratedAt: '2026-01-20T11:00:00Z',
       }, options);
-      
+
       const filePath = path.join(tempDir, 'full-migration.cel.json');
       fs.writeFileSync(filePath, serializeEventLogJson(log));
-      
+
       const result = await inspectCommand({ log: filePath });
-      
+
       expect(result.success).toBe(true);
       expect(result.state?.layer).toBe('btco');
       expect(result.state?.did).toBe('did:btco:inscription123');
       expect(result.state?.metadata?.txid).toBe('abc123def456');
+    });
+  });
+
+  describe('first-class event types (did:cel era)', () => {
+    const witnessProofFor = (satoshi: string) => ({
+      type: 'DataIntegrityProof' as const,
+      cryptosuite: 'bitcoin-ordinals-2024',
+      created: '2026-01-20T11:00:00Z',
+      verificationMethod: 'did:btco:witness#key-1',
+      proofPurpose: 'assertionMethod',
+      proofValue: 'z3BitcoinWitnessProof',
+      witnessedAt: '2026-01-20T11:00:00Z',
+      txid: 'abc123def456',
+      inscriptionId: 'inscription123i0',
+      satoshi,
+    });
+
+    it('state replay applies a migrate-typed event (layer, did, sourceDid)', async () => {
+      const signer = createMockSigner();
+      const options = {
+        signer,
+        verificationMethod: 'did:key:z6MkTest#key-1',
+        proofPurpose: 'assertionMethod',
+      };
+
+      let log = await createEventLog(createCelAssetData('Migrating Asset'), options);
+      const sourceDid = deriveDidCel(log);
+      log = await appendEvent(log, 'migrate', {
+        sourceDid,
+        targetDid: 'did:webvh:example.com:asset123',
+        layer: 'webvh',
+        domain: 'example.com',
+        migratedAt: '2026-01-20T10:00:00Z',
+      }, options);
+
+      const filePath = path.join(tempDir, 'first-class-migrate.cel.json');
+      fs.writeFileSync(filePath, serializeEventLogJson(log));
+
+      const result = await inspectCommand({ log: filePath });
+
+      expect(result.success).toBe(true);
+      expect(result.state?.layer).toBe('webvh');
+      expect(result.state?.did).toBe('did:webvh:example.com:asset123');
+      expect(result.state?.metadata?.sourceDid).toBe(sourceDid);
+      expect(result.state?.metadata?.domain).toBe('example.com');
+      expect(result.state?.updatedAt).toBe('2026-01-20T10:00:00Z');
+    });
+
+    it('displays migrate-typed events in the layer history section', async () => {
+      const signer = createMockSigner();
+      const options = {
+        signer,
+        verificationMethod: 'did:key:z6MkTest#key-1',
+        proofPurpose: 'assertionMethod',
+      };
+
+      let log = await createEventLog(createCelAssetData('History Asset'), options);
+      log = await appendEvent(log, 'migrate', {
+        sourceDid: deriveDidCel(log),
+        targetDid: 'did:webvh:example.com:hist1',
+        layer: 'webvh',
+        domain: 'example.com',
+        migratedAt: '2026-01-20T10:00:00Z',
+      }, options);
+
+      const filePath = path.join(tempDir, 'history.cel.json');
+      fs.writeFileSync(filePath, serializeEventLogJson(log));
+
+      const logged: string[] = [];
+      const orig = console.log;
+      console.log = (...args: unknown[]) => logged.push(args.join(' '));
+      let result;
+      try {
+        result = await inspectCommand({ log: filePath });
+      } finally {
+        console.log = orig;
+      }
+
+      expect(result.success).toBe(true);
+      const output = logged.join('\n');
+      // Layer history section renders only when >1 entries — the migrate-typed
+      // event must contribute the webvh entry.
+      expect(output).toContain('LAYER HISTORY');
+      expect(output).toContain('WebVH');
+      // Timeline shows a MIGRATE badge for the first-class event.
+      expect(output).toContain('MIGRATE');
+    });
+
+    it('derives did:btco from the bitcoin witness proof on a migrate-typed btco event', async () => {
+      const signer = createMockSigner();
+      const options = {
+        signer,
+        verificationMethod: 'did:key:z6MkTest#key-1',
+        proofPurpose: 'assertionMethod',
+      };
+
+      let log = await createEventLog(createCelAssetData('Btco Asset'), options);
+      log = await appendEvent(log, 'migrate', {
+        sourceDid: deriveDidCel(log),
+        targetDid: 'did:webvh:example.com:btco1',
+        layer: 'webvh',
+        domain: 'example.com',
+        migratedAt: '2026-01-20T10:00:00Z',
+      }, options);
+      log = await appendEvent(log, 'migrate', {
+        sourceDid: 'did:webvh:example.com:btco1',
+        layer: 'btco',
+        to: 'did:btco:123456789',
+        migratedAt: '2026-01-20T11:00:00Z',
+      }, options);
+
+      // Attach the bitcoin witness proof carrying the satoshi (added after
+      // signing, as BtcoCelManager does).
+      const last = log.events[log.events.length - 1];
+      log = {
+        events: [
+          ...log.events.slice(0, -1),
+          { ...last, proof: [...last.proof, witnessProofFor('123456789')] },
+        ],
+      };
+
+      const filePath = path.join(tempDir, 'btco-migrate.cel.json');
+      fs.writeFileSync(filePath, serializeEventLogJson(log));
+
+      const result = await inspectCommand({ log: filePath });
+
+      expect(result.success).toBe(true);
+      expect(result.state?.layer).toBe('btco');
+      expect(result.state?.did).toBe('did:btco:123456789');
+      expect(result.state?.metadata?.txid).toBe('abc123def456');
+      expect(result.state?.metadata?.inscriptionId).toBe('inscription123i0');
+    });
+
+    it('state replay applies a transfer-typed event (owners, timestamp; identity unchanged)', async () => {
+      const signer = createMockSigner();
+      const options = {
+        signer,
+        verificationMethod: 'did:key:z6MkTest#key-1',
+        proofPurpose: 'assertionMethod',
+      };
+
+      let log = await createEventLog(createCelAssetData('Owned Asset'), options);
+      const did = deriveDidCel(log);
+      log = await appendEvent(log, 'transfer', {
+        previousOwner: did,
+        newOwner: 'bc1qnewowner',
+        transferredAt: '2026-01-21T09:00:00Z',
+      }, options);
+
+      const filePath = path.join(tempDir, 'transferred.cel.json');
+      fs.writeFileSync(filePath, serializeEventLogJson(log));
+
+      const result = await inspectCommand({ log: filePath });
+
+      expect(result.success).toBe(true);
+      expect(result.state?.did).toBe(did);
+      expect(result.state?.metadata?.previousOwner).toBe(did);
+      expect(result.state?.metadata?.newOwner).toBe('bc1qnewowner');
+      expect(result.state?.updatedAt).toBe('2026-01-21T09:00:00Z');
+    });
+
+    it('state replay applies a rotateKey-typed event (controller hand-off)', async () => {
+      const signer = createMockSigner();
+      const options = {
+        signer,
+        verificationMethod: 'did:key:z6MkTest#key-1',
+        proofPurpose: 'assertionMethod',
+      };
+
+      let log = await createEventLog(createCelAssetData('Rotating Asset'), options);
+      log = await appendEvent(log, 'rotateKey', {
+        previousController: 'did:key:z6MkTest',
+        newController: 'did:key:z6MkNewController',
+        rotatedAt: '2026-01-22T08:00:00Z',
+      }, options);
+
+      const filePath = path.join(tempDir, 'rotated.cel.json');
+      fs.writeFileSync(filePath, serializeEventLogJson(log));
+
+      const result = await inspectCommand({ log: filePath });
+
+      expect(result.success).toBe(true);
+      expect(result.state?.controller).toBe('did:key:z6MkNewController');
+      expect(result.state?.updatedAt).toBe('2026-01-22T08:00:00Z');
+    });
+
+    it('timeline displays TRANSFER and ROTATEKEY badges with details', async () => {
+      const signer = createMockSigner();
+      const options = {
+        signer,
+        verificationMethod: 'did:key:z6MkTest#key-1',
+        proofPurpose: 'assertionMethod',
+      };
+
+      let log = await createEventLog(createCelAssetData('Badge Asset'), options);
+      log = await appendEvent(log, 'transfer', {
+        previousOwner: deriveDidCel(log),
+        newOwner: 'bc1qbadges',
+        transferredAt: '2026-01-21T09:00:00Z',
+      }, options);
+      log = await appendEvent(log, 'rotateKey', {
+        previousController: 'did:key:z6MkTest',
+        newController: 'did:key:z6MkNext',
+        rotatedAt: '2026-01-22T08:00:00Z',
+      }, options);
+
+      const filePath = path.join(tempDir, 'badges.cel.json');
+      fs.writeFileSync(filePath, serializeEventLogJson(log));
+
+      const logged: string[] = [];
+      const orig = console.log;
+      console.log = (...args: unknown[]) => logged.push(args.join(' '));
+      let result;
+      try {
+        result = await inspectCommand({ log: filePath });
+      } finally {
+        console.log = orig;
+      }
+
+      expect(result.success).toBe(true);
+      const output = logged.join('\n');
+      expect(output).toContain('TRANSFER');
+      expect(output).toContain('ROTATEKEY');
+      expect(output).toContain('bc1qbadges');
+      expect(output).toContain('did:key:z6MkNext');
     });
   });
   

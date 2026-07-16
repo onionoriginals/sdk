@@ -290,11 +290,10 @@ if (inscription) {
   console.log('Inscription not found or pending');
 }
 
-// Check for front-running (multiple inscriptions on same satoshi)
-const isSafe = await sdk.bitcoin.preventFrontRunning(inscription.satoshi);
-if (!isSafe) {
-  console.warn('Warning: Multiple inscriptions detected on this satoshi!');
-}
+// Uniqueness / anti-front-running is not a client-side check: it's enforced
+// fail-closed at resolution. verifyEventLog applies first-anchor-wins via the
+// provider's getAnchoringsForDidCel — the first inscription to anchor a given
+// did:cel sat is canonical; any later ones are rejected.
 ```
 
 ### Content Type Examples

@@ -192,7 +192,7 @@ describe('CLI Migrate Command', () => {
       // Verify output log has migration event
       const migratedLog = parseEventLogJson(fs.readFileSync(outputPath, 'utf-8'));
       expect(migratedLog.events.length).toBe(2); // create + migration
-      expect(migratedLog.events[1].type).toBe('update');
+      expect(migratedLog.events[1].type).toBe('migrate');
       
       const migrationData = migratedLog.events[1].data as Record<string, unknown>;
       expect(migrationData.layer).toBe('webvh');
