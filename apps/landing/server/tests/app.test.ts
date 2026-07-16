@@ -70,4 +70,34 @@ describe('unified server buildFetch', () => {
     );
     expect(res.status).toBe(501); // noopHostStore.handlePut
   });
+
+  test('host writes get the real socket IP (server.requestIP), not a client header', async () => {
+    let seenIp: string | undefined;
+    const recordingStore = {
+      async handlePut(_req: Request, _url: URL, clientIp: string) {
+        seenIp = clientIp;
+        return json({ ok: true }, 200);
+      },
+      serve: () => null as Response | null,
+    };
+    const fetchFn = buildFetch({ routes: buildStubRoutes(), hostStore: recordingStore, distDir });
+    const fakeServer = { requestIP: () => ({ address: '203.0.113.7' }) };
+    await fetchFn(
+      new Request('http://x/api/host/k', {
+        method: 'PUT',
+        headers: { 'x-forwarded-for': '9.9.9.9' }, // spoofed — must be ignored
+      }),
+      fakeServer
+    );
+    expect(seenIp).toBe('203.0.113.7');
+
+    // No server object available → falls back to 'local', never the header.
+    await fetchFn(
+      new Request('http://x/api/host/k2', {
+        method: 'PUT',
+        headers: { 'x-forwarded-for': '9.9.9.9' },
+      })
+    );
+    expect(seenIp).toBe('local');
+  });
 });

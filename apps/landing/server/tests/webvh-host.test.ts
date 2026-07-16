@@ -86,6 +86,26 @@ describe('webvh-host store', () => {
     expect(res.status).toBe(507);
   });
 
+  test('rate limit keys on the passed socket IP, not a spoofable X-Forwarded-For', async () => {
+    const store = createWebvhHostStore({ limit: 1, windowMs: 60_000 });
+    const mk = (k: string, xff: string) =>
+      new Request(`http://host/api/host/${encodeURIComponent(k)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/jsonl', 'x-forwarded-for': xff },
+        body: 'x',
+      });
+    const u = (k: string) => new URL(`http://host/api/host/${encodeURIComponent(k)}`);
+
+    const first = await store.handlePut(mk('a/x/did.jsonl', '9.9.9.9'), u('a/x/did.jsonl'), '1.1.1.1');
+    expect(first.status).toBe(200);
+    // Same real IP, a DIFFERENT spoofed X-Forwarded-For → still the same bucket → limited.
+    const second = await store.handlePut(mk('b/x/did.jsonl', '8.8.8.8'), u('b/x/did.jsonl'), '1.1.1.1');
+    expect(second.status).toBe(429);
+    // A genuinely different socket IP gets its own bucket.
+    const other = await store.handlePut(mk('c/x/did.jsonl', '7.7.7.7'), u('c/x/did.jsonl'), '2.2.2.2');
+    expect(other.status).toBe(200);
+  });
+
   test('non-PUT method is rejected 405', async () => {
     const store = createWebvhHostStore();
     const url = new URL('http://host/api/host/whatever');

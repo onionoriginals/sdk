@@ -42,14 +42,13 @@ export function createWebvhHostStore(opts?: {
     for (const [k, e] of map) if (e.expiresAt <= t) map.delete(k);
   }
 
-  function clientIp(req: Request): string {
-    return req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'local';
-  }
-
-  async function handlePut(req: Request, url: URL): Promise<Response> {
+  // `clientIp` is the resolved socket peer IP supplied by the server layer
+  // (app.ts `resolveClientIp`), NOT a client-supplied header — an X-Forwarded-For
+  // value is spoofable and would let one client mint unlimited rate-limit buckets.
+  async function handlePut(req: Request, url: URL, clientIp = 'local'): Promise<Response> {
     if (req.method !== 'PUT') return json({ error: 'method_not_allowed' }, 405);
 
-    const rl = limiter.check(clientIp(req));
+    const rl = limiter.check(clientIp);
     if (!rl.allowed) {
       return json({ error: 'rate_limited' }, 429, {
         'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)),

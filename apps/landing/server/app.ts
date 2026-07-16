@@ -2,11 +2,25 @@ import { file } from 'bun';
 import { normalize } from 'node:path';
 import { route, type Handler } from './router';
 
-// Minimal surface buildFetch depends on; the real store (webvh-host.ts, Task 4)
-// implements exactly these two methods.
+// Minimal surface buildFetch depends on; the real store (webvh-host.ts)
+// implements exactly these two methods. `handlePut` takes the resolved,
+// trustworthy client IP (Bun socket peer) for rate-limit keying — never a
+// client-supplied header, which is spoofable.
 export interface WebvhHostStore {
-  handlePut(req: Request, url: URL): Promise<Response>;
+  handlePut(req: Request, url: URL, clientIp: string): Promise<Response>;
   serve(req: Request, url: URL): Response | null;
+}
+
+// Just the slice of Bun's Server we use: the real peer IP of the connection.
+interface BunServerLike {
+  requestIP?(req: Request): { address: string } | null;
+}
+
+// The rate-limit key: the actual socket peer IP, which a client cannot spoof.
+// (Behind a proxy this is the proxy's IP — coarse but fail-safe: a spoofed
+// X-Forwarded-For can no longer mint unlimited buckets.)
+function resolveClientIp(req: Request, server?: BunServerLike): string {
+  return server?.requestIP?.(req)?.address || 'local';
 }
 
 async function serveStatic(url: URL, distDir: string): Promise<Response> {
@@ -34,14 +48,17 @@ export function buildFetch(deps: {
   routes: Record<string, Handler>;
   hostStore: WebvhHostStore;
   distDir: string;
-}): (req: Request) => Promise<Response> {
+}): (req: Request, server?: BunServerLike) => Promise<Response> {
   const { routes, hostStore, distDir } = deps;
-  return async (req) => {
+  // Bun calls this with (request, server); server exposes the real peer IP.
+  return async (req, server?: BunServerLike) => {
     const url = new URL(req.url);
     const path = url.pathname;
 
     // 1. WebVH host writes (wildcard path — not expressible in the exact route map).
-    if (path.startsWith('/api/host/')) return hostStore.handlePut(req, url);
+    if (path.startsWith('/api/host/')) {
+      return hostStore.handlePut(req, url, resolveClientIp(req, server));
+    }
 
     // 2. All other /api/* — exact-match route map (auth routes or 503 stubs + health).
     if (path.startsWith('/api/')) return route(req, routes);
