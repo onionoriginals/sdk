@@ -466,12 +466,12 @@ export class DIDManager {
             const network: 'mainnet' | 'testnet' | 'regtest' | 'signet' =
               btcoPrefix === 'reg' ? 'regtest'
               : btcoPrefix === 'sig' ? 'signet'
-              : btcoPrefix === 'test'
-                // OrdinalsClient has no testnet variant; fall back to the
-                // configured network (BtcoDidResolver still validates the DID
-                // against its own testnet prefix).
-                ? (this.config.network || 'mainnet')
-                : 'mainnet';
+              // The DID's own prefix determines the network, independent of SDK
+              // config — consistent with reg/sig. OrdinalsClient has no testnet
+              // variant, so the call below coerces testnet→signet (shared tb1
+              // params); BtcoDidResolver still validates the testnet prefix.
+              : btcoPrefix === 'test' ? 'testnet'
+              : 'mainnet';
             // OrdinalsClient has no testnet variant; testnet4 shares signet's
             // address params, so use signet for this RPC path (QuickNode is the
             // real testnet provider — see QuickNodeProvider).

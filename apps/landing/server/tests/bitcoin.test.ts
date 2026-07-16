@@ -106,10 +106,13 @@ describe('bitcoin routes', () => {
     const req = authedReq('/api/btc/funding', { address: userAddr });
     const res = await r.funding(req, new URL(req.url));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { fundingUtxo: { txid: string; vout: number; value: number }; changeAddress: string };
+    const body = (await res.json()) as { fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey: string }; changeAddress: string };
     expect(body.changeAddress).toBe(userAddr);
     expect(body.fundingUtxo.txid).toMatch(/^[0-9a-f]{64}$/);
     expect(body.fundingUtxo.value).toBe(20_000);
+    // scriptPubKey is REQUIRED by the SDK's commit builder — must be the user
+    // output's P2WPKH script (0014 + 20-byte hash).
+    expect(body.fundingUtxo.scriptPubKey).toMatch(/^0014[0-9a-f]{40}$/);
   });
 
   test('funding rejects a non-testnet address 400', async () => {

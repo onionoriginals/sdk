@@ -169,7 +169,7 @@ export function Demo() {
       if (res.status === 507) throw new Error(demo.inscribeGate.faucetEmpty);
       if (!res.ok) throw new Error(`Funding failed (${res.status})`);
       const { fundingUtxo, changeAddress } = (await res.json()) as {
-        fundingUtxo: { txid: string; vout: number; value: number };
+        fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey: string };
         changeAddress: string;
       };
       return engine.inscribe({

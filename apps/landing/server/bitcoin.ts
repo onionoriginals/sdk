@@ -122,16 +122,19 @@ export function createBitcoinRoutes(deps: {
     if (!sub) return json({ error: 'unauthorized' }, 401);
     const limited = rateLimited(req);
     if (limited) return limited;
+
+    // Validate the address BEFORE consuming a per-user faucet slot — otherwise
+    // repeated bad-address requests would exhaust a user's hourly cap for free.
+    const { address } = (await req.json().catch(() => ({}))) as { address?: string };
+    if (!address || !isValidBitcoinAddress(address, 'testnet')) {
+      return json({ error: 'bad_address', message: 'A testnet4 P2WPKH (tb1) address is required.' }, 400);
+    }
+
     const perUser = userLimiter.check(sub);
     if (!perUser.allowed) {
       return json({ error: 'faucet_user_cap', message: 'Per-user faucet limit reached; try again later.' }, 429, {
         'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
       });
-    }
-
-    const { address } = (await req.json().catch(() => ({}))) as { address?: string };
-    if (!address || !isValidBitcoinAddress(address, 'testnet')) {
-      return json({ error: 'bad_address', message: 'A testnet4 P2WPKH (tb1) address is required.' }, 400);
     }
 
     // 1) Gather the faucet's spendable UTXOs; pick enough to cover fundingSats +
@@ -197,7 +200,14 @@ export function createBitcoinRoutes(deps: {
       return json({ error: 'faucet_sign_failed', message: (e as Error).message }, 502);
     }
 
-    // 4) Broadcast; the funded outpoint is vout 0 (the user output).
+    // The funded outpoint is vout 0 (the user output). Capture its scriptPubKey
+    // now — the SDK's createCommitTransaction REQUIRES it on the fundingUtxo to
+    // set the segwit witnessUtxo (it throws "missing scriptPubKey" otherwise).
+    const userScript = tx.getOutput(0).script;
+    if (!userScript) return json({ error: 'funding_build_failed', message: 'No user output script.' }, 500);
+    const scriptPubKey = hex.encode(userScript);
+
+    // 4) Broadcast.
     let txid: string;
     try {
       txid = await provider.broadcastTransaction(signedTxHex);
@@ -206,7 +216,7 @@ export function createBitcoinRoutes(deps: {
     }
 
     return json({
-      fundingUtxo: { txid, vout: 0, value: faucetSats },
+      fundingUtxo: { txid, vout: 0, value: faucetSats, scriptPubKey },
       changeAddress: address, // the user's own address is the inscription change/reveal dest
     });
   };

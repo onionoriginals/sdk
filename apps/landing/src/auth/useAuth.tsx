@@ -8,10 +8,7 @@ import {
   type TurnkeyBitcoinClient,
   type TurnkeySessionApi,
 } from './turnkey-session';
-
-// Track B activates only when the deploy enables testnet4 signing.
-const btcTestnetEnabled =
-  (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_BTC_TESTNET === '1';
+import { btcTestnetEnabled } from '../sdk/testnet-flag';
 
 export interface BitcoinSession {
   fundingAddress: string;
@@ -58,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // build the signing client + ensure the testnet4 funding account. Best-
     // effort: a failure here must NOT block login — the demo simply falls back
     // to the mock inscribe path. Only runs when the deploy enabled testnet4.
-    if (!btcTestnetEnabled || !result.verificationToken) return;
+    if (!btcTestnetEnabled() || !result.verificationToken) return;
     try {
       // Lazy-load the browser Turnkey client so its browser-only dependency
       // graph never loads unless Track B is actually active.
