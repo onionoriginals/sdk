@@ -2,6 +2,7 @@ import { useMemo, useSyncExternalStore } from 'react';
 import { hero } from '../content';
 import { generateArtwork } from '../sdk/artwork';
 import { getArtSeed, subscribeArtSeed } from '../sdk/artwork-sync';
+import { IdentityPanel } from './IdentityPanel';
 import { InstallCommand } from './InstallCommand';
 import { Pipeline } from './Pipeline';
 import './hero.css';
@@ -25,6 +26,7 @@ export function Hero() {
         <p className="hero-eyebrow">{hero.eyebrow}</p>
         <h1 className="hero-headline">{hero.headline}</h1>
         <p className="hero-subhead">{hero.subhead}</p>
+        <IdentityPanel />
         <div className="hero-actions">
           <a className="btn btn-primary" href={hero.primaryCta.href}>
             {hero.primaryCta.label}

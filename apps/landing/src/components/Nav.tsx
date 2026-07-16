@@ -19,10 +19,8 @@ function Wordmark() {
 export function Nav() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-  const { isAuthenticated, user, createIdentity, signOut } = useAuth();
+  const { isAuthenticated, user, signOut } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
-  const [did, setDid] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -54,20 +52,11 @@ export function Nav() {
           </a>
           {isAuthenticated ? (
             <div className="nav-auth">
-              <span className="nav-email" title={user!.email}>{user!.email}</span>
-              <button
-                className="btn btn-primary"
-                disabled={creating}
-                onClick={async () => {
-                  setCreating(true);
-                  try { setDid(await createIdentity()); }
-                  catch (e) { alert(e instanceof Error ? e.message : 'DID creation failed'); }
-                  finally { setCreating(false); }
-                }}
-              >
-                {creating ? 'Creating…' : did ? 'Identity ✓' : 'Create your did:webvh'}
-              </button>
-              <button className="nav-signout" onClick={() => { setDid(null); signOut(); }}>Sign out</button>
+              <span className="nav-email" title={user!.email}>
+                <span className="nav-email-dot" aria-hidden="true" />
+                {user!.email}
+              </span>
+              <button className="nav-signout" onClick={() => signOut()}>Sign out</button>
             </div>
           ) : (
             <button className="btn btn-primary nav-cta" onClick={() => setLoginOpen(true)}>
@@ -104,7 +93,6 @@ export function Nav() {
         </nav>
       )}
       <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
-      {did && <div className="nav-did" title={did}>{did}</div>}
     </header>
   );
 }
