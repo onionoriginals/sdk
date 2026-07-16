@@ -69,6 +69,13 @@ function injectSiteMeta(): Plugin {
 
 export default defineConfig({
   plugins: [react(), injectSiteMeta()],
+  // Same-origin proxy so the browser reaches the standalone auth server
+  // (server/index.ts on :8787) without CORS and the httpOnly cookie works.
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8787'
+    }
+  },
   resolve: {
     alias: [
       { find: /^(node:)?fs\/promises$/, replacement: shim('fs-promises') },

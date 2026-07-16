@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { nav, site } from '../content';
+import { useAuth } from '../auth/useAuth';
+import { LoginModal } from './LoginModal';
 import './nav.css';
 
 function Wordmark() {
@@ -17,6 +19,8 @@ function Wordmark() {
 export function Nav() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
+  const { isAuthenticated, user, signOut } = useAuth();
+  const [loginOpen, setLoginOpen] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -46,9 +50,19 @@ export function Nav() {
             </svg>
             <span>{nav.github.label}</span>
           </a>
-          <a className="btn btn-primary nav-cta" href={nav.cta.href}>
-            {nav.cta.label}
-          </a>
+          {isAuthenticated ? (
+            <div className="nav-auth">
+              <span className="nav-email" title={user!.email}>
+                <span className="nav-email-dot" aria-hidden="true" />
+                {user!.email}
+              </span>
+              <button className="nav-signout" onClick={() => signOut()}>Sign out</button>
+            </div>
+          ) : (
+            <button className="btn btn-primary nav-cta" onClick={() => setLoginOpen(true)}>
+              Sign in
+            </button>
+          )}
           <button
             type="button"
             className="nav-menu-btn"
@@ -78,6 +92,7 @@ export function Nav() {
           </a>
         </nav>
       )}
+      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
     </header>
   );
 }

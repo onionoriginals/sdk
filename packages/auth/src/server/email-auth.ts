@@ -9,10 +9,15 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import type { EmailAuthSession, InitiateAuthResult, VerifyAuthResult } from '../types.js';
 import { encryptOtpCode } from '../otp-encryption.js';
-import { getOrCreateTurnkeySubOrg } from './turnkey-client.js';
+import { getOrCreateTurnkeySubOrg, normalizeEmail } from './turnkey-client.js';
 
 // Session timeout (15 minutes to match Turnkey OTP)
 const SESSION_TIMEOUT = 15 * 60 * 1000;
+
+// Maximum failed OTP verification attempts before the session is destroyed.
+// Limits local brute-forcing of the 6-digit code instead of relying solely
+// on Turnkey's server-side throttling.
+const MAX_OTP_ATTEMPTS = 5;
 
 /**
  * Session storage interface for pluggable session management
@@ -87,6 +92,16 @@ function generateSessionId(): string {
 /**
  * Initiate email authentication using Turnkey OTP
  * Sends a 6-digit OTP code to the user's email
+ *
+ * No Turnkey resources are provisioned here: the sub-organization (and its
+ * wallet) is only created in {@link verifyEmailAuth}, after the caller has
+ * proven control of the email address by presenting a valid OTP code.
+ *
+ * **Rate limiting is the caller's responsibility.** This function sends an
+ * email on every call. Endpoints exposing it MUST enforce rate limits (per
+ * IP and per target email) to prevent OTP email bombing of arbitrary
+ * inboxes; Turnkey's per-`userIdentifier` throttle does not protect
+ * arbitrary recipient addresses from an attacker who varies the email.
  */
 export async function initiateEmailAuth(
   email: string,
@@ -95,27 +110,30 @@ export async function initiateEmailAuth(
 ): Promise<InitiateAuthResult> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
 
+  // Normalize before validation and all Turnkey calls so the same mailbox
+  // always maps to the same identity (Alice@x.com === alice@x.com).
+  const normalizedEmail = normalizeEmail(email);
+
   // Validate email format
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
+  if (!emailRegex.test(normalizedEmail)) {
     throw new Error('Invalid email format');
   }
 
   console.log('[email-auth] Initiating email auth');
 
-  // Step 1: Get or create Turnkey sub-organization
-  const subOrgId = await getOrCreateTurnkeySubOrg(email, turnkeyClient);
-
-  // Step 2: Send OTP via Turnkey
+  // Send OTP via Turnkey. Sub-org creation is deliberately deferred to
+  // verifyEmailAuth: creating billable sub-orgs/wallets for unproven emails
+  // would let an unauthenticated attacker mass-provision resources.
 
   // Generate a unique user identifier for rate limiting
-  const data = new TextEncoder().encode(email);
+  const data = new TextEncoder().encode(normalizedEmail);
   const hash = sha256(data);
   const userIdentifier = bytesToHex(hash);
 
   const otpResult = await turnkeyClient.apiClient().initOtp({
     otpType: 'OTP_TYPE_EMAIL',
-    contact: email,
+    contact: normalizedEmail,
     userIdentifier: userIdentifier,
     appName: 'Originals',
     otpLength: 6,
@@ -138,11 +156,11 @@ export async function initiateEmailAuth(
 
   console.log('[email-auth] OTP sent');
 
-  // Create auth session
+  // Create auth session. subOrgId is intentionally absent until the email
+  // is verified (see verifyEmailAuth).
   const sessionId = generateSessionId();
   storage.set(sessionId, {
-    email,
-    subOrgId,
+    email: normalizedEmail,
     otpId,
     otpEncryptionTargetBundle,
     timestamp: Date.now(),
@@ -160,6 +178,18 @@ export async function initiateEmailAuth(
  */
 export interface VerifyEmailAuthOptions {
   /**
+   * Compressed P-256 public key (hex) supplied by the client, to which the
+   * Turnkey verification token will be bound. When provided, the matching
+   * private key never leaves the client: the verify result contains no
+   * `privateKey`, so nothing sensitive transits the HTTP response.
+   *
+   * When omitted, an ephemeral keypair is generated server-side and its
+   * private key is returned in the result. This is a fallback for
+   * server-only flows — for browser clients, always generate the keypair in
+   * the browser and pass its public key here.
+   */
+  publicKey?: string;
+  /**
    * Override for the enclave signing key used to verify the OTP encryption
    * target bundle's signature before encrypting the OTP code. ONLY for tests
    * or non-production Turnkey environments; defaults to Turnkey's production
@@ -175,9 +205,19 @@ export interface VerifyEmailAuthOptions {
  * to the `otpEncryptionTargetBundle` captured during {@link initiateEmailAuth}
  * and submitted as `encryptedOtpBundle` to Turnkey's `verifyOtp` activity.
  *
- * Returns the `verificationToken` together with the ephemeral P-256 keypair
- * it is bound to (`publicKey`/`privateKey`), which the caller needs to
- * complete a subsequent `otpLogin`.
+ * On success this also provisions the user's Turnkey sub-organization (get
+ * or create) — deferred from initiation so that resources are only created
+ * for proven email addresses.
+ *
+ * Returns the `verificationToken` together with the public key it is bound
+ * to. When no client `publicKey` was supplied (see
+ * {@link VerifyEmailAuthOptions}), the server-generated ephemeral private
+ * key is also returned, which the caller needs to complete a subsequent
+ * `otpLogin`.
+ *
+ * Failed verification attempts are counted per session; after
+ * {@link MAX_OTP_ATTEMPTS} failures the session is destroyed and the user
+ * must request a new code.
  */
 export async function verifyEmailAuth(
   sessionId: string,
@@ -203,29 +243,29 @@ export async function verifyEmailAuth(
     throw new Error('OTP ID not found in session');
   }
 
-  if (!session.subOrgId) {
-    throw new Error('Sub-organization ID not found');
-  }
-
   if (!session.otpEncryptionTargetBundle) {
     throw new Error(
       'OTP encryption target bundle not found in session. Please request a new code.'
     );
   }
 
-  // Reject malformed or oversized codes before hitting Turnkey
-  if (!/^[A-Za-z0-9]{4,10}$/.test(code)) {
+  // Reject malformed codes before hitting Turnkey (and before they consume
+  // an attempt): initiateEmailAuth always requests a 6-digit numeric OTP
+  // (otpLength: 6, alphanumeric: false), so anything else is definitely
+  // wrong. Keep in sync with the initOtp configuration above.
+  if (!/^\d{6}$/.test(code)) {
     throw new Error('Invalid verification code format');
   }
 
   console.log('[email-auth] Verifying OTP');
 
-  // Encrypt the OTP code (plus an ephemeral client public key) to the target
-  // encryption bundle. Turnkey v6 verifyOtp only accepts encrypted bundles.
-  // This also verifies the enclave signature on the target bundle. The
-  // verification token Turnkey issues is BOUND to the ephemeral public key
-  // embedded in the bundle, so the keypair must be surfaced to the caller
-  // for a subsequent otpLogin.
+  // Encrypt the OTP code (plus a client public key) to the target encryption
+  // bundle. Turnkey v6 verifyOtp only accepts encrypted bundles. This also
+  // verifies the enclave signature on the target bundle. The verification
+  // token Turnkey issues is BOUND to the public key embedded in the bundle:
+  // either the client-supplied one (preferred — its private key never leaves
+  // the client) or a server-generated ephemeral keypair that must be
+  // surfaced to the caller for a subsequent otpLogin.
   let encryptedOtpBundle: string;
   let publicKey: string;
   let privateKey: string | undefined;
@@ -233,6 +273,7 @@ export async function verifyEmailAuth(
     ({ encryptedOtpBundle, publicKey, privateKey } = await encryptOtpCode({
       otpCode: code,
       otpEncryptionTargetBundle: session.otpEncryptionTargetBundle,
+      publicKey: options?.publicKey,
       dangerouslyOverrideSignerPublicKey: options?.dangerouslyOverrideSignerPublicKey,
     }));
   } catch (error) {
@@ -242,43 +283,86 @@ export async function verifyEmailAuth(
     );
   }
 
+  let verificationToken: string;
   try {
-    // Verify the encrypted OTP bundle with Turnkey
+    // Verify the encrypted OTP bundle with Turnkey.
+    //
+    // NOTE (org context): this activity intentionally carries no
+    // organizationId override, so it runs under the PARENT organization —
+    // the same org context that ran initOtp. Turnkey's documented flow
+    // keeps initOtp/verifyOtp at the parent org and uses the sub-org only
+    // for the subsequent otpLogin; routing verifyOtp to the sub-org while
+    // initOtp ran at the parent relied on undocumented otpId scoping (and
+    // the sub-org may not even exist yet, since provisioning is deferred
+    // until after verification).
     const verifyResult = await turnkeyClient.apiClient().verifyOtp({
       otpId: session.otpId,
       encryptedOtpBundle,
       expirationSeconds: '900', // 15 minutes
-      // Route the VERIFY_OTP_V2 activity under the user's sub-organization,
-      // mirroring the client-side completeOtp path. subOrgId is validated
-      // non-null above; without it Turnkey v6 can reject the activity for
-      // missing org context.
-      organizationId: session.subOrgId,
     });
 
     if (!verifyResult.verificationToken) {
       throw new Error('OTP verification failed - no verification token returned');
     }
 
-    console.log('[email-auth] OTP verified successfully');
-
-    // Mark session as verified
-    session.verified = true;
-    storage.set(sessionId, session);
-
-    return {
-      verified: true,
-      email: session.email,
-      subOrgId: session.subOrgId,
-      verificationToken: verifyResult.verificationToken,
-      publicKey,
-      privateKey,
-    };
+    verificationToken = verifyResult.verificationToken;
   } catch (error) {
     console.error('❌ OTP verification failed:', error);
+
+    // Count the failed attempt; destroy the session once the budget is
+    // spent so the otpId cannot be brute-forced for the rest of the
+    // 15-minute window.
+    const attempts = (session.otpAttempts ?? 0) + 1;
+    if (attempts >= MAX_OTP_ATTEMPTS) {
+      storage.delete(sessionId);
+      throw new Error(
+        'Too many failed verification attempts. Please request a new code.'
+      );
+    }
+    session.otpAttempts = attempts;
+    storage.set(sessionId, session);
+
     throw new Error(
       `Invalid verification code: ${error instanceof Error ? error.message : String(error)}`
     );
   }
+
+  console.log('[email-auth] OTP verified successfully');
+
+  // Email ownership is now proven — provision the Turnkey sub-organization
+  // (deferred from initiateEmailAuth to prevent unauthenticated resource
+  // creation).
+  let subOrgId: string;
+  try {
+    subOrgId = await getOrCreateTurnkeySubOrg(session.email, turnkeyClient);
+  } catch (error) {
+    // The OTP was already consumed by the successful verifyOtp above, so
+    // this session can never complete: destroy it. Leaving it alive would
+    // make retries re-submit the consumed otpId to Turnkey, burning the
+    // attempt budget and eventually masking this error with a misleading
+    // "too many failed attempts".
+    storage.delete(sessionId);
+    throw new Error(
+      `Email verified, but provisioning the Turnkey sub-organization failed: ${
+        error instanceof Error ? error.message : String(error)
+      }. Please request a new code and try again.`,
+      { cause: error }
+    );
+  }
+
+  // Mark session as verified
+  session.verified = true;
+  session.subOrgId = subOrgId;
+  storage.set(sessionId, session);
+
+  return {
+    verified: true,
+    email: session.email,
+    subOrgId,
+    verificationToken,
+    publicKey,
+    privateKey,
+  };
 }
 
 /**
@@ -314,6 +398,9 @@ export function cleanupSession(
 
 /**
  * Get session data
+ *
+ * Note: `subOrgId` is only present on sessions that have completed
+ * verification — initiation no longer provisions the sub-organization.
  */
 export function getSession(
   sessionId: string,
@@ -332,4 +419,3 @@ export function getSession(
 
   return session;
 }
-

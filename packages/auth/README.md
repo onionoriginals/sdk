@@ -49,6 +49,32 @@ import type { AuthUser, TokenPayload, TurnkeyWallet } from '@originals/auth/type
 
 Import client utilities from `@originals/auth/client` (not the package root) to avoid pulling server code into browser bundles. Turnkey API keys are server-only: initialize Turnkey with `createTurnkeyClient` from `@originals/auth/server` — there is no client-side Turnkey initializer.
 
+## Security notes
+
+**Rate-limit the send-OTP endpoint.** `initiateEmailAuth` sends an email on every call. The endpoint exposing it MUST enforce rate limits (per IP and per target email) — Turnkey's per-user throttle does not protect arbitrary recipient addresses from an attacker who varies the email. Turnkey sub-organizations and wallets are only provisioned after the OTP is verified, so unverified requests create no billable resources, but unthrottled requests still spam arbitrary inboxes.
+
+**Keep the verification-token key in the browser.** The Turnkey verification token returned by `verifyEmailAuth` is bound to a P-256 key. Generate that keypair in the browser (`generateP256KeyPair` from `@turnkey/crypto`) and pass its public key through your verify endpoint into `verifyEmailAuth`'s `options.publicKey`, so the private key never transits an HTTP response:
+
+```typescript
+// Browser
+import { generateP256KeyPair } from '@turnkey/crypto';
+import { verifyOtp } from '@originals/auth/client';
+
+const keyPair = generateP256KeyPair(); // private key stays here
+const result = await verifyOtp(sessionId, code, undefined, {
+  publicKey: keyPair.publicKey,
+});
+
+// Server verify endpoint
+const result = await verifyEmailAuth(sessionId, code, turnkeyClient, storage, {
+  publicKey: req.body.publicKey, // bind the token to the client's key
+});
+```
+
+If no `publicKey` is supplied, `verifyEmailAuth` falls back to generating the keypair server-side and returns the private key in its result — acceptable for pure server-to-server flows only.
+
+**OTP attempt limiting.** A verification session is destroyed after 5 failed attempts; the user must request a new code.
+
 ## Documentation
 
 - [Originals SDK repository](https://github.com/onionoriginals/sdk) — source, issues, and protocol documentation

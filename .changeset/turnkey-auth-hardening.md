@@ -1,0 +1,5 @@
+---
+"@originals/auth": patch
+---
+
+Turnkey auth hardening: stop identity forking in `getOrCreateTurnkeySubOrg` (normalize email before all filters, repair walletless sub-orgs in place instead of minting a new sub-organization, pick deterministically when multiple sub-orgs match, rethrow transient lookup errors instead of creating duplicates); defer sub-org/wallet provisioning until after OTP verification so unauthenticated send-OTP calls create no billable resources (callers must rate-limit the initiate endpoint; session `subOrgId` is now only set post-verification); accept a client-supplied `publicKey` in `verifyEmailAuth`/client `verifyOtp` so the verification-token private key never leaves the browser; destroy sessions after 5 failed OTP attempts; fix dead session-expiry detection in `withTokenExpiration` (match on `error.message` and walk the `cause` chain); run `initOtp`/`verifyOtp` under the same (parent) org context per Turnkey's documented flow; stop logging raw emails and sub-org IDs.

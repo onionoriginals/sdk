@@ -105,6 +105,27 @@ describe('server-auth', () => {
       );
     });
 
+    test('forwards a client-generated publicKey so the private key stays in the browser', async () => {
+      const mockFetch = mock(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({ verified: true, email: 'test@example.com', subOrgId: 'org_123' }),
+        })
+      );
+      const publicKey = '02' + 'cd'.repeat(32);
+      await verifyOtp('session_123', '123456', undefined, {
+        fetch: mockFetch as unknown as typeof fetch,
+        publicKey,
+      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/auth/verify-otp',
+        expect.objectContaining({
+          body: JSON.stringify({ sessionId: 'session_123', code: '123456', publicKey }),
+        })
+      );
+    });
+
     test('throws on verification failure with server message', async () => {
       const mockFetch = mock(() =>
         Promise.resolve({

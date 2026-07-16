@@ -56,18 +56,14 @@ export function createAuthMiddleware(
       // Check if user already exists
       let user: AuthUser | null = await options.getUserByTurnkeyId(turnkeySubOrgId);
 
-      // If user doesn't exist and createUser is provided, create user
+      // If user doesn't exist and createUser is provided, create user.
+      // Deliberately not logging here: emails and sub-org IDs are user PII
+      // and must not go through raw console output.
       if (!user && options.createUser) {
-        console.log(`Creating user record for ${email}...`);
-
         // Use temporary DID as placeholder until user creates real DID
         const temporaryDid = `temp:turnkey:${turnkeySubOrgId}`;
 
         user = await options.createUser(turnkeySubOrgId, email, temporaryDid);
-
-        console.log(`✅ User created: ${email}`);
-        console.log(`   Turnkey sub-org ID: ${turnkeySubOrgId}`);
-        console.log(`   Temporary DID: ${temporaryDid}`);
       }
 
       if (!user) {

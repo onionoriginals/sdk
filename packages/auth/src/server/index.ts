@@ -15,7 +15,7 @@
  * ```
  */
 
-export { createTurnkeyClient, getOrCreateTurnkeySubOrg } from './turnkey-client.js';
+export { createTurnkeyClient, getOrCreateTurnkeySubOrg, normalizeEmail } from './turnkey-client.js';
 export {
   initiateEmailAuth,
   verifyEmailAuth,

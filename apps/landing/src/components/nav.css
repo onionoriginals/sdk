@@ -126,6 +126,50 @@
   border-bottom: none;
 }
 
+/* Signed-in: lightweight identity status only — the creation CTA lives in the hero. */
+.nav-auth {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.nav-email {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 13rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.nav-email-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--ok);
+}
+
+.nav-signout {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-tertiary);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.nav-signout:hover {
+  color: var(--text-primary);
+}
+
+@media (max-width: 640px) {
+  .nav-email {
+    display: none;
+  }
+}
+
 @media (min-width: 900px) {
   .nav-links {
     display: flex;

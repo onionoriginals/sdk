@@ -42,4 +42,9 @@ export {
 
 export { TurnkeyDIDSigner, createDIDWithTurnkey } from './turnkey-did-signer.js';
 
-export { sendOtp, verifyOtp, type ServerAuthOptions } from './server-auth.js';
+export {
+  sendOtp,
+  verifyOtp,
+  type ServerAuthOptions,
+  type VerifyOtpClientOptions,
+} from './server-auth.js';
