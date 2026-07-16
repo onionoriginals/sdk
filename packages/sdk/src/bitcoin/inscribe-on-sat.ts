@@ -122,7 +122,7 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
   // attach recovery data (rebroadcast revealTxHex to complete the inscription).
   try {
     await provider.broadcastTransaction(reveal.revealTxHex);
-  } catch (e) {
+  } catch {
     throw new StructuredError('REVEAL_BROADCAST_FAILED',
       `Commit ${commitTxId} broadcast but the reveal failed; rebroadcast revealTxHex to recover the committed funds and complete the inscription.`,
       { commitTxId, revealTxId: reveal.revealTxId, revealTxHex: reveal.revealTxHex, satoshi });

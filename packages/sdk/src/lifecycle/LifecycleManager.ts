@@ -2428,16 +2428,7 @@ export class LifecycleManager {
         // Key the shared money-lock by the asset's current DID so a concurrent
         // MigrationManager.migrate of the same DID is blocked at inscribe (issue #303).
         { lockKey: asset.id }
-      ) as {
-        revealTxId?: string;
-        txid: string;
-        commitTxId?: string;
-        inscriptionId: string;
-        satoshi?: string;
-        feeRate?: number;
-        content?: Buffer;
-        metadata?: Record<string, unknown>;
-      };
+      );
     }
     const revealTxId = inscription.revealTxId ?? inscription.txid;
     const commitTxId = inscription.commitTxId;
