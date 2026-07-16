@@ -100,10 +100,12 @@ function ensureHashesObject(
   return mod && typeof mod.hashes === 'object' && mod.hashes !== null ? mod.hashes : null;
 }
 
-let warnedFrozen = false;
+// Per-library so a frozen ed25519 namespace still warns even after secp256k1
+// already warned (both are frozen together in the Vite pre-bundle scenario).
+const warnedFrozen = new Set<string>();
 function warnFrozen(lib: string): void {
-  if (warnedFrozen) return;
-  warnedFrozen = true;
+  if (warnedFrozen.has(lib)) return;
+  warnedFrozen.add(lib);
   console.warn(
     `[noble-init] Could not configure @noble/${lib} sync hashes: the module namespace is frozen ` +
       `(non-configurable). Sync crypto ops may be unavailable in this environment. This is usually a ` +
