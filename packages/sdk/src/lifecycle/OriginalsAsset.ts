@@ -1,8 +1,9 @@
-import { 
-  AssetResource, 
-  DIDDocument, 
-  VerifiableCredential, 
-  LayerType 
+import {
+  AssetResource,
+  DIDDocument,
+  VerifiableCredential,
+  LayerType,
+  InscribeConfirm
 } from '../types/index.js';
 import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation.js';
 import { StructuredError } from '../utils/telemetry.js';
@@ -72,7 +73,11 @@ export class OriginalsAsset {
   // event via the manager's degrade-aware path and returns the new head digest,
   // or null when the append was skipped (no keyStore / no signing key). Undefined
   // for assets constructed outside the lifecycle (they degrade in-memory only).
-  #celAppender?: (type: 'migrate' | 'rotateKey' | 'update', data: unknown) => Promise<string | null>;
+  #celAppender?: (
+    type: 'migrate' | 'rotateKey' | 'update',
+    data: unknown,
+    opts?: { inscribeConfirm?: InscribeConfirm }
+  ) => Promise<string | null>;
   // Per-asset serialization for addResourceVersion: the sync→async cutover made
   // the shared #celLog read-modify-write span await points, so concurrent calls
   // raced (a later _replaceCelLog clobbered an earlier signed append, or landed
@@ -80,6 +85,17 @@ export class OriginalsAsset {
   // to run its critical section — re-read head, base-check, append — to
   // completion before the next begins.
   #appendChain: Promise<unknown> = Promise.resolve();
+  // #407 phase 3: the new version's inline bytes, exposed transiently WHILE the
+  // bound appender runs (addResourceVersion appends+inscribes BEFORE pushing the
+  // new resource, so the per-event inscription can carry the new media as
+  // content). Set before the appender, cleared in a finally — so a failed append
+  // never leaves resources/pending advanced past the log.
+  #pendingHeadMedia?: { resourceId: string; hash: string; content: string; contentType: string };
+
+  /** #407 phase 3: the pending new-version media, if an append is in flight. */
+  get pendingHeadMedia(): { resourceId: string; hash: string; content: string; contentType: string } | undefined {
+    return this.#pendingHeadMedia;
+  }
 
   constructor(
     resources: AssetResource[],
@@ -184,7 +200,11 @@ export class OriginalsAsset {
    * contract (cel:append-skipped) as the other authorship ops.
    */
   _bindCelAppender(
-    fn: (type: 'migrate' | 'rotateKey' | 'update', data: unknown) => Promise<string | null>
+    fn: (
+      type: 'migrate' | 'rotateKey' | 'update',
+      data: unknown,
+      opts?: { inscribeConfirm?: InscribeConfirm }
+    ) => Promise<string | null>
   ): void {
     this.#celAppender = fn;
   }
@@ -592,7 +612,8 @@ export class OriginalsAsset {
     resourceId: string,
     newContent: string,
     contentType: string,
-    changes?: string
+    changes?: string,
+    opts?: { inscribeConfirm?: InscribeConfirm }
   ): Promise<AssetResource> {
     // AssetResource.content is a string; a Buffer used to be silently dropped
     // (only its hash was stored), unrecoverably losing the binary content
@@ -612,7 +633,7 @@ export class OriginalsAsset {
     // second queued call re-reads the head INSIDE its turn, so it chains from
     // the first call's committed result rather than a stale snapshot (Finding 2).
     const run = this.#appendChain.then(() =>
-      this.#addResourceVersionCritical(resourceId, newContent, contentType, changes)
+      this.#addResourceVersionCritical(resourceId, newContent, contentType, changes, opts)
     );
     // Keep the chain alive across a rejected turn without swallowing it for the caller.
     this.#appendChain = run.catch(() => {});
@@ -644,7 +665,8 @@ export class OriginalsAsset {
     resourceId: string,
     newContent: string,
     contentType: string,
-    changes?: string
+    changes?: string,
+    opts?: { inscribeConfirm?: InscribeConfirm }
   ): Promise<AssetResource> {
     // RE-READ the current head inside the turn (a prior queued call may have
     // just committed a new version).
@@ -706,13 +728,22 @@ export class OriginalsAsset {
         // `toHash`, never the bytes. Content lives in the resources array /
         // serialize() envelope blobs (content-addressed store), keyed by hash.
         // This keeps the log byte-light so it can be inscribed cheaply (phase 2).
-        const digest = await this.#celAppender('update', {
-          resourceId,
-          contentType,
-          previousVersionHash: currentResource.hash,
-          toHash: newHash,
-          toVersion: newVersion
-        });
+        // Expose the new bytes transiently so a btco per-event inscription (phase
+        // 3) can carry them as content — resources itself advances only AFTER a
+        // successful append, so pending is the only pre-push view of the new media.
+        this.#pendingHeadMedia = { resourceId, hash: newHash, content: newContent, contentType };
+        let digest: string | null;
+        try {
+          digest = await this.#celAppender('update', {
+            resourceId,
+            contentType,
+            previousVersionHash: currentResource.hash,
+            toHash: newHash,
+            toVersion: newVersion
+          }, opts);
+        } finally {
+          this.#pendingHeadMedia = undefined;
+        }
         appended = digest !== null; // null ⇒ the manager already emitted cel:append-skipped
       }
     } else {

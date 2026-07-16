@@ -91,12 +91,13 @@ describe('OrdHttpProvider write-path methods fail loudly instead of fabricating 
   });
 
   test('read path getInscriptionsBySatoshi still works (not part of the stub hardening)', async () => {
+    const id = 'a'.repeat(64) + 'i1'; // well-formed inscription id (provider filters malformed ids)
     (globalThis as Record<string, unknown>).fetch = async () => ({
       ok: true,
-      arrayBuffer: async () => new TextEncoder().encode(JSON.stringify({ inscription_ids: ['i1'] })).buffer
+      arrayBuffer: async () => new TextEncoder().encode(JSON.stringify({ inscription_ids: [id] })).buffer
     });
     const result = await provider.getInscriptionsBySatoshi('123');
-    expect(result).toEqual([{ inscriptionId: 'i1' }]);
+    expect(result).toEqual([{ inscriptionId: id }]);
   });
 });
 

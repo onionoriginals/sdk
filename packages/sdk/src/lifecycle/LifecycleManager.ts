@@ -6,7 +6,10 @@ import {
   ExternalSigner,
   VerifiableCredential,
   LayerType,
-  DIDDocument
+  DIDDocument,
+  AppendKind,
+  AppendCostEstimate,
+  InscribeConfirm
 } from '../types/index.js';
 import { BitcoinManager, MAX_REASONABLE_FEE_RATE } from '../bitcoin/BitcoinManager.js';
 import { inscribeOnSat } from '../bitcoin/inscribe-on-sat.js';
@@ -30,7 +33,7 @@ import { btcoDidPrefix, btcoDidFromSatoshi } from '../cel/btcoDid.js';
 import { KeyManager } from '../did/KeyManager.js';
 import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
 import { createCelDidDocument, didCelMatchesLog, deriveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
-import { verifyEventLog, selectNewestAnchorInscription } from '../cel/algorithms/verifyEventLog.js';
+import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
 import { appendEvent } from '../cel/algorithms/appendEvent.js';
@@ -189,6 +192,17 @@ export class LifecycleManager {
    * transfers (issue #255).
    */
   private inFlightAssets = new Set<string>();
+
+  /**
+   * #407 phase 3: chain digest of the newest CEL event already committed
+   * on-chain for a btco asset (the snapshot head of the last inscription:
+   * migrate / rotation / resource-update). A subsequent btco resource-update
+   * inscribes only the DELTA of events appended since this head. Best-effort
+   * optimization ONLY: when the boundary is unknown (empty map, digest not
+   * found in the log), the append inscribes a FULL celLog snapshot instead —
+   * correctness never depends on this map.
+   */
+  private lastInscribedHead = new WeakMap<OriginalsAsset, string>();
 
   constructor(
     private config: OriginalsConfig,
@@ -352,7 +366,7 @@ export class LifecycleManager {
     const asset = new OriginalsAsset(resources, didDoc, [], log);
     // Bind the controller append path so addResourceVersion can write signed
     // `update` events with the same degrade contract as the other authorship ops.
-    asset._bindCelAppender((type, data) => this.appendCelEventOrSkip(asset, type, data));
+    asset._bindCelAppender((type, data, opts) => this.appendCelEventAndMaybeInscribe(asset, type, data, opts));
 
     // Persist the genesis CEL at the conventional cel/<suffix>.json key so
     // the did:cel resolves from storage immediately (best-effort, never gates).
@@ -754,7 +768,7 @@ export class LifecycleManager {
       log,
       { currentLayer: folded.currentLayer, bindings: folded.bindings, provenance }
     );
-    asset._bindCelAppender((type, data) => this.appendCelEventOrSkip(asset, type, data));
+    asset._bindCelAppender((type, data, opts) => this.appendCelEventAndMaybeInscribe(asset, type, data, opts));
 
     // Repopulate captured DID docs so re-serializing a loaded asset is
     // lossless. Only for layers cross-checked against the fold in step 5
@@ -802,82 +816,175 @@ export class LifecycleManager {
       if (!v.valid) throw new StructuredError('INVALID_SATOSHI', `Invalid satoshi identifier: ${v.error}`);
     }
 
-    // 1) Newest anchoring inscription by confirmed block height — reuses the
-    // verifier's selection so the resolver picks the SAME inscription
-    // head-freshness / the content gate check against (fail-closed on missing
-    // height, per-height newest, list-tail same-block residual).
-    const selected = await selectNewestAnchorInscription(sat, provider);
-    if ('error' in selected) {
-      throw new StructuredError('CHAIN_ASSET_NOT_FOUND', `Cannot resolve an asset from satoshi ${sat}: ${selected.error}.`);
+    // 1) Enumerate the sat's inscription chain (#407 phase 3). Each btco
+    // authorship append adds one inscription; walking them in confirmed-block
+    // order reconstructs the ALWAYS-CURRENT log — not just phase-2's point-in-time
+    // newest snapshot.
+    if (typeof provider.getInscriptionsBySatoshi !== 'function') {
+      throw new StructuredError('ORD_PROVIDER_REQUIRED', `The ordinals provider cannot enumerate inscriptions on satoshi ${sat}.`);
     }
-    const chosen = selected.inscription;
-
-    // 2) Read provenance (metadata) + media (content).
-    const metadata = chosen.metadata as { didDocument?: unknown; celLog?: unknown } | undefined;
-    const btcoDoc = metadata?.didDocument;
-    const rawCelLog = metadata?.celLog;
-    if (!btcoDoc || typeof btcoDoc !== 'object' || rawCelLog === undefined || rawCelLog === null) {
-      throw new StructuredError(
-        'CHAIN_ASSET_INVALID',
-        `Inscription ${chosen.inscriptionId} on satoshi ${sat} carries no provenance metadata (didDocument + celLog); not a phase-2 anchoring inscription.`
-      );
+    let onSat: Array<{ inscriptionId: string }>;
+    try {
+      onSat = await provider.getInscriptionsBySatoshi(sat);
+    } catch (e) {
+      throw new StructuredError('CHAIN_ASSET_NOT_FOUND', `Failed to enumerate inscriptions on satoshi ${sat}: ${e instanceof Error ? e.message : String(e)}.`);
     }
 
-    // 3) Parse the embedded byte-light CEL log through the JSON gate.
+    // 2) Fetch each, keeping OUR anchoring inscriptions (metadata carries a
+    // didDocument AND either a full celLog snapshot or an events delta). Order
+    // strictly by confirmed block height (list index as the documented
+    // same-block residual). A missing block height on any anchoring inscription
+    // fails closed — the chain order would be unprovable.
+    type Link = {
+      inscriptionId: string;
+      listIdx: number;
+      blockHeight: number;
+      didDocument: unknown;
+      snapshotEvents?: unknown[]; // full celLog (checkpoint) → REPLACE
+      deltaEvents?: unknown[];    // events delta → APPEND
+      content?: Buffer;
+      txid?: string;
+    };
+    const links: Link[] = [];
+    for (let idx = 0; idx < onSat.length; idx++) {
+      const inscriptionId = onSat[idx].inscriptionId;
+      let insc: Awaited<ReturnType<OrdinalsLookup['getInscriptionById']>>;
+      try {
+        insc = await provider.getInscriptionById(inscriptionId);
+      } catch (e) {
+        // A metadata-undecodable error (or any fetch failure) fails closed: a
+        // provider that cannot read an inscription must not yield a silent
+        // partial reconstruction.
+        throw new StructuredError('CHAIN_ASSET_INVALID', `Failed to fetch inscription ${inscriptionId} on satoshi ${sat}: ${e instanceof Error ? e.message : String(e)}.`);
+      }
+      // The provider JUST listed this id, so a null (fetch miss / transient
+      // fault the provider swallowed to null) is NOT "not an anchor" — it could
+      // be the newest inscription, and silently skipping it would truncate the
+      // chain tail to a self-consistent STALE log that still verifies. Fail
+      // closed. Fable I2.
+      if (!insc) {
+        throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${inscriptionId} listed on satoshi ${sat} could not be fetched; refusing to reconstruct from a possibly-truncated chain.`);
+      }
+      const meta = insc.metadata as { didDocument?: unknown; celLog?: unknown; events?: unknown } | undefined;
+      if (!meta || !meta.didDocument || typeof meta.didDocument !== 'object') continue;
+      const snapshot = meta.celLog !== undefined && meta.celLog !== null
+        ? (meta.celLog as { events?: unknown }).events
+        : undefined;
+      const delta = Array.isArray(meta.events) ? meta.events : undefined;
+      if (snapshot === undefined && delta === undefined) continue; // not an anchoring inscription
+      const rawHeight = (insc as { blockHeight?: unknown }).blockHeight;
+      const height = typeof rawHeight === 'number' && Number.isInteger(rawHeight) && rawHeight >= 0 ? rawHeight : undefined;
+      if (height === undefined) {
+        throw new StructuredError('CHAIN_ASSET_INVALID', `Anchoring inscription ${inscriptionId} on satoshi ${sat} has no confirmed block height; the chain order is unprovable.`);
+      }
+      links.push({
+        inscriptionId,
+        listIdx: idx,
+        blockHeight: height,
+        didDocument: meta.didDocument,
+        ...(Array.isArray(snapshot) ? { snapshotEvents: snapshot } : {}),
+        ...(delta ? { deltaEvents: delta } : {}),
+        ...(insc.content !== undefined ? { content: insc.content } : {}),
+        ...(typeof insc.txid === 'string' ? { txid: insc.txid } : {})
+      });
+    }
+    if (links.length === 0) {
+      throw new StructuredError('CHAIN_ASSET_NOT_FOUND', `Cannot resolve an asset from satoshi ${sat}: no Originals anchoring inscription found.`);
+    }
+    links.sort((a, b) => a.blockHeight - b.blockHeight || a.listIdx - b.listIdx);
+
+    // 3) Walk oldest→newest, concatenating events: a full celLog snapshot is a
+    // checkpoint (REPLACE); an events delta extends (APPEND). The result is the
+    // full current log; verifyEventLog (below, via loadAsset) enforces contiguous
+    // hash-chain continuity, so any gap or mis-ordered same-block link fails
+    // closed there — the resolver never trusts the concatenation blindly.
+    let rawEvents: unknown[] = [];
+    for (const link of links) {
+      if (link.snapshotEvents) {
+        rawEvents = link.snapshotEvents.slice();
+      } else if (link.deltaEvents) {
+        rawEvents = rawEvents.concat(link.deltaEvents);
+      }
+    }
+    const newest = links[links.length - 1];
+    const btcoDoc = newest.didDocument;
+
     let log: EventLog;
     try {
-      log = parseEventLogJson(JSON.stringify(rawCelLog));
+      log = parseEventLogJson(JSON.stringify({ events: rawEvents }));
     } catch (e) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} celLog is not a valid CEL log: ${(e as Error).message}`);
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Reconstructed log from satoshi ${sat} is not a valid CEL log: ${(e as Error).message}`);
     }
     if (!Array.isArray(log.events) || log.events.length === 0) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} celLog has no events.`);
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Reconstructed log from satoshi ${sat} has no events.`);
     }
 
-    // 4) The embedded celLog head MUST equal the on-chain `#cel` anchor
-    // (else the inscription is internally inconsistent). Defense-in-depth: the
-    // witness path re-derives this too, but a clear early error is worth it.
+    // 4) The newest inscription's `#cel` anchor MUST equal the reconstructed log
+    // head (else the newest link is inconsistent with the concatenated chain).
     const anchorDigest = this.extractCelAnchorFromDoc(btcoDoc);
     const headDigest = computeDigestMultibase(canonicalizeEntryForChain(log.events[log.events.length - 1]));
     if (anchorDigest === undefined) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} DID document carries no OriginalsCelAnchor; cannot confirm the embedded log head.`);
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Newest inscription ${newest.inscriptionId} DID document carries no OriginalsCelAnchor; cannot confirm the reconstructed log head.`);
     }
     if (!digestMultibaseEquals(anchorDigest, headDigest)) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId}: embedded celLog head (${headDigest}) does not equal the #cel anchor (${anchorDigest}).`);
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Newest inscription ${newest.inscriptionId}: reconstructed log head (${headDigest}) does not equal its #cel anchor (${anchorDigest}); the chain is truncated or inconsistent.`);
     }
 
-    // 5) Reconstruct the byte-light AssetEnvelope. The head event needs its OWN
-    // bitcoin witness proof reattached — the writer inscribes the doc/log BEFORE
-    // the inscription id exists, so the head's witness (which names this
-    // inscription) is never in the embedded snapshot. It is fully re-verified
-    // against the chain by verifyBitcoinWitnessProof inside loadAsset.
-    const headTxid = typeof chosen.txid === 'string' ? chosen.txid : undefined;
-    const headWitness: WitnessProof & { txid?: string; satoshi: string; inscriptionId: string } = {
-      type: 'DataIntegrityProof',
-      cryptosuite: 'bitcoin-ordinals-2024',
-      created: new Date().toISOString(),
-      verificationMethod: 'did:btco:witness',
-      proofPurpose: 'assertionMethod',
-      proofValue: `z${chosen.inscriptionId}`,
-      witnessedAt: new Date().toISOString(),
-      txid: headTxid,
-      satoshi: sat,
-      inscriptionId: chosen.inscriptionId
-    };
-    const headIdx = log.events.length - 1;
+    // 5) Reconstruct the byte-light AssetEnvelope. Each inscription witnessed the
+    // event its own `#cel` anchor commits to (migrate, a resource-update, a
+    // rotation), but that event's bitcoin witness proof is never in the embedded
+    // snapshot/delta — the writer inscribes the doc/log BEFORE the inscription id
+    // exists. Reattach, PER LINK, the witness to the event its anchor commits to,
+    // so every on-chain-anchored event carries its proof (not just the head). Each
+    // is fully re-verified against the chain by verifyBitcoinWitnessProof inside
+    // loadAsset (it must commit to that event's digest, or verification fails).
+    const eventDigests = log.events.map(ev => computeDigestMultibase(canonicalizeEntryForChain(ev)));
     const events = log.events.slice();
-    events[headIdx] = { ...events[headIdx], proof: [...events[headIdx].proof, headWitness] };
+    for (const link of links) {
+      const linkAnchor = this.extractCelAnchorFromDoc(link.didDocument);
+      if (linkAnchor === undefined) continue;
+      const evIdx = eventDigests.findIndex(d => digestMultibaseEquals(linkAnchor, d));
+      if (evIdx < 0) continue; // anchor commits to an event not in the reconstructed log
+      const witness: WitnessProof & { txid?: string; satoshi: string; inscriptionId: string } = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'bitcoin-ordinals-2024',
+        created: new Date().toISOString(),
+        verificationMethod: 'did:btco:witness',
+        proofPurpose: 'assertionMethod',
+        proofValue: `z${link.inscriptionId}`,
+        witnessedAt: new Date().toISOString(),
+        ...(typeof link.txid === 'string' ? { txid: link.txid } : {}),
+        satoshi: sat,
+        inscriptionId: link.inscriptionId
+      };
+      events[evIdx] = { ...events[evIdx], proof: [...events[evIdx].proof, witness] };
+    }
     const reconstructedLog: EventLog = { ...log, events };
 
-    // Resources from the log + the on-chain media as the head blob.
-    const resources = this.reconstructResourcesFromLog(reconstructedLog, chosen.content);
+    // Current media = the newest inscription content that hashes to the log's
+    // most-recent-resource head (a rotation's newest inscription carries no new
+    // media, so the media may live in an earlier resource-update inscription).
+    const head = mostRecentResourceHead(reconstructedLog);
+    let headContent: Buffer | undefined;
+    if (head) {
+      for (let i = links.length - 1; i >= 0; i--) {
+        const c = links[i].content;
+        // Hash the RAW bytes — a utf8 decode/encode round-trip would corrupt
+        // binary media (JPEG/PNG) and silently drop it (Greptile P1).
+        if (c && hashResource(c).toLowerCase() === head.hash.toLowerCase()) {
+          headContent = c;
+          break;
+        }
+      }
+    }
+    const resources = this.reconstructResourcesFromLog(reconstructedLog, headContent);
 
     // did:cel document is DERIVED (loadAsset re-derives it anyway; supply a
     // structurally valid one). did:btco is the on-chain metadata doc.
     const assetDid = deriveDidCel(reconstructedLog);
     const genesisController = (reconstructedLog.events[0]?.data as { controller?: unknown })?.controller;
     if (typeof genesisController !== 'string' || !genesisController.startsWith('did:key:')) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Inscription ${chosen.inscriptionId} genesis controller is not a did:key (only did:key controllers are supported by resolveAssetFromSat; got: ${String(genesisController)}).`);
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Reconstructed genesis controller is not a did:key (only did:key controllers are supported by resolveAssetFromSat; got: ${String(genesisController)}).`);
     }
     const celDoc = createCelDidDocument(assetDid, genesisController.slice('did:key:'.length));
 
@@ -2177,6 +2284,204 @@ export class LifecycleManager {
   }
 
   /**
+   * Controller-append entry point BOUND to `addResourceVersion` (#407 phase 3).
+   * First runs the standard hosted append (`appendCelEventOrSkip`); then, for a
+   * did:btco asset whose append LANDED, inscribes the new event on the anchoring
+   * sat so the on-chain log is always current (real-time recoverability). The
+   * witness-ack path calls `appendCelEventOrSkip` DIRECTLY (not this), so acks do
+   * NOT trigger a nested inscription. Migrate/rotation inscribe on their own
+   * paths, so only genuine post-btco authorship appends (resource updates) reach
+   * the inscribe branch here.
+   *
+   * Degrade (spec §1): off-btco, a degraded append (digest null), or no ordinals
+   * provider → hosted append only, with a clear `cel:append-inscribe-skipped`
+   * signal in the provider-absent case (never silent).
+   */
+  private async appendCelEventAndMaybeInscribe(
+    asset: OriginalsAsset,
+    type: 'migrate' | 'rotateKey' | 'update',
+    data: unknown,
+    opts?: { inscribeConfirm?: InscribeConfirm }
+  ): Promise<string | null> {
+    // Confirm gate (#407 phase 4): consent to the unavoidable on-chain cost BEFORE
+    // any log mutation. Only paid appends prompt — a btco asset WITH a provider (the
+    // ones that actually inscribe below). Off-btco / provider-absent appends inscribe
+    // nothing, so there is no cost to consent to and the gate is a no-op.
+    const gateProvider = this.config.ordinalsProvider ?? this.deps?.bitcoinManager?.ordinalsProvider;
+    const willInscribe = asset.currentLayer === 'did:btco' && !!gateProvider;
+    const confirm = opts?.inscribeConfirm ?? this.config.inscribeConfirm ?? 'now';
+    if (willInscribe && typeof confirm === 'function') {
+      const appendKind: AppendKind = type === 'rotateKey' ? 'rotate' : 'update';
+      // Estimate reflects THIS append (for 'update', pendingHeadMedia is already set
+      // by addResourceVersion and the log head has not advanced yet → sized correctly).
+      const estimate = await this.estimateAppendCost(asset, appendKind);
+      const approved = await confirm(estimate);
+      if (!approved) {
+        // Abort-before-mutate (spec §3): nothing was appended or inscribed, so the
+        // asset is byte-identical. THROW rather than return null — addResourceVersion
+        // pushes the new resource version unconditionally once the appender RETURNS
+        // (OriginalsAsset.ts), so only a throw guarantees a clean no-op.
+        await this.eventEmitter.emit({
+          type: 'cel:inscribe-declined',
+          timestamp: new Date().toISOString(),
+          asset: { id: asset.id },
+          appendKind,
+          estimate
+        });
+        throw new StructuredError(
+          'PROVENANCE_APPEND_DECLINED',
+          'The inscribeConfirm gate declined the paid did:btco append; nothing was appended or inscribed.'
+        );
+      }
+    }
+
+    // Snapshot the pre-append log BEFORE appendCelEventOrSkip advances it — the
+    // inscribe-failure rollback restores THIS (capturing after the append would
+    // restore the log to itself, leaving it permanently ahead of the chain and
+    // bricking future updates via UNPROVABLE_BASE). Fable I1.
+    const celLogBefore = asset.celLog;
+    const digest = await this.appendCelEventOrSkip(asset, type, data);
+    // Only inscribe genuine authorship appends that LANDED on a btco asset.
+    if (digest === null || asset.currentLayer !== 'did:btco') {
+      return digest;
+    }
+    const provider = this.config.ordinalsProvider ?? this.deps?.bitcoinManager?.ordinalsProvider;
+    if (!provider) {
+      // Spec §1: provider-absent → hosted append (degrade), not a crash. Surface
+      // it clearly so callers know the on-chain log did NOT advance this append.
+      await this.eventEmitter.emit({
+        type: 'cel:append-inscribe-skipped',
+        timestamp: new Date().toISOString(),
+        asset: { id: asset.id },
+        reason: 'NO_ORDINALS_PROVIDER'
+      });
+      return digest;
+    }
+    await this.inscribeCelAppend(asset, digest, celLogBefore);
+    return digest;
+  }
+
+  /**
+   * Inscribe a just-appended btco authorship event on the anchoring sat (#407
+   * phase 3). Content = the new head media (or DID-doc fallback for a
+   * pure-reference head); metadata = `{ didDocument: <btco doc w/ fresh #cel
+   * head>, events: <delta since last on-chain head> | celLog: <full snapshot> }`.
+   * Mirrors `reinscribeRotatedDoc`'s sat-pin + rollback: on failure (nothing paid
+   * before broadcast) the pre-append log is restored so the in-memory log never
+   * runs ahead of the chain.
+   */
+  private async inscribeCelAppend(asset: OriginalsAsset, headDigest: string, celLogBefore: EventLog | undefined): Promise<void> {
+    const log = asset.celLog;
+    const btcoDid = asset.bindings?.['did:btco'];
+    if (!log || !btcoDid) return; // defensive: btco asset always has both
+    const satoshi = btcoDid.split(':').pop()!;
+
+    // Rebuild the btco doc with the CURRENT controller key + refreshed resource
+    // manifest, then embed the fresh #cel head (the just-appended event).
+    const vm = currentControllerVm(log);
+    const controllerPubMb = vm.split('#')[0].slice('did:key:'.length);
+    const btcoDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, controllerPubMb);
+    this.embedCelAnchor(btcoDoc, headDigest);
+
+    // Delta since the last on-chain head, else a full snapshot (safe checkpoint).
+    const metadata: Record<string, unknown> = { didDocument: btcoDoc };
+    const lastHead = this.lastInscribedHead.get(asset);
+    const boundaryIdx = lastHead !== undefined
+      ? log.events.findIndex(ev => digestMultibaseEquals(lastHead, computeDigestMultibase(canonicalizeEntryForChain(ev))))
+      : -1;
+    if (boundaryIdx >= 0 && boundaryIdx < log.events.length - 1) {
+      const delta = log.events.slice(boundaryIdx + 1);
+      metadata.events = JSON.parse(serializeEventLogJson({ ...log, events: delta })).events;
+    } else {
+      // No known boundary → full snapshot; the resolver treats it as a checkpoint.
+      metadata.celLog = JSON.parse(serializeEventLogJson(log)) as Record<string, unknown>;
+    }
+
+    // Resolve the BitcoinManager ONCE so the surfaced cost estimate and the
+    // actual inscription share one instance / fee-rate lookup (Greptile P2).
+    const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+    const headMedia = this.tryResolveHeadMedia(asset);
+    // Cost surfacing (spec §0/§5): estimate + emit BEFORE the paid broadcast.
+    await this.emitInscribeCost(bitcoinManager, asset, headMedia?.content ?? Buffer.from(JSON.stringify(btcoDoc)));
+
+    let inscription: { inscriptionId: string; satoshi?: string; txid?: string; revealTxId?: string };
+    try {
+      inscription = await bitcoinManager.inscribeData(
+        headMedia ? headMedia.content : Buffer.from(JSON.stringify(btcoDoc)),
+        headMedia ? headMedia.contentType : 'application/did+json',
+        undefined,
+        { targetSatoshi: satoshi, metadata, lockKey: asset.id }
+      );
+    } catch (error) {
+      // Failed after the append (nothing paid before broadcast) — restore the
+      // PRE-append log AND re-persist it: appendCelEventOrSkip already advanced the
+      // hosted copy, so without this the stored log would stay ahead of the chain
+      // and every future update would degrade UNPROVABLE_BASE. Fable I1. The
+      // re-persist is best-effort and MUST NOT mask the original broadcast error
+      // (Greptile P2), so it is guarded independently.
+      if (celLogBefore) {
+        asset._replaceCelLog(celLogBefore);
+        try {
+          await this.persistCelArtifacts(asset);
+        } catch (persistErr) {
+          this.logger.warn('rollback re-persist failed (non-gating)', {
+            assetId: asset.id,
+            error: (persistErr as Error)?.message ?? String(persistErr)
+          });
+        }
+      }
+      throw error;
+    }
+
+    // Attach the head's own bitcoin witness proof (post-hoc; excluded from the
+    // chain digest, so it cannot break the anchored head). Then capture the
+    // updated btco doc and advance the on-chain head boundary.
+    if (inscription.satoshi) {
+      this.attachBitcoinWitnessProof(asset, {
+        satoshi: inscription.satoshi,
+        inscriptionId: inscription.inscriptionId,
+        txid: inscription.revealTxId ?? inscription.txid ?? ''
+      });
+    }
+    asset._captureDidDocument('did:btco', btcoDoc);
+    this.lastInscribedHead.set(asset, headDigest);
+
+    await this.eventEmitter.emit({
+      type: 'resource:inscribed',
+      timestamp: new Date().toISOString(),
+      asset: { id: asset.id },
+      did: btcoDid,
+      inscriptionId: inscription.inscriptionId
+    });
+  }
+
+  /**
+   * Best-effort cost estimate for a btco append inscription (spec §0/§5). Emits
+   * `cel:inscribe-cost` with the resolved fee rate and an approximate total sat
+   * cost (fee rate × rough vsize). Never gates — an estimator failure must not
+   * block the paid op the caller already intends.
+   */
+  private async emitInscribeCost(bitcoinManager: BitcoinManager, asset: OriginalsAsset, content: Buffer): Promise<void> {
+    try {
+      const feeRate = await bitcoinManager.estimateFeeRate();
+      // Rough commit+reveal vsize: content bytes / 4 (witness discount) + ~200
+      // vB overhead. A ballpark for cost-awareness, not a billing figure.
+      const estVsize = Math.ceil(content.byteLength / 4) + 200;
+      const estSats = typeof feeRate === 'number' ? Math.ceil(feeRate * estVsize) : undefined;
+      await this.eventEmitter.emit({
+        type: 'cel:inscribe-cost',
+        timestamp: new Date().toISOString(),
+        asset: { id: asset.id },
+        ...(typeof feeRate === 'number' ? { feeRate } : {}),
+        estVsize,
+        ...(estSats !== undefined ? { estSats } : {})
+      });
+    } catch {
+      // non-gating
+    }
+  }
+
+  /**
    * Resolve the media the anchoring inscription will carry as CONTENT (#407
    * phase 2): the most-recent resource's inline bytes + its MIME type. The head
    * is derived from the LOG (mostRecentResourceHead) — the same source the
@@ -2194,6 +2499,16 @@ export class LifecycleManager {
     if (!log) return null;
     const head = mostRecentResourceHead(log);
     if (!head) return null;
+    // Prefer the in-flight new-version media (#407 phase 3): during a btco
+    // resource-update inscription the log head already points at the new version,
+    // but asset.resources has not advanced yet — the bytes live in pendingHeadMedia.
+    const pending = asset.pendingHeadMedia;
+    if (pending && pending.hash === head.hash && (!head.resourceId || pending.resourceId === head.resourceId)) {
+      return {
+        content: Buffer.from(pending.content, 'utf8'),
+        contentType: pending.contentType ?? head.contentType ?? 'application/octet-stream'
+      };
+    }
     const res = asset.resources.find(r => (!head.resourceId || r.id === head.resourceId) && r.hash === head.hash);
     if (!res || typeof res.content !== 'string') return null;
     return {
@@ -2511,6 +2826,9 @@ export class LifecycleManager {
         proof: [...events[migrateIdx].proof, witnessProof]
       };
       asset._replaceCelLog({ ...log, events });
+      // #407 phase 3: the migrate event is now the on-chain head; a subsequent
+      // btco resource-update inscribes only the delta appended after it.
+      this.lastInscribedHead.set(asset, celHeadDigest);
     }
 
     // Capture the layer before migration for accurate metrics
@@ -2984,7 +3302,8 @@ export class LifecycleManager {
   async rotateBtcoKeys(
     asset: OriginalsAsset,
     newVerificationMethod: { publicKeyMultibase: string; privateKey?: string },
-    feeRate?: number
+    feeRate?: number,
+    opts?: { inscribeConfirm?: InscribeConfirm }
   ): Promise<{ inscriptionId: string; did: string }> {
     if (asset.currentLayer !== 'did:btco') {
       throw new StructuredError('INVALID_STATE', 'Key rotation requires the asset to be on the did:btco layer.');
@@ -3010,6 +3329,31 @@ export class LifecycleManager {
     const satoshi = btcoDid.split(':').pop()!;
     // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
     const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, newVerificationMethod.publicKeyMultibase);
+
+    // Confirm gate (#407 phase 4): a cooperative rotation reinscribes on-chain
+    // (paid), so consent to the cost BEFORE any mutation (log OR keyStore) — same
+    // abort-before-mutate contract as the update path. A provider is guaranteed
+    // here (btco asset). On decline, throw before the rotateKey append and before
+    // registering the incoming key; the finally releases the concurrency claim,
+    // leaving the asset byte-identical.
+    const rotateConfirm = opts?.inscribeConfirm ?? this.config.inscribeConfirm ?? 'now';
+    if (typeof rotateConfirm === 'function') {
+      const estimate = await this.estimateAppendCost(asset, 'rotate', { feeRate });
+      const approved = await rotateConfirm(estimate);
+      if (!approved) {
+        await this.eventEmitter.emit({
+          type: 'cel:inscribe-declined',
+          timestamp: new Date().toISOString(),
+          asset: { id: asset.id },
+          appendKind: 'rotate',
+          estimate
+        });
+        throw new StructuredError(
+          'PROVENANCE_APPEND_DECLINED',
+          'The inscribeConfirm gate declined the paid did:btco key rotation; nothing was appended or inscribed.'
+        );
+      }
+    }
 
     // Append-first (#365): rotateKey signed by the CURRENT controller — the
     // cooperative-rotation contract (the verifier only accepts rotations
@@ -3066,6 +3410,11 @@ export class LifecycleManager {
     // Reinscription succeeded — the rotated doc is now the resolvable btco doc;
     // it REPLACES the inscription-time capture for serialize().
     asset._captureDidDocument('did:btco', rotatedDoc);
+    // #407 phase 3: the rotateKey event is the new on-chain head; a subsequent
+    // btco resource-update inscribes only the delta appended after it.
+    if (celHeadDigest !== null) {
+      this.lastInscribedHead.set(asset, celHeadDigest);
+    }
 
     // Witness acknowledgment (map §5.1): controller-signed update recording the
     // reinscription. Folds to the CURRENT (post-rotation) controller; degrades
@@ -3213,6 +3562,9 @@ export class LifecycleManager {
 
     // Reinscription succeeded — the rotated doc is the resolvable btco doc.
     asset._captureDidDocument('did:btco', rotatedDoc);
+    // #407 phase 3: the rotateKey event is the new on-chain head; a subsequent
+    // btco resource-update inscribes only the delta appended after it.
+    this.lastInscribedHead.set(asset, celHeadDigest);
 
     // Direct best-effort persist (issue: no-keyStore gap): with no keyStore,
     // appendWitnessAcknowledgment below degrades to a skip and never reaches
@@ -3655,8 +4007,107 @@ export class LifecycleManager {
   }
 
   /**
+   * Non-mutating cost preview for the NEXT did:btco authorship append (#407 phase
+   * 4). Returns `{ satoshis, feeRate, vbytes, contentBytes }` for an `'update'`
+   * (new media) or `'rotate'` (event-only reinscription) without signing,
+   * appending, or inscribing anything — pure quote.
+   *
+   * Fee rate comes from the SAME resolver the real inscribe path uses
+   * (`bitcoinManager.estimateFeeRate` → feeOracle→provider, absurd
+   * >`MAX_REASONABLE_FEE_RATE` sources skipped; an explicit `opts.feeRate` wins).
+   * The vsize ballpark mirrors
+   * `emitInscribeCost` (content/4 witness discount + ~200 vB overhead), so the
+   * quote tracks the cost the subsequent real append incurs.
+   *
+   * For a STANDALONE `'update'` quote (not driven by the confirm gate), pass the
+   * intended new bytes as `opts.content` — otherwise the estimate is
+   * content-agnostic: with no in-flight `pendingHeadMedia` it sizes the CURRENT
+   * head media as a proxy and will underquote a larger upgrade. The confirm gate
+   * always sizes correctly (pendingHeadMedia is set before it runs).
+   *
+   * @throws StructuredError('ORD_PROVIDER_REQUIRED') when no ordinalsProvider is
+   *   configured — a btco op cannot be quoted without one.
+   */
+  async estimateAppendCost(
+    asset: OriginalsAsset,
+    appendKind: AppendKind,
+    opts?: { content?: string | Buffer; contentType?: string; feeRate?: number }
+  ): Promise<AppendCostEstimate> {
+    const provider = this.config.ordinalsProvider ?? this.deps?.bitcoinManager?.ordinalsProvider;
+    if (!provider) {
+      throw new StructuredError(
+        'ORD_PROVIDER_REQUIRED',
+        'An ordinalsProvider must be configured to estimate a did:btco append cost.'
+      );
+    }
+    // Same resolveFeeRate chain the real inscription uses (explicit override wins,
+    // else feeOracle→provider, absurd sources skipped). Conservative default when
+    // nothing resolves, so the quote is always a usable number for the confirm
+    // callback (matches estimateCost's fallback). Short-circuit an explicit
+    // opts.feeRate so we skip the fee-oracle round-trip it would only override.
+    let feeRate: number;
+    if (typeof opts?.feeRate === 'number' && Number.isFinite(opts.feeRate) && opts.feeRate > 0) {
+      feeRate = opts.feeRate;
+    } else {
+      const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
+      const resolved = await bitcoinManager.estimateFeeRate();
+      feeRate = (typeof resolved === 'number' && resolved > 0) ? resolved : 10;
+    }
+    const contentBytes = this.resolveAppendPayloadBytes(asset, appendKind, opts);
+    // Ballpark commit+reveal vsize (mirrors emitInscribeCost): a cost-awareness
+    // figure, not a billing number.
+    const vbytes = Math.ceil(contentBytes / 4) + 200;
+    const satoshis = Math.ceil(feeRate * vbytes);
+    return { satoshis, feeRate, vbytes, contentBytes };
+  }
+
+  /**
+   * Byte size of the content the next btco append would inscribe (#407 phase 4).
+   * Mirrors the real inscribe path's content selection so the estimate matches:
+   * caller-supplied content → in-flight new media (`pendingHeadMedia`, the
+   * confirm-gate case, since the log head has not advanced yet) → current head
+   * media → the DID document (pure-reference-head fallback). Pure/read-only.
+   *
+   * For `'rotate'`, this deliberately sizes the head MEDIA (when present), NOT the
+   * rotated DID doc: `reinscribeRotatedDoc` inscribes `headMedia.content` as the
+   * ordinal CONTENT and carries the rotated doc in METADATA, falling back to the
+   * DID doc as content only for a pure-reference head. So media size IS the paid
+   * cost of a rotation on an asset with media; the DID-doc fallback below applies
+   * to both kinds only when there is no inline media.
+   */
+  private resolveAppendPayloadBytes(
+    asset: OriginalsAsset,
+    appendKind: AppendKind,
+    opts?: { content?: string | Buffer }
+  ): number {
+    if (opts?.content !== undefined) {
+      const buf = Buffer.isBuffer(opts.content) ? opts.content : Buffer.from(String(opts.content), 'utf8');
+      return buf.byteLength;
+    }
+    if (appendKind === 'update' && asset.pendingHeadMedia) {
+      return Buffer.from(asset.pendingHeadMedia.content, 'utf8').byteLength;
+    }
+    // Head media is the inscribed CONTENT for BOTH kinds when present (update:
+    // reinscribeCelAppend; rotate: reinscribeRotatedDoc) — so this is the paid size.
+    const headMedia = this.tryResolveHeadMedia(asset);
+    if (headMedia) return headMedia.content.byteLength;
+    // Pure-reference head → the inscribe path falls back to the DID document as
+    // content; size the current btco doc (rebuilt with the current controller key).
+    const log = asset.celLog;
+    const btcoDid = asset.bindings?.['did:btco'];
+    if (log && btcoDid) {
+      const satoshi = btcoDid.split(':').pop()!;
+      const vm = currentControllerVm(log);
+      const controllerPubMb = vm.split('#')[0].slice('did:key:'.length);
+      const btcoDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, controllerPubMb);
+      return Buffer.from(JSON.stringify(btcoDoc)).byteLength;
+    }
+    return 0;
+  }
+
+  /**
    * Estimate the cost of migrating an asset to a target layer
-   * 
+   *
    * Returns a detailed breakdown of expected costs for Bitcoin operations.
    * For did:webvh migrations, costs are minimal (only hosting).
    * 
