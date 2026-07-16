@@ -7,13 +7,13 @@ A TypeScript SDK for the Originals Protocol - enabling creation, discovery, and 
 
 ## Overview
 
-The Originals Protocol organizes digital asset lifecycles into three layers:
+An Original asset **IS a Cryptographic Event Log (CEL)**: every authorship operation appends a signed, hash-chained event, and that log is the source of provenance truth. The lifecycle moves through three layers:
 
-- **`did:peer`** - Private creation and experimentation (offline, free)
-- **`did:webvh`** - Public discovery via HTTPS hosting ($25/year) 
-- **`did:btco`** - Transferable ownership on Bitcoin ($75-200 one-time)
+- **`did:cel`** - Private genesis, created offline (free)
+- **`did:webvh`** - Public discovery via HTTPS hosting
+- **`did:btco`** - Transferable ownership on Bitcoin, where the satoshi itself IS the identity and the ownership
 
-Assets migrate unidirectionally through these layers, with economic gravity determining when Bitcoin-level security is justified.
+Assets migrate unidirectionally through these layers, with economic gravity determining when Bitcoin-level security is justified. Ownership is live Bitcoin sat control — never a credential, and never transferred by editing a DID document.
 
 ## Installation
 
@@ -46,10 +46,11 @@ const draft = await originals.lifecycle.createDraft(resources);
 // Publish for discovery (second arg is the publisher's did:webvh DID or an ExternalSigner)
 const published = await originals.lifecycle.publish(draft, 'did:webvh:my-domain.com:my-user');
 
-// Inscribe on Bitcoin for permanent ownership
+// Inscribe on Bitcoin for permanent ownership (mints did:btco:<sat>)
 const inscribed = await originals.lifecycle.inscribe(published);
 
-// Transfer ownership of an inscribed asset
+// Transfer ownership: a pure Bitcoin sat move. Ownership IS live sat control,
+// so this writes NOTHING to the CEL — read the owner back with getCurrentOwner().
 // await originals.lifecycle.transfer(inscribed, 'bc1q...newowner');
 ```
 
@@ -65,7 +66,7 @@ const inscribed = await originals.lifecycle.inscribe(published);
 
 - **OriginalsSDK** - Main entry point and orchestration
 - **OriginalsAsset** - Represents a digital asset through its lifecycle
-- **DIDManager** - DID document creation and resolution (did:peer, did:webvh, did:btco) with external signer support
+- **DIDManager** - DID document creation and resolution (did:cel, did:webvh, did:btco) with external signer support
 - **CredentialManager** - Verifiable Credential handling
 - **LifecycleManager** - Asset migration between layers
 - **BitcoinManager** - Bitcoin/Ordinals integration
@@ -75,10 +76,10 @@ const inscribed = await originals.lifecycle.inscribe(published);
 - ✅ W3C DID and Verifiable Credential compliance
 - ✅ Multibase key encoding (no JSON Web Keys)
 - ✅ JSON-LD credential signing (no JWT)
-- ✅ Bitcoin Ordinals inscription support
-- ✅ Three-layer asset lifecycle management: `did:peer` → `did:webvh` → `did:btco`
-- ✅ Cryptographic provenance verification
-- ✅ Front-running protection via unique satoshi assignment
+- ✅ Bitcoin Ordinals inscription support (the inscription's content is the asset media; its CBOR metadata carries the CEL provenance)
+- ✅ Three-layer asset lifecycle management: `did:cel` → `did:webvh` → `did:btco`
+- ✅ Cryptographic provenance verification over the whole signed event chain
+- ✅ First-anchor-wins uniqueness, verified fail-closed at verify time (no "unique satoshi assignment" front-running mechanism)
 - ✅ **DID:WebVH integration with didwebvh-ts** - Full support for creating and managing did:webvh identifiers
 - ✅ **External signer support** - Integrate with Turnkey, AWS KMS, HSMs, and other key management systems
 

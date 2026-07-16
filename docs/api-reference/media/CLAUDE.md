@@ -12,11 +12,11 @@ For comprehensive API reference optimized for code generation, see:
 
 This is a TypeScript SDK for the Originals Protocol - enabling creation, discovery, and transfer of digital assets with cryptographically verifiable provenance. The protocol organizes digital asset lifecycles into three layers:
 
-- **`did:peer`** - Private creation and experimentation (offline, free)
+- **`did:cel`** - Private creation genesis (offline, free); an asset IS a Cryptographic Event Log
 - **`did:webvh`** - Public discovery via HTTPS hosting
-- **`did:btco`** - Transferable ownership on Bitcoin
+- **`did:btco`** - Transferable ownership on Bitcoin (ownership IS live sat control)
 
-Assets migrate unidirectionally through these layers: did:peer → did:webvh → did:btco.
+Assets migrate unidirectionally through these layers: did:cel → did:webvh → did:btco. (`did:peer` is deprecated as a creation method — the verifier keeps a legacy read path for pre-existing `did:peer:4` logs, but new assets are minted as `did:cel`.)
 
 ## Build and Test Commands
 
@@ -74,10 +74,12 @@ The SDK is built around a layered architecture with clear separation of concerns
 The DID system supports three DID methods with unified interfaces:
 
 **DIDManager (DIDManager.ts)** - Central orchestrator for all DID operations
-- `createDIDPeer()` - Create offline did:peer identifiers using @aviarytech/did-peer
-- `migrateToDIDWebVH()` - Upgrade did:peer to did:webvh for public hosting
-- `migrateToDIDBtco()` - Inscribe DID on Bitcoin for permanent ownership
-- `resolveDID()` - Universal resolver for all three DID methods
+- `createDIDWebVH()` - Create a did:webvh identifier for public hosting
+- `migrateToDIDWebVH()` - Upgrade a genesis (did:cel) asset to did:webvh for public hosting
+- `migrateToDIDBTCO()` - Inscribe DID on Bitcoin for transferable ownership (sat = identity)
+- `resolveDID()` - Universal resolver for all DID methods (incl. legacy did:peer read path)
+
+> Genesis is minted via `sdk.lifecycle.createAsset()` (a `did:cel` `create` event) — there is no `createDIDPeer()`.
 
 **WebVHManager (WebVHManager.ts)** - did:webvh-specific operations
 - Integrates with didwebvh-ts library for version history DIDs
@@ -102,7 +104,7 @@ The SDK supports external key management for production deployments:
 ```typescript
 interface ExternalSigner {
   sign(input: { document: Record<string, unknown>; proof: Record<string, unknown> }): Promise<{ proofValue: string }>;
-  getVerificationMethodId(): Promise<string> | string;
+  getVerificationMethodId(): string;
 }
 ```
 
@@ -118,9 +120,10 @@ Key files: `src/types/common.ts`, `src/did/WebVHManager.ts`
 
 **BitcoinManager (BitcoinManager.ts)** - High-level Bitcoin operations
 - `inscribeData()` - Inscribe arbitrary data as Ordinals
-- `transferInscription()` - Transfer inscription ownership
-- `inscribeDID()` - Create did:btco by inscribing DID document
-- `transferDID()` - Transfer did:btco ownership (updates DID document)
+- `transferInscription()` - Move an inscription-bearing sat to a new address (pure sat move)
+- `validateBTCODID()` - Validate a did:btco identifier against on-chain state
+
+> Ownership transfer is a pure Bitcoin **sat move** (`sdk.lifecycle.transferOwnership()` → `transferInscription()`); it edits NO DID document and writes NOTHING to the CEL. did:btco genesis is inscribed via `sdk.lifecycle.inscribeOnBitcoin()`.
 
 **Commit-Reveal Pattern (bitcoin/transactions/commit.ts)**
 - Commit transaction: uses a random reveal keypair, so the reveal address can't be precomputed/front-run from the mempool
@@ -141,16 +144,22 @@ Key files: `src/types/common.ts`, `src/did/WebVHManager.ts`
 
 ### Lifecycle Management (src/lifecycle/)
 
-**LifecycleManager (LifecycleManager.ts)** - Orchestrates asset migration
-- `createAsset()` - Creates did:peer asset with resources
-- `publishToWeb()` - Migrates to did:webvh
-- `inscribeOnBitcoin()` - Migrates to did:btco
-- Event-driven architecture via EventEmitter
+An Original asset **IS a CEL** (Cryptographic Event Log, src/cel/): every *authorship* lifecycle operation appends a signed event to `asset.celLog`, and the log — not the in-memory caches — is the source of provenance truth. Ownership is the exception: it IS Bitcoin sat control, read live (`getCurrentOwner()`), and a transfer writes nothing to the CEL.
+
+**LifecycleManager (LifecycleManager.ts)** - Orchestrates asset migration; each authorship op appends a signed CEL event (transfers are the exception — pure sat moves)
+- `createAsset()` - Mints a `did:cel` genesis (`create` event); `asset.id` is the derived did:cel and `currentLayer` is `'did:cel'`
+- `publishToWeb()` - Migrates to did:webvh (`migrate` event)
+- `inscribeOnBitcoin()` - Migrates to did:btco (`migrate` event); the on-chain DID doc carries an `OriginalsCelAnchor` (`#cel` service) committing to the log head at inscription time, and IS the witness artifact for the event's bitcoin proof
+- `transferOwnership()` - A pure Bitcoin **sat move** — writes NOTHING to the CEL (ownership IS sat control; the CEL is authorship only). Ownership is read live via `getCurrentOwner()`, never from a log event. The `transfer` CEL event type is legacy/read-only (verifiers still accept it in old logs; the SDK no longer emits it). `rotateBtcoKeys()` reinscribes same-id doc with a new key (`rotateKey` event, COOPERATIVE — signed by the outgoing controller), re-embedding a fresher `#cel`
+- `authorizeSigner()` - OPTIONAL author-enablement (#366, renamed from `claimOwnership`): does NOT grant or claim ownership (the sat is ownership). It lets a sat holder who cannot obtain the seller's signature establish a signing key so they can author new provenance — they reinscribe the did:btco doc with THEIR key and SELF-SIGN the `rotateKey`; the reinscription witness proves sat control, and the verifier accepts the otherwise-unauthorized rotation. `privateKey` is REQUIRED. Contrast with the cooperative `rotateBtcoKeys`.
+- `asset.serialize()` / `lifecycle.loadAsset()` - The interchange format (#377): `serialize()` emits a self-describing `AssetEnvelope` (the CEL log + captured DID docs + resources + an `unverified` honesty section); `loadAsset()` is the inverse and VERIFIES BY DEFAULT — same `verifyEventLog` gate plus resource↔genesis binding and DID-doc↔fold cross-checks, all fail-closed. With an ordinalsProvider it sets `checkHeadFreshness`, rejecting a truncated pre-rotation hand-off as `STALE_LOG` (#366).
+- Event-driven architecture via EventEmitter; when no keyStore/signing key is available, appends degrade with a `cel:append-skipped` event (verification is public-key-only and needs no keys; only WRITING needs the controller key)
 - Batch operations support for multiple assets
 
-**OriginalsAsset (OriginalsAsset.ts)** - Asset representation
+**OriginalsAsset (OriginalsAsset.ts)** - Asset representation, backed by its CEL log
 - Encapsulates resources, credentials, and provenance
-- Tracks migration state across layers
+- Tracks migration state across layers; `replayProvenance` folds the log to reconstruct it
+- `verify()` delegates to `verifyEventLog` — gating on the whole signed chain (btco anchoring needs an `ordinalsProvider` to check the witness proof)
 - Version management for resource updates
 
 **BatchOperations (BatchOperations.ts)**
@@ -177,7 +186,9 @@ Pluggable storage via StorageAdapter interface:
 - `LocalStorageAdapter` - Browser localStorage
 - Custom adapters can be implemented for databases, IPFS, etc.
 
-### Migration System (src/migration/)
+### Migration System (src/migration/) — EXPERIMENTAL, not the production path
+
+> **Note:** This subsystem is **experimental and unused in production.** `OriginalsSDK`/`LifecycleManager` run their own migrate/publish/inscribe flow with independent validation and never instantiate `MigrationManager`, so the checkpoint/rollback/audit/state-machine machinery below protects no production code path (issue #279). `MigrationManager` is intentionally **not** exported from the package entry point. Do not treat it as the supported migration API; use `LifecycleManager` (`sdk.lifecycle`) for real migrations.
 
 State machine-driven asset migration with validation:
 - **StateMachine (migration/state/StateMachine.ts)** - Enforces lifecycle rules
@@ -208,7 +219,7 @@ State machine-driven asset migration with validation:
 ### Event System (src/events/)
 
 **EventEmitter (EventEmitter.ts)** - Type-safe event dispatching
-- Lifecycle events: asset.created, asset.migrated, resource.published
+- Lifecycle events: asset:created, asset:migrated, resource:published
 - Subscribe via `lifecycle.on(eventType, handler)`
 - Event types defined in events/types.ts
 
@@ -349,7 +360,7 @@ const sdk = OriginalsSDK.create({
 });
 ```
 
-**Critical**: Bitcoin operations (inscribe, transfer) require `ordinalsProvider` to be configured. Use `OrdMockProvider` for testing, `OrdinalsClient` for production.
+**Critical**: Bitcoin operations (inscribe, transfer) require `ordinalsProvider` to be configured. Use `OrdMockProvider` for testing, `QuickNodeProvider` for production reads/broadcast/status/fees (QuickNode Bitcoin endpoint with the Ordinals & Runes add-on; `createOrdinalsProviderFromEnv()` selects it when `QUICKNODE_ENDPOINT` is set). Inscription construction/signing stays local — QuickNodeProvider's `createInscription`/`transferInscription` fail loudly by design; build the transaction locally and submit via `broadcastTransaction`.
 
 ## Development Workflow
 

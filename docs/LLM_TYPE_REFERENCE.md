@@ -105,7 +105,7 @@ interface DIDDocument {
   /** JSON-LD context */
   '@context': string[];
   
-  /** DID identifier (e.g., 'did:peer:4z...') */
+  /** DID identifier (e.g., 'did:cel:…' genesis, 'did:webvh:…', or 'did:btco:…') */
   id: string;
   
   /** Cryptographic verification methods */
@@ -331,19 +331,15 @@ interface ProvenanceChain {
     feeRate?: number;
   }>;
   
-  /** Transfer history */
-  transfers: Array<{
-    from: string;
-    to: string;
-    timestamp: string;
-    transactionId: string;
-  }>;
+  // NO `transfers` field. Ownership IS live Bitcoin sat control — a transfer is a pure
+  // sat move that writes NOTHING to the CEL/provenance. Read it live via
+  // sdk.lifecycle.getCurrentOwner(asset).
   
-  /** Resource update history */
+  /** Resource update history (fromVersion/toVersion optional for legacy/foreign events) */
   resourceUpdates: Array<{
     resourceId: string;
-    fromVersion: number;
-    toVersion: number;
+    fromVersion?: number;
+    toVersion?: number;
     fromHash: string;
     toHash: string;
     timestamp: string;
@@ -1060,6 +1056,51 @@ interface LifecycleOperationOptions {
 type ProgressCallback = (progress: LifecycleProgress) => void;
 ```
 
+### InscribeOnBitcoinOptions
+
+```typescript
+// Second arg to sdk.lifecycle.inscribeOnBitcoin(asset, opts). A bare `number`
+// is legacy shorthand for { feeRate }. Providing `fundingUtxo` switches to the
+// caller-selected-sat path: the genesis did:btco lands on that UTXO's first sat,
+// DERIVED from the provider's sat index (never caller-asserted).
+interface InscribeOnBitcoinOptions {
+  feeRate?: number;         // sat/vB
+  fundingUtxo?: Utxo;       // its first sat becomes did:btco:<sat>
+  satSigner?: BitcoinSigner;// signs the commit PSBT; required with fundingUtxo
+  changeAddress?: string;   // change/reveal destination; required with fundingUtxo
+}
+```
+
+### AssetEnvelope
+
+```typescript
+// Interchange format (#377): asset.serialize() emits it; sdk.lifecycle.loadAsset()
+// consumes it and VERIFIES BY DEFAULT (fail-closed).
+interface AssetEnvelope {
+  format: 'originals-asset-envelope';
+  version: number;
+  /** The did:cel genesis id; loadAsset's expectedDid, cross-checked vs the log. */
+  assetDid: string;
+  /** THE provenance encoding — the signed CEL event log. */
+  eventLog: EventLog;
+  /** Per-layer DID docs captured at operation time; did:cel always present. */
+  didDocuments: {
+    'did:cel': DIDDocument;
+    'did:webvh'?: DIDDocument;
+    'did:btco'?: DIDDocument;
+  };
+  resources: AssetResource[];
+  credentials?: VerifiableCredential[];
+  /** HONESTY SECTION — advisory only, never verified/trusted. */
+  unverified?: {
+    commitTxId?: string;
+    feeRate?: number;
+    /** Live-cache btco binding, present ONLY when the fold can't derive it. */
+    bindings?: Record<string, string>;
+  };
+}
+```
+
 ---
 
 ## Bitcoin Types
@@ -1181,6 +1222,17 @@ interface Utxo {
 interface ResourceUtxo extends Utxo {
   /** True if this UTXO contains an inscription */
   hasResource?: boolean;
+}
+```
+
+### BitcoinSigner
+
+```typescript
+// Signs the commit PSBT for a caller-selected-sat inscription. Returns a fully
+// signed, finalized, broadcast-ready transaction HEX (NOT a base64 PSBT) — the
+// SDK broadcasts it and parses it locally to compute the commit txid.
+interface BitcoinSigner {
+  signAndFinalizeCommitPsbt(psbtBase64: string): Promise<string>;
 }
 ```
 

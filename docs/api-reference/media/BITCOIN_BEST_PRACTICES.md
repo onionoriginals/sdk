@@ -598,6 +598,17 @@ await secretsManager.createSecret({
 
 ### Key Rotation
 
+> **For `did:btco` assets, use the lifecycle API — not manual DID-doc edits.**
+> Rotating the signing key that authors provenance is a first-class operation:
+> `sdk.lifecycle.rotateBtcoKeys(...)` (COOPERATIVE — signed by the outgoing
+> controller) or `sdk.lifecycle.authorizeSigner(...)` (self-signed by the
+> current sat holder when the previous controller's signature is unavailable).
+> Both reinscribe the same-id `did:btco` doc with the new key and append a
+> signed `rotateKey` event to the asset's CEL. **Key rotation does not change
+> ownership**: ownership IS live Bitcoin sat control, so it is never rotated or
+> transferred by editing a DID document. The generic pattern below illustrates
+> a grace-period rotation workflow for keys the SDK does not manage for you.
+
 ```typescript
 // Implement regular key rotation
 class KeyRotationManager {

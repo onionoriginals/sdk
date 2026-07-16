@@ -6,9 +6,9 @@ Create your first digital asset with cryptographically verifiable provenance —
 
 By the end of this tutorial, you'll have:
 
-1. Created a digital asset as a private draft (`did:peer`)
+1. Created a digital asset as a private genesis (`did:cel`)
 2. Published it for public discovery (`did:webvh`)
-3. Inscribed it on Bitcoin for permanent ownership (`did:btco`)
+3. Inscribed it on Bitcoin for permanent, transferable ownership (`did:btco`)
 
 ## Prerequisites
 
@@ -54,9 +54,9 @@ The SDK has three network tiers that pair a WebVH network with a Bitcoin network
 
 For this tutorial we use `magby` + `regtest` so everything is free and local.
 
-## Step 3: Create a draft asset (did:peer)
+## Step 3: Create a draft asset (did:cel)
 
-A draft asset lives in the `did:peer` layer — it's private, offline, and costs nothing. This is where you experiment.
+A draft asset lives in the `did:cel` genesis layer — it's private, offline, and costs nothing. Its `did:cel` identifier is derived from the create event that opens the asset's Cryptographic Event Log (CEL), the signed chain that IS the asset's provenance. This is where you experiment.
 
 Define your asset's resources and create the draft:
 
@@ -72,14 +72,14 @@ const resources = [
   },
 ];
 
-// Create the draft. It gets a did:peer identifier automatically.
+// Create the draft. It gets a did:cel genesis identifier automatically.
 const draft = await sdk.lifecycle.createDraft(resources, {
   onProgress: (p) => console.log(`[${p.percentage}%] ${p.message}`),
 });
 
 console.log('Draft created!');
-console.log('  Layer:', draft.currentLayer);  // 'did:peer'
-console.log('  DID:  ', draft.id);
+console.log('  Layer:', draft.currentLayer);  // 'did:cel'
+console.log('  DID:  ', draft.id);            // 'did:cel:...'
 ```
 
 At this point your asset exists only locally. No network calls, no fees. You can iterate on it as much as you want.
@@ -89,12 +89,10 @@ At this point your asset exists only locally. No network calls, no fees. You can
 When you're ready to make your asset publicly discoverable, publish it to the `did:webvh` layer. This serves your asset's DID document over HTTPS so anyone can find and verify it.
 
 ```typescript
-// You need a publisher DID. In development, create one from the SDK:
-const { didDocument: publisherDoc } = await sdk.did.createDIDPeer([], true);
-const publisherDid = publisherDoc.id;
-
-// Publish the draft to the web
-const published = await sdk.lifecycle.publish(draft, publisherDid, {
+// The second argument names where to publish. Pass a domain string (the SDK
+// mints the asset's own did:webvh under it), a full did:webvh DID, or an
+// ExternalSigner (Turnkey/KMS/HSM) bound to a did:webvh identifier.
+const published = await sdk.lifecycle.publish(draft, 'example.com', {
   onProgress: (p) => console.log(`[${p.percentage}%] ${p.message}`),
 });
 
@@ -107,7 +105,7 @@ Your asset is now publicly resolvable. Anyone with the DID can verify its proven
 
 ## Step 5: Inscribe on Bitcoin (did:btco)
 
-For permanent, transferable ownership, inscribe your asset on Bitcoin. This uses the Ordinals protocol to anchor your asset's identity on-chain.
+For permanent, transferable ownership, inscribe your asset on Bitcoin. This uses the Ordinals protocol to anchor your asset on a satoshi — that satoshi IS the asset's `did:btco` identity and its ownership. The inscription's content is your asset's media; its CBOR metadata carries the byte-light CEL provenance (the did:btco doc plus the full event log), so the whole history is recoverable from the bare sat. This layer is final: there is no fallback to `did:webvh` afterward.
 
 ```typescript
 // Estimate the cost first
@@ -129,7 +127,7 @@ Your asset now has a permanent identity on the Bitcoin blockchain. It can be tra
 
 ## Step 6: Transfer ownership (optional)
 
-Once an asset is inscribed on Bitcoin, you can transfer it to a new owner:
+Once an asset is inscribed on Bitcoin, you can transfer it to a new owner. Because ownership IS live Bitcoin sat control, a transfer is a pure sat move — it writes **nothing** to the CEL (the event log is authorship-only). Read the current owner back live with `sdk.lifecycle.getCurrentOwner(asset)`.
 
 ```typescript
 const tx = await sdk.lifecycle.transfer(inscribed, 'bc1qexampleaddress...', {
@@ -166,13 +164,13 @@ async function main() {
     },
   ];
 
-  // 3. Create draft (did:peer) — free, offline
+  // 3. Create draft (did:cel genesis) — free, offline
   const draft = await sdk.lifecycle.createDraft(resources);
   console.log('Draft created:', draft.id);
 
-  // 4. Publish (did:webvh) — publicly discoverable
-  const { didDocument: publisherDoc } = await sdk.did.createDIDPeer([], true);
-  const published = await sdk.lifecycle.publish(draft, publisherDoc.id);
+  // 4. Publish (did:webvh) — publicly discoverable. Pass a domain, a
+  //    did:webvh DID, or an ExternalSigner as the publish target.
+  const published = await sdk.lifecycle.publish(draft, 'example.com');
   console.log('Published:', published.id);
 
   // 5. Inscribe (did:btco) — permanent ownership on Bitcoin
@@ -200,8 +198,8 @@ bun run my-first-original.ts
 The Originals Protocol uses economic gravity to determine when Bitcoin-level security is justified:
 
 ```
-did:peer          did:webvh              did:btco
-(Private)    →    (Public)          →    (Bitcoin)
+did:cel           did:webvh              did:btco
+(Genesis)    →    (Public)          →    (Bitcoin)
 Free, offline     ~$25/year domain       $75-200 one-time
 Experiment        Share & discover       Own & transfer
 ```

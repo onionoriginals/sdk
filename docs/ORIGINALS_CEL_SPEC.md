@@ -695,16 +695,35 @@ Where `{identifier}` is derived from the source peer DID for linkage.
 #### 6.5.2 DID Generation
 
 ```
-did:btco:{inscriptionId}
+did:btco:{satoshi}          (mainnet)
+did:btco:sig:{satoshi}      (signet)
+did:btco:reg:{satoshi}      (regtest)
 ```
 
-The DID is derived from the Bitcoin ordinals inscription ID.
+The DID **is the satoshi** the asset is inscribed on — the sat is both the identity and
+the ownership. It is NOT derived from the inscription ID. The genesis sat is
+caller-selectable (`inscribeOnBitcoin` with a `fundingUtxo`); the sat is derived from the
+provider's sat index, never caller-asserted. Ownership is then read live from sat control
+(`getCurrentOwner`), never from a log event.
 
 #### 6.5.3 Bitcoin Witness Requirement
 
 - Migration to btco MUST include a Bitcoin witness proof
 - The witness inscribes the migration event attestation on-chain
 - The `txid`, `blockHeight`, `satoshi`, and `inscriptionId` are recorded
+- The anchoring inscription's *content* is the asset's current media; its CBOR
+  *metadata* carries the byte-light provenance (the did:btco doc with a `#cel` anchor
+  committing to the log head, plus the full CEL log), so provenance is recoverable from a
+  bare satoshi
+
+#### 6.5.4 Uniqueness (First-Anchor-Wins)
+
+Anti-front-running and uniqueness are **first-anchor-wins**, verified fail-closed at
+verification time via the provider's anchorings lookup: the first inscription to anchor a
+did:cel sat is canonical; competing anchorings are rejected (`UNIQUENESS_UNVERIFIABLE`
+when the lookup is unavailable). There is no "unique satoshi assignment" front-running
+mechanism, and the commit/reveal two-phase inscription is transaction *construction*, not
+front-running protection.
 
 ### 6.6 Detecting Migration Events
 

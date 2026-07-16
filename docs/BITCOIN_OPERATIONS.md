@@ -72,10 +72,20 @@ did:btco:2099994106992659
 ```
 
 This DID:
-- Points to a specific satoshi
+- Points to a specific satoshi — **the satoshi IS the identity**
 - Resolves to all inscriptions on that satoshi
-- Enables cryptographic asset ownership verification
 - Persists as long as Bitcoin exists
+
+**Ownership IS live Bitcoin sat control.** The sat is both the identity and the
+ownership — there is no ownership credential and no DID-document edit that transfers
+ownership. Read current ownership **live** with `sdk.lifecycle.getCurrentOwner(asset)`;
+`sdk.lifecycle.transferOwnership(asset, toAddress)` is a pure sat move that writes
+**nothing** to the asset's Cryptographic Event Log (the CEL records authorship only).
+
+Because the anchoring inscription is content-as-ordinal — its *content* is the asset's
+current media and its *metadata* carries the did:btco document plus the byte-light CEL
+log — full provenance is recoverable from a **bare satoshi** with
+`sdk.lifecycle.resolveAssetFromSat(sat)`, from Bitcoin alone (no host, no envelope).
 
 ## Understanding UTXOs
 
@@ -801,37 +811,33 @@ class InscriptionCollection {
 
 ### Provenance Chain
 
+Do **not** hand-roll provenance by inscribing your own JSON event objects. In the
+Originals model, **an asset IS a Cryptographic Event Log (CEL)**: every *authorship*
+lifecycle operation appends a signed, hash-chained event to `asset.celLog`, and that
+whole signed chain — verified by `asset.verify()` (`verifyEventLog`) — is the source of
+provenance truth.
+
+- **Authorship ops append CEL events:** `createAsset` (`create`), `publishToWeb`
+  (`migrate` → did:webvh), `inscribeOnBitcoin` (`migrate` → did:btco),
+  `addResourceVersion` (`update`), and key rotations (`rotateBtcoKeys` /
+  `authorizeSigner` → `rotateKey`).
+- **Ownership transfers append NOTHING.** `transferOwnership` is a pure Bitcoin sat
+  move; ownership is read live via `getCurrentOwner`, never from a log event.
+- The did:btco anchoring inscription commits to the log head (via a `#cel` anchor in
+  the DID document) and carries the byte-light CEL log in its metadata, so full
+  provenance is recoverable from the bare satoshi with `resolveAssetFromSat`.
+
 ```typescript
-async function createProvenanceChain(assetId: string, events: any[]) {
-  const provenanceInscriptions = [];
+// Provenance accrues automatically as you drive the lifecycle:
+const asset = await sdk.lifecycle.createAsset(resources);   // create event
+await sdk.lifecycle.publishToWeb(asset, publisherDid);      // migrate event (domain comes from webvhNetwork config)
+await sdk.lifecycle.inscribeOnBitcoin(asset);               // migrate event (+ #cel anchor)
 
-  for (const event of events) {
-    const inscription = await sdk.bitcoin.inscribeData(
-      JSON.stringify({
-        p: 'btco',
-        op: 'provenance',
-        asset: assetId,
-        event: event.type,
-        timestamp: new Date().toISOString(),
-        data: event.data
-      }),
-      'application/json'
-    );
+// Verify the whole signed chain (needs an ordinalsProvider to check the btco witness):
+const result = await asset.verify();
 
-    provenanceInscriptions.push(inscription);
-  }
-
-  return provenanceInscriptions;
-}
-
-// Usage
-const events = [
-  { type: 'created', data: { creator: 'alice' } },
-  { type: 'verified', data: { verifier: 'bob' } },
-  { type: 'transferred', data: { from: 'alice', to: 'carol' } }
-];
-
-const provenance = await createProvenanceChain(assetId, events);
+// Recover provenance from Bitcoin alone, from just the satoshi:
+const recovered = await sdk.lifecycle.resolveAssetFromSat(sat);
 ```
 
 ### Atomic Swaps (Conceptual)

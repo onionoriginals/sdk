@@ -69,10 +69,11 @@ const resource = createExternalReference(
   ['ipfs://QmYourHash...']
 );
 
-const log = await cel.create('My Digital Artwork', [resource]);
-console.log('Asset created:', log);
+// create() returns the event log AND the derived did:cel genesis identifier
+const { log, did } = await cel.create('My Digital Artwork', [resource]);
+console.log('Asset created:', did);  // "did:cel:uEiD..."
 
-// 5. Verify the log
+// 5. Verify the log (public-key-only — verification needs no signing keys)
 const result = await cel.verify(log);
 console.log('Verified:', result.verified);
 ```
@@ -95,6 +96,12 @@ npx originals-cel inspect --log ./asset.cel.json
 ## 2. Core Concepts
 
 ### 2.1 Event Logs
+
+An Original asset **IS** a Cryptographic Event Log (CEL). Every *authorship* operation
+appends a signed, hash-chained event; the whole signed chain — verified by
+`verifyEventLog` — is the source of provenance truth, not any in-memory cache.
+Ownership is the one exception: it IS live Bitcoin sat control (see §2.6), never a log
+event.
 
 An **Event Log** is an ordered sequence of cryptographically linked events that records the complete history of a digital asset.
 
@@ -127,11 +134,13 @@ Assets exist in one of three **trust layers**, each providing different levels o
 ```
    ┌──────────────────────────────────────────────────────────┐
    │                                                          │
-   │  PEER LAYER (did:peer)                                   │
-   │  • Local, self-issued DIDs                               │
+   │  GENESIS / PEER LAYER (did:cel)                          │
+   │  • did:cel derived from the create event (self-certifying)│
    │  • No external witnesses                                 │
-   │  • Instant, free creation                                │
+   │  • Instant, free, offline creation                       │
    │  • Verification: cryptographic proof only                │
+   │  • (did:peer is deprecated as a creation method;         │
+   │     verifiers keep a read-only path for legacy logs)     │
    │                                                          │
    └───────────────────────────┬──────────────────────────────┘
                                │ migrate()
@@ -230,6 +239,26 @@ const ref = createExternalReference(content, 'image/png', ['https://cdn.example.
 const isValid = verifyExternalReference(ref, downloadedContent);
 ```
 
+### 2.6 Ownership vs Authorship
+
+Two distinct rights, tracked in two distinct ways:
+
+- **Authorship** — the right to append provenance — lives in the CEL. `create`,
+  `migrate`, `update`, and `rotateKey` are signed authorship events.
+- **Ownership** — on the `btco` layer — **IS live Bitcoin sat control.** The satoshi
+  (`did:btco:<sat>`) is both the identity and the ownership. Read it live with
+  `sdk.lifecycle.getCurrentOwner(asset)`.
+
+A transfer is a pure Bitcoin **sat move** (`sdk.lifecycle.transferOwnership`) that writes
+**nothing** to the CEL. The legacy `transfer` event type is read-only — verifiers still
+accept it in old logs, but the SDK no longer emits it. Ownership is never a credential
+and is never transferred by editing a DID document.
+
+A new sat holder who wants to *author* provenance but can't get the seller's signature
+uses `authorizeSigner` (renamed from `claimOwnership`, #366): they reinscribe the
+did:btco doc with their key and self-sign a `rotateKey`. This establishes a signing key —
+it does not grant ownership, because the sat already is ownership.
+
 ---
 
 ## 3. SDK API Reference
@@ -262,23 +291,26 @@ type CelSigner = (data: unknown) => Promise<DataIntegrityProof>;
 
 #### Methods
 
-##### `create(name, resources): Promise<EventLog>`
+##### `create(name, resources): Promise<{ log: EventLog; did: string }>`
 
-Creates a new asset with an initial `create` event.
+Creates a new asset with an initial `create` event, and returns both the event log and
+the derived `did:cel` genesis identifier.
 
 ```typescript
-const log = await cel.create('My Asset', [
+const { log, did } = await cel.create('My Asset', [
   { digestMultibase: 'uXYZ...', mediaType: 'image/png' }
 ]);
+// did === "did:cel:uEiD..."
 ```
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `name` | `string` | Human-readable asset name |
 | `resources` | `ExternalReference[]` | Associated resources |
-| **Returns** | `Promise<EventLog>` | Event log with create event |
+| **Returns** | `Promise<{ log: EventLog; did: string }>` | Event log + derived `did:cel` |
 
-> **Note**: Assets can only be created at the `peer` layer. Create first, then migrate to other layers.
+> **Note**: Assets can only be created at the genesis (`peer`) layer, which mints a
+> `did:cel`. Create first, then migrate to other layers.
 
 ---
 
@@ -831,7 +863,7 @@ function CreateForm() {
         mediaType: file.type,
         url: ['https://your-storage.com/...']
       }],
-      creatorDid: 'did:peer:...',
+      creatorDid: 'did:cel:...',
     });
   };
   

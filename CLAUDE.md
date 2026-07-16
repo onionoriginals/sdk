@@ -12,11 +12,11 @@ For comprehensive API reference optimized for code generation, see:
 
 This is a TypeScript SDK for the Originals Protocol - enabling creation, discovery, and transfer of digital assets with cryptographically verifiable provenance. The protocol organizes digital asset lifecycles into three layers:
 
-- **`did:peer`** - Private creation and experimentation (offline, free)
+- **`did:cel`** - Private creation genesis (offline, free); an asset IS a Cryptographic Event Log
 - **`did:webvh`** - Public discovery via HTTPS hosting
-- **`did:btco`** - Transferable ownership on Bitcoin
+- **`did:btco`** - Transferable ownership on Bitcoin (ownership IS live sat control)
 
-Assets migrate unidirectionally through these layers: did:peer → did:webvh → did:btco.
+Assets migrate unidirectionally through these layers: did:cel → did:webvh → did:btco. (`did:peer` is deprecated as a creation method — the verifier keeps a legacy read path for pre-existing `did:peer:4` logs, but new assets are minted as `did:cel`.)
 
 ## Build and Test Commands
 
@@ -74,10 +74,12 @@ The SDK is built around a layered architecture with clear separation of concerns
 The DID system supports three DID methods with unified interfaces:
 
 **DIDManager (DIDManager.ts)** - Central orchestrator for all DID operations
-- `createDIDPeer()` - Create offline did:peer identifiers using @aviarytech/did-peer
-- `migrateToDIDWebVH()` - Upgrade did:peer to did:webvh for public hosting
-- `migrateToDIDBtco()` - Inscribe DID on Bitcoin for permanent ownership
-- `resolveDID()` - Universal resolver for all three DID methods
+- `createDIDWebVH()` - Create a did:webvh identifier for public hosting
+- `migrateToDIDWebVH()` - Upgrade a genesis (did:cel) asset to did:webvh for public hosting
+- `migrateToDIDBTCO()` - Inscribe DID on Bitcoin for transferable ownership (sat = identity)
+- `resolveDID()` - Universal resolver for all DID methods (incl. legacy did:peer read path)
+
+> Genesis is minted via `sdk.lifecycle.createAsset()` (a `did:cel` `create` event) — there is no `createDIDPeer()`.
 
 **WebVHManager (WebVHManager.ts)** - did:webvh-specific operations
 - Integrates with didwebvh-ts library for version history DIDs
@@ -118,9 +120,10 @@ Key files: `src/types/common.ts`, `src/did/WebVHManager.ts`
 
 **BitcoinManager (BitcoinManager.ts)** - High-level Bitcoin operations
 - `inscribeData()` - Inscribe arbitrary data as Ordinals
-- `transferInscription()` - Transfer inscription ownership
-- `inscribeDID()` - Create did:btco by inscribing DID document
-- `transferDID()` - Transfer did:btco ownership (updates DID document)
+- `transferInscription()` - Move an inscription-bearing sat to a new address (pure sat move)
+- `validateBTCODID()` - Validate a did:btco identifier against on-chain state
+
+> Ownership transfer is a pure Bitcoin **sat move** (`sdk.lifecycle.transferOwnership()` → `transferInscription()`); it edits NO DID document and writes NOTHING to the CEL. did:btco genesis is inscribed via `sdk.lifecycle.inscribeOnBitcoin()`.
 
 **Commit-Reveal Pattern (bitcoin/transactions/commit.ts)**
 - Commit transaction: uses a random reveal keypair, so the reveal address can't be precomputed/front-run from the mempool
@@ -144,7 +147,7 @@ Key files: `src/types/common.ts`, `src/did/WebVHManager.ts`
 An Original asset **IS a CEL** (Cryptographic Event Log, src/cel/): every *authorship* lifecycle operation appends a signed event to `asset.celLog`, and the log — not the in-memory caches — is the source of provenance truth. Ownership is the exception: it IS Bitcoin sat control, read live (`getCurrentOwner()`), and a transfer writes nothing to the CEL.
 
 **LifecycleManager (LifecycleManager.ts)** - Orchestrates asset migration; each authorship op appends a signed CEL event (transfers are the exception — pure sat moves)
-- `createAsset()` - Mints a `did:cel` genesis (`create` event); `asset.id` is the derived did:cel, while `currentLayer` label stays `'did:peer'`
+- `createAsset()` - Mints a `did:cel` genesis (`create` event); `asset.id` is the derived did:cel and `currentLayer` is `'did:cel'`
 - `publishToWeb()` - Migrates to did:webvh (`migrate` event)
 - `inscribeOnBitcoin()` - Migrates to did:btco (`migrate` event); the on-chain DID doc carries an `OriginalsCelAnchor` (`#cel` service) committing to the log head at inscription time, and IS the witness artifact for the event's bitcoin proof
 - `transferOwnership()` - A pure Bitcoin **sat move** — writes NOTHING to the CEL (ownership IS sat control; the CEL is authorship only). Ownership is read live via `getCurrentOwner()`, never from a log event. The `transfer` CEL event type is legacy/read-only (verifiers still accept it in old logs; the SDK no longer emits it). `rotateBtcoKeys()` reinscribes same-id doc with a new key (`rotateKey` event, COOPERATIVE — signed by the outgoing controller), re-embedding a fresher `#cel`
