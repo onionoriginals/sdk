@@ -18,9 +18,9 @@ export { short };
 import {
   OriginalsSDK,
   OrdMockProvider,
-  MemoryStorageAdapter,
   type OriginalsAsset
 } from '@originals/sdk';
+import { HttpHostingStorageAdapter } from './http-hosting-adapter';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 export type LayerId = 'did:peer' | 'did:webvh' | 'did:btco';
@@ -40,6 +40,8 @@ export interface DemoAssetState {
   layer: LayerId;
   did: string;
   webvhDid?: string;
+  webvhLogUrl?: string;
+  webvhResolved?: boolean;
   btcoDid?: string;
   resource: {
     id: string;
@@ -78,6 +80,8 @@ export class DemoEngine {
   private keys = new Map<string, string>();
   private listeners = new Set<Listener>();
   private publisherDid: string | null = null;
+  private webvhLogUrl: string | null = null;
+  private webvhResolved = false;
   asset: OriginalsAsset | null = null;
 
   constructor() {
@@ -91,7 +95,9 @@ export class DemoEngine {
       webvhNetwork: 'magby',
       defaultKeyType: 'Ed25519',
       ordinalsProvider: new OrdMockProvider(),
-      storageAdapter: new MemoryStorageAdapter(),
+      // Real HTTP hosting at this origin — the SDK's did:webvh log becomes
+      // resolvable over HTTP(S) (see http-hosting-adapter.ts).
+      storageAdapter: new HttpHostingStorageAdapter(),
       enableLogging: false,
       keyStore: {
         async getPrivateKey(id: string) {
@@ -213,6 +219,7 @@ export class DemoEngine {
 
     if (!this.publisherDid) {
       const webvh = await this.sdk.did.createDIDWebVH({
+        domain: demoHost(),
         paths: ['studio', 'you']
       });
       const result = webvh as unknown as {
@@ -241,6 +248,35 @@ export class DemoEngine {
     }
 
     await this.sdk.lifecycle.publishToWeb(this.asset, this.publisherDid);
+
+    // Prove REAL resolution: publishToWeb hosts the ASSET's did:webvh log (+ cel
+    // + resources) at this origin. Fetch that log back over the network via the
+    // SDK's real resolver. skipCache forces a network read (not the in-memory
+    // cache). Best-effort in dev (http origin can't satisfy the resolver's
+    // hard-coded https), authoritative in prod. resolved=false still shows the
+    // link, just no "resolved ✓" tick.
+    const assetWebvhDid = ((this.asset.bindings ?? {}) as Record<string, string>)['did:webvh'];
+    const logUrl = assetWebvhDid ? webvhLogUrl(assetWebvhDid) : '';
+    let resolvedDoc: unknown = null;
+    let resolved = false;
+    if (assetWebvhDid) {
+      try {
+        resolvedDoc = await this.sdk.did.resolveDID(assetWebvhDid, { skipCache: true });
+        resolved = !!resolvedDoc;
+      } catch (err) {
+        log('did:webvh:resolve-failed', err);
+      }
+    }
+    this.webvhLogUrl = logUrl;
+    this.webvhResolved = resolved;
+    this.emit(
+      'did:webvh:resolved',
+      resolved
+        ? `did:webvh log resolved over HTTPS — ${logUrl}`
+        : `did:webvh log hosted at ${logUrl} (resolves over HTTPS in production)`,
+      { logUrl, resolved, doc: resolvedDoc }
+    );
+
     return this.snapshot();
   }
 
@@ -279,6 +315,8 @@ export class DemoEngine {
       layer: asset.currentLayer as LayerId,
       did: asset.id,
       webvhDid: bindings['did:webvh'],
+      webvhLogUrl: this.webvhLogUrl ?? undefined,
+      webvhResolved: this.webvhResolved,
       btcoDid: bindings['did:btco'],
       resource: {
         id: res.id,
@@ -307,4 +345,24 @@ export class DemoEngine {
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// The origin host we host did:webvh logs under. In the browser this is the
+// live origin; VITE_WEBVH_HOST overrides it for the deployed host or tests.
+function demoHost(): string {
+  const envHost = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_WEBVH_HOST;
+  if (envHost) return envHost;
+  if (typeof window !== 'undefined' && window.location?.host) return window.location.host;
+  return 'localhost';
+}
+
+// Mirrors didwebvh-ts getFileUrl: pathed DID → https://<host>/<segs>/did.jsonl,
+// domain-root DID → https://<host>/.well-known/did.jsonl. This is the exact URL
+// the resolver GETs (protocol is always https).
+function webvhLogUrl(did: string): string {
+  const parts = did.split(':'); // did:webvh:<SCID>:<domain>[:<seg>…]
+  const domain = decodeURIComponent(parts[3] ?? '');
+  const segs = parts.slice(4).map((s) => decodeURIComponent(s));
+  const base = `https://${domain}`;
+  return segs.length ? `${base}/${segs.join('/')}/did.jsonl` : `${base}/.well-known/did.jsonl`;
 }
