@@ -8,6 +8,7 @@ import { route, type Handler } from './router';
 // client-supplied header, which is spoofable.
 export interface WebvhHostStore {
   handlePut(req: Request, url: URL, clientIp: string): Promise<Response>;
+  read(url: URL): Response;
   serve(req: Request, url: URL): Response | null;
 }
 
@@ -55,8 +56,10 @@ export function buildFetch(deps: {
     const url = new URL(req.url);
     const path = url.pathname;
 
-    // 1. WebVH host writes (wildcard path — not expressible in the exact route map).
+    // 1. WebVH host store (wildcard path — not expressible in the exact route
+    // map). GET/HEAD read an object by key (adapter.get); PUT writes.
     if (path.startsWith('/api/host/')) {
+      if (req.method === 'GET' || req.method === 'HEAD') return hostStore.read(url);
       return hostStore.handlePut(req, url, resolveClientIp(req, server));
     }
 

@@ -11,6 +11,9 @@ const noopHostStore = {
   async handlePut() {
     return json({ error: 'not_implemented' }, 501);
   },
+  read() {
+    return json({ error: 'not_found' }, 404);
+  },
   serve() {
     return null as Response | null;
   },
@@ -78,6 +81,7 @@ describe('unified server buildFetch', () => {
         seenIp = clientIp;
         return json({ ok: true }, 200);
       },
+      read: () => json({ error: 'not_found' }, 404),
       serve: () => null as Response | null,
     };
     const fetchFn = buildFetch({ routes: buildStubRoutes(), hostStore: recordingStore, distDir });

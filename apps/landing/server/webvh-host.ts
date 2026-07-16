@@ -76,6 +76,21 @@ export function createWebvhHostStore(opts?: {
     return json({ ok: true }, 200);
   }
 
+  // Read by object key — the counterpart to handlePut, for the StorageAdapter's
+  // GET /api/host/<key> (adapter.get). Keyed by the decoded object key (same as
+  // the put key), NOT the resolver host+pathname form that `serve` uses. Returns
+  // 404 JSON on a miss so the adapter maps it to null.
+  function read(url: URL): Response {
+    sweep();
+    const key = decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
+    const entry = map.get(key);
+    if (!entry) return json({ error: 'not_found' }, 404);
+    return new Response(entry.body.slice(), {
+      status: 200,
+      headers: { 'content-type': entry.contentType, 'x-content-type-options': 'nosniff' },
+    });
+  }
+
   function serve(_req: Request, url: URL): Response | null {
     sweep();
     const key = `${url.host}${url.pathname}`;
@@ -98,5 +113,5 @@ export function createWebvhHostStore(opts?: {
     });
   }
 
-  return { handlePut, serve, size: () => map.size };
+  return { handlePut, read, serve, size: () => map.size };
 }
