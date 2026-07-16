@@ -3,7 +3,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 /**
  * Bitcoin network types supported by the validation
  */
-export type BitcoinNetwork = 'mainnet' | 'regtest' | 'signet';
+export type BitcoinNetwork = 'mainnet' | 'testnet' | 'regtest' | 'signet';
 
 /**
  * Maps our network names to bitcoinjs-lib network configurations
@@ -12,6 +12,9 @@ const getNetwork = (network: BitcoinNetwork): bitcoin.Network => {
   switch (network) {
     case 'mainnet':
       return bitcoin.networks.bitcoin;
+    case 'testnet':
+      // testnet4 shares testnet3's bech32 params (tb1) — same as signet below.
+      return bitcoin.networks.testnet;
     case 'regtest':
       // Regtest uses testnet parameters but with bcrt prefix
       // However, since many regtest addresses in tests use testnet format,

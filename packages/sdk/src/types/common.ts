@@ -51,7 +51,7 @@ export type InscribeConfirm =
   | ((estimate: AppendCostEstimate) => boolean | Promise<boolean>);
 
 export interface OriginalsConfig {
-  network: 'mainnet' | 'regtest' | 'signet';
+  network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
   bitcoinRpcUrl?: string;
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
   keyStore?: KeyStore;

@@ -242,7 +242,7 @@ export class DIDManager {
    * (migrateToDIDBTCO) and the cross-network resolution guard (issue #267), so
    * the two can never disagree about which network the SDK is on.
    */
-  private getConfiguredBitcoinNetwork(): 'mainnet' | 'regtest' | 'signet' | undefined {
+  private getConfiguredBitcoinNetwork(): 'mainnet' | 'testnet' | 'regtest' | 'signet' | undefined {
     if (this.config.network) return this.config.network;
     if (this.config.webvhNetwork) return getBitcoinNetworkForWebVH(this.config.webvhNetwork);
     return undefined;
@@ -272,7 +272,7 @@ export class DIDManager {
     // inscriptions (issue #247). The WebVH mapping (magby→regtest,
     // cleffa→signet, pichu→mainnet) applies only when no explicit Bitcoin
     // network was configured.
-    const network: 'mainnet' | 'regtest' | 'signet' = this.getConfiguredBitcoinNetwork() ?? 'mainnet';
+    const network: 'mainnet' | 'testnet' | 'regtest' | 'signet' = this.getConfiguredBitcoinNetwork() ?? 'mainnet';
 
     // Carry over the first verification method's key into the did:btco
     // document. If the source document declares a verification method but its
@@ -311,7 +311,11 @@ export class DIDManager {
     if (publicKey && keyType) {
       btcoDoc = createBtcoDidDocument(satoshi, network, { publicKey, keyType });
     } else {
-      const prefix = network === 'mainnet' ? 'did:btco:' : network === 'regtest' ? 'did:btco:reg:' : 'did:btco:sig:';
+      const prefix =
+        network === 'mainnet' ? 'did:btco:'
+        : network === 'regtest' ? 'did:btco:reg:'
+        : network === 'testnet' ? 'did:btco:test:'
+        : 'did:btco:sig:';
       btcoDoc = {
         '@context': ['https://www.w3.org/ns/did/v1'],
         id: prefix + canonicalizeSatoshi(satoshi)
@@ -459,7 +463,7 @@ export class DIDManager {
             // SDK-wide config — a signet DID handed to a mainnet-configured SDK
             // must still be treated as a signet identifier.
             const btcoPrefix = did.match(/^did:btco:(reg|sig|test):/)?.[1];
-            const network: 'mainnet' | 'regtest' | 'signet' =
+            const network: 'mainnet' | 'testnet' | 'regtest' | 'signet' =
               btcoPrefix === 'reg' ? 'regtest'
               : btcoPrefix === 'sig' ? 'signet'
               : btcoPrefix === 'test'
@@ -468,7 +472,10 @@ export class DIDManager {
                 // against its own testnet prefix).
                 ? (this.config.network || 'mainnet')
                 : 'mainnet';
-            const client = new OrdinalsClient(rpcUrl, network);
+            // OrdinalsClient has no testnet variant; testnet4 shares signet's
+            // address params, so use signet for this RPC path (QuickNode is the
+            // real testnet provider — see QuickNodeProvider).
+            const client = new OrdinalsClient(rpcUrl, network === 'testnet' ? 'signet' : network);
             const adapter = new OrdinalsClientProviderAdapter(client, rpcUrl);
             // fetchContent pins content retrieval to the rpcUrl origin and
             // refuses redirects. Without it the resolver would fetch whatever
