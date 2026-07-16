@@ -157,6 +157,13 @@ export const demo = {
     beforeTx: 'in tx',
     after: 'The full history is in the Provenance tab.'
   },
+  resolved: {
+    heading: 'did:webvh log — live at this origin',
+    resolvedBadge: 'resolved ✓',
+    pendingBadge: 'resolves in production',
+    linkLabel: 'Open the signed DID log',
+    note: 'The SDK’s real resolver fetched this over HTTP(S) — no mock. Open it: it’s the signed version history.'
+  },
   reset: 'Start over with a new asset'
 };
 

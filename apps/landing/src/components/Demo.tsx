@@ -30,6 +30,7 @@ const eventColors: Record<string, string> = {
   'asset:created': 'var(--peer)',
   'did:webvh:created': 'var(--webvh)',
   'resource:published': 'var(--webvh)',
+  'did:webvh:resolved': 'var(--webvh)',
   'asset:migrated': 'var(--webvh)',
   'credential:issued': 'var(--ok)',
   'asset:inscribed': 'var(--btco)'
@@ -303,6 +304,33 @@ export function Demo() {
                 </ol>
 
                 {error && <p className="demo-error" role="alert">{error}</p>}
+
+                {(phase === 'published' || phase === 'inscribing' || phase === 'inscribed') &&
+                  asset?.webvhLogUrl && (
+                    <div className="demo-resolved">
+                      <div className="demo-resolved-head">
+                        <span>{demo.resolved.heading}</span>
+                        <span
+                          className="demo-resolved-badge"
+                          data-ok={asset.webvhResolved || undefined}
+                        >
+                          {asset.webvhResolved
+                            ? demo.resolved.resolvedBadge
+                            : demo.resolved.pendingBadge}
+                        </span>
+                      </div>
+                      <a
+                        className="demo-resolved-link"
+                        href={asset.webvhLogUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {demo.resolved.linkLabel}
+                        <code>{asset.webvhLogUrl}</code>
+                      </a>
+                      <p className="demo-resolved-note">{demo.resolved.note}</p>
+                    </div>
+                  )}
 
                 {phase === 'inscribed' && asset && (
                   <div className="demo-done">
