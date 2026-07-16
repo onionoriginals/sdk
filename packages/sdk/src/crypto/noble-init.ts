@@ -12,6 +12,10 @@
  * 1. Libraries are configured before any crypto operations
  * 2. Configuration is consistent across the SDK
  * 3. Readonly property issues (Bun) are handled gracefully
+ * 4. It never throws at import time — under some browser ESM bundlers the noble
+ *    module namespace is frozen (non-configurable, `hashes` reads undefined), so
+ *    configuration is impossible; we warn and skip rather than crash every
+ *    consumer that merely imports the SDK (browser white-screen reports).
  *
  * This should be imported at the SDK entry point (index.ts) to ensure it runs first.
  */
@@ -36,9 +40,10 @@ const hmacSha256Impl = (key: Uint8Array, ...msgs: Uint8Array[]) =>
   hmac(sha256, key, concatBytes(...msgs));
 
 /**
- * Safely set a property on an object, handling readonly properties
+ * Safely set a property on an object, handling readonly properties.
+ * Never throws — returns false if the property cannot be set.
  */
- 
+
 function safeSetProperty(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   obj: any,
@@ -55,7 +60,7 @@ function safeSetProperty(
     // Property might be readonly, try defineProperty
     try {
       Object.defineProperty(obj, prop, {
-         
+
         value,
         writable: options?.writable ?? true,
         configurable: options?.configurable ?? true,
@@ -69,71 +74,83 @@ function safeSetProperty(
 }
 
 /**
+ * Return the module's mutable `hashes` object, creating it if absent.
+ *
+ * Returns `null` when the module namespace is frozen and `hashes` cannot be
+ * attached — e.g. a strict-ESM browser bundle where the namespace is
+ * non-extensible and `hashes` exists only as a non-configurable binding whose
+ * value is `undefined`. In that case configuration is impossible and callers
+ * must skip rather than dereference `hashes` (which would throw and, at import
+ * time, white-screen the consuming app).
+ */
+function ensureHashesObject(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mod: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Record<string, any> | null {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  if (mod && typeof mod.hashes === 'object' && mod.hashes !== null) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access
+    return mod.hashes;
+  }
+  // safeSetProperty never throws (frozen namespace → both assign and
+  // defineProperty are caught), so this is safe at import time.
+  safeSetProperty(mod, 'hashes', {});
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  return mod && typeof mod.hashes === 'object' && mod.hashes !== null ? mod.hashes : null;
+}
+
+let warnedFrozen = false;
+function warnFrozen(lib: string): void {
+  if (warnedFrozen) return;
+  warnedFrozen = true;
+  console.warn(
+    `[noble-init] Could not configure @noble/${lib} sync hashes: the module namespace is frozen ` +
+      `(non-configurable). Sync crypto ops may be unavailable in this environment. This is usually a ` +
+      `bundler dedupe/pre-bundle issue — ensure a single @noble instance is served as ESM.`
+  );
+}
+
+/**
  * Initialize @noble/secp256k1 with sync hash utilities (v3.x `hashes` object).
  *
- * Note: v3.x freezes the legacy v2.x `utils` object, so it is no longer
- * possible (nor necessary) to inject `utils.hmacSha256Sync` for backward
- * compatibility - all sync signing/verification now reads from `hashes`.
+ * The optional `mod` parameter exists for testing (inject a frozen/mutable mock);
+ * production always configures the real imported module.
  */
-function initSecp256k1(): void {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
-  const sAny: any = secp256k1 as any;
-
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  if (!sAny?.hashes) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      sAny.hashes = {};
-    } catch {
-      Object.defineProperty(sAny, 'hashes', {
-        value: {},
-        writable: true,
-        configurable: true,
-      });
-    }
+export function initSecp256k1(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mod: any = secp256k1
+): void {
+  const hashes = ensureHashesObject(mod);
+  if (!hashes) {
+    warnFrozen('secp256k1');
+    return;
   }
-
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  if (typeof sAny.hashes.sha256 !== 'function') {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    safeSetProperty(sAny.hashes, 'sha256', sha256Impl);
+  if (typeof hashes.sha256 !== 'function') {
+    safeSetProperty(hashes, 'sha256', sha256Impl);
   }
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  if (typeof sAny.hashes.hmacSha256 !== 'function') {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    safeSetProperty(sAny.hashes, 'hmacSha256', hmacSha256Impl);
+  if (typeof hashes.hmacSha256 !== 'function') {
+    safeSetProperty(hashes, 'hmacSha256', hmacSha256Impl);
   }
 }
 
 /**
  * Initialize @noble/ed25519 with sync sha512 utility (v3.x `hashes.sha512`).
  *
- * Note: v3.x freezes the legacy v2.x `utils` / `etc` objects, so it is no
- * longer possible (nor necessary) to inject `utils.sha512Sync` /
- * `etc.sha512Sync` for backward compatibility - all sync signing/verification
- * now reads from `hashes`.
+ * The optional `mod` parameter exists for testing (inject a frozen/mutable mock);
+ * production always configures the real imported module.
  */
-function initEd25519(): void {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
-  const eAny: any = ed25519 as any;
-
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  if (!eAny?.hashes) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      eAny.hashes = {};
-    } catch {
-      Object.defineProperty(eAny, 'hashes', {
-        value: {},
-        writable: true,
-        configurable: true,
-      });
-    }
+export function initEd25519(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mod: any = ed25519
+): void {
+  const hashes = ensureHashesObject(mod);
+  if (!hashes) {
+    warnFrozen('ed25519');
+    return;
   }
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  if (typeof eAny.hashes.sha512 !== 'function') {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    safeSetProperty(eAny.hashes, 'sha512', sha512Impl);
+  if (typeof hashes.sha512 !== 'function') {
+    safeSetProperty(hashes, 'sha512', sha512Impl);
   }
 }
 
@@ -148,4 +165,3 @@ export function initNobleCrypto(): void {
 
 // Auto-initialize when this module is imported
 initNobleCrypto();
-
