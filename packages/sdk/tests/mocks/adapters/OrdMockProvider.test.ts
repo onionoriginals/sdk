@@ -166,11 +166,74 @@ describe('OrdMockProvider', () => {
     const prov = new OrdMockProvider();
     const data = Buffer.from('test');
     const res = await prov.createInscription({ data, contentType: 'text/plain' });
-    
+
     // Verify satoshi is numeric
     expect(res.satoshi).toBeDefined();
     expect(Number.isNaN(Number(res.satoshi))).toBe(false);
     expect(Number(res.satoshi!)).toBeGreaterThan(0);
+  });
+
+  // #407 phase 2: inscription CBOR metadata round-trip.
+  test('static metadata round-trips through getInscriptionById', async () => {
+    const prov = new OrdMockProvider();
+    const metadata = { didDocument: { id: 'did:btco:reg:42' }, celLog: { events: [] } };
+    const res = await prov.createInscription({
+      data: Buffer.from('media-bytes'),
+      contentType: 'image/png',
+      metadata
+    });
+    expect(res.metadata).toEqual(metadata);
+    const fetched = await prov.getInscriptionById(res.inscriptionId);
+    expect(fetched?.metadata).toEqual(metadata);
+    expect(fetched?.content?.toString()).toBe('media-bytes');
+  });
+
+  test('deferred buildContent may return { content, metadata }', async () => {
+    const prov = new OrdMockProvider();
+    const res = await prov.createInscription({
+      contentType: 'image/png',
+      buildContent: (sat: string) => ({
+        content: Buffer.from('deferred-media'),
+        metadata: { didDocument: { id: `did:btco:reg:${sat}` }, celLog: { events: [1] } }
+      })
+    });
+    const fetched = await prov.getInscriptionById(res.inscriptionId);
+    expect(fetched?.content?.toString()).toBe('deferred-media');
+    expect((fetched?.metadata as { didDocument: { id: string } }).didDocument.id)
+      .toBe(`did:btco:reg:${res.satoshi}`);
+  });
+
+  test('deferred metadata wins over the static metadata param', async () => {
+    const prov = new OrdMockProvider();
+    const res = await prov.createInscription({
+      contentType: 'text/plain',
+      metadata: { source: 'static' },
+      buildContent: () => ({ content: Buffer.from('x'), metadata: { source: 'deferred' } })
+    });
+    const fetched = await prov.getInscriptionById(res.inscriptionId);
+    expect((fetched?.metadata as { source: string }).source).toBe('deferred');
+  });
+
+  test('stored metadata is isolated from later caller mutation', async () => {
+    const prov = new OrdMockProvider();
+    const metadata: Record<string, unknown> = { didDocument: { id: 'did:btco:reg:1' } };
+    const res = await prov.createInscription({ data: Buffer.from('m'), contentType: 'text/plain', metadata });
+    (metadata.didDocument as { id: string }).id = 'did:btco:reg:HACKED';
+    const fetched = await prov.getInscriptionById(res.inscriptionId);
+    expect((fetched?.metadata as { didDocument: { id: string } }).didDocument.id).toBe('did:btco:reg:1');
+  });
+
+  test('getAnchoringsForDidCel reads alsoKnownAs from metadata.didDocument', async () => {
+    const prov = new OrdMockProvider();
+    const didCel = 'did:cel:zabc';
+    await prov.createInscription({
+      data: Buffer.from('media-not-a-did-doc'),
+      contentType: 'image/png',
+      metadata: { didDocument: { id: 'did:btco:reg:7', alsoKnownAs: [didCel] } }
+    });
+    const anchorings = await prov.getAnchoringsForDidCel(didCel);
+    expect(anchorings.length).toBe(1);
+    expect(anchorings[0].satoshi).toBeTruthy();
   });
 });
 

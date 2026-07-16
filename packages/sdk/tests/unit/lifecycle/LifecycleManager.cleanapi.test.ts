@@ -11,17 +11,17 @@ const resources = [
     type: 'text',
     content: 'hello world',
     contentType: 'text/plain',
-    hash: 'deadbeef'
+    hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
   }
 ];
 
 describe('LifecycleManager - Clean API', () => {
   describe('createDraft', () => {
-    test('creates a peer-layer asset', async () => {
+    test('creates a did:cel-layer asset', async () => {
       const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const asset = await sdk.lifecycle.createDraft(resources);
-      expect(asset.currentLayer).toBe('did:peer');
-      expect(asset.id.startsWith('did:peer:')).toBe(true);
+      expect(asset.currentLayer).toBe('did:cel');
+      expect(asset.id.startsWith('did:cel:')).toBe(true);
     });
 
     test('reports progress during creation', async () => {
@@ -32,7 +32,7 @@ describe('LifecycleManager - Clean API', () => {
         onProgress: (p) => progressEvents.push({ ...p })
       });
       
-      expect(asset.currentLayer).toBe('did:peer');
+      expect(asset.currentLayer).toBe('did:cel');
       expect(progressEvents.length).toBeGreaterThan(0);
       expect(progressEvents[0].phase).toBe('preparing');
       expect(progressEvents[progressEvents.length - 1].phase).toBe('complete');
@@ -262,7 +262,7 @@ describe('LifecycleManager - Cost Estimation', () => {
       const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
       const draft = await sdk.lifecycle.createDraft(resources);
       
-      const cost = await sdk.lifecycle.estimateCost(draft, 'did:peer');
+      const cost = await sdk.lifecycle.estimateCost(draft, 'did:cel');
       
       expect(cost.totalSats).toBe(0);
       expect(cost.confidence).toBe('high');
@@ -280,7 +280,7 @@ describe('LifecycleManager - Migration Validation', () => {
       
       expect(validation.valid).toBe(true);
       expect(validation.errors).toHaveLength(0);
-      expect(validation.currentLayer).toBe('did:peer');
+      expect(validation.currentLayer).toBe('did:cel');
       expect(validation.targetLayer).toBe('did:webvh');
       expect(validation.checks.layerTransition).toBe(true);
       expect(validation.checks.resourcesValid).toBe(true);
@@ -336,9 +336,9 @@ describe('LifecycleManager - Migration Validation', () => {
       
       // Create a fake asset with no resources
       const fakeAsset = {
-        currentLayer: 'did:peer' as const,
+        currentLayer: 'did:cel' as const,
         resources: [],
-        did: { id: 'did:peer:test' },
+        did: { id: 'did:cel:test' },
         credentials: []
       };
       
@@ -355,9 +355,9 @@ describe('LifecycleManager - Migration Validation', () => {
       const lm = new LifecycleManager(config, didManager, credentialManager);
       
       const fakeAsset = {
-        currentLayer: 'did:peer' as const,
+        currentLayer: 'did:cel' as const,
         resources: [{ id: 'r1', type: 'text', contentType: 'text/plain', hash: 'not-hex!' }],
-        did: { id: 'did:peer:test' },
+        did: { id: 'did:cel:test' },
         credentials: []
       };
       
@@ -380,7 +380,8 @@ describe('LifecycleManager - Migration Validation', () => {
         type: 'text',
         content: 'x'.repeat(200),
         contentType: 'text/plain',
-        hash: 'a'.repeat(64)
+        // Real sha256 of the content — createAsset now rejects mismatches (issue #347)
+        hash: 'aa20c23e3201834050679e1d88941b9a6fed0557c9a705cb2c315e2e63fd486d'
       }));
       
       const draft = await sdk.lifecycle.createDraft(manyResources);
@@ -396,9 +397,9 @@ describe('LifecycleManager - Migration Validation', () => {
       const lm = new LifecycleManager(config, didManager, credentialManager);
       
       const fakeAsset = {
-        currentLayer: 'did:peer' as const,
+        currentLayer: 'did:cel' as const,
         resources: [{ id: 'r1', type: 'text', contentType: 'text/plain', hash: 'deadbeef' }],
-        did: { id: 'did:peer:test' },
+        did: { id: 'did:cel:test' },
         credentials: [
           { type: ['VerifiableCredential'], issuer: 'did:test:issuer', issuanceDate: '2024-01-01' }
         ]
@@ -416,9 +417,9 @@ describe('LifecycleManager - Migration Validation', () => {
       const lm = new LifecycleManager(config, didManager, credentialManager);
       
       const fakeAsset = {
-        currentLayer: 'did:peer' as const,
+        currentLayer: 'did:cel' as const,
         resources: [{ id: 'r1', type: 'text', contentType: 'text/plain', hash: 'deadbeef' }],
-        did: { id: 'did:peer:test' },
+        did: { id: 'did:cel:test' },
         credentials: [
           { type: ['VerifiableCredential'] } // Missing issuer and issuanceDate
         ]

@@ -1,3 +1,4 @@
+// SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Integration tests for peer → webvh migration
  */
@@ -9,7 +10,7 @@ import { MigrationManager } from '../../../src/migration';
 import { AuditLogger, AuditSignerConfig } from '../../../src/migration/audit/AuditLogger';
 import { MigrationStateEnum } from '../../../src/migration/types';
 
-describe('Peer to WebVH Migration', () => {
+describe.skip('Peer to WebVH Migration', () => {
   let sdk: OriginalsSDK;
   let migrationManager: MigrationManager;
 
@@ -38,7 +39,7 @@ describe('Peer to WebVH Migration', () => {
         id: 'resource-1',
         type: 'Image',
         contentType: 'image/png',
-        hash: 'abc123',
+        hash: '0a3666a0710c08aa6d0de92ce72beeb5b93124cce1bf3701c9d6cdeb543cb73e',
         content: 'test-content'
       }
     ];
@@ -190,7 +191,7 @@ describe('Peer to WebVH Migration', () => {
     );
 
     const peerDid = await signedSdk.did.createDIDPeer([
-      { id: 'resource-1', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'test-content' }
+      { id: 'resource-1', type: 'Image', contentType: 'image/png', hash: '0a3666a0710c08aa6d0de92ce72beeb5b93124cce1bf3701c9d6cdeb543cb73e', content: 'test-content' }
     ]);
 
     await signedManager.migrate({ sourceDid: peerDid.id, targetLayer: 'webvh', domain: 'example.com' });

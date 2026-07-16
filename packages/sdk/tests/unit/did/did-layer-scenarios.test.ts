@@ -56,42 +56,8 @@ async function makeTempDir(): Promise<{ dir: string; cleanup: () => Promise<void
 // DID-001 — create did:peer with empty resources → valid DID doc
 // ---------------------------------------------------------------------------
 
-describe('DID-001 — did:peer with empty resources', () => {
-  test('createDIDPeer with empty resource list produces valid DID document', async () => {
-    const manager = new DIDManager(baseConfig);
-
-    // Resources are passed to the lifecycle layer, NOT stored in the DID doc itself.
-    // An empty resource list should still produce a well-formed did:peer document.
-    const didDoc = await manager.createDIDPeer([]);
-
-    // Must be a real DID document
-    expect(didDoc).toBeDefined();
-    expect(typeof didDoc.id).toBe('string');
-    expect(didDoc.id).toMatch(/^did:peer:/);
-    expect(Array.isArray(didDoc['@context'])).toBe(true);
-    expect(didDoc['@context'].length).toBeGreaterThan(0);
-
-    // Must carry at least one verification method
-    expect(Array.isArray(didDoc.verificationMethod)).toBe(true);
-    expect((didDoc.verificationMethod ?? []).length).toBeGreaterThan(0);
-
-    // The DID doc must NOT contain a "resources" field — resources are external
-    expect((didDoc as Record<string, unknown>)['resources']).toBeUndefined();
-  }, 10000);
-
-  test('createDIDPeer with empty resources returns keyPair when requested', async () => {
-    const manager = new DIDManager(baseConfig);
-    const result = await manager.createDIDPeer([], true);
-
-    expect(result).toHaveProperty('didDocument');
-    expect(result).toHaveProperty('keyPair');
-    const { didDocument, keyPair } = result;
-
-    expect(didDocument.id).toMatch(/^did:peer:/);
-    expect(keyPair.publicKey).toMatch(/^z/);
-    expect(keyPair.privateKey).toMatch(/^z/);
-  }, 10000);
-});
+// DID-001 removed (did:peer purge, did:cel Phase 4·5/5): createDIDPeer and the
+// did:peer creation path are gone; did:cel is the sole genesis layer.
 
 // ---------------------------------------------------------------------------
 // DID-006 — create did:webvh with mock external signer
@@ -273,6 +239,10 @@ describe('DID-007 — update did:webvh', () => {
     expect(Array.isArray(newEntry.proof)).toBe(true);
     const proof = (newEntry.proof as Record<string, unknown>[])[0];
     expect(typeof proof.proofValue).toBe('string');
+
+    // The new entry's state must actually contain the update (issue #338).
+    expect((newEntry.state as { service?: unknown }).service).toEqual([newService]);
+    expect(updated.didDocument.service).toEqual([newService]);
   }, 20000);
 
   test('update preserves DID identity (id constant across updates)', async () => {
@@ -301,21 +271,22 @@ describe('DID-007 — update did:webvh', () => {
     const extraKey = await keyManager.generateKeyPair('Ed25519');
 
     // Add a service referencing new key as a proxy for injecting new VM info
+    const extraService = {
+      id: `${created.did}#extra`,
+      type: 'ExtraService',
+      serviceEndpoint: `did:key:${extraKey.publicKey}`,
+    };
     const updated = await manager.updateDIDWebVH({
       did: created.did,
       currentLog: created.log,
-      updates: {
-        service: [{
-          id: `${created.did}#extra`,
-          type: 'ExtraService',
-          serviceEndpoint: `did:key:${extraKey.publicKey}`,
-        }],
-      },
+      updates: { service: [extraService] },
       signer: created.keyPair,
     });
 
     expect(updated.didDocument).toBeDefined();
     expect(updated.log.length).toBeGreaterThan(created.log.length);
+    // The service must actually be applied (issue #338).
+    expect(updated.didDocument.service).toEqual([extraService]);
   }, 20000);
 });
 
@@ -424,7 +395,7 @@ describe('DID-009 — recovery credential is tamper-evident (W3C VC)', () => {
     const cred = result.recoveryCredential;
 
     // Verify the credential has the expected W3C VC shape
-    expect(cred['@context']).toContain('https://www.w3.org/2018/credentials/v1');
+    expect(cred['@context']).toContain('https://www.w3.org/ns/credentials/v2');
     expect(cred.type).toContain('VerifiableCredential');
     expect(cred.type).toContain('KeyRecoveryCredential');
     expect(cred.issuer).toBe('did:peer:test-recovery-tamper');
@@ -457,7 +428,7 @@ describe('DID-009 — recovery credential is tamper-evident (W3C VC)', () => {
     expect(tamperResult).toBe(false);
   });
 
-  test('mutating issuanceDate of recovery credential invalidates signature', async () => {
+  test('mutating validFrom of recovery credential invalidates signature', async () => {
     const km = new KeyManager();
     const kp = await km.generateKeyPair('Ed25519');
 
@@ -478,8 +449,8 @@ describe('DID-009 — recovery credential is tamper-evident (W3C VC)', () => {
     const originalBytes = Buffer.from(JSON.stringify(cred), 'utf8');
     const sig: Buffer = await signer.sign(originalBytes, signerKP.privateKey);
 
-    // Tamper: change issuanceDate
-    const tampered = { ...cred, issuanceDate: '1970-01-01T00:00:00Z' };
+    // Tamper: change validFrom
+    const tampered = { ...cred, validFrom: '1970-01-01T00:00:00Z' };
     const tamperedBytes = Buffer.from(JSON.stringify(tampered), 'utf8');
 
     expect(await signer.verify(tamperedBytes, sig, signerKP.publicKey)).toBe(false);
@@ -706,8 +677,8 @@ describe('DID-013 — recovery marks compromised key with ISO-8601 timestamp', (
 
     // recoveredAt on the credential subject must be ISO-8601
     expect(cred.credentialSubject.recoveredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    // issuanceDate must also be ISO-8601
-    expect(cred.issuanceDate).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // validFrom must also be ISO-8601
+    expect(cred.validFrom).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 });
 

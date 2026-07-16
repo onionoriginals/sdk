@@ -358,10 +358,11 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
       ];
 
       // Request amount that would leave dust change (< 546 dust limit)
-      // With 1 input, 2 outputs: ~140 vbytes, fee ~1400 sats
-      // Change = 101000 - 99500 - 1400 = 100 (< 546 dust limit)
+      // With 1 P2WPKH input (68 vB) and 2 outputs at the conservative 43 vB
+      // each (issue #344): 10 + 68 + 86 = 164 vbytes, fee 1640 sats
+      // Change = 101000 - 99260 - 1640 = 100 (< 546 dust limit)
       const result = selectResourceUtxos(utxos, {
-        requiredAmount: 99500, // Would leave ~100 sat change (< 546 dust limit)
+        requiredAmount: 99260, // Would leave ~100 sat change (< 546 dust limit)
         feeRate: 10
       });
 

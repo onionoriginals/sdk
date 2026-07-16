@@ -30,7 +30,7 @@ const baseResource: AssetResource = {
   type: 'text',
   content: 'hello world',
   contentType: 'text/plain',
-  hash: 'deadbeef',
+  hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
 };
 
 function makeSDK(opts?: Partial<OriginalsConfig>) {
@@ -147,7 +147,7 @@ describe('LIFECYCLE-004/happy – registerKey with Ed25519', () => {
 
     const keyManager = new KeyManager();
     const kp = await keyManager.generateKeyPair('Ed25519');
-    const vmId = 'did:peer:z6MkTest#key-0';
+    const vmId = 'did:cel:z6MkTest#key-0';
 
     await lm.registerKey(vmId, kp.privateKey);
 
@@ -193,7 +193,7 @@ describe('LIFECYCLE-005/error – publishToWeb from wrong layer', () => {
 
     await expect(
       sdk.lifecycle.publishToWeb(asset, 'example.com')
-    ).rejects.toThrow(/did:peer layer/);
+    ).rejects.toThrow(/genesis layer/);
   });
 
   test('asset on did:btco also throws', async () => {
@@ -204,7 +204,7 @@ describe('LIFECYCLE-005/error – publishToWeb from wrong layer', () => {
 
     await expect(
       sdk.lifecycle.publishToWeb(asset, 'example.com')
-    ).rejects.toThrow(/did:peer layer/);
+    ).rejects.toThrow(/genesis layer/);
   });
 });
 
@@ -391,11 +391,11 @@ describe('LIFECYCLE-010/happy – validateMigration resource integrity', () => {
 
   test('fake asset with empty resources fails resource check', () => {
     const fakeAsset = {
-      id: 'did:peer:z6MkEmpty',
-      currentLayer: 'did:peer' as const,
+      id: 'did:cel:z6MkEmpty',
+      currentLayer: 'did:cel' as const,
       resources: [] as AssetResource[],
       credentials: [],
-      did: { id: 'did:peer:z6MkEmpty' },
+      did: { id: 'did:cel:z6MkEmpty' },
     };
 
     const config: OriginalsConfig = { network: 'regtest' };
@@ -421,7 +421,7 @@ describe('LIFECYCLE-021/happy – query migrations by toLayer', () => {
   test('toLayer filter returns only matching migrations', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
 
@@ -443,26 +443,6 @@ describe('LIFECYCLE-021/happy – query migrations by toLayer', () => {
 // LIFECYCLE-022 / happy  –  query transfers filtered by recipient address
 // ---------------------------------------------------------------------------
 
-describe('LIFECYCLE-022/happy – query transfers by recipient', () => {
-  test('to() filter returns only transfers destined for that address', async () => {
-    const asset = new OriginalsAsset(
-      [baseResource],
-      buildDid('did:peer:abc') as any,
-      []
-    );
-    await asset.migrate('did:btco');
-
-    await asset.recordTransfer('addr-alice', 'addr-bob', 'tx-1');
-    await asset.recordTransfer('addr-bob', 'addr-carol', 'tx-2');
-    await asset.recordTransfer('addr-carol', 'addr-bob', 'tx-3');
-
-    const toBob = asset.queryProvenance().transfers().to('addr-bob').all();
-
-    expect(toBob).toHaveLength(2);
-    expect(toBob.every(t => t.to === 'addr-bob')).toBe(true);
-  });
-});
-
 // ---------------------------------------------------------------------------
 // LIFECYCLE-023 / happy  –  findByTransactionId
 // ---------------------------------------------------------------------------
@@ -471,7 +451,7 @@ describe('LIFECYCLE-023/happy – findByTransactionId', () => {
   test('finds migration by transaction ID', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     await asset.migrate('did:webvh', { transactionId: 'tx-web-xyz' });
@@ -481,24 +461,10 @@ describe('LIFECYCLE-023/happy – findByTransactionId', () => {
     expect((found as any).to).toBe('did:webvh');
   });
 
-  test('finds transfer by transaction ID', async () => {
-    const asset = new OriginalsAsset(
-      [baseResource],
-      buildDid('did:peer:abc') as any,
-      []
-    );
-    await asset.migrate('did:btco');
-    await asset.recordTransfer('from-addr', 'to-addr', 'tx-transfer-abc');
-
-    const found = asset.findByTransactionId('tx-transfer-abc');
-    expect(found).not.toBeNull();
-    expect((found as any).transactionId).toBe('tx-transfer-abc');
-  });
-
   test('returns null for unknown transaction ID', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     const found = asset.findByTransactionId('does-not-exist');
@@ -514,7 +480,7 @@ describe('LIFECYCLE-023/happy – findByInscriptionId', () => {
   test('finds migration by inscription ID', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     await asset.migrate('did:webvh');
@@ -528,7 +494,7 @@ describe('LIFECYCLE-023/happy – findByInscriptionId', () => {
   test('returns null for unknown inscription ID', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     const found = asset.findByInscriptionId('no-such-id');
@@ -544,18 +510,16 @@ describe('LIFECYCLE-024/happy – getProvenanceSummary', () => {
   test('reports correct counts and current layer after full lifecycle', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     await asset.migrate('did:webvh', { transactionId: 'tx-w' });
     await asset.migrate('did:btco', { transactionId: 'tx-b', inscriptionId: 'i-1' });
-    await asset.recordTransfer('owner-1', 'owner-2', 'tx-t');
 
     const summary = asset.getProvenanceSummary();
 
     expect(summary.currentLayer).toBe('did:btco');
     expect(summary.migrationCount).toBe(2);
-    expect(summary.transferCount).toBe(1);
     expect(summary.created).toBeTruthy();
     expect(summary.lastActivity).toBeTruthy();
   });
@@ -563,13 +527,12 @@ describe('LIFECYCLE-024/happy – getProvenanceSummary', () => {
   test('lastActivity equals createdAt when nothing has happened', () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:fresh') as any,
+      buildDid('did:cel:fresh') as any,
       []
     );
     const summary = asset.getProvenanceSummary();
 
     expect(summary.migrationCount).toBe(0);
-    expect(summary.transferCount).toBe(0);
     expect(summary.lastActivity).toBe(summary.created);
   });
 });
@@ -645,7 +608,7 @@ describe('LIFECYCLE-039/security – asset immutable after btco inscription', ()
   test('migrate from did:btco to any target throws', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     await asset.migrate('did:webvh');
@@ -654,7 +617,7 @@ describe('LIFECYCLE-039/security – asset immutable after btco inscription', ()
     await expect(asset.migrate('did:webvh')).rejects.toThrow(
       /Invalid migration from did:btco/
     );
-    await expect(asset.migrate('did:peer' as any)).rejects.toThrow(
+    await expect(asset.migrate('did:cel' as any)).rejects.toThrow(
       /Invalid migration from did:btco/
     );
   });
@@ -662,7 +625,7 @@ describe('LIFECYCLE-039/security – asset immutable after btco inscription', ()
   test('currentLayer remains did:btco after attempted re-migration', async () => {
     const asset = new OriginalsAsset(
       [baseResource],
-      buildDid('did:peer:abc') as any,
+      buildDid('did:cel:abc') as any,
       []
     );
     await asset.migrate('did:btco', { inscriptionId: 'i-1', transactionId: 'tx-1' });

@@ -1,3 +1,4 @@
+// SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * #323 review — "Cleanup sweep is unreachable".
  *
@@ -34,7 +35,7 @@ afterEach(() => {
   MigrationManager.resetInstance();
 });
 
-describe('MigrationManager reclaims stranded checkpoints automatically (#323 review)', () => {
+describe.skip('MigrationManager reclaims stranded checkpoints automatically (#323 review)', () => {
   it('runs cleanupOldCheckpoints once, lazily on the first real migration', async () => {
     MigrationManager.resetInstance();
     const sweepSpy = spyOn(CheckpointManager.prototype, 'cleanupOldCheckpoints');

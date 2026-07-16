@@ -32,7 +32,7 @@ describe('StatusListManager', () => {
       expect(vc.type).toContain('BitstringStatusListCredential');
       expect(vc.id).toBe('https://example.com/status/1');
       expect(vc.issuer).toBe('did:example:issuer');
-      expect(vc.issuanceDate).toBeDefined();
+      expect(vc.validFrom).toBeDefined();
 
       const subject = vc.credentialSubject as BitstringStatusListSubject;
       expect(subject.type).toBe('BitstringStatusList');
@@ -207,7 +207,7 @@ describe('StatusListManager', () => {
       expect(manager.checkStatus(entry43, updated).isSet).toBe(false);
     });
 
-    test('sets issuanceDate on update', () => {
+    test('sets validFrom on update', () => {
       const vc = manager.createStatusListCredential({
         id: 'https://example.com/status/1',
         issuer: 'did:example:issuer',
@@ -215,8 +215,48 @@ describe('StatusListManager', () => {
       });
 
       const updated = manager.setStatus(vc, 0, true);
-      expect(updated.issuanceDate).toBeDefined();
-      expect(typeof updated.issuanceDate).toBe('string');
+      expect(updated.validFrom).toBeDefined();
+      expect(typeof updated.validFrom).toBe('string');
+    });
+
+    // Regression (#300 review): updating a genuinely legacy VCDM 1.1 status
+    // list (1.1 context + issuanceDate, no validFrom) must yield a valid 2.0
+    // credential — upgrade @context to 2.0 AND strip the deprecated 1.1 date
+    // fields, which the v2 context does not define (leaving them would break
+    // safe-mode canonicalization and the validateCredential gate).
+    test('upgrades a legacy v1/issuanceDate status list to VCDM 2.0 on update', async () => {
+      const { validateCredential } = await import('../../../src/utils/validation');
+      const v2 = manager.createStatusListCredential({
+        id: 'https://example.com/status/legacy',
+        issuer: 'did:peer:issuer',
+        statusPurpose: 'revocation',
+      });
+      // Simulate a status list minted before the 2.0 standardization: 1.1
+      // context, issuanceDate present, validFrom absent, and a legacy
+      // expirationDate to prove expiry semantics are preserved.
+      const legacy = {
+        ...v2,
+        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        issuanceDate: '2020-01-01T00:00:00Z',
+        expirationDate: '2999-01-01T00:00:00Z',
+      } as Record<string, unknown>;
+      delete legacy.validFrom;
+
+      for (const updated of [
+        manager.setStatus(legacy as never, 0, true),
+        manager.batchSetStatus(legacy as never, [[1, true]]),
+      ]) {
+        const u = updated as Record<string, unknown>;
+        expect((u['@context'] as string[])).toContain('https://www.w3.org/ns/credentials/v2');
+        expect((u['@context'] as string[])).not.toContain('https://www.w3.org/2018/credentials/v1');
+        expect(u.validFrom).toBeDefined();
+        // Deprecated 1.1 terms must not survive onto the v2 document.
+        expect(u.issuanceDate).toBeUndefined();
+        expect(u.expirationDate).toBeUndefined();
+        // expirationDate migrated to validUntil (expiry preserved).
+        expect(u.validUntil).toBe('2999-01-01T00:00:00Z');
+        expect(validateCredential(updated)).toBe(true);
+      }
     });
 
     test('returns a new credential (immutable)', () => {
@@ -855,12 +895,13 @@ describe('StatusListManager', () => {
       expect(mismatch.verified).toBe(false);
       expect(mismatch.errors.some(e => e.includes('Status check error'))).toBe(true);
 
-      // Determinable revocation still leaves the signature valid: `revoked`
-      // carries the status, `verified` stays true (the signature is genuine).
+      // Determinable revocation fails verification (issue #345): a caller
+      // gating on `verified` alone must not accept a revoked credential, so
+      // `revoked` carries the status AND `verified` flips to false.
       const revokedList = sdk.statusList.setStatus(statusListVC, 7, true);
       const revoked = await sdk.credentials.verifyCredentialWithStatus(signed, revokedList);
       expect(revoked.revoked).toBe(true);
-      expect(revoked.verified).toBe(true);
+      expect(revoked.verified).toBe(false);
     });
 
     test('SDK exposes statusList on top-level instance', async () => {

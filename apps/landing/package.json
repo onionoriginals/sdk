@@ -11,7 +11,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "typecheck:server": "tsc --noEmit -p tsconfig.server.json"
+    "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
+    "smoke": "node scripts/smoke.mjs",
+    "ci": "bun scripts/ci.mjs",
+    "icons": "bun scripts/icons.mjs",
+    "og": "bun scripts/og-image.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
@@ -22,19 +26,19 @@
     "@originals/sdk": "workspace:*",
     "@turnkey/crypto": "^2.10.0",
     "didwebvh-ts": "^2.8.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@turnkey/sdk-server": "^6.1.1",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
     "buffer": "^6.0.3",
     "bun-types": "^1.3.14",
     "path-browserify": "^1.0.1",
     "playwright-core": "^1.49.0",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.3"
+    "typescript": "^7.0.2",
+    "vite": "^8.1.4"
   }
 }

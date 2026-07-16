@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'bun:test';
+import { createHash } from 'crypto';
 import { OriginalsSDK } from '../../src/core/OriginalsSDK';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { BatchOperationExecutor } from '../../src/lifecycle/BatchOperations';
@@ -387,15 +388,22 @@ describe('Batch Operations Stress Tests', () => {
 
   describe('6. Memory and Resource Tests', () => {
     it('should not leak memory during repeated batch operations', async () => {
-      const iterations = 10;
+      const warmupIterations = 5; // allow JIT to settle before measuring
+      const measuredIterations = 10;
       const batchSize = 100;
+
+      // Warmup: let Bun's JIT and allocator reach a steady state
+      for (let i = 0; i < warmupIterations; i++) {
+        await sdk.lifecycle.batchCreateAssets(createTestResourcesList(batchSize), {
+          maxConcurrent: 5
+        });
+        if (global.gc) global.gc();
+      }
 
       const memoryReadings: number[] = [];
 
-      for (let i = 0; i < iterations; i++) {
-        const resourcesList = createTestResourcesList(batchSize);
-
-        await sdk.lifecycle.batchCreateAssets(resourcesList, {
+      for (let i = 0; i < measuredIterations; i++) {
+        await sdk.lifecycle.batchCreateAssets(createTestResourcesList(batchSize), {
           maxConcurrent: 5
         });
 
@@ -410,9 +418,12 @@ describe('Batch Operations Stress Tests', () => {
         console.log(`[STRESS] Iteration ${i + 1}: ${memUsage.toFixed(2)}MB`);
       }
 
-      // Check for memory leak (memory shouldn't grow linearly)
-      const firstHalf = memoryReadings.slice(0, 5).reduce((a, b) => a + b) / 5;
-      const secondHalf = memoryReadings.slice(5).reduce((a, b) => a + b) / 5;
+      // Check for memory leak: after JIT warmup the heap should be stable.
+      // Compare first half vs second half of the measured window — a real leak
+      // would show the second half steadily above the first.
+      const half = Math.floor(measuredIterations / 2);
+      const firstHalf = memoryReadings.slice(0, half).reduce((a, b) => a + b) / half;
+      const secondHalf = memoryReadings.slice(half).reduce((a, b) => a + b) / (measuredIterations - half);
       const growth = ((secondHalf - firstHalf) / firstHalf) * 100;
 
       console.log(`[STRESS] Memory growth: ${growth.toFixed(2)}%`);
@@ -470,15 +481,20 @@ describe('Batch Operations Stress Tests', () => {
 // Helper functions
 
 function createTestResourcesList(count: number): AssetResource[][] {
-  return Array.from({ length: count }, (_, i) => [
-    {
-      id: `resource-${i}-${Date.now()}`,
-      type: 'DigitalArt',
-      contentType: 'application/json',
-      hash: Buffer.from(`hash-${i}`).toString('hex'),
-      content: JSON.stringify({ test: `data-${i}` })
-    }
-  ]);
+  return Array.from({ length: count }, (_, i) => {
+    // Real content hash — createAsset now verifies content against the
+    // declared hash (issue #347).
+    const content = JSON.stringify({ test: `data-${i}` });
+    return [
+      {
+        id: `resource-${i}-${Date.now()}`,
+        type: 'DigitalArt',
+        contentType: 'application/json',
+        hash: createHash('sha256').update(content, 'utf8').digest('hex'),
+        content
+      }
+    ];
+  });
 }
 
 interface ConcurrencyResult {

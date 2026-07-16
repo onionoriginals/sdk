@@ -39,20 +39,19 @@ const BANNER = `
 const HELP = `
 Commands:
 
-  create [name]         Create a new asset (did:peer layer)
+  create [name]         Create a new asset (did:cel genesis layer)
   publish <id> [domain] Publish asset to web (did:webvh layer)
   inscribe <id>         Inscribe asset on Bitcoin (did:btco layer)
   resolve <did>         Resolve a DID to its document
   assets                List all assets in this session
   inspect <id>          Show detailed asset info and provenance
-  did-peer [name]       Create a standalone did:peer (returns DID doc)
   estimate <id>         Estimate Bitcoin inscription cost
   help                  Show this help message
   exit                  Exit the playground
 
 Arguments:
   <id>    Asset alias (e.g., "a1") from the assets list
-  <did>   A full DID string (did:peer:..., did:webvh:..., did:btco:...)
+  <did>   A full DID string (did:cel:..., did:webvh:..., did:btco:...)
   [name]  Optional name for the asset (defaults to "Asset N")
 `;
 
@@ -98,8 +97,8 @@ async function handlePublish(state: SessionState, args: string[]): Promise<void>
     return;
   }
 
-  if (asset.currentLayer !== 'did:peer') {
-    console.log(`  Asset is already at layer "${asset.currentLayer}". Can only publish from did:peer.`);
+  if (asset.currentLayer !== 'did:cel') {
+    console.log(`  Asset is already at layer "${asset.currentLayer}". Can only publish from the genesis layer (did:cel).`);
     return;
   }
 
@@ -202,7 +201,6 @@ function handleInspect(state: SessionState, args: string[]): void {
   console.log(`    Created:     ${summary.created}`);
   console.log(`    Creator:     ${summary.creator}`);
   console.log(`    Migrations:  ${summary.migrationCount}`);
-  console.log(`    Transfers:   ${summary.transferCount}`);
   console.log(`    Last Active: ${summary.lastActivity}`);
 
   if (provenance.migrations.length > 0) {
@@ -214,29 +212,6 @@ function handleInspect(state: SessionState, args: string[]): void {
   console.log('');
 }
 
-async function handleDidPeer(state: SessionState, args: string[]): Promise<void> {
-  const name = args.join(' ') || `Peer ${++state.counter}`;
-
-  const content = JSON.stringify({ name, created: new Date().toISOString() });
-  const resources = [{
-    id: 'metadata.json',
-    type: 'data',
-    content,
-    contentType: 'application/json',
-    hash: computeHash(content),
-    size: content.length,
-  }];
-
-  const result = await state.sdk.did.createDIDPeer(resources, true);
-  const didDoc = 'didDocument' in result ? result.didDocument : result;
-  const did = (didDoc as unknown as Record<string, unknown>).id as string;
-
-  console.log(`\n  Created did:peer`);
-  console.log(`  DID: ${did}`);
-  console.log(`\n  Document:\n`);
-  console.log('  ' + JSON.stringify(didDoc, null, 2).split('\n').join('\n  '));
-  console.log('');
-}
 
 async function handleEstimate(state: SessionState, args: string[]): Promise<void> {
   const [alias] = args;
@@ -299,10 +274,6 @@ async function processCommand(state: SessionState, input: string): Promise<boole
       case 'inspect':
       case 'show':
         handleInspect(state, args);
-        break;
-      case 'did-peer':
-      case 'peer':
-        await handleDidPeer(state, args);
         break;
       case 'estimate':
       case 'cost':

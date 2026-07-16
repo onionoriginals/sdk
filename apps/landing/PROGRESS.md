@@ -3,7 +3,34 @@
 Status board for the landing page at `apps/landing/`. Updated every
 build→grade cycle. Craft bar and grading protocol: see `GRADING.md`.
 
-## Current status — cycle 8: a real Original, verified live in the browser
+## Current status — cycle 9: share cards, crawler/production polish, deploy-ready
+
+Shipping the unblocked halves of issues #331, #335, and #330 (prep):
+- **Social cards (#331)**: og:title/description/url/image (1200×630) +
+  twitter:card in `index.html`, injected at build time from `content.ts`
+  (`%SITE_*%` tokens via a vite plugin — single-content-file rule holds).
+  `public/og.png` is rendered by `scripts/og-image.mjs`: a real generative
+  artwork from `src/sdk/artwork.ts` (fixed seed, amber/violet, the amber
+  core echoing the favicon) beside the wordmark and tagline, screenshotted
+  through the existing Playwright harness. `site.url` in `content.ts` is
+  the ONE placeholder constant to swap when #330 picks the domain; the
+  build fails if `robots.txt`/`sitemap.xml` drift from it.
+- **Production polish (#335)**: `public/robots.txt` + single-page
+  `public/sitemap.xml`; `favicon.ico` (16/32/48 PNG-entry ICO, hand-packed,
+  no new deps) + `apple-touch-icon.png` rasterized from the inline SVG icon
+  by `scripts/icons.mjs`. Analytics decision: **none** — the
+  zero-external-runtime-dependency property is kept (rationale in
+  README.md; noted on the issue).
+- **Deploy prep (#330)**: `scripts/ci.mjs` = build packages → build app →
+  serve dist → browser smoke, non-zero exit on any console error
+  (`bun run landing:ci` from the root). `DEPLOY.md` documents exact
+  build-command/publish-dir settings for Vercel, Netlify, Cloudflare Pages,
+  and GitHub Pages (incl. the `--base` caveat) plus the domain-swap
+  checklist. No deploy attempted — hosting decision is the only open item.
+- Verified: `bun run landing:ci` green locally (full lifecycle, zero
+  console errors); og.png/favicon/apple-touch-icon eyeballed at full size.
+
+## Cycle 8 — a real Original, verified live in the browser
 
 User steering: “it would be great to have a real example instead of a fake
 one.” The live network domains are unreachable from this container (proxy),
@@ -263,3 +290,4 @@ all fixed and re-verified in-browser. Cycle 2 grading next.
 | 6 | 2026-07-05 | user steering: artwork as hero visual | fresh generative halo per page load, ring-masked behind the headline |
 | 7 | 2026-07-06 | user steering: halo must be the asset being created | shared seed store; hero + demo render the same artwork, live-synced |
 | 8 | 2026-07-06 | user steering: real example, not a fake one | “First Light”: SDK-minted Original shipped with the page and cryptographically re-verified in every visitor's browser |
+| 9 | 2026-07-07 | issues #331/#335/#330-prep | OG/Twitter share card from a real generative artwork; robots/sitemap/favicon.ico/apple-touch-icon; CI build+smoke gate + DEPLOY.md — repo deploy-ready, only the hosting decision remains |

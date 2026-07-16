@@ -61,18 +61,25 @@ const createMockSigner = () =>
 /** BitcoinManager mock that returns deterministic inscription data. */
 const createMockBitcoinManager = (): BitcoinManager =>
   ({
-    inscribeData: async () => ({
-      txid: 'deadbeef01020304',
-      inscriptionId: 'deadbeef01020304i0',
-      satoshi: '9876543210',
-      blockHeight: 840000,
-    }),
+    network: 'mainnet',
+    // BtcoCelManager pins the sat first: invoke the buildContent(satoshi) callback.
+    inscribeData: async (data: unknown) => {
+      if (typeof data === 'function') {
+        await (data as (s: string) => Buffer | Promise<Buffer>)('9876543210');
+      }
+      return {
+        txid: 'deadbeef01020304',
+        inscriptionId: 'deadbeef01020304i0',
+        satoshi: '9876543210',
+        blockHeight: 840000,
+      };
+    },
   } as unknown as BitcoinManager);
 
 /** Build a webvh-layer event log (peer → webvh migration). */
 const buildWebvhLog = async (): Promise<EventLog> => {
   const peerMgr = new PeerCelManager(createMockSigner());
-  const peerLog = await peerMgr.create('Coverage Asset', [
+  const { log: peerLog } = await peerMgr.create('Coverage Asset', [
     { digestMultibase: 'uCoverageHash', mediaType: 'image/png' },
   ]);
   const webvhMgr = new WebVHCelManager(createMockSigner(), 'coverage.example.com');
@@ -92,13 +99,13 @@ describe('CEL-CORE-012/happy – webvh→btco migration via BtcoCelManager', () 
     btcoLog = await btcoMgr.migrate(webvhLog);
   });
 
-  it('final event has type="update", layer="btco", sourceDid starts with did:webvh:, targetDid starts with did:btco:', () => {
-    // The btco migration appends a third event (create + webvh-update + btco-update).
+  it('final event has type="migrate", layer="btco", sourceDid starts with did:webvh:, targetDid starts with did:btco:', () => {
+    // The btco migration appends a third event (create + webvh-migrate + btco-migrate).
     const finalEvent = btcoLog.events[btcoLog.events.length - 1];
     const data = finalEvent.data as Record<string, unknown>;
 
-    // Event type
-    expect(finalEvent.type).toBe('update');
+    // Event type: migrations are first-class migrate events now
+    expect(finalEvent.type).toBe('migrate');
 
     // Layer label
     expect(data.layer).toBe('btco');

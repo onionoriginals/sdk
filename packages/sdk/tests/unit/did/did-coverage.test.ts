@@ -93,40 +93,8 @@ async function buildMockExternalSigner(keyManager: KeyManager): Promise<{
 // DID-001 — Create did:peer with ES256K key type → ES256K key material encoded
 // ---------------------------------------------------------------------------
 
-describe('DID-001 — createDIDPeer with ES256K key type', () => {
-  test('ES256K public key encoded in verificationMethod (Secp256k1 multicodec)', async () => {
-    const manager = new DIDManager({ ...baseConfig, defaultKeyType: 'ES256K' });
-
-    const didDoc = await manager.createDIDPeer([]);
-
-    expect(didDoc.id).toMatch(/^did:peer:/);
-    expect(Array.isArray(didDoc.verificationMethod)).toBe(true);
-    expect((didDoc.verificationMethod ?? []).length).toBeGreaterThan(0);
-
-    const vm = didDoc.verificationMethod![0];
-    expect(vm.type).toBe('Multikey');
-    expect(vm.publicKeyMultibase).toMatch(/^z/);
-
-    // Decode: must be a Secp256k1 key
-    const decoded = multikey.decodePublicKey(vm.publicKeyMultibase);
-    expect(decoded.type).toBe('Secp256k1');
-    expect(decoded.key instanceof Uint8Array).toBe(true);
-    // Compressed secp256k1 public key is 33 bytes
-    expect(decoded.key.length).toBe(33);
-  }, 15000);
-
-  test('returnKeyPair=true returns keyPair with Secp256k1 encoding', async () => {
-    const manager = new DIDManager({ ...baseConfig, defaultKeyType: 'ES256K' });
-
-    const result = await manager.createDIDPeer([], true);
-    expect(result.keyPair.publicKey).toMatch(/^z/);
-    expect(result.keyPair.privateKey).toMatch(/^z/);
-
-    // Public key round-trips as Secp256k1
-    const decoded = multikey.decodePublicKey(result.keyPair.publicKey);
-    expect(decoded.type).toBe('Secp256k1');
-  }, 15000);
-});
+// DID-001 removed (did:peer purge, did:cel Phase 4·5/5): createDIDPeer and the
+// did:peer creation path are gone; did:cel is the sole genesis layer.
 
 // ---------------------------------------------------------------------------
 // DID-002 — Migrate did:peer→did:webvh with default domain from network config
@@ -139,8 +107,8 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
       webvhNetwork: 'magby',
     });
 
-    const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = (await manager.migrateToDIDWebVH(peerDoc)).didDocument; // no explicit domain
+    const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:did002-magby' };
+    const webDoc = (await manager.migrateToDIDWebVH(sourceDoc)).didDocument; // no explicit domain
 
     expect(webDoc.id).toMatch(/^did:webvh:/);
     expect(webDoc.id).toContain('magby.originals.build');
@@ -152,8 +120,8 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
       webvhNetwork: 'cleffa',
     });
 
-    const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = (await manager.migrateToDIDWebVH(peerDoc)).didDocument;
+    const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:did002-cleffa' };
+    const webDoc = (await manager.migrateToDIDWebVH(sourceDoc)).didDocument;
 
     expect(webDoc.id).toMatch(/^did:webvh:/);
     expect(webDoc.id).toContain('cleffa.originals.build');
@@ -165,8 +133,8 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
       webvhNetwork: 'pichu',
     });
 
-    const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = (await manager.migrateToDIDWebVH(peerDoc)).didDocument;
+    const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:did002-pichu' };
+    const webDoc = (await manager.migrateToDIDWebVH(sourceDoc)).didDocument;
 
     expect(webDoc.id).toMatch(/^did:webvh:/);
     expect(webDoc.id).toContain('pichu.originals.build');
@@ -178,8 +146,8 @@ describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
       webvhNetwork: 'magby',
     });
 
-    const peerDoc = await manager.createDIDPeer([]);
-    const webDoc = (await manager.migrateToDIDWebVH(peerDoc, 'custom.example.com')).didDocument;
+    const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:did002-override' };
+    const webDoc = (await manager.migrateToDIDWebVH(sourceDoc, 'custom.example.com')).didDocument;
 
     expect(webDoc.id).toContain('custom.example.com');
     expect(webDoc.id).not.toContain('magby.originals.build');
@@ -461,6 +429,12 @@ describe('DID-007 — updateDIDWebVH adds new service endpoint with signed log e
     expect(typeof proof.proofValue).toBe('string');
     expect((proof.proofValue as string).length).toBeGreaterThan(0);
 
+    // The update must actually be APPLIED — not a signed no-op re-stating the
+    // previous document (issue #338): the service must appear both in the
+    // returned document and in the new log entry's state.
+    expect(updated.didDocument.service).toEqual([newService]);
+    expect((newEntry.state as { service?: unknown }).service).toEqual([newService]);
+
     // DID id must be unchanged
     expect(updated.didDocument.id).toBe(created.did);
   }, 30000);
@@ -503,10 +477,11 @@ describe('DID-007 — updateDIDWebVH adds new service endpoint with signed log e
       },
     };
 
+    const extService = { id: `${created.did}#svc`, type: 'ExampleService', serviceEndpoint: 'https://svc.example.com' };
     const updated = await manager.updateDIDWebVH({
       did: created.did,
       currentLog: created.log,
-      updates: { service: [{ id: `${created.did}#svc`, type: 'ExampleService', serviceEndpoint: 'https://svc.example.com' }] },
+      updates: { service: [extService] },
       signer: authorizedSigner,
       verifier: authorizedVerifier,
     });
@@ -514,6 +489,12 @@ describe('DID-007 — updateDIDWebVH adds new service endpoint with signed log e
     expect(updated.log.length).toBe(created.log.length + 1);
     expect(updateCalls).toBeGreaterThan(0);
     expect(updated.didDocument.id).toBe(created.did);
+
+    // The update must actually be applied (issue #338), in both the returned
+    // document and the appended log entry's state.
+    expect(updated.didDocument.service).toEqual([extService]);
+    const lastEntry = updated.log[updated.log.length - 1];
+    expect((lastEntry.state as { service?: unknown }).service).toEqual([extService]);
   }, 30000);
 });
 

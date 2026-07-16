@@ -10,8 +10,8 @@ import type {
   VerifyOptions,
 } from '../../../src/cel/types';
 import { multikey } from '../../../src/crypto/Multikey';
-import { canonicalizeEvent, canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
-import { computeDigestMultibase } from '../../../src/cel/hash';
+import { canonicalizeEvent, canonicalizeEntryForChain, witnessSigningBytes } from '../../../src/cel/canonicalize';
+import { computeDigestMultibase, decodeDigestMultibase } from '../../../src/cel/hash';
 
 /**
  * Mock signer that creates a structurally valid DataIntegrityProof.
@@ -926,6 +926,103 @@ describe('verifyEventLog', () => {
       expect(result.events[0].witnessProofs).toHaveLength(1);
       expect(result.events[0].witnessProofs![0].verificationMethod).toBe(witnessVm);
       expect(result.events[0].witnessProofs![0].verified).toBe(true);
+    });
+
+    test('witnessSigningBytes(digest) produces the exact preimage verifyEventLog accepts (#314)', async () => {
+      const { signer } = await makeRealSigner();
+      const eventData = { name: 'Helper-Signed Asset' };
+      const controllerProof = await signer({ type: 'create', data: eventData });
+
+      const ed25519 = await import('@noble/ed25519');
+      const witnessPrivateKey = ed25519.utils.randomSecretKey();
+      const witnessPublicKey = new Uint8Array(
+        await (ed25519 as any).getPublicKeyAsync(witnessPrivateKey),
+      );
+      const witnessVm = 'did:webvh:witness.example.com#key-ed25519';
+
+      const digest = computeDigestMultibase(canonicalizeEntryForChain({
+        type: 'create',
+        data: eventData,
+        proof: [],
+      } as any));
+
+      // Sign the bytes the public helper hands out — no knowledge of the
+      // internal canonicalizeEvent(<string>) quoting convention required.
+      const message = witnessSigningBytes(digest);
+      // The helper must return exactly what the verifier reconstructs.
+      expect(Array.from(message)).toEqual(Array.from(canonicalizeEvent(digest)));
+      const witnessSig = await (ed25519 as any).signAsync(message, witnessPrivateKey);
+
+      const log: EventLog = {
+        events: [{
+          type: 'create',
+          data: eventData,
+          proof: [controllerProof, {
+            type: 'DataIntegrityProof' as const,
+            cryptosuite: 'eddsa-jcs-2022',
+            created: new Date().toISOString(),
+            verificationMethod: witnessVm,
+            proofPurpose: 'assertionMethod',
+            proofValue: multikey.encodeMultibase(new Uint8Array(witnessSig)),
+            witnessedAt: '2026-01-20T12:00:00Z',
+          }],
+        }],
+      };
+
+      const resolveKey = async (method: string): Promise<Uint8Array | null> =>
+        method === witnessVm ? witnessPublicKey : null;
+
+      const result = await verifyEventLog(log, { resolveKey });
+      expect(result.events[0].witnessProofs![0].verified).toBe(true);
+    });
+
+    test('signing the RAW decoded digest bytes (the wrong preimage) fails witness verification (#314)', async () => {
+      const { signer } = await makeRealSigner();
+      const eventData = { name: 'Wrong-Preimage Asset' };
+      const controllerProof = await signer({ type: 'create', data: eventData });
+
+      const ed25519 = await import('@noble/ed25519');
+      const witnessPrivateKey = ed25519.utils.randomSecretKey();
+      const witnessPublicKey = new Uint8Array(
+        await (ed25519 as any).getPublicKeyAsync(witnessPrivateKey),
+      );
+      const witnessVm = 'did:webvh:witness.example.com#key-ed25519';
+
+      const digest = computeDigestMultibase(canonicalizeEntryForChain({
+        type: 'create',
+        data: eventData,
+        proof: [],
+      } as any));
+
+      // The classic third-party mistake: sign the raw hash bytes rather than
+      // the JSON-quoted digest string the SDK actually verifies against.
+      const wrongMessage = decodeDigestMultibase(digest);
+      expect(Array.from(wrongMessage)).not.toEqual(Array.from(witnessSigningBytes(digest)));
+      const witnessSig = await (ed25519 as any).signAsync(wrongMessage, witnessPrivateKey);
+
+      const log: EventLog = {
+        events: [{
+          type: 'create',
+          data: eventData,
+          proof: [controllerProof, {
+            type: 'DataIntegrityProof' as const,
+            cryptosuite: 'eddsa-jcs-2022',
+            created: new Date().toISOString(),
+            verificationMethod: witnessVm,
+            proofPurpose: 'assertionMethod',
+            proofValue: multikey.encodeMultibase(new Uint8Array(witnessSig)),
+            witnessedAt: '2026-01-20T12:00:00Z',
+          }],
+        }],
+      };
+
+      const resolveKey = async (method: string): Promise<Uint8Array | null> =>
+        method === witnessVm ? witnessPublicKey : null;
+
+      const result = await verifyEventLog(log, { resolveKey });
+      // Witness proofs are non-gating, so the event still verifies overall,
+      // but the witness proof itself must be reported unverified.
+      expect(result.events[0].witnessProofs![0].verified).toBe(false);
     });
 
     test('event with ONLY a witness proof (no controller proof) → verified: false', async () => {

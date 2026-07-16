@@ -1,4 +1,4 @@
-import { DIDDocument, OriginalsConfig, AssetResource, KeyPair, ExternalSigner, ExternalVerifier } from '../types/index.js';
+import { DIDDocument, OriginalsConfig, KeyPair, ExternalSigner, ExternalVerifier } from '../types/index.js';
 import { getNetworkDomain, DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH } from '../types/network.js';
 import { BtcoDidResolver } from './BtcoDidResolver.js';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient.js';
@@ -7,7 +7,6 @@ import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProvide
 import { OrdinalsProviderResolverAdapter } from './providers/OrdinalsProviderResolverAdapter.js';
 import { StructuredError } from '../utils/telemetry.js';
 import { multikey } from '../crypto/Multikey.js';
-import { KeyManager } from './KeyManager.js';
 import { WebVHManager } from './WebVHManager.js';
 import { Ed25519Verifier } from './Ed25519Verifier.js';
 import type {
@@ -17,6 +16,9 @@ import type {
   RecoverWebVHResult,
 } from './WebVHManager.js';
 import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
+import { resolveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
+import { parseEventLogJson } from '../cel/serialization/json.js';
+import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
@@ -37,20 +39,20 @@ interface CarriedVerificationMethod {
 const PRESERVABLE_RELATIONSHIPS = ['keyAgreement', 'capabilityDelegation', 'capabilityInvocation'] as const;
 
 /**
- * Longest did:peer suffix carried verbatim into the did:webvh slug during
- * migration. Longer suffixes (every numalgo-4 long-form did:peer) are replaced
- * by a 32-hex-char SHA-256 prefix of the suffix so the slug — which becomes a
- * filesystem directory name when the DID log is saved, and a URL path segment
- * when it is hosted — always fits within the 255-byte filename limit.
+ * Longest source-DID suffix carried verbatim into the did:webvh slug during
+ * migration. Longer suffixes are replaced by a 32-hex-char SHA-256 prefix of
+ * the suffix so the slug — which becomes a filesystem directory name when the
+ * DID log is saved, and a URL path segment when it is hosted — always fits
+ * within the 255-byte filename limit.
  */
 const MAX_HUMAN_READABLE_SLUG_LENGTH = 64;
 
 /**
- * Collect the source did:peer document's verification methods to carry into the
- * migrated did:webvh document, preserving each key's verification relationship
- * (#299). Keys are gathered both from the top-level `verificationMethod` list
- * and — for relationships whose keys are embedded directly (common for X25519
- * `keyAgreement` in did:peer) — from the relationship arrays themselves, so a
+ * Collect the source document's verification methods to carry into the migrated
+ * did:webvh document, preserving each key's verification relationship (#299).
+ * Keys are gathered both from the top-level `verificationMethod` list and — for
+ * relationships whose keys are embedded directly (e.g. an embedded X25519
+ * `keyAgreement` key) — from the relationship arrays themselves, so a
  * keyAgreement key that never appears in `verificationMethod` is not lost.
  */
 function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerificationMethod[] {
@@ -107,69 +109,8 @@ export class DIDManager {
     return this.metrics ? this.metrics.track(op, fn) : fn();
   }
 
-  async createDIDPeer(resources: AssetResource[], returnKeyPair?: false): Promise<DIDDocument>;
-  async createDIDPeer(resources: AssetResource[], returnKeyPair: true): Promise<{ didDocument: DIDDocument; keyPair: { privateKey: string; publicKey: string } }>;
-  async createDIDPeer(resources: AssetResource[], returnKeyPair?: boolean): Promise<DIDDocument | { didDocument: DIDDocument; keyPair: { privateKey: string; publicKey: string } }> {
-    return this.track('did.createDIDPeer', async () => {
-    // Generate a multikey keypair according to configured defaultKeyType
-    const keyManager = new KeyManager();
-    const desiredType = this.config.defaultKeyType || 'ES256K';
-    const keyPair = await keyManager.generateKeyPair(desiredType);
-
-    // Use @aviarytech/did-peer to create a did:peer (variant 4 long-form for full VM+context)
-    const didPeerMod = await import('@aviarytech/did-peer') as unknown as {
-      createNumAlgo4: (vms: unknown[], service?: unknown, extra?: unknown) => Promise<string>;
-      resolve: (did: string) => Promise<Record<string, unknown>>;
-    };
-    const did: string = await didPeerMod.createNumAlgo4(
-      [
-        {
-          // type validated by the library; controller/id not required
-          type: 'Multikey',
-          publicKeyMultibase: keyPair.publicKey
-        }
-      ],
-      undefined,
-      undefined
-    );
-
-    // Resolve to DID Document using the same library
-    const rawResolved = await didPeerMod.resolve(did);
-    // Type the resolved document properly
-    const resolved = rawResolved as unknown as {
-      id?: string;
-      verificationMethod?: Array<Record<string, unknown>>;
-      authentication?: string[];
-      assertionMethod?: string[];
-      [key: string]: unknown;
-    };
-    // Ensure controller is set on VM entries for compatibility
-    if (resolved && Array.isArray(resolved.verificationMethod)) {
-      resolved.verificationMethod = resolved.verificationMethod.map((vm) => ({
-        controller: did,
-        ...vm
-      }));
-    }
-    // Ensure relationships exist and reference a VM
-    const vmIds: string[] = Array.isArray(resolved?.verificationMethod)
-      ? (resolved.verificationMethod as Array<{ id?: string }>).map((vm) => vm.id).filter(Boolean) as string[]
-      : [];
-    if (!resolved.authentication || resolved.authentication.length === 0) {
-      if (vmIds.length > 0) resolved.authentication = [vmIds[0]];
-    }
-    if (!resolved.assertionMethod || resolved.assertionMethod.length === 0) {
-      resolved.assertionMethod = resolved.authentication || (vmIds.length > 0 ? [vmIds[0]] : []);
-    }
-
-    if (returnKeyPair) {
-      return { didDocument: resolved as unknown as DIDDocument, keyPair };
-    }
-    return resolved as unknown as DIDDocument;
-    }); // end track did.createDIDPeer
-  }
-
   /**
-   * Migrate a did:peer document to a real did:webvh.
+   * Migrate a genesis DID document (did:cel) to a real did:webvh.
    *
    * The migration goes through WebVHManager.createDIDWebVH (didwebvh-ts
    * createDID), so the resulting DID has a genuine SCID and a signed DID log
@@ -186,9 +127,9 @@ export class DIDManager {
    * migrated DID unhostable and un-updatable. Provide either `keyPair` OR
    * `externalSigner` in `options`, never both.
    *
-   * The peer document's verification methods are carried over as
+   * The source document's verification methods are carried over as
    * verification-only keys, its services are preserved, and the original
-   * did:peer is recorded in `alsoKnownAs`. The `keyAgreement`,
+   * source DID is recorded in `alsoKnownAs`. The `keyAgreement`,
    * `capabilityInvocation`, and `capabilityDelegation` relationships each key
    * held in the source document are preserved (#299). `authentication` and
    * `assertionMethod` are re-assigned to the new signing key (`#key-0`) in the
@@ -229,17 +170,13 @@ export class DIDManager {
       }
     }
 
-    // Stable slug derived from original peer DID suffix (or last segment).
-    // The slug becomes both a did:webvh path segment and a directory name in
-    // saveDIDLog, so it must stay well under the 255-byte filename limit. A
-    // did:peer numalgo-4 suffix is hash + full encoded document (~384 chars
-    // for a one-key DID), so using it verbatim made saveDIDLog throw
-    // ENAMETOOLONG and left the migrated DID unhostable. Short suffixes keep
-    // the human-readable form; anything longer collapses to a short, stable
-    // hash of the suffix.
+    // Stable slug derived from the source DID's last segment. The slug becomes
+    // both a did:webvh path segment and a directory name in saveDIDLog, so it
+    // must stay well under the 255-byte filename limit: short suffixes keep the
+    // human-readable form; anything longer collapses to a short, stable hash of
+    // the suffix.
     const parts = (didDoc.id || '').split(':');
-    const method = parts.slice(0, 2).join(':');
-    const originalSuffix = method === 'did:peer' ? parts.slice(2).join(':') : parts[parts.length - 1];
+    const originalSuffix = parts[parts.length - 1];
     const rawSlug = (originalSuffix || '')
       .toString()
       .trim()
@@ -249,7 +186,7 @@ export class DIDManager {
       ? rawSlug
       : Buffer.from(sha256(new TextEncoder().encode(originalSuffix))).toString('hex').slice(0, 32);
 
-    // Carry the peer document's multikey verification methods over as
+    // Carry the source document's multikey verification methods over as
     // verification-only keys (they do not become updateKeys — log updates are
     // authorized by the signing key generated/provided below). Each carried key
     // also keeps the verification relationship it held in the source document
@@ -389,8 +326,89 @@ export class DIDManager {
     }); // end track did.migrateToDIDBTCO
   }
 
+  /**
+   * Cross-network did:btco guard (issue #267). The configured ordinalsProvider
+   * is pinned to one Bitcoin network, so a DID whose encoded network differs
+   * must be rejected — otherwise an attacker can inscribe "did:btco:reg:N"
+   * content on mainnet sat N and have it resolve as the regtest DID. This runs
+   * BEFORE the cache lookup: DIDCache supports a pluggable persistent storage
+   * adapter that may be shared between SDK instances on different networks (or
+   * populated via the bitcoinRpcUrl branch, which deliberately resolves any
+   * network), so a cached cross-network document must not bypass the guard
+   * (issue #312). It is a prefix parse of the DID string — no provider query.
+   */
+  private assertBtcoNetworkMatchesProvider(did: string): void {
+    if (!did.startsWith('did:btco:') || !this.config.ordinalsProvider) return;
+    const btcoNetworkPrefix = did.match(/^did:btco:(reg|sig|test):/)?.[1];
+    // 'test' (testnet) has no OrdinalsClient/config counterpart; preserve
+    // existing pass-through behavior for it.
+    //
+    // Only reject when the SDK's network is actually known. If neither
+    // `network` nor `webvhNetwork` is configured, the provider's chain is
+    // genuinely unknown, so defaulting to mainnet and rejecting a reg/sig DID
+    // would be a false positive — fall through and let the provider answer
+    // (its own resolution still validates the DID).
+    const providerNetwork = this.getConfiguredBitcoinNetwork();
+    if (btcoNetworkPrefix === 'test' || !providerNetwork) return;
+    const didNetwork: 'mainnet' | 'regtest' | 'signet' =
+      btcoNetworkPrefix === 'reg' ? 'regtest'
+      : btcoNetworkPrefix === 'sig' ? 'signet'
+      : 'mainnet';
+    if (didNetwork !== providerNetwork) {
+      throw new StructuredError(
+        'BTCO_NETWORK_MISMATCH',
+        `Cannot resolve ${did}: the DID targets the ${didNetwork} network but the configured ` +
+        `ordinalsProvider serves ${providerNetwork}. Configure an SDK instance for ${didNetwork} ` +
+        'to resolve this DID.'
+      );
+    }
+  }
+
+  /**
+   * Reads the persisted CEL for a did:cel from the storage adapter at the
+   * conventional key LifecycleManager writes (`cel/<suffix>.json`). Supports
+   * both duck-typed adapter shapes in the same priority order as the writes
+   * (legacy `get(key)` first, canonical `getObject(domain, path)` second).
+   * Any miss or adapter failure returns null — resolution then stays
+   * honest-null instead of crashing.
+   */
+  private async readStoredCelLog(did: string): Promise<string | null> {
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
+    if (!storage || typeof storage !== 'object') return null;
+    const path = `${did.slice(DID_CEL_PREFIX.length)}.json`;
+
+    const decode = (value: unknown): string | null => {
+      if (typeof value === 'string') return value;
+      if (value instanceof Uint8Array) return new TextDecoder().decode(value);
+      if (value && typeof value === 'object') {
+        const content = (value as { content?: unknown }).content;
+        if (typeof content === 'string') return content;
+        if (content instanceof Uint8Array) return new TextDecoder().decode(content);
+      }
+      return null;
+    };
+
+    try {
+      const withGet = storage as { get?: (key: string) => Promise<unknown> };
+      if (typeof withGet.get === 'function') {
+        const found = decode(await withGet.get(`cel/${path}`));
+        if (found !== null) return found;
+      }
+      const withGetObject = storage as { getObject?: (domain: string, path: string) => Promise<unknown> };
+      if (typeof withGetObject.getObject === 'function') {
+        return decode(await withGetObject.getObject('cel', path));
+      }
+    } catch {
+      // A throwing storage adapter must not crash resolution.
+    }
+    return null;
+  }
+
   async resolveDID(did: string, options?: { skipCache?: boolean }): Promise<DIDDocument | null> {
     return this.track('did.resolveDID', async () => {
+      // Network guard must precede the cache read (issue #312).
+      this.assertBtcoNetworkMatchesProvider(did);
+
       // Check cache first (unless skipCache is set). The read is best-effort:
       // a throwing storage adapter must not crash resolution — treat it as a miss.
       if (!options?.skipCache) {
@@ -423,35 +441,9 @@ export class DIDManager {
           }
         } else if (did.startsWith('did:btco:')) {
           if (this.config.ordinalsProvider) {
-            // The configured ordinalsProvider is pinned to one Bitcoin
-            // network, so a DID whose encoded network differs must be
-            // rejected before querying (issue #267): otherwise an attacker
-            // can inscribe "did:btco:reg:N" content on mainnet sat N and have
-            // it resolve — and be cached — as the regtest DID.
-            const btcoNetworkPrefix = did.match(/^did:btco:(reg|sig|test):/)?.[1];
-            // 'test' (testnet) has no OrdinalsClient/config counterpart;
-            // preserve existing pass-through behavior for it.
+            // Cross-network guard already enforced pre-cache by
+            // assertBtcoNetworkMatchesProvider (issues #267/#312).
             //
-            // Only reject when the SDK's network is actually known. If neither
-            // `network` nor `webvhNetwork` is configured, the provider's chain
-            // is genuinely unknown, so defaulting to mainnet and rejecting a
-            // reg/sig DID would be a false positive — fall through and let the
-            // provider answer (its own resolution still validates the DID).
-            const providerNetwork = this.getConfiguredBitcoinNetwork();
-            if (btcoNetworkPrefix !== 'test' && providerNetwork) {
-              const didNetwork: 'mainnet' | 'regtest' | 'signet' =
-                btcoNetworkPrefix === 'reg' ? 'regtest'
-                : btcoNetworkPrefix === 'sig' ? 'signet'
-                : 'mainnet';
-              if (didNetwork !== providerNetwork) {
-                throw new StructuredError(
-                  'BTCO_NETWORK_MISMATCH',
-                  `Cannot resolve ${did}: the DID targets the ${didNetwork} network but the configured ` +
-                  `ordinalsProvider serves ${providerNetwork}. Configure an SDK instance for ${didNetwork} ` +
-                  'to resolve this DID.'
-                );
-              }
-            }
             // The configured ordinalsProvider is the source of truth for
             // Bitcoin state (it performed the inscriptions), so resolution
             // must go through it — not through a freshly constructed HTTP
@@ -517,6 +509,34 @@ export class DIDManager {
               console.warn('Failed to resolve did:webvh:', err);
             }
           }
+        } else if (did.startsWith(DID_CEL_PREFIX)) {
+          // Persistence-backed resolution (Phase 3): LifecycleManager persists
+          // the asset's CEL at the conventional `cel/<suffix>.json` key at
+          // genesis and after every successful append. Read it back, parse it
+          // through the JSON gate, and resolve via resolveDidCel — which
+          // verifies the WHOLE chain against the DID before folding the
+          // current controller into a document (never a fabricated one). The
+          // DIDManager-backed key resolver and the configured ordinalsProvider
+          // are threaded so rotated and btco-anchored (witness-proofed) logs
+          // verify too; without a provider those fail closed to null.
+          const json = await this.readStoredCelLog(did);
+          if (json !== null) {
+            try {
+              const log = parseEventLogJson(json);
+              result = await resolveDidCel(did, log, {
+                resolveKey: createDidManagerKeyResolver(this),
+                ordinalsProvider: this.config.ordinalsProvider
+              });
+            } catch {
+              // Parse failure → the honest null below.
+              result = null;
+            }
+          }
+          if (!result && this.config.enableLogging) {
+            console.warn(
+              `did:cel could not be resolved from storage; callers holding the event log can use resolveDidCel(did, log) from the cel module. Returning null for ${did}`
+            );
+          }
         } else if (this.config.enableLogging) {
           console.warn(`Unsupported DID method for resolution: ${did}`);
         }
@@ -550,13 +570,6 @@ export class DIDManager {
 
   validateDIDDocument(didDoc: DIDDocument): boolean {
     return !!didDoc.id && Array.isArray(didDoc['@context']);
-  }
-
-  private getLayerFromDID(did: string): 'did:peer' | 'did:webvh' | 'did:btco' {
-    if (did.startsWith('did:peer:')) return 'did:peer';
-    if (did.startsWith('did:webvh:')) return 'did:webvh';
-    if (did.startsWith('did:btco:')) return 'did:btco';
-    throw new Error('Unsupported DID method');
   }
 
   createBtcoDidDocument(

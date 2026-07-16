@@ -49,7 +49,7 @@ across three trust layers.
 
 ### 2.1 DID Layers
 
-- **did:peer** — Private creation layer (offline, free)
+- **did:cel** — Private creation layer (offline, free)
 - **did:webvh** — Public discovery via HTTPS hosting
 - **did:btco** — Permanent ownership on Bitcoin
 

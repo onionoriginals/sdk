@@ -6,7 +6,7 @@ describe('LifecycleManager - empty resources guard', () => {
   test('publishToWeb with emptied resources does not produce credential with undefined resourceId', async () => {
     const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'res1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'abc' }
+      { id: 'res1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824' }
     ]);
 
     // Simulate post-creation resource removal (e.g., deserialization edge case)
@@ -25,7 +25,7 @@ describe('LifecycleManager - empty resources guard', () => {
   test('publishToWeb with valid resources produces credential with defined resourceId', async () => {
     const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'res1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'abc123' }
+      { id: 'res1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824' }
     ]);
     expect(asset.resources.length).toBe(1);
 
@@ -45,7 +45,7 @@ describe('LifecycleManager - empty resources guard', () => {
   test('publishToWeb with resource having empty id does not produce credential', async () => {
     const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
-      { id: 'res1', type: 'text', content: 'hello', contentType: 'text/plain', hash: 'abc123' }
+      { id: 'res1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824' }
     ]);
 
     // Force the resource id to be empty string (falsy) after creation

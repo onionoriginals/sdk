@@ -448,11 +448,11 @@ describe('BITCOIN-023: SignetProvider write ops without bitcoinRpcUrl', () => {
     ).rejects.toThrow(/bitcoinRpcUrl/i);
   });
 
-  test('estimateFee without bitcoinRpcUrl falls back to default (no throw)', async () => {
+  test('estimateFee without bitcoinRpcUrl throws instead of fabricating a rate (issue #351)', async () => {
     const provider = new SignetProvider({ ordUrl: 'http://localhost:80' });
-    // Should not throw; returns a default fee
-    const fee = await provider.estimateFee(1);
-    expect(fee).toBeGreaterThan(0);
+    // The old fallback invented a rate that INCREASED with the confirmation
+    // target; fee estimation must fail loudly like the other providers.
+    await expect(provider.estimateFee(1)).rejects.toThrow(/bitcoinRpcUrl/);
   });
 });
 

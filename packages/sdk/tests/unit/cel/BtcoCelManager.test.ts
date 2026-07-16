@@ -23,9 +23,20 @@ const createMockSigner = () => {
   });
 };
 
+// BtcoCelManager now pins the sat first: it inscribes via a buildContent(satoshi)
+// callback (so the migrate body can sign `to: did:btco:<sat>`). A mock inscribeData
+// must therefore invoke the callback with the returned satoshi, mirroring OrdMockProvider.
+const mockInscribeData = (result: { txid: string; inscriptionId: string; satoshi: string; blockHeight?: number }) =>
+  vi.fn(async (data: unknown) => {
+    if (typeof data === 'function') {
+      await (data as (s: string) => Buffer | Promise<Buffer>)(result.satoshi);
+    }
+    return result;
+  });
+
 // Mock BitcoinManager
 const createMockBitcoinManager = (): BitcoinManager => ({
-  inscribeData: vi.fn().mockResolvedValue({
+  inscribeData: mockInscribeData({
     txid: 'abc123def456',
     inscriptionId: 'abc123def456i0',
     satoshi: '1234567890',
@@ -42,7 +53,7 @@ const createFailingBitcoinManager = (): BitcoinManager => ({
 // Helper to create a webvh layer log for testing
 const createWebvhLog = async (): Promise<EventLog> => {
   const peerManager = new PeerCelManager(createMockSigner());
-  const peerLog = await peerManager.create('Test Asset', [
+  const { log: peerLog } = await peerManager.create('Test Asset', [
     { digestMultibase: 'uTestHash123', mediaType: 'image/png' },
   ]);
   
@@ -53,9 +64,9 @@ const createWebvhLog = async (): Promise<EventLog> => {
 // Helper to create a peer layer log for testing
 const createPeerLog = async (): Promise<EventLog> => {
   const peerManager = new PeerCelManager(createMockSigner());
-  return peerManager.create('Test Asset', [
+  return (await peerManager.create('Test Asset', [
     { digestMultibase: 'uTestHash123', mediaType: 'image/png' },
-  ]);
+  ])).log;
 };
 
 
@@ -125,7 +136,68 @@ describe('BtcoCelManager', () => {
       const btcoLog = await manager.migrate(webvhLog);
 
       const migrationEvent = btcoLog.events[2];
-      expect(migrationEvent.type).toBe('update');
+      expect(migrationEvent.type).toBe('migrate');
+    });
+
+    it('emits a first-class migrate event carrying the migration payload', async () => {
+      const webvhLog = await createWebvhLog();
+      const btcoLog = await manager.migrate(webvhLog);
+
+      const migrationEvent = btcoLog.events.at(-1)!;
+      expect(migrationEvent.type).toBe('migrate');
+
+      const data = migrationEvent.data as Record<string, unknown>;
+      expect(data.sourceDid).toMatch(/^did:webvh:/);
+      expect(data.layer).toBe('btco');
+      expect(data.migratedAt).toBeDefined();
+      expect((data as { type?: unknown }).type).toBeUndefined();
+    });
+
+    it('migrates a log whose webvh migration is a legacy update event (sniff kept)', async () => {
+      // Old fixture logs record the peer→webvh migration as an 'update' event;
+      // the btco migration detection must keep recognising them.
+      const mockProof = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: '2020-01-01T00:00:00.000Z',
+        verificationMethod: 'did:key:zLegacy#key-0',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'zLegacy',
+      };
+      const legacyWebvhLog: EventLog = {
+        events: [
+          {
+            type: 'create',
+            data: {
+              name: 'Legacy Asset',
+              did: 'did:peer:4zLegacyDid',
+              layer: 'peer',
+              resources: [],
+              creator: 'did:peer:4zLegacyDid',
+              createdAt: '2020-01-01T00:00:00.000Z',
+            },
+            proof: [mockProof],
+          },
+          {
+            type: 'update',
+            data: {
+              sourceDid: 'did:peer:4zLegacyDid',
+              targetDid: 'did:webvh:example.com:legacy',
+              layer: 'webvh',
+              domain: 'example.com',
+              migratedAt: '2020-01-02T00:00:00.000Z',
+            },
+            previousEvent: 'uLegacyDigest',
+            proof: [mockProof],
+          },
+        ],
+      };
+
+      const btcoLog = await manager.migrate(legacyWebvhLog);
+      const migrationData = btcoLog.events.at(-1)!.data as Record<string, unknown>;
+      expect(btcoLog.events.at(-1)!.type).toBe('migrate');
+      expect(migrationData.sourceDid).toBe('did:webvh:example.com:legacy');
+      expect(migrationData.layer).toBe('btco');
     });
 
     it('should include sourceDid in migration data', async () => {
@@ -159,7 +231,7 @@ describe('BtcoCelManager', () => {
       // createBtcoDidDocument — otherwise a regtest/signet asset resolves
       // against the mainnet ordinals namespace.
       const regtestBitcoin = {
-        inscribeData: vi.fn().mockResolvedValue({
+        inscribeData: mockInscribeData({
           txid: 'abc123def456',
           inscriptionId: 'abc123def456i0',
           satoshi: '1234567890',
@@ -186,7 +258,7 @@ describe('BtcoCelManager', () => {
       // the mainnet form. The network is recorded in the signed data, so replay
       // must be deterministic regardless of the replaying manager's network.
       const regtestBitcoin = {
-        inscribeData: vi.fn().mockResolvedValue({
+        inscribeData: mockInscribeData({
           txid: 'abc123def456',
           inscriptionId: 'abc123def456i0',
           satoshi: '1234567890',
@@ -450,6 +522,33 @@ describe('BtcoCelManager', () => {
       expect(state.name).toBe('B');
     });
 
+    it('preserves an application-defined `to` field on an ordinary update', async () => {
+      // Regression (#397 greptile P2): `to` is the SIGNED btco-anchor field, so it
+      // must be stripped from metadata only on btco migration events — not globally.
+      // An ordinary update carrying an application-defined `to` must keep it.
+      const log = {
+        events: [
+          { type: 'create', data: { did: 'did:peer:abc', name: 'A', layer: 'peer', resources: [] } },
+          { type: 'update', data: { name: 'B', to: 'application-defined-target', updatedAt: '2020-01-01T00:00:00.000Z' } },
+        ],
+      } as unknown as EventLog;
+
+      const state = manager.getCurrentState(log);
+      expect(state.metadata?.to).toBe('application-defined-target');
+      expect(state.name).toBe('B');
+    });
+
+    it('strips the signed `to` anchor from metadata on a btco migration event', async () => {
+      // The complement: on a real btco migration, `to` is consumed to derive the
+      // did:btco identity and must NOT leak into metadata.
+      const webvhLog = await createWebvhLog();
+      const btcoLog = await manager.migrate(webvhLog);
+      const migrationData = btcoLog.events[2].data as Record<string, unknown>;
+      expect(migrationData.to).toBe('did:btco:1234567890'); // signed into the body
+      const state = manager.getCurrentState(btcoLog);
+      expect(state.metadata?.to).toBeUndefined(); // but not surfaced as metadata
+    });
+
     it('should not be deactivated after migration', async () => {
       const webvhLog = await createWebvhLog();
       const btcoLog = await manager.migrate(webvhLog);
@@ -457,6 +556,74 @@ describe('BtcoCelManager', () => {
       const state = manager.getCurrentState(btcoLog);
 
       expect(state.deactivated).toBe(false);
+    });
+
+    it('replays a fully legacy btco log (update-sniffed migrations)', () => {
+      // Old fixture logs record migrations as 'update' events; replay must keep
+      // deriving the did:btco identifier from the witness proof + signed network.
+      const mockProof = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: '2020-01-01T00:00:00.000Z',
+        verificationMethod: 'did:key:zLegacy#key-0',
+        proofPurpose: 'assertionMethod',
+        proofValue: 'zLegacy',
+      };
+      const legacyBtcoLog: EventLog = {
+        events: [
+          {
+            type: 'create',
+            data: {
+              name: 'Legacy Asset',
+              did: 'did:peer:4zLegacyDid',
+              layer: 'peer',
+              resources: [],
+              creator: 'did:peer:4zLegacyDid',
+              createdAt: '2020-01-01T00:00:00.000Z',
+            },
+            proof: [mockProof],
+          },
+          {
+            type: 'update',
+            data: {
+              sourceDid: 'did:peer:4zLegacyDid',
+              targetDid: 'did:webvh:example.com:legacy',
+              layer: 'webvh',
+              domain: 'example.com',
+              migratedAt: '2020-01-02T00:00:00.000Z',
+            },
+            previousEvent: 'uLegacy1',
+            proof: [mockProof],
+          },
+          {
+            type: 'update',
+            data: {
+              sourceDid: 'did:webvh:example.com:legacy',
+              layer: 'btco',
+              network: 'mainnet',
+              migratedAt: '2020-01-03T00:00:00.000Z',
+            },
+            previousEvent: 'uLegacy2',
+            proof: [
+              mockProof,
+              {
+                ...mockProof,
+                cryptosuite: 'bitcoin-ordinals-2024',
+                txid: 'legacytxid',
+                inscriptionId: 'legacytxidi0',
+                satoshi: '5555555555',
+                witnessedAt: '2020-01-03T00:00:00.000Z',
+              },
+            ],
+          },
+        ],
+      };
+
+      const state = manager.getCurrentState(legacyBtcoLog);
+      expect(state.layer).toBe('btco');
+      expect(state.did).toBe('did:btco:5555555555');
+      expect(state.metadata?.txid).toBe('legacytxid');
+      expect(state.metadata?.sourceDid).toBe('did:webvh:example.com:legacy');
     });
 
     it('should throw for empty log', () => {
@@ -479,13 +646,36 @@ describe('BtcoCelManager', () => {
         'First event must be a create event'
       );
     });
+
+    it('throws for a shapeless genesis (neither controller nor did) instead of minting an unbacked did:cel', () => {
+      const shapelessLog: EventLog = {
+        events: [{
+          type: 'create',
+          data: {
+            name: 'Shapeless Asset',
+            resources: [],
+            createdAt: '2020-01-01T00:00:00Z',
+          },
+          proof: [{
+            type: 'DataIntegrityProof',
+            cryptosuite: 'eddsa-jcs-2022',
+            created: '2020-01-01T00:00:00Z',
+            verificationMethod: 'did:key:z6Mk#key-0',
+            proofPurpose: 'assertionMethod',
+            proofValue: 'zMock',
+          }],
+        }],
+      };
+
+      expect(() => manager.getCurrentState(shapelessLog)).toThrow(/genesis|controller|did/i);
+    });
   });
 
   describe('integration: peer to webvh to btco migration', () => {
     it('should complete full migration cycle', async () => {
       // Create peer asset
       const peerManager = new PeerCelManager(createMockSigner());
-      const peerLog = await peerManager.create('My Artwork', [
+      const { log: peerLog } = await peerManager.create('My Artwork', [
         { digestMultibase: 'uArtworkHash', mediaType: 'image/jpeg' },
       ]);
 
@@ -522,7 +712,7 @@ describe('BtcoCelManager', () => {
         { digestMultibase: 'uHash1', mediaType: 'image/png' },
         { digestMultibase: 'uHash2', mediaType: 'video/mp4' },
       ];
-      const peerLog = await peerManager.create('Multi-Resource', resources);
+      const { log: peerLog } = await peerManager.create('Multi-Resource', resources);
 
       const webvhManager = new WebVHCelManager(createMockSigner(), 'example.com');
       const webvhLog = await webvhManager.migrate(peerLog);
@@ -543,12 +733,12 @@ describe('BtcoCelManager', () => {
       expect(btcoLog.events[0].type).toBe('create');
       expect(btcoLog.events[0].previousEvent).toBeUndefined();
 
-      // Second event: webvh migration
-      expect(btcoLog.events[1].type).toBe('update');
+      // Second event: webvh migration (first-class type)
+      expect(btcoLog.events[1].type).toBe('migrate');
       expect(btcoLog.events[1].previousEvent).toBeDefined();
 
-      // Third event: btco migration
-      expect(btcoLog.events[2].type).toBe('update');
+      // Third event: btco migration (first-class type)
+      expect(btcoLog.events[2].type).toBe('migrate');
       expect(btcoLog.events[2].previousEvent).toBeDefined();
     });
 

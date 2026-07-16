@@ -353,6 +353,25 @@ describe('createCommitTransaction', () => {
       expect(result.commitAddress).toMatch(/^bcrt1p/);
       expect(result.commitPsbtBase64).toBeDefined();
     });
+
+    test('regtest commit accepts a testnet-format (tb1) change address (issue #351)', async () => {
+      // validateBitcoinAddress deliberately accepts testnet-format addresses
+      // on regtest (regtest tooling commonly emits them), so the change output
+      // encoding must accept them too — previously tx.addOutputAddress decoded
+      // strictly against 'bcrt' and threw a cryptic @scure error AFTER
+      // keygen/selection/fee work, defeating the early fail-fast validation.
+      const params = createCommitParams({
+        network: 'regtest',
+        changeAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
+        utxos: [createUtxo(50000, 0, 'regtest')]
+      });
+      const result = await createCommitTransaction(params);
+
+      expect(result.commitAddress).toMatch(/^bcrt1p/);
+      // With 50k sats in and a small commit output, change is above dust —
+      // the tx must carry the change output derived from the tb1 address.
+      expect(result.commitPsbt.outputsLength).toBe(2);
+    });
   });
 
   describe('Error Handling', () => {

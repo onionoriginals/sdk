@@ -1,6 +1,8 @@
-import type { OrdinalsProvider } from '../types.js';
+import type { OrdinalsProvider, InscriptionParts } from '../types.js';
 import { StructuredError } from '../../utils/telemetry.js';
 import { validateSatoshiNumber } from '../../utils/satoshi-validation.js';
+import { decode as decodeCbor } from '../../utils/cbor.js';
+import { hexToBytes } from '../../utils/encoding.js';
 
 export interface QuickNodeProviderOptions {
   /**
@@ -18,7 +20,37 @@ export interface QuickNodeProviderOptions {
   maxJsonBytes?: number;
   /** Max bytes accepted for decoded inscription content (default 5 MiB). */
   maxContentBytes?: number;
+  /**
+   * Bitcoin network this endpoint is expected to serve. When set, the
+   * provider verifies `getblockchaininfo.chain` against it on first RPC use
+   * and fails loudly on a mismatch — a mainnet-configured SDK pointed at a
+   * testnet endpoint would otherwise silently answer mainnet DID
+   * existence/transfer questions with testnet data (issue #350).
+   */
+  expectedNetwork?: 'mainnet' | 'testnet' | 'signet' | 'regtest';
+  /**
+   * How `ord_getContent` results are encoded (issue #350):
+   * - 'base64' (recommended): always base64-decode; malformed base64 fails loudly.
+   * - 'utf8': treat the result as literal UTF-8 text.
+   * - 'auto' (default, for backwards compatibility): heuristic — base64-shaped
+   *   content is decoded, anything else is treated as literal UTF-8. Ambiguous
+   *   short text inscriptions can be misdecoded; pin an explicit encoding for
+   *   deployments where content hashes matter.
+   */
+  contentEncoding?: 'base64' | 'utf8' | 'auto';
 }
+
+/** getblockchaininfo.chain values mapped to SDK network names. */
+const CHAIN_TO_NETWORK: Record<string, 'mainnet' | 'testnet' | 'signet' | 'regtest'> = {
+  main: 'mainnet',
+  test: 'testnet',
+  signet: 'signet',
+  regtest: 'regtest',
+};
+
+/** Shape gate for inscription ids: 64-hex txid + 'i' + numeric index. */
+const INSCRIPTION_ID_RE = /^[0-9a-f]{64}i\d+$/i;
+const TXID_RE = /^[0-9a-f]{64}$/i;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_JSON_BYTES = 1 * 1024 * 1024;
@@ -26,6 +58,7 @@ const DEFAULT_MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
 /** Bitcoin Core RPC error code for "No such mempool or blockchain transaction". */
 const RPC_INVALID_ADDRESS_OR_KEY = -5;
+const JSON_RPC_METHOD_NOT_FOUND = -32601;
 
 interface JsonRpcError {
   code?: number;
@@ -71,6 +104,9 @@ export class QuickNodeProvider implements OrdinalsProvider {
   private readonly timeout: number;
   private readonly maxJsonBytes: number;
   private readonly maxContentBytes: number;
+  private readonly expectedNetwork?: 'mainnet' | 'testnet' | 'signet' | 'regtest';
+  private readonly contentEncoding: 'base64' | 'utf8' | 'auto';
+  private networkCheck: Promise<void> | null = null;
 
   constructor(options: QuickNodeProviderOptions) {
     if (!options?.endpoint) {
@@ -80,7 +116,10 @@ export class QuickNodeProvider implements OrdinalsProvider {
     try {
       parsed = new URL(options.endpoint);
     } catch {
-      throw new StructuredError('QUICKNODE_ENDPOINT_INVALID', `QuickNodeProvider endpoint is not a valid URL: ${options.endpoint}`);
+      // Never echo the endpoint string back: the QuickNode auth token is
+      // embedded in the URL path and error text lands in logs/telemetry
+      // (issue #350).
+      throw new StructuredError('QUICKNODE_ENDPOINT_INVALID', 'QuickNodeProvider endpoint is not a valid URL');
     }
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
       throw new StructuredError('QUICKNODE_ENDPOINT_INVALID', `QuickNodeProvider endpoint must be http(s), got ${parsed.protocol}`);
@@ -89,6 +128,39 @@ export class QuickNodeProvider implements OrdinalsProvider {
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     this.maxJsonBytes = options.maxJsonBytes ?? DEFAULT_MAX_JSON_BYTES;
     this.maxContentBytes = options.maxContentBytes ?? DEFAULT_MAX_CONTENT_BYTES;
+    this.expectedNetwork = options.expectedNetwork;
+    this.contentEncoding = options.contentEncoding ?? 'auto';
+  }
+
+  /**
+   * Verify the endpoint's chain matches the expected network (issue #350).
+   * Runs once before the first real RPC call; the memoized promise is reset
+   * on failure so a transient RPC error does not poison the provider forever.
+   */
+  private ensureExpectedNetwork(): Promise<void> {
+    if (!this.expectedNetwork) return Promise.resolve();
+    if (!this.networkCheck) {
+      this.networkCheck = (async () => {
+        const info = await this.rpcCall<{ chain?: string } | null>('getblockchaininfo', []);
+        const chain = info?.chain;
+        const actual = typeof chain === 'string' ? CHAIN_TO_NETWORK[chain] : undefined;
+        if (actual !== this.expectedNetwork) {
+          throw new StructuredError(
+            'QUICKNODE_NETWORK_MISMATCH',
+            `QuickNodeProvider: endpoint serves chain '${String(chain)}' (${String(actual)}) but the SDK is configured for ${this.expectedNetwork}. ` +
+            'Point QUICKNODE_ENDPOINT at an endpoint on the configured network.'
+          );
+        }
+      })().catch((err) => {
+        // Only reset for transient errors so a permanent QUICKNODE_NETWORK_MISMATCH
+        // doesn't cause a redundant getblockchaininfo call on every subsequent retry.
+        if (!(err instanceof StructuredError) || err.code !== 'QUICKNODE_NETWORK_MISMATCH') {
+          this.networkCheck = null;
+        }
+        throw err;
+      });
+    }
+    return this.networkCheck;
   }
 
   /**
@@ -167,6 +239,19 @@ export class QuickNodeProvider implements OrdinalsProvider {
   }
 
   /**
+   * True when the endpoint does not implement an RPC method (JSON-RPC -32601 or
+   * an ord/gateway "method not found" message) — distinct from a transient
+   * transport fault, which must propagate. Used so a missing `ord_getMetadata`
+   * (older ord add-on) degrades to "no metadata" while a 500/timeout does not.
+   */
+  private static isMethodNotFound(err: unknown): boolean {
+    if (!(err instanceof StructuredError) || err.code !== 'QUICKNODE_RPC_ERROR') return false;
+    if (err.details?.rpcCode === JSON_RPC_METHOD_NOT_FOUND) return true;
+    const rpcMessage = err.details?.rpcMessage;
+    return typeof rpcMessage === 'string' && /method not found/i.test(rpcMessage);
+  }
+
+  /**
    * Decode the `ord_getContent` result into raw bytes. QuickNode returns the
    * inscription content base64-encoded inside the JSON-RPC result (either as
    * a bare string or wrapped in an object). Content that doesn't decode as
@@ -194,7 +279,20 @@ export class QuickNodeProvider implements OrdinalsProvider {
     }
     let buf: Buffer | undefined;
     const compact = raw.replace(/\s+/g, '');
-    if (compact.length > 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(compact) && compact.length % 4 === 0) {
+    const isBase64Shaped = compact.length > 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(compact) && compact.length % 4 === 0;
+    if (this.contentEncoding === 'base64') {
+      // Explicit encoding: no guessing. Content that is not valid base64 is a
+      // server contract violation, not literal text (issue #350).
+      if (!isBase64Shaped) {
+        throw new StructuredError(
+          'QUICKNODE_CONTENT_UNEXPECTED_SHAPE',
+          "QuickNodeProvider: ord_getContent result is not base64 (provider configured with contentEncoding: 'base64')"
+        );
+      }
+      buf = Buffer.from(compact, 'base64');
+    } else if (this.contentEncoding === 'utf8') {
+      buf = Buffer.from(raw, 'utf8');
+    } else if (isBase64Shaped) {
       const decoded = Buffer.from(compact, 'base64');
       if (!QuickNodeProvider.isTextContentType(contentType) || QuickNodeProvider.isValidUtf8(decoded)) {
         buf = decoded;
@@ -232,6 +330,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
 
   async getInscriptionById(id: string) {
     if (!id) return null;
+    await this.ensureExpectedNetwork();
     let info: QuickNodeInscription | null;
     try {
       info = await this.rpcCall<QuickNodeInscription | null>('ord_getInscription', [id]);
@@ -241,15 +340,43 @@ export class QuickNodeProvider implements OrdinalsProvider {
     }
     if (!info) return null;
 
+    // Validate server-supplied fields BEFORE they flow into provenance
+    // records (issue #350): a compromised endpoint must not be able to inject
+    // arbitrary strings as txid/inscriptionId/satoshi. Malformed data is a
+    // contract violation and throws — it is not "not found".
+    const inscriptionId = info.id || info.inscription_id || id;
+    if (!INSCRIPTION_ID_RE.test(inscriptionId)) {
+      throw new StructuredError(
+        'QUICKNODE_UNEXPECTED_SHAPE',
+        `QuickNodeProvider: ord_getInscription returned a malformed inscription id (${inscriptionId})`
+      );
+    }
+
     // Current location comes from the satpoint ('txid:vout:offset'); fall
-    // back to the owning output ('txid:vout') if satpoint is absent.
-    let txid = 'unknown';
-    let vout = 0;
+    // back to the owning output ('txid:vout') if satpoint is absent. A
+    // missing or malformed location throws rather than fabricating the
+    // literal 'unknown' as a txid.
     const location = info.satpoint || info.output;
-    if (typeof location === 'string' && location.includes(':')) {
-      const [tid, v] = location.split(':');
-      txid = tid;
-      vout = Number(v) || 0;
+    const [tid, v] = typeof location === 'string' ? location.split(':') : [];
+    if (!tid || !TXID_RE.test(tid)) {
+      throw new StructuredError(
+        'QUICKNODE_UNEXPECTED_SHAPE',
+        'QuickNodeProvider: ord_getInscription returned no valid satpoint/output location'
+      );
+    }
+    const txid = tid;
+    const vout = Number(v) || 0;
+
+    const satRaw = info.sat;
+    let satoshi: string | undefined;
+    if (satRaw !== null && satRaw !== undefined) {
+      satoshi = String(satRaw);
+      if (!validateSatoshiNumber(satoshi).valid) {
+        throw new StructuredError(
+          'QUICKNODE_UNEXPECTED_SHAPE',
+          `QuickNodeProvider: ord_getInscription returned an invalid sat number (${satoshi})`
+        );
+      }
     }
 
     // Content bytes are a separate call: ord_getInscription returns metadata
@@ -261,25 +388,137 @@ export class QuickNodeProvider implements OrdinalsProvider {
       const contentResult = await this.rpcCall<unknown>('ord_getContent', [id], contentJsonCap);
       content = this.decodeContent(contentResult, info.content_type || info.effective_content_type);
     } catch (err) {
-      if (QuickNodeProvider.isNotFound(err)) return null;
+      // The inscription's metadata EXISTS (ord_getInscription succeeded), so
+      // a content-lookup miss (e.g. indexer lag) is "content unavailable",
+      // not "inscription does not exist". Returning null here made
+      // verifyBitcoinWitnessProof report a hard false negative for a real
+      // on-chain anchor (issue #350).
+      if (QuickNodeProvider.isNotFound(err)) {
+        throw new StructuredError(
+          'QUICKNODE_CONTENT_UNAVAILABLE',
+          `QuickNodeProvider: inscription ${id} exists but its content is not yet available from the endpoint (possible indexer lag); retry later`,
+          { inscriptionId: id }
+        );
+      }
       throw err;
     }
 
-    const satRaw = info.sat;
-    const satoshi = satRaw === null || satRaw === undefined ? undefined : String(satRaw);
     const blockHeight = typeof info.height === 'number'
       ? info.height
       : (typeof info.genesis_height === 'number' ? info.genesis_height : undefined);
 
+    // #407 phase 3: decode the inscription's CBOR metadata so a real chain can
+    // be walked/reconstructed. Absent → undefined; present-but-undecodable →
+    // fail closed (never a silent partial reconstruction).
+    const metadata = await this.fetchMetadata(id, info);
+
     return {
-      inscriptionId: info.id || info.inscription_id || id,
+      inscriptionId,
       content,
       contentType: info.content_type || info.effective_content_type || 'application/octet-stream',
       txid,
       vout,
       satoshi,
       blockHeight,
+      ...(metadata !== undefined ? { metadata } : {}),
     };
+  }
+
+  /**
+   * The first (lowest-offset) sat in an output, per the Ordinals & Runes API's
+   * sat-range index (mirrors ord's `/output/<OUTPOINT>` `sat_ranges`). Used to
+   * derive a did:btco identity BEFORE building the inscription that will land
+   * on it, so an empty/error response must fail loudly rather than fabricate
+   * a sat that would mint a wrong DID.
+   */
+  async getFirstSatOfOutput(outpoint: { txid: string; vout: number }): Promise<string> {
+    if (!TXID_RE.test(outpoint.txid) || !Number.isInteger(outpoint.vout) || outpoint.vout < 0) {
+      throw new StructuredError(
+        'QUICKNODE_INVALID_OUTPOINT',
+        'QuickNodeProvider.getFirstSatOfOutput requires a valid { txid, vout } outpoint'
+      );
+    }
+    await this.ensureExpectedNetwork();
+    const outpointStr = `${outpoint.txid}:${outpoint.vout}`;
+    let info: { sat_ranges?: Array<[number | string, number | string]> } | null;
+    try {
+      info = await this.rpcCall<{ sat_ranges?: Array<[number | string, number | string]> } | null>(
+        'ord_getOutput',
+        [outpointStr]
+      );
+    } catch (err) {
+      // Any RPC/transport failure — including "not found" — means the sat
+      // index has nothing for this output. Never guess a sat here.
+      throw new StructuredError(
+        'SAT_INDEX_UNAVAILABLE',
+        `QuickNodeProvider: could not fetch sat index for output ${outpointStr}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    const ranges = info?.sat_ranges;
+    if (!Array.isArray(ranges) || ranges.length === 0 || !Array.isArray(ranges[0])) {
+      throw new StructuredError(
+        'SAT_INDEX_UNAVAILABLE',
+        `QuickNodeProvider: no sat ranges returned for output ${outpointStr} (sat index may not be enabled on this endpoint)`
+      );
+    }
+    const satoshi = String(ranges[0][0]);
+    if (!validateSatoshiNumber(satoshi).valid) {
+      throw new StructuredError(
+        'SAT_INDEX_UNAVAILABLE',
+        `QuickNodeProvider: sat index returned an invalid sat number (${satoshi}) for output ${outpointStr}`
+      );
+    }
+    return satoshi;
+  }
+
+  /**
+   * Fetch + CBOR-decode an inscription's metadata (#407 phase 3). Prefers an
+   * inline hex `metadata` field on the `ord_getInscription` result, else the
+   * `ord_getMetadata` RPC. Returns `undefined` when no metadata exists (RPC
+   * not-found / absent field). Throws a clear fail-closed error when metadata
+   * bytes are PRESENT but cannot be hex/CBOR decoded.
+   */
+  private async fetchMetadata(id: string, info: QuickNodeInscription): Promise<Record<string, unknown> | undefined> {
+    let hex: string | undefined;
+    const inlineMeta = (info as { metadata?: unknown }).metadata;
+    if (typeof inlineMeta === 'string' && inlineMeta.length > 0) {
+      hex = inlineMeta;
+    } else {
+      let raw: unknown;
+      try {
+        raw = await this.rpcCall<unknown>('ord_getMetadata', [id]);
+      } catch (err) {
+        // ONLY degrade to undefined when the metadata genuinely isn't there:
+        // the endpoint lacks ord_getMetadata (older add-on → JSON-RPC method
+        // not found) or the inscription has none (isNotFound). A transient
+        // fault (HTTP 500, timeout, rate-limit) must PROPAGATE — swallowing it
+        // would let the resolver silently truncate the chain to a stale log.
+        // Fable I2.
+        if (QuickNodeProvider.isNotFound(err) || QuickNodeProvider.isMethodNotFound(err)) return undefined;
+        throw err;
+      }
+      if (raw === null || raw === undefined) return undefined;
+      if (typeof raw === 'object') {
+        const obj = raw as Record<string, unknown>;
+        const inner = obj.metadata ?? obj.hex ?? obj.data;
+        if (typeof inner === 'string') hex = inner;
+        else return raw as Record<string, unknown>; // already decoded object
+      } else if (typeof raw === 'string') {
+        hex = raw;
+      } else {
+        return undefined;
+      }
+    }
+    if (!hex) return undefined;
+    try {
+      return decodeCbor<Record<string, unknown>>(hexToBytes(hex));
+    } catch (e) {
+      throw new StructuredError(
+        'QUICKNODE_METADATA_UNDECODABLE',
+        `QuickNodeProvider: inscription ${id} carries metadata that could not be hex/CBOR decoded (${e instanceof Error ? e.message : String(e)}); refusing to reconstruct from partial provenance`,
+        { inscriptionId: id }
+      );
+    }
   }
 
   async getInscriptionsBySatoshi(satoshi: string) {
@@ -287,6 +526,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
     if (!validation.valid) {
       throw new StructuredError('QUICKNODE_INVALID_SATOSHI', `QuickNodeProvider: ${validation.error}`);
     }
+    await this.ensureExpectedNetwork();
     // Sat ordinals max out at 2,099,999,997,689,999 (< 2^53), so Number is
     // exact here; ord_getSat expects a JSON number, not a string.
     let info: { inscriptions?: string[]; inscription_ids?: string[] } | null;
@@ -302,8 +542,10 @@ export class QuickNodeProvider implements OrdinalsProvider {
     const ids = Array.isArray(info?.inscriptions)
       ? info.inscriptions
       : (Array.isArray(info?.inscription_ids) ? info.inscription_ids : []);
+    // Shape-gate server-supplied ids before they flow into DID resolution /
+    // provenance (issue #350).
     return ids
-      .filter((x): x is string => typeof x === 'string' && x.length > 0)
+      .filter((x): x is string => typeof x === 'string' && INSCRIPTION_ID_RE.test(x))
       .map((inscriptionId) => ({ inscriptionId }));
   }
 
@@ -317,6 +559,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
         'QuickNodeProvider.broadcastTransaction requires a raw transaction hex string (even-length hexadecimal)'
       );
     }
+    await this.ensureExpectedNetwork();
     const result = await this.rpcCall<unknown>('sendrawtransaction', [txHexOrObj]);
     // A malformed or empty result must not become a "successful" txid that
     // downstream code records as provenance — require a real 64-char hex txid.
@@ -336,6 +579,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
         'QuickNodeProvider.getTransactionStatus requires a 64-character hex txid'
       );
     }
+    await this.ensureExpectedNetwork();
     let tx: { confirmations?: number; blockhash?: string } | null;
     try {
       tx = await this.rpcCall<{ confirmations?: number; blockhash?: string } | null>(
@@ -369,6 +613,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
   }
 
   async estimateFee(blocks: number = 1): Promise<number> {
+    await this.ensureExpectedNetwork();
     const target = Math.max(1, Math.floor(blocks));
     const result = await this.rpcCall<{ feerate?: number; errors?: string[] } | null>(
       'estimatesmartfee',
@@ -394,7 +639,14 @@ export class QuickNodeProvider implements OrdinalsProvider {
   // (src/bitcoin/transactions/commit.ts) or transfer (src/bitcoin/transfer.ts)
   // transaction locally, sign it, and submit via broadcastTransaction.
 
-  createInscription(_params: { data: Buffer; contentType: string; feeRate?: number; }): Promise<{
+  createInscription(params: {
+    data?: Buffer;
+    buildContent?: (satoshi: string) => InscriptionParts | Promise<InscriptionParts>;
+    contentType: string;
+    feeRate?: number;
+    metadata?: Record<string, unknown>;
+    targetSatoshi?: string;
+  }): Promise<{
     inscriptionId: string;
     revealTxId: string;
     commitTxId?: string;
@@ -405,7 +657,14 @@ export class QuickNodeProvider implements OrdinalsProvider {
     content?: Buffer;
     contentType?: string;
     feeRate?: number;
+    metadata?: Record<string, unknown>;
   }> {
+    if (params.buildContent || params.targetSatoshi) {
+      return Promise.reject(new StructuredError(
+        'ORD_PROVIDER_UNSUPPORTED',
+        'This provider does not support deferred content (buildContent) or sat-targeted reinscription (targetSatoshi). Build the inscription locally and submit via broadcastTransaction.'
+      ));
+    }
     return Promise.reject(new StructuredError(
       'QUICKNODE_CREATE_INSCRIPTION_NOT_IMPLEMENTED',
       'QuickNodeProvider.createInscription is not implemented: QuickNode does not construct or sign transactions, and no inscription was created. Build and sign the commit/reveal transactions locally, then submit them via broadcastTransaction.'

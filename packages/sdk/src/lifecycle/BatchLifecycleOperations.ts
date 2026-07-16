@@ -16,7 +16,9 @@ import {
   type BatchResult,
   type BatchOperationOptions,
   type BatchInscriptionOptions,
+  type BatchProgressSnapshot,
 } from './BatchOperations.js';
+import type { InscribeOnBitcoinOptions } from './LifecycleManager.js';
 
 /**
  * The single-asset lifecycle operations that batch operations orchestrate over.
@@ -26,7 +28,7 @@ import {
 export interface LifecycleCoreOperations {
   createAsset(resources: AssetResource[]): Promise<OriginalsAsset>;
   publishToWeb(asset: OriginalsAsset, publisherDidOrSigner: any): Promise<OriginalsAsset>;
-  inscribeOnBitcoin(asset: OriginalsAsset, feeRate?: number): Promise<OriginalsAsset>;
+  inscribeOnBitcoin(asset: OriginalsAsset, opts?: number | InscribeOnBitcoinOptions): Promise<OriginalsAsset>;
   transferOwnership(asset: OriginalsAsset, to: string): Promise<BitcoinTransaction>;
 }
 
@@ -47,6 +49,26 @@ export class BatchLifecycleOperations {
   ) {
     this.batchExecutor = new BatchOperationExecutor();
     this.batchValidator = new BatchValidator();
+  }
+
+  /**
+   * Per-settled-item 'batch:progress' emitter. Declared in the public
+   * EventTypeMap and subscribed by EventLogger but previously never emitted
+   * anywhere (issue #352).
+   */
+  private emitBatchProgress(batchId: string, operation: string) {
+    return async ({ completed, failed, total }: BatchProgressSnapshot): Promise<void> => {
+      await this.eventEmitter.emit({
+        type: 'batch:progress',
+        timestamp: new Date().toISOString(),
+        batchId,
+        operation,
+        progress: total > 0 ? Math.round(((completed + failed) / total) * 100) : 100,
+        completed,
+        failed,
+        total
+      });
+    };
   }
 
   /**
@@ -86,7 +108,8 @@ export class BatchLifecycleOperations {
           return asset;
         },
         options,
-        batchId // Pass the pre-generated batchId for event correlation
+        batchId, // Pass the pre-generated batchId for event correlation
+        this.emitBatchProgress(batchId, 'create')
       );
 
       // Emit batch:completed event
@@ -147,7 +170,8 @@ export class BatchLifecycleOperations {
           return await this.core.publishToWeb(asset, domain);
         },
         options,
-        batchId // Pass the pre-generated batchId for event correlation
+        batchId, // Pass the pre-generated batchId for event correlation
+        this.emitBatchProgress(batchId, 'publish')
       );
 
       // Emit batch:completed event
@@ -241,7 +265,8 @@ export class BatchLifecycleOperations {
           return await this.core.inscribeOnBitcoin(asset, options?.feeRate);
         },
         options,
-        batchId // Pass the pre-generated batchId for event correlation
+        batchId, // Pass the pre-generated batchId for event correlation
+        this.emitBatchProgress(batchId, 'inscribe')
       );
 
       // Emit batch:completed event
@@ -318,7 +343,8 @@ export class BatchLifecycleOperations {
           return await this.core.transferOwnership(transfer.asset, transfer.to);
         },
         options,
-        batchId // Pass the pre-generated batchId for event correlation
+        batchId, // Pass the pre-generated batchId for event correlation
+        this.emitBatchProgress(batchId, 'transfer')
       );
 
       // Emit batch:completed event

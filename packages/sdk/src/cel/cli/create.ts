@@ -38,6 +38,8 @@ export interface CreateResult {
   success: boolean;
   message: string;
   log?: unknown;
+  /** The asset's derived did:cel identifier */
+  did?: string;
   keyGenerated?: boolean;
   privateKey?: string;
   publicKey?: string;
@@ -255,8 +257,9 @@ export async function createCommand(flags: CreateFlags): Promise<CreateResult> {
   });
   
   let eventLog;
+  let assetDid = '';
   try {
-    eventLog = await manager.create(flags.name, [resource]);
+    ({ log: eventLog, did: assetDid } = await manager.create(flags.name, [resource]));
   } catch (e) {
     return {
       success: false,
@@ -304,6 +307,10 @@ export async function createCommand(flags: CreateFlags): Promise<CreateResult> {
     }
   }
   
+  // Surface the derived did:cel on stderr (stdout carries the serialized log
+  // when no --output is given).
+  console.error(`\nAsset DID: ${assetDid}`);
+
   // Build result
   const result: CreateResult = {
     success: true,
@@ -311,6 +318,7 @@ export async function createCommand(flags: CreateFlags): Promise<CreateResult> {
       ? `Created CEL asset "${flags.name}" and saved to ${flags.output}`
       : `Created CEL asset "${flags.name}"`,
     log: eventLog,
+    did: assetDid,
     keyGenerated,
   };
   

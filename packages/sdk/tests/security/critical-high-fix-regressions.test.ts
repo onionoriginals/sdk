@@ -181,7 +181,7 @@ describe('multi-sig proofs must be assertions (review follow-up)', () => {
   });
 });
 
-describe('multi-sig signs plain VCDM 1.1 credentials (review follow-up)', () => {
+describe('multi-sig adds a securing context when one is missing (review follow-up)', () => {
   test('a credential without a data-integrity context signs and verifies (securing context added)', async () => {
     const { MultiSigManager } = await import('../../src/vc/MultiSigManager');
     const { DIDManager } = await import('../../src/did/DIDManager');
@@ -194,12 +194,15 @@ describe('multi-sig signs plain VCDM 1.1 credentials (review follow-up)', () => 
     const mgr = new MultiSigManager(config, new DIDManager(config));
     const policy = { required: 1, total: 1, signerVerificationMethods: [vm] };
 
-    // Plain VCDM 1.1 context only — previously threw 'Safe mode validation error'
+    // A credential whose @context defines no securing (data-integrity) context —
+    // previously threw 'Safe mode validation error' until withSecuringContext
+    // appended data-integrity/v2. (The SDK is VCDM 2.0-only per #300; this uses a
+    // non-securing, resolvable context to still exercise the append path.)
     const credential = {
-      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      '@context': ['https://originals.build/context'],
       type: ['VerifiableCredential'],
       issuer: 'did:peer:issuer',
-      issuanceDate: new Date().toISOString(),
+      validFrom: new Date().toISOString(),
       credentialSubject: { id: 'did:peer:subject' },
     };
     const signed = await mgr.signCredentialMultiSig(credential as never, {

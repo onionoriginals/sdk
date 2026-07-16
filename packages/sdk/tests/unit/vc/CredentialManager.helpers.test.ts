@@ -38,7 +38,7 @@ describe('CredentialManager - Factory Methods', () => {
       expect(credential.type).toContain('VerifiableCredential');
       expect(credential.type).toContain('ResourceCreated');
       expect(credential.issuer).toBe('did:peer:creator');
-      expect(credential.issuanceDate).toBeDefined();
+      expect(credential.validFrom).toBeDefined();
       expect(credential.id).toBeDefined();
       expect(credential.id?.startsWith('urn:uuid:')).toBe(true);
       

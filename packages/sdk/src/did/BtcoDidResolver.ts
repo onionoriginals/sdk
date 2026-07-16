@@ -30,6 +30,10 @@ export interface BtcoDidResolutionResult {
     deactivated?: boolean;
     inscriptionId?: string;
     network?: string;
+    // Best-effort UTXO ownership of the DID's sat. Resolution METADATA only —
+    // the inscribed document stays byte-authoritative; never derive controller
+    // or any document field from this.
+    ownership?: { address: string; outpoint: string };
   };
 }
 
@@ -37,6 +41,8 @@ export interface ResourceProviderLike {
   getSatInfo(satNumber: string): Promise<{ inscription_ids: string[] }>;
   resolveInscription(inscriptionId: string): Promise<{ id: string; sat: number; content_type: string; content_url: string }>;
   getMetadata(inscriptionId: string): Promise<Record<string, unknown> | null>;
+  /** Optional sat ownership lookup; populates didDocumentMetadata.ownership. */
+  getSatOwnership?(satoshi: string): Promise<{ address: string; outpoint: string } | null>;
 }
 
 export interface BtcoDidResolutionOptions {
@@ -282,6 +288,26 @@ export class BtcoDidResolver {
       }
     }
 
+    const didDocumentMetadata: BtcoDidResolutionResult['didDocumentMetadata'] = {
+      inscriptionId: latestInscriptionId,
+      network,
+      ...(deactivated ? { deactivated: true } : {})
+    };
+
+    // Ownership is best-effort resolution METADATA: a missing lookup or a
+    // throwing provider must never gate resolution, and the byte-authoritative
+    // inscribed document above is never altered from it.
+    if (typeof provider.getSatOwnership === 'function') {
+      try {
+        const ownership = await provider.getSatOwnership(satNumber);
+        if (ownership) {
+          didDocumentMetadata.ownership = ownership;
+        }
+      } catch {
+        // fail-open: resolution is not gated on ownership metadata.
+      }
+    }
+
     return {
       didDocument: latestValidDidDocument,
       inscriptions: inscriptionDataList,
@@ -292,11 +318,7 @@ export class BtcoDidResolver {
         totalInscriptions: inscriptionDataList.length,
         ...(deactivated ? { message: 'DID has been deactivated' } : {})
       },
-      didDocumentMetadata: {
-        inscriptionId: latestInscriptionId,
-        network,
-        ...(deactivated ? { deactivated: true } : {})
-      }
+      didDocumentMetadata
     };
   }
 

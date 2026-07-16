@@ -19,6 +19,27 @@ export const LEGACY_SECP256K1_PRIV_HEADER = new Uint8Array([0x13, 0x01]);
 
 export type MultikeyType = 'Ed25519' | 'Secp256k1' | 'Bls12381G2' | 'P256';
 
+// Expected raw key lengths per type. Decode paths enforce these so a
+// wrong-length body cannot decode "successfully" and be re-encoded into a
+// well-formed-looking but wrong multikey (e.g. during migrateToDIDBTCO key
+// carry-over) — issue #352. Shared with validateMultikeyFormat.
+const EXPECTED_KEY_LENGTHS: Record<MultikeyType, { private: number; public: number }> = {
+  Ed25519: { private: 32, public: 32 },
+  Secp256k1: { private: 32, public: 33 },
+  P256: { private: 32, public: 33 },
+  Bls12381G2: { private: 32, public: 96 }
+};
+
+function assertKeyLength(key: Uint8Array, type: MultikeyType, isPrivate: boolean): void {
+  const expected = isPrivate ? EXPECTED_KEY_LENGTHS[type].private : EXPECTED_KEY_LENGTHS[type].public;
+  if (key.length !== expected) {
+    throw new Error(
+      `Invalid multibase key format. Expected ${type} ${isPrivate ? 'private' : 'public'} key to be ` +
+      `${expected} bytes, but found ${key.length} bytes.`
+    );
+  }
+}
+
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(a.length + b.length);
   out.set(a, 0);
@@ -95,26 +116,8 @@ export function validateMultikeyFormat(
       );
     }
 
-    // Validate key length (basic sanity check)
-    const keyBytes = mc.slice(2);
-    const expectedLengths: Record<MultikeyType, { private: number; public: number }> = {
-      Ed25519: { private: 32, public: 32 },
-      Secp256k1: { private: 32, public: 33 },
-      P256: { private: 32, public: 33 },
-      Bls12381G2: { private: 32, public: 96 }
-    };
-
-    const expectedLength = isPrivate
-      ? expectedLengths[expectedType].private
-      : expectedLengths[expectedType].public;
-
-    if (keyBytes.length !== expectedLength) {
-      throw new Error(
-        `Invalid multibase key format. Expected ${expectedType} ${
-          isPrivate ? 'private' : 'public'
-        } key to be ${expectedLength} bytes, but found ${keyBytes.length} bytes.`
-      );
-    }
+    // Validate key length (basic sanity check; same table the decode paths enforce)
+    assertKeyLength(mc.slice(2), expectedType, isPrivate);
   } catch (error) {
     // Re-throw our own errors as-is
     if (error instanceof Error && error.message.startsWith('Invalid multibase key format')) {
@@ -194,17 +197,21 @@ export const multikey = {
     const mc = base58.decode(publicKeyMultibase.slice(1));
     const header = mc.slice(0, 2);
     const key = mc.slice(2);
+    const decoded = (type: MultikeyType): { key: Uint8Array; type: MultikeyType } => {
+      assertKeyLength(key, type, false);
+      return { key, type };
+    };
     if (header[0] === MULTICODEC_ED25519_PUB_HEADER[0] && header[1] === MULTICODEC_ED25519_PUB_HEADER[1]) {
-      return { key, type: 'Ed25519' };
+      return decoded('Ed25519');
     }
     if (header[0] === MULTICODEC_SECP256K1_PUB_HEADER[0] && header[1] === MULTICODEC_SECP256K1_PUB_HEADER[1]) {
-      return { key, type: 'Secp256k1' };
+      return decoded('Secp256k1');
     }
     if (header[0] === MULTICODEC_BLS12381_G2_PUB_HEADER[0] && header[1] === MULTICODEC_BLS12381_G2_PUB_HEADER[1]) {
-      return { key, type: 'Bls12381G2' };
+      return decoded('Bls12381G2');
     }
     if (header[0] === MULTICODEC_P256_PUB_HEADER[0] && header[1] === MULTICODEC_P256_PUB_HEADER[1]) {
-      return { key, type: 'P256' };
+      return decoded('P256');
     }
     throw new Error('Unsupported key type');
   },
@@ -216,20 +223,24 @@ export const multikey = {
     const mc = base58.decode(privateKeyMultibase.slice(1));
     const header = mc.slice(0, 2);
     const key = mc.slice(2);
+    const decoded = (type: MultikeyType): { key: Uint8Array; type: MultikeyType } => {
+      assertKeyLength(key, type, true);
+      return { key, type };
+    };
     if (header[0] === MULTICODEC_ED25519_PRIV_HEADER[0] && header[1] === MULTICODEC_ED25519_PRIV_HEADER[1]) {
-      return { key, type: 'Ed25519' };
+      return decoded('Ed25519');
     }
     if (header[0] === MULTICODEC_SECP256K1_PRIV_HEADER[0] && header[1] === MULTICODEC_SECP256K1_PRIV_HEADER[1]) {
-      return { key, type: 'Secp256k1' };
+      return decoded('Secp256k1');
     }
     if (header[0] === LEGACY_SECP256K1_PRIV_HEADER[0] && header[1] === LEGACY_SECP256K1_PRIV_HEADER[1]) {
-      return { key, type: 'Secp256k1' };
+      return decoded('Secp256k1');
     }
     if (header[0] === MULTICODEC_BLS12381_G2_PRIV_HEADER[0] && header[1] === MULTICODEC_BLS12381_G2_PRIV_HEADER[1]) {
-      return { key, type: 'Bls12381G2' };
+      return decoded('Bls12381G2');
     }
     if (header[0] === MULTICODEC_P256_PRIV_HEADER[0] && header[1] === MULTICODEC_P256_PRIV_HEADER[1]) {
-      return { key, type: 'P256' };
+      return decoded('P256');
     }
     throw new Error('Unsupported key type');
   }

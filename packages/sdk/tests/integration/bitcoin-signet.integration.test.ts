@@ -95,10 +95,11 @@ describeSignet('OrdinalsClient against signet', () => {
     client = new OrdinalsClient(ORD_SIGNET_URL!, 'signet');
   });
 
-  test('estimateFee returns a positive number', async () => {
-    const fee = await client.estimateFee(1);
-    expect(typeof fee).toBe('number');
-    expect(fee).toBeGreaterThan(0);
+  test('estimateFee throws NOT_IMPLEMENTED instead of returning a hardcoded rate (#318/#328)', async () => {
+    // OrdinalsClient.estimateFee was hardened in #248/#318 to refuse to return
+    // a fabricated fee rate. Until real fee estimation lands (#328) this must
+    // assert the fail-loud behavior, not a positive number.
+    await expect(client.estimateFee(1)).rejects.toThrow(/not implemented/i);
   });
 
   test('getSatInfo returns inscription_ids array for unknown sat', async () => {
@@ -144,11 +145,6 @@ describeSignet('BitcoinManager against signet', () => {
       enableLogging: false,
     };
     manager = new BitcoinManager(config);
-  });
-
-  test('preventFrontRunning returns boolean for unknown satoshi', async () => {
-    const result = await manager.preventFrontRunning('999999999999999');
-    expect(typeof result).toBe('boolean');
   });
 
   test('getSatoshiFromInscription returns null for unknown inscription', async () => {
@@ -199,9 +195,14 @@ describeSignet('OriginalsSDK with signet provider', () => {
   });
 
   test('SDK DID operations work alongside signet provider', async () => {
-    // Verify DID creation still works when signet provider is configured
-    const didDoc = await sdk.did.createDIDPeer();
-    expect(didDoc.id).toMatch(/^did:peer:/);
+    // Verify asset creation (did:cel genesis) works when the signet provider is
+    // configured. did:peer creation was removed (did:peer purge, did:cel Phase 4·5/5).
+    // Hash-only resource (no inline content) so createAsset's content↔hash
+    // check (#347) is skipped; 'a'*64 is a valid hex hash.
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r1', type: 'data', contentType: 'text/plain', hash: 'a'.repeat(64) },
+    ]);
+    expect(asset.id).toMatch(/^did:cel:/);
   });
 });
 
@@ -229,17 +230,11 @@ describeSignet('SignetProvider against signet', () => {
     expect(Array.isArray(results)).toBe(true);
   });
 
-  test('estimateFee returns a positive number', async () => {
-    const fee = await provider.estimateFee(1);
-    expect(typeof fee).toBe('number');
-    expect(fee).toBeGreaterThan(0);
-  });
-
-  test('estimateFee uses Bitcoin Core RPC when configured', async () => {
+  test('estimateFee uses Bitcoin Core RPC when configured, throws without it (#351)', async () => {
     if (!BITCOIN_SIGNET_RPC_URL) {
-      // Without RPC, falls back to default
-      const fee = await provider.estimateFee(6);
-      expect(fee).toBeGreaterThan(0);
+      // Without RPC there is no real fee source; fabricating a rate is
+      // forbidden (issue #351), so the provider must fail loudly.
+      await expect(provider.estimateFee(6)).rejects.toThrow(/bitcoinRpcUrl/);
       return;
     }
     // With RPC, should get a real fee estimate
@@ -301,11 +296,6 @@ describeSignet('SignetProvider with BitcoinManager', () => {
       enableLogging: false,
     };
     manager = new BitcoinManager(config);
-  });
-
-  test('preventFrontRunning returns boolean', async () => {
-    const result = await manager.preventFrontRunning('999999999999999');
-    expect(typeof result).toBe('boolean');
   });
 
   test('validateBTCODID returns false for nonexistent DID', async () => {
@@ -406,10 +396,6 @@ describeSignet('BitcoinManager DID validation against signet', () => {
   test('validateBTCODID rejects DID with invalid network prefix', async () => {
     const result = await manager.validateBTCODID('did:btco:invalid:123');
     expect(result).toBe(false);
-  });
-
-  test('preventFrontRunning rejects empty satoshi', async () => {
-    await expect(manager.preventFrontRunning('')).rejects.toThrow('SATOSHI_REQUIRED');
   });
 
   test('inscribeData validates content type format', async () => {

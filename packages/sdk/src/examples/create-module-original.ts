@@ -241,7 +241,7 @@ export function formatText(text, style = 'title') {
       }],
       // Declare dependency on greeting-utils
       dependencies: [{
-        did: 'did:peer:example-greeting-utils-did',
+        did: 'did:cel:example-greeting-utils-did',
         name: 'greeting-utils',
         version: '^1.0.0',
       }],

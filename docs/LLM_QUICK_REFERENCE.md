@@ -16,7 +16,7 @@ const sdk = OriginalsSDK.create({
 ## Asset Lifecycle (Clean API)
 
 ```typescript
-// Layer 1: Create draft (did:peer)
+// Layer 1: Create draft — asset.id is did:cel:…, currentLayer label 'did:peer'
 const draft = await sdk.lifecycle.createDraft(resources, {
   onProgress: (p) => console.log(`${p.percentage}%: ${p.message}`)
 });
@@ -35,6 +35,37 @@ const cost = await sdk.lifecycle.estimateCost(draft, 'did:btco');
 
 // Migration validation
 const validation = await sdk.lifecycle.validateMigration(draft, 'did:webvh');
+```
+
+## Interchange, Ownership & Author-enablement
+
+```typescript
+// Creator: serialize provenance into a self-describing envelope.
+const envelope = asset.serialize();                 // AssetEnvelope
+const wire = JSON.stringify(envelope);
+
+// Buyer: reconstruct + VERIFY BY DEFAULT — no keys needed (verification is
+// public-key-only). With an ordinalsProvider, sets checkHeadFreshness and
+// rejects a truncated pre-rotation hand-off as STALE_LOG.
+const { asset, verification, warnings } = await sdk.lifecycle.loadAsset(wire);
+//   throws ASSET_LOAD_VERIFICATION_FAILED / ENVELOPE_INVALID / ENVELOPE_VERSION_UNSUPPORTED
+
+// OWNERSHIP = sat control. transferOwnership is a pure sat move — it writes
+// NOTHING to the CEL. Receiving an asset = receiving the sat (no inscription).
+await sdk.lifecycle.transferOwnership(asset, 'bcrt1q...');
+const owner = await sdk.lifecycle.getCurrentOwner(asset); // { address, outpoint } | null (read live)
+
+// AUTHORING is optional and separate from ownership. To append new provenance the
+// sat holder must establish a signing key:
+//  COOPERATIVE: outgoing controller signs → rotate the new holder's key in.
+await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase, privateKey });
+//  NON-COOPERATIVE: holder can't get the seller's signature. authorizeSigner
+//  reinscribes with THEIR key and self-signs; the witness proves sat control.
+//  It enables authoring, NOT ownership (the sat already is). privateKey REQUIRED.
+await sdk.lifecycle.authorizeSigner(asset, { publicKeyMultibase, privateKey });
+// Before enabling a signer, a holder's appends DEGRADE (cel:append-skipped/
+// NO_SIGNING_KEY) yet they still own and can transfer the sat. Post-genesis
+// resource versions ride unverified.resourceUpdates (advisory) until Phase 4.
 ```
 
 ## Typed Originals (Kinds System)
@@ -214,7 +245,7 @@ await sdk.did.createDIDWebVH({
 
 ## Critical Rules
 
-1. **Bitcoin ops need `ordinalsProvider`** - Always configure for inscribe/transfer
+1. **Bitcoin ops need `ordinalsProvider`** - Always configure for inscribe/transfer; also pass it to `asset.verify({ ordinalsProvider })` to verify inscribed (did:btco) assets
 2. **Keys are Multikey, not JWK** - Use `multikey.encode*()` functions
 3. **Migration is one-way** - peer → webvh → btco only
 4. **Max fee rate: 10,000 sat/vB** - Prevents accidental fund loss

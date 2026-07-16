@@ -35,7 +35,7 @@ describe('StatusListManager', () => {
       expect(vc.type).toContain('BitstringStatusListCredential');
       expect(vc.id).toBe(listId);
       expect(vc.issuer).toBe(issuer);
-      expect(vc.issuanceDate).toBeDefined();
+      expect(vc.validFrom).toBeDefined();
       expect(vc.credentialSubject.type).toBe('BitstringStatusList');
       expect(vc.credentialSubject.statusPurpose).toBe('revocation');
       expect(vc.credentialSubject.encodedList).toBeDefined();

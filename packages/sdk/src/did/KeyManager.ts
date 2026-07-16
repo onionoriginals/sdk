@@ -144,7 +144,7 @@ export class KeyManager {
 		// Ensure required contexts
 		const multikeyContext = 'https://w3id.org/security/multikey/v1';
 		const securityContext = 'https://w3id.org/security/v1';
-		const credentialsContext = 'https://www.w3.org/2018/credentials/v1';
+		const credentialsContext = 'https://www.w3.org/ns/credentials/v2';
 		
 		const updatedContext = [...didDoc['@context']];
 		if (!updatedContext.includes(multikeyContext)) {
@@ -205,7 +205,7 @@ export class KeyManager {
 			'@context': [credentialsContext, securityContext],
 			type: ['VerifiableCredential', 'KeyRecoveryCredential'],
 			issuer: didDoc.id,
-			issuanceDate: compromisedTimestamp,
+			validFrom: compromisedTimestamp,
 			credentialSubject: {
 				id: didDoc.id,
 				recoveredAt: compromisedTimestamp,

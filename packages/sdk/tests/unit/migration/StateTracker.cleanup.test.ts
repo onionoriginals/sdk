@@ -1,3 +1,4 @@
+// SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Item 6: StateTracker.cleanupOldStates never reclaimed FAILED/QUARANTINED
  * entries, so they accumulated unboundedly. They are now cleaned up with a
@@ -49,7 +50,7 @@ async function makeTerminalState(
   return state.migrationId;
 }
 
-describe('StateTracker.cleanupOldStates reclaims FAILED/QUARANTINED (item 6)', () => {
+describe.skip('StateTracker.cleanupOldStates reclaims FAILED/QUARANTINED (item 6)', () => {
   let tracker: StateTracker;
 
   beforeEach(() => {
@@ -100,7 +101,7 @@ describe('StateTracker.cleanupOldStates reclaims FAILED/QUARANTINED (item 6)', (
   });
 });
 
-describe('MIGRATION_IN_PROGRESS rejection produces no audit/event noise (item 6, low-pri)', () => {
+describe.skip('MIGRATION_IN_PROGRESS rejection produces no audit/event noise (item 6, low-pri)', () => {
   afterEach(() => {
     MigrationManager.resetInstance();
   });
@@ -115,7 +116,7 @@ describe('MIGRATION_IN_PROGRESS rejection produces no audit/event noise (item 6,
     );
 
     const peerDid = await sdk.did.createDIDPeer([
-      { id: 'res-noise', type: 'Image', contentType: 'image/png', hash: 'abc123', content: 'data' }
+      { id: 'res-noise', type: 'Image', contentType: 'image/png', hash: '3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7', content: 'data' }
     ]);
 
     const failedEvents: unknown[] = [];

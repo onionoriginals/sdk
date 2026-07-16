@@ -3,7 +3,8 @@ import {
   OrdinalsInscription,
   BitcoinTransaction
 } from '../types/index.js';
-import type { FeeOracleAdapter, OrdinalsProvider } from '../adapters/index.js';
+import type { FeeOracleAdapter, OrdinalsProvider, InscriptionParts } from '../adapters/index.js';
+import type { OperationLock } from '../utils/OperationLock.js';
 import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
@@ -11,17 +12,21 @@ import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
 /**
  * Upper bound on any fee rate the SDK will use, whether caller-provided or
  * returned by a fee oracle / ordinals provider. Guards against a misbehaving or
- * compromised estimator draining funds via an absurd sat/vB value.
+ * compromised estimator draining funds via an absurd sat/vB value. Exported so
+ * quote-only paths (LifecycleManager.estimateCost) apply the same cap
+ * (issue #351).
  */
-const MAX_REASONABLE_FEE_RATE = 10_000; // sat/vB
+export const MAX_REASONABLE_FEE_RATE = 10_000; // sat/vB
 
 export class BitcoinManager {
   private readonly feeOracle?: FeeOracleAdapter;
   private readonly ord?: OrdinalsProvider;
+  private readonly operationLock?: OperationLock;
 
   constructor(private config: OriginalsConfig) {
     this.feeOracle = config.feeOracle;
     this.ord = config.ordinalsProvider;
+    this.operationLock = config.operationLock;
   }
 
   /**
@@ -40,6 +45,15 @@ export class BitcoinManager {
    */
   get ordinalsProvider(): OrdinalsProvider | undefined {
     return this.ord;
+  }
+
+  /**
+   * Public fee-rate estimate (sat/vB) via the same feeOracle→provider fallback
+   * the paid inscribe path uses. Returns undefined when no source yields a
+   * plausible rate. Used to surface btco-append cost (#407 phase 3).
+   */
+  async estimateFeeRate(targetBlocks = 1): Promise<number | undefined> {
+    return this.resolveFeeRate(targetBlocks);
   }
 
   private async resolveFeeRate(targetBlocks = 1, provided?: number): Promise<number | undefined> {
@@ -112,7 +126,23 @@ export class BitcoinManager {
   async inscribeData(
     data: any,
     contentType: string,
-    feeRate?: number
+    feeRate?: number,
+    options?: {
+      targetSatoshi?: string;
+      /**
+       * Canonical DID being inscribed. When provided (and a shared operationLock
+       * is configured), the paid createInscription broadcast is claimed under
+       * this key so a second concurrent inscription of the same DID — even from a
+       * different manager — is rejected rather than double-paying (issue #303).
+       */
+      lockKey?: string;
+      /**
+       * Static CBOR metadata to attach to the inscription (#407 phase 2). On the
+       * deferred (`buildContent`) path, a `{ content, metadata }` result from the
+       * builder takes precedence over this.
+       */
+      metadata?: Record<string, unknown>;
+    }
   ): Promise<OrdinalsInscription> {
     // Input validation
     if (!data) {
@@ -151,7 +181,25 @@ export class BitcoinManager {
       );
     }
 
-    const creation = await this.ord.createInscription({ data, contentType, feeRate: effectiveFeeRate });
+    const ord = this.ord;
+    // Everything from here spends money on-chain; hold the shared lock across it
+    // so a concurrent inscription of the same DID cannot broadcast a duplicate.
+    const performInscription = async (): Promise<OrdinalsInscription> => {
+    const creation = typeof data === 'function'
+      ? await ord.createInscription({
+          buildContent: data as (satoshi: string) => InscriptionParts | Promise<InscriptionParts>,
+          contentType,
+          feeRate: effectiveFeeRate,
+          ...(options?.metadata ? { metadata: options.metadata } : {}),
+          ...(options?.targetSatoshi ? { targetSatoshi: options.targetSatoshi } : {})
+        })
+      : await ord.createInscription({
+          data,
+          contentType,
+          feeRate: effectiveFeeRate,
+          ...(options?.metadata ? { metadata: options.metadata } : {}),
+          ...(options?.targetSatoshi ? { targetSatoshi: options.targetSatoshi } : {})
+        });
     const txid = creation.txid ?? creation.revealTxId;
     if (!creation.inscriptionId || !txid) {
       throw new StructuredError(
@@ -205,17 +253,29 @@ export class BitcoinManager {
     } = {
       satoshi,
       inscriptionId: creation.inscriptionId,
-      content: creation.content ?? data,
+      // On the deferred path `data` is a content-BUILDER function, never valid
+      // inscription content — only fall back to it when it is a real Buffer,
+      // else leave content undefined (a function here crashes downstream JSON
+      // parsing after migrate + payment).
+      content: creation.content ?? (Buffer.isBuffer(data) ? data : undefined),
       contentType: creation.contentType ?? contentType,
       txid,
       vout: typeof creation.vout === 'number' ? creation.vout : 0,
       blockHeight: creation.blockHeight,
       revealTxId: creation.revealTxId,
       commitTxId: creation.commitTxId,
-      feeRate: recordedFeeRate
+      feeRate: recordedFeeRate,
+      ...(creation.metadata !== undefined ? { metadata: creation.metadata } : {})
     };
 
     return inscription;
+    };
+
+    const lockKey = options?.lockKey;
+    if (lockKey && this.operationLock) {
+      return this.operationLock.runExclusive(lockKey, performInscription);
+    }
+    return performInscription();
   }
 
   async trackInscription(inscriptionId: string): Promise<OrdinalsInscription | null> {
@@ -229,7 +289,8 @@ export class BitcoinManager {
         contentType: info.contentType,
         txid: info.txid,
         vout: info.vout,
-        blockHeight: info.blockHeight
+        blockHeight: info.blockHeight,
+        ...(info.metadata !== undefined ? { metadata: info.metadata } : {})
       };
     }
     return null;
@@ -303,16 +364,6 @@ export class BitcoinManager {
       blockHeight: response.blockHeight,
       confirmations: response.confirmations
     };
-  }
-
-  async preventFrontRunning(satoshi: string): Promise<boolean> {
-    if (!satoshi) throw new StructuredError('SATOSHI_REQUIRED', 'Satoshi identifier is required');
-    // Naive implementation: check for multiple inscriptions on same satoshi via provider
-    if (this.ord) {
-      const list = await this.ord.getInscriptionsBySatoshi(satoshi);
-      return list.length <= 1;
-    }
-    return true;
   }
 
   /**

@@ -97,13 +97,21 @@ export function getNetworkContextUrl(network: WebVHNetworkName): string {
 export function validateVersionForNetwork(version: string, network: WebVHNetworkName): boolean {
   const config = getNetworkConfig(network);
 
-  // Parse semver (basic parsing, assumes format X.Y.Z)
-  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-.*)?$/);
+  // Parse semver (basic parsing, assumes format X.Y.Z with optional prerelease)
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(-.*)?$/);
   if (!match) {
     throw new Error(`Invalid version format: ${version}. Expected semver format (e.g., 1.2.3)`);
   }
 
-  const [, , minor, patch] = match;
+  const [, , minor, patch, prerelease] = match;
+
+  // A prerelease (e.g. 2.0.0-rc.1) is NOT a release: it must not pass the
+  // pichu "major releases only" or cleffa "minor releases" gates just because
+  // its numeric part matches (issue #352). Only magby (all versions) accepts
+  // prereleases.
+  if (prerelease && config.stability !== 'patch') {
+    return false;
+  }
 
   switch (config.stability) {
     case 'major':

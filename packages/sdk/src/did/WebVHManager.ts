@@ -1,7 +1,7 @@
 import { KeyManager } from './KeyManager.js';
 import { multikey } from '../crypto/Multikey.js';
 import { Ed25519Signer } from '../crypto/Signer.js';
-import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier } from '../types/index.js';
+import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier, VerificationMethod as DidDocVerificationMethod } from '../types/index.js';
 import { StructuredError } from '../utils/telemetry.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { base58 } from '@scure/base';
@@ -197,11 +197,11 @@ export interface CreateWebVHOptions {
   prerotation?: boolean;
   /**
    * Extra verification methods to publish in the DID document alongside the
-   * signing key (e.g. keys carried over from a migrated did:peer document).
+   * signing key (e.g. keys carried over from a migrated genesis document).
    * These do NOT become updateKeys — they are published for verification only.
    */
   additionalVerificationMethods?: VerificationMethod[];
-  /** alsoKnownAs identifiers to record (e.g. the pre-migration did:peer). */
+  /** alsoKnownAs identifiers to record (e.g. the pre-migration source DID). */
   alsoKnownAs?: string[];
   /** Service endpoints to carry into the DID document. */
   services?: Array<Record<string, unknown>>;
@@ -281,12 +281,12 @@ export interface RecoverWebVHOptions {
   outputDir?: string;
 }
 
-/** Minimal W3C VC documenting a key-compromise recovery. */
+/** Minimal W3C VCDM 2.0 VC documenting a key-compromise recovery. */
 export interface KeyRecoveryCredential {
   '@context': string[];
   type: string[];
   issuer: string;
-  issuanceDate: string;
+  validFrom: string;
   credentialSubject: {
     id: string;
     recoveredAt: string;
@@ -421,9 +421,14 @@ export class WebVHManager {
       // Generate or use provided key pair (Ed25519 for did:webvh)
       keyPair = providedKeyPair || await this.keyManager.generateKeyPair('Ed25519');
 
-      // Create verification methods
+      // Create verification methods. The signing VM must carry an explicit
+      // id: without one, didwebvh-ts assigns a key-derived id (e.g.
+      // '#9XCESUFW'), and the '#key-0' relationship arrays emitted below
+      // reference a fragment no verification method has — breaking
+      // third-party proof-purpose verification (issue #334).
       verificationMethods = [
         {
+          id: '#key-0',
           type: 'Multikey',
           publicKeyMultibase: keyPair.publicKey,
         }
@@ -459,6 +464,20 @@ export class WebVHManager {
       verificationMethods = [...verificationMethods, ...additionalVerificationMethods];
     }
 
+    // The authentication/assertionMethod relationships must reference a
+    // fragment that exists on the published signing VM (issue #334). The
+    // internal path pins the signing VM's id to '#key-0' above; an external
+    // caller may supply its own id — use it. When an external caller omits
+    // the id, assign '#key-0' rather than letting didwebvh-ts derive a
+    // key-based id the relationship arrays would then dangle against.
+    if (verificationMethods.length > 0 && !verificationMethods[0].id) {
+      verificationMethods = [
+        { ...verificationMethods[0], id: '#key-0' },
+        ...verificationMethods.slice(1),
+      ];
+    }
+    const signingVmId = verificationMethods[0]?.id ?? '#key-0';
+
     // Create the DID using didwebvh-ts
     const createArgs: Record<string, unknown> = {
       domain,
@@ -472,8 +491,8 @@ export class WebVHManager {
       ],
       paths,
       portable,
-      authentication: ['#key-0'],
-      assertionMethod: ['#key-0'],
+      authentication: [signingVmId],
+      assertionMethod: [signingVmId],
     };
     if (nextKeyHashes) {
       createArgs.nextKeyHashes = nextKeyHashes;
@@ -729,18 +748,27 @@ export class WebVHManager {
     const currentDoc = currentEntry.state as unknown as DIDDocument;
 
     // Merge updates with current document
-    const updatedDoc = {
+    const updatedDoc: DIDDocument = {
       ...currentDoc,
       ...updates,
       id: did, // Ensure ID doesn't change
     };
 
+    // didwebvh-ts's updateDID never reads a `doc` option: it deep-clones the
+    // last entry's state and only overlays the named options it consumes
+    // (verificationMethods, services, authentication, assertionMethod,
+    // keyAgreement, alsoKnownAs, context). Passing the merged document as
+    // `doc` made every update a signed no-op re-stating the previous state
+    // (issue #338) — translate the merged document into those named options
+    // instead.
+    const namedOptions = this.deriveUpdateOptions(updatedDoc, updates);
+
     // Update the DID using didwebvh-ts
     const result = await updateDID({
       log: currentLog,
-      doc: updatedDoc,
       signer,
       verifier: verifier || undefined,
+      ...namedOptions,
     });
 
     // Validate the returned DID document
@@ -843,12 +871,12 @@ export class WebVHManager {
     const now = new Date().toISOString();
     const recoveryCredential: KeyRecoveryCredential = {
       '@context': [
-        'https://www.w3.org/2018/credentials/v1',
+        'https://www.w3.org/ns/credentials/v2',
         'https://w3id.org/security/multikey/v1'
       ],
       type: ['VerifiableCredential', 'KeyRecoveryCredential'],
       issuer: did,
-      issuanceDate: now,
+      validFrom: now,
       credentialSubject: {
         id: did,
         recoveredAt: now,
@@ -883,6 +911,242 @@ export class WebVHManager {
   }
 
   /**
+   * True when `ref` (a relationship-array entry: a string reference or an
+   * embedded verification method) designates the verification method with the
+   * given `id`. Ids may be relative ('#key-0') or absolute ('did:…#key-0');
+   * per DID Core a relative DID URL resolves against the document id, so
+   * same-document entries are compared by fragment.
+   */
+  private refersToVM(ref: unknown, id: string | undefined): boolean {
+    const refId = typeof ref === 'string' ? ref : (ref as { id?: unknown } | null)?.id;
+    if (typeof refId !== 'string' || !id) return false;
+    if (refId === id) return true;
+    const refFragment = refId.split('#')[1];
+    const idFragment = id.split('#')[1];
+    return refFragment !== undefined && idFragment !== undefined && refFragment === idFragment;
+  }
+
+  /**
+   * Convert a DID-document verification method into the shape didwebvh-ts
+   * consumes, deriving the single-valued `purpose` didwebvh-ts uses to
+   * rebuild relationship arrays. Only the capability relationships are
+   * load-bearing here: authentication/assertionMethod/keyAgreement are pinned
+   * by explicit options wherever this is used, but capabilityInvocation and
+   * capabilityDelegation have NO option override in didwebvh-ts — they are
+   * expressible solely via a VM's purpose.
+   *
+   * CALLER CONTRACT: every call site MUST also pass explicit
+   * `authentication`, `assertionMethod`, and `keyAgreement` options to
+   * updateDID/createDID. `authentication` is deliberately absent from the
+   * purpose chain below (didwebvh-ts already defaults purposeless VMs into
+   * `authentication`), so without the explicit override a VM that is in
+   * `authentication` AND another relationship (e.g. keyAgreement) would get
+   * the other purpose and silently drop out of the rebuilt `authentication`
+   * array.
+   */
+  private toWebVHVerificationMethod(vm: DidDocVerificationMethod, doc: DIDDocument): VerificationMethod {
+    const inRelationship = (rel?: (string | DidDocVerificationMethod)[]): boolean =>
+      Array.isArray(rel) && rel.some(entry => this.refersToVM(entry, vm.id));
+
+    const invocation = inRelationship(doc.capabilityInvocation);
+    const delegation = inRelationship(doc.capabilityDelegation);
+    if (invocation && delegation) {
+      // Path-neutral error code: this helper is reached from update AND from
+      // rotation/recovery (via buildRotationDocumentOptions), so the code
+      // must describe the unexpressible document shape, not one entry path.
+      throw new StructuredError(
+        'WEBVH_UNSUPPORTED_DOCUMENT_SHAPE',
+        `Verification method ${vm.id} is in both capabilityInvocation and capabilityDelegation; ` +
+        'didwebvh-ts expresses capability relationships through a single per-VM purpose, so this ' +
+        'document shape cannot be written (on update, rotation, or recovery) without silently ' +
+        'dropping one relationship.'
+      );
+    }
+    const purpose = invocation ? 'capabilityInvocation'
+      : delegation ? 'capabilityDelegation'
+      : inRelationship(doc.keyAgreement) ? 'keyAgreement'
+      : inRelationship(doc.assertionMethod) ? 'assertionMethod'
+      : undefined;
+    // When no relationship matches, keep any purpose already carried on the
+    // VM (docs produced by this SDK publish it) rather than clearing it.
+    return { ...vm, ...(purpose ? { purpose } : {}) };
+  }
+
+  /**
+   * Translate the merged document + requested updates into the named options
+   * didwebvh-ts's updateDID actually consumes (verified against
+   * didwebvh-ts@2.8.0): `verificationMethods`, `services`, `authentication`,
+   * `assertionMethod`, `keyAgreement`, `alsoKnownAs`, `context`. Fields the
+   * library cannot express are rejected loudly — silently dropping them is
+   * exactly the failure mode of issue #338. Fields the update does not touch
+   * are omitted so they ride the library's own carry-forward of the previous
+   * state, untouched.
+   */
+  private deriveUpdateOptions(mergedDoc: DIDDocument, updates: Partial<DIDDocument>): Record<string, unknown> {
+    const SUPPORTED_UPDATE_FIELDS = new Set([
+      '@context', 'id', 'verificationMethod', 'service', 'authentication',
+      'assertionMethod', 'keyAgreement', 'capabilityInvocation',
+      'capabilityDelegation', 'alsoKnownAs',
+    ]);
+    for (const key of Object.keys(updates)) {
+      if (!SUPPORTED_UPDATE_FIELDS.has(key)) {
+        throw new StructuredError(
+          'WEBVH_UNSUPPORTED_UPDATE_FIELD',
+          `updateDIDWebVH cannot apply updates to "${key}": didwebvh-ts updateDID has no ` +
+          'corresponding option, so the change would be silently discarded.'
+        );
+      }
+    }
+
+    // `id` is accepted only so callers may spread an existing document into
+    // `updates`; the DID identifier itself is immutable through this API
+    // (mergedDoc.id is pinned to the DID before this runs). An attempt to
+    // CHANGE it must fail loudly rather than be silently pinned back.
+    if (updates.id !== undefined && updates.id !== mergedDoc.id) {
+      throw new StructuredError(
+        'WEBVH_UNSUPPORTED_UPDATE_FIELD',
+        `updateDIDWebVH cannot change the DID id (got "${updates.id}"): the identifier is ` +
+        'immutable; moving a portable DID is not supported through this API.'
+      );
+    }
+
+    const options: Record<string, unknown> = {};
+
+    if ('@context' in updates) {
+      options.context = mergedDoc['@context'];
+    }
+    if ('service' in updates) {
+      options.services = mergedDoc.service ?? [];
+    }
+    if ('alsoKnownAs' in updates) {
+      options.alsoKnownAs = mergedDoc.alsoKnownAs ?? [];
+    }
+
+    // Supplying `verificationMethods` makes updateDID REBUILD every
+    // relationship array from the VMs' single `purpose` field, so whenever the
+    // update touches the VM/relationship block, pin authentication,
+    // assertionMethod and keyAgreement to the merged document's arrays (the
+    // library applies those options after the rebuild). The capability
+    // relationships have no such option and are derived from VM purposes in
+    // toWebVHVerificationMethod.
+    const touchesVMBlock = ['verificationMethod', 'capabilityInvocation', 'capabilityDelegation']
+      .some(key => key in updates);
+    if (touchesVMBlock) {
+      const vms = mergedDoc.verificationMethod ?? [];
+      // Capability entries that reference no published VM would be silently
+      // dropped by the rebuild — refuse instead.
+      for (const relName of ['capabilityInvocation', 'capabilityDelegation'] as const) {
+        for (const entry of mergedDoc[relName] ?? []) {
+          if (!vms.some(vm => this.refersToVM(entry, vm.id))) {
+            const shown = typeof entry === 'string' ? entry : (entry as { id?: string }).id ?? JSON.stringify(entry);
+            throw new StructuredError(
+              'WEBVH_UNSUPPORTED_UPDATE_FIELD',
+              `${relName} entry ${shown} does not reference a published verificationMethod; ` +
+              'didwebvh-ts can only express capability relationships as references to verification ' +
+              'methods (via their purpose).'
+            );
+          }
+        }
+      }
+      options.verificationMethods = vms.map(vm => this.toWebVHVerificationMethod(vm, mergedDoc));
+      options.authentication = mergedDoc.authentication ?? [];
+      options.assertionMethod = mergedDoc.assertionMethod ?? [];
+      options.keyAgreement = mergedDoc.keyAgreement ?? [];
+    } else {
+      for (const rel of ['authentication', 'assertionMethod', 'keyAgreement'] as const) {
+        if (rel in updates) {
+          options[rel] = mergedDoc[rel] ?? [];
+        }
+      }
+    }
+
+    return options;
+  }
+
+  /**
+   * The updateKeys currently in force for the log: the most recent entry's
+   * explicit `updateKeys`, walking back through entries that carried the
+   * previous value forward.
+   */
+  private effectiveUpdateKeys(currentLog: DIDLog): string[] {
+    for (let i = currentLog.length - 1; i >= 0; i--) {
+      const keys = (currentLog[i].parameters as { updateKeys?: unknown } | undefined)?.updateKeys;
+      if (Array.isArray(keys)) {
+        return keys.filter((k): k is string => typeof k === 'string');
+      }
+    }
+    return [];
+  }
+
+  /**
+   * Build the verificationMethods + relationship options for a key-change
+   * entry. didwebvh-ts REPLACES the whole VM/relationship block whenever
+   * `verificationMethods` is supplied, so passing only the new signing VM
+   * wiped every carried verification method and emptied keyAgreement and the
+   * capability relationships on rotate/recover (issue #339). Carry the
+   * non-signing VMs forward with purposes derived from the current state, and
+   * re-point the signing role at the new '#key-0'.
+   *
+   * @param retiringKeys - public multikeys being rotated out, in addition to
+   *   the log's effective updateKeys (which always retire on a key change)
+   * @param newPublicKey - the incoming signing key, published as '#key-0'
+   */
+  private buildRotationDocumentOptions(
+    currentLog: DIDLog,
+    retiringKeys: string[],
+    newPublicKey: string
+  ): {
+    verificationMethods: VerificationMethod[];
+    authentication: string[];
+    assertionMethod: string[];
+    keyAgreement: string[];
+  } {
+    const state = (currentLog[currentLog.length - 1]?.state ?? {}) as unknown as DIDDocument;
+    const existingVMs = Array.isArray(state.verificationMethod) ? state.verificationMethod : [];
+
+    const retired = new Set(
+      [...this.effectiveUpdateKeys(currentLog), ...retiringKeys].map(normalizeUpdateKey)
+    );
+    const isRetired = (vm: DidDocVerificationMethod): boolean =>
+      typeof vm.publicKeyMultibase === 'string' && retired.has(vm.publicKeyMultibase);
+    const carriedVMs = existingVMs.filter(
+      vm => !isRetired(vm) && vm.publicKeyMultibase !== newPublicKey
+    );
+
+    const verificationMethods: VerificationMethod[] = [
+      { id: '#key-0', type: 'Multikey', publicKeyMultibase: newPublicKey },
+      ...carriedVMs.map(vm => this.toWebVHVerificationMethod(vm, state)),
+    ];
+
+    // Keep relationship entries that reference carried VMs; drop references
+    // to the retired key (its signing roles transfer to '#key-0') and any
+    // dangling references (e.g. the pre-#334 key-derived-id mismatch).
+    const mapRelationship = (
+      rel: (string | DidDocVerificationMethod)[] | undefined,
+      includeNewKey: boolean
+    ): string[] => {
+      const out: string[] = includeNewKey ? ['#key-0'] : [];
+      for (const entry of rel ?? []) {
+        const refId = typeof entry === 'string' ? entry : entry?.id;
+        if (typeof refId !== 'string') continue;
+        if (carriedVMs.some(vm => this.refersToVM(refId, vm.id)) && !out.includes(refId)) {
+          out.push(refId);
+        }
+      }
+      return out;
+    };
+
+    return {
+      verificationMethods,
+      // The new signing key assumes authentication + assertionMethod, exactly
+      // as createDIDWebVH assigns them to the initial signing key.
+      authentication: mapRelationship(state.authentication, true),
+      assertionMethod: mapRelationship(state.assertionMethod, true),
+      keyAgreement: mapRelationship(state.keyAgreement, false),
+    };
+  }
+
+  /**
    * Shared primitive: append a signed did:webvh log entry that replaces the
    * verification method and updateKey with `newKeyPair`, signed by
    * `currentKeyPair`.
@@ -908,6 +1172,12 @@ export class WebVHManager {
       throw new Error('Failed to load didwebvh-ts: invalid module exports');
     }
 
+    // createDIDWebVH enforces Ed25519 updateKeys; without the same assertion
+    // here a non-Ed25519 rotation key would sign successfully but leave the
+    // DID unverifiable by Ed25519Verifier — bricked for all future updates
+    // (issue #339, related gap).
+    assertEd25519WebVHUpdateKeys([newKeyPair.publicKey]);
+
     const currentVerificationMethod: VerificationMethod = {
       type: 'Multikey',
       publicKeyMultibase: currentKeyPair.publicKey,
@@ -919,19 +1189,20 @@ export class WebVHManager {
       { verificationMethod: currentVerificationMethod }
     );
 
-    const newVerificationMethod: VerificationMethod = {
-      type: 'Multikey',
-      publicKeyMultibase: newKeyPair.publicKey,
-    };
+    // Carry forward all non-signing verification methods and their
+    // relationships; only the signing key rotates (issue #339).
+    const documentOptions = this.buildRotationDocumentOptions(
+      currentLog,
+      [currentKeyPair.publicKey],
+      newKeyPair.publicKey
+    );
 
     const result = await updateDID({
       log: currentLog,
       signer,
       verifier: signer,
       updateKeys: [newKeyPair.publicKey],
-      verificationMethods: [newVerificationMethod],
-      authentication: ['#key-0'],
-      assertionMethod: ['#key-0'],
+      ...documentOptions,
     });
 
     if (!this.isDIDDocument(result.doc)) {
@@ -1000,6 +1271,10 @@ export class WebVHManager {
       );
     }
 
+    // Same Ed25519 guard as appendKeyChange: the pre-committed key becomes
+    // the updateKey, so a non-Ed25519 key would brick future updates.
+    assertEd25519WebVHUpdateKeys([activeKeyPair.publicKey]);
+
     // The active (pre-committed) key signs the entry and becomes updateKey.
     const activeVerificationMethod: VerificationMethod = {
       type: 'Multikey',
@@ -1015,15 +1290,23 @@ export class WebVHManager {
     // Commit the hash of the next key to continue the pre-rotation chain.
     const nextKeyHashes = [computeNextKeyHash(nextKeyPair.publicKey)];
 
+    // Carry forward all non-signing verification methods and their
+    // relationships (issue #339). The retiring key is the log's effective
+    // updateKey (the previously active key), which buildRotationDocumentOptions
+    // always retires; activeKeyPair is the incoming '#key-0'.
+    const documentOptions = this.buildRotationDocumentOptions(
+      currentLog,
+      [],
+      activeKeyPair.publicKey
+    );
+
     const result = await updateDID({
       log: currentLog,
       signer,
       verifier: signer,
       updateKeys: [activeKeyPair.publicKey],
       nextKeyHashes,
-      verificationMethods: [activeVerificationMethod],
-      authentication: ['#key-0'],
-      assertionMethod: ['#key-0'],
+      ...documentOptions,
     });
 
     if (!this.isDIDDocument(result.doc)) {

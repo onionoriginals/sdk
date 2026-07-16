@@ -24,18 +24,18 @@ export class Ed25519Verifier implements ExternalVerifier {
    */
   async verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): Promise<boolean> {
     try {
-      // Ed25519 public keys must be exactly 32 bytes
-      // Some keys may have a version byte prefix, so remove it if present
-      let ed25519PublicKey = publicKey;
-      if (publicKey.length === 33) {
-        ed25519PublicKey = publicKey.slice(1);
-      } else if (publicKey.length !== 32) {
+      // Ed25519 public keys must be exactly 32 bytes. A 33-byte input is NOT
+      // a "prefixed Ed25519 key": Ed25519 multicodec prefixes are 2 bytes
+      // (0xed 0x01 → 34 bytes), while 33 bytes is the shape of a compressed
+      // secp256k1 key. Stripping one byte verified against garbage — reject
+      // instead of guessing (issue #352).
+      if (publicKey.length !== 32) {
         console.error(`[Ed25519Verifier] Invalid public key length: ${publicKey.length} (expected 32 bytes)`);
         return false;
       }
-      
+
       // Correct parameter order: verifyAsync(signature, message, publicKey)
-      return await verifyAsync(signature, message, ed25519PublicKey);
+      return await verifyAsync(signature, message, publicKey);
     } catch (error) {
       console.error('[Ed25519Verifier] Verification error:', error);
       return false;
@@ -64,9 +64,12 @@ export class Ed25519Verifier implements ExternalVerifier {
     if (!this.publicKey) {
       return undefined;
     }
-    // A 33-byte key carries a version-byte prefix (see verify()).
-    const key = this.publicKey.length === 33 ? this.publicKey.slice(1) : this.publicKey;
-    return multikey.encodePublicKey(key, 'Ed25519');
+    // Silently slicing a "prefix" off a wrong-length key would mint a
+    // well-formed-looking but wrong multikey (see verify(), issue #352).
+    if (this.publicKey.length !== 32) {
+      throw new Error(`Invalid Ed25519 public key length: ${this.publicKey.length} (expected 32 bytes)`);
+    }
+    return multikey.encodePublicKey(this.publicKey, 'Ed25519');
   }
 }
 

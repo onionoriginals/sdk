@@ -2,7 +2,8 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { createInMemorySessionStorage, type SessionStorage } from '@originals/auth/server';
 import { createAuthRoutes } from '../auth-routes';
 
-const JWT_SECRET = 'test-secret-please-change';
+// >= 32 chars: @originals/auth enforces RFC 7518's HS256 minimum key length
+const JWT_SECRET = 'test-secret-please-change-0123456789';
 
 // Turnkey mock: initOtp returns an id + a dummy target bundle; verifyOtp returns a token;
 // sub-org lookup/create returns a stable id. Enough to drive the 2.0 flow without real Turnkey.

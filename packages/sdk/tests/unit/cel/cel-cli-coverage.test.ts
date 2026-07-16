@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { spyOn } from 'bun:test';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -86,6 +87,7 @@ function makeMockSigner(vm = 'did:key:z6MkMock#key-1'): (data: unknown) => Promi
   });
 }
 
+/** LEGACY genesis shape (pre-did:cel) — kept as the legacy-fixture per behavior. */
 function makePeerAssetData(name: string) {
   return {
     name,
@@ -94,6 +96,17 @@ function makePeerAssetData(name: string) {
     resources: [],
     creator: 'did:peer:4z123456789abcdef',
     createdAt: new Date().toISOString(),
+  };
+}
+
+/** New-shape genesis (CelAssetData): identity derived (did:cel), controller = holder key DID. */
+function makeCelAssetData(name: string, controller = 'did:key:z6MkMock') {
+  return {
+    name,
+    controller,
+    resources: [],
+    createdAt: new Date().toISOString(),
+    nonce: 'uQ292ZXJhZ2VOb25jZTAx',
   };
 }
 
@@ -117,11 +130,13 @@ afterEach(() => {
 
 describe('CEL-CLI-002/security: verify with tampered hash chain', () => {
   it('returns verified=false and reports chain-integrity error', async () => {
-    // Build a valid 2-event log with real crypto.
+    // Build a valid 2-event log with real crypto over a NEW-SHAPE genesis
+    // (controller = the signer's did:key).
     const { signer, verificationMethod } = await makeRealDidKeySigner();
     const opts = { signer, verificationMethod, proofPurpose: 'assertionMethod' };
+    const controller = verificationMethod.split('#')[0];
 
-    let log = await createEventLog(makePeerAssetData('Chain Test'), opts);
+    let log = await createEventLog(makeCelAssetData('Chain Test', controller), opts);
     log = await updateEventLog(log, { note: 'v2' }, opts);
 
     // Tamper: replace previousEvent hash on the second event.
@@ -152,8 +167,9 @@ describe('CEL-CLI-002/security: verify with invalid proof signature', () => {
   it('returns verified=false and reports signature/proof error', async () => {
     // Build a log with a real did:key verificationMethod but replace the
     // proofValue with a wrong signature (same multibase prefix, bad bytes).
+    // New-shape genesis: controller = the signer's did:key.
     const { signer, verificationMethod } = await makeRealDidKeySigner();
-    const log = await createEventLog(makePeerAssetData('Bad Sig'), {
+    const log = await createEventLog(makeCelAssetData('Bad Sig', verificationMethod.split('#')[0]), {
       signer,
       verificationMethod,
       proofPurpose: 'assertionMethod',
@@ -198,12 +214,40 @@ describe('CEL-CLI-002/security: verify with invalid proof signature', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('CEL-CLI-003/happy: inspect layer history (peer→webvh)', () => {
-  it('shows both layers in history and updated DID/layer in state', async () => {
+  it('shows both layers with a first-class migrate event over a did:cel genesis', async () => {
+    const { appendEvent } = await import('../../../src/cel/algorithms/appendEvent');
+    const { deriveDidCel } = await import('../../../src/cel/celDid');
+    const signer = makeMockSigner();
+    const opts = { signer, verificationMethod: 'did:key:z6MkMock#key-1', proofPurpose: 'assertionMethod' };
+
+    let log = await createEventLog(makeCelAssetData('Migrated Asset'), opts);
+    const sourceDid = deriveDidCel(log);
+    log = await appendEvent(log, 'migrate', {
+      sourceDid,
+      targetDid: 'did:webvh:example.com:asset1',
+      layer: 'webvh',
+      domain: 'example.com',
+      migratedAt: '2026-01-01T10:00:00Z',
+    }, opts);
+
+    const filePath = path.join(tempDir, 'migrated-firstclass.cel.json');
+    fs.writeFileSync(filePath, serializeEventLogJson(log));
+
+    const result = await inspectCommand({ log: filePath });
+
+    expect(result.success).toBe(true);
+    expect(result.state?.layer).toBe('webvh');
+    expect(result.state?.did).toBe('did:webvh:example.com:asset1');
+    expect(result.state?.metadata?.sourceDid).toBe(sourceDid);
+  });
+
+  it('shows both layers in history and updated DID/layer in state (legacy update-sniffed fixture)', async () => {
     const signer = makeMockSigner();
     const opts = { signer, verificationMethod: 'did:key:z6MkMock#key-1', proofPurpose: 'assertionMethod' };
 
     let log = await createEventLog(makePeerAssetData('Migrated Asset'), opts);
-    // Simulate a webvh migration update event (same shape as WebVHCelManager).
+    // Simulate a webvh migration update event (legacy shape — kept as the
+    // legacy-fixture case for the update-sniff fallback).
     log = await updateEventLog(log, {
       sourceDid: 'did:peer:4z123456789abcdef',
       targetDid: 'did:webvh:example.com:asset1',
@@ -666,26 +710,33 @@ describe('CEL-CLI-012/error: file write permission error', () => {
 
     const outPath = path.join(roDir, 'output.json');
 
-    // Use a real did:peer (resolvable offline) so we reach the write path —
-    // unknown DID methods no longer resolve to fabricated stub documents.
-    const { OriginalsSDK } = await import('../../../src');
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
-    const peerDoc = await sdk.did.createDIDPeer([]);
-    const result = await resolveCommand({
-      did: peerDoc.id,
-      output: outPath,
-    });
+    // did:peer offline resolution is gone (did:peer purge, did:cel Phase 4·5/5),
+    // and resolveCommand builds a provider-less SDK, so stub the resolver to
+    // return a document — the subject here is the write-failure path, not resolution.
+    const { DIDManager } = await import('../../../src/did/DIDManager');
+    const did = 'did:cel:uEiExampleForWriteFailure';
+    const spy = spyOn(DIDManager.prototype, 'resolveDID').mockResolvedValue({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: did,
+    } as any);
 
-    // Restore permissions so cleanup works.
-    fs.chmodSync(roDir, 0o755);
+    try {
+      const result = await resolveCommand({ did, output: outPath });
 
-    // Either the write failed (permission denied) or (rarely on macOS running as root)
-    // it succeeded.
-    if (!result.success) {
-      expect(result.message).toMatch(/write|permission|EACCES|EPERM|output|Failed/i);
-    } else {
-      // Running as root or the OS allowed the write — document was returned.
-      expect(result.didDocument).toBeDefined();
+      // Restore permissions so cleanup works.
+      fs.chmodSync(roDir, 0o755);
+
+      // Either the write failed (permission denied) or (rarely on macOS running as root)
+      // it succeeded.
+      if (!result.success) {
+        expect(result.message).toMatch(/write|permission|EACCES|EPERM|output|Failed/i);
+      } else {
+        // Running as root or the OS allowed the write — document was returned.
+        expect(result.didDocument).toBeDefined();
+      }
+    } finally {
+      spy.mockRestore();
+      try { fs.chmodSync(roDir, 0o755); } catch { /* best-effort */ }
     }
   });
 });
