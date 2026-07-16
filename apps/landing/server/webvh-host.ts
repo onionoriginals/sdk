@@ -83,9 +83,19 @@ export function createWebvhHostStore(opts?: {
     const entry = map.get(key);
     if (!entry) return null;
     // Copy so the caller can't mutate stored bytes.
+    // The store is unauthenticated (public demo — must run without secrets), so
+    // content is untrusted. Neutralize stored-XSS: nosniff + a sandbox CSP +
+    // attachment disposition mean a browser never executes served bytes as a
+    // page regardless of their content-type. did:webvh resolution is unaffected
+    // — it reads the log via fetch(), where these headers don't apply.
     return new Response(entry.body.slice(), {
       status: 200,
-      headers: { 'content-type': entry.contentType },
+      headers: {
+        'content-type': entry.contentType,
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; sandbox",
+        'content-disposition': 'attachment',
+      },
     });
   }
 

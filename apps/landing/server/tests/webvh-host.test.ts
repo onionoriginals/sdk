@@ -28,6 +28,21 @@ describe('webvh-host store', () => {
     expect(await served!.text()).toBe('{"v":1}\n{"v":2}');
   });
 
+  test('served content is neutralized against stored XSS', async () => {
+    const store = createWebvhHostStore();
+    // An attacker PUTs active HTML with an arbitrary content-type.
+    const key = 'victim.example.com/evil/did.jsonl';
+    await store.handlePut(
+      putReq(key, '<script>alert(document.cookie)</script>', 'text/html'),
+      new URL(`http://host/api/host/${encodeURIComponent(key)}`)
+    );
+    const url = new URL('http://victim.example.com/evil/did.jsonl');
+    const served = store.serve(new Request(url), url)!;
+    expect(served.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(served.headers.get('content-security-policy')).toContain('sandbox');
+    expect(served.headers.get('content-disposition')).toBe('attachment');
+  });
+
   test('serve returns null for unknown key', () => {
     const store = createWebvhHostStore();
     const url = new URL('http://demo.example.com/nope/did.jsonl');
