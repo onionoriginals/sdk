@@ -3,6 +3,7 @@ import { describe, test, expect } from 'bun:test';
 import * as btc from '@scure/btc-signer';
 import { OriginalsSDK, OriginalsAsset } from '../../../src';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 import { sampleUtxo, sampleChangeAddress } from '../../fixtures/bitcoin';
 
 // Extends the standard OrdMock double with the sat-index surface inscribeOnSat
@@ -31,7 +32,7 @@ class NoFeeSatSelectProvider extends SatSelectProvider {
 // witness-independent — an unsigned raw serialization yields the same txid the
 // SDK computes locally.
 const satSigner = {
-  signCommitPsbt: async (psbtBase64: string) => {
+  signAndFinalizeCommitPsbt: async (psbtBase64: string) => {
     const tx = btc.Transaction.fromPSBT(Buffer.from(psbtBase64, 'base64'), { allowUnknownOutputs: true });
     return Buffer.from(tx.toBytes(true, false)).toString('hex');
   }
@@ -82,6 +83,57 @@ describe('inscribeOnBitcoin (sat-selected)', () => {
     await expect(
       sdk.lifecycle.inscribeOnBitcoin(asset, { fundingUtxo: sampleUtxo, satSigner, changeAddress: sampleChangeAddress })
     ).rejects.toMatchObject({ code: 'FEE_RATE_REQUIRED' });
+  });
+
+  test('preserves the migrate CEL event (no rollback) and reaches a coherent btco state when the reveal broadcast fails', async () => {
+    // The reveal broadcast (2nd broadcastTransaction call) fails, but the commit
+    // is already on-chain and the reveal is recoverable via revealTxHex. The
+    // migrate event MUST NOT be rolled back — doing so would desync the log from
+    // an inscription that can still land. A keyStore is required so the CEL
+    // migrate event actually appends (otherwise it degrades to append-skipped).
+    let n = 0;
+    class FailRevealProvider extends SatSelectProvider {
+      async broadcastTransaction(_tx: unknown): Promise<string> {
+        n++;
+        if (n === 2) throw new Error('mempool rejected reveal');
+        return 'bb'.repeat(32);
+      }
+    }
+    const provider = new FailRevealProvider();
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: provider,
+      keyStore: new MockKeyStore()
+    } as any);
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
+    ]);
+    const eventsBefore = asset.celLog!.events.length;
+
+    await expect(
+      sdk.lifecycle.inscribeOnBitcoin(asset, {
+        fundingUtxo: sampleUtxo,
+        satSigner,
+        changeAddress: sampleChangeAddress,
+        feeRate: 2
+      })
+    ).rejects.toMatchObject({ code: 'REVEAL_BROADCAST_FAILED' });
+
+    // The migrate event survived the failure (NOT rolled back).
+    const migrate = asset.celLog!.events.find(e => e.type === 'migrate');
+    expect(migrate).toBeDefined();
+    expect(asset.celLog!.events.length).toBeGreaterThan(eventsBefore);
+
+    // Coherent "migrated, inscription pending" state: layer advanced + binding set,
+    // matching a successful-but-unconfirmed inscription.
+    expect(asset.currentLayer).toBe('did:btco');
+    expect(asset.bindings!['did:btco']).toBe('did:btco:reg:1777');
+
+    // verify / replay fold from the log without blowing up (return, not throw).
+    const ok = await asset.verify({ ordinalsProvider: provider as any });
+    expect(typeof ok).toBe('boolean');
+    expect(() => asset.getProvenance()).not.toThrow();
   });
 
   test('legacy inscribeOnBitcoin(asset) still works with OrdMock (provider picks the sat)', async () => {

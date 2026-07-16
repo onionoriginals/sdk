@@ -120,11 +120,14 @@ export interface ExternalVerifier {
  */
 export interface BitcoinSigner {
   /**
-   * Signs the commit PSBT and returns a fully-signed, finalized, broadcast-ready
-   * transaction **hex** (NOT a base64 PSBT). The SDK passes this return value
-   * straight to `broadcastTransaction` and parses it locally to compute the
-   * commit txid; production providers reject anything that is not raw tx hex.
+   * Signs AND FINALIZES the commit PSBT, returning a fully-signed, finalized,
+   * broadcast-ready transaction **hex** (NOT a base64 PSBT). The name says
+   * "AndFinalize" precisely because returning a still-unfinalized PSBT is a
+   * runtime error: the SDK passes this return value straight to
+   * `broadcastTransaction` and parses it locally to compute the commit txid
+   * (a PSBT fails to parse → `COMMIT_TX_INVALID`), and production providers
+   * reject anything that is not raw tx hex.
    */
-  signCommitPsbt(psbtBase64: string): Promise<string>;
+  signAndFinalizeCommitPsbt(psbtBase64: string): Promise<string>;
 }
 

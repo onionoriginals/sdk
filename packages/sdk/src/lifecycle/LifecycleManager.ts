@@ -2362,6 +2362,13 @@ export class LifecycleManager {
       content?: Buffer;
       metadata?: Record<string, unknown>;
     };
+    // Set only on a RECOVERABLE reveal-broadcast failure (sat-selected path): the
+    // commit is on-chain and the reveal can be rebroadcast, so we drive the asset
+    // to the SAME "migrated, inscription pending" state a successful-but-
+    // unconfirmed inscription reaches, then re-throw so the caller rebroadcasts
+    // revealTxHex. Rolling the migrate event back instead would desync the log
+    // from an inscription that can still land (Greptile finding).
+    let revealBroadcastError: StructuredError | undefined;
     if (options.fundingUtxo) {
       // Sat-selected path (#369): the caller picks the funding UTXO, the
       // provider's sat index derives the DID sat, and the commit/reveal are
@@ -2403,23 +2410,51 @@ export class LifecycleManager {
             'Sat-selected inscription requires an explicit feeRate or a working fee estimate; refusing to guess a fee on a real-spend path.');
         }
       }
-      const result = await inscribeOnSat({
-        buildContent: buildContentForSat,
-        fundingUtxo: options.fundingUtxo,
-        satSigner: options.satSigner!,
-        changeAddress: options.changeAddress!,
-        feeRate: effectiveFeeRate,
-        network,
-        provider
-      });
-      inscription = {
-        satoshi: result.satoshi,
-        inscriptionId: result.inscriptionId,
-        commitTxId: result.commitTxId,
-        revealTxId: result.revealTxId,
-        txid: result.revealTxId,
-        feeRate: effectiveFeeRate
-      };
+      try {
+        const result = await inscribeOnSat({
+          buildContent: buildContentForSat,
+          fundingUtxo: options.fundingUtxo,
+          satSigner: options.satSigner!,
+          changeAddress: options.changeAddress!,
+          feeRate: effectiveFeeRate,
+          network,
+          provider
+        });
+        inscription = {
+          satoshi: result.satoshi,
+          inscriptionId: result.inscriptionId,
+          commitTxId: result.commitTxId,
+          revealTxId: result.revealTxId,
+          txid: result.revealTxId,
+          feeRate: effectiveFeeRate
+        };
+      } catch (e) {
+        // REVEAL_BROADCAST_FAILED is the ONE recoverable failure: the commit
+        // landed on-chain and the error carries the deterministic reveal
+        // (revealTxHex/revealTxId/inscriptionId/satoshi) needed to complete the
+        // inscription later. Synthesize the inscription record from those details
+        // and fall through to the normal downstream state capture — the migrate
+        // event gets its bitcoin witness proof, the layer advances, the btco doc
+        // is captured — so the asset matches an unconfirmed-but-successful
+        // inscription. We re-throw the original error just before returning, and
+        // the outer catch preserves (does NOT roll back) the CEL log for it.
+        if (e instanceof StructuredError && e.code === 'REVEAL_BROADCAST_FAILED') {
+          const d = (e.details ?? {}) as {
+            satoshi?: string; inscriptionId?: string; commitTxId?: string; revealTxId?: string;
+          };
+          inscription = {
+            satoshi: d.satoshi,
+            inscriptionId: d.inscriptionId as string,
+            commitTxId: d.commitTxId,
+            revealTxId: d.revealTxId,
+            txid: d.revealTxId as string,
+            feeRate: effectiveFeeRate
+          };
+          revealBroadcastError = e;
+        } else {
+          throw e;
+        }
+      }
     } else {
       inscription = await bitcoinManager.inscribeData(
         buildContentForSat,
@@ -2502,12 +2537,16 @@ export class LifecycleManager {
     // Mirror onto the manager emitter: asset.migrate emits only on the
     // asset's private emitter, so sdk.lifecycle.on('asset:migrated', ...)
     // subscriptions (and the built-in EventLogger) never fired (issue #346).
-    await this.eventEmitter.emit({
-      type: 'asset:migrated',
-      timestamp: new Date().toISOString(),
-      asset: { id: asset.id, fromLayer, toLayer: 'did:btco' },
-      details: migrationDetails
-    });
+    // Suppressed on a pending-reveal failure: we are about to throw, so emitting
+    // a success migration event would mislead listeners (EventLogger et al.).
+    if (!revealBroadcastError) {
+      await this.eventEmitter.emit({
+        type: 'asset:migrated',
+        timestamp: new Date().toISOString(),
+        asset: { id: asset.id, fromLayer, toLayer: 'did:btco' },
+        details: migrationDetails
+      });
+    }
 
     // The binding is ALWAYS computed locally from the configured network +
     // the real satoshi the provider assigned — never the provider-echoed
@@ -2548,9 +2587,19 @@ export class LifecycleManager {
       });
     }
 
+    // Recoverable reveal failure: the asset is now fully in the migrated btco
+    // state (witness proof attached, layer advanced, doc captured, binding set,
+    // witness ack appended) — the SAME state a successful-but-unconfirmed
+    // inscription reaches. Re-throw so the caller learns it must rebroadcast
+    // revealTxHex; the outer catch keeps the CEL log intact (no rollback) and
+    // records the failure metric.
+    if (revealBroadcastError) {
+      throw revealBroadcastError;
+    }
+
     stopTimer();
     this.logger.info('Asset inscribed on Bitcoin successfully', {
-      assetId: asset.id, 
+      assetId: asset.id,
       inscriptionId: inscription.inscriptionId,
       transactionId: revealTxId
     });
@@ -2563,8 +2612,15 @@ export class LifecycleManager {
     }
     } catch (error) {
       // Anything thrown after the append leaves the log ahead of reality —
-      // restore the pre-append snapshot (pure in-memory).
-      if (celHeadDigest !== null && celLogBefore && asset.celLog !== celLogBefore) {
+      // restore the pre-append snapshot (pure in-memory). EXCEPTION (#Greptile):
+      // a recoverable REVEAL_BROADCAST_FAILED is INTENTIONALLY not rolled back —
+      // its commit is on-chain and the reveal can be rebroadcast, so the migrate
+      // event (now witnessed) plus the advanced btco state correctly reflect
+      // "migrated, inscription pending". Rolling back would desync the log from
+      // an inscription that can still land.
+      const recoverableReveal =
+        error instanceof StructuredError && error.code === 'REVEAL_BROADCAST_FAILED';
+      if (!recoverableReveal && celHeadDigest !== null && celLogBefore && asset.celLog !== celLogBefore) {
         asset._replaceCelLog(celLogBefore);
       }
       stopTimer();

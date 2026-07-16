@@ -62,7 +62,7 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
   });
 
   // 4) Caller signs the commit; the return MUST be broadcast-ready tx hex.
-  const signedCommit = await satSigner.signCommitPsbt(commit.commitPsbtBase64);
+  const signedCommit = await satSigner.signAndFinalizeCommitPsbt(commit.commitPsbtBase64);
 
   // 5) Compute the commit txid LOCALLY from the signed tx. The funding input is
   // segwit, so the txid is witness-independent — never trust a provider-returned
@@ -85,8 +85,12 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
   // return a different, validly-formed tx (wrong input, wrong output) which would
   // silently land the DID on the wrong sat. Check input[0]==fundingUtxo and
   // output[0]==the commit output (amount + scriptPubKey) BEFORE broadcasting.
+  // Also BOUND the shape: exactly one input (we fund from the single fundingUtxo,
+  // so any extra input spends an unrelated UTXO) and at most two outputs (the
+  // commit output at vout 0 plus an optional change output — a third output could
+  // redirect funds to an attacker). Both fail closed before any broadcast.
   const mismatchDetails = { fundingUtxo, commitAmount: commit.commitAmount, commitAddress: commit.commitAddress };
-  if (parsed.inputsLength < 1 || parsed.outputsLength < 1) {
+  if (parsed.inputsLength !== 1 || parsed.outputsLength < 1 || parsed.outputsLength > 2) {
     throw new StructuredError('COMMIT_TX_MISMATCH',
       'The signed commit does not match the commit built for this funding UTXO; refusing to broadcast (the DID sat would be wrong).',
       mismatchDetails);
@@ -125,7 +129,7 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
   } catch {
     throw new StructuredError('REVEAL_BROADCAST_FAILED',
       `Commit ${commitTxId} broadcast but the reveal failed; rebroadcast revealTxHex to recover the committed funds and complete the inscription.`,
-      { commitTxId, revealTxId: reveal.revealTxId, revealTxHex: reveal.revealTxHex, satoshi });
+      { commitTxId, revealTxId: reveal.revealTxId, revealTxHex: reveal.revealTxHex, satoshi, inscriptionId: reveal.inscriptionId });
   }
 
   return { satoshi, inscriptionId: reveal.inscriptionId, commitTxId, revealTxId: reveal.revealTxId };

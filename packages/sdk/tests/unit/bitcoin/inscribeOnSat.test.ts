@@ -9,7 +9,7 @@ import { sampleUtxo, sampleChangeAddress } from '../../fixtures/bitcoin';
 // but the funding input is segwit so the txid is witness-independent — an
 // unsigned raw serialization yields the same txid the SDK computes locally.
 const signer = {
-  signCommitPsbt: async (psbtBase64: string) => {
+  signAndFinalizeCommitPsbt: async (psbtBase64: string) => {
     const tx = btc.Transaction.fromPSBT(Buffer.from(psbtBase64, 'base64'), { allowUnknownOutputs: true });
     return Buffer.from(tx.toBytes(true, false)).toString('hex');
   }
@@ -48,9 +48,9 @@ describe('inscribeOnSat', () => {
   });
 
   it('calls the signer with the COMMIT psbt exactly once', async () => {
-    const signCommitPsbt = mock(signer.signCommitPsbt);
-    await inscribeOnSat({ ...baseParams(), satSigner: { signCommitPsbt }, provider: providerDouble() });
-    expect(signCommitPsbt).toHaveBeenCalledTimes(1);
+    const signAndFinalizeCommitPsbt = mock(signer.signAndFinalizeCommitPsbt);
+    await inscribeOnSat({ ...baseParams(), satSigner: { signAndFinalizeCommitPsbt }, provider: providerDouble() });
+    expect(signAndFinalizeCommitPsbt).toHaveBeenCalledTimes(1);
   });
 
   it('broadcasts the reveal AFTER the commit, built from the LOCAL commit txid (not a provider-returned one)', async () => {
@@ -79,7 +79,7 @@ describe('inscribeOnSat', () => {
 
   it('throws COMMIT_TX_INVALID when the signer does not return broadcast-ready hex', async () => {
     // Legacy signer that echoes the base64 PSBT — not valid tx hex.
-    const badSigner = { signCommitPsbt: async (p: string) => p };
+    const badSigner = { signAndFinalizeCommitPsbt: async (p: string) => p };
     await expect(inscribeOnSat({ ...baseParams(), satSigner: badSigner, provider: providerDouble() }))
       .rejects.toMatchObject({ code: 'COMMIT_TX_INVALID' });
   });
@@ -88,7 +88,7 @@ describe('inscribeOnSat', () => {
     // A validly-parseable tx, but its input[0] is NOT fundingUtxo — e.g. a signer
     // bug that funded from the wrong UTXO. Must be rejected before any broadcast.
     const wrongInputSigner = {
-      signCommitPsbt: async () => {
+      signAndFinalizeCommitPsbt: async () => {
         const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true });
         tx.addInput({
           txid: 'ff'.repeat(32),
@@ -111,7 +111,7 @@ describe('inscribeOnSat', () => {
     // Correct input, but output[0] doesn't match the commit output the SDK built
     // (wrong destination address here, standing in for wrong amount/script).
     const wrongOutputSigner = {
-      signCommitPsbt: async () => {
+      signAndFinalizeCommitPsbt: async () => {
         const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true });
         tx.addInput({
           txid: sampleUtxo.txid,
@@ -127,6 +127,50 @@ describe('inscribeOnSat', () => {
     const broadcastTransaction = mock(async () => 'cc'.repeat(32));
     const provider = providerDouble({ broadcastTransaction });
     await expect(inscribeOnSat({ ...baseParams(), satSigner: wrongOutputSigner, provider }))
+      .rejects.toMatchObject({ code: 'COMMIT_TX_MISMATCH' });
+    expect(broadcastTransaction).not.toHaveBeenCalled();
+  });
+
+  it('throws COMMIT_TX_MISMATCH (and broadcasts nothing) when the signed tx has an EXTRA input', async () => {
+    // input[0]==fundingUtxo and output[0]==the commit output are BOTH intact, but
+    // the signer appended a second input spending an unrelated UTXO. Bounding the
+    // input count to exactly 1 is what catches this before any broadcast.
+    const extraInputSigner = {
+      signAndFinalizeCommitPsbt: async (psbtBase64: string) => {
+        const tx = btc.Transaction.fromPSBT(Buffer.from(psbtBase64, 'base64'), { allowUnknownOutputs: true });
+        tx.addInput({
+          txid: 'ee'.repeat(32),
+          index: 1,
+          sequence: 0xfffffffd,
+          witnessUtxo: { amount: BigInt(sampleUtxo.value), script: Buffer.from(sampleUtxo.scriptPubKey, 'hex') }
+        });
+        return Buffer.from(tx.toBytes(true, false)).toString('hex');
+      }
+    };
+    const broadcastTransaction = mock(async () => 'cc'.repeat(32));
+    const provider = providerDouble({ broadcastTransaction });
+    await expect(inscribeOnSat({ ...baseParams(), satSigner: extraInputSigner, provider }))
+      .rejects.toMatchObject({ code: 'COMMIT_TX_MISMATCH' });
+    expect(broadcastTransaction).not.toHaveBeenCalled();
+  });
+
+  it('throws COMMIT_TX_MISMATCH (and broadcasts nothing) when the signed tx has EXTRA outputs', async () => {
+    // input[0] and output[0] are intact, but the signer appended extra outputs
+    // (e.g. redirecting change to an attacker). Bounding outputs to at most 2
+    // (commit + optional change) rejects it before any broadcast.
+    const extraOutputSigner = {
+      signAndFinalizeCommitPsbt: async (psbtBase64: string) => {
+        const tx = btc.Transaction.fromPSBT(Buffer.from(psbtBase64, 'base64'), { allowUnknownOutputs: true });
+        // Add outputs until the tx has at least 3 (exceeds the commit+change bound).
+        while (tx.outputsLength < 3) {
+          tx.addOutputAddress(sampleChangeAddress, 546n, getScureNetwork('regtest'));
+        }
+        return Buffer.from(tx.toBytes(true, false)).toString('hex');
+      }
+    };
+    const broadcastTransaction = mock(async () => 'cc'.repeat(32));
+    const provider = providerDouble({ broadcastTransaction });
+    await expect(inscribeOnSat({ ...baseParams(), satSigner: extraOutputSigner, provider }))
       .rejects.toMatchObject({ code: 'COMMIT_TX_MISMATCH' });
     expect(broadcastTransaction).not.toHaveBeenCalled();
   });

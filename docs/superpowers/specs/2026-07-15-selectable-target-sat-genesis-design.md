@@ -93,11 +93,13 @@ A minimal new interface (`src/types/common.ts`, beside `ExternalSigner`):
 
 ```ts
 interface BitcoinSigner {
-  /** Sign the commit transaction's funding input(s). Returns a fully-signed,
-   *  finalized, broadcast-ready tx HEX (not a base64 PSBT) — the SDK passes it
-   *  straight to broadcastTransaction and parses it locally for the commit txid;
-   *  production providers reject anything that is not raw tx hex. */
-  signCommitPsbt(psbtBase64: string): Promise<string>;
+  /** Sign AND FINALIZE the commit transaction's funding input(s). Returns a
+   *  fully-signed, finalized, broadcast-ready tx HEX (not a base64 PSBT) — the
+   *  name says "AndFinalize" because a still-unfinalized PSBT is a runtime error:
+   *  the SDK passes the return straight to broadcastTransaction and parses it
+   *  locally for the commit txid; production providers reject anything that is
+   *  not raw tx hex. */
+  signAndFinalizeCommitPsbt(psbtBase64: string): Promise<string>;
 }
 ```
 
@@ -123,8 +125,8 @@ to a focused helper, e.g. `bitcoin/inscribe-on-sat.ts`, to keep
    sat) flows funding → commit output → reveal output as the first sat, so no
    pointer is needed. Returns the unsigned commit PSBT + reveal key + inscription
    script.
-4. **Sign commit.** `signed = await satSigner.signCommitPsbt(commitPsbtBase64)` —
-   `signed` MUST be broadcast-ready tx hex.
+4. **Sign commit.** `signed = await satSigner.signAndFinalizeCommitPsbt(commitPsbtBase64)` —
+   `signed` MUST be broadcast-ready tx hex (finalized, not a PSBT).
 5. **Compute commit txid LOCALLY.** Parse `signed` (`btc.Transaction.fromRaw`)
    and read `.id`. The funding input is segwit, so the txid is witness-
    independent — never trust a provider-returned txid to build the reveal.
