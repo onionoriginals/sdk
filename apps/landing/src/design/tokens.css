@@ -22,8 +22,8 @@
   --accent-text: #ffb04d;
 
   /* Layer hues */
-  --peer: #a78bfa;
-  --peer-soft: rgba(167, 139, 250, 0.14);
+  --cel: #a78bfa;
+  --cel-soft: rgba(167, 139, 250, 0.14);
   --webvh: #4cc2ff;
   --webvh-soft: rgba(76, 194, 255, 0.13);
   --btco: #f7931a;

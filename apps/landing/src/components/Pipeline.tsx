@@ -3,7 +3,7 @@ import { layers } from '../content';
 import './pipeline.css';
 
 const glyphs: Record<string, JSX.Element> = {
-  'did:peer': (
+  'did:cel': (
     // pencil / draft
     <svg viewBox="0 0 16 16" aria-hidden="true">
       <path

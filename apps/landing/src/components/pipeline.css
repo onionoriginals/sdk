@@ -16,7 +16,7 @@
 
 .pipeline-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--peer), var(--webvh) 55%, var(--btco));
+  background: linear-gradient(90deg, var(--cel), var(--webvh) 55%, var(--btco));
   border-radius: var(--r-full);
   transition: width 700ms var(--ease);
 }
@@ -86,7 +86,7 @@
   50% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--node-color) 16%, transparent), 0 0 32px color-mix(in srgb, var(--node-color) 30%, transparent); }
 }
 
-.pipeline-node[data-layer='did:peer'] { --node-color: var(--peer); }
+.pipeline-node[data-layer='did:cel'] { --node-color: var(--cel); }
 .pipeline-node[data-layer='did:webvh'] { --node-color: var(--webvh); }
 .pipeline-node[data-layer='did:btco'] { --node-color: var(--btco); }
 

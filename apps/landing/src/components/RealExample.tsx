@@ -122,7 +122,7 @@ export function RealExample() {
                       <div>
                         <dt>{realExample.fields.identity}</dt>
                         <dd>
-                          <code title={result.dids.peer}>{short(result.dids.peer, 34, 8)}</code>
+                          <code title={result.dids.cel}>{short(result.dids.cel, 34, 8)}</code>
                         </dd>
                       </div>
                       <div>

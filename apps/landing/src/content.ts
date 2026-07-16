@@ -6,7 +6,7 @@
 export const site = {
   title: 'Originals SDK — Provenance that survives the internet',
   description:
-    'Create, publish, and inscribe digital assets with cryptographically verifiable provenance. did:peer → did:webvh → did:btco.',
+    'Create, publish, and inscribe digital assets with cryptographically verifiable provenance. did:cel → did:webvh → did:btco.',
   /**
    * PLACEHOLDER — production URL, pending the hosting decision in issue #330.
    * This is the single constant to swap once the domain is chosen. It is
@@ -46,11 +46,11 @@ export const hero = {
 
 export const layers = [
   {
-    id: 'did:peer' as const,
-    name: 'did:peer',
+    id: 'did:cel' as const,
+    name: 'did:cel',
     title: 'Create',
     role: 'Private draft',
-    blurb: 'Born offline. Free, instant, and invisible until you say otherwise.',
+    blurb: 'Born offline as a signed event log. Free, instant, and invisible until you say otherwise.',
     facts: ['Costs nothing', 'Works offline', 'Keys stay with you']
   },
   {
@@ -80,7 +80,7 @@ export const why = {
   cards: [
     {
       title: 'Provenance you can hand to anyone',
-      body: 'Every asset carries signed credentials for its creation, publication, and transfers. Anyone can verify the chain — without trusting you, us, or any platform.'
+      body: 'Every asset is a signed event log of how it was made and published, and ownership settles directly on Bitcoin. Anyone can verify the whole chain — without trusting you, us, or any platform.'
     },
     {
       title: 'A lifecycle, not a lock-in',
@@ -116,9 +116,9 @@ export const demo = {
       action: 'Create asset',
       pending: 'Creating…',
       title: 'Create',
-      layer: 'did:peer',
+      layer: 'did:cel',
       description:
-        'Hashes the artwork’s bytes and mints a did:peer identity — entirely in this tab, no server involved.'
+        'Hashes the artwork’s bytes and mints a did:cel identity — a signed event log, entirely in this tab, no server involved.'
     },
     {
       id: 'publish',
@@ -165,7 +165,7 @@ export const realExample = {
   eyebrow: 'A real Original',
   headline: 'Don’t take our word for it.',
   subhead:
-    '“First Light” is a genuine Original, minted with this SDK: real keys, a real did:webvh identity with a signed version history, and a signed publication credential. Your browser is re-verifying every signature right now — the checks below run locally, not on a server.',
+    '“First Light” is a genuine Original, minted with this SDK: real keys, a real did:cel genesis event log, a did:webvh identity with a signed version history, and a signed publication credential. Your browser is re-verifying every signature right now — the checks below run locally, not on a server.',
   checkLabels: {
     hash: 'Artwork bytes match their declared sha-256',
     log: 'did:webvh log — SCID and Ed25519 proof chain verify',
@@ -196,12 +196,12 @@ export const protocol = {
   eyebrow: 'The protocol',
   headline: 'Three layers. One direction.',
   subhead:
-    'Assets migrate unidirectionally — did:peer → did:webvh → did:btco. Each migration is recorded and signed, so the full lineage travels with the asset.',
+    'Assets migrate unidirectionally — did:cel → did:webvh → did:btco. Each migration is recorded and signed, so the full lineage travels with the asset.',
   migrationNote:
     'Unidirectional by design: an original can gain permanence, but its history can never be quietly rewritten.',
   columns: [
     {
-      layer: 'did:peer',
+      layer: 'did:cel',
       stage: '01 · Create',
       cost: 'Free',
       rows: [
@@ -274,7 +274,7 @@ const sdk = OriginalsSDK.create({
   keyStore
 });
 
-// 1 · Create a private did:peer asset — offline, free
+// 1 · Create a private did:cel asset — offline, free
 const content = JSON.stringify({ title: 'Genesis #001' });
 const hash = Buffer
   .from(sha256(Buffer.from(content)))
@@ -310,7 +310,7 @@ export const footer = {
   tagline: 'Provenance that survives the internet.',
   license: 'MIT licensed. Built by Aviary Tech.',
   bottomLeft: '© 2026 Aviary Tech · MIT License',
-  bottomRight: 'did:peer → did:webvh → did:btco',
+  bottomRight: 'did:cel → did:webvh → did:btco',
   columns: [
     {
       title: 'Project',

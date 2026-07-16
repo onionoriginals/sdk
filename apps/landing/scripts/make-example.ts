@@ -3,7 +3,7 @@
  *   bun scripts/make-example.ts
  *
  * Uses the actual @originals/sdk (workspace source) to create a genuine
- * asset: real Ed25519 keys, real did:peer, a real did:webvh publisher with
+ * asset: real Ed25519 keys, a real did:cel genesis, a real did:webvh publisher with
  * a signed DID log, and a signed publication credential. The artifacts are
  * written to public/example/ and shipped statically; the landing page then
  * re-verifies all of it cryptographically in the visitor's browser.
@@ -77,7 +77,7 @@ const metadata = JSON.stringify(
 );
 const metaBytes = new TextEncoder().encode(metadata);
 
-// 2 · Real did:peer asset.
+// 2 · Real did:cel genesis asset.
 const asset = await sdk.lifecycle.createAsset([
   {
     id: 'artwork.svg',
@@ -148,6 +148,14 @@ writeFileSync(
   join(outDir, 'did-log.jsonl'),
   (result.log as unknown[]).map((entry) => JSON.stringify(entry)).join('\n') + '\n'
 );
+// The CEL event log (create + migrate) — the browser re-derives the did:cel
+// genesis identity from it (resolveDidCel verifies the whole signed chain and
+// binds the DID) to check the publication credential, which is issued and
+// self-signed by the did:cel.
+writeFileSync(
+  join(outDir, 'cel-log.json'),
+  JSON.stringify(asset.serialize().eventLog, null, 2) + '\n'
+);
 writeFileSync(
   join(outDir, 'manifest.json'),
   JSON.stringify(
@@ -155,7 +163,7 @@ writeFileSync(
       title: TITLE,
       medium: MEDIUM,
       dids: {
-        'did:peer': (asset.bindings as Record<string, string>)['did:peer'] ?? asset.id,
+        'did:cel': (asset.bindings as Record<string, string>)['did:cel'] ?? asset.id,
         'did:webvh': result.did
       },
       resources: asset.resources.map((r) => ({

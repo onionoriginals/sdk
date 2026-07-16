@@ -204,7 +204,7 @@ pre {
   background: var(--text-tertiary);
 }
 
-.layer-pill[data-layer='did:peer'] .dot { background: var(--peer); }
+.layer-pill[data-layer='did:cel'] .dot { background: var(--cel); }
 .layer-pill[data-layer='did:webvh'] .dot { background: var(--webvh); }
 .layer-pill[data-layer='did:btco'] .dot { background: var(--btco); }
 

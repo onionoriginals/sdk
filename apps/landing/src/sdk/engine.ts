@@ -22,7 +22,7 @@ import {
 } from '@originals/sdk';
 import { sha256 } from '@noble/hashes/sha2.js';
 
-export type LayerId = 'did:peer' | 'did:webvh' | 'did:btco';
+export type LayerId = 'did:cel' | 'did:webvh' | 'did:btco';
 
 export interface DemoEvent {
   /** SDK event type, e.g. 'asset:created', 'asset:migrated' */
@@ -115,7 +115,7 @@ export class DemoEngine {
     };
 
     forward('asset:created', (e: { asset: { id: string } }) =>
-      `Asset created as ${short(e.asset.id)} — a private did:peer identity, generated entirely offline`
+      `Asset created as ${short(e.asset.id)} — a private did:cel identity, generated entirely offline`
     );
     forward(
       'resource:published',
@@ -150,7 +150,7 @@ export class DemoEngine {
   }
 
   /**
-   * Step 1 — create a did:peer asset. The primary resource is the artwork
+   * Step 1 — create a did:cel asset. The primary resource is the artwork
    * itself: a real SVG file whose exact bytes are hashed and carried through
    * the whole lifecycle. A small JSON metadata resource rides along.
    */
