@@ -2,19 +2,20 @@
  * Live verification of the shipped real example ("First Light").
  *
  * The artifacts under public/example/ were minted once with the real SDK
- * (scripts/make-example.ts): real Ed25519 keys, a real did:webvh identity
- * with a signed version-history log, and a signed publication credential.
- * This module re-verifies all of it in the visitor's browser — hash
- * recomputation, DID-log proof-chain verification via didwebvh-ts, and
- * credential signature verification via the SDK — so the page never asks
- * anyone to take its word for it.
+ * (scripts/make-example.ts): real Ed25519 keys, a real did:cel genesis with a
+ * signed CEL event log, a real did:webvh identity with a signed version-history
+ * log, and a signed publication credential. This module re-verifies all of it
+ * in the visitor's browser — hash recomputation, did:webvh-log proof-chain
+ * verification via didwebvh-ts, and did:cel-log + credential signature
+ * verification via the SDK — so the page never asks anyone to take its word.
  */
 import '../shims/buffer-global';
 import {
   OriginalsSDK,
   OrdMockProvider,
   MemoryStorageAdapter,
-  Ed25519Verifier
+  Ed25519Verifier,
+  resolveDidCel
 } from '@originals/sdk';
 import { resolveDIDFromLog } from 'didwebvh-ts';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -24,6 +25,7 @@ import manifestJson from '../../public/example/manifest.json';
 import credentialJson from '../../public/example/credential.json';
 import artworkSvg from '../../public/example/artwork.svg?raw';
 import didLogRaw from '../../public/example/did-log.jsonl?raw';
+import celLogJson from '../../public/example/cel-log.json';
 
 export interface ExampleCheck {
   id: 'hash' | 'log' | 'credential';
@@ -35,7 +37,7 @@ export interface VerifiedExample {
   title: string;
   medium: string;
   artworkDataUri: string;
-  dids: { peer: string; webvh: string };
+  dids: { cel: string; webvh: string };
   credentialTypes: string[];
   issuedAt?: string;
   checks: ExampleCheck[];
@@ -101,30 +103,37 @@ export async function verifyExample(): Promise<VerifiedExample> {
       : realExample.checkFailDetails.log
   });
 
-  // 3 · Provenance: verify the publication credential's signature against
-  //     the key material we just derived from the verified log.
+  // 3 · Provenance: the publication credential is issued and self-signed by the
+  //     asset's did:cel genesis identity. Re-derive that identity from the
+  //     shipped CEL log — resolveDidCel verifies the WHOLE signed chain and binds
+  //     the DID to it (returns null otherwise) — then verify the credential's
+  //     signature against the derived key material. No server, no trust in us.
   let credentialOk = false;
-  if (didDocument) {
-    const sdk = OriginalsSDK.create({
-      network: 'regtest',
-      webvhNetwork: 'magby',
-      defaultKeyType: 'Ed25519',
-      ordinalsProvider: new OrdMockProvider(),
-      storageAdapter: new MemoryStorageAdapter(),
-      enableLogging: false
-    } as unknown as Parameters<typeof OriginalsSDK.create>[0]);
-    await sdk.did.cache.set(resolvedDid, didDocument as never);
-    try {
+  const celDid = manifest.dids['did:cel'];
+  try {
+    const celDoc = celDid
+      ? await resolveDidCel(celDid, celLogJson as never)
+      : null;
+    if (celDoc) {
+      const sdk = OriginalsSDK.create({
+        network: 'regtest',
+        webvhNetwork: 'magby',
+        defaultKeyType: 'Ed25519',
+        ordinalsProvider: new OrdMockProvider(),
+        storageAdapter: new MemoryStorageAdapter(),
+        enableLogging: false
+      } as unknown as Parameters<typeof OriginalsSDK.create>[0]);
+      await sdk.did.cache.set(celDid, celDoc as never);
       const signatureOk = await sdk.credentials.verifyCredential(credential as never);
       const issuer =
         typeof credential.issuer === 'string' ? credential.issuer : credential.issuer.id;
       credentialOk =
         signatureOk &&
-        issuer === resolvedDid &&
-        credential.credentialSubject.id === manifest.dids['did:peer'];
-    } catch (err) {
-      console.error('[originals-sdk] example credential verification failed', err);
+        issuer === celDid &&
+        credential.credentialSubject.id === celDid;
     }
+  } catch (err) {
+    console.error('[originals-sdk] example credential verification failed', err);
   }
   checks.push({
     id: 'credential',
@@ -138,7 +147,7 @@ export async function verifyExample(): Promise<VerifiedExample> {
     title: manifest.title,
     medium: manifest.medium,
     artworkDataUri: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(artworkSvg)}`,
-    dids: { peer: manifest.dids['did:peer'], webvh: manifest.dids['did:webvh'] },
+    dids: { cel: manifest.dids['did:cel'], webvh: manifest.dids['did:webvh'] },
     credentialTypes: credential.type,
     issuedAt: credential.validFrom ?? credential.issuanceDate,
     checks,

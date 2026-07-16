@@ -20,7 +20,7 @@
   border-top-right-radius: var(--r-sm);
 }
 
-.protocol-card[data-layer='did:peer'] { --card-accent: var(--peer); }
+.protocol-card[data-layer='did:cel'] { --card-accent: var(--cel); }
 .protocol-card[data-layer='did:webvh'] { --card-accent: var(--webvh); }
 .protocol-card[data-layer='did:btco'] { --card-accent: var(--btco); }
 
@@ -61,7 +61,7 @@
   background: color-mix(in srgb, var(--card-accent) 12%, transparent);
 }
 
-.protocol-card[data-layer='did:peer'] .protocol-cost { color: #c9b8ff; }
+.protocol-card[data-layer='did:cel'] .protocol-cost { color: #c9b8ff; }
 .protocol-card[data-layer='did:webvh'] .protocol-cost { color: #8fd6ff; }
 .protocol-card[data-layer='did:btco'] .protocol-cost { color: #ffb866; }
 

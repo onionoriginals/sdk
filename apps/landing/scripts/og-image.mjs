@@ -44,7 +44,7 @@ const monoUrl = fontUrl('@fontsource/jetbrains-mono', 'jetbrains-mono-latin-400-
 const esc = (s) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-// footer.bottomRight is the canonical "did:peer → did:webvh → did:btco"
+// footer.bottomRight is the canonical "did:cel → did:webvh → did:btco"
 // string; color each layer with its hue from the site's palette.
 const layerHues = ['#a78bfa', '#4cc2ff', '#f7931a'];
 const chain = footer.bottomRight

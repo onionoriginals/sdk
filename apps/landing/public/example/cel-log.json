@@ -1,0 +1,56 @@
+{
+  "events": [
+    {
+      "type": "create",
+      "data": {
+        "controller": "did:key:z6MkhhHvRLSgmvgneytgm64PBFzgrr1maxVjEgCr4gWGZ85p",
+        "createdAt": "2026-07-16T05:56:22.011Z",
+        "name": "artwork.svg",
+        "nonce": "uKV70s9aH52rZ1nzK6Uog9w",
+        "resources": [
+          {
+            "digestMultibase": "uEiDq42LG0UdTeZMLYrsckqR3sn7DCIZuAV6nnKrn11NgWg",
+            "id": "artwork.svg",
+            "mediaType": "image/svg+xml"
+          },
+          {
+            "digestMultibase": "uEiAYsepzbRrYtqCvKqdKJEiWxs-pTxfzzV9ApQkcvPuI5A",
+            "id": "metadata.json",
+            "mediaType": "application/json"
+          }
+        ]
+      },
+      "proof": [
+        {
+          "created": "2026-07-16T05:56:22.038Z",
+          "cryptosuite": "eddsa-jcs-2022",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z2nTv6dFXWK9hgjqYoF6z1f8AtEUjEie4AhCbstzU1qk7uu5Pqey9vTeSg3uUniDjkKPAXKHTeMhUo3RkqX9avzUC",
+          "type": "DataIntegrityProof",
+          "verificationMethod": "did:key:z6MkhhHvRLSgmvgneytgm64PBFzgrr1maxVjEgCr4gWGZ85p#z6MkhhHvRLSgmvgneytgm64PBFzgrr1maxVjEgCr4gWGZ85p"
+        }
+      ]
+    },
+    {
+      "type": "migrate",
+      "data": {
+        "domain": "magby.originals.build",
+        "layer": "webvh",
+        "migratedAt": "2026-07-16T05:56:22.053Z",
+        "sourceDid": "did:cel:uEiD6909LPnH10_myIoEODhInq6jVmhbAl0hR_i0bpUpDKQ",
+        "targetDid": "did:webvh:QmcXLu1DgoXZh344onb6tpPoesMUveyZ6mUwD3GXKeohM8:magby.originals.build:ueid6909lpnh10_myioeodhinq6jvmhbal0hr_i0bpupdkq"
+      },
+      "proof": [
+        {
+          "created": "2026-07-16T05:56:22.054Z",
+          "cryptosuite": "eddsa-jcs-2022",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z47VVZiFZSgFjn1ECRQPcgKFT5Dkas7NXFiHfriVY3KKzySSseRom65MEtUmJxvZG282W1ykTrNpbNMykpSzQoF1E",
+          "type": "DataIntegrityProof",
+          "verificationMethod": "did:key:z6MkhhHvRLSgmvgneytgm64PBFzgrr1maxVjEgCr4gWGZ85p#z6MkhhHvRLSgmvgneytgm64PBFzgrr1maxVjEgCr4gWGZ85p"
+        }
+      ],
+      "previousEvent": "uEiD6909LPnH10_myIoEODhInq6jVmhbAl0hR_i0bpUpDKQ"
+    }
+  ]
+}

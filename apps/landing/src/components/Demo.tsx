@@ -27,7 +27,7 @@ const phaseToStep: Record<Phase, number> = {
 };
 
 const eventColors: Record<string, string> = {
-  'asset:created': 'var(--peer)',
+  'asset:created': 'var(--cel)',
   'did:webvh:created': 'var(--webvh)',
   'resource:published': 'var(--webvh)',
   'asset:migrated': 'var(--webvh)',
@@ -456,7 +456,7 @@ export function Demo() {
 }
 
 function DidList({ asset }: { asset: DemoAssetState }) {
-  const entries: Array<[string, string]> = [['did:peer', asset.did]];
+  const entries: Array<[string, string]> = [['did:cel', asset.did]];
   if (asset.webvhDid) entries.push(['did:webvh', asset.webvhDid]);
   if (asset.btcoDid) entries.push(['did:btco', asset.btcoDid]);
   return (

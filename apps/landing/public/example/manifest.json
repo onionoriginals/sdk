@@ -2,8 +2,8 @@
   "title": "First Light",
   "medium": "Artwork",
   "dids": {
-    "did:peer": "did:peer:4zQmPARJeBYboHHyW4XfcDocFJqARed2wfyewTPDdZyK8U51:z2E3ApMRVSzHJcKffrpLi1ex4H6YDtwSuhNERf4QcAFcSQEZ2CA8o3wuTuHDhk1qPmXof4zgH9LtPMY1FhMT5yBjiSUQgDRrcC35e4HTG3YgWZ4Et8w19JAHuHQxsk9WkoshRpCj5MfTXwtbSSwH8LfwFAMHsAYfAbidTBaeRmNKFDTmUE42Y4rygYHXKHTJqPdczvk9SBoExqtEsAHprvPNWqtWcAU5CVzv1S6sc3yjbEa4wgY9zMRRYV9S5cBufvL8DPw6n1NJTmMseUMW6NWJEXPDpTWx1KJydAEMn62dzVbWHdTSZwDHaD5LnMVMhoPEnpRMjknVqmv",
-    "did:webvh": "did:webvh:QmX38NGfM2hZMEjbvyHM6Cg1v3i45EBoYxTiuDqyzsVZh9:magby.originals.build:examples:first-light"
+    "did:cel": "did:cel:uEiD6909LPnH10_myIoEODhInq6jVmhbAl0hR_i0bpUpDKQ",
+    "did:webvh": "did:webvh:QmWFcneg2iKFwgbqDVCVTDmk3snraYH8TJRiqsBX3SLz9c:magby.originals.build:examples:first-light"
   },
   "resources": [
     {
@@ -18,16 +18,15 @@
     }
   ],
   "provenance": {
-    "createdAt": "2026-07-06T06:42:31.256Z",
-    "creator": "did:peer:4zQmPARJeBYboHHyW4XfcDocFJqARed2wfyewTPDdZyK8U51:z2E3ApMRVSzHJcKffrpLi1ex4H6YDtwSuhNERf4QcAFcSQEZ2CA8o3wuTuHDhk1qPmXof4zgH9LtPMY1FhMT5yBjiSUQgDRrcC35e4HTG3YgWZ4Et8w19JAHuHQxsk9WkoshRpCj5MfTXwtbSSwH8LfwFAMHsAYfAbidTBaeRmNKFDTmUE42Y4rygYHXKHTJqPdczvk9SBoExqtEsAHprvPNWqtWcAU5CVzv1S6sc3yjbEa4wgY9zMRRYV9S5cBufvL8DPw6n1NJTmMseUMW6NWJEXPDpTWx1KJydAEMn62dzVbWHdTSZwDHaD5LnMVMhoPEnpRMjknVqmv",
+    "createdAt": "2026-07-16T05:56:22.039Z",
+    "creator": "did:cel:uEiD6909LPnH10_myIoEODhInq6jVmhbAl0hR_i0bpUpDKQ",
     "migrations": [
       {
-        "from": "did:peer",
+        "from": "did:cel",
         "to": "did:webvh",
-        "timestamp": "2026-07-06T06:42:31.276Z"
+        "timestamp": "2026-07-16T05:56:22.055Z"
       }
     ],
-    "transfers": [],
     "resourceUpdates": []
   },
   "generator": {
