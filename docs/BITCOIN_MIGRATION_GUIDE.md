@@ -211,6 +211,14 @@ const transferTx = await sdk.bitcoin.transferInscription(
 console.log('Transfer TX:', transferTx.txid);
 ```
 
+> **Note on ownership:** `transferInscription` is the low-level Bitcoin
+> primitive. At the Originals asset level, ownership IS live Bitcoin sat
+> control — the satoshi (`did:btco:<sat>`) is the identity, and
+> `sdk.lifecycle.transferOwnership(asset, newOwnerAddress)` is a **pure sat
+> move that writes NOTHING to the asset's provenance log (CEL)**. Ownership is
+> read live from Bitcoin via `getCurrentOwner()`; it is never a credential and
+> is never transferred by editing a DID document.
+
 ### Migration Steps
 
 1. **Replace HTTP client with OrdinalsProvider**:

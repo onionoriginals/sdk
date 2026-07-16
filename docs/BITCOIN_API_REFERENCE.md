@@ -202,56 +202,46 @@ if (inscription) {
 
 ---
 
-### validateBitcoinAddress()
+### validateBitcoinAddress() / isValidBitcoinAddress()
 
-Validates a Bitcoin address for a specific network.
+Address validation is exposed as **standalone package exports**, not as methods on
+`sdk.bitcoin`. Two variants:
+
+- `validateBitcoinAddress(address, network)` — returns `true` when valid, **throws**
+  (with a descriptive message) when invalid. Use this when you want a hard failure.
+- `isValidBitcoinAddress(address, network)` — a non-throwing wrapper that returns
+  `true`/`false`.
 
 ```typescript
-validateBitcoinAddress(
-  address: string,
-  network: BitcoinNetwork
-): boolean
+import { validateBitcoinAddress, isValidBitcoinAddress } from '@originals/sdk';
+
+function validateBitcoinAddress(address: string, network: BitcoinNetwork): boolean; // throws on invalid
+function isValidBitcoinAddress(address: string, network: BitcoinNetwork): boolean;   // never throws
 ```
 
 **Parameters:**
 - `address` (string): Bitcoin address to validate
 - `network` (BitcoinNetwork): Network to validate against
 
-**Returns:**
-- `boolean`: `true` if valid, `false` otherwise
-
 **Example:**
 ```typescript
-// Mainnet addresses
-const isValid1 = sdk.bitcoin.validateBitcoinAddress(
-  'bc1qxyz...', // Native SegWit
-  'mainnet'
-);
+import { validateBitcoinAddress, isValidBitcoinAddress } from '@originals/sdk';
 
-const isValid2 = sdk.bitcoin.validateBitcoinAddress(
-  '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa', // Legacy
-  'mainnet'
-);
+// Boolean check (never throws)
+const ok = isValidBitcoinAddress('bc1qxyz...', 'mainnet'); // true / false
 
-const isValid3 = sdk.bitcoin.validateBitcoinAddress(
-  '3J98t1WpEZ73CNmYviecrnyiWrnqRhWNLy', // P2SH
-  'mainnet'
-);
+// Cross-network mismatch is rejected
+isValidBitcoinAddress('tb1qxyz...', 'mainnet'); // false
 
-// Testnet address
-const isValid4 = sdk.bitcoin.validateBitcoinAddress(
-  'tb1qxyz...',
-  'testnet'
-);
-
-// Cross-network check (fails)
-const isValid5 = sdk.bitcoin.validateBitcoinAddress(
-  'tb1qxyz...', // Testnet address
-  'mainnet'    // Mainnet network
-); // Returns false
+// Throwing variant — surfaces the reason
+try {
+  validateBitcoinAddress('tb1qxyz...', 'mainnet');
+} catch (err) {
+  console.error(err.message); // e.g. wrong-network / checksum failure
+}
 ```
 
-**Location:** `src/bitcoin/BitcoinManager.ts:178`
+**Location:** `src/utils/bitcoin-address.ts:55` (`validateBitcoinAddress`), `:125` (`isValidBitcoinAddress`)
 
 ---
 
@@ -286,27 +276,37 @@ if (isValid) {
 
 **Location:** `src/bitcoin/BitcoinManager.ts:198`
 
+> **Ownership IS live Bitcoin sat control.** A `did:btco:<sat>` DID — the satoshi
+> *is* both the identity and the ownership. There is no ownership credential and no
+> DID-document edit that transfers ownership. Current ownership is read **live** from
+> Bitcoin via `sdk.lifecycle.getCurrentOwner(asset)`; `sdk.lifecycle.transferOwnership(asset, toAddress)`
+> is a pure sat move that writes **nothing** to the asset's Cryptographic Event Log
+> (the CEL is authorship-only). The `BitcoinManager` methods below (`transferInscription`,
+> etc.) are the low-level sat-moving primitives those lifecycle operations build on.
+> See the Lifecycle docs for `inscribeOnBitcoin`, `transferOwnership`, `getCurrentOwner`,
+> and `resolveAssetFromSat`.
+
 ---
 
 ### getSatoshiFromInscription()
 
-Extracts satoshi identifier from inscription ID.
+Resolves the satoshi identifier for an inscription ID via the configured provider.
 
 ```typescript
-getSatoshiFromInscription(
+async getSatoshiFromInscription(
   inscriptionId: string
-): string
+): Promise<string | null>
 ```
 
 **Parameters:**
 - `inscriptionId` (string): Full inscription ID
 
 **Returns:**
-- `string`: Satoshi identifier
+- `Promise<string | null>`: Satoshi identifier, or `null` if the provider has no inscription / the satoshi fails validation
 
 **Example:**
 ```typescript
-const satoshi = sdk.bitcoin.getSatoshiFromInscription(
+const satoshi = await sdk.bitcoin.getSatoshiFromInscription(
   'abc123...i0'
 );
 
@@ -314,7 +314,7 @@ console.log('Satoshi:', satoshi);
 // Output: Satoshi: 2099994106992659
 ```
 
-**Location:** `src/bitcoin/BitcoinManager.ts:221`
+**Location:** `src/bitcoin/BitcoinManager.ts:392`
 
 ---
 

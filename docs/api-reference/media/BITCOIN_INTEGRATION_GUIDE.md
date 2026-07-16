@@ -1059,7 +1059,8 @@ describe('Bitcoin Integration Tests', () => {
 ```typescript
 describe('Full Asset Lifecycle', () => {
   it('should create, inscribe, and transfer asset', async () => {
-    // Create asset
+    // Create asset — genesis is a did:cel (created offline, free).
+    // `asset.id` IS the DID string; `asset.did` is the DID *document*.
     const resources = [{
       id: 'test-asset',
       type: 'image',
@@ -1068,21 +1069,28 @@ describe('Full Asset Lifecycle', () => {
     }];
 
     const asset = await sdk.lifecycle.createAsset(resources);
-    expect(asset.did).toMatch(/^did:peer:/);
+    expect(asset.id).toMatch(/^did:cel:/);
+    expect(asset.currentLayer).toBe('did:cel');
 
-    // Inscribe on Bitcoin
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
-    expect(asset.did).toMatch(/^did:btco:/);
+    // Inscribe on Bitcoin — migrates to did:btco:<sat>. The satoshi IS the
+    // identity and the ownership. (For a caller-selected sat, pass
+    // { fundingUtxo, satSigner, changeAddress, feeRate }; omit for the
+    // provider-picked dev/test path.)
+    const inscribed = await sdk.lifecycle.inscribeOnBitcoin(asset);
+    expect(inscribed.currentLayer).toBe('did:btco');
+    expect(inscribed.id).toMatch(/^did:btco:/);
 
-    // Transfer ownership
-    const transferResult = await sdk.lifecycle.transferOwnership(
-      asset,
+    // Transfer ownership — a PURE Bitcoin sat move. It writes NOTHING to the
+    // CEL (ownership is sat control, not a log event and not a DID-doc edit).
+    const transferTx = await sdk.lifecycle.transferOwnership(
+      inscribed,
       'buyer-bitcoin-address'
     );
+    expect(transferTx.txid).toBeDefined();
 
-    // Verify transfer completed
-    expect(transferResult).toBeDefined();
-    expect(asset.did).toMatch(/^did:btco:/);
+    // Ownership is read LIVE from Bitcoin, never from a log event:
+    const owner = await sdk.lifecycle.getCurrentOwner(inscribed);
+    expect(owner?.address).toBeDefined();
   }, 180000); // 3 minute timeout
 });
 ```

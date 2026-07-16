@@ -13,7 +13,7 @@
 ```
 External Input          SDK Boundary              Internal Operations
 ─────────────────────   ──────────────────────    ────────────────────────
-User resources    ───→  Validation layer     ───→  DID creation (did:peer)
+User resources    ───→  Validation layer     ───→  DID creation (did:cel genesis)
 DID strings       ───→  DID parsing          ───→  WebVH publication
 Bitcoin addresses ───→  Address validation   ───→  Bitcoin inscription
 Fee rates         ───→  Bounds checking      ───→  Transaction construction
@@ -80,7 +80,7 @@ External signers  ───→  Interface contract   ───→  Credential is
 
 **F5 — DID document validation not called in creation paths**
 - **File:** `src/utils/validation.ts:78-115`
-- **Issue:** `validateDIDDocument()` exists but isn't invoked during `createDIDPeer()` or `createDIDWebVH()`.
+- **Issue:** `validateDIDDocument()` exists but isn't invoked during `createDIDWebVH()` or the did:cel genesis (`createAsset`) path.
 - **Impact:** Malformed DID documents could be created in edge cases.
 - **Recommendation:** Call `validateDIDDocument()` in DID creation methods.
 
@@ -169,7 +169,9 @@ The SDK demonstrates strong security practices in several areas:
 - **Fee rate bounds** — Max 10,000 sat/vB in BitcoinManager prevents accidental fund drain
 - **Dust limit handling** — Sub-546-sat change added to fee instead of creating dust outputs
 - **Reveal-tx front-running protection** — Random reveal keypair per inscription
-- **did:cel sat uniqueness** — First-anchor-wins, verified fail-closed at resolution in `verifyEventLog` via the provider's `getAnchoringsForDidCel`
+- **did:cel sat uniqueness** — First-anchor-wins, verified fail-closed at resolution in `verifyEventLog` via the provider's `getAnchoringsForDidCel` (`UNIQUENESS_UNVERIFIABLE` when the provider can't confirm). There is no "unique satoshi assignment" front-running mechanism — that was never wired and was removed (`preventFrontRunning` deleted, #369); commit/reveal is transaction construction, not front-running protection
+- **Ownership IS live Bitcoin sat control** — `did:btco:<sat>` makes the satoshi both identity and ownership, read live via `getCurrentOwner()`. Ownership is never a credential and is never transferred by editing a DID document; `transferOwnership()` is a pure sat move that writes nothing to the CEL
+- **Hosted-resource verification fails closed (#368)** — a URL-only resource whose fetch errors, hash-mismatches, or has no fetcher fails verification rather than silently passing
 - **Inscription UTXO protection** — `hasResource` flag prevents spending inscription-bearing UTXOs
 - **Error message sanitization** — No private keys or sensitive data in error messages
 - **Comprehensive security tests** — 11 categories in `tests/security/bitcoin-penetration-tests.test.ts`

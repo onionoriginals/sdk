@@ -16,7 +16,7 @@ const sdk = OriginalsSDK.create({
 ## Asset Lifecycle (Clean API)
 
 ```typescript
-// Layer 1: Create draft — asset.id is did:cel:…, currentLayer label 'did:peer'
+// Layer 1: Create draft — asset.id is did:cel:…, currentLayer 'did:cel'
 const draft = await sdk.lifecycle.createDraft(resources, {
   onProgress: (p) => console.log(`${p.percentage}%: ${p.message}`)
 });
@@ -133,8 +133,9 @@ const chainValid = manager.verifyVersionChain(resource.id);
 ## DID Operations
 
 ```typescript
-// Create
-const { didDocument, keyPair } = await sdk.did.createDIDPeer(resources, true);
+// Genesis is did:cel — mint via the lifecycle API (no createDIDPeer):
+const asset = await sdk.lifecycle.createAsset(resources);  // asset.id === 'did:cel:…'
+// Public discovery:
 const result = await sdk.did.createDIDWebVH({ domain: 'example.com' });
 
 // Migrate (returns { did, didDocument, log, keyPair, logPath?, previousDid } —
@@ -247,7 +248,7 @@ await sdk.did.createDIDWebVH({
 
 1. **Bitcoin ops need `ordinalsProvider`** - Always configure for inscribe/transfer; also pass it to `asset.verify({ ordinalsProvider })` to verify inscribed (did:btco) assets
 2. **Keys are Multikey, not JWK** - Use `multikey.encode*()` functions
-3. **Migration is one-way** - peer → webvh → btco only
+3. **Migration is one-way** - did:cel → webvh → btco only (no fallback once on btco)
 4. **Max fee rate: 10,000 sat/vB** - Prevents accidental fund loss
 5. **Use `OrdMockProvider` for tests** - Never real Bitcoin in tests
 6. **Use typed Originals** - Prefer `createTypedOriginal` for validation

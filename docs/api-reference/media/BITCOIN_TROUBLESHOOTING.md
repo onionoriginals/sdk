@@ -512,6 +512,14 @@ console.log('Spendable balance:', regularBalance, 'sats');
 
 **Symptom:** Inscription transferred when trying to send regular Bitcoin.
 
+> **Why this matters for `did:btco` assets:** ownership IS live Bitcoin sat
+> control — the inscribed satoshi (`did:btco:<sat>`) is simultaneously the
+> asset's identity and its ownership. Deliberately moving that sat to a new
+> address IS the ownership transfer (a pure sat move; nothing is written to
+> the asset's provenance log). Accidentally spending it into a payment
+> destroys the binding you meant to keep, so resource-aware selection is not
+> optional.
+
 **Prevention:**
 
 ```typescript
