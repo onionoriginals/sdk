@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine, DemoEvent } from '../sdk/engine';
+import { btcTestnetEnabled } from '../sdk/testnet-flag';
+import { useAuth } from '../auth/useAuth';
 import { generateArtwork } from '../sdk/artwork';
 import { getArtSeed, setArtSeed } from '../sdk/artwork-sync';
 import { Pipeline } from './Pipeline';
@@ -64,6 +66,8 @@ function useEngine() {
 
 export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
+  const { isAuthenticated, bitcoin } = useAuth();
+  const testnet = btcTestnetEnabled();
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [medium, setMedium] = useState(demo.form.mediums[0]);
   const [nonce, setNonce] = useState(() => getArtSeed().nonce);
@@ -147,7 +151,31 @@ export function Demo() {
   const publish = () =>
     run('created', 'publishing', 'published', (engine) => engine.publish());
   const inscribe = () =>
-    run('published', 'inscribing', 'inscribed', (engine) => engine.inscribe(7));
+    run('published', 'inscribing', 'inscribed', async (engine) => {
+      // Mock path (testnet disabled): unchanged bare inscribe.
+      if (!testnet) return engine.inscribe();
+      // Real path: must be signed in with a provisioned testnet4 session.
+      if (!isAuthenticated || !bitcoin) {
+        throw new Error(demo.inscribeGate.signInPrompt);
+      }
+      // Ask the server faucet to fund the user's address, then inscribe with the
+      // user's Turnkey key. faucet_empty (507) surfaces a friendly message.
+      const res = await fetch('/api/btc/funding', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ address: bitcoin.fundingAddress }),
+      });
+      if (res.status === 507) throw new Error(demo.inscribeGate.faucetEmpty);
+      if (!res.ok) throw new Error(`Funding failed (${res.status})`);
+      const { fundingUtxo, changeAddress } = (await res.json()) as {
+        fundingUtxo: { txid: string; vout: number; value: number };
+        changeAddress: string;
+      };
+      return engine.inscribe({
+        funding: { fundingUtxo, changeAddress, signingClient: bitcoin.signingClient },
+      });
+    });
 
   const reset = () => {
     unsubscribe.current?.();
@@ -305,6 +333,16 @@ export function Demo() {
 
                 {error && <p className="demo-error" role="alert">{error}</p>}
 
+                {phase === 'published' && (
+                  <p className="demo-inscribe-note">
+                    {testnet
+                      ? isAuthenticated && bitcoin
+                        ? demo.inscribeGate.yourKeyNote
+                        : demo.inscribeGate.signInPrompt
+                      : demo.inscribeGate.mockNote}
+                  </p>
+                )}
+
                 {(phase === 'published' || phase === 'inscribing' || phase === 'inscribed') &&
                   asset?.webvhLogUrl && (
                     <div className="demo-resolved">
@@ -339,6 +377,16 @@ export function Demo() {
                       <code>{asset.inscription?.satoshi}</code> {demo.done.beforeTx}{' '}
                       <code>{asset.inscription?.txid}</code>. {demo.done.after}
                     </p>
+                    {asset.inscription?.explorerUrl && (
+                      <a
+                        className="demo-explorer-link"
+                        href={asset.inscription.explorerUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {demo.inscribeGate.explorerLabel}
+                      </a>
+                    )}
                     <button type="button" className="demo-reset" onClick={reset}>
                       {demo.reset}
                     </button>

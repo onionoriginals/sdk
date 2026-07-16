@@ -23,8 +23,11 @@ import {
 import { HttpHostingStorageAdapter } from './http-hosting-adapter';
 import { HttpOrdinalsProvider } from './http-ordinals-provider';
 import { TurnkeySatSigner } from './turnkey-sat-signer';
+import { btcTestnetEnabled } from './testnet-flag';
 import type { TurnkeyBitcoinClient } from '../auth/turnkey-session';
 import { sha256 } from '@noble/hashes/sha2.js';
+
+export { btcTestnetEnabled } from './testnet-flag';
 
 export type LayerId = 'did:peer' | 'did:webvh' | 'did:btco';
 
@@ -385,13 +388,6 @@ export class DemoEngine {
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-// Track B is enabled only when the deploy sets VITE_BTC_TESTNET=1 (server has
-// QUICKNODE_ENDPOINT + a faucet Turnkey wallet). Absent → the inscribe step is
-// the self-contained OrdMockProvider mock.
-export function btcTestnetEnabled(): boolean {
-  return (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_BTC_TESTNET === '1';
 }
 
 // The testnet4 block explorer link for a real inscription's reveal txid. Only
