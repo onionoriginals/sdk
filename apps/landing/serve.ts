@@ -1,36 +1,46 @@
 /**
- * Production static server for the built landing SPA (Railway).
+ * Unified production server for the landing app (Railway entry).
  *
- * Serves `apps/landing/dist` on $PORT with SPA fallback (unknown non-asset
- * routes → index.html). Static-only: the auth API (`server/index.ts`) is a
- * separate service that needs Turnkey creds — deploy it alongside and point the
- * proxy/`VITE_*` at it if you want the Sign-in / did:webvh features live.
+ * One origin serves: the built SPA (with SPA fallback + traversal guard), the
+ * auth API (only when JWT_SECRET + TURNKEY_* are present; otherwise 503 stubs),
+ * the WebVH host write endpoint (PUT /api/host/*), and the hosted did:webvh logs
+ * at the exact URLs didwebvh-ts's resolver GETs. No secrets are required to run
+ * the SPA and the real did:webvh hosting demo (Track A).
  */
-import { file } from 'bun';
-import { normalize } from 'node:path';
+import { createInMemorySessionStorage } from '@originals/auth/server';
+import { buildFetch } from './server/app';
+import { createWebvhHostStore } from './server/webvh-host';
+import { buildRoutes, buildStubRoutes } from './server/index';
+import { getTurnkey } from './server/turnkey';
 
-const DIST = new URL('./dist/', import.meta.url).pathname;
-const port = Number(process.env.PORT ?? 3000);
+const distDir = new URL('./dist/', import.meta.url).pathname;
+const hostStore = createWebvhHostStore();
 
-async function serveFile(relPath: string): Promise<Response> {
-  const f = file(DIST + relPath);
-  if (await f.exists()) return new Response(f);
-  // SPA fallback: client-side routes have no file on disk.
-  return new Response(file(DIST + 'index.html'), {
-    headers: { 'content-type': 'text/html; charset=utf-8' },
+const jwtSecret = process.env.JWT_SECRET;
+const turnkeyConfigured =
+  !!process.env.TURNKEY_API_PUBLIC_KEY &&
+  !!process.env.TURNKEY_API_PRIVATE_KEY &&
+  !!process.env.TURNKEY_ORGANIZATION_ID;
+
+let routes;
+if (jwtSecret && turnkeyConfigured) {
+  routes = buildRoutes({
+    turnkey: getTurnkey(),
+    sessions: createInMemorySessionStorage(),
+    jwtSecret,
   });
+  console.log('[landing] auth configured — /api/auth/* live');
+} else {
+  console.warn(
+    '[landing] auth unconfigured (JWT_SECRET/TURNKEY_* absent) — /api/auth/* returns 503; SPA + did:webvh hosting still work'
+  );
+  routes = buildStubRoutes();
 }
 
 const server = Bun.serve({
-  port,
+  port: Number(process.env.PORT ?? 8787),
   hostname: '0.0.0.0',
-  async fetch(req) {
-    const url = new URL(req.url);
-    // Strip leading slashes, normalize, and reject path traversal.
-    const rel = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.(\/|\\|$))+/, '').replace(/^\/+/, '');
-    if (rel.includes('..')) return new Response('Bad request', { status: 400 });
-    return serveFile(rel === '' ? 'index.html' : rel);
-  },
+  fetch: buildFetch({ routes, hostStore, distDir }),
 });
 
-console.log(`[landing] serving ${DIST} on http://0.0.0.0:${server.port}`);
+console.log(`[landing] unified server on http://0.0.0.0:${server.port}`);

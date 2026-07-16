@@ -22,6 +22,23 @@ export function buildRoutes(deps: {
   };
 }
 
+// Routes for when Turnkey/JWT env is absent: health works, auth returns 503 so
+// the SPA + Track A (real webvh hosting) run WITHOUT any secrets.
+export function buildStubRoutes(): Record<string, Handler> {
+  const unavailable: Handler = () =>
+    json(
+      { error: 'auth_unconfigured', message: 'Authentication is not configured on this server.' },
+      503
+    );
+  return {
+    'GET /api/health': () => json({ status: 'ok' }),
+    'POST /api/auth/send-otp': unavailable,
+    'POST /api/auth/verify-otp': unavailable,
+    'GET /api/me': unavailable,
+    'POST /api/auth/logout': unavailable,
+  };
+}
+
 if (import.meta.main) {
   const jwtSecret = process.env.JWT_SECRET;
   if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
