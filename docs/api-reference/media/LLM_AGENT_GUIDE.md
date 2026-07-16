@@ -49,8 +49,7 @@ Free       Hosted     Permanent + ownership
 | Layer 3 | `did:btco` | Permanent on Bitcoin; the sat IS ownership | Transferable ownership |
 
 > **Genesis is `did:cel`, not `did:peer`.** `createAsset` mints a `did:cel` from the
-> create-event hash (`asset.id` is that did:cel), while `asset.currentLayer` still reports
-> the `'did:peer'` layer label. **`createDIDPeer` no longer exists** — the verifier keeps a
+> create-event hash (`asset.id` is that did:cel), while `asset.currentLayer` is `'did:cel'`. **`createDIDPeer` no longer exists** — the verifier keeps a
 > read-only path for pre-existing `did:peer:4` logs, but new assets are never created as
 > did:peer. Once an asset reaches `did:btco` there is **no `did:webvh` fallback**.
 
@@ -382,7 +381,7 @@ appends a signed `create` event and derives the asset's `did:cel` id from it:
 
 ```typescript
 const asset = await sdk.lifecycle.createAsset(resources: AssetResource[]): Promise<OriginalsAsset>
-// asset.id === 'did:cel:…'  (asset.currentLayer label is 'did:peer')
+// asset.id === 'did:cel:…'  (asset.currentLayer is 'did:cel')
 ```
 
 See [LifecycleManager API → Creating Assets](#creating-assets).
@@ -469,7 +468,7 @@ const log = await sdk.did.loadDIDLog(logPath: string): Promise<DIDLog>
 The clean API provides intuitive methods with progress tracking and validation:
 
 ```typescript
-// Create draft (did:cel genesis; currentLayer label 'did:peer')
+// Create draft (did:cel genesis; currentLayer 'did:cel')
 const draft = await sdk.lifecycle.createDraft(resources, {
   onProgress: (p) => console.log(`${p.percentage}%: ${p.message}`)
 });
@@ -778,7 +777,7 @@ asset.id: string                     // DID identifier
 asset.resources: AssetResource[]     // Asset resources
 asset.did: DIDDocument               // DID document
 asset.credentials: VerifiableCredential[]
-asset.currentLayer: LayerType        // 'did:peer' | 'did:webvh' | 'did:btco'
+asset.currentLayer: LayerType        // 'did:cel' | 'did:webvh' | 'did:btco'
 asset.bindings?: Record<string, string>  // Cross-layer DID mappings
 ```
 
@@ -1298,7 +1297,7 @@ const resources = [{
   size: contentBuffer.length,
 }];
 
-// 3. Create asset (genesis layer; currentLayer label is 'did:peer')
+// 3. Create asset (genesis layer; currentLayer is 'did:cel')
 const asset = await sdk.lifecycle.createAsset(resources);
 console.log('Created:', asset.id); // did:cel:u...
 
@@ -1467,7 +1466,7 @@ const resourceHash = hashResource(Buffer.from(content));
 ### Core Types
 
 ```typescript
-type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';
+type LayerType = 'did:cel' | 'did:webvh' | 'did:btco';
 type KeyType = 'ES256K' | 'Ed25519' | 'ES256';
 type MultikeyType = 'Ed25519' | 'Secp256k1' | 'P256' | 'Bls12381G2';
 type WebVHNetworkName = 'magby' | 'cleffa' | 'pichu';

@@ -16,7 +16,7 @@ const sdk = OriginalsSDK.create({
 ## Asset Lifecycle (Clean API)
 
 ```typescript
-// Layer 1: Create draft — asset.id is did:cel:…, currentLayer label 'did:peer'
+// Layer 1: Create draft — asset.id is did:cel:…, currentLayer 'did:cel'
 const draft = await sdk.lifecycle.createDraft(resources, {
   onProgress: (p) => console.log(`${p.percentage}%: ${p.message}`)
 });

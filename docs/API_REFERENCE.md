@@ -287,7 +287,7 @@ control, not a log event (see `transferOwnership` / `getCurrentOwner`).
 #### `createAsset(resources)`
 
 Mint a new asset. Appends a `create` event and derives a `did:cel` genesis
-identifier (`asset.id`); the asset starts on the `did:peer` layer label (offline, free).
+identifier (`asset.id`); the asset starts on the `did:cel` layer (offline, free).
 
 ```typescript
 const asset = await sdk.lifecycle.createAsset([

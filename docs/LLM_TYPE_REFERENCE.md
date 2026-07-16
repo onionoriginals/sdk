@@ -351,7 +351,7 @@ interface ProvenanceChain {
 ### LayerType
 
 ```typescript
-type LayerType = 'did:peer' | 'did:webvh' | 'did:btco';
+type LayerType = 'did:cel' | 'did:webvh' | 'did:btco';
 ```
 
 ---
