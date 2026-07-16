@@ -78,7 +78,7 @@ export class TurnkeyDIDSigner {
         const cleanS = s.startsWith('0x') ? s.slice(2) : s;
         const combinedHex = cleanR + cleanS;
 
-        const signatureBytes = Buffer.from(combinedHex, 'hex');
+        const signatureBytes = Uint8Array.from(Buffer.from(combinedHex, 'hex'));
 
         if (signatureBytes.length !== 64) {
           throw new Error(
