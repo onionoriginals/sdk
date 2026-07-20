@@ -388,7 +388,10 @@ describe('Batch Operations Stress Tests', () => {
 
   describe('6. Memory and Resource Tests', () => {
     it('should not leak memory during repeated batch operations', async () => {
-      const warmupIterations = 5; // allow JIT to settle before measuring
+      // Longer warmup so GC from prior heavy stress tests (1000-asset migrations)
+      // fully settles before we start measuring — without this, mid-measurement GC
+      // can make firstHalf >> secondHalf and cause the growth check to false-fire.
+      const warmupIterations = 15;
       const measuredIterations = 10;
       const batchSize = 100;
 
@@ -427,7 +430,9 @@ describe('Batch Operations Stress Tests', () => {
       const growth = ((secondHalf - firstHalf) / firstHalf) * 100;
 
       console.log(`[STRESS] Memory growth: ${growth.toFixed(2)}%`);
-      expect(Math.abs(growth)).toBeLessThan(50); // Memory shouldn't grow > 50%
+      // A memory leak manifests as POSITIVE growth. GC-driven shrinkage between
+      // halves is normal and not a leak, so we only check the positive direction.
+      expect(growth).toBeLessThan(50); // Memory shouldn't grow > 50%
     }, 180000);
 
     it('should handle resource cleanup after timeout', async () => {
