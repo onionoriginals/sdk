@@ -78,13 +78,39 @@ export class OriginalsAsset {
     data: unknown,
     opts?: { inscribeConfirm?: InscribeConfirm }
   ) => Promise<string | null>;
-  // Per-asset serialization for addResourceVersion: the sync→async cutover made
-  // the shared #celLog read-modify-write span await points, so concurrent calls
-  // raced (a later _replaceCelLog clobbered an earlier signed append, or landed
-  // a stale-chained unverifiable event). A promise-chain mutex forces each call
-  // to run its critical section — re-read head, base-check, append — to
-  // completion before the next begins.
+  // The SOLE per-asset lock for CEL #celLog read-modify-write (#400). The
+  // sync→async cutover made every head→sign→_replaceCelLog span cross await
+  // points, so concurrent mutators raced (a later _replaceCelLog clobbered an
+  // earlier signed append, or landed a stale-chained unverifiable event). A
+  // promise-chain mutex forces each critical section — re-read head, base-check,
+  // append/replace — to run to completion before the next begins.
+  //
+  // Routed through it: addResourceVersion (internally) AND every LifecycleManager
+  // log-mutating op (publish/inscribe/rotate/authorize), which wrap their append
+  // span in `runExclusive`. Originally it only serialized addResourceVersion vs
+  // itself; the lifecycle ops were serialized only by LifecycleManager's
+  // (mutually invisible) inFlightAssets guard, so a migrate could interleave with
+  // and clobber an addResourceVersion append (#400).
+  //
+  // LOCK ORDERING (no cycle): lifecycle ops take inFlightAssets (a synchronous,
+  // non-blocking throw-guard — never waits) BEFORE this lock; addResourceVersion
+  // takes ONLY this lock and NEVER inFlightAssets. NOT reentrant — a holder must
+  // not re-acquire it (LifecycleManager's append helpers deliberately do NOT
+  // self-acquire; only their outermost op span does).
   #appendChain: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Run `fn` as an exclusive critical section against every other per-asset CEL
+   * mutation (#400). All #celLog read-modify-write must pass through here (or via
+   * addResourceVersion, which does). NON-reentrant: never call from inside a fn
+   * already holding the lock, or it deadlocks. See #appendChain for ordering.
+   */
+  async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.#appendChain.then(() => fn());
+    // Keep the chain alive across a rejected turn without swallowing it for the caller.
+    this.#appendChain = run.then(() => {}, () => {});
+    return run;
+  }
   // #407 phase 3: the new version's inline bytes, exposed transiently WHILE the
   // bound appender runs (addResourceVersion appends+inscribes BEFORE pushing the
   // new resource, so the per-event inscription can carry the new media as
@@ -628,16 +654,15 @@ export class OriginalsAsset {
         'or host the bytes externally and reference them by hash.'
       );
     }
-    // Serialize the whole read-modify-write of #celLog per asset: acquire this
-    // asset's append turn, run the critical section to completion, release. A
-    // second queued call re-reads the head INSIDE its turn, so it chains from
-    // the first call's committed result rather than a stale snapshot (Finding 2).
-    const run = this.#appendChain.then(() =>
+    // Serialize the whole read-modify-write of #celLog per asset via the shared
+    // lock: acquire this asset's append turn, run the critical section to
+    // completion, release. A second queued call (another addResourceVersion OR a
+    // lifecycle migrate/rotate) re-reads the head INSIDE its turn, so it chains
+    // from the first call's committed result rather than a stale snapshot
+    // (Finding 2 / #400).
+    return this.runExclusive(() =>
       this.#addResourceVersionCritical(resourceId, newContent, contentType, changes, opts)
     );
-    // Keep the chain alive across a rejected turn without swallowing it for the caller.
-    this.#appendChain = run.catch(() => {});
-    return run;
   }
 
   /**
