@@ -31,6 +31,32 @@ describe('originals routes — auth gating', () => {
     const putUrl = new URL('http://h/api/originals/host/demo.example.com/studio/you/abc/did.jsonl');
     const putRes = await routes.hostPut(new Request(putUrl, { method: 'PUT', body: 'x' }), putUrl, '1.1.1.1');
     expect(putRes.status).toBe(401);
+    const getRes = await routes.hostGet(new Request(putUrl), putUrl);
+    expect(getRes.status).toBe(401);
+  });
+
+  test('PUT then GET on /api/originals/host/* round-trips (adapter.get path)', async () => {
+    const store = tmpStore();
+    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
+    const key = 'demo.example.com/studio/you/abc/did.jsonl';
+    const endpoint = `http://demo.local/api/originals/host/${encodeURIComponent(key)}`;
+    const cookie = cookieFor('sub-1');
+
+    const putRes = await fetchFn(
+      new Request(endpoint, { method: 'PUT', headers: { 'content-type': 'application/jsonl', cookie }, body: '{"v":1}' })
+    );
+    expect(putRes.status).toBe(200);
+
+    // GET on the same path must NOT 405 — it reads the object back (was the P1 bug).
+    const getRes = await fetchFn(new Request(endpoint, { headers: { cookie } }));
+    expect(getRes.status).toBe(200);
+    expect(await getRes.text()).toBe('{"v":1}');
+
+    // A key this user never wrote → 404, which the adapter maps to null.
+    const missUrl = `http://demo.local/api/originals/host/${encodeURIComponent('demo.example.com/nope/did.jsonl')}`;
+    const missRes = await fetchFn(new Request(missUrl, { headers: { cookie } }));
+    expect(missRes.status).toBe(404);
   });
 
   test('record then list under the authenticated sub', async () => {

@@ -74,6 +74,7 @@ export function buildFetch(deps: {
     // 1b. Durable per-user Originals hosting (auth-gated). Same wildcard shape,
     // but persisted and namespaced by the JWT sub.
     if (originals && path.startsWith('/api/originals/host/')) {
+      if (req.method === 'GET' || req.method === 'HEAD') return originals.hostGet(req, url);
       return originals.hostPut(req, url, resolveClientIp(req, server));
     }
 

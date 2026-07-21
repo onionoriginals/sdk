@@ -83,6 +83,35 @@ describe('originals-store', () => {
     ).toThrow('STORE_FULL');
   });
 
+  test('recordOriginal is idempotent on a duplicate did (best-effort retry)', () => {
+    const store = createOriginalsStore({ dataDir: tmpDir() });
+    const o = { did: 'did:webvh:S:h:a', title: 'A', resourceHash: 'x', createdAt: 't' };
+    store.recordOriginal('sub-1', o);
+    store.recordOriginal('sub-1', { ...o, title: 'A (retry)' }); // same did, ignored
+    const list = store.list('sub-1');
+    expect(list.length).toBe(1);
+    expect(list[0].title).toBe('A'); // first write wins, no duplicate
+  });
+
+  test('read: auth-scoped get by key returns the bytes with anti-XSS headers', () => {
+    const store = createOriginalsStore({ dataDir: tmpDir() });
+    const key = 'demo.example.com/studio/you/abc/did.jsonl';
+    store.saveBytes('sub-1', key, enc('{"v":1}'), 'application/jsonl');
+    const res = store.read('sub-1', key);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/jsonl');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  test('read: 404 for a key the user never wrote (and never another user’s key)', () => {
+    const store = createOriginalsStore({ dataDir: tmpDir() });
+    const key = 'demo.example.com/studio/you/abc/did.jsonl';
+    store.saveBytes('sub-1', key, enc('{"v":1}'), 'application/jsonl');
+    expect(store.read('sub-1', 'demo.example.com/nope/did.jsonl').status).toBe(404);
+    // sub-2 wrote nothing → cannot read sub-1's key.
+    expect(store.read('sub-2', key).status).toBe(404);
+  });
+
   test('quota: exceeding total bytes throws STORE_FULL', () => {
     const store = createOriginalsStore({ dataDir: tmpDir(), maxTotalBytes: 8 });
     expect(() =>

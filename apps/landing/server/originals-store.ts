@@ -45,6 +45,8 @@ export interface OriginalsStore {
   ): void;
   list(subOrgId: string): OriginalSummary[];
   serve(url: URL): Response | null;
+  /** Auth-scoped read by object key (adapter.get) — only keys this user wrote. */
+  read(subOrgId: string, key: string): Response;
 }
 
 const CTYPE_SUFFIX = '.ctype';
@@ -116,6 +118,9 @@ export function createOriginalsStore(opts: {
     o: { did: string; title: string; resourceHash: string; createdAt: string }
   ): void {
     const idx = readIndex(subOrgId);
+    // Idempotent: a best-effort record retry (POST timed out, user re-published)
+    // must not list the same did twice.
+    if (idx.originals.some((e) => e.did === o.did)) return;
     if (idx.originals.length >= maxOriginals) throw new Error('STORE_FULL');
     idx.originals.push(o);
     writeIndex(subOrgId, idx);
@@ -157,5 +162,25 @@ export function createOriginalsStore(opts: {
     return new Response(new Uint8Array(bytes), { status: 200, headers: untrustedHeaders(contentType) });
   }
 
-  return { saveBytes, recordOriginal, list, serve };
+  // adapter.get: read back an object the user themselves wrote. Scoped to the
+  // user's index (keys in idx.sizes) so it never reads another user's bytes.
+  // 404 → the adapter returns null (its "not found" contract); other bytes 200.
+  function read(subOrgId: string, key: string): Response {
+    const idx = readIndex(subOrgId);
+    if (!(key in idx.sizes)) return new Response('Not found', { status: 404 });
+    let path: string;
+    try {
+      path = keyToPath(hostedDir, key);
+    } catch {
+      return new Response('Bad key', { status: 400 });
+    }
+    if (!existsSync(path)) return new Response('Not found', { status: 404 });
+    const bytes = readFileSync(path);
+    const contentType = existsSync(path + CTYPE_SUFFIX)
+      ? readFileSync(path + CTYPE_SUFFIX, 'utf8')
+      : 'application/octet-stream';
+    return new Response(new Uint8Array(bytes), { status: 200, headers: untrustedHeaders(contentType) });
+  }
+
+  return { saveBytes, recordOriginal, list, serve, read };
 }

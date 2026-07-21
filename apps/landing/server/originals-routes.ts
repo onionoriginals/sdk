@@ -19,6 +19,7 @@ const HOST_PREFIX = '/api/originals/host/';
 
 export interface OriginalsRoutes {
   hostPut(req: Request, url: URL, clientIp: string): Promise<Response>;
+  hostGet(req: Request, url: URL): Promise<Response>;
   record: Handler;
   list: Handler;
   serve(url: URL): Response | null;
@@ -73,6 +74,20 @@ export function createOriginalsRoutes(deps: {
     return json({ ok: true }, 200);
   }
 
+  // adapter.get: read back an object under this user's account (auth-scoped in
+  // the store). GET on the same wildcard path hostPut writes to.
+  async function hostGet(req: Request, url: URL): Promise<Response> {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const key = decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
+    if (!key) return json({ error: 'missing_key' }, 400);
+    try {
+      return store.read(sub, key);
+    } catch (e) {
+      return storeError(e);
+    }
+  }
+
   const record: Handler = async (req) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
@@ -98,5 +113,5 @@ export function createOriginalsRoutes(deps: {
     return json({ originals: store.list(sub) });
   };
 
-  return { hostPut, record, list, serve: (url) => store.serve(url) };
+  return { hostPut, hostGet, record, list, serve: (url) => store.serve(url) };
 }
