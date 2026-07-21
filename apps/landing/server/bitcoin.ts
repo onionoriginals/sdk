@@ -1,14 +1,17 @@
 /**
- * Server Bitcoin routes: a Turnkey-org faucet + thin QuickNode proxies.
+ * Server Bitcoin routes: a testnet4 faucet + thin QuickNode proxies.
  *
- * NO raw private key on the server: the faucet is a Turnkey-org wallet, signed
- * with the SAME Turnkey API creds auth already uses. The user's inscription is
- * signed in the browser by the user's own Turnkey session key. Every route is
- * auth-gated (JWT cookie) + rate-limited. The faucet signs ONLY its own funding
- * tx to a logged-in user's testnet address — never a general signing oracle.
+ * The faucet funds a logged-in user's testnet4 address so the user's own
+ * Turnkey key can sign the inscription in the browser. The faucet can sign its
+ * funding tx two ways (rawKeyFaucetSigner / turnkeyFaucetSigner) — coins are
+ * worthless tBTC, so a raw key is fine for a demo. Every route is auth-gated
+ * (JWT cookie) + rate-limited; the faucet signs ONLY its own funding tx to a
+ * logged-in user's testnet address, never a general signing oracle.
  */
 import * as btc from '@scure/btc-signer';
-import { hex, base64 } from '@scure/base';
+import { hex, base64, base58check } from '@scure/base';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import type { Turnkey } from '@turnkey/sdk-server';
 import { verifyToken } from '@originals/auth/server';
 import type { OrdinalsProvider } from '@originals/sdk';
@@ -20,8 +23,8 @@ import { createRateLimiter } from './rate-limit';
 export function isBitcoinConfigured(): boolean {
   return (
     !!process.env.QUICKNODE_ENDPOINT &&
-    !!process.env.BTC_FAUCET_WALLET_ID &&
-    !!process.env.BTC_FAUCET_ADDRESS
+    !!process.env.BTC_FAUCET_ADDRESS &&
+    (!!process.env.BTC_FAUCET_WIF || !!process.env.BTC_FAUCET_WALLET_ID)
   );
 }
 
@@ -34,11 +37,52 @@ export interface FaucetProvider extends OrdinalsProvider {
   >;
 }
 
+/** The scriptPubKey (hex) for a bech32 P2WPKH `tb1q…` address. */
+export function p2wpkhScriptHex(address: string): string {
+  const decoded = btc.Address(btc.TEST_NETWORK).decode(address);
+  if (!decoded || decoded.type !== 'wpkh') {
+    throw new Error(`Faucet address must be P2WPKH (tb1q…): ${address}`);
+  }
+  // Cast: the narrowed wpkh shape is a valid OutScript input; the union type on
+  // encode() otherwise widens to include undefined and fails to match.
+  return hex.encode(btc.OutScript.encode(decoded as Parameters<typeof btc.OutScript.encode>[0]));
+}
+
+/**
+ * The faucet's spendable UTXOs from mempool.space's testnet4 address API — free,
+ * no QuickNode add-on needed. Every UTXO pays to the faucet address, so its
+ * scriptPubKey is derived from that address. Only CONFIRMED UTXOs are returned
+ * (never spend our own unconfirmed change).
+ */
+export async function fetchFaucetUtxos(opts: {
+  api: string;
+  address: string;
+  fetchImpl?: typeof fetch;
+}): Promise<Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const scriptPubKey = p2wpkhScriptHex(opts.address);
+  const res = await fetchImpl(`${opts.api}/address/${opts.address}/utxo`);
+  if (!res.ok) throw new Error(`mempool.space UTXO fetch failed (${res.status}) for ${opts.address}`);
+  const utxos = (await res.json()) as Array<{
+    txid: string;
+    vout: number;
+    value: number;
+    status?: { confirmed?: boolean };
+  }>;
+  return utxos
+    .filter((u) => u.status?.confirmed)
+    .map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, scriptPubKey }));
+}
+
+/** Signs a built funding tx and returns broadcast-ready raw tx hex. */
+export type FaucetTxSigner = (tx: btc.Transaction) => Promise<string>;
+
 export function createBitcoinRoutes(deps: {
-  turnkey: Turnkey;
   jwtSecret: string;
   provider: OrdinalsProvider | FaucetProvider;
-  faucet: { walletId: string; address: string };
+  // `signFundingTx` decouples the routes from HOW the faucet is signed (raw key
+  // or Turnkey org wallet — see rawKeyFaucetSigner / turnkeyFaucetSigner).
+  faucet: { address: string; signFundingTx: FaucetTxSigner };
   faucetSats?: number;
   now?: () => number;
 }): { funding: Handler; sat: Handler; fee: Handler; broadcast: Handler } {
@@ -178,34 +222,21 @@ export function createBitcoinRoutes(deps: {
     tx.addOutputAddress(address, BigInt(faucetSats), btc.TEST_NETWORK);
     if (change > 330) tx.addOutputAddress(deps.faucet.address, BigInt(change), btc.TEST_NETWORK);
 
-    // 3) Sign with the faucet Turnkey-org wallet (unsigned PSBT hex → Turnkey →
-    //    broadcast-ready hex). NO raw key: Turnkey holds the faucet key.
-    const unsignedHex = hex.encode(tx.toPSBT());
-    let signedTxHex: string;
-    try {
-      const result = await deps.turnkey.apiClient().signTransaction({
-        organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
-        signWith: deps.faucet.address,
-        unsignedTransaction: unsignedHex,
-        type: 'TRANSACTION_TYPE_BITCOIN',
-      } as never);
-      // Turnkey returns either broadcast-ready hex or a partially-signed PSBT.
-      const signed =
-        (result as { activity?: { result?: { signTransactionResult?: { signedTransaction?: string } } } })
-          .activity?.result?.signTransactionResult?.signedTransaction;
-      if (!signed) throw new Error('Turnkey signTransaction returned no signedTransaction');
-      // If Turnkey returned a PSBT, finalize it; if already raw hex, pass through.
-      signedTxHex = maybeFinalize(signed);
-    } catch (e) {
-      return json({ error: 'faucet_sign_failed', message: (e as Error).message }, 502);
-    }
-
     // The funded outpoint is vout 0 (the user output). Capture its scriptPubKey
     // now — the SDK's createCommitTransaction REQUIRES it on the fundingUtxo to
     // set the segwit witnessUtxo (it throws "missing scriptPubKey" otherwise).
     const userScript = tx.getOutput(0).script;
     if (!userScript) return json({ error: 'funding_build_failed', message: 'No user output script.' }, 500);
     const scriptPubKey = hex.encode(userScript);
+
+    // 3) Sign the funding tx with the faucet's key (raw WIF or Turnkey org) →
+    //    broadcast-ready hex.
+    let signedTxHex: string;
+    try {
+      signedTxHex = await deps.faucet.signFundingTx(tx);
+    } catch (e) {
+      return json({ error: 'faucet_sign_failed', message: (e as Error).message }, 502);
+    }
 
     // 4) Broadcast.
     let txid: string;
@@ -225,6 +256,50 @@ export function createBitcoinRoutes(deps: {
 }
 
 export type BitcoinRoutes = ReturnType<typeof createBitcoinRoutes>;
+
+/**
+ * Raw-key faucet signer: decode a testnet WIF, derive its tb1q address, and
+ * return a signer that signs+finalizes the funding tx locally. Simplest to
+ * operate for a testnet4 demo (worthless coins) — no Turnkey wallet needed.
+ */
+export function rawKeyFaucetSigner(wif: string): { address: string; signFundingTx: FaucetTxSigner } {
+  const raw = base58check(sha256).decode(wif.trim());
+  const version = raw[0];
+  if (version !== 0xef) {
+    throw new Error(`BTC_FAUCET_WIF must be a testnet WIF (version 0xEF); got 0x${version.toString(16)}.`);
+  }
+  const privateKey = raw.slice(1, 33); // drop version byte + optional compression flag
+  const pub = secp256k1.getPublicKey(privateKey, true);
+  const address = btc.p2wpkh(pub, btc.TEST_NETWORK).address!;
+  const signFundingTx: FaucetTxSigner = async (tx) => {
+    tx.sign(privateKey);
+    tx.finalize();
+    return hex.encode(tx.extract());
+  };
+  return { address, signFundingTx };
+}
+
+/**
+ * Turnkey-org faucet signer: signs the funding tx via Turnkey signTransaction
+ * (no raw key on the server) and finalizes locally. Requires a Turnkey wallet
+ * holding the faucet address.
+ */
+export function turnkeyFaucetSigner(turnkey: Turnkey, address: string): FaucetTxSigner {
+  return async (tx) => {
+    const unsignedHex = hex.encode(tx.toPSBT());
+    const result = await turnkey.apiClient().signTransaction({
+      organizationId: process.env.TURNKEY_ORGANIZATION_ID!,
+      signWith: address,
+      unsignedTransaction: unsignedHex,
+      type: 'TRANSACTION_TYPE_BITCOIN',
+    } as never);
+    const signed =
+      (result as { activity?: { result?: { signTransactionResult?: { signedTransaction?: string } } } })
+        .activity?.result?.signTransactionResult?.signedTransaction;
+    if (!signed) throw new Error('Turnkey signTransaction returned no signedTransaction');
+    return maybeFinalize(signed);
+  };
+}
 
 /** Pass raw tx hex through; finalize a PSBT (base64 or hex) into raw hex. */
 function maybeFinalize(signed: string): string {

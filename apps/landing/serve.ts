@@ -18,26 +18,31 @@ import { buildFetch } from './server/app';
 import { createWebvhHostStore } from './server/webvh-host';
 import { buildRoutes } from './server/index';
 import { getTurnkey } from './server/turnkey';
-import { createBitcoinRoutes, isBitcoinConfigured, type FaucetProvider } from './server/bitcoin';
+import {
+  createBitcoinRoutes,
+  isBitcoinConfigured,
+  rawKeyFaucetSigner,
+  turnkeyFaucetSigner,
+  fetchFaucetUtxos,
+  type FaucetProvider,
+  type FaucetTxSigner,
+} from './server/bitcoin';
 import type { Handler } from './server/router';
 
 const DIST = new URL('./dist/', import.meta.url).pathname;
 const port = Number(process.env.PORT ?? 3000);
 const hostStore = createWebvhHostStore();
 
-// QuickNodeProvider + a faucet UTXO lookup. getSpendableUtxos uses the Ordinals
-// add-on's address index / bitcoind scantxoutset — an explicit throw-until-wired
-// operational gap (fails loudly; never fabricates), filled per-deploy.
-function createFaucetProviderFromEnv(): FaucetProvider {
+// QuickNode gives the ordinals-aware sat lookup + fee + broadcast. The faucet's
+// own confirmed UTXOs come from mempool.space's testnet4 address API (free, no
+// add-on needed) — see fetchFaucetUtxos in server/bitcoin.ts.
+function createFaucetProviderFromEnv(faucetAddress: string): FaucetProvider {
   const provider = new QuickNodeProvider({
     endpoint: process.env.QUICKNODE_ENDPOINT!,
     expectedNetwork: 'testnet',
   }) as unknown as FaucetProvider;
-  provider.getSpendableUtxos = async (address: string) => {
-    throw new Error(
-      `getSpendableUtxos not wired for ${address}: implement against the QuickNode Ordinals add-on address index or bitcoind scantxoutset before enabling the faucet.`
-    );
-  };
+  const api = process.env.MEMPOOL_TESTNET4_API ?? 'https://mempool.space/testnet4/api';
+  provider.getSpendableUtxos = (address: string) => fetchFaucetUtxos({ api, address });
   return provider;
 }
 
@@ -52,17 +57,29 @@ function buildApiRoutes(): Record<string, Handler> | null {
   const turnkey = getTurnkey();
   let bitcoin;
   if (isBitcoinConfigured()) {
+    // Pick the faucet signer: a raw testnet WIF (simplest) or a Turnkey-org wallet.
+    let faucetAddress = process.env.BTC_FAUCET_ADDRESS!;
+    let signFundingTx: FaucetTxSigner;
+    if (process.env.BTC_FAUCET_WIF) {
+      const signer = rawKeyFaucetSigner(process.env.BTC_FAUCET_WIF);
+      signFundingTx = signer.signFundingTx;
+      if (signer.address !== faucetAddress) {
+        console.warn(
+          `[landing] BTC_FAUCET_ADDRESS (${faucetAddress}) != the WIF's address (${signer.address}) — using the WIF's.`
+        );
+        faucetAddress = signer.address;
+      }
+      console.log('[landing] testnet4 inscription configured — /api/btc/* live (raw-key faucet)');
+    } else {
+      signFundingTx = turnkeyFaucetSigner(turnkey, faucetAddress);
+      console.log('[landing] testnet4 inscription configured — /api/btc/* live (Turnkey-org faucet)');
+    }
     bitcoin = createBitcoinRoutes({
-      turnkey,
       jwtSecret,
-      provider: createFaucetProviderFromEnv(),
-      faucet: { walletId: process.env.BTC_FAUCET_WALLET_ID!, address: process.env.BTC_FAUCET_ADDRESS! },
+      provider: createFaucetProviderFromEnv(faucetAddress),
+      faucet: { address: faucetAddress, signFundingTx },
       faucetSats: Number(process.env.BTC_FAUCET_SATS ?? 20_000),
     });
-    console.warn(
-      '[landing] /api/btc/* mounted, but the faucet WILL return 502 until getSpendableUtxos ' +
-        'is wired in createFaucetProviderFromEnv (serve.ts) for your QuickNode add-on / bitcoind.'
-    );
   } else {
     console.warn('[landing] testnet4 inscription disabled (QUICKNODE_ENDPOINT/BTC_FAUCET_* absent) — inscribe stays mock');
   }

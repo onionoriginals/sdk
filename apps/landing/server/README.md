@@ -33,3 +33,28 @@ Requires live `TURNKEY_*` creds, `JWT_SECRET`, and access to the target inbox.
 ## Notes
 - Session storage is in-memory (lost on restart; single process). Not for production.
 - Rate limiting is in-memory (per IP + per email); also single-process.
+
+## Enabling real testnet4 inscription (Track B)
+
+By default the demo's Inscribe step uses a mock provider. To make it a **real**
+Bitcoin testnet4 inscription (worthless tBTC):
+
+1. **QuickNode:** a testnet4 endpoint **with the Ordinals & Runes add-on** →
+   `QUICKNODE_ENDPOINT`. Confirm the add-on covers testnet4 first:
+   ```
+   QUICKNODE_ENDPOINT=... BTC_FAUCET_ADDRESS=tb1q... \
+     bun run apps/landing/scripts/check-quicknode-ordinals.ts
+   ```
+   If that fails, testnet4 inscription isn't viable on that endpoint (use a
+   self-hosted ord+bitcoind instead).
+2. **Faucet:** create a testnet4 P2WPKH (`tb1q…`) wallet, fund it from a public
+   testnet4 faucet, and set `BTC_FAUCET_WIF` (the address's WIF) + `BTC_FAUCET_ADDRESS`.
+   (Or use a Turnkey-org wallet via `BTC_FAUCET_WALLET_ID` instead of the WIF.)
+   The faucet's confirmed UTXOs are read from mempool.space testnet4 — no add-on needed.
+3. **Browser flag:** set `VITE_BTC_TESTNET=1` and **rebuild** the SPA (`bun run build`)
+   — Vite bakes it at build time; a runtime-only change does nothing.
+4. Sign in → Create → Publish → Inscribe. The user's own Turnkey key signs the
+   commit; the faucet funds it; the UI links the real tx on mempool.space/testnet4.
+
+Everything is gated: with any of the above absent, `/api/btc/*` is unmounted and
+the demo silently falls back to the mock path.
