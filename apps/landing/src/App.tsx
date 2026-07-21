@@ -46,7 +46,7 @@ function SmokeTest() {
       const art = generateArtwork('Smoke Test', 'Artwork', 1);
       const s1 = await engine.create('Smoke Test', 'Artwork', art.svg);
       const s2 = await engine.publish();
-      const s3 = await engine.inscribe(7);
+      const s3 = await engine.inscribe({ feeRate: 7 });
       setOut(
         JSON.stringify(
           { l1: s1.layer, l2: s2.layer, l3: s3.layer, events, tx: s3.inscription?.txid },

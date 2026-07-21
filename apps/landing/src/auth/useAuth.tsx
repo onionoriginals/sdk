@@ -2,12 +2,26 @@ import { createContext, useContext, useEffect, useState, useCallback, type React
 import * as api from './api';
 import type { AuthUser } from './api';
 import { createUserWebVHDid } from './webvh';
+import {
+  otpLoginToSession,
+  ensureBitcoinFundingAccount,
+  type TurnkeyBitcoinClient,
+  type TurnkeySessionApi,
+} from './turnkey-session';
+import { btcTestnetEnabled } from '../sdk/testnet-flag';
+
+export interface BitcoinSession {
+  fundingAddress: string;
+  signingClient: TurnkeyBitcoinClient;
+}
 
 interface AuthContextValue {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   sessionId: string | null;
+  /** Track B: the user's testnet4 signing client + funding address (null until ready / when disabled). */
+  bitcoin: BitcoinSession | null;
   startOtp: (email: string) => Promise<void>;
   verify: (code: string) => Promise<void>;
   createIdentity: () => Promise<string>;
@@ -20,6 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [bitcoin, setBitcoin] = useState<BitcoinSession | null>(null);
 
   useEffect(() => {
     api.fetchMe().then(setUser).finally(() => setIsLoading(false));
@@ -35,6 +50,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await api.completeOtp(sessionId, code);
     setUser({ subOrgId: result.subOrgId, email: result.email });
     setSessionId(null);
+
+    // Track B bootstrap: install the P-256 session credential (OTP_LOGIN), then
+    // build the signing client + ensure the testnet4 funding account. Best-
+    // effort: a failure here must NOT block login — the demo simply falls back
+    // to the mock inscribe path. Only runs when the deploy enabled testnet4.
+    if (!btcTestnetEnabled() || !result.verificationToken) return;
+    try {
+      // Lazy-load the browser Turnkey client so its browser-only dependency
+      // graph never loads unless Track B is actually active.
+      const { buildBrowserSigningClient } = await import('./turnkey-browser-client');
+      const signingClient = buildBrowserSigningClient({
+        subOrgId: result.subOrgId,
+        p256PublicKey: result.p256PublicKey,
+        p256PrivateKey: result.p256PrivateKey,
+      });
+      await otpLoginToSession({
+        turnkey: signingClient as unknown as TurnkeySessionApi,
+        subOrgId: result.subOrgId,
+        verificationToken: result.verificationToken,
+        p256PublicKey: result.p256PublicKey,
+        p256PrivateKey: result.p256PrivateKey,
+      });
+      const fundingAddress = await ensureBitcoinFundingAccount(signingClient, result.subOrgId);
+      setBitcoin({ fundingAddress, signingClient });
+    } catch (err) {
+      // Non-fatal: log for the console-visible demo narrative; UI stays on mock.
+      console.warn('[originals-demo] testnet4 session bootstrap failed; inscribe stays on mock', err);
+      setBitcoin(null);
+    }
   }, [sessionId]);
 
   const createIdentity = useCallback(async () => {
@@ -48,11 +92,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     await api.logout();
     setUser(null);
+    setBitcoin(null);
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ user, isAuthenticated: !!user, isLoading, sessionId, startOtp, verify, createIdentity, signOut }}
+      value={{ user, isAuthenticated: !!user, isLoading, sessionId, bitcoin, startOtp, verify, createIdentity, signOut }}
     >
       {children}
     </AuthContext.Provider>

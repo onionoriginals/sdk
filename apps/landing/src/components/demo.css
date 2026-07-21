@@ -661,3 +661,21 @@
   font-size: 0.78rem;
   color: var(--text-tertiary, #888);
 }
+
+.demo-inscribe-note {
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--text-tertiary, #888);
+}
+.demo-explorer-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--btco, #f7931a);
+  text-decoration: none;
+}
+.demo-explorer-link:hover {
+  text-decoration: underline;
+}

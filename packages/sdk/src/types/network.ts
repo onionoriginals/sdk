@@ -9,7 +9,7 @@
 
 export type WebVHNetworkName = 'magby' | 'cleffa' | 'pichu';
 
-export type BitcoinNetworkName = 'mainnet' | 'regtest' | 'signet';
+export type BitcoinNetworkName = 'mainnet' | 'testnet' | 'regtest' | 'signet';
 
 export type VersionStability = 'patch' | 'minor' | 'major';
 

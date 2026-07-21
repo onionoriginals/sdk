@@ -21,7 +21,13 @@ import {
   type OriginalsAsset
 } from '@originals/sdk';
 import { HttpHostingStorageAdapter } from './http-hosting-adapter';
+import { HttpOrdinalsProvider } from './http-ordinals-provider';
+import { TurnkeySatSigner } from './turnkey-sat-signer';
+import { btcTestnetEnabled } from './testnet-flag';
+import type { TurnkeyBitcoinClient } from '../auth/turnkey-session';
 import { sha256 } from '@noble/hashes/sha2.js';
+
+export { btcTestnetEnabled } from './testnet-flag';
 
 export type LayerId = 'did:peer' | 'did:webvh' | 'did:btco';
 
@@ -60,6 +66,7 @@ export interface DemoAssetState {
     inscriptionId: string;
     satoshi: string;
     feeRate?: number;
+    explorerUrl?: string;
   };
   provenance: unknown;
 }
@@ -90,11 +97,15 @@ export class DemoEngine {
     // construction so it always points at the engine currently driving the UI.
     (globalThis as Record<string, unknown>).__originalsDemo = this;
     const keys = this.keys;
+    // Track B: when the deploy enables testnet4 signing, inscribe for real over
+    // the /api/btc/* QuickNode proxies on Bitcoin testnet4; otherwise keep the
+    // self-contained OrdMockProvider mock (regtest) unchanged.
+    const testnet = btcTestnetEnabled();
     this.sdk = OriginalsSDK.create({
-      network: 'regtest',
+      network: testnet ? 'testnet' : 'regtest',
       webvhNetwork: 'magby',
       defaultKeyType: 'Ed25519',
-      ordinalsProvider: new OrdMockProvider(),
+      ordinalsProvider: testnet ? new HttpOrdinalsProvider() : new OrdMockProvider(),
       // Real HTTP hosting at this origin — the SDK's did:webvh log becomes
       // resolvable over HTTP(S) (see http-hosting-adapter.ts).
       storageAdapter: new HttpHostingStorageAdapter(),
@@ -280,10 +291,41 @@ export class DemoEngine {
     return this.snapshot();
   }
 
-  /** Step 3 — inscribe on Bitcoin (OrdMockProvider; regtest semantics). */
-  async inscribe(feeRate = 7): Promise<DemoAssetState> {
+  /**
+   * Step 3 — inscribe on Bitcoin.
+   *
+   * With `funding` (Track B, login-gated): a REAL testnet4 inscription. The
+   * server-funded UTXO's first sat becomes the did:btco identity, the user's
+   * Turnkey session key signs the commit, the reveal is self-signed by the SDK,
+   * and both broadcast via the /api/btc/* QuickNode proxies. Without `funding`:
+   * the self-contained OrdMockProvider mock (regtest).
+   */
+  async inscribe(opts?: {
+    feeRate?: number;
+    funding?: {
+      fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey?: string; address?: string };
+      changeAddress: string;
+      signingClient: TurnkeyBitcoinClient;
+    };
+  }): Promise<DemoAssetState> {
     if (!this.asset) throw new Error('Create an asset first');
-    await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, feeRate);
+    const feeRate = opts?.feeRate ?? 7;
+    if (opts?.funding) {
+      // Real sat-selected path: the user's Turnkey key signs the commit.
+      const satSigner = new TurnkeySatSigner({
+        client: opts.funding.signingClient,
+        signWith: opts.funding.changeAddress, // the user's tb1q funding address IS signWith
+      });
+      await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, {
+        fundingUtxo: opts.funding.fundingUtxo,
+        satSigner,
+        changeAddress: opts.funding.changeAddress,
+        feeRate,
+      });
+    } else {
+      // Mock path (unchanged): bare feeRate against OrdMockProvider.
+      await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, feeRate);
+    }
     const state = this.snapshot();
     if (state.inscription) {
       this.emit(
@@ -334,7 +376,8 @@ export class DemoEngine {
               txid: last.transactionId,
               inscriptionId: last.inscriptionId ?? '',
               satoshi: last.satoshi ?? '',
-              feeRate: last.feeRate
+              feeRate: last.feeRate,
+              explorerUrl: btcoExplorerUrl(last.transactionId)
             }
           : undefined,
       provenance
@@ -345,6 +388,13 @@ export class DemoEngine {
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// The testnet4 block explorer link for a real inscription's reveal txid. Only
+// produced when testnet is enabled — a mock/regtest txid has no public explorer.
+export function btcoExplorerUrl(txid: string): string | undefined {
+  if (!btcTestnetEnabled() || !txid) return undefined;
+  return `https://mempool.space/testnet4/tx/${txid}`;
 }
 
 // The origin host we host did:webvh logs under. In the browser this is the

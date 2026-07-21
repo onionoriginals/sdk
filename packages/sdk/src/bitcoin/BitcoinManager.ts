@@ -422,7 +422,8 @@ export class BitcoinManager {
     const expectedPrefix =
       this.config.network === 'regtest' ? 'reg'
         : this.config.network === 'signet' ? 'sig'
-          : null; // mainnet DIDs have no network prefix (did:btco:<sat>)
+          : this.config.network === 'testnet' ? 'test'
+            : null; // mainnet DIDs have no network prefix (did:btco:<sat>)
     const actualPrefix = prefix === 'reg' || prefix === 'sig' || prefix === 'test' ? prefix : null;
     if (actualPrefix !== expectedPrefix) return false;
     

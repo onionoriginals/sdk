@@ -3,6 +3,7 @@ import type { Turnkey } from '@turnkey/sdk-server';
 import { json, route, type Handler } from './router';
 import { getTurnkey } from './turnkey';
 import { createAuthRoutes } from './auth-routes';
+import type { BitcoinRoutes } from './bitcoin';
 
 // did:webvh creation is client-side (browser Ed25519 key, see src/auth/webvh.ts):
 // the parent Turnkey key can't sign for a credential-less sub-org, so there is
@@ -11,15 +12,23 @@ export function buildRoutes(deps: {
   turnkey: Turnkey;
   sessions: SessionStorage;
   jwtSecret: string;
+  bitcoin?: BitcoinRoutes;
 }): Record<string, Handler> {
   const auth = createAuthRoutes(deps);
-  return {
+  const routes: Record<string, Handler> = {
     'GET /api/health': () => json({ status: 'ok' }),
     'POST /api/auth/send-otp': auth.sendOtp,
     'POST /api/auth/verify-otp': auth.verifyOtp,
     'GET /api/me': auth.me,
     'POST /api/auth/logout': auth.logout,
   };
+  if (deps.bitcoin) {
+    routes['POST /api/btc/funding'] = deps.bitcoin.funding;
+    routes['POST /api/btc/sat'] = deps.bitcoin.sat;
+    routes['POST /api/btc/fee'] = deps.bitcoin.fee;
+    routes['POST /api/btc/broadcast'] = deps.bitcoin.broadcast;
+  }
+  return routes;
 }
 
 // Routes for when Turnkey/JWT env is absent: health works, auth returns 503 so

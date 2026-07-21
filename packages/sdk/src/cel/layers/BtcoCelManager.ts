@@ -36,7 +36,7 @@ export interface BtcoCelConfig {
    * BitcoinManager is configured (read-only replay). New logs record the
    * network in the signed data, so this is never consulted for them.
    */
-  network?: 'mainnet' | 'regtest' | 'signet';
+  network?: 'mainnet' | 'testnet' | 'regtest' | 'signet';
 }
 
 /**
@@ -71,7 +71,7 @@ export interface BtcoMigrationData {
    * than from the replaying SDK's runtime config. Absent on logs created before
    * this field existed.
    */
-  network?: 'mainnet' | 'regtest' | 'signet';
+  network?: 'mainnet' | 'testnet' | 'regtest' | 'signet';
   /** The Bitcoin transaction ID anchoring the migration */
   txid?: string;
   /** The inscription ID on Bitcoin */

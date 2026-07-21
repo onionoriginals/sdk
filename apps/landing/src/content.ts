@@ -164,6 +164,15 @@ export const demo = {
     linkLabel: 'Open the signed DID log',
     note: 'The SDK’s real resolver fetched this over HTTP(S) — no mock. Open it: it’s the signed version history.'
   },
+  inscribeGate: {
+    signInPrompt: 'Sign in to inscribe on Bitcoin testnet4 — your own key signs it.',
+    yourKeyNote: 'Your Turnkey key signs this inscription in your browser. The server never sees a private key; funding comes from a testnet4 faucet (worthless tBTC).',
+    fundingLabel: 'Requesting testnet4 funding…',
+    signingLabel: 'Signing the commit with your key…',
+    explorerLabel: 'View the real transaction on mempool.space',
+    faucetEmpty: 'The testnet4 faucet is temporarily out of funds — try again in a bit.',
+    mockNote: 'Bitcoin inscription runs against a mock provider in this environment (no wallet, no chain). Deploy with a testnet4 endpoint + faucet to make it real.'
+  },
   reset: 'Start over with a new asset'
 };
 
