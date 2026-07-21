@@ -107,7 +107,7 @@ export function createWebvhHostStore(opts?: {
 // attachment disposition mean a browser never executes served bytes as a page
 // regardless of their content-type. did:webvh resolution is unaffected — it
 // reads the log via fetch(), where these headers don't apply.
-function untrustedHeaders(contentType: string): Record<string, string> {
+export function untrustedHeaders(contentType: string): Record<string, string> {
   return {
     'content-type': contentType,
     'x-content-type-options': 'nosniff',
