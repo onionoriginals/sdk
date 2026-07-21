@@ -37,8 +37,14 @@ try {
   console.log(`   first sat of ${u.txid}:${u.vout} = ${sat}`);
   console.log(`   → real testnet4 inscription is viable on this endpoint.`);
 } catch (e) {
-  console.error(`❌ getFirstSatOfOutput failed — the QuickNode Ordinals add-on likely does NOT cover testnet4.`);
-  console.error(`   ${(e as Error).message}`);
-  console.error(`   → use a self-hosted ord + bitcoind on testnet4 instead.`);
+  const msg = (e as Error).message;
+  if (/serves chain|configured for/.test(msg)) {
+    console.error(`❌ Network-guard mismatch (NOT an add-on problem): ${msg}`);
+    console.error(`   → update @originals/sdk (CHAIN_TO_NETWORK must map your endpoint's chain to 'testnet') and rebuild.`);
+  } else {
+    console.error(`❌ getFirstSatOfOutput failed — the QuickNode Ordinals add-on likely does NOT cover testnet4.`);
+    console.error(`   ${msg}`);
+    console.error(`   → use a self-hosted ord + bitcoind on testnet4 instead.`);
+  }
   process.exit(1);
 }
