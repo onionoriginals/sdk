@@ -468,6 +468,15 @@ describe('QuickNodeProvider hardening (issue #350)', () => {
       expect(requests.filter((r) => r.method === 'getblockchaininfo').length).toBe(1);
     });
 
+    test("accepts chain 'testnet4' for expectedNetwork 'testnet'", async () => {
+      // Modern bitcoind reports chain 'testnet4' (not 'test') on testnet4.
+      mockRpc('getblockchaininfo', { chain: 'testnet4' });
+      mockRpc('ord_getSat', { inscriptions: [] });
+      const provider = new QuickNodeProvider({ endpoint: ENDPOINT, expectedNetwork: 'testnet' });
+      await provider.getInscriptionsBySatoshi('123'); // must NOT throw a network mismatch
+      expect(requests.filter((r) => r.method === 'ord_getSat').length).toBe(1);
+    });
+
     test('performs no chain check when expectedNetwork is not set', async () => {
       mockRpc('ord_getSat', { inscriptions: [] });
       await new QuickNodeProvider({ endpoint: ENDPOINT }).getInscriptionsBySatoshi('123');

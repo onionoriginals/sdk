@@ -43,7 +43,9 @@ export interface QuickNodeProviderOptions {
 /** getblockchaininfo.chain values mapped to SDK network names. */
 const CHAIN_TO_NETWORK: Record<string, 'mainnet' | 'testnet' | 'signet' | 'regtest'> = {
   main: 'mainnet',
-  test: 'testnet',
+  test: 'testnet', // testnet3 (older bitcoind)
+  testnet3: 'testnet',
+  testnet4: 'testnet', // modern bitcoind reports 'testnet4' for testnet4
   signet: 'signet',
   regtest: 'regtest',
 };
