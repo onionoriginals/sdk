@@ -93,6 +93,17 @@ describe('originals-store', () => {
     expect(list[0].title).toBe('A'); // first write wins, no duplicate
   });
 
+  test('first-writer-wins: another user cannot overwrite an object, the owner can', () => {
+    const store = createOriginalsStore({ dataDir: tmpDir() });
+    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
+    store.saveBytes('sub-1', key, enc('A'), 'application/jsonl');
+    expect(() => store.saveBytes('sub-2', key, enc('B'), 'application/jsonl')).toThrow('FORBIDDEN');
+    // The owner may still re-write their own object.
+    expect(() => store.saveBytes('sub-1', key, enc('A2'), 'application/jsonl')).not.toThrow();
+    // sub-1's bytes stand; sub-2 never clobbered them.
+    expect(store.serve(new URL('http://demo.example.com/user-sub-1/abc/did.jsonl'))!.status).toBe(200);
+  });
+
   test('read: auth-scoped get by key returns the bytes with anti-XSS headers', () => {
     const store = createOriginalsStore({ dataDir: tmpDir() });
     const key = 'demo.example.com/studio/you/abc/did.jsonl';

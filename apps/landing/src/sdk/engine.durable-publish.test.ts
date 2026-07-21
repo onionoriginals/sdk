@@ -47,7 +47,9 @@ describe('authed durable publish', () => {
   afterEach(() => restore());
 
   test('authed publish hosts durably and records a summary', async () => {
-    const engine = new DemoEngine({ authed: true });
+    // subOrgId must match the JWT sub the server verifies ('sub-1'), so the
+    // per-user slug the engine publishes under passes the namespace guard.
+    const engine = new DemoEngine({ authed: true, subOrgId: 'sub-1' });
     await engine.create('Durable Piece', 'Artwork', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
     const state = await engine.publish();
 

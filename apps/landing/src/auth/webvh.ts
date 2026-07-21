@@ -128,6 +128,17 @@ async function getOrCreateBrowserKeyPair(
 }
 
 /**
+ * A stable, PII-free per-user did:webvh path slug derived from the Turnkey
+ * sub-org id. Namespaces every user's hosted DID log/resources under their own
+ * URL so no two users collide. The SERVER derives the same slug from the JWT
+ * `sub` to enforce that a user can only write within their own namespace, so
+ * this MUST stay byte-identical to the server's copy (originals-routes.ts).
+ */
+export function userWebvhSlug(subOrgId: string): string {
+  return `user-${subOrgId.slice(0, 16)}`;
+}
+
+/**
  * Create (or re-create, deterministically from the persisted key) the user's
  * did:webvh in the browser. The sub-org id supplies a stable, PII-free slug.
  */
@@ -138,7 +149,7 @@ export async function createUserWebVHDid(params: {
 }): Promise<WebVHDidResult> {
   const { privateKey, publicKeyMultibase } = await getOrCreateBrowserKeyPair(params.subOrgId);
   const signer = new BrowserWebVHSigner(privateKey, publicKeyMultibase);
-  const slug = `user-${params.subOrgId.slice(0, 16)}`;
+  const slug = userWebvhSlug(params.subOrgId);
   const result = await buildUserWebVHDid(signer, {
     domain: params.domain ?? DEFAULT_WEBVH_DOMAIN,
     slug,

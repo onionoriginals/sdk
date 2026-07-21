@@ -49,6 +49,7 @@ export function createOriginalsRoutes(deps: {
     const msg = (e as Error).message;
     if (msg === 'STORE_FULL') return json({ error: 'store_full' }, 507);
     if (msg === 'BAD_KEY') return json({ error: 'bad_key' }, 400);
+    if (msg === 'FORBIDDEN') return json({ error: 'forbidden' }, 403);
     return json({ error: 'store_error', message: msg }, 500);
   }
 

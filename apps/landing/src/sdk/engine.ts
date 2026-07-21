@@ -24,6 +24,7 @@ import { HttpHostingStorageAdapter } from './http-hosting-adapter';
 import { DurableHostingStorageAdapter } from './durable-hosting-adapter';
 import { HttpOrdinalsProvider } from './http-ordinals-provider';
 import { TurnkeySatSigner } from './turnkey-sat-signer';
+import { userWebvhSlug } from '../auth/webvh';
 import { btcTestnetEnabled } from './testnet-flag';
 import type { TurnkeyBitcoinClient } from '../auth/turnkey-session';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -91,12 +92,14 @@ export class DemoEngine {
   private webvhLogUrl: string | null = null;
   private webvhResolved = false;
   private readonly authed: boolean;
+  private readonly subOrgId?: string;
   private assetTitle = '';
   private assetResourceHash = '';
   asset: OriginalsAsset | null = null;
 
-  constructor(opts?: { authed?: boolean }) {
+  constructor(opts?: { authed?: boolean; subOrgId?: string }) {
     this.authed = opts?.authed ?? false;
+    this.subOrgId = opts?.subOrgId;
     // Deliberately public and permanent: lets anyone (including skeptics)
     // inspect the live engine from the devtools console. Reassigned on every
     // construction so it always points at the engine currently driving the UI.
@@ -239,9 +242,14 @@ export class DemoEngine {
     if (!this.asset) throw new Error('Create an asset first');
 
     if (!this.publisherDid) {
+      // Signed-in users host under their own per-user slug so no two users
+      // collide on disk (and the server rejects writes outside this namespace).
+      // Anonymous demo stays on the shared ephemeral (TTL) path.
+      const paths =
+        this.authed && this.subOrgId ? [userWebvhSlug(this.subOrgId)] : ['studio', 'you'];
       const webvh = await this.sdk.did.createDIDWebVH({
         domain: demoHost(),
-        paths: ['studio', 'you']
+        paths
       });
       const result = webvh as unknown as {
         did: string;

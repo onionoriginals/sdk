@@ -39,7 +39,7 @@ describe('originals routes — auth gating', () => {
     const store = tmpStore();
     const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
-    const key = 'demo.example.com/studio/you/abc/did.jsonl';
+    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
     const endpoint = `http://demo.local/api/originals/host/${encodeURIComponent(key)}`;
     const cookie = cookieFor('sub-1');
 
@@ -54,9 +54,24 @@ describe('originals routes — auth gating', () => {
     expect(await getRes.text()).toBe('{"v":1}');
 
     // A key this user never wrote → 404, which the adapter maps to null.
-    const missUrl = `http://demo.local/api/originals/host/${encodeURIComponent('demo.example.com/nope/did.jsonl')}`;
+    const missUrl = `http://demo.local/api/originals/host/${encodeURIComponent('demo.example.com/user-sub-1/nope/did.jsonl')}`;
     const missRes = await fetchFn(new Request(missUrl, { headers: { cookie } }));
     expect(missRes.status).toBe(404);
+  });
+
+  test('a second user cannot overwrite the first user’s object (403)', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
+    const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
+    const put = (sub: string) =>
+      routes.hostPut(
+        new Request(url, { method: 'PUT', headers: { 'content-type': 'application/jsonl', cookie: cookieFor(sub) }, body: '{}' }),
+        url,
+        '1.1.1.1'
+      );
+    expect((await put('sub-1')).status).toBe(200); // sub-1 owns it
+    expect((await put('sub-2')).status).toBe(403); // sub-2 is refused
+    expect((await put('sub-1')).status).toBe(200); // owner may re-write
   });
 
   test('record then list under the authenticated sub', async () => {
@@ -86,7 +101,7 @@ describe('originals routes — auth gating', () => {
     const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
 
-    const key = 'demo.example.com/studio/you/abc/did.jsonl';
+    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
     const putRes = await fetchFn(
       new Request(`http://demo.local/api/originals/host/${encodeURIComponent(key)}`, {
         method: 'PUT',
@@ -97,7 +112,7 @@ describe('originals routes — auth gating', () => {
     expect(putRes.status).toBe(200);
 
     // Anyone GETting the resolver URL gets the durable object via the serve fallback.
-    const getRes = await fetchFn(new Request('http://demo.example.com/studio/you/abc/did.jsonl'));
+    const getRes = await fetchFn(new Request('http://demo.example.com/user-sub-1/abc/did.jsonl'));
     expect(getRes.status).toBe(200);
     expect(await getRes.text()).toBe('{"v":1}');
     expect(getRes.headers.get('content-disposition')).toBe('attachment');

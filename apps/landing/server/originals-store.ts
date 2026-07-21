@@ -50,6 +50,7 @@ export interface OriginalsStore {
 }
 
 const CTYPE_SUFFIX = '.ctype';
+const OWNER_SUFFIX = '.owner';
 
 /** Split a key into safe segments, rejecting empty / dot / traversal segments. */
 function keySegments(key: string): string[] {
@@ -99,6 +100,16 @@ export function createOriginalsStore(opts: {
 
   function saveBytes(subOrgId: string, key: string, bytes: Uint8Array, contentType: string): void {
     const target = keyToPath(hostedDir, key); // validates traversal
+    // First-writer-wins: an object is owned by the sub that created it. A
+    // different user can never overwrite it (defense against a signed-in user
+    // clobbering another's durable DID log/resources). Accidental collisions
+    // don't arise — publisher logs are per-user-slug, asset logs/resources are
+    // per-asset-SCID — so this only ever fires on a deliberate cross-user write.
+    const ownerPath = target + OWNER_SUFFIX;
+    if (existsSync(ownerPath) && readFileSync(ownerPath, 'utf8') !== subOrgId) {
+      throw new Error('FORBIDDEN');
+    }
+
     const idx = readIndex(subOrgId);
     const prev = idx.sizes[key] ?? 0;
     const nextTotal = idx.totalBytes - prev + bytes.byteLength;
@@ -107,6 +118,7 @@ export function createOriginalsStore(opts: {
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, bytes);
     writeFileSync(target + CTYPE_SUFFIX, contentType);
+    writeFileSync(ownerPath, subOrgId);
 
     idx.sizes[key] = bytes.byteLength;
     idx.totalBytes = nextTotal;
@@ -147,7 +159,7 @@ export function createOriginalsStore(opts: {
 
   function serve(url: URL): Response | null {
     const key = `${url.host}${url.pathname}`;
-    if (key.endsWith(CTYPE_SUFFIX)) return null; // never serve the sidecars
+    if (key.endsWith(CTYPE_SUFFIX) || key.endsWith(OWNER_SUFFIX)) return null; // never serve the sidecars
     let path: string;
     try {
       path = keyToPath(hostedDir, key);
