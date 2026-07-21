@@ -89,6 +89,17 @@ describe('OriginalsSDK', () => {
     expect((explicitTier as any).config.webvhNetwork).toBe('pichu');
   });
 
+  test("accepts network 'testnet' (testnet4) — the type and Bitcoin layer support it", () => {
+    // Regression: OriginalsConfig.network includes 'testnet' and the whole
+    // bitcoin layer handles it (BitcoinManager→'test', transfer→signet, address
+    // validation), but the constructor guard omitted it, so a config with
+    // network:'testnet' threw 'Invalid network' — bricking e.g. the landing
+    // demo whenever VITE_BTC_TESTNET was set.
+    expect(() => new OriginalsSDK({ network: 'testnet', defaultKeyType: 'Ed25519' })).not.toThrow();
+    const sdk = OriginalsSDK.create({ network: 'testnet', webvhNetwork: 'magby' });
+    expect((sdk as any).config.network).toBe('testnet');
+  });
+
   test('constructor honors config.keyStore (issue #277)', () => {
     // Regression: OriginalsConfig declares keyStore, but the constructor only
     // forwarded its second parameter — config.keyStore was silently ignored
@@ -127,12 +138,12 @@ describe('OriginalsSDK', () => {
 
   test('constructor throws error when network is invalid', () => {
     expect(() => new OriginalsSDK({ network: 'invalid' as any, defaultKeyType: 'ES256K' }))
-      .toThrow('Invalid network: must be mainnet, regtest, or signet');
+      .toThrow('Invalid network: must be mainnet, testnet, regtest, or signet');
   });
 
   test('constructor throws error when network is missing', () => {
     expect(() => new OriginalsSDK({ defaultKeyType: 'ES256K' } as any))
-      .toThrow('Invalid network: must be mainnet, regtest, or signet');
+      .toThrow('Invalid network: must be mainnet, testnet, regtest, or signet');
   });
 
   test('constructor throws error when defaultKeyType is invalid', () => {
