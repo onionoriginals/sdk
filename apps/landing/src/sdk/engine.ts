@@ -33,6 +33,17 @@ export { btcTestnetEnabled } from './testnet-flag';
 
 export type LayerId = 'did:cel' | 'did:webvh' | 'did:btco';
 
+/**
+ * Identity of the engine a given auth state must use: the durable adapter +
+ * per-user host path depend on (authed, subOrgId). When this string changes
+ * (sign in/out, or a different account), the cached engine MUST be discarded —
+ * otherwise a user who signs in after an anonymous engine was preloaded would
+ * keep publishing through the ephemeral (TTL) adapter instead of their account.
+ */
+export function engineIdentity(authed: boolean, subOrgId?: string): string {
+  return authed ? `authed:${subOrgId ?? ''}` : 'anon';
+}
+
 export interface DemoEvent {
   /** SDK event type, e.g. 'asset:created', 'asset:migrated' */
   type: string;

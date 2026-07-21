@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine, DemoEvent } from '../sdk/engine';
+import { engineIdentity } from '../sdk/engine';
 import { btcTestnetEnabled } from '../sdk/testnet-flag';
 import { useAuth } from '../auth/useAuth';
 import { generateArtwork } from '../sdk/artwork';
@@ -193,6 +194,21 @@ export function Demo() {
     discardEngine();
     void getEngine();
   };
+
+  // Rebuild from a clean slate whenever the auth identity changes (sign in/out
+  // via the modal, no reload). Without this the demo keeps the engine it
+  // preloaded, so a user who signs in mid-session would publish through the
+  // anonymous ephemeral adapter instead of their durable account. Skip the
+  // initial mount (identity unchanged).
+  const identity = engineIdentity(isAuthenticated, user?.subOrgId);
+  const prevIdentity = useRef(identity);
+  useEffect(() => {
+    if (prevIdentity.current === identity) return;
+    prevIdentity.current = identity;
+    reset();
+    // reset() is a fresh closure each render; identity is the real trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity]);
 
   const step = phaseToStep[phase];
   const busy = phase === 'creating' || phase === 'publishing' || phase === 'inscribing';
