@@ -65,8 +65,19 @@ export function createAuthRoutes(deps: {
       }
       const token = signToken(result.subOrgId, result.email, undefined, { secret: deps.jwtSecret });
       const cookie = serializeCookie(getAuthCookieConfig(token));
+      // Surface the Turnkey verificationToken + the P-256 pubkey it is bound to
+      // so the browser can run OTP_LOGIN and install its own session credential
+      // (Track B, testnet4 signing). The token is client-bound — useless without
+      // the browser-held P-256 private key — so returning it is safe. The
+      // httpOnly session JWT cookie is UNCHANGED.
       return json(
-        { verified: true, email: result.email, subOrgId: result.subOrgId },
+        {
+          verified: true,
+          email: result.email,
+          subOrgId: result.subOrgId,
+          verificationToken: result.verificationToken,
+          publicKey: result.publicKey,
+        },
         200,
         { 'Set-Cookie': cookie }
       );

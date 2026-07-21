@@ -118,7 +118,7 @@ export const demo = {
       title: 'Create',
       layer: 'did:cel',
       description:
-        'Hashes the artwork’s bytes and mints a did:cel identity — a signed event log, entirely in this tab, no server involved.'
+        'Hashes the artwork’s bytes and mints its did:cel genesis — a signed event log, entirely in this tab, no server involved.'
     },
     {
       id: 'publish',
@@ -127,7 +127,7 @@ export const demo = {
       title: 'Publish',
       layer: 'did:webvh',
       description:
-        'Migrates the asset to did:webvh, publishes its resources, and signs a publication credential.'
+        'Migrates the asset to did:webvh and hosts the signed DID log at this origin — the SDK’s real resolver then fetches it back over HTTP(S).'
     },
     {
       id: 'inscribe',
@@ -156,6 +156,22 @@ export const demo = {
     beforeSatoshi: 'Inscribed on satoshi',
     beforeTx: 'in tx',
     after: 'The full history is in the Provenance tab.'
+  },
+  resolved: {
+    heading: 'did:webvh log — live at this origin',
+    resolvedBadge: 'resolved ✓',
+    pendingBadge: 'resolves in production',
+    linkLabel: 'Open the signed DID log',
+    note: 'The SDK’s real resolver fetched this over HTTP(S) — no mock. Open it: it’s the signed version history.'
+  },
+  inscribeGate: {
+    signInPrompt: 'Sign in to inscribe on Bitcoin testnet4 — your own key signs it.',
+    yourKeyNote: 'Your Turnkey key signs this inscription in your browser. The server never sees a private key; funding comes from a testnet4 faucet (worthless tBTC).',
+    fundingLabel: 'Requesting testnet4 funding…',
+    signingLabel: 'Signing the commit with your key…',
+    explorerLabel: 'View the real transaction on mempool.space',
+    faucetEmpty: 'The testnet4 faucet is temporarily out of funds — try again in a bit.',
+    mockNote: 'Bitcoin inscription runs against a mock provider in this environment (no wallet, no chain). Deploy with a testnet4 endpoint + faucet to make it real.'
   },
   reset: 'Start over with a new asset'
 };
