@@ -1,12 +1,27 @@
 import { describe, test, expect } from 'bun:test';
 import * as btc from '@scure/btc-signer';
-import { hex } from '@scure/base';
+import { hex, base58check } from '@scure/base';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../cookies';
-import { createBitcoinRoutes } from '../bitcoin';
+import { createBitcoinRoutes, rawKeyFaucetSigner, fetchFaucetUtxos } from '../bitcoin';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
+
+// The faucet key: its P2WPKH script is what the faucet's UTXOs pay to, so the
+// funding tx signs+finalizes cleanly with this key (mirrors the raw-key faucet).
+const FAUCET_PRIV = hex.decode('3'.repeat(64));
+const FAUCET_PUB = secp256k1.getPublicKey(FAUCET_PRIV, true);
+const FAUCET_P2WPKH = btc.p2wpkh(FAUCET_PUB, btc.TEST_NETWORK);
+const FAUCET_ADDRESS = FAUCET_P2WPKH.address!;
+const FAUCET_SCRIPT = hex.encode(FAUCET_P2WPKH.script);
+
+const faucetSignFundingTx = async (tx: btc.Transaction) => {
+  tx.sign(FAUCET_PRIV);
+  tx.finalize();
+  return hex.encode(tx.extract());
+};
 
 function authedReq(path: string, body: unknown) {
   const token = signToken('sub-1', 'a@b.com', undefined, { secret: JWT });
@@ -18,51 +33,22 @@ function authedReq(path: string, body: unknown) {
   });
 }
 
-// A real, fully-signed-but-not-finalized P2WPKH PSBT (hex) — the shape Turnkey
-// signTransaction returns, which the funding route finalizes before broadcast.
-function signedFaucetPsbtHex(): string {
-  const priv = hex.decode('2222222222222222222222222222222222222222222222222222222222222222');
-  const pub = secp256k1.getPublicKey(priv, true);
-  const p2wpkh = btc.p2wpkh(pub, btc.TEST_NETWORK);
-  const tx = new btc.Transaction();
-  tx.addInput({ txid: hex.decode('c'.repeat(64)), index: 0, witnessUtxo: { script: p2wpkh.script, amount: 100_000n } });
-  tx.addOutputAddress('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', 20_000n, btc.TEST_NETWORK);
-  tx.sign(priv); // signs, does NOT finalize
-  return hex.encode(tx.toPSBT());
-}
-
 function fakeProvider() {
   return {
     async getFirstSatOfOutput() { return '5000000000'; },
     async estimateFee() { return 3; },
     async broadcastTransaction() { return 'f'.repeat(64); },
     async getSpendableUtxos() {
-      return [{ txid: 'a'.repeat(64), vout: 0, value: 100_000, scriptPubKey: '0014' + '0'.repeat(40) }];
+      // Faucet UTXOs pay to the faucet address → the faucet key can sign them.
+      return [{ txid: 'a'.repeat(64), vout: 0, value: 100_000, scriptPubKey: FAUCET_SCRIPT }];
     },
   } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
 }
 
-function fakeTurnkey() {
-  const signedTransaction = signedFaucetPsbtHex();
-  return {
-    apiClient: () => ({
-      signTransaction: async () => ({ activity: { result: { signTransactionResult: { signedTransaction } } } }),
-    }),
-  } as unknown as Parameters<typeof createBitcoinRoutes>[0]['turnkey'];
-}
-
-// A real (valid-checksum) testnet4 P2WPKH faucet address — the change output
-// is sent here, so it must decode.
-const FAUCET_ADDRESS = btc.p2wpkh(
-  secp256k1.getPublicKey(hex.decode('3'.repeat(64)), true),
-  btc.TEST_NETWORK
-).address!;
-
 const deps = () => ({
-  turnkey: fakeTurnkey(),
   jwtSecret: JWT,
   provider: fakeProvider(),
-  faucet: { walletId: 'w-faucet', address: FAUCET_ADDRESS },
+  faucet: { address: FAUCET_ADDRESS, signFundingTx: faucetSignFundingTx },
   faucetSats: 20_000,
 });
 
@@ -120,5 +106,59 @@ describe('bitcoin routes', () => {
     const req = authedReq('/api/btc/funding', { address: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4' });
     const res = await r.funding(req, new URL(req.url));
     expect(res.status).toBe(400);
+  });
+});
+
+describe('rawKeyFaucetSigner', () => {
+  test('decodes a testnet WIF to its tb1q address', () => {
+    // Build a testnet compressed WIF (version 0xEF + priv + 0x01) from a known key.
+    const wif = base58check(sha256).encode(new Uint8Array([0xef, ...FAUCET_PRIV, 0x01]));
+    const signer = rawKeyFaucetSigner(wif);
+    expect(signer.address).toBe(FAUCET_ADDRESS);
+    expect(signer.address.startsWith('tb1q')).toBe(true);
+  });
+
+  test('rejects a mainnet WIF (version 0x80)', () => {
+    const mainnetWif = base58check(sha256).encode(new Uint8Array([0x80, ...FAUCET_PRIV, 0x01]));
+    expect(() => rawKeyFaucetSigner(mainnetWif)).toThrow('testnet WIF');
+  });
+
+  test('rejects an uncompressed testnet WIF (no 0x01 flag)', () => {
+    const uncompressed = base58check(sha256).encode(new Uint8Array([0xef, ...FAUCET_PRIV]));
+    expect(() => rawKeyFaucetSigner(uncompressed)).toThrow('COMPRESSED');
+  });
+});
+
+describe('fetchFaucetUtxos (mempool.space)', () => {
+  test('returns only confirmed UTXOs with the faucet address scriptPubKey', async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify([
+          { txid: 'a'.repeat(64), vout: 0, value: 50_000, status: { confirmed: true } },
+          { txid: 'b'.repeat(64), vout: 1, value: 30_000, status: { confirmed: false } }, // unconfirmed → dropped
+        ]),
+        { status: 200 }
+      )) as unknown as typeof fetch;
+    const utxos = await fetchFaucetUtxos({ api: 'https://x/api', address: FAUCET_ADDRESS, fetchImpl });
+    expect(utxos).toHaveLength(1);
+    expect(utxos[0].txid).toBe('a'.repeat(64));
+    expect(utxos[0].value).toBe(50_000);
+    expect(utxos[0].scriptPubKey).toBe(FAUCET_SCRIPT);
+  });
+
+  test('throws on a non-ok response', async () => {
+    const fetchImpl = (async () => new Response('nope', { status: 502 })) as unknown as typeof fetch;
+    await expect(fetchFaucetUtxos({ api: 'https://x/api', address: FAUCET_ADDRESS, fetchImpl })).rejects.toThrow();
+  });
+
+  test('aborts a hung request via the timeout', async () => {
+    // fetchImpl respects the abort signal but never resolves on its own.
+    const fetchImpl = ((_url: string, init?: { signal?: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      })) as unknown as typeof fetch;
+    await expect(
+      fetchFaucetUtxos({ api: 'https://x/api', address: FAUCET_ADDRESS, fetchImpl, timeoutMs: 20 })
+    ).rejects.toThrow();
   });
 });
