@@ -21,8 +21,10 @@ import {
   type OriginalsAsset
 } from '@originals/sdk';
 import { HttpHostingStorageAdapter } from './http-hosting-adapter';
+import { DurableHostingStorageAdapter } from './durable-hosting-adapter';
 import { HttpOrdinalsProvider } from './http-ordinals-provider';
 import { TurnkeySatSigner } from './turnkey-sat-signer';
+import { userWebvhSlug } from '../auth/webvh';
 import { btcTestnetEnabled } from './testnet-flag';
 import type { TurnkeyBitcoinClient } from '../auth/turnkey-session';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -30,6 +32,17 @@ import { sha256 } from '@noble/hashes/sha2.js';
 export { btcTestnetEnabled } from './testnet-flag';
 
 export type LayerId = 'did:cel' | 'did:webvh' | 'did:btco';
+
+/**
+ * Identity of the engine a given auth state must use: the durable adapter +
+ * per-user host path depend on (authed, subOrgId). When this string changes
+ * (sign in/out, or a different account), the cached engine MUST be discarded —
+ * otherwise a user who signs in after an anonymous engine was preloaded would
+ * keep publishing through the ephemeral (TTL) adapter instead of their account.
+ */
+export function engineIdentity(authed: boolean, subOrgId?: string): string {
+  return authed ? `authed:${subOrgId ?? ''}` : 'anon';
+}
 
 export interface DemoEvent {
   /** SDK event type, e.g. 'asset:created', 'asset:migrated' */
@@ -89,9 +102,15 @@ export class DemoEngine {
   private publisherDid: string | null = null;
   private webvhLogUrl: string | null = null;
   private webvhResolved = false;
+  private readonly authed: boolean;
+  private readonly subOrgId?: string;
+  private assetTitle = '';
+  private assetResourceHash = '';
   asset: OriginalsAsset | null = null;
 
-  constructor() {
+  constructor(opts?: { authed?: boolean; subOrgId?: string }) {
+    this.authed = opts?.authed ?? false;
+    this.subOrgId = opts?.subOrgId;
     // Deliberately public and permanent: lets anyone (including skeptics)
     // inspect the live engine from the devtools console. Reassigned on every
     // construction so it always points at the engine currently driving the UI.
@@ -106,9 +125,12 @@ export class DemoEngine {
       webvhNetwork: 'magby',
       defaultKeyType: 'Ed25519',
       ordinalsProvider: testnet ? new HttpOrdinalsProvider() : new OrdMockProvider(),
-      // Real HTTP hosting at this origin — the SDK's did:webvh log becomes
-      // resolvable over HTTP(S) (see http-hosting-adapter.ts).
-      storageAdapter: new HttpHostingStorageAdapter(),
+      // Signed-in users host DURABLY (persisted under their account, PUT
+      // /api/originals/host/*); anonymous users keep the ephemeral TTL host
+      // (PUT /api/host/*). Both make the did:webvh log resolvable over HTTP(S).
+      storageAdapter: this.authed
+        ? new DurableHostingStorageAdapter()
+        : new HttpHostingStorageAdapter(),
       enableLogging: false,
       keyStore: {
         async getPrivateKey(id: string) {
@@ -208,6 +230,8 @@ export class DemoEngine {
       }
     ]);
     this.asset = asset;
+    this.assetTitle = title;
+    this.assetResourceHash = svgHash;
 
     asset.on('asset:migrated', (e: { asset: { fromLayer: string; toLayer: string } }) => {
       this.emit(
@@ -229,9 +253,14 @@ export class DemoEngine {
     if (!this.asset) throw new Error('Create an asset first');
 
     if (!this.publisherDid) {
+      // Signed-in users host under their own per-user slug so no two users
+      // collide on disk (and the server rejects writes outside this namespace).
+      // Anonymous demo stays on the shared ephemeral (TTL) path.
+      const paths =
+        this.authed && this.subOrgId ? [userWebvhSlug(this.subOrgId)] : ['studio', 'you'];
       const webvh = await this.sdk.did.createDIDWebVH({
         domain: demoHost(),
-        paths: ['studio', 'you']
+        paths
       });
       const result = webvh as unknown as {
         did: string;
@@ -287,6 +316,26 @@ export class DemoEngine {
         : `did:webvh log hosted at ${logUrl} (resolves over HTTPS in production)`,
       { logUrl, resolved, doc: resolvedDoc }
     );
+
+    // Signed-in: record a durable summary under the user's account so it shows
+    // up on /me. Best-effort — a failure must not break the publish UX.
+    if (this.authed && assetWebvhDid) {
+      try {
+        const res = await fetch('/api/originals', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            did: assetWebvhDid,
+            title: this.assetTitle,
+            resourceHash: this.assetResourceHash,
+          }),
+        });
+        if (!res.ok) log('originals:record-failed', res.status);
+      } catch (err) {
+        log('originals:record-failed', err);
+      }
+    }
 
     return this.snapshot();
   }

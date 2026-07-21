@@ -1,6 +1,7 @@
 import { file } from 'bun';
 import { normalize } from 'node:path';
 import { route, json, type Handler } from './router';
+import type { OriginalsRoutes } from './originals-routes';
 
 // Minimal surface buildFetch depends on; the real store (webvh-host.ts)
 // implements exactly these two methods. `handlePut` takes the resolved,
@@ -53,8 +54,10 @@ export function buildFetch(deps: {
   apiRoutes: Record<string, Handler> | null;
   hostStore: WebvhHostStore;
   distDir: string;
+  // Durable per-user Originals (auth-gated). Present only when auth is configured.
+  originals?: OriginalsRoutes | null;
 }): (req: Request, server?: BunServerLike) => Promise<Response> {
-  const { apiRoutes, hostStore, distDir } = deps;
+  const { apiRoutes, hostStore, distDir, originals } = deps;
   // Bun calls this with (request, server); server exposes the real peer IP.
   return async (req, server?: BunServerLike) => {
     const url = new URL(req.url);
@@ -66,6 +69,13 @@ export function buildFetch(deps: {
     if (path.startsWith('/api/host/')) {
       if (req.method === 'GET' || req.method === 'HEAD') return hostStore.read(url);
       return hostStore.handlePut(req, url, resolveClientIp(req, server));
+    }
+
+    // 1b. Durable per-user Originals hosting (auth-gated). Same wildcard shape,
+    // but persisted and namespaced by the JWT sub.
+    if (originals && path.startsWith('/api/originals/host/')) {
+      if (req.method === 'GET' || req.method === 'HEAD') return originals.hostGet(req, url);
+      return originals.hostPut(req, url, resolveClientIp(req, server));
     }
 
     // 2. All other /api/* — dispatch when configured, else a clear JSON 404
@@ -82,6 +92,8 @@ export function buildFetch(deps: {
     if (req.method === 'GET' || req.method === 'HEAD') {
       const served = hostStore.serve(req, url);
       if (served) return served;
+      const durable = originals?.serve(url);
+      if (durable) return durable;
     }
 
     // 4. Static SPA + fallback (with traversal guard).

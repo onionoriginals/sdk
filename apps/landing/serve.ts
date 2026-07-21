@@ -28,10 +28,15 @@ import {
   type FaucetTxSigner,
 } from './server/bitcoin';
 import type { Handler } from './server/router';
+import { createOriginalsStore } from './server/originals-store';
+import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
 
 const DIST = new URL('./dist/', import.meta.url).pathname;
 const port = Number(process.env.PORT ?? 3000);
 const hostStore = createWebvhHostStore();
+const originalsStore = createOriginalsStore({
+  dataDir: process.env.ORIGINALS_DATA_DIR ?? './.originals-data',
+});
 
 // QuickNode gives the ordinals-aware sat lookup + fee + broadcast. The faucet's
 // own confirmed UTXOs come from mempool.space's testnet4 address API (free, no
@@ -46,7 +51,7 @@ function createFaucetProviderFromEnv(faucetAddress: string): FaucetProvider {
   return provider;
 }
 
-function buildApiRoutes(): Record<string, Handler> | null {
+function buildApiRoutes(): { routes: Record<string, Handler>; originals: OriginalsRoutes } | null {
   const jwtSecret = process.env.JWT_SECRET;
   const configured =
     jwtSecret &&
@@ -83,17 +88,26 @@ function buildApiRoutes(): Record<string, Handler> | null {
   } else {
     console.warn('[landing] testnet4 inscription disabled (QUICKNODE_ENDPOINT/BTC_FAUCET_* absent) — inscribe stays mock');
   }
-  return buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin });
+  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore });
+  return {
+    routes: buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin, originals }),
+    originals,
+  };
 }
 
-const apiRoutes = buildApiRoutes();
+const api = buildApiRoutes();
 
 const server = Bun.serve({
   port,
   hostname: '0.0.0.0',
-  fetch: buildFetch({ apiRoutes, hostStore, distDir: DIST }),
+  fetch: buildFetch({
+    apiRoutes: api?.routes ?? null,
+    hostStore,
+    distDir: DIST,
+    originals: api?.originals ?? null,
+  }),
 });
 
 console.log(
-  `[landing] serving ${DIST} on http://0.0.0.0:${server.port} (auth API: ${apiRoutes ? 'enabled' : 'static-only'})`
+  `[landing] serving ${DIST} on http://0.0.0.0:${server.port} (auth API: ${api ? 'enabled' : 'static-only'})`
 );

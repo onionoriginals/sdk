@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine, DemoEvent } from '../sdk/engine';
+import { engineIdentity } from '../sdk/engine';
 import { btcTestnetEnabled } from '../sdk/testnet-flag';
 import { useAuth } from '../auth/useAuth';
 import { generateArtwork } from '../sdk/artwork';
@@ -38,7 +39,7 @@ const eventColors: Record<string, string> = {
   'asset:inscribed': 'var(--btco)'
 };
 
-function useEngine() {
+function useEngine(authed: boolean, subOrgId?: string) {
   const engineRef = useRef<DemoEngine | null>(null);
   const loading = useRef<Promise<DemoEngine> | null>(null);
 
@@ -46,13 +47,14 @@ function useEngine() {
     if (engineRef.current) return engineRef.current;
     loading.current ??= import('../sdk/engine').then(({ DemoEngine }) => {
       // The engine registers itself as window.__originalsDemo so skeptics can
-      // inspect it from the devtools console.
-      const engine = new DemoEngine();
+      // inspect it from the devtools console. Signed-in ⇒ durable hosting under
+      // the user's own per-user slug (subOrgId).
+      const engine = new DemoEngine({ authed, subOrgId });
       engineRef.current = engine;
       return engine;
     });
     return loading.current;
-  }, []);
+  }, [authed, subOrgId]);
 
   // Drop the current engine so the next run starts from a clean slate —
   // fresh keys, fresh publisher DID, fresh asset.
@@ -66,7 +68,7 @@ function useEngine() {
 
 export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
-  const { isAuthenticated, bitcoin } = useAuth();
+  const { isAuthenticated, bitcoin, user } = useAuth();
   const testnet = btcTestnetEnabled();
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [medium, setMedium] = useState(demo.form.mediums[0]);
@@ -86,7 +88,7 @@ export function Demo() {
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'events' | 'provenance' | 'resource'>('events');
-  const { getEngine, discardEngine } = useEngine();
+  const { getEngine, discardEngine } = useEngine(isAuthenticated, user?.subOrgId);
   const logRef = useRef<HTMLOListElement>(null);
   const unsubscribe = useRef<(() => void) | null>(null);
 
@@ -192,6 +194,21 @@ export function Demo() {
     discardEngine();
     void getEngine();
   };
+
+  // Rebuild from a clean slate whenever the auth identity changes (sign in/out
+  // via the modal, no reload). Without this the demo keeps the engine it
+  // preloaded, so a user who signs in mid-session would publish through the
+  // anonymous ephemeral adapter instead of their durable account. Skip the
+  // initial mount (identity unchanged).
+  const identity = engineIdentity(isAuthenticated, user?.subOrgId);
+  const prevIdentity = useRef(identity);
+  useEffect(() => {
+    if (prevIdentity.current === identity) return;
+    prevIdentity.current = identity;
+    reset();
+    // reset() is a fresh closure each render; identity is the real trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity]);
 
   const step = phaseToStep[phase];
   const busy = phase === 'creating' || phase === 'publishing' || phase === 'inscribing';
@@ -304,27 +321,35 @@ export function Demo() {
                             </span>
                           </div>
                           <p>{s.description}</p>
-                          {state !== 'done' && (
-                            <button
-                              type="button"
-                              className="btn btn-primary demo-step-btn"
-                              disabled={
-                                (state !== 'ready' && state !== 'busy') ||
-                                (i === 0 && title.trim().length === 0)
-                              }
-                              data-busy={state === 'busy' || undefined}
-                              onClick={stepActions[i]}
-                            >
-                              {state === 'busy' ? (
-                                <>
-                                  <span className="demo-spinner" aria-hidden="true" />
-                                  {s.pending}
-                                </>
-                              ) : (
-                                s.action
-                              )}
-                            </button>
-                          )}
+                          {state !== 'done' &&
+                            (i === 2 && !testnet ? (
+                              // did:btco inscription is not live yet — disabled,
+                              // never calls engine.inscribe(). The gated testnet4
+                              // path (testnet === true) is unchanged.
+                              <button type="button" className="btn demo-step-btn" disabled>
+                                {demo.comingSoon}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-primary demo-step-btn"
+                                disabled={
+                                  (state !== 'ready' && state !== 'busy') ||
+                                  (i === 0 && title.trim().length === 0)
+                                }
+                                data-busy={state === 'busy' || undefined}
+                                onClick={stepActions[i]}
+                              >
+                                {state === 'busy' ? (
+                                  <>
+                                    <span className="demo-spinner" aria-hidden="true" />
+                                    {s.pending}
+                                  </>
+                                ) : (
+                                  s.action
+                                )}
+                              </button>
+                            ))}
                         </div>
                       </li>
                     );
@@ -339,7 +364,7 @@ export function Demo() {
                       ? isAuthenticated && bitcoin
                         ? demo.inscribeGate.yourKeyNote
                         : demo.inscribeGate.signInPrompt
-                      : demo.inscribeGate.mockNote}
+                      : demo.comingSoon}
                   </p>
                 )}
 
