@@ -429,7 +429,20 @@ describe('Batch Operations Stress Tests', () => {
       let memoryReadings: number[] = [];
       let prevMem = process.memoryUsage().heapUsed / 1024 / 1024;
 
+      // Hard cap on total iterations so a pathological GC storm (window resets on
+      // every iteration under heavy memory pressure) fails fast with a clear
+      // message instead of silently running into the 180s test timeout.
+      let totalIterations = 0;
+      const maxTotalIterations = measuredIterations * 10;
+
       while (memoryReadings.length < measuredIterations) {
+        if (++totalIterations > maxTotalIterations) {
+          throw new Error(
+            `[STRESS] Memory window never stabilised: GC drops kept resetting it after ` +
+              `${maxTotalIterations} iterations (needed ${measuredIterations} consecutive clean readings). ` +
+              `Likely a very memory-pressured agent, not a leak — re-run or raise maxTotalIterations.`
+          );
+        }
         await sdk.lifecycle.batchCreateAssets(createTestResourcesList(batchSize), {
           maxConcurrent: 5
         });
@@ -439,7 +452,10 @@ describe('Batch Operations Stress Tests', () => {
         const drop = (prevMem - memUsage) / Math.max(prevMem, 1);
 
         if (drop > GC_DROP_THRESHOLD) {
-          // Major GC fired — discard the pre-GC readings and restart the window
+          // Major GC fired — discard the pre-GC readings and restart the window.
+          console.log(
+            `[STRESS] GC drop detected (${(drop * 100).toFixed(0)}%) at iteration ${totalIterations}, resetting window`
+          );
           memoryReadings = [];
         } else {
           memoryReadings.push(memUsage);
