@@ -6,6 +6,8 @@ import { createAuthRoutes } from './auth-routes';
 import { buildFetch } from './app';
 import { createWebvhHostStore } from './webvh-host';
 import type { BitcoinRoutes } from './bitcoin';
+import { createOriginalsStore } from './originals-store';
+import { createOriginalsRoutes, type OriginalsRoutes } from './originals-routes';
 
 // did:webvh creation is client-side (browser Ed25519 key, see src/auth/webvh.ts):
 // the parent Turnkey key can't sign for a credential-less sub-org, so there is
@@ -16,6 +18,7 @@ export function buildRoutes(deps: {
   sessions: SessionStorage;
   jwtSecret: string;
   bitcoin?: BitcoinRoutes;
+  originals?: OriginalsRoutes;
 }): Record<string, Handler> {
   const auth = createAuthRoutes(deps);
   const routes: Record<string, Handler> = {
@@ -31,6 +34,10 @@ export function buildRoutes(deps: {
     routes['POST /api/btc/fee'] = deps.bitcoin.fee;
     routes['POST /api/btc/broadcast'] = deps.bitcoin.broadcast;
   }
+  if (deps.originals) {
+    routes['POST /api/originals'] = deps.originals.record;
+    routes['GET /api/originals'] = deps.originals.list;
+  }
   return routes;
 }
 
@@ -39,16 +46,21 @@ export function buildRoutes(deps: {
 if (import.meta.main) {
   const jwtSecret = process.env.JWT_SECRET;
   if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
+  const originalsStore = createOriginalsStore({
+    dataDir: process.env.ORIGINALS_DATA_DIR ?? './.originals-data',
+  });
+  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore });
   const apiRoutes = buildRoutes({
     turnkey: getTurnkey(),
     sessions: createInMemorySessionStorage(),
     jwtSecret,
+    originals,
   });
   const hostStore = createWebvhHostStore();
   const distDir = new URL('../dist/', import.meta.url).pathname;
   const server = Bun.serve({
     port: Number(process.env.PORT ?? 8787),
-    fetch: buildFetch({ apiRoutes, hostStore, distDir }),
+    fetch: buildFetch({ apiRoutes, hostStore, distDir, originals }),
   });
   console.log(`[auth-server] listening on http://localhost:${server.port}`);
 }

@@ -112,3 +112,6 @@ playwright/.cache/
 
 # CLI-generated key files (written by `cel create`/`cel migrate`, incl. during tests)
 *.key
+
+# Durable Originals store (dev default; prod uses a Railway volume at ORIGINALS_DATA_DIR)
+.originals-data/
