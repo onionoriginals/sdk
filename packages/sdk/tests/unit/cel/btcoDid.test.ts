@@ -13,7 +13,8 @@ describe('btcoDid helpers', () => {
   });
 
   test('throws on unrecognized networks instead of silently minting a mainnet DID', () => {
-    expect(() => btcoDidPrefix('testnet')).toThrow('Unsupported Bitcoin network');
+    // 'testnet' is now a supported network; assert on genuinely-invalid ones.
+    expect(() => btcoDidPrefix('mars')).toThrow('Unsupported Bitcoin network');
     expect(() => btcoDidFromSatoshi('123', 'mainet')).toThrow('Unsupported Bitcoin network');
   });
 });

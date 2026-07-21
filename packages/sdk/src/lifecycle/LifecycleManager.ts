@@ -3605,7 +3605,7 @@ export class LifecycleManager {
    * tier mapping, #247). Both the btco binding fallback and rotateBtcoKeys use
    * this so a tier-only config can never drift into a NETWORK_MISMATCH.
    */
-  private getConfiguredBitcoinNetwork(): 'mainnet' | 'regtest' | 'signet' {
+  private getConfiguredBitcoinNetwork(): 'mainnet' | 'testnet' | 'regtest' | 'signet' {
     return this.config.network
       ?? (this.config.webvhNetwork ? getBitcoinNetworkForWebVH(this.config.webvhNetwork) : undefined)
       ?? 'mainnet';
