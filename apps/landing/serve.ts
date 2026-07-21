@@ -59,7 +59,10 @@ function buildApiRoutes(): Record<string, Handler> | null {
       faucet: { walletId: process.env.BTC_FAUCET_WALLET_ID!, address: process.env.BTC_FAUCET_ADDRESS! },
       faucetSats: Number(process.env.BTC_FAUCET_SATS ?? 20_000),
     });
-    console.log('[landing] testnet4 inscription configured — /api/btc/* live');
+    console.warn(
+      '[landing] /api/btc/* mounted, but the faucet WILL return 502 until getSpendableUtxos ' +
+        'is wired in createFaucetProviderFromEnv (serve.ts) for your QuickNode add-on / bitcoind.'
+    );
   } else {
     console.warn('[landing] testnet4 inscription disabled (QUICKNODE_ENDPOINT/BTC_FAUCET_* absent) — inscribe stays mock');
   }

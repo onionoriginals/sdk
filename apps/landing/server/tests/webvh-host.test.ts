@@ -43,6 +43,21 @@ describe('webvh-host store', () => {
     expect(served.headers.get('content-disposition')).toBe('attachment');
   });
 
+  test('read() (GET /api/host/*) also carries the anti-XSS headers', async () => {
+    const store = createWebvhHostStore();
+    const key = 'victim.example.com/evil/did.jsonl';
+    await store.handlePut(
+      putReq(key, '<script>alert(1)</script>', 'text/html'),
+      new URL(`http://host/api/host/${encodeURIComponent(key)}`)
+    );
+    const url = new URL(`http://host/api/host/${encodeURIComponent(key)}`);
+    const res = store.read(url);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toContain('sandbox');
+    expect(res.headers.get('content-disposition')).toBe('attachment');
+  });
+
   test('serve returns null for unknown key', () => {
     const store = createWebvhHostStore();
     const url = new URL('http://demo.example.com/nope/did.jsonl');

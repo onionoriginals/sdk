@@ -85,10 +85,8 @@ export function createWebvhHostStore(opts?: {
     const key = decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
     const entry = map.get(key);
     if (!entry) return json({ error: 'not_found' }, 404);
-    return new Response(entry.body.slice(), {
-      status: 200,
-      headers: { 'content-type': entry.contentType, 'x-content-type-options': 'nosniff' },
-    });
+    // Copy so the caller can't mutate stored bytes.
+    return new Response(entry.body.slice(), { status: 200, headers: untrustedHeaders(entry.contentType) });
   }
 
   function serve(_req: Request, url: URL): Response | null {
@@ -97,21 +95,23 @@ export function createWebvhHostStore(opts?: {
     const entry = map.get(key);
     if (!entry) return null;
     // Copy so the caller can't mutate stored bytes.
-    // The store is unauthenticated (public demo — must run without secrets), so
-    // content is untrusted. Neutralize stored-XSS: nosniff + a sandbox CSP +
-    // attachment disposition mean a browser never executes served bytes as a
-    // page regardless of their content-type. did:webvh resolution is unaffected
-    // — it reads the log via fetch(), where these headers don't apply.
-    return new Response(entry.body.slice(), {
-      status: 200,
-      headers: {
-        'content-type': entry.contentType,
-        'x-content-type-options': 'nosniff',
-        'content-security-policy': "default-src 'none'; sandbox",
-        'content-disposition': 'attachment',
-      },
-    });
+    return new Response(entry.body.slice(), { status: 200, headers: untrustedHeaders(entry.contentType) });
   }
 
   return { handlePut, read, serve, size: () => map.size };
+}
+
+// The store is unauthenticated (public demo — must run without secrets), so ALL
+// served content is untrusted. Both serve() and read() return stored bytes to a
+// browser, so both MUST neutralize stored-XSS: nosniff + a sandbox CSP +
+// attachment disposition mean a browser never executes served bytes as a page
+// regardless of their content-type. did:webvh resolution is unaffected — it
+// reads the log via fetch(), where these headers don't apply.
+function untrustedHeaders(contentType: string): Record<string, string> {
+  return {
+    'content-type': contentType,
+    'x-content-type-options': 'nosniff',
+    'content-security-policy': "default-src 'none'; sandbox",
+    'content-disposition': 'attachment',
+  };
 }
