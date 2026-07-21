@@ -17,6 +17,31 @@ import type { OriginalsStore } from './originals-store';
 
 const HOST_PREFIX = '/api/originals/host/';
 
+// Reject a declared body larger than this before buffering it — the store's
+// per-user 25 MiB quota is the real ceiling; no single did:webvh artifact
+// (log/cel/resource) comes close, so this is generous headroom, not a limit
+// users hit.
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+/**
+ * A host key must name a did:webvh hosting artifact: `<segs…>/did.jsonl`,
+ * `<segs…>/cel.json`, or `<segs…>/resources/<multibase>`. This confines every
+ * authed PUT to the shapes the SDK actually publishes and — crucially — makes
+ * it impossible to plant bytes at a path that would SHADOW the app's own static
+ * assets (`index.html`, `assets/app-*.js`). `buildFetch` runs `originals.serve`
+ * before the SPA/static fallback, so an unconfined key like
+ * `<host>/assets/app-abc.js` would otherwise be served (as a forced download,
+ * via untrustedHeaders) to every visitor, breaking the page. Cross-user
+ * OVERWRITE of a claimed key is separately blocked by the store's owner sidecar.
+ */
+function isWebvhArtifactKey(key: string): boolean {
+  const segs = key.split('/');
+  const last = segs[segs.length - 1];
+  if (last === 'did.jsonl' || last === 'cel.json') return true;
+  // Published resource: `…/resources/<base64url-multibase>` (multibase 'u' prefix).
+  return segs[segs.length - 2] === 'resources' && /^u[A-Za-z0-9_-]+$/.test(last);
+}
+
 export interface OriginalsRoutes {
   hostPut(req: Request, url: URL, clientIp: string): Promise<Response>;
   hostGet(req: Request, url: URL): Promise<Response>;
@@ -65,7 +90,17 @@ export function createOriginalsRoutes(deps: {
 
     const key = decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
     if (!key) return json({ error: 'missing_key' }, 400);
+    // Confine writes to did:webvh artifact paths so a user can't shadow the
+    // app's own static assets (served by originals.serve before the fallback).
+    if (!isWebvhArtifactKey(key)) return json({ error: 'forbidden_path' }, 403);
+    // Cap the upload before buffering the whole body into memory (the rate
+    // limiter bounds request COUNT, not per-request size).
+    const declared = Number(req.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) {
+      return json({ error: 'payload_too_large' }, 413);
+    }
     const bytes = new Uint8Array(await req.arrayBuffer());
+    if (bytes.byteLength > MAX_UPLOAD_BYTES) return json({ error: 'payload_too_large' }, 413);
     const contentType = req.headers.get('content-type') ?? 'application/octet-stream';
     try {
       store.saveBytes(sub, key, bytes, contentType);

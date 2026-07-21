@@ -59,6 +59,40 @@ describe('originals routes — auth gating', () => {
     expect(missRes.status).toBe(404);
   });
 
+  test('rejects a non-artifact key that would shadow a static asset (403)', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const shadow = (key: string) => {
+      const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
+      return routes.hostPut(
+        new Request(url, { method: 'PUT', headers: { 'content-type': 'application/javascript', cookie: cookieFor('sub-1') }, body: 'alert(1)' }),
+        url,
+        '1.1.1.1'
+      );
+    };
+    expect((await shadow('magby.originals.build/assets/app-abc123.js')).status).toBe(403);
+    expect((await shadow('magby.originals.build/index.html')).status).toBe(403);
+    // A bare 'resources/<name>' whose name isn't a multibase is refused too.
+    expect((await shadow('magby.originals.build/assets/resources/evil.js')).status).toBe(403);
+    // But real did:webvh artifacts are allowed.
+    expect((await shadow('magby.originals.build/user-sub-1/did.jsonl')).status).toBe(200);
+    expect((await shadow('magby.originals.build/ueibabc/resources/uJZtLeUr')).status).toBe(200);
+  });
+
+  test('rejects an oversized upload by Content-Length (413)', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const url = new URL(`http://h/api/originals/host/${encodeURIComponent('h/user-sub-1/did.jsonl')}`);
+    const res = await routes.hostPut(
+      new Request(url, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/jsonl', cookie: cookieFor('sub-1') },
+        body: 'x'.repeat(9 * 1024 * 1024), // > 8 MiB cap ⇒ Content-Length trips the guard
+      }),
+      url,
+      '1.1.1.1'
+    );
+    expect(res.status).toBe(413);
+  });
+
   test('a second user cannot overwrite the first user’s object (403)', async () => {
     const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
     const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
