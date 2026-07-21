@@ -179,6 +179,21 @@ export interface LifecycleOperationOptions {
   atomicRollback?: boolean;
 }
 
+/**
+ * The `#resources` OriginalsResourceManifest service shape — pinned so an edit
+ * to buildResourceManifestService can't silently change on-chain manifest
+ * content (the inscribed body is hashed and resolver-verified). `url` mirrors
+ * AssetResource.url (optional).
+ */
+interface ResourceManifestService {
+  id: string;
+  type: 'OriginalsResourceManifest';
+  serviceEndpoint: {
+    resources: Array<{ id: string; hash: string; contentType: string; url?: string }>;
+    timestamp: string;
+  };
+}
+
 export class LifecycleManager {
   private eventEmitter: EventEmitter;
   private batchOps: BatchLifecycleOperations;
@@ -3111,7 +3126,7 @@ export class LifecycleManager {
    * manifest rides INSIDE the DID document (the inscription must be the DID doc,
    * application/did+json, or BtcoDidResolver rejects it — #375).
    */
-  private buildResourceManifestService(docId: string, resources: AssetResource[]) {
+  private buildResourceManifestService(docId: string, resources: AssetResource[]): ResourceManifestService {
     return {
       id: `${docId}#resources`,
       type: 'OriginalsResourceManifest',
