@@ -136,7 +136,7 @@ export const demo = {
       title: 'Inscribe',
       layer: 'did:btco',
       description:
-        'Runs the commit/reveal inscription flow and binds the asset to a specific satoshi as did:btco.'
+        'Coming soon: inscribe the published Original onto a satoshi as did:btco — real Bitcoin inscription lands once testnet4 ordinals support ships.'
     }
   ],
   eventLog: {
@@ -173,6 +173,7 @@ export const demo = {
     faucetEmpty: 'The testnet4 faucet is temporarily out of funds — try again in a bit.',
     mockNote: 'Bitcoin inscription runs against a mock provider in this environment (no wallet, no chain). Deploy with a testnet4 endpoint + faucet to make it real.'
   },
+  comingSoon: 'Coming soon — inscribing on Bitcoin (did:btco) is not enabled yet. Your Original is already real and resolvable as did:webvh.',
   reset: 'Start over with a new asset'
 };
 

@@ -304,27 +304,35 @@ export function Demo() {
                             </span>
                           </div>
                           <p>{s.description}</p>
-                          {state !== 'done' && (
-                            <button
-                              type="button"
-                              className="btn btn-primary demo-step-btn"
-                              disabled={
-                                (state !== 'ready' && state !== 'busy') ||
-                                (i === 0 && title.trim().length === 0)
-                              }
-                              data-busy={state === 'busy' || undefined}
-                              onClick={stepActions[i]}
-                            >
-                              {state === 'busy' ? (
-                                <>
-                                  <span className="demo-spinner" aria-hidden="true" />
-                                  {s.pending}
-                                </>
-                              ) : (
-                                s.action
-                              )}
-                            </button>
-                          )}
+                          {state !== 'done' &&
+                            (i === 2 && !testnet ? (
+                              // did:btco inscription is not live yet — disabled,
+                              // never calls engine.inscribe(). The gated testnet4
+                              // path (testnet === true) is unchanged.
+                              <button type="button" className="btn demo-step-btn" disabled>
+                                {demo.comingSoon}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-primary demo-step-btn"
+                                disabled={
+                                  (state !== 'ready' && state !== 'busy') ||
+                                  (i === 0 && title.trim().length === 0)
+                                }
+                                data-busy={state === 'busy' || undefined}
+                                onClick={stepActions[i]}
+                              >
+                                {state === 'busy' ? (
+                                  <>
+                                    <span className="demo-spinner" aria-hidden="true" />
+                                    {s.pending}
+                                  </>
+                                ) : (
+                                  s.action
+                                )}
+                              </button>
+                            ))}
                         </div>
                       </li>
                     );
@@ -339,7 +347,7 @@ export function Demo() {
                       ? isAuthenticated && bitcoin
                         ? demo.inscribeGate.yourKeyNote
                         : demo.inscribeGate.signInPrompt
-                      : demo.inscribeGate.mockNote}
+                      : demo.comingSoon}
                   </p>
                 )}
 
