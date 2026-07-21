@@ -59,9 +59,9 @@ describe('createBtcoDidDocument', () => {
 	it('throws on unsupported network', () => {
 		const pub = rangeBytes(32, 9);
 		expect(() =>
-			// @ts-expect-error testing invalid network
-			createBtcoDidDocument('1', 'testnet', { publicKey: pub, keyType: 'Ed25519' })
-		).toThrow('Unsupported Bitcoin network: testnet');
+			// @ts-expect-error testing invalid network ('testnet' is now supported)
+			createBtcoDidDocument('1', 'mars', { publicKey: pub, keyType: 'Ed25519' })
+		).toThrow('Unsupported Bitcoin network: mars');
 	});
 
 	it('canonicalizes a satoshi string with surrounding whitespace into a resolvable id', () => {

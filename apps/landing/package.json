@@ -20,11 +20,16 @@
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
+    "@noble/curves": "^2.2.0",
     "@noble/ed25519": "^3.1.0",
     "@noble/hashes": "^2.0.1",
     "@originals/auth": "workspace:*",
     "@originals/sdk": "workspace:*",
+    "@scure/base": "^2.2.0",
+    "@scure/btc-signer": "^2.2.0",
+    "@turnkey/api-key-stamper": "^0.6.7",
     "@turnkey/crypto": "^2.10.0",
+    "@turnkey/sdk-browser": "^6.1.1",
     "didwebvh-ts": "^2.8.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"

@@ -1,25 +1,45 @@
 /**
  * Production server for the landing app (Railway) — single service.
  *
- * Serves the built SPA (`apps/landing/dist`) on `$PORT`, and — when the Turnkey
- * auth env is present — ALSO mounts the `/api` auth routes in the SAME process,
- * so Sign-in / session work same-origin (no CORS, httpOnly cookie). Without that
- * env it serves the static site only and `/api/*` returns a clear JSON 404.
+ * Serves the built SPA (`apps/landing/dist`) on `$PORT`, hosts the real
+ * did:webvh logs at `/api/host/*` + the resolver URLs (Track A — no secrets
+ * needed), and — when the Turnkey auth env is present — ALSO mounts the `/api`
+ * auth routes (and, when a testnet4 faucet is configured, `/api/btc/*` for real
+ * inscription) in the SAME process, so everything is same-origin. Without the
+ * auth env, `/api/*` (except the host store) returns a clear JSON 404.
  *
- * Enable the auth API by setting on the Railway service:
- *   TURNKEY_API_PUBLIC_KEY, TURNKEY_API_PRIVATE_KEY, TURNKEY_ORGANIZATION_ID, JWT_SECRET
- * Sessions are in-memory (fine for a single instance; use a shared store if you
- * scale to multiple).
+ * Enable the auth API by setting: TURNKEY_API_PUBLIC_KEY, TURNKEY_API_PRIVATE_KEY,
+ * TURNKEY_ORGANIZATION_ID, JWT_SECRET. Enable real testnet4 inscription by ALSO
+ * setting QUICKNODE_ENDPOINT + BTC_FAUCET_WALLET_ID + BTC_FAUCET_ADDRESS.
  */
-import { file } from 'bun';
-import { normalize } from 'node:path';
 import { createInMemorySessionStorage } from '@originals/auth/server';
-import { route, json, type Handler } from './server/router';
+import { QuickNodeProvider } from '@originals/sdk';
+import { buildFetch } from './server/app';
+import { createWebvhHostStore } from './server/webvh-host';
 import { buildRoutes } from './server/index';
 import { getTurnkey } from './server/turnkey';
+import { createBitcoinRoutes, isBitcoinConfigured, type FaucetProvider } from './server/bitcoin';
+import type { Handler } from './server/router';
 
 const DIST = new URL('./dist/', import.meta.url).pathname;
 const port = Number(process.env.PORT ?? 3000);
+const hostStore = createWebvhHostStore();
+
+// QuickNodeProvider + a faucet UTXO lookup. getSpendableUtxos uses the Ordinals
+// add-on's address index / bitcoind scantxoutset — an explicit throw-until-wired
+// operational gap (fails loudly; never fabricates), filled per-deploy.
+function createFaucetProviderFromEnv(): FaucetProvider {
+  const provider = new QuickNodeProvider({
+    endpoint: process.env.QUICKNODE_ENDPOINT!,
+    expectedNetwork: 'testnet',
+  }) as unknown as FaucetProvider;
+  provider.getSpendableUtxos = async (address: string) => {
+    throw new Error(
+      `getSpendableUtxos not wired for ${address}: implement against the QuickNode Ordinals add-on address index or bitcoind scantxoutset before enabling the faucet.`
+    );
+  };
+  return provider;
+}
 
 function buildApiRoutes(): Record<string, Handler> | null {
   const jwtSecret = process.env.JWT_SECRET;
@@ -29,39 +49,32 @@ function buildApiRoutes(): Record<string, Handler> | null {
     process.env.TURNKEY_API_PRIVATE_KEY &&
     process.env.TURNKEY_ORGANIZATION_ID;
   if (!configured) return null;
-  return buildRoutes({ turnkey: getTurnkey(), sessions: createInMemorySessionStorage(), jwtSecret });
+  const turnkey = getTurnkey();
+  let bitcoin;
+  if (isBitcoinConfigured()) {
+    bitcoin = createBitcoinRoutes({
+      turnkey,
+      jwtSecret,
+      provider: createFaucetProviderFromEnv(),
+      faucet: { walletId: process.env.BTC_FAUCET_WALLET_ID!, address: process.env.BTC_FAUCET_ADDRESS! },
+      faucetSats: Number(process.env.BTC_FAUCET_SATS ?? 20_000),
+    });
+    console.warn(
+      '[landing] /api/btc/* mounted, but the faucet WILL return 502 until getSpendableUtxos ' +
+        'is wired in createFaucetProviderFromEnv (serve.ts) for your QuickNode add-on / bitcoind.'
+    );
+  } else {
+    console.warn('[landing] testnet4 inscription disabled (QUICKNODE_ENDPOINT/BTC_FAUCET_* absent) — inscribe stays mock');
+  }
+  return buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin });
 }
 
 const apiRoutes = buildApiRoutes();
 
-async function serveFile(relPath: string): Promise<Response> {
-  const f = file(DIST + relPath);
-  if (await f.exists()) return new Response(f);
-  // SPA fallback: client-side routes have no file on disk.
-  return new Response(file(DIST + 'index.html'), {
-    headers: { 'content-type': 'text/html; charset=utf-8' },
-  });
-}
-
 const server = Bun.serve({
   port,
   hostname: '0.0.0.0',
-  async fetch(req) {
-    const url = new URL(req.url);
-    // Auth API: dispatch when configured, else a clear JSON 404 (never
-    // SPA-fallback /api/* to index.html — the client would parse HTML as JSON).
-    if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
-      if (apiRoutes) return route(req, apiRoutes);
-      return json(
-        { error: 'Auth API not configured — set TURNKEY_* + JWT_SECRET on this service to enable Sign-in.' },
-        404
-      );
-    }
-    // Strip leading slashes, normalize, and reject path traversal.
-    const rel = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.(\/|\\|$))+/, '').replace(/^\/+/, '');
-    if (rel.includes('..')) return new Response('Bad request', { status: 400 });
-    return serveFile(rel === '' ? 'index.html' : rel);
-  },
+  fetch: buildFetch({ apiRoutes, hostStore, distDir: DIST }),
 });
 
 console.log(

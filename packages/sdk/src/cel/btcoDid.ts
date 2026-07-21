@@ -12,6 +12,8 @@ export function btcoDidPrefix(network: string | undefined): string {
       return 'did:btco:sig';
     case 'regtest':
       return 'did:btco:reg';
+    case 'testnet':
+      return 'did:btco:test';
     case 'mainnet':
     case undefined:
       // undefined = legacy log with no recorded network; mainnet is the only
