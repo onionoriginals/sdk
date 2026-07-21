@@ -128,7 +128,7 @@ if (api && !originalsDataDirIsExplicit && isLikelyDeployed()) {
   console.warn(
     '\n' +
       '  ┌──────────────────────────────────────────────────────────────────────┐\n' +
-      '  │  ⚠  ORIGINALS_DATA_DIR is not set on a deployed instance.              │\n' +
+      '  │  !  ORIGINALS_DATA_DIR is not set on a deployed instance.              │\n' +
       "  │     Signed-in users' Originals are being written to an EPHEMERAL       │\n" +
       '  │     container path and will be LOST on the next redeploy.              │\n' +
       '  │     Fix: attach a persistent volume and set ORIGINALS_DATA_DIR to      │\n' +
