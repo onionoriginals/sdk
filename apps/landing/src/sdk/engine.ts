@@ -21,6 +21,7 @@ import {
   type OriginalsAsset
 } from '@originals/sdk';
 import { HttpHostingStorageAdapter } from './http-hosting-adapter';
+import { DurableHostingStorageAdapter } from './durable-hosting-adapter';
 import { HttpOrdinalsProvider } from './http-ordinals-provider';
 import { TurnkeySatSigner } from './turnkey-sat-signer';
 import { btcTestnetEnabled } from './testnet-flag';
@@ -89,9 +90,13 @@ export class DemoEngine {
   private publisherDid: string | null = null;
   private webvhLogUrl: string | null = null;
   private webvhResolved = false;
+  private readonly authed: boolean;
+  private assetTitle = '';
+  private assetResourceHash = '';
   asset: OriginalsAsset | null = null;
 
-  constructor() {
+  constructor(opts?: { authed?: boolean }) {
+    this.authed = opts?.authed ?? false;
     // Deliberately public and permanent: lets anyone (including skeptics)
     // inspect the live engine from the devtools console. Reassigned on every
     // construction so it always points at the engine currently driving the UI.
@@ -106,9 +111,12 @@ export class DemoEngine {
       webvhNetwork: 'magby',
       defaultKeyType: 'Ed25519',
       ordinalsProvider: testnet ? new HttpOrdinalsProvider() : new OrdMockProvider(),
-      // Real HTTP hosting at this origin — the SDK's did:webvh log becomes
-      // resolvable over HTTP(S) (see http-hosting-adapter.ts).
-      storageAdapter: new HttpHostingStorageAdapter(),
+      // Signed-in users host DURABLY (persisted under their account, PUT
+      // /api/originals/host/*); anonymous users keep the ephemeral TTL host
+      // (PUT /api/host/*). Both make the did:webvh log resolvable over HTTP(S).
+      storageAdapter: this.authed
+        ? new DurableHostingStorageAdapter()
+        : new HttpHostingStorageAdapter(),
       enableLogging: false,
       keyStore: {
         async getPrivateKey(id: string) {
@@ -208,6 +216,8 @@ export class DemoEngine {
       }
     ]);
     this.asset = asset;
+    this.assetTitle = title;
+    this.assetResourceHash = svgHash;
 
     asset.on('asset:migrated', (e: { asset: { fromLayer: string; toLayer: string } }) => {
       this.emit(
@@ -287,6 +297,26 @@ export class DemoEngine {
         : `did:webvh log hosted at ${logUrl} (resolves over HTTPS in production)`,
       { logUrl, resolved, doc: resolvedDoc }
     );
+
+    // Signed-in: record a durable summary under the user's account so it shows
+    // up on /me. Best-effort — a failure must not break the publish UX.
+    if (this.authed && assetWebvhDid) {
+      try {
+        const res = await fetch('/api/originals', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            did: assetWebvhDid,
+            title: this.assetTitle,
+            resourceHash: this.assetResourceHash,
+          }),
+        });
+        if (!res.ok) log('originals:record-failed', res.status);
+      } catch (err) {
+        log('originals:record-failed', err);
+      }
+    }
 
     return this.snapshot();
   }

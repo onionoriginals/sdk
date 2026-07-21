@@ -38,7 +38,7 @@ const eventColors: Record<string, string> = {
   'asset:inscribed': 'var(--btco)'
 };
 
-function useEngine() {
+function useEngine(authed: boolean) {
   const engineRef = useRef<DemoEngine | null>(null);
   const loading = useRef<Promise<DemoEngine> | null>(null);
 
@@ -46,13 +46,13 @@ function useEngine() {
     if (engineRef.current) return engineRef.current;
     loading.current ??= import('../sdk/engine').then(({ DemoEngine }) => {
       // The engine registers itself as window.__originalsDemo so skeptics can
-      // inspect it from the devtools console.
-      const engine = new DemoEngine();
+      // inspect it from the devtools console. Signed-in ⇒ durable hosting.
+      const engine = new DemoEngine({ authed });
       engineRef.current = engine;
       return engine;
     });
     return loading.current;
-  }, []);
+  }, [authed]);
 
   // Drop the current engine so the next run starts from a clean slate —
   // fresh keys, fresh publisher DID, fresh asset.
@@ -86,7 +86,7 @@ export function Demo() {
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'events' | 'provenance' | 'resource'>('events');
-  const { getEngine, discardEngine } = useEngine();
+  const { getEngine, discardEngine } = useEngine(isAuthenticated);
   const logRef = useRef<HTMLOListElement>(null);
   const unsubscribe = useRef<(() => void) | null>(null);
 
