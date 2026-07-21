@@ -122,6 +122,11 @@ describe('rawKeyFaucetSigner', () => {
     const mainnetWif = base58check(sha256).encode(new Uint8Array([0x80, ...FAUCET_PRIV, 0x01]));
     expect(() => rawKeyFaucetSigner(mainnetWif)).toThrow('testnet WIF');
   });
+
+  test('rejects an uncompressed testnet WIF (no 0x01 flag)', () => {
+    const uncompressed = base58check(sha256).encode(new Uint8Array([0xef, ...FAUCET_PRIV]));
+    expect(() => rawKeyFaucetSigner(uncompressed)).toThrow('COMPRESSED');
+  });
 });
 
 describe('fetchFaucetUtxos (mempool.space)', () => {
@@ -144,5 +149,16 @@ describe('fetchFaucetUtxos (mempool.space)', () => {
   test('throws on a non-ok response', async () => {
     const fetchImpl = (async () => new Response('nope', { status: 502 })) as unknown as typeof fetch;
     await expect(fetchFaucetUtxos({ api: 'https://x/api', address: FAUCET_ADDRESS, fetchImpl })).rejects.toThrow();
+  });
+
+  test('aborts a hung request via the timeout', async () => {
+    // fetchImpl respects the abort signal but never resolves on its own.
+    const fetchImpl = ((_url: string, init?: { signal?: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      })) as unknown as typeof fetch;
+    await expect(
+      fetchFaucetUtxos({ api: 'https://x/api', address: FAUCET_ADDRESS, fetchImpl, timeoutMs: 20 })
+    ).rejects.toThrow();
   });
 });

@@ -58,10 +58,20 @@ export async function fetchFaucetUtxos(opts: {
   api: string;
   address: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 }): Promise<Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const scriptPubKey = p2wpkhScriptHex(opts.address);
-  const res = await fetchImpl(`${opts.api}/address/${opts.address}/utxo`);
+  // Bound the call so a hung mempool.space response can't hold the funding
+  // handler (and the user's rate-limit slot) open indefinitely.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 10_000);
+  let res: Response;
+  try {
+    res = await fetchImpl(`${opts.api}/address/${opts.address}/utxo`, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) throw new Error(`mempool.space UTXO fetch failed (${res.status}) for ${opts.address}`);
   const utxos = (await res.json()) as Array<{
     txid: string;
@@ -268,7 +278,13 @@ export function rawKeyFaucetSigner(wif: string): { address: string; signFundingT
   if (version !== 0xef) {
     throw new Error(`BTC_FAUCET_WIF must be a testnet WIF (version 0xEF); got 0x${version.toString(16)}.`);
   }
-  const privateKey = raw.slice(1, 33); // drop version byte + optional compression flag
+  // P2WPKH requires a COMPRESSED key → the WIF must carry the 0x01 compression
+  // flag (34 bytes total). An uncompressed WIF would derive a different address
+  // than intended, so reject it rather than silently mismatch.
+  if (raw.length !== 34 || raw[33] !== 0x01) {
+    throw new Error('BTC_FAUCET_WIF must be a COMPRESSED testnet WIF (P2WPKH needs a compressed key).');
+  }
+  const privateKey = raw.slice(1, 33);
   const pub = secp256k1.getPublicKey(privateKey, true);
   const address = btc.p2wpkh(pub, btc.TEST_NETWORK).address!;
   const signFundingTx: FaucetTxSigner = async (tx) => {

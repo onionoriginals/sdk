@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
     "smoke": "node scripts/smoke.mjs",
+    "check:ordinals": "bun scripts/check-quicknode-ordinals.ts",
     "ci": "bun scripts/ci.mjs",
     "icons": "bun scripts/icons.mjs",
     "og": "bun scripts/og-image.mjs"
