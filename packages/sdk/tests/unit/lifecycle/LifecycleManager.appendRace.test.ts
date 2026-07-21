@@ -107,4 +107,51 @@ describe('#400: addResourceVersion vs lifecycle append race', () => {
     // would break continuity).
     expect(await asset.verify()).toBe(true);
   });
+
+  // The end-to-end publish variant proves one op's wiring against a real clobber.
+  // The other three wrapped ops (inscribe/rotate/authorize) can't be guarded the
+  // same way: they migrate to did:btco, after which addResourceVersion takes a
+  // different per-event-inscription path (event count varies with lock order)
+  // and btco verify() needs an ordinalsProvider — so a full end-to-end race
+  // asserts nothing deterministic. Instead, lock down the shared primitive every
+  // op wraps: if runExclusive stops serializing, ALL four ops regress.
+  test('runExclusive serializes concurrent critical sections (mutual exclusion + FIFO)', async () => {
+    const sdk = OriginalsSDK.create({
+      network: 'regtest',
+      defaultKeyType: 'Ed25519',
+      ordinalsProvider: new OrdMockProvider(),
+      keyStore: new MockKeyStore(),
+      storageAdapter: new MemoryStorageAdapter()
+    } as any);
+    const asset = await sdk.lifecycle.createAsset(RES);
+
+    const order: string[] = [];
+    let active = 0;
+    let maxActive = 0;
+    const critical = (label: string, delayMs: number) => async () => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      order.push(`${label}:start`);
+      await new Promise((r) => setTimeout(r, delayMs));
+      order.push(`${label}:end`);
+      active--;
+      return label;
+    };
+
+    // A runs longest but is enqueued first — FIFO must still run A→B→C to
+    // completion each, never overlapping (a broken lock would interleave).
+    const results = await Promise.all([
+      asset.runExclusive(critical('A', 30)),
+      asset.runExclusive(critical('B', 5)),
+      asset.runExclusive(critical('C', 5))
+    ]);
+
+    expect(maxActive).toBe(1); // never two critical sections in flight at once
+    expect(order).toEqual(['A:start', 'A:end', 'B:start', 'B:end', 'C:start', 'C:end']);
+    expect(results).toEqual(['A', 'B', 'C']);
+
+    // A rejected turn must not wedge the chain: the next acquirer still runs.
+    await expect(asset.runExclusive(async () => { throw new Error('boom'); })).rejects.toThrow('boom');
+    expect(await asset.runExclusive(async () => 'after')).toBe('after');
+  });
 });
