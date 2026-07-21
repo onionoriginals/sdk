@@ -176,6 +176,21 @@ export const demo = {
   reset: 'Start over with a new asset'
 };
 
+export const yourOriginals = {
+  navLabel: 'Your Originals',
+  heading: 'Your Originals',
+  subhead:
+    'Every piece you’ve created and published lives here — each a real, resolvable did:webvh with a signed version history hosted at this origin.',
+  signedOut: 'Sign in to see the Originals saved to your account.',
+  emptyTitle: 'No Originals yet.',
+  emptyBody: 'Create and publish your first piece in the live demo — signed in, it’s saved right here.',
+  emptyCta: 'Create your first Original',
+  resolvedBadge: 'resolved ✓',
+  pendingBadge: 'resolves in production',
+  openLog: 'Open the signed DID log',
+  createdLabel: 'Created',
+};
+
 export const realExample = {
   id: 'example',
   eyebrow: 'A real Original',

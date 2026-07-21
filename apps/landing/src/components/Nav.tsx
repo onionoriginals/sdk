@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { nav, site } from '../content';
+import { nav, site, yourOriginals } from '../content';
 import { useAuth } from '../auth/useAuth';
+import { navigate } from '../router';
 import { LoginModal } from './LoginModal';
 import './nav.css';
 
@@ -50,6 +51,18 @@ export function Nav() {
             </svg>
             <span>{nav.github.label}</span>
           </a>
+          {isAuthenticated && (
+            <a
+              className="nav-your-originals"
+              href="/me"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/me');
+              }}
+            >
+              {yourOriginals.navLabel}
+            </a>
+          )}
           {isAuthenticated ? (
             <div className="nav-auth">
               <span className="nav-email" title={user!.email}>

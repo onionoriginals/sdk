@@ -7,22 +7,33 @@ import { RealExample } from './components/RealExample';
 import { Protocol } from './components/Protocol';
 import { Developers } from './components/Developers';
 import { Footer } from './components/Footer';
+import { useLocationPath, routeForPath } from './router';
+import { YourOriginals } from './pages/YourOriginals';
 
 export function App() {
   if (new URLSearchParams(location.search).has('smoke')) {
     return <SmokeTest />;
   }
+  return <RoutedApp />;
+}
+
+function RoutedApp() {
+  const path = useLocationPath();
   return (
     <>
       <Nav />
-      <main>
-        <Hero />
-        <Why />
-        <Demo />
-        <RealExample />
-        <Protocol />
-        <Developers />
-      </main>
+      {routeForPath(path) === 'your-originals' ? (
+        <YourOriginals />
+      ) : (
+        <main>
+          <Hero />
+          <Why />
+          <Demo />
+          <RealExample />
+          <Protocol />
+          <Developers />
+        </main>
+      )}
       <Footer />
     </>
   );
