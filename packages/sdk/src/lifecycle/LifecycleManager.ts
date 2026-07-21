@@ -2589,13 +2589,6 @@ export class LifecycleManager {
     // pre-append log here for rollback; the append itself is deferred below.
     celLogBefore = asset.celLog;
     const network = this.getConfiguredBitcoinNetwork();
-    // Resource manifest rides INSIDE the DID document as a service entry —
-    // the inscription itself must be the DID document (application/did+json)
-    // or the SDK's own BtcoDidResolver rejects it (#375).
-    const manifestEndpoint = {
-      resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
-      timestamp: new Date().toISOString()
-    };
     // First-anchor-wins uniqueness (#did-cel-uniqueness): the inscribed btco
     // doc MUST back-link its did:cel so on-chain anchorings are enumerable via
     // getAnchoringsForDidCel. Derive it from the genesis event (not the mutable
@@ -2640,11 +2633,7 @@ export class LifecycleManager {
       btcoDoc.alsoKnownAs = backLinks;
       btcoDoc.service = [
         ...(btcoDoc.service || []),
-        {
-          id: `${btcoDoc.id}#resources`,
-          type: 'OriginalsResourceManifest',
-          serviceEndpoint: manifestEndpoint
-        },
+        this.buildResourceManifestService(btcoDoc.id, asset.resources),
         // On-chain commitment to the entire signed history (#365): anchors
         // the CEL head so the log cannot be swapped or truncated post-hoc.
         // Absent when the append degraded — the doc simply lacks the anchor.
@@ -3115,6 +3104,25 @@ export class LifecycleManager {
   }
 
   /**
+   * The `#resources` OriginalsResourceManifest service for a did:btco document:
+   * the on-chain declaration of each resource's id/hash/contentType/url. Shared
+   * by the btco migrate (inscribeOnBitcoin) and rotate/authorize reinscription
+   * paths so the manifest shape stays byte-identical across them (#384). The
+   * manifest rides INSIDE the DID document (the inscription must be the DID doc,
+   * application/did+json, or BtcoDidResolver rejects it — #375).
+   */
+  private buildResourceManifestService(docId: string, resources: AssetResource[]) {
+    return {
+      id: `${docId}#resources`,
+      type: 'OriginalsResourceManifest',
+      serviceEndpoint: {
+        resources: resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
+        timestamp: new Date().toISOString()
+      }
+    };
+  }
+
+  /**
    * Builds the rotated did:btco document (shared by rotateBtcoKeys and
    * authorizeSigner): same id, the NEW verification method, lineage back-links,
    * and the re-embedded resource manifest (the resolver serves the newest
@@ -3142,14 +3150,7 @@ export class LifecycleManager {
     rotatedDoc.alsoKnownAs = backLinks;
     rotatedDoc.service = [
       ...(rotatedDoc.service || []),
-      {
-        id: `${rotatedDoc.id}#resources`,
-        type: 'OriginalsResourceManifest',
-        serviceEndpoint: {
-          resources: asset.resources.map(res => ({ id: res.id, hash: res.hash, contentType: res.contentType, url: res.url })),
-          timestamp: new Date().toISOString()
-        }
-      }
+      this.buildResourceManifestService(rotatedDoc.id, asset.resources)
     ];
     return rotatedDoc;
   }
