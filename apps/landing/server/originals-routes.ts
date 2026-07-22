@@ -42,6 +42,25 @@ function isWebvhArtifactKey(key: string): boolean {
   return segs[segs.length - 2] === 'resources' && /^u[A-Za-z0-9_-]+$/.test(last);
 }
 
+/** The caller's per-user namespace slug — mirrors userWebvhSlug in src/auth/webvh.ts. */
+function userSlug(sub: string): string {
+  return `user-${sub.slice(0, 16)}`;
+}
+
+/**
+ * Decode the host object key from the request path, or null when it contains a
+ * malformed percent-encoding (`%GG`). Bun's URL accepts such paths, so a bare
+ * decodeURIComponent would throw URIError → an uncaught 500; callers turn null
+ * into a clean 400.
+ */
+function decodeKey(url: URL): string | null {
+  try {
+    return decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
+  } catch {
+    return null;
+  }
+}
+
 export interface OriginalsRoutes {
   hostPut(req: Request, url: URL, clientIp: string): Promise<Response>;
   hostGet(req: Request, url: URL): Promise<Response>;
@@ -88,11 +107,22 @@ export function createOriginalsRoutes(deps: {
       return json({ error: 'rate_limited' }, 429, { 'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)) });
     }
 
-    const key = decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
+    const key = decodeKey(url);
+    if (key === null) return json({ error: 'bad_key' }, 400);
     if (!key) return json({ error: 'missing_key' }, 400);
     // Confine writes to did:webvh artifact paths so a user can't shadow the
     // app's own static assets (served by originals.serve before the fallback).
     if (!isWebvhArtifactKey(key)) return json({ error: 'forbidden_path' }, 403);
+    // Namespace guard: a `user-<slug>` path segment is a per-user namespace —
+    // only its owner may write there. Blocks pre-squatting another user's
+    // PREDICTABLE publisher DID path (`user-<victim>/did.jsonl`), which the
+    // store's first-writer-wins owner sidecar alone can't (it only protects an
+    // already-claimed key). Asset paths are hash-derived (not `user-`-prefixed),
+    // so they stay open and are overwrite-protected by the sidecar.
+    const nsSeg = key.split('/')[1]; // [0] is the host
+    if (nsSeg && nsSeg.startsWith('user-') && nsSeg !== userSlug(sub)) {
+      return json({ error: 'forbidden_namespace' }, 403);
+    }
     // Cap the upload before buffering the whole body into memory (the rate
     // limiter bounds request COUNT, not per-request size).
     const declared = Number(req.headers.get('content-length'));
@@ -115,7 +145,8 @@ export function createOriginalsRoutes(deps: {
   async function hostGet(req: Request, url: URL): Promise<Response> {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const key = decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
+    const key = decodeKey(url);
+    if (key === null) return json({ error: 'bad_key' }, 400);
     if (!key) return json({ error: 'missing_key' }, 400);
     try {
       return store.read(sub, key);

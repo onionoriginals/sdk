@@ -108,6 +108,35 @@ describe('originals routes — auth gating', () => {
     expect((await put('sub-1')).status).toBe(200); // owner may re-write
   });
 
+  test('pre-squat blocked: cannot write another user’s namespace even when unclaimed (403)', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    // sub-2 targets sub-1's PREDICTABLE publisher path BEFORE sub-1 ever writes —
+    // the owner sidecar alone wouldn't stop this (unclaimed key); the namespace
+    // guard does.
+    const key = 'demo.example.com/user-sub-1/did.jsonl';
+    const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
+    const res = await routes.hostPut(
+      new Request(url, { method: 'PUT', headers: { 'content-type': 'application/jsonl', cookie: cookieFor('sub-2') }, body: '{}' }),
+      url,
+      '1.1.1.1'
+    );
+    expect(res.status).toBe(403); // forbidden_namespace
+  });
+
+  test('a malformed percent-encoded key is a clean 400, not a 500', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    // %GG is an invalid escape: the URL constructor accepts it, decodeURIComponent throws.
+    const url = new URL('http://h/api/originals/host/demo.example.com/%GG/did.jsonl');
+    const putRes = await routes.hostPut(
+      new Request(url, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body: '{}' }),
+      url,
+      '1.1.1.1'
+    );
+    expect(putRes.status).toBe(400);
+    const getRes = await routes.hostGet(new Request(url, { headers: { cookie: cookieFor('sub-1') } }), url);
+    expect(getRes.status).toBe(400);
+  });
+
   test('record then list under the authenticated sub', async () => {
     const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
     const cookie = cookieFor('sub-1');

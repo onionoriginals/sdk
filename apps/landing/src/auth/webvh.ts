@@ -129,10 +129,13 @@ async function getOrCreateBrowserKeyPair(
 
 /**
  * A stable, PII-free per-user did:webvh path slug derived from the Turnkey
- * sub-org id. Namespaces every user's hosted DID log/resources under their own
- * URL so no two users collide. The SERVER derives the same slug from the JWT
- * `sub` to enforce that a user can only write within their own namespace, so
- * this MUST stay byte-identical to the server's copy (originals-routes.ts).
+ * sub-org id. Namespaces the publisher DID log under a per-user URL. The SERVER
+ * derives the same slug from the JWT `sub` and rejects any write to a
+ * `user-*` path segment that isn't the caller's own — so no user can pre-squat
+ * another's publisher namespace (originals-routes.ts `hostPut`). This MUST stay
+ * byte-identical to the server's copy. (Asset log/resource paths are hash-derived,
+ * not `user-`-prefixed; they're guarded instead by the store's first-writer-wins
+ * ownership sidecar.)
  */
 export function userWebvhSlug(subOrgId: string): string {
   return `user-${subOrgId.slice(0, 16)}`;
