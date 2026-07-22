@@ -609,10 +609,13 @@ async function verifyHeadFreshness(
  * and permanently DENY an honest mint (deny-only front-run). A bare back-link, or
  * a proof by an unauthorized key, therefore does NOT count.
  *
- * The signed payload is the DID document with its `proof` removed (standard Data
- * Integrity: proofs are stripped before canonicalization), verified with the SAME
- * `eddsa-jcs-2022` primitive the CEL uses (`dispatchVerify` over
- * `canonicalizeEvent(docWithoutProof)`). Authorization compares the resolved
+ * The signed payload is the DID document with its `proof` removed, verified with
+ * the SAME `eddsa-jcs-2022` primitive the CEL uses (`dispatchVerify` over
+ * `canonicalizeEvent(docWithoutProof)`). NOTE: this is THIS codebase's signing
+ * convention — JCS over the proofless document — NOT W3C Data Integrity, which
+ * signs over document + proof-options (the proof sans `proofValue`); don't treat
+ * them as interchangeable if a real VCDM proof path is ever added. Authorization
+ * compares the resolved
  * PUBLIC KEY against the history set — not the VM URI string — matching the
  * controller-binding elsewhere in this file. Fail-closed throughout: a missing
  * doc, a malformed/structurally-invalid proof, an unresolvable or unauthorized
@@ -701,6 +704,11 @@ async function verifyUniqueness(
   // can never trip NON_CANONICAL_ANCHOR / AMBIGUOUS_CANONICAL. Fail-closed by
   // construction: a competitor the provider cannot surface a doc for, or whose
   // doc is not authorized-signed, simply does not count.
+  // ACCEPTED TRADE-OFF: an OrdinalsProvider that doesn't populate `didDocument`
+  // (backward-compat) makes ALL competitors uncountable — closing the DoS but
+  // also silently suppressing legit-dupe detection (a genuine earlier
+  // controller-signed mint on another sat would be ignored). Providers must
+  // surface the doc (see OrdinalsLookup/OrdinalsProvider docs) to restore it.
   const anchorings: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number }> = [];
   for (const a of rawAnchorings) {
     if (a.satoshi === anchoredSat.satoshi) {
