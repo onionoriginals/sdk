@@ -155,8 +155,9 @@ export class OrdMockProvider implements OrdinalsProvider {
     satoshi: string;
     inscriptionId: string;
     blockHeight?: number;
+    didDocument?: Record<string, unknown>;
   }>> {
-    const out: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number }> = [];
+    const out: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number; didDocument?: Record<string, unknown> }> = [];
     for (const rec of this.state.inscriptionsById.values()) {
       if (rec.satoshi === undefined) continue;
       // #407 phase 2: the DID document rides in inscription METADATA (content is
@@ -172,7 +173,13 @@ export class OrdMockProvider implements OrdinalsProvider {
       }
       const aka = (doc as { alsoKnownAs?: unknown } | null)?.alsoKnownAs;
       if (Array.isArray(aka) && aka.includes(didCel)) {
-        out.push({ satoshi: rec.satoshi, inscriptionId: rec.inscriptionId, blockHeight: rec.blockHeight });
+        // Surface the inscribed doc so uniqueness can authenticate a competing
+        // anchoring via its DataIntegrityProof (#402). Clone so a reader mutating
+        // the result cannot corrupt stored state.
+        const didDocument = doc && typeof doc === 'object'
+          ? (structuredClone(doc) as Record<string, unknown>)
+          : undefined;
+        out.push({ satoshi: rec.satoshi, inscriptionId: rec.inscriptionId, blockHeight: rec.blockHeight, didDocument });
       }
     }
     return out;

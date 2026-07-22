@@ -601,6 +601,52 @@ async function verifyHeadFreshness(
 }
 
 /**
+ * Authenticates a COMPETING anchoring (#402): true iff its inscribed did:btco
+ * document carries a DataIntegrityProof (eddsa-jcs-2022) signed by a key in the
+ * verified log's authorized-key history. Without this gate, `getAnchoringsForDidCel`
+ * counts ANY inscription that back-links the did:cel via `alsoKnownAs` — so a
+ * non-controller could inscribe `{alsoKnownAs:[didCel]}` on their own earlier sat
+ * and permanently DENY an honest mint (deny-only front-run). A bare back-link, or
+ * a proof by an unauthorized key, therefore does NOT count.
+ *
+ * The signed payload is the DID document with its `proof` removed (standard Data
+ * Integrity: proofs are stripped before canonicalization), verified with the SAME
+ * `eddsa-jcs-2022` primitive the CEL uses (`dispatchVerify` over
+ * `canonicalizeEvent(docWithoutProof)`). Authorization compares the resolved
+ * PUBLIC KEY against the history set — not the VM URI string — matching the
+ * controller-binding elsewhere in this file. Fail-closed throughout: a missing
+ * doc, a malformed/structurally-invalid proof, an unresolvable or unauthorized
+ * key, or a bad signature all yield false (the competitor simply does not count).
+ */
+async function anchoringDocAuthenticated(
+  didDocument: Record<string, unknown> | undefined,
+  authorizedKeyHexes: Set<string>,
+  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>
+): Promise<boolean> {
+  if (!didDocument || typeof didDocument !== 'object') return false;
+  const rawProof = (didDocument as { proof?: unknown }).proof;
+  const proofs = Array.isArray(rawProof) ? rawProof : rawProof ? [rawProof] : [];
+  if (proofs.length === 0) return false;
+
+  // Canonicalize over the document WITHOUT any proof (all proofs stripped).
+  const docWithoutProof: Record<string, unknown> = { ...didDocument };
+  delete docWithoutProof.proof;
+
+  for (const candidate of proofs) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const proof = candidate as DataIntegrityProof;
+    if (!structuralCheck(proof)) continue;
+    // KEY must be in the log's authorized-key history.
+    const keyHex = await resolveControllerKeyHex(proof.verificationMethod, resolveKey);
+    if (keyHex === null || !authorizedKeyHexes.has(keyHex)) continue;
+    // SIGNATURE must verify over the proofless document.
+    const { verified } = await dispatchVerify(proof, docWithoutProof, resolveKey);
+    if (verified) return true;
+  }
+  return false;
+}
+
+/**
  * did:cel uniqueness — first-anchor-wins (follow-up to the signed-anchored-sat
  * spec). The canonical sat for a did:cel is the sat of its EARLIEST on-chain
  * anchoring: the lowest confirmed block height, GROUPED BY SAT. Multiple
@@ -608,10 +654,20 @@ async function verifyHeadFreshness(
  * compete — only a different, earlier sat wins. A btco-anchored log whose
  * anchored sat is not that canonical sat is a non-canonical dupe.
  *
+ * COMPETITOR AUTHENTICATION (#402): only CONTROLLER-authenticated anchorings
+ * count. The log's OWN anchored sat always counts (it is the artifact under
+ * verification). A competitor on a DIFFERENT sat counts only if its inscribed
+ * did:btco document is signed by a key in THIS log's authorized-key history
+ * (`anchoringDocAuthenticated`). An unauthenticated back-link — a bare
+ * `alsoKnownAs`, or a proof by an unauthorized key — is IGNORED, so a
+ * non-controller cannot front-run and deny an honest mint. A genuinely
+ * controller-signed earlier anchoring on a different sat still competes (legit
+ * dupe detection preserved).
+ *
  * Fail-closed and NOT opt-in: a btco-anchored did:cel log already requires a
  * provider, so a provider that cannot enumerate, an empty enumeration, or any
- * anchoring missing a confirmed block height → `UNIQUENESS_UNVERIFIABLE`. A
- * same-block tie between two DIFFERENT sats → `AMBIGUOUS_CANONICAL` (no finer
+ * COUNTABLE anchoring missing a confirmed block height → `UNIQUENESS_UNVERIFIABLE`.
+ * A same-block tie between two DIFFERENT sats → `AMBIGUOUS_CANONICAL` (no finer
  * on-chain order is exposed by the provider contract today).
  *
  * Returns a coded error string on failure, or null when the anchored sat is
@@ -620,25 +676,50 @@ async function verifyHeadFreshness(
 async function verifyUniqueness(
   didCel: string,
   anchoredSat: AnchoredSat,
-  ordinalsProvider: OrdinalsLookup | undefined
+  authorizedKeyHexes: Set<string>,
+  ordinalsProvider: OrdinalsLookup | undefined,
+  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>
 ): Promise<string | null> {
   if (!ordinalsProvider || typeof ordinalsProvider.getAnchoringsForDidCel !== 'function') {
     return `UNIQUENESS_UNVERIFIABLE: the ordinals provider cannot enumerate anchorings for ${didCel}; a btco-anchored did:cel log requires this to confirm first-anchor-wins canonicality`;
   }
 
-  let anchorings: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number }>;
+  let rawAnchorings: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number; didDocument?: Record<string, unknown> }>;
   try {
-    anchorings = await ordinalsProvider.getAnchoringsForDidCel(didCel);
+    rawAnchorings = await ordinalsProvider.getAnchoringsForDidCel(didCel);
   } catch (e) {
     return `UNIQUENESS_UNVERIFIABLE: failed to enumerate anchorings for ${didCel}: ${e instanceof Error ? e.message : String(e)}`;
   }
 
-  if (!Array.isArray(anchorings) || anchorings.length === 0) {
+  if (!Array.isArray(rawAnchorings) || rawAnchorings.length === 0) {
     return `UNIQUENESS_UNVERIFIABLE: no on-chain anchorings found for ${didCel}; cannot confirm the anchored sat ${anchoredSat.satoshi} is canonical`;
   }
 
-  // Every anchoring must carry a confirmed (non-negative integer) block height:
-  // the ordering signal must be provable, or canonicality is undecidable.
+  // #402 filter: keep only COUNTABLE anchorings — the log's own anchored sat
+  // (always) plus controller-authenticated competitors on other sats. Everything
+  // else (unauthenticated back-links) is dropped BEFORE any ordering logic, so it
+  // can never trip NON_CANONICAL_ANCHOR / AMBIGUOUS_CANONICAL. Fail-closed by
+  // construction: a competitor the provider cannot surface a doc for, or whose
+  // doc is not authorized-signed, simply does not count.
+  const anchorings: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number }> = [];
+  for (const a of rawAnchorings) {
+    if (a.satoshi === anchoredSat.satoshi) {
+      anchorings.push(a);
+    } else if (await anchoringDocAuthenticated(a.didDocument, authorizedKeyHexes, resolveKey)) {
+      anchorings.push(a);
+    }
+  }
+
+  if (anchorings.length === 0) {
+    // No countable anchoring at all: the log's OWN anchored sat is absent from
+    // the enumeration (its inscribed did:btco doc is missing the did:cel
+    // back-link) and every competitor was unauthenticated. Cannot confirm
+    // canonicality — fail closed.
+    return `UNIQUENESS_UNVERIFIABLE: the log's own anchoring sat ${anchoredSat.satoshi} for ${didCel} is absent from the on-chain enumeration and no controller-authenticated competitor was found; cannot confirm canonicality`;
+  }
+
+  // Every COUNTABLE anchoring must carry a confirmed (non-negative integer) block
+  // height: the ordering signal must be provable, or canonicality is undecidable.
   for (const a of anchorings) {
     if (typeof a.blockHeight !== 'number' || !Number.isInteger(a.blockHeight) || a.blockHeight < 0) {
       return `UNIQUENESS_UNVERIFIABLE: anchoring ${a.inscriptionId} on satoshi ${a.satoshi} has no confirmed block height; first-anchor-wins ordering is unprovable`;
@@ -1461,6 +1542,14 @@ export async function verifyEventLog(
   const currentResourceHash = new Map<string, string>();
 
   let authorizedKeyIds = new Set<string>();
+  // The UNION of every key the log's key history ever authorized (genesis
+  // controller + each accepted rotation's newController). Unlike authorizedKeyIds
+  // — which a rotation REPLACES (hand-off semantics) — this only grows, because a
+  // legitimate earlier btco anchoring may have been signed by an EARLIER
+  // controller key. Used solely to authenticate competing anchorings in #402
+  // uniqueness (it never relaxes per-event authorization, which stays scoped to
+  // authorizedKeyIds as it stood when each event was appended).
+  const allAuthorizedKeyHexes = new Set<string>();
   let authorityError: string | undefined;
   if (!options?.verifier) {
     // A non-array proof (missing, object, string, …) yields zero controller
@@ -1556,6 +1645,8 @@ export async function verifyEventLog(
   // confirmed by a matching bitcoin witness proof, the log's authority is
   // anchored to that sat. Default-path only; a custom verifier owns semantics.
   let anchoredSat: AnchoredSat | undefined;
+  // Seed the history union with the genesis-authorized key(s) established above.
+  for (const k of authorizedKeyIds) allAuthorizedKeyHexes.add(k);
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
@@ -1607,6 +1698,10 @@ export async function verifyEventLog(
         // REPLACE, not union — hand-off semantics (design spec §2/§5); keeping
         // the old keys would reopen the stale-key window rotation closes.
         authorizedKeyIds = newKeys;
+        // The uniqueness history union (#402) DOES accumulate: an earlier
+        // anchoring signed by this now-superseded controller must still be
+        // recognizable as a legit competitor.
+        for (const k of newKeys) allAuthorizedKeyHexes.add(k);
       }
     }
 
@@ -1699,7 +1794,7 @@ export async function verifyEventLog(
   // path (which owns proof semantics and never establishes `anchoredSat`).
   let uniquenessError: string | undefined;
   if (!options?.verifier && anchoredSat && typeof assetDid === 'string' && assetDid.startsWith('did:cel:')) {
-    uniquenessError = (await verifyUniqueness(assetDid, anchoredSat, options?.ordinalsProvider)) ?? undefined;
+    uniquenessError = (await verifyUniqueness(assetDid, anchoredSat, allAuthorizedKeyHexes, options?.ordinalsProvider, options?.resolveKey)) ?? undefined;
   }
 
   // Content-as-ordinal integrity (#407 phase 2): a phase-2 anchor inscription's
