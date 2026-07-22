@@ -37,6 +37,7 @@ export function goToSection(hash: string): void {
   };
   if (window.location.pathname !== '/') {
     navigate('/'); // remount the landing, then scroll
+    if (hash) window.history.replaceState({}, '', hash);
     scrollWhenReady();
   } else {
     if (hash) window.history.replaceState({}, '', hash);
