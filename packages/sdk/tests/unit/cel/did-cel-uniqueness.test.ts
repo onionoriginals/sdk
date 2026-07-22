@@ -57,6 +57,18 @@ function btcoDoc(satoshi: string, headDigestMultibase: string, didCel: string, p
   };
 }
 
+// Controller-sign a btco doc so it counts as an authenticated competitor (#402):
+// the proof is over the JCS of the doc WITHOUT its proof — exactly what
+// verifyUniqueness re-checks. `signer` must be a key in the log's authorized-key
+// history (genesis controller or a rotated-in controller).
+async function signBtcoDoc(
+  doc: Record<string, unknown>,
+  signer: (data: unknown) => Promise<Record<string, unknown>>
+): Promise<Record<string, unknown>> {
+  const proof = await signer(doc);
+  return { ...doc, proof };
+}
+
 function attachWitness(log: EventLog, insc: { inscriptionId: string; txid: string }, satoshi: string): EventLog {
   const last = log.events[log.events.length - 1];
   const witnessedAt = '2026-07-13T00:00:01Z';
@@ -75,9 +87,20 @@ function attachWitness(log: EventLog, insc: { inscriptionId: string; txid: strin
   return { events: [...log.events.slice(0, -1), { ...last, proof: [...last.proof, witnessProof] }] };
 }
 
-async function inscribeDoc(p: OrdMockProvider, satoshi: string, headDigest: string, didCel: string, publicKeyMultibase?: string) {
+// Inscribe a btco doc on `satoshi`. When `signer` is provided the doc is
+// controller-signed (authenticated competitor, #402); when omitted the doc is
+// a BARE back-link (the front-run attacker shape — must be ignored by uniqueness).
+async function inscribeDoc(
+  p: OrdMockProvider,
+  satoshi: string,
+  headDigest: string,
+  didCel: string,
+  opts?: { publicKeyMultibase?: string; signer?: (data: unknown) => Promise<Record<string, unknown>> }
+) {
+  let doc: Record<string, unknown> = btcoDoc(satoshi, headDigest, didCel, opts?.publicKeyMultibase);
+  if (opts?.signer) doc = await signBtcoDoc(doc, opts.signer);
   const res = await p.createInscription({
-    data: Buffer.from(JSON.stringify(btcoDoc(satoshi, headDigest, didCel, publicKeyMultibase))),
+    data: Buffer.from(JSON.stringify(doc)),
     contentType: 'application/did+json',
     targetSatoshi: satoshi,
   });
@@ -101,7 +124,9 @@ async function branch(base: EventLog, a: Key, p: OrdMockProvider, sat: string, d
     { sourceDid: didCel, layer: 'btco', network: 'regtest', to: `did:btco:reg:${sat}`, migratedAt: '2026-07-13T00:00:00Z' },
     { signer: a.signer, verificationMethod: a.vm }
   );
-  const insc = await inscribeDoc(p, sat, chainDigest(log.events[log.events.length - 1]), didCel);
+  // Controller-signed (by `a`, the genesis controller) so this anchoring counts
+  // as an authenticated competitor when a DIFFERENT branch's log is verified.
+  const insc = await inscribeDoc(p, sat, chainDigest(log.events[log.events.length - 1]), didCel, { signer: a.signer });
   log = attachWitness(log, insc, sat);
   return { log, inscriptionId: insc.inscriptionId };
 }
@@ -172,7 +197,7 @@ describe('did:cel uniqueness — first-anchor-wins', () => {
       { newController: b.didKey, rotatedAt: '2026-07-13T00:00:02Z' },
       { signer: b.signer, verificationMethod: b.vm }
     );
-    const rotInsc = await inscribeDoc(p, X, chainDigest(rotated.events[rotated.events.length - 1]), didCel, b.pubMb);
+    const rotInsc = await inscribeDoc(p, X, chainDigest(rotated.events[rotated.events.length - 1]), didCel, { publicKeyMultibase: b.pubMb, signer: b.signer });
     const full = attachWitness(rotated, rotInsc, X);
 
     // Migrate at block 100, rotation reinscription at block 200 — both on X.
@@ -254,6 +279,67 @@ describe('did:cel uniqueness — first-anchor-wins', () => {
     const result = await verifyEventLog(bx.log, { ordinalsProvider: provider });
     expect(result.verified).toBe(false);
     expect(hasCode(result, 'UNIQUENESS_UNVERIFIABLE')).toBe(true);
+  });
+
+  // #402: only CONTROLLER-authenticated competitors count. A non-controller who
+  // inscribes a bare {alsoKnownAs:[didCel]} back-link on an earlier sat must NOT
+  // be able to deny an honest mint (deny-only front-run). These are the
+  // regression tests — they FAIL on origin/main (the honest mint trips
+  // NON_CANONICAL_ANCHOR because the unauthenticated rival is counted).
+  test('FRONT-RUN (bare back-link): an UNSIGNED earlier anchoring on a rival sat is IGNORED; the honest mint verifies', async () => {
+    const p = new OrdMockProvider();
+    const a = await makeKey();
+    const { base, didCel } = await genesis(a, 'uniq-frontrun-bare');
+    const S = '900000009'; // honest own sat
+    const Z = '100000001'; // attacker's earlier sat
+
+    // Honest controller mints on its own sat S (controller-signed via branch()).
+    const honest = await branch(base, a, p, S, didCel);
+    // Attacker front-runs: a BARE back-link doc on an EARLIER sat Z, NO controller
+    // proof. It back-links the did:cel (so it IS enumerated) but authenticates to
+    // nobody, so uniqueness must ignore it.
+    const attackInsc = await inscribeDoc(p, Z, 'uATTACKERHEAD', didCel);
+
+    // Attacker's Z anchored FIRST (block 100); honest S later (block 200).
+    const provider = withHeights(p, { [honest.inscriptionId]: 200, [attackInsc.inscriptionId]: 100 });
+    const result = await verifyEventLog(honest.log, { ordinalsProvider: provider });
+    expect(result.errors).toEqual([]);
+    expect(result.verified).toBe(true);
+  });
+
+  test('FRONT-RUN (unauthorized signature): an earlier anchoring signed by a NON-controller key is IGNORED; the honest mint verifies', async () => {
+    const p = new OrdMockProvider();
+    const a = await makeKey();
+    const attacker = await makeKey();
+    const { base, didCel } = await genesis(a, 'uniq-frontrun-badkey');
+    const S = '900000009';
+    const Z = '100000001';
+
+    const honest = await branch(base, a, p, S, didCel);
+    // The rival doc is signed — but by the ATTACKER's own key, which is not in
+    // the log's authorized-key history, so it must not count.
+    const attackInsc = await inscribeDoc(p, Z, 'uATTACKERHEAD', didCel, { signer: attacker.signer });
+
+    const provider = withHeights(p, { [honest.inscriptionId]: 200, [attackInsc.inscriptionId]: 100 });
+    const result = await verifyEventLog(honest.log, { ordinalsProvider: provider });
+    expect(result.errors).toEqual([]);
+    expect(result.verified).toBe(true);
+  });
+
+  test('LEGIT DUPE PRESERVED: a CONTROLLER-signed earlier anchoring on a different sat STILL trips NON_CANONICAL_ANCHOR', async () => {
+    const p = new OrdMockProvider();
+    const a = await makeKey();
+    const { base, didCel } = await genesis(a, 'uniq-legit-dupe');
+    const X = '100000001'; // controller's earlier legit anchoring
+    const S = '900000009'; // the branch under verification, later
+
+    const legit = await branch(base, a, p, X, didCel); // controller-signed, earlier
+    const mine = await branch(base, a, p, S, didCel); // controller-signed, later
+    const provider = withHeights(p, { [legit.inscriptionId]: 100, [mine.inscriptionId]: 200 });
+
+    const result = await verifyEventLog(mine.log, { ordinalsProvider: provider });
+    expect(result.verified).toBe(false);
+    expect(hasCode(result, 'NON_CANONICAL_ANCHOR')).toBe(true);
   });
 
   test('THROWING PROVIDER: getAnchoringsForDidCel throws → UNIQUENESS_UNVERIFIABLE', async () => {

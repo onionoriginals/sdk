@@ -106,11 +106,19 @@ export interface OrdinalsProvider {
    * providers implement this via a content/metadata index (an `ord` instance
    * or a service such as the QuickNode Ordinals add-on). `blockHeight` is the
    * canonical ordering signal; a missing height fails uniqueness closed.
+   *
+   * `didDocument` (#402) is the inscribed did:btco document with its
+   * DataIntegrityProof, used to authenticate a competing anchoring on a
+   * DIFFERENT sat (a competitor counts only if signed by a key in the verified
+   * log's authorized-key history). Optional/backward-compatible: an omitted
+   * `didDocument` means the competitor cannot be authenticated and does not
+   * count toward canonicality.
    */
   getAnchoringsForDidCel?(didCel: string): Promise<Array<{
     satoshi: string;
     inscriptionId: string;
     blockHeight?: number;
+    didDocument?: Record<string, unknown>;
   }>>;
   transferInscription(
     inscriptionId: string,

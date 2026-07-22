@@ -192,11 +192,20 @@ export interface OrdinalsLookup {
    * fails uniqueness CLOSED (`UNIQUENESS_UNVERIFIABLE`). Multiple inscriptions
    * on the SAME sat (migrate + rotation reinscriptions) are expected and do
    * not compete — only a different, earlier sat wins.
+   *
+   * `didDocument` (#402) is the inscribed did:btco document carrying its
+   * DataIntegrityProof. Uniqueness uses it to AUTHENTICATE a competing anchoring
+   * on a DIFFERENT sat: a competitor counts only if its doc is signed by a key
+   * in the verified log's authorized-key history — otherwise a non-controller
+   * could inscribe a bare `alsoKnownAs` back-link on an earlier sat and deny an
+   * honest mint. Optional/backward-compatible: an omitted `didDocument` simply
+   * means that competitor cannot be authenticated and does not count.
    */
   getAnchoringsForDidCel?(didCel: string): Promise<Array<{
     satoshi: string;
     inscriptionId: string;
     blockHeight?: number;
+    didDocument?: Record<string, unknown>;
   }>>;
 }
 
