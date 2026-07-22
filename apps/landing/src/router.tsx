@@ -19,6 +19,31 @@ export function navigate(path: string): void {
   window.dispatchEvent(new Event(NAV_EVENT));
 }
 
+/**
+ * Navigate to a landing-page section by hash (e.g. '#why'). The nav is shown on
+ * every route, but its section anchors are dead off '/' (on '/me' those sections
+ * aren't mounted, so a plain `<a href="#why">` has no target). This routes home
+ * first when needed, then smooth-scrolls once the section mounts.
+ */
+export function goToSection(hash: string): void {
+  if (typeof window === 'undefined') return;
+  const scrollWhenReady = (tries = 30): void => {
+    const el = hash ? document.querySelector(hash) : null;
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
+    if (tries > 0) requestAnimationFrame(() => scrollWhenReady(tries - 1));
+  };
+  if (window.location.pathname !== '/') {
+    navigate('/'); // remount the landing, then scroll
+    scrollWhenReady();
+  } else {
+    if (hash) window.history.replaceState({}, '', hash);
+    scrollWhenReady();
+  }
+}
+
 export function useLocationPath(): string {
   const [path, setPath] = useState(() =>
     typeof window !== 'undefined' ? window.location.pathname : '/'

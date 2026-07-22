@@ -1,13 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { nav, site, yourOriginals } from '../content';
 import { useAuth } from '../auth/useAuth';
-import { navigate } from '../router';
+import { navigate, goToSection } from '../router';
 import { LoginModal } from './LoginModal';
 import './nav.css';
 
+// In-page section links (#why, #demo, …, #top) must work from any route — on
+// /me the target sections aren't mounted, so a bare hash anchor is dead. Route
+// home first, then scroll.
+function onSectionClick(e: MouseEvent<HTMLAnchorElement>, href: string) {
+  if (!href.startsWith('#')) return; // external/absolute links: default behavior
+  e.preventDefault();
+  goToSection(href);
+}
+
 function Wordmark() {
   return (
-    <a className="nav-wordmark" href="#top" aria-label={`${site.wordmark} — home`}>
+    <a
+      className="nav-wordmark"
+      href="#top"
+      aria-label={`${site.wordmark} — home`}
+      onClick={(e) => onSectionClick(e, '#top')}
+    >
       <svg viewBox="0 0 20 20" aria-hidden="true">
         <circle cx="10" cy="10" r="7.25" fill="none" stroke="var(--accent)" strokeWidth="2.5" />
         <circle cx="10" cy="10" r="2" fill="currentColor" />
@@ -36,7 +50,7 @@ export function Nav() {
         <Wordmark />
         <nav className="nav-links" aria-label="Primary">
           {nav.links.map((link) => (
-            <a key={link.href} href={link.href}>
+            <a key={link.href} href={link.href} onClick={(e) => onSectionClick(e, link.href)}>
               {link.label}
             </a>
           ))}
@@ -96,7 +110,14 @@ export function Nav() {
       {open && (
         <nav className="nav-mobile" aria-label="Mobile">
           {nav.links.map((link) => (
-            <a key={link.href} href={link.href} onClick={() => setOpen(false)}>
+            <a
+              key={link.href}
+              href={link.href}
+              onClick={(e) => {
+                setOpen(false);
+                onSectionClick(e, link.href);
+              }}
+            >
               {link.label}
             </a>
           ))}
