@@ -18,6 +18,7 @@ import {
   writeFileSync,
   readFileSync,
   existsSync,
+  statSync,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { untrustedHeaders } from './webvh-host';
@@ -166,12 +167,23 @@ export function createOriginalsStore(opts: {
     } catch {
       return null; // traversal or bad key → miss, never escapes the dir
     }
-    if (!existsSync(path)) return null;
-    const bytes = readFileSync(path);
-    const contentType = existsSync(path + CTYPE_SUFFIX)
-      ? readFileSync(path + CTYPE_SUFFIX, 'utf8')
-      : 'application/octet-stream';
-    return new Response(new Uint8Array(bytes), { status: 200, headers: untrustedHeaders(contentType) });
+    // Only serve regular files, and never let a filesystem error 500 the
+    // request. A key can resolve to a DIRECTORY in the hosted tree — most
+    // importantly the bare host for pathname '/' (key `<host>/` → `hosted/<host>`,
+    // which exists once anything is hosted): readFileSync on a dir throws EISDIR.
+    // A vanished file throws ENOENT. Either way it's a miss (falls through to the
+    // SPA), never a crash. The single try/catch also closes the existsSync→stat
+    // TOCTOU (no window where the file disappears between two syscalls).
+    try {
+      if (!statSync(path).isFile()) return null;
+      const bytes = readFileSync(path);
+      const contentType = existsSync(path + CTYPE_SUFFIX)
+        ? readFileSync(path + CTYPE_SUFFIX, 'utf8')
+        : 'application/octet-stream';
+      return new Response(new Uint8Array(bytes), { status: 200, headers: untrustedHeaders(contentType) });
+    } catch {
+      return null;
+    }
   }
 
   // adapter.get: read back an object the user themselves wrote. Scoped to the
@@ -186,12 +198,19 @@ export function createOriginalsStore(opts: {
     } catch {
       return new Response('Bad key', { status: 400 });
     }
-    if (!existsSync(path)) return new Response('Not found', { status: 404 });
-    const bytes = readFileSync(path);
-    const contentType = existsSync(path + CTYPE_SUFFIX)
-      ? readFileSync(path + CTYPE_SUFFIX, 'utf8')
-      : 'application/octet-stream';
-    return new Response(new Uint8Array(bytes), { status: 200, headers: untrustedHeaders(contentType) });
+    // Only read regular files, and never let a filesystem error escape: a
+    // directory key would EISDIR, a vanished file ENOENT — both are 404. The
+    // single try/catch also closes the existsSync→stat TOCTOU.
+    try {
+      if (!statSync(path).isFile()) return new Response('Not found', { status: 404 });
+      const bytes = readFileSync(path);
+      const contentType = existsSync(path + CTYPE_SUFFIX)
+        ? readFileSync(path + CTYPE_SUFFIX, 'utf8')
+        : 'application/octet-stream';
+      return new Response(new Uint8Array(bytes), { status: 200, headers: untrustedHeaders(contentType) });
+    } catch {
+      return new Response('Not found', { status: 404 });
+    }
   }
 
   return { saveBytes, recordOriginal, list, serve, read };
