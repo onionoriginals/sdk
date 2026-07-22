@@ -1476,6 +1476,11 @@ export class LifecycleManager {
       }
       this.inFlightAssets.add(asset.id);
       try {
+      // Serialize the CEL-log mutations below (migrate append + any rollback)
+      // against a concurrent addResourceVersion on the same asset (#400). Taken
+      // AFTER the non-blocking inFlightAssets guard so concurrent publishes still
+      // throw OPERATION_IN_PROGRESS rather than queue.
+      return await asset.runExclusive(async () => {
       const { publisherDid, signer } = this.extractPublisherInfo(publisherDidOrSigner);
       // Publisher DID contributes only the domain; the hosting path comes
       // from the minted DID below.
@@ -1613,6 +1618,7 @@ export class LifecycleManager {
       this.metrics.recordMigration(priorLayer, 'did:webvh');
 
       return asset;
+      });
       } finally {
         this.inFlightAssets.delete(asset.id);
       }
@@ -2576,6 +2582,15 @@ export class LifecycleManager {
     }
     this.inFlightAssets.add(asset.id);
     try {
+    // #400: serialize the migrate append, its witness-proof attach, the
+    // witness-ack, AND the append-rollback (moved into this span, see the inner
+    // catch below) against a concurrent addResourceVersion on the same asset.
+    // The rollback MUST hold this lock too — otherwise a concurrent update could
+    // interleave between a post-append failure and the restore and be clobbered.
+    // Taken after the non-blocking inFlightAssets guard (concurrent inscribes
+    // still throw OPERATION_IN_PROGRESS).
+    return await asset.runExclusive(async () => {
+    try {
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     // The manifest permanently records each resource's declared hash on
     // Bitcoin; verify inline content against it first so a mismatched hash
@@ -2925,22 +2940,28 @@ export class LifecycleManager {
     this.metrics.recordMigration(fromLayer, 'did:btco');
 
     return asset;
-    } finally {
-      this.inFlightAssets.delete(asset.id);
-    }
     } catch (error) {
       // Anything thrown after the append leaves the log ahead of reality —
-      // restore the pre-append snapshot (pure in-memory). EXCEPTION (#Greptile):
-      // a recoverable REVEAL_BROADCAST_FAILED is INTENTIONALLY not rolled back —
-      // its commit is on-chain and the reveal can be rebroadcast, so the migrate
-      // event (now witnessed) plus the advanced btco state correctly reflect
-      // "migrated, inscription pending". Rolling back would desync the log from
-      // an inscription that can still land.
+      // restore the pre-append snapshot (pure in-memory). Kept INSIDE runExclusive
+      // (#400) so a concurrent addResourceVersion cannot interleave between the
+      // failure and this restore. EXCEPTION (#Greptile): a recoverable
+      // REVEAL_BROADCAST_FAILED is INTENTIONALLY not rolled back — its commit is
+      // on-chain and the reveal can be rebroadcast, so the migrate event (now
+      // witnessed) plus the advanced btco state correctly reflect "migrated,
+      // inscription pending". Rolling back would desync the log from an
+      // inscription that can still land.
       const recoverableReveal =
         error instanceof StructuredError && error.code === 'REVEAL_BROADCAST_FAILED';
       if (!recoverableReveal && celHeadDigest !== null && celLogBefore && asset.celLog !== celLogBefore) {
         asset._replaceCelLog(celLogBefore);
       }
+      throw error;
+    }
+    });
+    } finally {
+      this.inFlightAssets.delete(asset.id);
+    }
+    } catch (error) {
       stopTimer();
       this.logger.error('Bitcoin inscription failed', error as Error, { assetId: asset.id, feeRate });
       this.metrics.recordOperation('lifecycle.inscribeOnBitcoin', performance.now() - metricsStart, false);
@@ -3325,6 +3346,10 @@ export class LifecycleManager {
     }
     this.inFlightAssets.add(asset.id);
     try {
+    // Serialize the CEL rotateKey append + witness-ack + reinscribe-failure
+    // rollback against a concurrent addResourceVersion (#400). After the
+    // non-blocking inFlightAssets guard (concurrent rotations still throw).
+    return await asset.runExclusive(async () => {
     // pop() yields the sat for every prefix form (did:btco:N, :reg:N, :sig:N).
     const satoshi = btcoDid.split(':').pop()!;
     // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
@@ -3437,6 +3462,7 @@ export class LifecycleManager {
     });
 
     return { inscriptionId: inscription.inscriptionId, did: btcoDid };
+    });
     } finally {
       this.inFlightAssets.delete(asset.id);
     }
@@ -3495,6 +3521,10 @@ export class LifecycleManager {
     }
     this.inFlightAssets.add(asset.id);
     try {
+    // Serialize the self-signed rotateKey append + witness-proof attach +
+    // reinscribe-failure rollback against a concurrent addResourceVersion (#400).
+    // After the non-blocking inFlightAssets guard (concurrent calls still throw).
+    return await asset.runExclusive(async () => {
     const satoshi = btcoDid.split(':').pop()!;
     const pkm = newVerificationMethod.publicKeyMultibase;
     // Derive-check the new signer's keypair (privateKey REQUIRED); register it
@@ -3594,6 +3624,7 @@ export class LifecycleManager {
     });
 
     return { inscriptionId: inscription.inscriptionId, did: btcoDid };
+    });
     } finally {
       this.inFlightAssets.delete(asset.id);
     }
