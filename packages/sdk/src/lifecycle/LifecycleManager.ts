@@ -31,7 +31,7 @@ import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier, validateSatoshiNumber } from '../utils/satoshi-validation.js';
 import { btcoDidPrefix, btcoDidFromSatoshi } from '../cel/btcoDid.js';
 import { KeyManager } from '../did/KeyManager.js';
-import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
+import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm, attachBtcoDocProof } from '../cel/signerAdapter.js';
 import { createCelDidDocument, didCelMatchesLog, deriveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
 import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
@@ -2403,6 +2403,9 @@ export class LifecycleManager {
     const controllerPubMb = vm.split('#')[0].slice('did:key:'.length);
     const btcoDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, controllerPubMb);
     this.embedCelAnchor(btcoDoc, headDigest);
+    // #442: sign the reinscribed doc with the current controller (the append
+    // that triggered this reinscription was signed by the same key).
+    await this.signBtcoDocWithController(btcoDoc, vm);
 
     // Delta since the last on-chain head, else a full snapshot (safe checkpoint).
     const metadata: Record<string, unknown> = { didDocument: btcoDoc };
@@ -2673,6 +2676,14 @@ export class LifecycleManager {
           serviceEndpoint: { headDigestMultibase: celHeadDigest }
         }] : [])
       ];
+      // #442: sign the fully-built doc with the controller that signed the
+      // migrate event (same key, in the log's authorized-key set). Only when the
+      // migrate append landed (celHeadDigest !== null ⇒ that key is in the
+      // keyStore); a degraded append leaves the doc unsigned AND anchor-less.
+      // migrate never rotates, so the current controller VM IS the migrate signer.
+      if (celHeadDigest !== null && asset.celLog) {
+        await this.signBtcoDocWithController(btcoDoc, currentControllerVm(asset.celLog));
+      }
       inscribedBtcoDoc = btcoDoc;
       // Metadata = { didDocument, celLog }. Snapshot the log AFTER the migrate
       // append so the embedded celLog head equals the #cel anchor digest.
@@ -3209,6 +3220,24 @@ export class LifecycleManager {
   }
 
   /**
+   * Self-authenticating did:btco doc (#442): sign the FULLY-built doc
+   * (alsoKnownAs + services + `#cel` all set) with the controller's Ed25519 key
+   * — the SAME identity that signed the corresponding CEL event — so #402's
+   * `anchoringDocAuthenticated` accepts an HONEST anchoring. The key is fetched
+   * from the keyStore under its did:key VM; that VM becomes the proof's
+   * `verificationMethod` so the verifier resolves it offline. Best-effort: a
+   * missing keyStore/key or a non-did:key controller VM leaves the doc unsigned
+   * (backward-compat — resolution still gates on the `#cel` anchor + VM). The
+   * proof commits to the doc only; it does NOT touch the `#cel` head or witness.
+   */
+  private async signBtcoDocWithController(doc: DIDDocument, controllerVm: string): Promise<void> {
+    if (!controllerVm.startsWith('did:key:') || !this.keyStore) return;
+    const priv = await this.keyStore.getPrivateKey(controllerVm);
+    if (!priv) return;
+    attachBtcoDocProof(doc as unknown as Record<string, unknown>, priv, controllerVm);
+  }
+
+  /**
    * Reinscribes the rotated document on the SAME sat (targetSatoshi). On
    * failure — nothing is paid before the broadcast fails — restores the
    * pre-append CEL log (`restoreLog`) so the in-memory log never runs ahead of
@@ -3427,6 +3456,14 @@ export class LifecycleManager {
     // event was not appended and no anchor is embedded.
     if (celHeadDigest !== null) {
       this.embedCelAnchor(rotatedDoc, celHeadDigest);
+      // #442: sign the reinscribed doc with the OUTGOING controller — the same
+      // identity that (cooperatively) signed this rotateKey event, and a key in
+      // the log's authorized-key history. NOT the new key: the rotated doc's VM
+      // is the new key, but authentication compares the resolved key against the
+      // whole key history, so the outgoing key authenticates the anchoring.
+      if (celLogBefore) {
+        await this.signBtcoDocWithController(rotatedDoc, currentControllerVm(celLogBefore));
+      }
     }
 
     const inscription = await this.reinscribeRotatedDoc(
@@ -3582,6 +3619,16 @@ export class LifecycleManager {
     // #cel anchor = the rotateKey event's chain digest (commits the on-chain
     // doc to the rotation the reinscription witnesses).
     this.embedCelAnchor(rotatedDoc, celHeadDigest);
+    // #442: sign the reinscribed doc with the NEW self-certified key — the same
+    // identity that self-signed this rotateKey event (privateKey is REQUIRED
+    // here). That key is added to the log's authorized-key history by the
+    // accepted rotation, so it authenticates the anchoring. Signed directly from
+    // the supplied privateKey so it works even without a keyStore.
+    attachBtcoDocProof(
+      rotatedDoc as unknown as Record<string, unknown>,
+      newVerificationMethod.privateKey,
+      newControllerVm
+    );
 
     // Reinscribe on the SAME sat; restore the pre-append log on failure.
     const inscription = await this.reinscribeRotatedDoc(asset, rotatedDoc, satoshi, feeRate, celLogBefore);

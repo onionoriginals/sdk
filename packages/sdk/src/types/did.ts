@@ -1,3 +1,5 @@
+import type { DataIntegrityProof } from './proof.js';
+
 // W3C DID Document types
 export interface DIDDocument {
   '@context': string[];
@@ -11,6 +13,12 @@ export interface DIDDocument {
   service?: ServiceEndpoint[];
   controller?: string[];
   alsoKnownAs?: string[];
+  /**
+   * Self-authenticating controller signature over the proofless document
+   * (#442). Present on inscribed did:btco documents (eddsa-jcs-2022); ignored by
+   * resolvers that predate it, which still cross-check the `#cel` anchor + VM.
+   */
+  proof?: DataIntegrityProof | DataIntegrityProof[];
 }
 
 export interface VerificationMethod {

@@ -37,6 +37,26 @@ function buildProof(secret: Uint8Array, verificationMethod: string, data: unknow
   };
 }
 
+/**
+ * Signs a fully-built did:btco document with a controller's Ed25519 key so the
+ * on-chain doc is self-authenticating (#442). Attaches a DataIntegrityProof
+ * (eddsa-jcs-2022) over the PROOFLESS document — the exact primitive
+ * `verifyEventLog`'s `anchoringDocAuthenticated`/`dispatchVerify` checks against
+ * (`ed25519` over `canonicalizeEvent(docWithoutProof)`). `verificationMethod`
+ * MUST be a `did:key` VM so the verifier resolves the key offline. Mutates `doc`
+ * in place (sets `doc.proof`); any pre-existing proof is stripped before signing.
+ */
+export function attachBtcoDocProof(
+  doc: Record<string, unknown>,
+  privateKeyMultibase: string,
+  verificationMethod: string
+): void {
+  const secret = assertEd25519(privateKeyMultibase);
+  const docWithoutProof = { ...doc };
+  delete (docWithoutProof as { proof?: unknown }).proof;
+  doc.proof = buildProof(secret, verificationMethod, docWithoutProof);
+}
+
 export function celSignerFromKeyPair(keyPair: KeyPair): {
   signer: CelSigner; controller: string; verificationMethod: string;
 } {
