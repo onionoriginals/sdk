@@ -1,13 +1,16 @@
 /**
  * The /me "Your Originals" page. Auth-gated: signed-out users get a prompt;
- * signed-in users see their durable did:webvh Originals (artwork thumbnail,
- * title, did with a live "resolved ✓", open-log link, created date). Empty
- * state links back to the demo.
+ * signed-in users see their durable did:webvh Originals as a gallery of cards
+ * (artwork cover, title, did with a live "resolved ✓", created date). Each
+ * card opens the Original's own detail page ('/me/<did>') where the full
+ * provenance — CEL timeline, signed DID log, sealed resources — is laid out
+ * and re-verified in the browser. Empty state links back to the demo.
  */
 import { useEffect, useState } from 'react';
 import { yourOriginals } from '../content';
 import { useAuth } from '../auth/useAuth';
-import { navigate } from '../router';
+import { navigate, originalPath } from '../router';
+import { sameOriginUrl } from './original-detail-data';
 import './your-originals.css';
 
 export interface OriginalRow {
@@ -28,15 +31,20 @@ export function originalsView(input: { authenticated: boolean; originals: Origin
   return { mode: 'list', rows: input.originals };
 }
 
-async function fetchOriginals(): Promise<OriginalRow[]> {
-  const res = await fetch('/api/originals', { credentials: 'same-origin' });
-  if (!res.ok) return [];
-  const body = (await res.json()) as { originals?: OriginalRow[] };
-  return body.originals ?? [];
+/** The signed-in user's Originals, newest first ([] when signed out / on error). */
+export async function fetchOriginals(): Promise<OriginalRow[]> {
+  try {
+    const res = await fetch('/api/originals', { credentials: 'same-origin' });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { originals?: OriginalRow[] };
+    return body.originals ?? [];
+  } catch {
+    return [];
+  }
 }
 
 // Best-effort live resolution proof (production only — the resolver forces
-// https, so a dev http origin returns false; the row still renders).
+// https, so a dev http origin returns false; the card still renders).
 async function resolveLive(did: string): Promise<boolean> {
   try {
     const { OriginalsSDK, OrdMockProvider } = await import('@originals/sdk');
@@ -53,13 +61,6 @@ async function resolveLive(did: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function didLogUrl(did: string): string {
-  const parts = did.split(':'); // did:webvh:<SCID>:<host>[:<seg>…]
-  const host = decodeURIComponent(parts[3] ?? '');
-  const segs = parts.slice(4).map((s) => decodeURIComponent(s));
-  return segs.length ? `https://${host}/${segs.join('/')}/did.jsonl` : `https://${host}/.well-known/did.jsonl`;
 }
 
 export function YourOriginals() {
@@ -100,32 +101,51 @@ export function YourOriginals() {
         )}
 
         {view.mode === 'list' && (
-          <ul className="your-originals-list">
+          <ul className="your-originals-grid">
             {view.rows.map((row) => {
-              const logUrl = didLogUrl(row.did);
+              const href = originalPath(row.did);
               const ok = resolved[row.did];
               return (
-                <li key={row.did} className="your-original">
-                  {row.resourceUrl ? (
-                    <img className="your-original-thumb" src={row.resourceUrl} alt={`Artwork for “${row.title}”`} />
-                  ) : (
-                    <span className="your-original-thumb your-original-thumb-empty" aria-hidden="true" />
-                  )}
-                  <div className="your-original-body">
-                    <h2>{row.title}</h2>
-                    <div className="your-original-did">
-                      <code title={row.did}>{row.did}</code>
+                <li key={row.did}>
+                  <a
+                    className="card your-original-card"
+                    href={href}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate(href);
+                    }}
+                    aria-label={`“${row.title}” — ${yourOriginals.viewLabel}`}
+                  >
+                    <span className="your-original-cover">
+                      {row.resourceUrl ? (
+                        <img src={sameOriginUrl(row.resourceUrl, window.location.host)} alt="" />
+                      ) : (
+                        <span className="your-original-cover-empty" aria-hidden="true" />
+                      )}
                       <span className="your-original-badge" data-ok={ok || undefined}>
                         {ok ? yourOriginals.resolvedBadge : yourOriginals.pendingBadge}
                       </span>
-                    </div>
-                    <a href={logUrl} target="_blank" rel="noreferrer" className="your-original-log">
-                      {yourOriginals.openLog}
-                    </a>
-                    <p className="your-original-created">
-                      {yourOriginals.createdLabel} {row.createdAt.slice(0, 10)}
-                    </p>
-                  </div>
+                    </span>
+                    <span className="your-original-card-body">
+                      <span className="layer-pill" data-layer="did:webvh">
+                        <span className="dot" />
+                        did:webvh
+                      </span>
+                      <h2>{row.title}</h2>
+                      <code className="your-original-did" title={row.did}>{row.did}</code>
+                      <span className="your-original-foot">
+                        <span className="your-original-created">
+                          {yourOriginals.createdLabel} {row.createdAt.slice(0, 10)}
+                        </span>
+                        <span className="your-original-view">
+                          {yourOriginals.viewLabel}
+                          <svg viewBox="0 0 16 16" aria-hidden="true" width="12" height="12">
+                            <path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </span>
+                      </span>
+                    </span>
+                  </a>
                 </li>
               );
             })}

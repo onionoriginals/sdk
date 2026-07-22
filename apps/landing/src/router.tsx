@@ -1,14 +1,38 @@
 /**
- * Minimal client-side routing — no react-router. Two views: the landing page
- * ('/') and Your Originals ('/me'). navigate() pushes history and notifies
- * subscribers; useLocationPath() re-renders on navigate + browser back/forward.
+ * Minimal client-side routing — no react-router. Three views: the landing page
+ * ('/'), Your Originals ('/me'), and a single Original's detail page
+ * ('/me/<encoded did>'). navigate() pushes history and notifies subscribers;
+ * useLocationPath() re-renders on navigate + browser back/forward.
  */
 import { useEffect, useState } from 'react';
 
-export type RouteName = 'landing' | 'your-originals';
+export type RouteName = 'landing' | 'your-originals' | 'original-detail';
 
 export function routeForPath(pathname: string): RouteName {
-  return pathname === '/me' ? 'your-originals' : 'landing';
+  if (pathname === '/me') return 'your-originals';
+  if (pathname.startsWith('/me/') && didFromPath(pathname)) return 'original-detail';
+  return 'landing';
+}
+
+/** Path for a single Original's detail page. The DID is one encoded segment. */
+export function originalPath(did: string): string {
+  return `/me/${encodeURIComponent(did)}`;
+}
+
+/**
+ * The DID encoded in an '/me/<did>' path, or null when the path isn't one
+ * (including a malformed percent-encoding, which decodeURIComponent throws on).
+ */
+export function didFromPath(pathname: string): string | null {
+  if (!pathname.startsWith('/me/')) return null;
+  const seg = pathname.slice('/me/'.length);
+  if (!seg || seg.includes('/')) return null;
+  try {
+    const did = decodeURIComponent(seg);
+    return did.startsWith('did:') ? did : null;
+  } catch {
+    return null;
+  }
 }
 
 const NAV_EVENT = 'originals:navigate';

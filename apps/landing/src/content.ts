@@ -190,6 +190,82 @@ export const yourOriginals = {
   pendingBadge: 'resolves in production',
   openLog: 'Open the signed DID log',
   createdLabel: 'Created',
+  viewLabel: 'View provenance',
+};
+
+export const originalDetail = {
+  backLabel: 'Your Originals',
+  signedOut: 'Sign in to see this Original.',
+  loading: 'Fetching the signed artifacts…',
+  notFoundTitle: 'Not one of your Originals.',
+  notFoundBody:
+    'This page shows Originals saved to your account — this DID isn’t among them. It may belong to another account, or the link is stale.',
+  notFoundCta: 'Back to Your Originals',
+  createdLabel: 'Created',
+  verifyingBadge: 'Verifying in your browser…',
+  verifiedBadge: 'Verified in this tab',
+  failedBadge: 'Verification incomplete',
+  verifyNote:
+    'These checks run locally, against the artifacts this Original hosts at this origin — not a database row.',
+  checkLabels: {
+    hash: 'Resource bytes match their declared sha-256',
+    log: 'did:webvh log — SCID and Ed25519 proof chain verify',
+    cel: 'CEL event chain verifies back to the did:cel genesis'
+  },
+  artifactsMissing:
+    'The signed artifacts could not be fetched in this environment — they resolve at the production origin.',
+  timeline: {
+    eyebrow: 'Provenance',
+    heading: 'How this Original came to be',
+    subhead:
+      'Every step is a signed event in the asset’s own cryptographic event log. The log — not this page — is the source of truth: anyone can fetch it and re-verify the chain.',
+    steps: {
+      create: {
+        title: 'Created',
+        blurb:
+          'Born as a did:cel genesis — a signed event log minted in the browser, no server involved. The resource bytes were hashed and sealed into the very first event.'
+      },
+      publish: {
+        title: 'Published',
+        blurb:
+          'Migrated to did:webvh: a signed version history went live at this origin, resolvable by anyone with the SDK — or curl.'
+      },
+      inscribe: {
+        title: 'Inscribed',
+        blurb:
+          'The next step in the lifecycle: inscribing on a satoshi makes ownership transferable on Bitcoin — permanent, final, and platform-free.'
+      }
+    },
+    upcomingLabel: 'Up next',
+    proofLabel: 'Signed',
+  },
+  resources: {
+    heading: 'Sealed resources',
+    subhead:
+      'The files hashed into the genesis event. Change a single byte anywhere and every verification on this page fails.',
+    digestLabel: 'Digest',
+    typeLabel: 'Type',
+    openRaw: 'Open raw bytes'
+  },
+  identity: {
+    heading: 'Identity on the open web',
+    subhead:
+      'The current DID document, derived from the signed version-history log — the same document the SDK’s resolver returns for this DID.',
+    did: 'DID',
+    scid: 'SCID',
+    versions: 'Log entries',
+    updated: 'Last updated',
+    updateKey: 'Update key',
+    signingKey: 'Signing key',
+    documentToggle: 'View the resolved DID document'
+  },
+  artifacts: {
+    heading: 'Raw artifacts',
+    subhead:
+      'Nothing hidden: these are the exact files the resolver fetches. Take them anywhere — the signatures travel with the bytes.',
+    logLabel: 'did.jsonl — signed version history',
+    celLabel: 'cel.json — cryptographic event log'
+  }
 };
 
 export const realExample = {

@@ -12,7 +12,7 @@ export function IdentityPanel() {
   const [did, setDid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const copyTimer = useRef<ReturnType<typeof setTimeout>>();
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   if (!isAuthenticated) return null;
 
