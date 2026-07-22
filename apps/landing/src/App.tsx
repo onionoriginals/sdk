@@ -7,8 +7,9 @@ import { RealExample } from './components/RealExample';
 import { Protocol } from './components/Protocol';
 import { Developers } from './components/Developers';
 import { Footer } from './components/Footer';
-import { useLocationPath, routeForPath } from './router';
+import { useLocationPath, routeForPath, didFromPath } from './router';
 import { YourOriginals } from './pages/YourOriginals';
+import { OriginalDetail } from './pages/OriginalDetail';
 
 export function App() {
   if (new URLSearchParams(location.search).has('smoke')) {
@@ -19,10 +20,13 @@ export function App() {
 
 function RoutedApp() {
   const path = useLocationPath();
+  const route = routeForPath(path);
   return (
     <>
       <Nav />
-      {routeForPath(path) === 'your-originals' ? (
+      {route === 'original-detail' ? (
+        <OriginalDetail did={didFromPath(path)!} />
+      ) : route === 'your-originals' ? (
         <YourOriginals />
       ) : (
         <main>
