@@ -31,6 +31,25 @@ describe('originals-store', () => {
     expect(store.serve(new URL('http://demo.example.com/nope/did.jsonl'))).toBeNull();
   });
 
+  test('serve returns null (no EISDIR) when the key resolves to a directory, e.g. "/"', () => {
+    const store = createOriginalsStore({ dataDir: tmpDir() });
+    // Host something so `hosted/demo.example.com/...` (and its parent dir) exist.
+    store.saveBytes('sub-1', 'demo.example.com/studio/you/abc/did.jsonl', enc('{}'), 'application/jsonl');
+    // Pathname '/' → key 'demo.example.com/' → resolves to the host DIRECTORY.
+    // Must be a clean miss (falls through to the SPA), never a readFileSync crash.
+    expect(store.serve(new URL('http://demo.example.com/'))).toBeNull();
+    // An intermediate directory in the hosted tree is likewise a miss.
+    expect(store.serve(new URL('http://demo.example.com/studio/you/abc'))).toBeNull();
+  });
+
+  test('read returns 404 (no EISDIR) for a key that maps to a directory', () => {
+    const store = createOriginalsStore({ dataDir: tmpDir() });
+    store.saveBytes('sub-1', 'demo.example.com/studio/you/abc/did.jsonl', enc('{}'), 'application/jsonl');
+    // A bare-directory key is a 404 — the user index never records it, and the
+    // fs guard would also reject it as a non-file — so read never EISDIRs.
+    expect(store.read('sub-1', 'demo.example.com/studio/you/abc').status).toBe(404);
+  });
+
   test('record + list roundtrip, with a derived resourceUrl from a saved resource key', () => {
     const store = createOriginalsStore({ dataDir: tmpDir() });
     const did = 'did:webvh:SCID:demo.example.com:studio:you:abc';

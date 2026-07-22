@@ -18,6 +18,7 @@ import {
   writeFileSync,
   readFileSync,
   existsSync,
+  statSync,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { untrustedHeaders } from './webvh-host';
@@ -167,6 +168,11 @@ export function createOriginalsStore(opts: {
       return null; // traversal or bad key → miss, never escapes the dir
     }
     if (!existsSync(path)) return null;
+    // A key can resolve to a DIRECTORY in the hosted tree — most importantly the
+    // bare host for pathname '/' (key `<host>/` → `hosted/<host>`, which exists
+    // once anything is hosted). readFileSync on a dir throws EISDIR, which would
+    // 500 the request instead of falling through to the SPA. Non-files are a miss.
+    if (!statSync(path).isFile()) return null;
     const bytes = readFileSync(path);
     const contentType = existsSync(path + CTYPE_SUFFIX)
       ? readFileSync(path + CTYPE_SUFFIX, 'utf8')
@@ -187,6 +193,8 @@ export function createOriginalsStore(opts: {
       return new Response('Bad key', { status: 400 });
     }
     if (!existsSync(path)) return new Response('Not found', { status: 404 });
+    // Never readFileSync a directory (EISDIR); a non-file key is a 404 miss.
+    if (!statSync(path).isFile()) return new Response('Not found', { status: 404 });
     const bytes = readFileSync(path);
     const contentType = existsSync(path + CTYPE_SUFFIX)
       ? readFileSync(path + CTYPE_SUFFIX, 'utf8')
