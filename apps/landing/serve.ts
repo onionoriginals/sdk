@@ -30,13 +30,18 @@ import {
 import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
+import { isLikelyDeployed } from './server/deploy-env';
 
 const DIST = new URL('./dist/', import.meta.url).pathname;
 const port = Number(process.env.PORT ?? 3000);
 const hostStore = createWebvhHostStore();
-const originalsStore = createOriginalsStore({
-  dataDir: process.env.ORIGINALS_DATA_DIR ?? './.originals-data',
-});
+// Durable Originals persist here. Without an explicit ORIGINALS_DATA_DIR the
+// store falls back to a path INSIDE the container/cwd — fine for dev, but on a
+// deploy that dir is ephemeral and every redeploy silently wipes signed-in
+// users' Originals. buildBanner() below warns loudly when that's the case.
+const originalsDataDir = process.env.ORIGINALS_DATA_DIR ?? './.originals-data';
+const originalsDataDirIsExplicit = !!process.env.ORIGINALS_DATA_DIR;
+const originalsStore = createOriginalsStore({ dataDir: originalsDataDir });
 
 // QuickNode gives the ordinals-aware sat lookup + fee + broadcast. The faucet's
 // own confirmed UTXOs come from mempool.space's testnet4 address API (free, no
@@ -111,3 +116,23 @@ const server = Bun.serve({
 console.log(
   `[landing] serving ${DIST} on http://0.0.0.0:${server.port} (auth API: ${api ? 'enabled' : 'static-only'})`
 );
+console.log(
+  `[landing] durable Originals dir: ${originalsDataDir}${originalsDataDirIsExplicit ? '' : ' (default — NOT set via ORIGINALS_DATA_DIR)'}`
+);
+
+// Loud guard against the silent data-loss trap: durable Originals only matter
+// when the auth API is enabled (signed-in users), and only persist across
+// redeploys if ORIGINALS_DATA_DIR points at a mounted volume. Warn — don't
+// throw: the anonymous demo + Track-A hosting must still run without it.
+if (api && !originalsDataDirIsExplicit && isLikelyDeployed()) {
+  console.warn(
+    '\n' +
+      '  ┌──────────────────────────────────────────────────────────────────────┐\n' +
+      '  │  !  ORIGINALS_DATA_DIR is not set on a deployed instance.              │\n' +
+      "  │     Signed-in users' Originals are being written to an EPHEMERAL       │\n" +
+      '  │     container path and will be LOST on the next redeploy.              │\n' +
+      '  │     Fix: attach a persistent volume and set ORIGINALS_DATA_DIR to      │\n' +
+      '  │     its mount path (e.g. ORIGINALS_DATA_DIR=/data).                    │\n' +
+      '  └──────────────────────────────────────────────────────────────────────┘\n'
+  );
+}
