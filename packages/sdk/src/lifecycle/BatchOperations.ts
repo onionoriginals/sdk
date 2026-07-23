@@ -398,8 +398,10 @@ export class BatchOperationExecutor {
   private sleepCancellable(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve) => {
       if (signal.aborted) { resolve(); return; }
-      const timer = setTimeout(resolve, ms);
-      signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+      const onTimeout = () => { signal.removeEventListener('abort', onAbort); resolve(); };
+      const onAbort = () => { clearTimeout(timer); resolve(); };
+      const timer = setTimeout(onTimeout, ms);
+      signal.addEventListener('abort', onAbort, { once: true });
     });
   }
   
