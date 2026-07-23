@@ -6,9 +6,14 @@
     "id": "@id",
     "Originals": "https://originals.build",
     "OriginalsBundle": "Originals:OriginalsBundle",
+
     "ResourceCreated": "Originals:ResourceCreated",
     "ResourceUpdated": "Originals:ResourceUpdated",
     "ResourceMigrated": "Originals:ResourceMigrated",
+    "MigrationCompleted": "Originals:MigrationCompleted",
+    "OwnershipTransferred": "Originals:OwnershipTransferred",
+    "KeyRecoveryCredential": "Originals:KeyRecoveryCredential",
+
     "attributes": {
       "@id": "Originals:attributes",
       "@container": "@set"
@@ -18,6 +23,42 @@
     "content": "Originals:content",
     "trait_type": "Originals:trait_type",
     "display_type": "Originals:display_type",
-    "value": "Originals:value"
+    "value": "Originals:value",
+
+    "resourceId": "Originals:resourceId",
+    "resourceType": "Originals:resourceType",
+    "contentHash": "Originals:contentHash",
+    "contentType": "Originals:contentType",
+    "creator": "Originals:creator",
+    "createdAt": "Originals:createdAt",
+    "previousHash": "Originals:previousHash",
+    "newHash": "Originals:newHash",
+    "fromVersion": "Originals:fromVersion",
+    "toVersion": "Originals:toVersion",
+    "updatedAt": "Originals:updatedAt",
+    "updateReason": "Originals:updateReason",
+
+    "sourceDid": "Originals:sourceDid",
+    "targetDid": "Originals:targetDid",
+    "fromLayer": "Originals:fromLayer",
+    "toLayer": "Originals:toLayer",
+    "migratedAt": "Originals:migratedAt",
+    "transactionId": "Originals:transactionId",
+    "inscriptionId": "Originals:inscriptionId",
+    "satoshi": "Originals:satoshi",
+    "migrationReason": "Originals:migrationReason",
+
+    "previousOwner": "Originals:previousOwner",
+    "newOwner": "Originals:newOwner",
+    "transferredAt": "Originals:transferredAt",
+    "transferReason": "Originals:transferReason",
+
+    "recoveredAt": "Originals:recoveredAt",
+    "recoveryReason": "Originals:recoveryReason",
+    "previousVerificationMethods": {
+      "@id": "Originals:previousVerificationMethods",
+      "@container": "@set"
+    },
+    "newVerificationMethod": "Originals:newVerificationMethod"
   }
 }
