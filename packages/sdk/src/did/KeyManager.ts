@@ -202,7 +202,8 @@ export class KeyManager {
 
 		// Create recovery credential
 		const recoveryCredential: KeyRecoveryCredential = {
-			'@context': [credentialsContext, securityContext],
+			// originals context defines KeyRecoveryCredential + its recovery terms (#371).
+			'@context': [credentialsContext, securityContext, 'https://originals.build/context'],
 			type: ['VerifiableCredential', 'KeyRecoveryCredential'],
 			issuer: didDoc.id,
 			validFrom: compromisedTimestamp,

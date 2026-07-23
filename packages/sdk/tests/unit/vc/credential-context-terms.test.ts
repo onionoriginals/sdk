@@ -30,8 +30,16 @@ const emitted = [
     transactionId: 'tx', inscriptionId: 'ins', satoshi: '123', migrationReason: 'publish'
   }),
   cm.issueOwnershipCredential(ASSET, 'addr-a', 'addr-b', 'tx', ISSUER, { satoshi: '123', transferReason: 'sale' }),
-  // KeyRecoveryCredential is emitted by WebVHManager; assert its fixed shape too.
+  // ResourceMigrated as LifecycleManager.issuePublicationCredential emits it (with `migratedTo`).
+  cm.createResourceCredential(
+    'ResourceMigrated',
+    { id: ASSET, migratedTo: 'did:webvh:x', resourceId: 'res-1', fromLayer: 'did:cel', toLayer: 'did:webvh', migratedAt: '2026-01-01T00:00:00Z' } as never,
+    ISSUER
+  ),
+  // KeyRecoveryCredential as WebVHManager/KeyManager emit it — including the
+  // originals context (added in #371 so its terms actually resolve).
   {
+    '@context': ['https://www.w3.org/ns/credentials/v2', 'https://w3id.org/security/multikey/v1', 'https://originals.build/context'],
     type: ['VerifiableCredential', 'KeyRecoveryCredential'],
     credentialSubject: {
       id: ASSET,
@@ -49,6 +57,9 @@ describe('#371 — every factory credential term is defined in the Originals con
   for (const cred of emitted) {
     const credType = cred.type[cred.type.length - 1];
     test(`${credType}: type + all subject keys are explicitly in the context`, () => {
+      // The credential must DECLARE the originals context, or its terms never load
+      // (the KeyRecovery credentials failed exactly this — #371 review).
+      expect((cred as { '@context': string[] })['@context']).toContain('https://originals.build/context');
       // The credential type (last, most-specific entry) must be defined.
       expect(contextTerms.has(credType)).toBe(true);
       // Every credentialSubject key must be defined (id → @id counts).

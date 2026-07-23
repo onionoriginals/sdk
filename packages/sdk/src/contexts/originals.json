@@ -43,6 +43,7 @@
     "fromLayer": "Originals:fromLayer",
     "toLayer": "Originals:toLayer",
     "migratedAt": "Originals:migratedAt",
+    "migratedTo": "Originals:migratedTo",
     "transactionId": "Originals:transactionId",
     "inscriptionId": "Originals:inscriptionId",
     "satoshi": "Originals:satoshi",
