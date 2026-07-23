@@ -181,6 +181,11 @@ export class BatchOperationExecutor {
     // paid/non-idempotent operation after the batch has already failed and
     // (b) any not-yet-started item from starting.
     let aborted = false;
+    // AbortController whose signal is passed to interruptible backoff sleeps.
+    // When aborted=true fires, we also call batchAbortController.abort() so
+    // any sibling currently sleeping in backoff wakes immediately instead of
+    // waiting out its full delay before re-checking the abort flag.
+    const batchAbortController = new AbortController();
 
     // Process items with concurrency control
     const processItem = async (item: T, index: number): Promise<void> => {
@@ -229,10 +234,13 @@ export class BatchOperationExecutor {
             break;
           }
 
-          // If not last attempt, wait with exponential backoff
+          // If not last attempt, wait with exponential backoff.
+          // Use the cancellable sleep so a sibling abort wakes us immediately
+          // instead of requiring the full delay to elapse before the post-sleep
+          // check fires — critical under CPU load where sleep durations stretch.
           if (attempt < retryCount) {
             const delay = this.calculateRetryDelay(attempt, retryDelay);
-            await this.sleep(delay);
+            await this.sleepCancellable(delay, batchAbortController.signal);
             // Re-check AFTER the sleep: a sibling may have failed the batch
             // while this item was in backoff. Without this check the item
             // would wake and start another attempt — re-running a paid /
@@ -257,6 +265,9 @@ export class BatchOperationExecutor {
       // If fail-fast mode, abort the batch and throw error
       if (!continueOnError) {
         aborted = true;
+        // Wake any siblings sleeping in backoff so they re-check aborted
+        // immediately rather than waiting out their full delay.
+        batchAbortController.abort();
         throw lastError!;
       }
     };
@@ -377,6 +388,19 @@ export class BatchOperationExecutor {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Sleep for specified milliseconds, resolving early if the signal fires.
+   * Resolves (does not reject) on abort so the post-sleep abort check handles
+   * the control flow — no try/catch needed at the call site.
+   */
+  private sleepCancellable(ms: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+      if (signal.aborted) { resolve(); return; }
+      const timer = setTimeout(resolve, ms);
+      signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
   }
   
   /**
