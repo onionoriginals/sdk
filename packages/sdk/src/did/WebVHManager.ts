@@ -872,9 +872,7 @@ export class WebVHManager {
     const recoveryCredential: KeyRecoveryCredential = {
       '@context': [
         'https://www.w3.org/ns/credentials/v2',
-        'https://w3id.org/security/multikey/v1',
-        // Defines KeyRecoveryCredential + its recovery terms (#371).
-        'https://originals.build/context'
+        'https://w3id.org/security/multikey/v1'
       ],
       type: ['VerifiableCredential', 'KeyRecoveryCredential'],
       issuer: did,
