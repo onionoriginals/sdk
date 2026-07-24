@@ -620,6 +620,17 @@ async function verifyHeadFreshness(
  * controller-binding elsewhere in this file. Fail-closed throughout: a missing
  * doc, a malformed/structurally-invalid proof, an unresolvable or unauthorized
  * key, or a bad signature all yield false (the competitor simply does not count).
+ *
+ * REALITY (#442 closed): conformant did:btco documents are NOT signed — the BTCO
+ * DID Method authenticates via sat control + the witnessed, controller-signed
+ * CEL migrate event, not a document `proof` (which DID Core 1.0 removed). The SDK
+ * therefore does not sign anchoring docs, so in practice NO competitor carries a
+ * proof and this gate's real effect is simply to DROP unauthenticated back-links
+ * — which is what closes the deny-only front-run. The accept path would fire only
+ * for a (hypothetical) controller-signed competing doc; honest cross-sat dupe
+ * detection is consequently off — a no-attacker gap, since an attacker cannot
+ * forge a valid competing anchoring without the creator's signed genesis. A
+ * method-conformant dupe check would authenticate via the witnessed CEL event.
  */
 async function anchoringDocAuthenticated(
   didDocument: Record<string, unknown> | undefined,
@@ -663,9 +674,10 @@ async function anchoringDocAuthenticated(
  * did:btco document is signed by a key in THIS log's authorized-key history
  * (`anchoringDocAuthenticated`). An unauthenticated back-link — a bare
  * `alsoKnownAs`, or a proof by an unauthorized key — is IGNORED, so a
- * non-controller cannot front-run and deny an honest mint. A genuinely
- * controller-signed earlier anchoring on a different sat still competes (legit
- * dupe detection preserved).
+ * non-controller cannot front-run and deny an honest mint. (Conformant did:btco
+ * docs are unsigned — #442 closed — so honest competitors carry no proof and are
+ * also dropped: cross-sat dupe detection is OFF. That's a no-attacker gap, not a
+ * security loss — an attacker can't forge a valid competing anchoring.)
  *
  * Fail-closed and NOT opt-in: a btco-anchored did:cel log already requires a
  * provider, so a provider that cannot enumerate, an empty enumeration, or any
@@ -704,11 +716,13 @@ async function verifyUniqueness(
   // can never trip NON_CANONICAL_ANCHOR / AMBIGUOUS_CANONICAL. Fail-closed by
   // construction: a competitor the provider cannot surface a doc for, or whose
   // doc is not authorized-signed, simply does not count.
-  // ACCEPTED TRADE-OFF: an OrdinalsProvider that doesn't populate `didDocument`
-  // (backward-compat) makes ALL competitors uncountable — closing the DoS but
-  // also silently suppressing legit-dupe detection (a genuine earlier
-  // controller-signed mint on another sat would be ignored). Providers must
-  // surface the doc (see OrdinalsLookup/OrdinalsProvider docs) to restore it.
+  // ACCEPTED TRADE-OFF: conformant did:btco docs are unsigned (#442 closed —
+  // signing a DID document is non-conformant with the BTCO method), so NO honest
+  // competitor authenticates and ALL competitors are dropped: this closes the
+  // deny-only DoS but turns cross-sat dupe detection off. That's a no-attacker
+  // gap (an attacker can't forge a valid competing anchoring). Restoring real
+  // dupe detection would require authenticating a competitor via its witnessed
+  // CEL migrate event (method-conformant), not a doc proof.
   const anchorings: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number }> = [];
   for (const a of rawAnchorings) {
     if (a.satoshi === anchoredSat.satoshi) {
