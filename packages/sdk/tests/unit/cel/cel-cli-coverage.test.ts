@@ -461,7 +461,7 @@ describe('CEL-CLI-009/happy: --version shows version', () => {
     }
 
     const output = logged.join('\n');
-    // VERSION is hardcoded to '1.5.0' in index.ts; format: "originals-cel v<version>"
+    // VERSION is hardcoded in index.ts (kept in sync with package.json); format: "originals-cel v<version>"
     expect(output).toMatch(/originals-cel v\d+\.\d+\.\d+/);
   });
 });
