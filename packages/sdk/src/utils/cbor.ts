@@ -46,12 +46,12 @@ function mapsToObjects(value: unknown): unknown {
   return value;
 }
 
-export function decode<T = unknown>(bytes: Uint8Array | ArrayBuffer | Buffer): T {
+export function decode<T = unknown>(bytes: Uint8Array | ArrayBuffer): T {
   let u8: Uint8Array;
   if (bytes instanceof ArrayBuffer) {
     u8 = new Uint8Array(bytes);
   } else {
-    // Uint8Array and Buffer both expose buffer/byteOffset/byteLength
+    // Uint8Array (and Buffer, which extends it) expose buffer/byteOffset/byteLength
     u8 = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
   const decoded = cborgDecode(u8, {
