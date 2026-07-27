@@ -109,6 +109,12 @@ jobs:
       - name: Verify built packages import under Node ESM
         run: node scripts/verify-esm.mjs
 
+      # Node-only features must load their modules lazily so browser/edge
+      # consumers can still import the package. One static `import 'node:fs'`
+      # in the graph breaks that for everyone and is invisible until bundling.
+      - name: Verify browser-facing entry points have no eager Node builtins
+        run: node scripts/check-browser-safety.mjs
+
   changeset:
     name: Changeset present
     # Only on PRs, and skip the "Version Packages" PR (which intentionally has no

@@ -20,6 +20,16 @@
       "default": "./dist/index.js"
     },
     "./package.json": "./package.json",
+    "./cel": {
+      "types": "./dist/cel/index.d.ts",
+      "import": "./dist/cel/index.js",
+      "default": "./dist/cel/index.js"
+    },
+    "./cel/*": {
+      "types": "./dist/cel/*.d.ts",
+      "import": "./dist/cel/*.js",
+      "default": "./dist/cel/*.js"
+    },
     "./core/*": {
       "types": "./dist/core/*.d.ts",
       "import": "./dist/core/*.js",

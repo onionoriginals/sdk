@@ -143,6 +143,11 @@ jobs:
       - name: Verify built packages import under Node ESM
         run: node scripts/verify-esm.mjs
 
+      # Same idea for non-Node consumers: never publish a dist that a browser or
+      # edge runtime cannot import because a Node builtin is pulled in eagerly.
+      - name: Verify browser-facing entry points have no eager Node builtins
+        run: node scripts/check-browser-safety.mjs
+
       # Publish via changesets/action so npm publish, git tag creation/push, and
       # GitHub Release creation happen as one managed step — avoiding the
       # publish-succeeds-but-tag-push-fails gap where tags would be missing

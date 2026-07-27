@@ -21,4 +21,7 @@ export {
   createKeyStoreCelSigner,
   hexSha256ToDigestMultibase,
 } from './signerAdapter.js';
-export { main as celCli } from './cli/index.js';
+// The CLI is intentionally NOT re-exported here. It statically imports fs and
+// path and pulls in all of OriginalsSDK, which would make this barrel — the
+// genesis-only entry point for browser consumers — unloadable outside Node.
+// It ships as the `originals-cel` bin (dist/cel/cli/index.js) instead.
