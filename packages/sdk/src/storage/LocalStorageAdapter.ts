@@ -1,10 +1,35 @@
 // Local adapter is optional in this environment; keeping implementation but avoid Node typings
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
-import * as fs from 'fs/promises';
-import * as path from 'path';
 import { GetObjectResult, LocalStorageAdapterOptions, StorageAdapter } from './StorageAdapter.js';
 import { StructuredError } from '../utils/telemetry.js';
+
+/**
+ * Node-only modules, loaded on first use rather than at import time. This
+ * adapter is re-exported from the package barrel, so a static import made the
+ * whole SDK unloadable in browsers/edge — same reasoning as FileLogOutput.
+ *
+ * They stay memoized in module scope so the path-traversal guards below can
+ * remain synchronous with Node's exact `path` semantics; reimplementing
+ * resolve/relative/sep portably would put those security checks at risk.
+ */
+let fs: typeof import('fs/promises') | null = null;
+let path: typeof import('path') | null = null;
+
+async function loadNodeModules(): Promise<void> {
+  if (fs && path) return;
+  [fs, path] = await Promise.all([import('fs/promises'), import('path')]);
+}
+
+function requirePath(): typeof import('path') {
+  if (!path) {
+    throw new StructuredError(
+      'STORAGE_NOT_INITIALIZED',
+      'LocalStorageAdapter requires a Node-like runtime; call an async method first so node:path can load.'
+    );
+  }
+  return path;
+}
 
 export class LocalStorageAdapter implements StorageAdapter {
   private baseDir: string;
@@ -27,6 +52,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   private resolvePath(domain: string, objectPath: string): string {
+    const path = requirePath();
     const safeDomain = this.sanitizeDomain(domain);
     const cleanPath = objectPath.replace(/^\/+/, '');
     const base = path.resolve(this.baseDir, safeDomain);
@@ -66,14 +92,16 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async putObject(domain: string, objectPath: string, content: Uint8Array | string): Promise<string> {
+    await loadNodeModules();
     const fullPath = this.resolvePath(domain, objectPath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
-    const data = typeof content === 'string' ? Buffer.from(content) : Buffer.from(content);
+    const data = typeof content === 'string' ? new TextEncoder().encode(content) : content;
     await fs.writeFile(fullPath, data);
     return this.toUrl(domain, objectPath);
   }
 
   async getObject(domain: string, objectPath: string): Promise<GetObjectResult | null> {
+    await loadNodeModules();
     const fullPath = this.resolvePath(domain, objectPath);
     try {
       const content = await fs.readFile(fullPath);
@@ -88,6 +116,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async exists(domain: string, objectPath: string): Promise<boolean> {
+    await loadNodeModules();
     const fullPath = this.resolvePath(domain, objectPath);
     try {
       await fs.access(fullPath);
@@ -112,6 +141,7 @@ export class LocalStorageAdapter implements StorageAdapter {
    * round-trip through getObject. A never-written domain yields [].
    */
   async listObjects(domain: string, prefix: string): Promise<string[]> {
+    await loadNodeModules();
     // Reuse resolvePath's traversal containment for the domain directory.
     const base = this.resolvePath(domain, '');
     const cleanPrefix = prefix.replace(/^\/+/, '');

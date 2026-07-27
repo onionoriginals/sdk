@@ -3,12 +3,12 @@
  *
  * Ported from aviarytech/di-wings (src/lib/vcs/v2/utils/selective-disclosure.ts)
  * and adapted to the Originals SDK: jose's base64url is replaced with a local
- * helper and Node's `crypto.randomUUID` is used for skolemization nonces.
+ * helper and the Web Crypto `crypto.randomUUID` global is used for
+ * skolemization nonces (available in browsers and Node >= 19, so no import).
  *
  * Algorithm step numbers reference the W3C VC Data Integrity ECDSA/BBS specs.
  */
 import jsonld from 'jsonld';
-import crypto from 'crypto';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
@@ -202,7 +202,7 @@ export function skolemizeExpandedJsonLd(
   // branch reuses the same skolem URN and two distinct blank nodes collapse
   // into one after deskolemization (issue #316).
   if (!options.urnScheme) options.urnScheme = CUSTOM_URN_SCHEME;
-  if (!options.randomString) options.randomString = crypto.randomUUID();
+  if (!options.randomString) options.randomString = globalThis.crypto.randomUUID();
   if (options.count === undefined) options.count = 0;
 
   const generateId = (blankNodeId?: string): string => {
@@ -266,7 +266,7 @@ export const skolemizeCompactJsonLd = async (
     const expanded = await jsonld.expand(document, { safe: true, documentLoader: options.documentLoader } as any);
     const skolemizedExpandedDocument = skolemizeExpandedJsonLd(
       expanded as Record<string, unknown>[],
-      { urnScheme, randomString: crypto.randomUUID(), count: 0 }
+      { urnScheme, randomString: globalThis.crypto.randomUUID(), count: 0 }
     );
     const skolemizedCompactDocument = await jsonld.compact(
       skolemizedExpandedDocument,
