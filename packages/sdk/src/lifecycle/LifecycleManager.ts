@@ -16,7 +16,7 @@ import { inscribeOnSat } from '../bitcoin/inscribe-on-sat.js';
 import type { Utxo } from '../types/bitcoin.js';
 import type { BitcoinSigner } from '../types/common.js';
 import { DIDManager } from '../did/DIDManager.js';
-import { CredentialManager } from '../vc/CredentialManager.js';
+import type { CredentialManager } from '../vc/CredentialManager.js';
 import { OriginalsAsset, type ProvenanceChain } from './OriginalsAsset.js';
 import { replayProvenance } from './replayProvenance.js';
 import { checkGenesisResourceBinding } from './genesisBinding.js';

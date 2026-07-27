@@ -7,7 +7,7 @@ import {
 } from '../types/index.js';
 import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation.js';
 import { StructuredError } from '../utils/telemetry.js';
-import { CredentialManager } from '../vc/CredentialManager.js';
+import type { CredentialManager } from '../vc/CredentialManager.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { ProvenanceQuery, Migration } from './ProvenanceQuery.js';
 import { EventEmitter } from '../events/EventEmitter.js';
@@ -540,8 +540,12 @@ export class OriginalsAsset {
         }
       }
 
-      // If a credentialManager with didManager is provided, verify each credential cryptographically
-      if (deps?.credentialManager && deps.credentialManager instanceof CredentialManager && deps?.didManager) {
+      // If a credentialManager with didManager is provided, verify each credential cryptographically.
+      // Duck-typed rather than `instanceof`: importing CredentialManager for the
+      // check alone dragged jsonld into every genesis consumer's bundle, and
+      // instanceof is unreliable anyway when a bundler yields two copies of the
+      // module.
+      if (deps?.credentialManager && typeof deps.credentialManager.verifyCredential === 'function' && deps?.didManager) {
         for (const cred of this.credentials) {
           const ok = await deps.credentialManager.verifyCredential(cred);
           if (!ok) return false;
