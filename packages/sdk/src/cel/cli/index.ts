@@ -12,7 +12,7 @@ import { inspectCommand, InspectFlags } from './inspect.js';
 import { migrateCommand, MigrateFlags } from './migrate.js';
 
 // Version from package.json - will be replaced at build time or read dynamically
-const VERSION = '1.5.0';
+const VERSION = '2.0.0'; // keep in sync with packages/sdk/package.json
 
 const HELP_TEXT = `
 originals-cel - Cryptographic Event Log CLI for Originals Protocol
