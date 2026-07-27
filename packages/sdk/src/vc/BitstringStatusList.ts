@@ -1,4 +1,5 @@
-import { gzipSync, gunzipSync, inflateSync } from 'node:zlib';
+import { gzipBytes, boundedGunzip, boundedUnzlib } from './utils/bounded-decompress.js';
+import { base64url } from '../utils/encoding.js';
 import { MAX_DECOMPRESSED_BITSTRING_BYTES } from './StatusListManager.js';
 
 const MINIMUM_LIST_SIZE = 131072; // 16KB = 131072 bits per W3C spec recommendation
@@ -67,8 +68,8 @@ export class BitstringStatusList {
    * readable by any spec-compliant consumer.
    */
   encode(): string {
-    const compressed = gzipSync(Buffer.from(this.bits));
-    return 'u' + base64urlEncode(compressed);
+    const compressed = gzipBytes(this.bits);
+    return 'u' + base64url.encode(compressed);
   }
 
   /**
@@ -80,14 +81,14 @@ export class BitstringStatusList {
     // Cap decompression: encodedList may come from an untrusted status list
     // credential, and unbounded gunzip/inflate of a small gzip bomb can
     // allocate gigabytes (verifier DoS).
-    const limit = { maxOutputLength: MAX_DECOMPRESSED_BITSTRING_BYTES };
+    const limit = MAX_DECOMPRESSED_BITSTRING_BYTES;
     let decompressed: Uint8Array;
     try {
       if (encoded.startsWith('u')) {
-        decompressed = new Uint8Array(gunzipSync(base64urlDecode(encoded.slice(1)), limit));
+        decompressed = boundedGunzip(base64url.decode(encoded.slice(1)), limit);
       } else {
-        // Legacy pre-spec encoding: bare base64url, raw DEFLATE stream.
-        decompressed = new Uint8Array(inflateSync(base64urlDecode(encoded), limit));
+        // Legacy pre-spec encoding: bare base64url, ZLIB-wrapped DEFLATE stream.
+        decompressed = boundedUnzlib(base64url.decode(encoded), limit);
       }
     } catch (err) {
       throw new Error(
@@ -113,12 +114,3 @@ export class BitstringStatusList {
   }
 }
 
-function base64urlEncode(data: Uint8Array): string {
-  const b64 = Buffer.from(data).toString('base64');
-  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function base64urlDecode(str: string): Uint8Array {
-  const padded = str.replace(/-/g, '+').replace(/_/g, '/');
-  return new Uint8Array(Buffer.from(padded, 'base64'));
-}

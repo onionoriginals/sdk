@@ -1,7 +1,14 @@
-import b58 from 'b58';
+// @scure/base rather than Buffer: this module is on the import path of nearly
+// every entry point, so a Node-only dependency here makes the whole SDK
+// unloadable in browsers/edge runtimes.
+import {
+  base58 as scureBase58,
+  base64 as scureBase64,
+  base64urlnopad as scureBase64UrlNoPad
+} from '@scure/base';
 
 export function encodeBase64UrlMultibase(bytes: Uint8Array): string {
-  return 'u' + Buffer.from(bytes).toString('base64url');
+  return 'u' + scureBase64UrlNoPad.encode(bytes);
 }
 
 export function decodeBase64UrlMultibase(s: string): Uint8Array {
@@ -9,13 +16,13 @@ export function decodeBase64UrlMultibase(s: string): Uint8Array {
     throw new Error('Invalid Multibase encoding');
   }
   const payload = s.slice(1);
-  // Buffer.from(..., 'base64url') silently skips characters outside the
-  // alphabet, so distinct proofValue strings would decode to the same bytes
-  // (signature malleability). Validate strictly instead.
+  // Decoders that skip characters outside the alphabet would let distinct
+  // proofValue strings decode to the same bytes (signature malleability).
+  // Validate strictly instead.
   if (!/^[A-Za-z0-9_-]*$/.test(payload)) {
     throw new Error('Invalid Multibase encoding: not base64url');
   }
-  return Uint8Array.from(Buffer.from(payload, 'base64url'));
+  return scureBase64UrlNoPad.decode(payload);
 }
 
 export function hexToBytes(hex: string): Uint8Array {
@@ -60,13 +67,18 @@ export const MULTICODEC_BLS12381_G2_PRIV_HEADER = new Uint8Array([0x8a, 0x26]);
 
 export const base64 = {
 	encode: (unencoded: string | Uint8Array): string => {
-		return Buffer.from(unencoded || '').toString('base64');
+		const bytes = typeof unencoded === 'string'
+			? utf8.encode(unencoded)
+			: (unencoded ?? new Uint8Array());
+		return scureBase64.encode(bytes);
 	},
 	decode: (encoded: string): Uint8Array => {
-		// Copy instead of wrapping `.buffer`: on Node, small Buffers are views
-		// into a shared pool, so wrapping the backing ArrayBuffer without
-		// byteOffset/byteLength returns unrelated pool memory.
-		return Uint8Array.from(Buffer.from(encoded || '', 'base64'));
+		if (!encoded) return new Uint8Array();
+		// @scure/base requires canonical padding; Buffer did not. Pad rather than
+		// reject so callers holding unpadded base64 keep working.
+		let padded = encoded;
+		while (padded.length % 4) padded += '=';
+		return scureBase64.decode(padded);
 	}
 };
 
@@ -81,30 +93,24 @@ export const utf8 = {
 
 export const base64url = {
 	encode: (unencoded: string | Uint8Array): string => {
-		const encoded = base64.encode(unencoded);
-		return encoded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+		const bytes = typeof unencoded === 'string'
+			? utf8.encode(unencoded)
+			: (unencoded ?? new Uint8Array());
+		return scureBase64UrlNoPad.encode(bytes);
 	},
 	decode: (encoded: string): Uint8Array => {
-		let padded = encoded.replace(/-/g, '+').replace(/_/g, '/');
-		while (padded.length % 4) padded += '=';
-		return base64.decode(padded);
+		if (!encoded) return new Uint8Array();
+		// Tolerate the padded form; the nopad decoder rejects trailing '='.
+		return scureBase64UrlNoPad.decode(encoded.replace(/=+$/, ''));
 	}
 };
 
-// Type assertion for b58 library which doesn't have proper types
-interface B58Module {
-  encode: (unencoded: Uint8Array) => string;
-  decode: (encoded: string) => Uint8Array;
-}
-
-const b58Typed = b58 as unknown as B58Module;
-
 export const base58 = {
 	encode: (unencoded: Uint8Array): string => {
-		return b58Typed.encode(unencoded);
+		return scureBase58.encode(unencoded);
 	},
 	decode: (encoded: string): Uint8Array => {
-		return b58Typed.decode(encoded);
+		return scureBase58.decode(encoded);
 	}
 };
 
