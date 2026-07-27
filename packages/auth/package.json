@@ -37,7 +37,6 @@
   },
   "scripts": {
     "build": "bunx tsc && bunx tsc-alias",
-    "prepublishOnly": "npm run build",
     "test": "bun test tests/",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts"

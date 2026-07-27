@@ -124,6 +124,12 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      # The ONLY build before publish. The packages deliberately have no
+      # `prepublishOnly`: `changeset publish` runs packages concurrently, so a
+      # per-package rebuild had sdk's tsc rewriting dist/*.d.ts while auth's tsc
+      # was reading them (auth imports @originals/sdk) — a race that also rebuilt
+      # artifacts *after* the ESM gate below had verified them. Turbo builds in
+      # dependency order, once.
       - name: Build
         run: bun run build
 
