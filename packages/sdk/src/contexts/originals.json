@@ -18,6 +18,12 @@
     "content": "Originals:content",
     "trait_type": "Originals:trait_type",
     "display_type": "Originals:display_type",
-    "value": "Originals:value"
+    "value": "Originals:value",
+
+    "migratedTo": "Originals:migratedTo",
+    "resourceId": "Originals:resourceId",
+    "fromLayer": "Originals:fromLayer",
+    "toLayer": "Originals:toLayer",
+    "migratedAt": "Originals:migratedAt"
   }
 }
