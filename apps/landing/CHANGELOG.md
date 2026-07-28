@@ -1,5 +1,12 @@
 # @originals/landing
 
+## 0.1.2
+
+### Patch Changes
+
+- Updated dependencies [99dfa90]
+  - @originals/sdk@2.1.0
+
 ## 0.1.1
 
 ### Patch Changes
