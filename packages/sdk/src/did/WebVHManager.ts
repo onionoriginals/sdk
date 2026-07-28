@@ -678,7 +678,7 @@ export class WebVHManager {
    * @returns The loaded DID log
    */
   async loadDIDLog(logPath: string): Promise<DIDLog> {
-    const { fs, path } = await loadNodeModules();
+    const { fs } = await loadNodeModules();
     const content = await fs.promises.readFile(logPath, 'utf8');
     const lines = content.trim().split('\n');
     return lines.map(line => JSON.parse(line) as DIDLogEntry);

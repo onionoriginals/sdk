@@ -13,12 +13,22 @@ export function gzipBytes(data: Uint8Array): Uint8Array {
 type StreamCtor = typeof Gunzip | typeof Unzlib;
 
 /**
- * Decompress with a hard output budget.
+ * Compressed input is fed in slices this size so the output budget can be
+ * re-checked between pushes. fflate inflates an entire `push()` before
+ * returning, so pushing the whole payload at once would spend the full CPU cost
+ * of a bomb before the budget could stop it — the point is to bound work, not
+ * just memory. Measured on a 400 MB bomb: ~920ms in one push vs ~12ms sliced.
+ */
+const INPUT_SLICE_BYTES = 4096;
+
+/**
+ * Decompress with a hard output budget, bounding both memory and CPU.
  *
  * fflate has no `maxOutputLength` equivalent: passing a pre-sized `out` buffer
  * makes it **silently truncate** rather than throw, which for a status list
  * would read as "not revoked" for entries past the cut — fail-open. So stream
- * instead and abort as soon as the budget is passed.
+ * instead: stop retaining chunks the moment the budget is passed (bounding
+ * memory), and stop feeding input (bounding the remaining inflate work).
  */
 function boundedDecompress(data: Uint8Array, maxBytes: number, Ctor: StreamCtor): Uint8Array {
   const chunks: Uint8Array[] = [];
@@ -29,13 +39,23 @@ function boundedDecompress(data: Uint8Array, maxBytes: number, Ctor: StreamCtor)
     if (overflowed) return;
     total += chunk.length;
     if (total > maxBytes) {
+      // Drop this chunk and every later one: memory stays bounded even if the
+      // remainder of the current slice still inflates.
       overflowed = true;
       return;
     }
     chunks.push(chunk);
   });
 
-  stream.push(data, true);
+  if (data.length === 0) {
+    stream.push(data, true);
+  } else {
+    for (let offset = 0; offset < data.length; offset += INPUT_SLICE_BYTES) {
+      const end = Math.min(offset + INPUT_SLICE_BYTES, data.length);
+      stream.push(data.subarray(offset, end), end === data.length);
+      if (overflowed) break;
+    }
+  }
 
   if (overflowed) {
     throw new Error(`decompressed output exceeded the ${maxBytes}-byte limit`);

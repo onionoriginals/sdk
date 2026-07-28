@@ -11,17 +11,14 @@
 import jsonld from 'jsonld';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { base64url } from '../../utils/encoding.js';
 
 // Specification default recommended URN scheme to use for skolemization
 const CUSTOM_URN_SCHEME = 'custom-scheme';
 
 /** base64url-no-pad encoding (replaces jose's base64url.encode). */
 function base64urlEncode(bytes: Uint8Array): string {
-  return Buffer.from(bytes)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
+  return base64url.encode(bytes);
 }
 
 export type GroupDefinitions = {
