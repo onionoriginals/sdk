@@ -16,7 +16,7 @@ import { inscribeOnSat } from '../bitcoin/inscribe-on-sat.js';
 import type { Utxo } from '../types/bitcoin.js';
 import type { BitcoinSigner } from '../types/common.js';
 import { DIDManager } from '../did/DIDManager.js';
-import { CredentialManager } from '../vc/CredentialManager.js';
+import type { CredentialManager } from '../vc/CredentialManager.js';
 import { OriginalsAsset, type ProvenanceChain } from './OriginalsAsset.js';
 import { replayProvenance } from './replayProvenance.js';
 import { checkGenesisResourceBinding } from './genesisBinding.js';
@@ -857,7 +857,7 @@ export class LifecycleManager {
       didDocument: unknown;
       snapshotEvents?: unknown[]; // full celLog (checkpoint) → REPLACE
       deltaEvents?: unknown[];    // events delta → APPEND
-      content?: Buffer;
+      content?: Uint8Array;
       txid?: string;
     };
     const links: Link[] = [];
@@ -980,7 +980,7 @@ export class LifecycleManager {
     // most-recent-resource head (a rotation's newest inscription carries no new
     // media, so the media may live in an earlier resource-update inscription).
     const head = mostRecentResourceHead(reconstructedLog);
-    let headContent: Buffer | undefined;
+    let headContent: Uint8Array | undefined;
     if (head) {
       for (let i = links.length - 1; i >= 0; i--) {
         const c = links[i].content;
@@ -1043,7 +1043,7 @@ export class LifecycleManager {
    * blob↔toHash gate (which independently re-checks it) passes; a
    * non-utf8-roundtrippable or mismatched blob is left as a pure reference.
    */
-  private reconstructResourcesFromLog(log: EventLog, headContent: Buffer | undefined): AssetResource[] {
+  private reconstructResourcesFromLog(log: EventLog, headContent: Uint8Array | undefined): AssetResource[] {
     const resources: AssetResource[] = [];
     const genesis = log.events[0]?.data as { resources?: unknown } | undefined;
     const gres: Array<Record<string, unknown>> = Array.isArray(genesis?.resources) ? genesis.resources : [];
@@ -1083,7 +1083,7 @@ export class LifecycleManager {
     // head hash (loadAsset re-verifies hash(content) == signed toHash).
     const head = mostRecentResourceHead(log);
     if (headContent && head) {
-      const contentStr = headContent.toString('utf8');
+      const contentStr = new TextDecoder().decode(headContent);
       if (hashResource(Buffer.from(contentStr, 'utf8')).toLowerCase() === head.hash.toLowerCase()) {
         const target = resources.find(r => (!head.resourceId || r.id === head.resourceId) && r.hash === head.hash && r.content === undefined);
         if (target) target.content = contentStr;

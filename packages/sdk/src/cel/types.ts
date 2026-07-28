@@ -163,7 +163,7 @@ export interface OrdinalsLookup {
   getInscriptionById(id: string): Promise<{
     inscriptionId: string;
     // Optional: deferred-content providers may not echo built content back.
-    content?: Buffer;
+    content?: Uint8Array;
     contentType: string;
     txid?: string;
     satoshi?: string;

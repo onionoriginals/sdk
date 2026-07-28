@@ -8,6 +8,7 @@
  */
 
 import { verifyAsync } from '@noble/ed25519';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import type {
   EventLog,
   LogEntry,
@@ -42,7 +43,7 @@ function didDocumentFromInscription(inscription: FetchedInscription): unknown {
   if (metaDoc && typeof metaDoc === 'object') return metaDoc;
   if (inscription?.content === undefined) return undefined;
   try {
-    return JSON.parse(inscription.content.toString('utf8'));
+    return JSON.parse(new TextDecoder().decode(inscription.content));
   } catch {
     return undefined;
   }
@@ -229,7 +230,7 @@ async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null>
     // non-Ed25519 key means no Ed25519 proof can be bound to it (empty set →
     // fail closed at the caller).
     const key = extractEd25519FromDidKey(did);
-    return new Set(key ? [Buffer.from(key).toString('hex')] : []);
+    return new Set(key ? [bytesToHex(key)] : []);
   }
 
   if (did.startsWith('did:peer:4')) {
@@ -248,7 +249,7 @@ async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null>
           if (vm && typeof vm.publicKeyMultibase === 'string') {
             try {
               const dec = multikey.decodePublicKey(vm.publicKeyMultibase);
-              if (dec.type === 'Ed25519') keys.add(Buffer.from(dec.key).toString('hex'));
+              if (dec.type === 'Ed25519') keys.add(bytesToHex(dec.key));
             } catch {
               // skip non-decodable verification methods
             }
@@ -437,7 +438,7 @@ async function verifyBitcoinWitnessProof(
   let attestation: unknown;
   if (inscription.content !== undefined) {
     try {
-      attestation = JSON.parse(inscription.content.toString('utf8'));
+      attestation = JSON.parse(new TextDecoder().decode(inscription.content));
     } catch {
       attestation = undefined; // content is media (phase 2) — shape (a) N/A
     }
@@ -820,7 +821,7 @@ async function verifyAnchorContentMatchesHead(
   // asset — no inline media to inscribe).
   let asJson: unknown;
   try {
-    asJson = JSON.parse(inscription.content.toString('utf8'));
+    asJson = JSON.parse(new TextDecoder().decode(inscription.content));
   } catch {
     asJson = undefined;
   }
@@ -884,7 +885,7 @@ function ed25519KeyHexesFromDidDocument(content: unknown): Set<string> {
     if (typeof pkm !== 'string') continue;
     try {
       const dec = multikey.decodePublicKey(pkm);
-      if (dec.type === 'Ed25519') keys.add(Buffer.from(dec.key).toString('hex'));
+      if (dec.type === 'Ed25519') keys.add(bytesToHex(dec.key));
     } catch {
       // skip non-decodable verification methods
     }
@@ -1110,7 +1111,7 @@ async function resolveControllerKeyHex(
       key = null;
     }
   }
-  return key ? Buffer.from(key).toString('hex') : null;
+  return key ? bytesToHex(key) : null;
 }
 
 /**

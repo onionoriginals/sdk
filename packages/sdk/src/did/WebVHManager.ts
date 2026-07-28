@@ -5,8 +5,20 @@ import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier, VerificationMet
 import { StructuredError } from '../utils/telemetry.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { base58 } from '@scure/base';
-import * as fs from 'fs';
-import * as path from 'path';
+/**
+ * Node-only modules, loaded on first use. Only saveDIDLog/loadDIDLog touch the
+ * filesystem, but a static import here made every entry point that reaches
+ * DIDManager unloadable in browsers/edge.
+ */
+let fs: typeof import('fs') | null = null;
+let path: typeof import('path') | null = null;
+
+async function loadNodeModules(): Promise<{ fs: typeof import('fs'); path: typeof import('path') }> {
+  if (!fs || !path) {
+    [fs, path] = await Promise.all([import('fs'), import('path')]);
+  }
+  return { fs, path };
+}
 
 /**
  * Compute the pre-rotation key hash for an update key.
@@ -545,8 +557,11 @@ export class WebVHManager {
       return false;
     }
     
-    // Reject absolute paths (starting with / or drive letter on Windows)
-    if (path.isAbsolute(segment)) {
+    // Reject absolute paths (leading separator, or a Windows drive prefix).
+    // Checked inline rather than via node:path so this validator stays usable
+    // without a Node runtime — separators are already rejected above, leaving
+    // only the drive-letter form to catch.
+    if (segment.startsWith('/') || /^[a-zA-Z]:/.test(segment)) {
       return false;
     }
     
@@ -585,6 +600,7 @@ export class WebVHManager {
    * @returns The full path where the log was saved
    */
   async saveDIDLog(did: string, log: DIDLog, baseDir: string): Promise<string> {
+    const { fs, path } = await loadNodeModules();
     // Parse the DID per the did:webvh method spec (and didwebvh-ts, which
     // produced it): did:webvh:{SCID}:{domain}[:path1:path2...]. The SCID comes
     // BEFORE the domain — treating segment 2 as the domain (the old behavior)
@@ -662,6 +678,7 @@ export class WebVHManager {
    * @returns The loaded DID log
    */
   async loadDIDLog(logPath: string): Promise<DIDLog> {
+    const { fs } = await loadNodeModules();
     const content = await fs.promises.readFile(logPath, 'utf8');
     const lines = content.trim().split('\n');
     return lines.map(line => JSON.parse(line) as DIDLogEntry);

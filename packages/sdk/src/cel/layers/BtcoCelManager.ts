@@ -298,7 +298,7 @@ export class BtcoCelManager {
             },
           ],
         };
-        return Buffer.from(JSON.stringify(btcoDoc));
+        return new TextEncoder().encode(JSON.stringify(btcoDoc));
       },
       'application/did+json',
       this.config.feeRate,

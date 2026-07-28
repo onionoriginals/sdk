@@ -20,6 +20,16 @@
       "default": "./dist/index.js"
     },
     "./package.json": "./package.json",
+    "./cel": {
+      "types": "./dist/cel/index.d.ts",
+      "import": "./dist/cel/index.js",
+      "default": "./dist/cel/index.js"
+    },
+    "./cel/*": {
+      "types": "./dist/cel/*.d.ts",
+      "import": "./dist/cel/*.js",
+      "default": "./dist/cel/*.js"
+    },
     "./core/*": {
       "types": "./dist/core/*.d.ts",
       "import": "./dist/core/*.js",
@@ -126,6 +136,7 @@
     "bitcoinjs-lib": "^6.1.0",
     "cborg": "^5.1.6",
     "didwebvh-ts": "^2.8.0",
+    "fflate": "^0.8.3",
     "jsonld": "^8.3.3",
     "micro-ordinals": "^0.2.2",
     "uuid": "^14.0.1"

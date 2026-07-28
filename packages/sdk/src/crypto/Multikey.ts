@@ -1,4 +1,5 @@
 import { base58 } from '@scure/base';
+import { base64url } from '../utils/encoding.js';
 
 // Multicodec headers (varint encodings of the registry codes) for supported
 // key types. Private-key codes: ed25519-priv 0x1300, secp256k1-priv 0x1301,
@@ -159,8 +160,8 @@ export const multikey = {
     return 'z' + base58.encode(mcBytes);
   },
 
-  encodeMultibase: (data: Uint8Array | Buffer): string => {
-    return 'z' + base58.encode(data instanceof Buffer ? new Uint8Array(data) : data);
+  encodeMultibase: (data: Uint8Array): string => {
+    return 'z' + base58.encode(data);
   },
 
   decodeMultibase: (encoded: string): Uint8Array => {
@@ -176,8 +177,8 @@ export const multikey = {
       return base58.decode(encoded.slice(1));
     }
     if (encoded[0] === 'u') {
-      // Validate before decoding. `Buffer.from(..., 'base64url')` silently drops
-      // invalid characters (e.g. "@@@" -> empty buffer) instead of throwing, so
+      // Validate before decoding: lenient base64url decoders silently drop
+      // invalid characters (e.g. "@@@" -> empty result) instead of throwing, so
       // malformed input would otherwise be accepted as an empty result — unlike
       // the base58 branch, which throws. Reject anything that is not non-empty
       // unpadded base64url.
@@ -185,7 +186,7 @@ export const multikey = {
       if (!/^[A-Za-z0-9_-]+$/.test(payload)) {
         throw new Error('Invalid Multibase encoding: malformed u-base64url payload');
       }
-      return new Uint8Array(Buffer.from(payload, 'base64url'));
+      return base64url.decode(payload);
     }
     throw new Error('Invalid Multibase encoding: only z-base58btc and u-base64url are supported');
   },

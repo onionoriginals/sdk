@@ -16,6 +16,7 @@
  */
 import type { EventLog } from './types.js';
 import { decodeDigestMultibase } from './hash.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 
 export interface ResourceHead {
   /** Logical resource id (may be '' for legacy id-less genesis). */
@@ -64,7 +65,7 @@ export function mostRecentResourceHead(log: EventLog): ResourceHead | undefined 
   if (typeof first.digestMultibase !== 'string') return undefined;
   let hash: string;
   try {
-    hash = Buffer.from(decodeDigestMultibase(first.digestMultibase)).toString('hex');
+    hash = bytesToHex(decodeDigestMultibase(first.digestMultibase));
   } catch {
     return undefined;
   }

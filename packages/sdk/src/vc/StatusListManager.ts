@@ -4,7 +4,8 @@ import {
   BitstringStatusListSubject,
   StatusPurpose,
 } from '../types/index.js';
-import { gzipSync, gunzipSync } from 'node:zlib';
+import { gzipBytes, boundedGunzip } from './utils/bounded-decompress.js';
+import { base64url } from '../utils/encoding.js';
 
 /**
  * Options for creating a new status list.
@@ -375,10 +376,8 @@ export class StatusListManager {
    * Format: 'u' (multibase base64url) prefix + base64url(gzip(bitstring))
    */
   static encodeBitstring(bitstring: Uint8Array): string {
-    const compressed = gzipSync(Buffer.from(bitstring));
-    const base64url = Buffer.from(compressed)
-      .toString('base64url');
-    return 'u' + base64url;
+    const compressed = gzipBytes(bitstring);
+    return 'u' + base64url.encode(compressed);
   }
 
   /**
@@ -394,11 +393,9 @@ export class StatusListManager {
         'Invalid encoded bitstring: must start with multibase base64url prefix "u"'
       );
     }
-    const compressed = Buffer.from(encoded.slice(1), 'base64url');
+    const compressed = base64url.decode(encoded.slice(1));
     try {
-      return new Uint8Array(
-        gunzipSync(compressed, { maxOutputLength: MAX_DECOMPRESSED_BITSTRING_BYTES })
-      );
+      return boundedGunzip(compressed, MAX_DECOMPRESSED_BITSTRING_BYTES);
     } catch (err) {
       throw new Error(
         `Invalid encoded bitstring: decompression failed or exceeded the ${MAX_DECOMPRESSED_BITSTRING_BYTES}-byte limit: ${
