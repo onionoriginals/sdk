@@ -55,6 +55,21 @@ export interface DemoEvent {
   payload: unknown;
 }
 
+/** One entry of the asset's CEL, narrowed to what the demo renders. */
+export interface CelEntry {
+  type: string;
+  data: Record<string, unknown>;
+  /** Multibase digest of the preceding entry; absent on the genesis event. */
+  previousEvent?: string;
+  proof: Array<{
+    type?: string;
+    cryptosuite?: string;
+    proofPurpose?: string;
+    verificationMethod?: string;
+    proofValue?: string;
+  }>;
+}
+
 export interface DemoAssetState {
   layer: LayerId;
   did: string;
@@ -74,6 +89,12 @@ export interface DemoAssetState {
     content: string;
   };
   credentials: number;
+  /**
+   * The asset's Cryptographic Event Log — the signed, hash-chained record the
+   * provenance above is folded from. Surfaced so the demo can show the actual
+   * chain instead of the SDK's app-level emitter events.
+   */
+  celLog: CelEntry[];
   inscription?: {
     txid: string;
     inscriptionId: string;
@@ -419,6 +440,7 @@ export class DemoEngine {
         ? { id: meta.id, hash: meta.hash, content: meta.content ?? '' }
         : undefined,
       credentials: asset.credentials.length,
+      celLog: celEntries(asset),
       inscription:
         last && last.to === 'did:btco' && last.transactionId
           ? {
@@ -434,6 +456,27 @@ export class DemoEngine {
   }
 }
 
+
+/**
+ * Read the asset's CEL defensively: it is the source of provenance truth, but a
+ * demo panel must never be the thing that breaks a lifecycle step, so an
+ * unexpected shape degrades to an empty chain rather than throwing.
+ */
+function celEntries(asset: unknown): CelEntry[] {
+  const log = (asset as { celLog?: { events?: unknown } }).celLog;
+  const events = log?.events;
+  if (!Array.isArray(events)) return [];
+  return events.map((e) => {
+    const entry = (e ?? {}) as Record<string, unknown>;
+    return {
+      type: typeof entry.type === 'string' ? entry.type : 'unknown',
+      data: (entry.data ?? {}) as Record<string, unknown>,
+      previousEvent:
+        typeof entry.previousEvent === 'string' ? entry.previousEvent : undefined,
+      proof: Array.isArray(entry.proof) ? (entry.proof as CelEntry['proof']) : []
+    };
+  });
+}
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');

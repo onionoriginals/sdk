@@ -141,10 +141,15 @@ export const demo = {
   ],
   eventLog: {
     title: 'Event log',
-    empty: 'Awaiting first event',
-    emptyHint: 'Create an asset and real SDK events stream in here.',
-    emptyUpcoming: ['asset:created', 'asset:migrated', 'credential:issued'],
-    sourceNote: 'Emitted by @originals/sdk in this browser tab'
+    empty: 'Awaiting genesis event',
+    emptyHint: 'Create an asset and its signed event log builds here, entry by entry.',
+    emptyUpcoming: ['create', 'migrate', 'migrate'],
+    sourceNote: 'The asset IS this log — signed by @originals/sdk in this browser tab',
+    /** Each entry commits to the hash of the one before it. */
+    chainLabel: 'previousEvent',
+    genesisLabel: 'genesis · no parent',
+    signedBy: 'signed by',
+    unsigned: 'unsigned'
   },
   inspector: {
     provenanceTab: 'Provenance',
