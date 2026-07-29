@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { demo } from '../content';
-import type { DemoAssetState, DemoEngine, DemoEvent } from '../sdk/engine';
+import type { DemoAssetState, DemoEngine } from '../sdk/engine';
 import { engineIdentity } from '../sdk/engine';
 import { btcTestnetEnabled } from '../sdk/testnet-flag';
 import { useAuth } from '../auth/useAuth';
 import { generateArtwork } from '../sdk/artwork';
 import { getArtSeed, setArtSeed } from '../sdk/artwork-sync';
+import { CelChain } from './CelChain';
 import { Pipeline } from './Pipeline';
 import { Reveal } from './Reveal';
 import './demo.css';
@@ -27,16 +28,6 @@ const phaseToStep: Record<Phase, number> = {
   published: 2,
   inscribing: 2,
   inscribed: 3
-};
-
-const eventColors: Record<string, string> = {
-  'asset:created': 'var(--cel)',
-  'did:webvh:created': 'var(--webvh)',
-  'resource:published': 'var(--webvh)',
-  'did:webvh:resolved': 'var(--webvh)',
-  'asset:migrated': 'var(--webvh)',
-  'credential:issued': 'var(--ok)',
-  'asset:inscribed': 'var(--btco)'
 };
 
 function useEngine(authed: boolean, subOrgId?: string) {
@@ -84,13 +75,11 @@ export function Demo() {
   useEffect(() => {
     setArtSeed({ title: title.trim() || demo.form.defaultTitle, medium, nonce });
   }, [title, medium, nonce]);
-  const [events, setEvents] = useState<DemoEvent[]>([]);
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'events' | 'provenance' | 'resource'>('events');
   const { getEngine, discardEngine } = useEngine(isAuthenticated, user?.subOrgId);
-  const logRef = useRef<HTMLOListElement>(null);
-  const unsubscribe = useRef<(() => void) | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
   // Preload the SDK chunk when the demo scrolls near the viewport, so the
   // first click is instant but first paint stays light.
@@ -111,14 +100,12 @@ export function Demo() {
     return () => io.disconnect();
   }, [getEngine]);
 
+  const celLog = asset?.celLog ?? [];
+
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events]);
-
-  // Detach the engine listener if the component ever unmounts (e.g. under
-  // client-side routing), so no state updates target an unmounted tree.
-  useEffect(() => () => unsubscribe.current?.(), []);
+  }, [celLog.length]);
 
   const run = async (
     from: Phase,
@@ -130,12 +117,6 @@ export function Demo() {
     setPhase(working);
     try {
       const engine = await getEngine();
-      if (from === 'idle') {
-        unsubscribe.current?.();
-        unsubscribe.current = engine.on((event) =>
-          setEvents((prev) => [...prev, event])
-        );
-      }
       const state = await action(engine);
       setAsset(state);
       setPhase(done);
@@ -180,10 +161,7 @@ export function Demo() {
     });
 
   const reset = () => {
-    unsubscribe.current?.();
-    unsubscribe.current = null;
     setPhase('idle');
-    setEvents([]);
     setAsset(null);
     setError(null);
     setTab('events');
@@ -428,7 +406,9 @@ export function Demo() {
                     onClick={() => setTab('events')}
                   >
                     {demo.eventLog.title}
-                    {events.length > 0 && <span className="demo-tab-count">{events.length}</span>}
+                    {celLog.length > 0 && (
+                      <span className="demo-tab-count">{celLog.length}</span>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -450,7 +430,7 @@ export function Demo() {
 
                 {tab === 'events' && (
                   <div className="demo-log-wrap">
-                    {events.length === 0 ? (
+                    {celLog.length === 0 ? (
                       <div className="demo-log-zero">
                         <p className="demo-log-zero-title">
                           <span className="demo-log-cursor" aria-hidden="true" />
@@ -467,26 +447,9 @@ export function Demo() {
                         </ul>
                       </div>
                     ) : (
-                      <>
-                        <ol className="demo-log" ref={logRef} aria-live="polite">
-                          {events.map((event, i) => (
-                            <li key={i} className="demo-log-row">
-                              <span
-                                className="demo-log-dot"
-                                style={{ background: eventColors[event.type] ?? 'var(--text-tertiary)' }}
-                              />
-                              <div>
-                                <div className="demo-log-meta">
-                                  <code>{event.type}</code>
-                                  <time>{event.at.slice(11, 23)}</time>
-                                </div>
-                                <p>{event.summary}</p>
-                              </div>
-                            </li>
-                          ))}
-                        </ol>
-                        <p className="demo-log-source">{demo.eventLog.sourceNote}</p>
-                      </>
+                      <div className="cel-chain-scroll" ref={logRef}>
+                        <CelChain entries={celLog} />
+                      </div>
                     )}
                   </div>
                 )}
