@@ -616,3 +616,160 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ——— Cryptographic event log ———
+   Replaces the old emitter-event list. The visual job here is to make the
+   CHAIN legible: each entry carries the digest of its parent, so the link is
+   drawn between entries rather than inside them. */
+
+.cel-chain-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.cel-chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cel-entry-body {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+}
+
+/* Sequence number doubles as the chain's spine: the link rail below aligns to
+   its centre, so the thread reads as continuous. */
+.cel-entry-index {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.cel-entry-main {
+  min-width: 0;
+  flex: 1;
+  padding-bottom: var(--sp-1);
+}
+
+.cel-entry-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.cel-entry-type {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.cel-entry-genesis {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.cel-entry-summary {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.cel-entry-proof {
+  margin-top: var(--sp-2);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.cel-entry-proof code {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.cel-proof-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.cel-proof-value {
+  padding: 1px var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-overlay);
+}
+
+.cel-entry-unsigned {
+  color: var(--warn, var(--text-tertiary));
+}
+
+/* The link belongs BETWEEN entries — it is entry N's claim about entry N-1. */
+.cel-link {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+}
+
+.cel-link-rail {
+  flex: none;
+  width: 22px;
+  display: flex;
+  justify-content: center;
+}
+
+.cel-link-rail::before {
+  content: '';
+  width: 1px;
+  height: 20px;
+  background: linear-gradient(
+    to bottom,
+    var(--border-strong),
+    var(--border-strong) 60%,
+    transparent
+  );
+}
+
+.cel-link-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.cel-link-label code {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  padding: 1px var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-overlay);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cel-entry {
+    animation: cel-entry-in 260ms ease-out both;
+  }
+}
+
+@keyframes cel-entry-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
