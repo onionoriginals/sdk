@@ -37,6 +37,10 @@ describe('bounded decompression (gzip bomb defence)', () => {
     expect(() => boundedGunzip(justOver, MAX)).toThrow(/exceeded/i);
   });
 
+  // Creating a 400 MB gzip bomb takes ~5 s even in isolation; under parallel
+  // test load it can exceed Bun's default 5 s per-test timeout.  The large
+  // timeout here covers only the setup step — the actual gunzip call is still
+  // required to finish in < 300 ms by the assertion below.
   test('stops decompressing on overflow rather than only dropping output', () => {
     // Bounding memory is not enough: fflate inflates an entire push() before
     // returning, so feeding the whole payload at once burns the full CPU cost of
@@ -51,7 +55,7 @@ describe('bounded decompression (gzip bomb defence)', () => {
     // Generous bound (full inflate is ~900ms on CI-class hardware): this fails
     // loudly if someone reverts to a single push, without being flaky.
     expect(elapsed).toBeLessThan(300);
-  });
+  }, 15_000);
 
   test('rejects truncated and garbage input instead of returning partial data', () => {
     const valid = gzipBytes(new Uint8Array(1000).fill(1));
