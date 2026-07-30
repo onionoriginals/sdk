@@ -3,7 +3,8 @@ import { gzipSync as nodeGzip, gunzipSync as nodeGunzip, deflateSync as nodeDefl
 import {
   gzipBytes,
   boundedGunzip,
-  boundedUnzlib
+  boundedUnzlib,
+  INPUT_SLICE_BYTES
 } from '../../src/vc/utils/bounded-decompress';
 import { BitstringStatusList } from '../../src/vc/BitstringStatusList';
 import { StatusListManager } from '../../src/vc/StatusListManager';
@@ -38,6 +39,11 @@ describe('bounded decompression (gzip bomb defence)', () => {
   });
 
   test('stops decompressing on overflow rather than only dropping output', () => {
+    // Hardware-independent guard: if INPUT_SLICE_BYTES is removed or inflated to a
+    // large value the timing assertion below won't catch it on faster machines.
+    // Pin it here so removing slicing is a deterministic failure on any hardware.
+    expect(INPUT_SLICE_BYTES).toBeLessThanOrEqual(16384);
+
     // Bounding memory is not enough: fflate inflates an entire push() before
     // returning, so feeding the whole payload at once burns the full CPU cost of
     // a bomb even though the bytes are discarded. Input is sliced so the budget

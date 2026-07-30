@@ -19,7 +19,7 @@ type StreamCtor = typeof Gunzip | typeof Unzlib;
  * of a bomb before the budget could stop it — the point is to bound work, not
  * just memory. Measured on a 400 MB bomb: ~920ms in one push vs ~12ms sliced.
  */
-const INPUT_SLICE_BYTES = 4096;
+export const INPUT_SLICE_BYTES = 4096;
 
 /**
  * Decompress with a hard output budget, bounding both memory and CPU.
