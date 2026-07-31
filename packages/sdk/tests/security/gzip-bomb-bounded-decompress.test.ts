@@ -53,10 +53,12 @@ describe('bounded decompression (gzip bomb defence)', () => {
     expect(() => boundedGunzip(bomb, MAX)).toThrow(/exceeded/i);
     const elapsed = performance.now() - started;
 
-    // 2000ms is well below the unsliced baseline (~8800ms) so a regression to a
-    // single push() still trips this assertion, and well above the sliced baseline
-    // (~53ms) so the test survives full-suite concurrent load without being flaky.
-    expect(elapsed).toBeLessThan(2000);
+    // 750ms sits between the sliced baseline (~53ms on CI hardware, ~12ms on a
+    // developer laptop) and the unsliced baseline (~920ms on a developer laptop,
+    // ~8800ms on CI hardware). A regression to a single push() fails on any
+    // reasonably fast machine, while the sliced path has headroom to survive
+    // full-suite concurrent load without being flaky.
+    expect(elapsed).toBeLessThan(750);
   }, 60_000);
 
   test('rejects truncated and garbage input instead of returning partial data', () => {
