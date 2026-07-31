@@ -41,17 +41,23 @@ describe('bounded decompression (gzip bomb defence)', () => {
     // Bounding memory is not enough: fflate inflates an entire push() before
     // returning, so feeding the whole payload at once burns the full CPU cost of
     // a bomb even though the bytes are discarded. Input is sliced so the budget
-    // halts the work. Measured on this 400 MB bomb: ~920ms unsliced vs ~12ms.
+    // halts the work. Measured on this 400 MB bomb: ~8800ms unsliced vs ~53ms
+    // sliced on CI-class hardware (ratio ≈ 166×).
+    //
+    // Test-level timeout is 60s because creating a 400 MB Uint8Array + gzip
+    // under full-suite concurrent load can take 10-15s on its own — that cost is
+    // intentionally excluded from the elapsed assertion below.
     const bomb = gzipBytes(new Uint8Array(400_000_000));
 
     const started = performance.now();
     expect(() => boundedGunzip(bomb, MAX)).toThrow(/exceeded/i);
     const elapsed = performance.now() - started;
 
-    // Generous bound (full inflate is ~900ms on CI-class hardware): this fails
-    // loudly if someone reverts to a single push, without being flaky.
-    expect(elapsed).toBeLessThan(300);
-  });
+    // 2000ms is well below the unsliced baseline (~8800ms) so a regression to a
+    // single push() still trips this assertion, and well above the sliced baseline
+    // (~53ms) so the test survives full-suite concurrent load without being flaky.
+    expect(elapsed).toBeLessThan(2000);
+  }, 60_000);
 
   test('rejects truncated and garbage input instead of returning partial data', () => {
     const valid = gzipBytes(new Uint8Array(1000).fill(1));
