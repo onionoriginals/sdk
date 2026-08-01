@@ -115,3 +115,6 @@ playwright/.cache/
 
 # Durable Originals store (dev default; prod uses a Railway volume at ORIGINALS_DATA_DIR)
 .originals-data/
+
+# Local agent/skill configuration — keep out of the public tree (#381).
+docs/agents/
