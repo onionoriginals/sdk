@@ -991,16 +991,36 @@ const result = await sdk.credentials.verifyCredentialChain(credentials);
 
 ### BBS+ Selective Disclosure
 
+Both calls REQUIRE a BBS+ base proof — they throw rather than silently
+returning an unredacted credential.
+
+The SDK does not generate BLS12-381 keys yet (`KeyManager` covers ES256K /
+Ed25519 / ES256), so bring your own:
+
 ```typescript
-// Prepare for selective disclosure
-const prepared = await sdk.credentials.prepareSelectiveDisclosure(credential, {
-  mandatoryPointers: ['/credentialSubject/id'],
-  selectivePointers: ['/credentialSubject/name', '/credentialSubject/email']
+import * as bbs from '@digitalbazaar/bbs-signatures';
+import { multikey } from '@originals/sdk';
+
+const { secretKey, publicKey } = await bbs.generateKeyPair({
+  ciphersuite: 'BLS12-381-SHA-256'
 });
 
-// Create derived proof
+// Publish the public key in the issuer's DID document so verifiers can resolve it.
+const publicKeyMultibase = multikey.encodePublicKey(publicKey, 'Bls12381G2');
+
+// 1. Issuer: sign a base proof. Without privateKey this throws BBS_KEY_REQUIRED.
+const prepared = await sdk.credentials.prepareSelectiveDisclosure(credential, {
+  mandatoryPointers: ['/credentialSubject/id'],
+  selectivePointers: ['/credentialSubject/name', '/credentialSubject/email'],
+  privateKey: secretKey,
+  publicKey,
+  verificationMethod: 'did:webvh:example.com:issuer#bbs-key-0'
+});
+
+// 2. Holder: derive a proof revealing only some fields. Deriving from a
+//    credential with no bbs-2023 proof throws BBS_BASE_PROOF_REQUIRED.
 const derived = await sdk.credentials.deriveSelectiveProof(
-  credential,
+  prepared.credential,
   ['/credentialSubject/id', '/credentialSubject/name']
 );
 // { credential, disclosedFields, hiddenFields }
@@ -1008,6 +1028,9 @@ const derived = await sdk.credentials.deriveSelectiveProof(
 // Get field by JSON Pointer
 const value = sdk.credentials.getFieldByPointer(credential, '/credentialSubject/name');
 ```
+
+Mandatory pointers are always revealed in every derived proof — that is what
+makes them usable as a stable identifier for the disclosure.
 
 ---
 

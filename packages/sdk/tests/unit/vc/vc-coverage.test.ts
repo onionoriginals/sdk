@@ -458,7 +458,7 @@ describe('VC-008/error – corporate policy with unassigned mandatory role is re
 
 // ─── VC-010 ──────────────────────────────────────────────────────────────────
 
-describe('VC-010/happy – prepareSelectiveDisclosure with mandatory + selective pointers', () => {
+describe('VC-010 – prepareSelectiveDisclosure requires a BBS+ key', () => {
   const cm = new CredentialManager(config);
 
   const credential: VerifiableCredential = {
@@ -474,27 +474,26 @@ describe('VC-010/happy – prepareSelectiveDisclosure with mandatory + selective
     },
   };
 
-  test('returns credential and pointer arrays without BBS+ key (metadata-only mode)', async () => {
-    const result = await cm.prepareSelectiveDisclosure(credential, {
-      mandatoryPointers: ['/issuer', '/issuanceDate', '/credentialSubject/id'],
-      selectivePointers: ['/credentialSubject/name', '/credentialSubject/age'],
-    });
-
-    expect(result.credential).toBeDefined();
-    expect(result.mandatoryPointers).toContain('/issuer');
-    expect(result.mandatoryPointers).toContain('/issuanceDate');
-    expect(result.mandatoryPointers).toContain('/credentialSubject/id');
-    expect(result.selectivePointers).toContain('/credentialSubject/name');
-    expect(result.selectivePointers).toContain('/credentialSubject/age');
-    // email is neither mandatory nor selective — not in selectivePointers
-    expect(result.selectivePointers).not.toContain('/credentialSubject/email');
+  // This described a "metadata-only mode": pointer arrays returned, no proof
+  // created. It read as success, so callers shipped credentials that could
+  // never be selectively disclosed — including the example in the LLM guide.
+  test('throws instead of returning a metadata-only result', async () => {
+    await expect(
+      cm.prepareSelectiveDisclosure(credential, {
+        mandatoryPointers: ['/issuer', '/issuanceDate', '/credentialSubject/id'],
+        selectivePointers: ['/credentialSubject/name', '/credentialSubject/age'],
+      })
+    ).rejects.toThrow(/BBS\+ key pair|privateKey/);
   });
 
-  test('works when selectivePointers is omitted (defaults to empty array)', async () => {
-    const result = await cm.prepareSelectiveDisclosure(credential, {
-      mandatoryPointers: ['/issuer'],
-    });
-    expect(result.selectivePointers).toHaveLength(0);
+  test('pointer validation still runs before the key check', async () => {
+    // Ordering matters: a caller with both problems should hear about the
+    // malformed pointer, which is the one they can see in their own code.
+    await expect(
+      cm.prepareSelectiveDisclosure(credential, {
+        mandatoryPointers: ['issuer'],
+      })
+    ).rejects.toThrow(/Invalid JSON Pointer/);
   });
 });
 
@@ -528,10 +527,10 @@ describe('VC-010/invalid-input – invalid JSON Pointer in selective or mandator
 
 // ─── VC-011 ──────────────────────────────────────────────────────────────────
 
-describe('VC-011/happy – deriveSelectiveProof (fallback without real BBS+ base proof)', () => {
-  // NOTE: BbsSimple.sign/createProof is not yet implemented (throws "not implemented").
-  // The fallback path in deriveSelectiveProof is exercised when the credential
-  // lacks a bbs-2023 proof — it returns the credential unchanged with field lists.
+describe('VC-011 – deriveSelectiveProof refuses a credential with no BBS+ base proof', () => {
+  // This used to assert the fallback: the credential returned UNCHANGED while
+  // hiddenFields claimed /credentialSubject/email was withheld. That is a
+  // fail-open disclosure bug, so the fallback now throws instead.
   const cm = new CredentialManager(config);
 
   const credential: VerifiableCredential = {
@@ -546,24 +545,16 @@ describe('VC-011/happy – deriveSelectiveProof (fallback without real BBS+ base
     },
   };
 
-  test('disclosedFields matches the provided pointer list', async () => {
-    const result = await cm.deriveSelectiveProof(credential, [
-      '/issuer',
-      '/credentialSubject/name',
-    ]);
-
-    expect(result.disclosedFields).toContain('/issuer');
-    expect(result.disclosedFields).toContain('/credentialSubject/name');
-    expect(result.hiddenFields).toContain('/credentialSubject/email');
-    expect(result.credential).toBeDefined();
+  test('throws rather than returning every field while reporting some as hidden', async () => {
+    await expect(
+      cm.deriveSelectiveProof(credential, ['/issuer', '/credentialSubject/name'])
+    ).rejects.toThrow(/bbs-2023 base proof/);
   });
 
-  test('hiddenFields and disclosedFields are disjoint', async () => {
-    const result = await cm.deriveSelectiveProof(credential, ['/issuer']);
-    const disclosedSet = new Set(result.disclosedFields);
-    for (const f of result.hiddenFields) {
-      expect(disclosedSet.has(f)).toBe(false);
-    }
+  test('the error names what is missing so the caller knows the fix', async () => {
+    await expect(
+      cm.deriveSelectiveProof(credential, ['/issuer'])
+    ).rejects.toThrow(/prepareSelectiveDisclosure/);
   });
 
   test('throws "Invalid JSON Pointer" for field path without leading slash', async () => {
@@ -573,7 +564,7 @@ describe('VC-011/happy – deriveSelectiveProof (fallback without real BBS+ base
   });
 });
 
-describe('VC-011/boundary – deriveSelectiveProof with only mandatory fields (empty selective)', () => {
+describe('VC-011/boundary – deriveSelectiveProof rejects unsigned credentials at every disclosure size', () => {
   const cm = new CredentialManager(config);
 
   const credential: VerifiableCredential = {
@@ -584,13 +575,15 @@ describe('VC-011/boundary – deriveSelectiveProof with only mandatory fields (e
     credentialSubject: { id: 'did:peer:subject', name: 'Alice' },
   };
 
-  test('empty disclosure list → zero disclosedFields, all fields in hiddenFields', async () => {
-    const result = await cm.deriveSelectiveProof(credential, []);
-    expect(result.disclosedFields).toHaveLength(0);
-    expect(result.hiddenFields.length).toBeGreaterThan(0);
+  // The empty list was the worst case of the old fallback: it reported EVERY
+  // field as hidden while returning all of them.
+  test('empty disclosure list throws rather than reporting every field as hidden', async () => {
+    await expect(cm.deriveSelectiveProof(credential, [])).rejects.toThrow(
+      /bbs-2023 base proof/
+    );
   });
 
-  test('disclosing all top-level paths → none appear in hiddenFields', async () => {
+  test('disclosing every path throws too — the credential is still unsigned', async () => {
     const allPaths = [
       '/@context',
       '/type',
@@ -600,11 +593,9 @@ describe('VC-011/boundary – deriveSelectiveProof with only mandatory fields (e
       '/credentialSubject/id',
       '/credentialSubject/name',
     ];
-    const result = await cm.deriveSelectiveProof(credential, allPaths);
-    const hiddenSet = new Set(result.hiddenFields);
-    for (const p of allPaths) {
-      expect(hiddenSet.has(p)).toBe(false);
-    }
+    await expect(cm.deriveSelectiveProof(credential, allPaths)).rejects.toThrow(
+      /bbs-2023 base proof/
+    );
   });
 });
 

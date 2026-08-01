@@ -27,6 +27,7 @@ import { Verifier, checkCredentialValidityPeriod } from './Verifier.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
 import { MultiSigManager } from './MultiSigManager.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
+import { StructuredError } from '../utils/telemetry.js';
 
 // ===== Credential Factory Types =====
 
@@ -1124,12 +1125,13 @@ export class CredentialManager {
       };
     }
 
-    // Fallback: return credential with metadata only (no BBS+ key provided)
-    return {
-      credential: { ...credential },
-      mandatoryPointers: options.mandatoryPointers,
-      selectivePointers,
-    };
+    // No key ⇒ no proof can be made. Previously this returned the credential
+    // untouched with the pointer lists attached, which looked like success and
+    // silently produced a credential that could never be selectively disclosed.
+    throw new StructuredError(
+      'BBS_KEY_REQUIRED',
+      'prepareSelectiveDisclosure requires a BBS+ key pair: pass `privateKey` (and `publicKey`) so a bbs-2023 base proof can be created. Without one there is nothing to derive a disclosure from. Generate a key with @digitalbazaar/bbs-signatures `generateKeyPair({ ciphersuite })`.'
+    );
   }
 
   /**
@@ -1155,9 +1157,11 @@ export class CredentialManager {
       }
     }
 
+    // Field paths of the ORIGINAL credential; the BBS branch subtracts what the
+    // derived proof actually reveals to report hiddenFields. (The removed
+    // fallback instead computed them from the caller's request and reported
+    // them against an unmodified credential.)
     const allFields = this.extractFieldPaths(credential as unknown as Record<string, unknown>);
-    const disclosedSet = new Set(fieldsToDisclose);
-    const hiddenFields = allFields.filter(f => !disclosedSet.has(f));
 
     // If the credential has a BBS+ proof, derive a real selective disclosure proof
     const proof = credential.proof as any;
@@ -1192,12 +1196,16 @@ export class CredentialManager {
       };
     }
 
-    // Fallback for non-BBS+ credentials
-    return {
-      credential: { ...credential },
-      disclosedFields: fieldsToDisclose,
-      hiddenFields,
-    };
+    // A credential without a bbs-2023 base proof cannot be redacted in any way a
+    // verifier would accept. This previously returned the credential UNCHANGED
+    // while reporting `hiddenFields` — so a caller who trusted that report and
+    // forwarded the credential disclosed every field it claimed to withhold.
+    throw new StructuredError(
+      'BBS_BASE_PROOF_REQUIRED',
+      `Cannot derive a selective disclosure: this credential has no bbs-2023 base proof (found ${
+        (credential.proof as { cryptosuite?: string } | undefined)?.cryptosuite ?? 'no proof'
+      }). Call prepareSelectiveDisclosure with a BBS+ key pair first — deriving from an unsigned credential would return every field while reporting some as hidden.`
+    );
   }
 
   /**
