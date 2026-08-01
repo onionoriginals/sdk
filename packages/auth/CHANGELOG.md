@@ -1,5 +1,12 @@
 # @originals/auth
 
+## 2.0.1
+
+### Patch Changes
+
+- Updated dependencies [18fb3bf]
+  - @originals/sdk@3.0.0
+
 ## 2.0.0
 
 Initial published release. Version 2.0.0 was tagged internally but never published to npm, so all changes accumulated during the pre-release stabilization effort ship as part of this initial 2.0.0 release. The consumed changesets are consolidated below.
@@ -22,6 +29,7 @@ Initial published release. Version 2.0.0 was tagged internally but never publish
   The SDK release also includes opt-in `did:webvh` pre-rotation key support
   (`createDIDWebVH`/`rotateDIDWebVHKeys` `prerotation` option, returned
   `nextKeyPair`), with guards that reject misuse on pre-rotation chains.
+
 - 5981ec2: Migrate the OTP verification flow to the Turnkey v6 encrypted-bundle API (`@turnkey/sdk-server` 5.3.0 → 6.1.1, new dependency `@turnkey/crypto`).
 
   Turnkey v6 replaced plaintext OTP verification: `initOtp` (ACTIVITY_TYPE_INIT_OTP_V3) now returns an `otpEncryptionTargetBundle` (a signed bundle containing a target encryption key), and `verifyOtp` (ACTIVITY_TYPE_VERIFY_OTP_V2) requires an `encryptedOtpBundle` — the OTP code plus a client-generated P-256 public key, HPKE-encrypted to that target key — instead of the previous plaintext `otpCode` field. The previous release preserved the pre-v6 plaintext call shape behind a type cast, which type-checked but could not succeed against the real Turnkey v6 API.
