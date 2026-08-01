@@ -350,7 +350,7 @@ describe('CredentialManager - Selective Disclosure', () => {
   const credentialManager = new CredentialManager(config);
 
   describe('prepareSelectiveDisclosure', () => {
-    test('prepares credential with mandatory pointers', async () => {
+    test('refuses to prepare without a BBS+ key instead of silently producing no proof', async () => {
       const credential: VerifiableCredential = {
         '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential'],
@@ -364,15 +364,15 @@ describe('CredentialManager - Selective Disclosure', () => {
         }
       };
       
-      const result = await credentialManager.prepareSelectiveDisclosure(credential, {
-        mandatoryPointers: ['/issuer', '/issuanceDate', '/credentialSubject/id'],
-        selectivePointers: ['/credentialSubject/name', '/credentialSubject/age']
-      });
-      
-      expect(result.credential).toBeDefined();
-      expect(result.mandatoryPointers).toContain('/issuer');
-      expect(result.mandatoryPointers).toContain('/issuanceDate');
-      expect(result.selectivePointers).toContain('/credentialSubject/name');
+      // Previously this resolved with the credential untouched and the pointer
+      // lists attached, which read as success while producing nothing that could
+      // ever be selectively disclosed.
+      await expect(
+        credentialManager.prepareSelectiveDisclosure(credential, {
+          mandatoryPointers: ['/issuer', '/issuanceDate', '/credentialSubject/id'],
+          selectivePointers: ['/credentialSubject/name', '/credentialSubject/age']
+        })
+      ).rejects.toThrow(/BBS\+ key pair|privateKey/);
     });
 
     test('throws error for empty mandatory pointers', async () => {
@@ -409,7 +409,7 @@ describe('CredentialManager - Selective Disclosure', () => {
   });
 
   describe('deriveSelectiveProof', () => {
-    test('creates derived proof result with disclosed/hidden fields', async () => {
+    test('refuses to derive from a credential with no BBS+ base proof', async () => {
       const credential: VerifiableCredential = {
         '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential'],
@@ -422,15 +422,12 @@ describe('CredentialManager - Selective Disclosure', () => {
         }
       };
       
-      const result = await credentialManager.deriveSelectiveProof(
-        credential,
-        ['/issuer', '/credentialSubject/name']
-      );
-      
-      expect(result.credential).toBeDefined();
-      expect(result.disclosedFields).toContain('/issuer');
-      expect(result.disclosedFields).toContain('/credentialSubject/name');
-      expect(result.hiddenFields).toContain('/credentialSubject/email');
+      // Previously this resolved with the FULL credential while reporting
+      // /credentialSubject/email as hidden — a caller trusting that report and
+      // forwarding the credential disclosed the very field it withheld.
+      await expect(
+        credentialManager.deriveSelectiveProof(credential, ['/issuer', '/credentialSubject/name'])
+      ).rejects.toThrow(/bbs-2023 base proof/);
     });
 
     test('throws error for invalid JSON Pointer in disclosure', async () => {
