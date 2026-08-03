@@ -134,7 +134,7 @@
     "@scure/btc-signer": "^2.2.0",
     "b58": "^4.0.3",
     "bitcoinjs-lib": "^6.1.0",
-    "cborg": "^5.1.6",
+    "cborg": "^6.1.1",
     "didwebvh-ts": "^2.8.0",
     "fflate": "^0.8.3",
     "jsonld": "^8.3.3",
