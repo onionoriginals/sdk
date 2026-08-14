@@ -4,17 +4,20 @@ import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { computeDigestMultibase } from '../../../src/cel/hash';
 import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
 import type { DataIntegrityProof } from '../../../src/cel/types';
+import { createRealCelSigner } from '../../fixtures/celSigner';
 
+const realSigner = createRealCelSigner();
 const signedPayloads: unknown[] = [];
+// Records what was handed to the signer, then signs it for real.
 const signer = async (data: unknown): Promise<DataIntegrityProof> => {
   signedPayloads.push(data);
-  return { type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022', created: 'x', verificationMethod: 'did:key:z6Mk#z6Mk', proofPurpose: 'assertionMethod', proofValue: 'zSig' };
+  return realSigner.signer(data);
 };
 
 describe('appendEvent', () => {
   test('appends a typed event with correct chain link and signed payload', async () => {
-    const log = await createEventLog({ name: 'A' }, { signer, verificationMethod: 'did:key:z6Mk#z6Mk' });
-    const out = await appendEvent(log, 'migrate', { sourceDid: 'a', targetDid: 'b', layer: 'webvh', migratedAt: 'x' }, { signer, verificationMethod: 'did:key:z6Mk#z6Mk' });
+    const log = await createEventLog({ name: 'A' }, { signer, verificationMethod: realSigner.verificationMethod });
+    const out = await appendEvent(log, 'migrate', { sourceDid: 'a', targetDid: 'b', layer: 'webvh', migratedAt: 'x' }, { signer, verificationMethod: realSigner.verificationMethod });
     const evt = out.events[1];
     expect(evt.type).toBe('migrate');
     expect(evt.previousEvent).toBe(computeDigestMultibase(canonicalizeEntryForChain(log.events[0])));

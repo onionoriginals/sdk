@@ -8,6 +8,7 @@ import { MultiSigManager } from '../../../src/vc/MultiSigManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import type { VerifiableCredential, OriginalsConfig } from '../../../src/types';
+import { DIDManager } from '../../../src/did/DIDManager';
 
 const keyManager = new KeyManager();
 
@@ -126,14 +127,14 @@ describe('signer selection from key multicodec (issue #261)', () => {
     };
 
     // Issuer signs on an Ed25519-default instance (no didManager -> legacy path)
-    const issuerManager = new CredentialManager({ network: 'regtest', defaultKeyType: 'Ed25519' });
+    const issuerManager = new CredentialManager({ network: 'regtest', defaultKeyType: 'Ed25519' }, new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519' } as never));
     const signed = await issuerManager.signCredential(credential, privateKey, vm);
     expect(signed.proof).toBeDefined();
 
     // Relying party verifies on the DEFAULT config (ES256K). Before the fix the
     // verifier picked ES256KSigner from its own config and rejected the
     // perfectly valid Ed25519 signature.
-    const verifierManager = new CredentialManager({ network: 'regtest', defaultKeyType: 'ES256K' });
+    const verifierManager = new CredentialManager({ network: 'regtest', defaultKeyType: 'ES256K' }, new DIDManager({ network: 'regtest', defaultKeyType: 'ES256K' } as never));
     expect(await verifierManager.verifyCredential(signed)).toBe(true);
   });
 
@@ -151,7 +152,7 @@ describe('signer selection from key multicodec (issue #261)', () => {
     };
 
     // Config says ES256K but the key is Ed25519: signing must follow the key.
-    const manager = new CredentialManager({ network: 'regtest', defaultKeyType: 'ES256K' });
+    const manager = new CredentialManager({ network: 'regtest', defaultKeyType: 'ES256K' }, new DIDManager({ network: 'regtest', defaultKeyType: 'ES256K' } as never));
     const signed = await manager.signCredential(credential, privateKey, vm);
     expect(await manager.verifyCredential(signed)).toBe(true);
   });

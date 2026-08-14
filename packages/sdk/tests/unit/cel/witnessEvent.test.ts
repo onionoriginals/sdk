@@ -7,6 +7,7 @@ import type { DataIntegrityProof, WitnessProof, LogEntry, CreateOptions } from '
 import type { WitnessService } from '../../../src/cel/witnesses/WitnessService';
 import { computeDigestMultibase } from '../../../src/cel/hash';
 import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
+import { createRealCelSigner } from '../../fixtures/celSigner';
 
 /**
  * Witness service that records the digestMultibase it was asked to attest to.
@@ -32,17 +33,9 @@ function createDigestCapturingWitnessService(): WitnessService & { lastDigest?: 
 /**
  * Mock signer that creates a valid DataIntegrityProof structure.
  */
-function createMockSigner(verificationMethod: string) {
-  return async (data: unknown): Promise<DataIntegrityProof> => {
-    return {
-      type: 'DataIntegrityProof',
-      cryptosuite: 'eddsa-jcs-2022',
-      created: new Date().toISOString(),
-      verificationMethod,
-      proofPurpose: 'assertionMethod',
-      proofValue: 'z' + Buffer.from('mock-signature-' + JSON.stringify(data)).toString('base64'),
-    };
-  };
+const realSigner = createRealCelSigner();
+function createMockSigner(_verificationMethod?: string) {
+  return realSigner.signer;
 }
 
 /**
@@ -103,7 +96,7 @@ function createInvalidWitnessService(missingField: 'type' | 'cryptosuite' | 'pro
 }
 
 describe('witnessEvent', () => {
-  const verificationMethod = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+  const verificationMethod = realSigner.verificationMethod;
 
   /**
    * Helper to create a test event log with a single event.

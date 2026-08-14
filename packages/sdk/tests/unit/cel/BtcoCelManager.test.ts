@@ -10,18 +10,13 @@ import { WebVHCelManager } from '../../../src/cel/layers/WebVHCelManager';
 import { PeerCelManager } from '../../../src/cel/layers/PeerCelManager';
 import type { EventLog, DataIntegrityProof, WitnessProof } from '../../../src/cel/types';
 import type { BitcoinManager } from '../../../src/bitcoin/BitcoinManager';
+import { createRealCelSigner } from '../../fixtures/celSigner';
 
-// Mock signer that produces valid proofs
-const createMockSigner = () => {
-  return async (data: unknown): Promise<DataIntegrityProof> => ({
-    type: 'DataIntegrityProof',
-    cryptosuite: 'eddsa-jcs-2022',
-    created: new Date().toISOString(),
-    verificationMethod: 'did:key:z6MkTest123#key-0',
-    proofPurpose: 'assertionMethod',
-    proofValue: 'z' + Buffer.from('mock-signature').toString('base64'),
-  });
-};
+// One real Ed25519 did:key signer shared by every manager in this file: seal-time
+// self-verification (plan 034) rejects unverifiable proofs, and CEL authority
+// requires the same controller across appends.
+const realSigner = createRealCelSigner();
+const createMockSigner = () => realSigner.signer;
 
 // BtcoCelManager now pins the sat first: it inscribes via a buildContent(satoshi)
 // callback (so the migrate body can sign `to: did:btco:<sat>`). A mock inscribeData

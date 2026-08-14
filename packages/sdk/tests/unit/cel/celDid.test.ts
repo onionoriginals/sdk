@@ -9,15 +9,12 @@ import { PeerCelManager } from '../../../src/cel/layers/PeerCelManager';
 import { multikey } from '../../../src/crypto/Multikey';
 import type { DataIntegrityProof } from '../../../src/cel/types';
 import { validateDIDDocument } from '../../../src/utils/validation';
+import { createRealCelSigner } from '../../fixtures/celSigner';
 
-const fakeSigner = async (_data: unknown): Promise<DataIntegrityProof> => ({
-  type: 'DataIntegrityProof',
-  cryptosuite: 'eddsa-jcs-2022',
-  created: '2026-07-10T00:00:00Z',
-  verificationMethod: 'did:key:z6MkfakeSigner#z6MkfakeSigner',
-  proofPurpose: 'assertionMethod',
-  proofValue: 'zFakeSig'
-});
+// Real signer: the did:cel digest excludes the proof (asserted below), so the
+// derived DID stays stable even though the key is freshly generated.
+const realSigner = createRealCelSigner();
+const fakeSigner = realSigner.signer;
 
 async function makeLog() {
   return createEventLog(

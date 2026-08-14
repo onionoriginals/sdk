@@ -2,10 +2,11 @@ import { describe, test, expect } from 'bun:test';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { StatusListManager } from '../../../src/vc/StatusListManager';
 import type { VerifiableCredential, BitstringStatusListEntry } from '../../../src/types';
+import { DIDManager } from '../../../src/did/DIDManager';
 
 describe('CredentialManager - Revocation', () => {
   const config = { network: 'regtest' as const, defaultKeyType: 'Ed25519' as const, enableLogging: false };
-  const credentialManager = new CredentialManager(config);
+  const credentialManager = new CredentialManager(config, new DIDManager(config as never));
   const statusListManager = new StatusListManager();
 
   const issuerDid = 'did:example:issuer';

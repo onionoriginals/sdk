@@ -16,6 +16,7 @@ import { KeyManager } from '../../../src/did/KeyManager';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 import { MockOrdinalsProvider, MockFeeOracle } from '../../mocks/adapters';
 import type { AssetResource, OriginalsConfig } from '../../../src/types';
+import { DIDManager } from '../../../src/did/DIDManager';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -140,7 +141,7 @@ describe('LIFECYCLE-004/happy – registerKey with Ed25519', () => {
     const lm = new LifecycleManager(
       config,
       new DIDManager(config),
-      new CredentialManager(config),
+      new CredentialManager(config, new DIDManager(config as never)),
       undefined,
       keyStore
     );
@@ -167,7 +168,7 @@ describe('LIFECYCLE-004/invalid-input – registerKey invalid VM ID', () => {
     const lm = new LifecycleManager(
       config,
       new DIDManager(config),
-      new CredentialManager(config),
+      new CredentialManager(config, new DIDManager(config as never)),
       undefined,
       keyStore
     );
@@ -402,7 +403,7 @@ describe('LIFECYCLE-010/happy – validateMigration resource integrity', () => {
     const lm = new LifecycleManager(
       config,
       new DIDManager(config),
-      new CredentialManager(config)
+      new CredentialManager(config, new DIDManager(config as never))
     );
 
     // @ts-expect-error – deliberately partial asset for testing validation path

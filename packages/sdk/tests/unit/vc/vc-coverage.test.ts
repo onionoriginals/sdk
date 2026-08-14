@@ -21,6 +21,7 @@ import {
   registerVerificationMethod,
 } from '../../../src/vc/documentLoader';
 import { PRELOADED_CONTEXTS } from '../../../src/utils/serialization';
+import { DIDManager } from '../../../src/did/DIDManager';
 import type {
   VerifiableCredential,
   EscrowPolicy,
@@ -48,7 +49,7 @@ const preloadedLoader = async (url: string) => {
 // ─── VC-001 ──────────────────────────────────────────────────────────────────
 
 describe('VC-001/error – credential with missing issuer fails verification', () => {
-  const cm = new CredentialManager(config);
+  const cm = new CredentialManager(config, new DIDManager(config as never));
 
   test('createResourceCredential stores the issuer as-is (no validation at factory time)', () => {
     const vc = cm.createResourceCredential('ResourceCreated', { id: 'did:peer:s' }, '');
@@ -73,7 +74,7 @@ describe('VC-001/error – credential with missing issuer fails verification', (
 });
 
 describe('VC-001/boundary – very large credentialSubject signs and can be hashed', () => {
-  const cm = new CredentialManager(config);
+  const cm = new CredentialManager(config, new DIDManager(config as never));
 
   test('credential with 500-field subject is created and canonicalized without error', async () => {
     const subject: Record<string, unknown> = { id: 'did:peer:largesubject' };
@@ -459,7 +460,7 @@ describe('VC-008/error – corporate policy with unassigned mandatory role is re
 // ─── VC-010 ──────────────────────────────────────────────────────────────────
 
 describe('VC-010 – prepareSelectiveDisclosure requires a BBS+ key', () => {
-  const cm = new CredentialManager(config);
+  const cm = new CredentialManager(config, new DIDManager(config as never));
 
   const credential: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
@@ -498,7 +499,7 @@ describe('VC-010 – prepareSelectiveDisclosure requires a BBS+ key', () => {
 });
 
 describe('VC-010/invalid-input – invalid JSON Pointer in selective or mandatory pointer list', () => {
-  const cm = new CredentialManager(config);
+  const cm = new CredentialManager(config, new DIDManager(config as never));
   const credential: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1'],
     type: ['VerifiableCredential'],
@@ -531,7 +532,7 @@ describe('VC-011 – deriveSelectiveProof refuses a credential with no BBS+ base
   // This used to assert the fallback: the credential returned UNCHANGED while
   // hiddenFields claimed /credentialSubject/email was withheld. That is a
   // fail-open disclosure bug, so the fallback now throws instead.
-  const cm = new CredentialManager(config);
+  const cm = new CredentialManager(config, new DIDManager(config as never));
 
   const credential: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
@@ -565,7 +566,7 @@ describe('VC-011 – deriveSelectiveProof refuses a credential with no BBS+ base
 });
 
 describe('VC-011/boundary – deriveSelectiveProof rejects unsigned credentials at every disclosure size', () => {
-  const cm = new CredentialManager(config);
+  const cm = new CredentialManager(config, new DIDManager(config as never));
 
   const credential: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1'],
@@ -696,7 +697,7 @@ describe('VC-016/boundary – verifyPresentation with string (non-array) @contex
 // ─── VC-017 ──────────────────────────────────────────────────────────────────
 
 describe('VC-017 – getFieldByPointer', () => {
-  const cm = new CredentialManager(config);
+  const cm = new CredentialManager(config, new DIDManager(config as never));
 
   const credential: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1'],

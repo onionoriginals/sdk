@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { CredentialManager } from '../../src/vc/CredentialManager';
 import type { OriginalsConfig, VerifiableCredential } from '../../src/types';
+import { DIDManager } from '../../src/did/DIDManager';
 
 /**
  * Regression tests for a fail-open selective-disclosure bug.
@@ -32,7 +33,7 @@ const credential: VerifiableCredential = {
 } as unknown as VerifiableCredential;
 
 describe('selective disclosure fails closed', () => {
-  const cm = new CredentialManager(config);
+  const cm = new CredentialManager(config, new DIDManager(config as never));
 
   test('derive on an unsigned credential throws instead of leaking withheld fields', async () => {
     await expect(

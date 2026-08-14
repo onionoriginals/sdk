@@ -12,6 +12,7 @@ import type {
 import { multikey } from '../../../src/crypto/Multikey';
 import { canonicalizeEvent, canonicalizeEntryForChain, witnessSigningBytes } from '../../../src/cel/canonicalize';
 import { computeDigestMultibase, decodeDigestMultibase } from '../../../src/cel/hash';
+import { createRealCelSigner } from '../../fixtures/celSigner';
 
 /**
  * Mock signer that creates a structurally valid DataIntegrityProof.
@@ -20,15 +21,9 @@ import { computeDigestMultibase, decodeDigestMultibase } from '../../../src/cel/
  *   (a) supply a custom verifier, or
  *   (b) expect verified: false (testing chain/structure failures).
  */
-function createMockSigner(verificationMethod: string) {
-  return async (_data: unknown): Promise<DataIntegrityProof> => ({
-    type: 'DataIntegrityProof',
-    cryptosuite: 'eddsa-jcs-2022',
-    created: new Date().toISOString(),
-    verificationMethod,
-    proofPurpose: 'assertionMethod',
-    proofValue: 'z' + 'a'.repeat(86),
-  });
+const realSigner = createRealCelSigner();
+function createMockSigner(_verificationMethod?: string) {
+  return realSigner.signer;
 }
 
 /**

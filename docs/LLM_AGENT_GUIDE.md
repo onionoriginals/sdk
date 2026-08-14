@@ -436,7 +436,7 @@ const btcoDoc = await sdk.did.migrateToDIDBTCO(
 
 ```typescript
 const didDoc = await sdk.did.resolveDID(did: string): Promise<DIDDocument | null>
-// Supports: did:peer:*, did:webvh:*, did:btco:*
+// Supports: did:cel:*, did:webvh:*, did:btco:* (+ legacy did:peer:4 read path)
 ```
 
 ### Validating DID Documents

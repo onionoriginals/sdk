@@ -8,6 +8,7 @@
  */
 
 import type { EventLog, LogEntry, CreateOptions, DataIntegrityProof } from '../types.js';
+import { sealProof } from './sealProof.js';
 
 /**
  * Creates a new event log with a single "create" event.
@@ -44,13 +45,8 @@ export async function createEventLog(
     // Note: First event has no previousEvent
   };
 
-  // Generate proof using the provided signer
-  const proof: DataIntegrityProof = await signer(eventBase);
-
-  // Validate the proof has required fields
-  if (!proof.type || !proof.cryptosuite || !proof.proofValue) {
-    throw new Error('Invalid proof: missing required fields (type, cryptosuite, proofValue)');
-  }
+  // Generate the proof and prove it verifies before sealing it (see sealProof).
+  const proof: DataIntegrityProof = await sealProof(signer, eventBase, options);
 
   // Construct the complete log entry
   const entry: LogEntry = {

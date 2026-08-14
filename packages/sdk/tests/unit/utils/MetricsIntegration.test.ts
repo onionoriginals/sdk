@@ -4,6 +4,7 @@ import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { OriginalsSDK } from '../../../src/core/OriginalsSDK';
 import type { OriginalsConfig } from '../../../src/types';
+import { DIDManager } from '../../../src/did/DIDManager';
 
 const testConfig: OriginalsConfig = {
   network: 'regtest',
@@ -19,7 +20,7 @@ describe('Metrics Integration', () => {
 
     beforeEach(() => {
       metrics = new MetricsCollector();
-      credentialManager = new CredentialManager(testConfig, undefined, metrics);
+      credentialManager = new CredentialManager(testConfig, new DIDManager(testConfig as never), metrics);
     });
 
     test('should track credential signing operation', async () => {
@@ -76,7 +77,7 @@ describe('Metrics Integration', () => {
     });
 
     test('should work without metrics (backward compatible)', () => {
-      const cm = new CredentialManager(testConfig);
+      const cm = new CredentialManager(testConfig, new DIDManager(testConfig as never));
       const credential = cm.createResourceCredential(
         'ResourceCreated',
         { id: 'did:peer:test', resourceId: 'r1', resourceType: 'code' },

@@ -8,6 +8,7 @@ import {
   type VerifiableCredential
 } from '../../../src';
 import { DIDManager } from '../../../src/did/DIDManager';
+import { DIDManager } from '../../../src/did/DIDManager';
 
 const config: any = { 
   network: 'regtest', 
@@ -246,7 +247,7 @@ describe('CredentialManager - Factory Methods', () => {
 });
 
 describe('CredentialManager - Credential Chaining', () => {
-  const credentialManager = new CredentialManager(config);
+  const credentialManager = new CredentialManager(config, new DIDManager(config as never));
 
   describe('computeCredentialHash', () => {
     test('computes consistent hash for same credential', async () => {
@@ -347,7 +348,7 @@ describe('CredentialManager - Credential Chaining', () => {
 });
 
 describe('CredentialManager - Selective Disclosure', () => {
-  const credentialManager = new CredentialManager(config);
+  const credentialManager = new CredentialManager(config, new DIDManager(config as never));
 
   describe('prepareSelectiveDisclosure', () => {
     test('refuses to prepare without a BBS+ key instead of silently producing no proof', async () => {
@@ -490,7 +491,7 @@ describe('CredentialManager - Selective Disclosure', () => {
 });
 
 describe('CredentialManager - Credential ID Generation', () => {
-  const credentialManager = new CredentialManager(config);
+  const credentialManager = new CredentialManager(config, new DIDManager(config as never));
 
   test('generates unique credential IDs', async () => {
     const resource: AssetResource = {

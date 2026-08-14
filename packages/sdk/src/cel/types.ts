@@ -143,6 +143,12 @@ export interface CreateOptions {
   verificationMethod: string;
   /** The proof purpose (defaults to "assertionMethod") */
   proofPurpose?: string;
+  /**
+   * Verify the signer's proof before sealing it into the log (default `true`).
+   * Set `false` only to deliberately construct an invalid log, e.g. a
+   * tamper-detection fixture. See `algorithms/sealProof.ts`.
+   */
+  verifyOnSign?: boolean;
 }
 
 /**

@@ -134,7 +134,9 @@ describe('CLI two-step migration chain (peer → webvh → btco)', () => {
       proofPurpose: 'assertionMethod',
       proofValue: 'z3LegacyMockProof',
     });
-    const opts = { signer, verificationMethod: 'did:key:z6MkLegacy#key-1', proofPurpose: 'assertionMethod' };
+    // Deliberately-legacy fixture with a placeholder VM: opt out of seal-time
+    // self-verification (plan 034) to build the old-shape log this test asserts on.
+    const opts = { signer, verificationMethod: 'did:key:z6MkLegacy#key-1', proofPurpose: 'assertionMethod', verifyOnSign: false };
 
     let log = await createEventLog({
       name: 'Legacy Asset',

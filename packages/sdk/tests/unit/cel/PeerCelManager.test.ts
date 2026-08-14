@@ -4,26 +4,22 @@ import type { DataIntegrityProof, EventLog, ExternalReference, AssetState } from
 import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
 import { deactivateEventLog } from '../../../src/cel/algorithms/deactivateEventLog';
 import { deriveDidCel } from '../../../src/cel/celDid';
+import { createRealCelSigner } from '../../fixtures/celSigner';
+
+// Real Ed25519 did:key signer — seal-time self-verification (plan 034) rejects
+// proofs that don't verify, so tests sign for real.
+const realSigner = createRealCelSigner();
 
 // The did:key the default mock signer reports as its verificationMethod; the
 // controller derived from the create event equals the DID portion (before '#').
-const MOCK_CONTROLLER = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+const MOCK_CONTROLLER = realSigner.controller;
 
 /**
  * Mock signer that creates a valid DataIntegrityProof structure.
  * In production, this would use actual Ed25519 signing with eddsa-jcs-2022.
  */
-function createMockSigner(verificationMethod?: string): CelSigner {
-  return async (data: unknown): Promise<DataIntegrityProof> => {
-    return {
-      type: 'DataIntegrityProof',
-      cryptosuite: 'eddsa-jcs-2022',
-      created: new Date().toISOString(),
-      verificationMethod: verificationMethod || `${MOCK_CONTROLLER}#z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK`,
-      proofPurpose: 'assertionMethod',
-      proofValue: 'z' + Buffer.from('mock-signature-' + JSON.stringify(data).slice(0, 50)).toString('base64'),
-    };
-  };
+function createMockSigner(_verificationMethod?: string): CelSigner {
+  return realSigner.signer;
 }
 
 describe('PeerCelManager', () => {
@@ -267,9 +263,10 @@ describe('PeerCelManager', () => {
 
   describe('config options', () => {
     test('uses custom verificationMethod from config', async () => {
-      const customVm = 'did:key:z6MkCustomKey#key-0';
+      const custom = createRealCelSigner();
+      const customVm = custom.verificationMethod;
       const manager = new PeerCelManager(
-        createMockSigner(customVm),
+        custom.signer,
         { verificationMethod: customVm }
       );
 
@@ -293,14 +290,7 @@ describe('PeerCelManager', () => {
     });
 
     test('uses custom proofPurpose from config', async () => {
-      const customSigner = async (data: unknown): Promise<DataIntegrityProof> => ({
-        type: 'DataIntegrityProof',
-        cryptosuite: 'eddsa-jcs-2022',
-        created: new Date().toISOString(),
-        verificationMethod: 'did:key:z6Mk123#key-0',
-        proofPurpose: 'authentication',
-        proofValue: 'zMockSig',
-      });
+      const customSigner = createRealCelSigner('authentication').signer;
 
       const manager = new PeerCelManager(customSigner, {
         proofPurpose: 'authentication',

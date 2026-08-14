@@ -3,23 +3,19 @@ import { serializeEventLogJson, parseEventLogJson } from '../../../src/cel/seria
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
 import type { EventLog, DataIntegrityProof, WitnessProof } from '../../../src/cel/types';
+import { createRealCelSigner } from '../../fixtures/celSigner';
 
-// Mock signer for testing
-const mockSigner = async (data: unknown): Promise<DataIntegrityProof> => ({
-  type: 'DataIntegrityProof',
-  cryptosuite: 'eddsa-jcs-2022',
-  created: new Date().toISOString(),
-  verificationMethod: 'did:key:z6Mktest#key-1',
-  proofPurpose: 'assertionMethod',
-  proofValue: 'zMockProofValue123',
-});
+// Real Ed25519 did:key signer — seal-time self-verification (plan 034) rejects
+// proofs that don't verify.
+const realSigner = createRealCelSigner();
+const mockSigner = realSigner.signer;
 
 describe('CEL JSON Serialization', () => {
   describe('serializeEventLogJson', () => {
     test('serializes a simple event log to JSON string', async () => {
       const log = await createEventLog({ name: 'Test Asset' }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json = serializeEventLogJson(log);
@@ -32,7 +28,7 @@ describe('CEL JSON Serialization', () => {
     test('produces valid JSON', async () => {
       const log = await createEventLog({ name: 'Test' }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json = serializeEventLogJson(log);
@@ -46,7 +42,7 @@ describe('CEL JSON Serialization', () => {
     test('uses deterministic key ordering', async () => {
       const log = await createEventLog({ z: 'last', a: 'first', m: 'middle' }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json = serializeEventLogJson(log);
@@ -60,11 +56,11 @@ describe('CEL JSON Serialization', () => {
     test('serializes multiple events correctly', async () => {
       let log = await createEventLog({ name: 'Test Asset' }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
       log = await updateEventLog(log, { name: 'Updated Asset' }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json = serializeEventLogJson(log);
@@ -84,7 +80,7 @@ describe('CEL JSON Serialization', () => {
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
             created: '2026-01-20T12:00:00Z',
-            verificationMethod: 'did:key:z6Mktest#key-1',
+            verificationMethod: realSigner.verificationMethod,
             proofPurpose: 'assertionMethod',
             proofValue: 'zMockProofValue123',
           }],
@@ -116,7 +112,7 @@ describe('CEL JSON Serialization', () => {
               type: 'DataIntegrityProof',
               cryptosuite: 'eddsa-jcs-2022',
               created: '2026-01-20T12:00:00Z',
-              verificationMethod: 'did:key:z6Mktest#key-1',
+              verificationMethod: realSigner.verificationMethod,
               proofPurpose: 'assertionMethod',
               proofValue: 'zControllerProof',
             },
@@ -150,7 +146,7 @@ describe('CEL JSON Serialization', () => {
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
             created: '2026-01-20T12:00:00Z',
-            verificationMethod: 'did:key:z6Mktest#key-1',
+            verificationMethod: realSigner.verificationMethod,
             proofPurpose: 'assertionMethod',
             proofValue: 'zMockProofValue123',
           }],
@@ -174,7 +170,7 @@ describe('CEL JSON Serialization', () => {
               type: 'DataIntegrityProof',
               cryptosuite: 'eddsa-jcs-2022',
               created: '2026-01-20T12:00:00Z',
-              verificationMethod: 'did:key:z6Mktest#key-1',
+              verificationMethod: realSigner.verificationMethod,
               proofPurpose: 'assertionMethod',
               proofValue: 'zProof1',
             }],
@@ -187,7 +183,7 @@ describe('CEL JSON Serialization', () => {
               type: 'DataIntegrityProof',
               cryptosuite: 'eddsa-jcs-2022',
               created: '2026-01-20T12:00:01Z',
-              verificationMethod: 'did:key:z6Mktest#key-1',
+              verificationMethod: realSigner.verificationMethod,
               proofPurpose: 'assertionMethod',
               proofValue: 'zProof2',
             }],
@@ -212,7 +208,7 @@ describe('CEL JSON Serialization', () => {
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
             created: '2026-01-20T12:00:00Z',
-            verificationMethod: 'did:key:z6Mktest#key-1',
+            verificationMethod: realSigner.verificationMethod,
             proofPurpose: 'assertionMethod',
             proofValue: 'zProof',
           }],
@@ -235,7 +231,7 @@ describe('CEL JSON Serialization', () => {
               type: 'DataIntegrityProof',
               cryptosuite: 'eddsa-jcs-2022',
               created: '2026-01-20T12:00:00Z',
-              verificationMethod: 'did:key:z6Mktest#key-1',
+              verificationMethod: realSigner.verificationMethod,
               proofPurpose: 'assertionMethod',
               proofValue: 'zControllerProof',
             },
@@ -324,7 +320,7 @@ describe('CEL JSON Serialization', () => {
           proof: [{
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
-            verificationMethod: 'did:key:z6Mktest#key-1',
+            verificationMethod: realSigner.verificationMethod,
             proofPurpose: 'assertionMethod',
             proofValue: 'zMockProofValue123',
           }],
@@ -342,7 +338,7 @@ describe('CEL JSON Serialization', () => {
           proof: [{
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
-            verificationMethod: 'did:key:z6Mktest#key-1',
+            verificationMethod: realSigner.verificationMethod,
             proofPurpose: 'assertionMethod',
             proofValue: 'zMockProofValue123',
           }],
@@ -359,7 +355,7 @@ describe('CEL JSON Serialization', () => {
     test('serialize then parse equals original (simple log)', async () => {
       const original = await createEventLog({ name: 'Test Asset', value: 42 }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json = serializeEventLogJson(original);
@@ -374,15 +370,15 @@ describe('CEL JSON Serialization', () => {
     test('serialize then parse equals original (multi-event log)', async () => {
       let original = await createEventLog({ name: 'Test Asset' }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
       original = await updateEventLog(original, { name: 'Updated Asset' }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
       original = await updateEventLog(original, { name: 'Final Asset' }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json = serializeEventLogJson(original);
@@ -405,7 +401,7 @@ describe('CEL JSON Serialization', () => {
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
             created: '2026-01-20T12:00:00Z',
-            verificationMethod: 'did:key:z6Mktest#key-1',
+            verificationMethod: realSigner.verificationMethod,
             proofPurpose: 'assertionMethod',
             proofValue: 'zMockProofValue123',
           }],
@@ -437,7 +433,7 @@ describe('CEL JSON Serialization', () => {
 
       const original = await createEventLog(complexData, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json = serializeEventLogJson(original);
@@ -456,7 +452,7 @@ describe('CEL JSON Serialization', () => {
               type: 'DataIntegrityProof',
               cryptosuite: 'eddsa-jcs-2022',
               created: '2026-01-20T12:00:00Z',
-              verificationMethod: 'did:key:z6Mktest#key-1',
+              verificationMethod: realSigner.verificationMethod,
               proofPurpose: 'assertionMethod',
               proofValue: 'zControllerProof',
             },
@@ -518,7 +514,7 @@ describe('CEL JSON Serialization', () => {
     test('double round-trip produces identical results', async () => {
       const original = await createEventLog({ name: 'Test' }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json1 = serializeEventLogJson(original);
@@ -536,7 +532,7 @@ describe('CEL JSON Serialization', () => {
     test('handles empty data object', async () => {
       const log = await createEventLog({}, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json = serializeEventLogJson(log);
@@ -548,7 +544,7 @@ describe('CEL JSON Serialization', () => {
     test('handles unicode in data', async () => {
       const log = await createEventLog({ name: '日本語テスト 🎨 émojis' }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json = serializeEventLogJson(log);
@@ -564,7 +560,7 @@ describe('CEL JSON Serialization', () => {
         float: 0.123456789012345,
       }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json = serializeEventLogJson(log);
@@ -582,7 +578,7 @@ describe('CEL JSON Serialization', () => {
         mixed: [1, 'two', { three: 3 }],
       }, {
         signer: mockSigner,
-        verificationMethod: 'did:key:z6Mktest#key-1',
+        verificationMethod: realSigner.verificationMethod,
       });
 
       const json = serializeEventLogJson(log);
@@ -603,7 +599,7 @@ describe('CEL JSON Serialization', () => {
               type: 'DataIntegrityProof',
               cryptosuite: 'eddsa-jcs-2022',
               created: '2026-01-20T12:00:00Z',
-              verificationMethod: 'did:key:z6Mktest#key-1',
+              verificationMethod: realSigner.verificationMethod,
               proofPurpose: 'assertionMethod',
               proofValue: 'zProof1',
             }],
@@ -616,7 +612,7 @@ describe('CEL JSON Serialization', () => {
               type: 'DataIntegrityProof',
               cryptosuite: 'eddsa-jcs-2022',
               created: '2026-01-20T13:00:00Z',
-              verificationMethod: 'did:key:z6Mktest#key-1',
+              verificationMethod: realSigner.verificationMethod,
               proofPurpose: 'assertionMethod',
               proofValue: 'zProof2',
             }],
@@ -658,7 +654,7 @@ describe('CEL JSON Serialization', () => {
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
             // created intentionally omitted
-            verificationMethod: 'did:key:z6Mktest#key-1',
+            verificationMethod: realSigner.verificationMethod,
             proofPurpose: 'assertionMethod',
             proofValue: 'zMockProofValue123',
           }],
@@ -685,7 +681,7 @@ describe('CEL JSON Serialization', () => {
             type: 'DataIntegrityProof',
             cryptosuite: 'eddsa-jcs-2022',
             created: 12345,
-            verificationMethod: 'did:key:z6Mktest#key-1',
+            verificationMethod: realSigner.verificationMethod,
             proofPurpose: 'assertionMethod',
             proofValue: 'zMockProofValue123',
           }],
