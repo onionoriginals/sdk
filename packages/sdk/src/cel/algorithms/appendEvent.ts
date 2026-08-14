@@ -11,6 +11,7 @@
 import type { EventLog, EventType, LogEntry, UpdateOptions, DataIntegrityProof } from '../types.js';
 import { computeDigestMultibase } from '../hash.js';
 import { canonicalizeEntryForChain } from '../canonicalize.js';
+import { sealProof } from './sealProof.js';
 
 /**
  * Appends a typed event to an existing Cryptographic Event Log.
@@ -54,13 +55,8 @@ export async function appendEvent(
     previousEvent,
   };
 
-  // Generate proof using the provided signer
-  const proof: DataIntegrityProof = await signer(eventBase);
-
-  // Validate the proof has required fields
-  if (!proof.type || !proof.cryptosuite || !proof.proofValue) {
-    throw new Error('Invalid proof: missing required fields (type, cryptosuite, proofValue)');
-  }
+  // Generate the proof and prove it verifies before sealing it (see sealProof).
+  const proof: DataIntegrityProof = await sealProof(signer, eventBase, options);
 
   // Construct the complete log entry
   const entry: LogEntry = {

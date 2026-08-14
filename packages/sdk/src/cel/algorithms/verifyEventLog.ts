@@ -7,7 +7,6 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
-import { verifyAsync } from '@noble/ed25519';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import type {
   EventLog,
@@ -19,11 +18,18 @@ import type {
   OrdinalsLookup
 } from '../types.js';
 import { computeDigestMultibase, digestMultibaseEquals } from '../hash.js';
-import { canonicalizeEvent, canonicalizeEntryForChain } from '../canonicalize.js';
+import { canonicalizeEntryForChain } from '../canonicalize.js';
 import { multikey } from '../../crypto/Multikey.js';
 import { deriveDidCelFromGenesis, didCelMatchesLog } from '../celDid.js';
 import { parseSatoshiIdentifier } from '../../utils/satoshi-validation.js';
 import { hexSha256ToDigestMultibase } from '../signerAdapter.js';
+import {
+  structuralCheck,
+  structuralCheckReason,
+  extractEd25519FromDidKey,
+  verifyProofWithKey,
+  verifyDidKeyProof,
+} from '../proofVerification.js';
 import { hashResource } from '../../utils/validation.js';
 import { mostRecentResourceHead } from '../resourceHead.js';
 
@@ -49,53 +55,9 @@ function didDocumentFromInscription(inscription: FetchedInscription): unknown {
   }
 }
 
-/**
- * Validates the structural requirements of a DataIntegrityProof (field presence,
- * multibase prefix, recognised cryptosuite).  Used as a precondition by the
- * cryptographic verifiers and as the sole check on the fallback / structural-
- * only path.
- */
-function structuralCheck(proof: DataIntegrityProof): boolean {
-  if (!proof.type || proof.type !== 'DataIntegrityProof') {
-    return false;
-  }
-  if (!proof.cryptosuite) {
-    return false;
-  }
-  if (!proof.proofValue || typeof proof.proofValue !== 'string' || proof.proofValue.length === 0) {
-    return false;
-  }
-  if (!proof.verificationMethod || typeof proof.verificationMethod !== 'string') {
-    return false;
-  }
-  if (!proof.proofPurpose || typeof proof.proofPurpose !== 'string') {
-    return false;
-  }
-  const validCryptosuites = ['eddsa-jcs-2022', 'eddsa-rdfc-2022'];
-  if (!validCryptosuites.includes(proof.cryptosuite)) {
-    return false;
-  }
-  if (!proof.proofValue.startsWith('z') && !proof.proofValue.startsWith('u')) {
-    return false;
-  }
-  return true;
-}
-
-/**
- * Extracts the Ed25519 public key bytes embedded in a `did:key` verification
- * method URI (`did:key:<multikey>#<fragment>`).  Returns `null` for non-Ed25519
- * keys or if decoding fails — callers must fail closed on `null`.
- */
-function extractEd25519FromDidKey(verificationMethod: string): Uint8Array | null {
-  try {
-    const withoutPrefix = verificationMethod.slice('did:key:'.length);
-    const multikeyStr = withoutPrefix.split('#')[0];
-    const decoded = multikey.decodePublicKey(multikeyStr);
-    return decoded.type === 'Ed25519' ? decoded.key : null;
-  } catch {
-    return null;
-  }
-}
+// Structural check, did:key extraction and the offline signature check live in
+// `../proofVerification.js` so the SEALING path can reuse them without pulling
+// this module's Bitcoin/resource dependencies in (see algorithms/sealProof.ts).
 
 /**
  * Cryptographically verifies a `did:key` Ed25519 `eddsa-jcs-2022` proof.
@@ -111,35 +73,8 @@ export async function verifyDidKeyEd25519Proof(
   proof: DataIntegrityProof,
   data: unknown
 ): Promise<{ verified: boolean; cryptographicallyVerified: boolean }> {
-  // Run structural checks first — these are preconditions for any path.
-  if (!structuralCheck(proof)) {
-    return { verified: false, cryptographicallyVerified: false };
-  }
-
-  // Only handle did:key verification methods.
-  if (!proof.verificationMethod.startsWith('did:key:')) {
-    return { verified: false, cryptographicallyVerified: false };
-  }
-
-  // Only handle eddsa-jcs-2022 cryptosuite.
-  if (proof.cryptosuite !== 'eddsa-jcs-2022') {
-    return { verified: false, cryptographicallyVerified: false };
-  }
-
-  const publicKeyBytes = extractEd25519FromDidKey(proof.verificationMethod);
-  if (!publicKeyBytes) {
-    // Non-Ed25519 key or decoding failure — fail closed.
-    return { verified: false, cryptographicallyVerified: false };
-  }
-
-  try {
-    const signatureBytes = multikey.decodeMultibase(proof.proofValue);
-    const message = canonicalizeEvent(data);
-    const ok = await verifyAsync(signatureBytes, message, publicKeyBytes);
-    return { verified: ok, cryptographicallyVerified: ok };
-  } catch {
-    return { verified: false, cryptographicallyVerified: false };
-  }
+  const { verified, cryptographicallyVerified } = await verifyDidKeyProof(proof, data);
+  return { verified, cryptographicallyVerified };
 }
 
 /**
@@ -153,22 +88,20 @@ export async function verifyDidKeyEd25519Proof(
  * Structural validity is only a precondition — it never alone yields
  * `verified: true`.
  *
- * Returns the full `{ verified, cryptographicallyVerified }` pair.
+ * `reason` explains a failure ("unsupported cryptosuite …", "signature
+ * mismatch", …) so `errors` can say more than "Verification failed".
  */
 async function dispatchVerify(
   proof: DataIntegrityProof,
   data: unknown,
   resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>
-): Promise<{ verified: boolean; cryptographicallyVerified: boolean }> {
-  // Precondition: structural validity.
-  if (!structuralCheck(proof)) {
-    return { verified: false, cryptographicallyVerified: false };
-  }
-
-  // CEL signatures are Ed25519-over-JCS; any other suite cannot be verified
-  // here and must fail closed (incl. eddsa-rdfc-2022).
-  if (proof.cryptosuite !== 'eddsa-jcs-2022') {
-    return { verified: false, cryptographicallyVerified: false };
+): Promise<{ verified: boolean; cryptographicallyVerified: boolean; reason?: string }> {
+  // Precondition: structural validity — which now includes the cryptosuite
+  // check, so a suite this dispatcher cannot verify is rejected in one place
+  // rather than admitted by the validator and failed closed here.
+  const structural = structuralCheckReason(proof);
+  if (structural) {
+    return { verified: false, cryptographicallyVerified: false, reason: structural };
   }
 
   // Obtain the public key.
@@ -177,26 +110,29 @@ async function dispatchVerify(
   if (proof.verificationMethod.startsWith('did:key:')) {
     // Key is embedded in the identifier — works offline, no resolver needed.
     publicKey = extractEd25519FromDidKey(proof.verificationMethod);
+    if (!publicKey) {
+      return { verified: false, cryptographicallyVerified: false, reason: 'non-Ed25519 did:key' };
+    }
   } else {
     // Key lives in a remote DID document — requires a resolver.
     if (!resolveKey) {
-      return { verified: false, cryptographicallyVerified: false };
+      return {
+        verified: false,
+        cryptographicallyVerified: false,
+        reason: `no resolver for ${proof.verificationMethod}`,
+      };
     }
     publicKey = await resolveKey(proof.verificationMethod);
+    if (!publicKey) {
+      return {
+        verified: false,
+        cryptographicallyVerified: false,
+        reason: `unresolvable key for ${proof.verificationMethod}`,
+      };
+    }
   }
 
-  if (!publicKey) {
-    return { verified: false, cryptographicallyVerified: false };
-  }
-
-  try {
-    const signatureBytes = multikey.decodeMultibase(proof.proofValue);
-    const message = canonicalizeEvent(data);
-    const ok = await verifyAsync(signatureBytes, message, publicKey);
-    return { verified: ok, cryptographicallyVerified: ok };
-  } catch {
-    return { verified: false, cryptographicallyVerified: false };
-  }
+  return verifyProofWithKey(proof, data, publicKey);
 }
 
 /**
@@ -1320,10 +1256,12 @@ async function verifyEvent(
         // When a custom verifier is used we cannot assert cryptographic verification.
         allCryptographicallyVerified = false;
       } else {
-        const { verified, cryptographicallyVerified } = await dispatchVerify(proof, eventData, resolveKey);
+        const { verified, cryptographicallyVerified, reason } = await dispatchVerify(proof, eventData, resolveKey);
         if (!verified) {
           allControllerProofsValid = false;
-          errors.push(`Event ${index}, Proof ${originalIndex}: Verification failed`);
+          errors.push(
+            `Event ${index}, Proof ${originalIndex}: Verification failed${reason ? ` (${reason})` : ''}`
+          );
         }
         if (!cryptographicallyVerified) {
           allCryptographicallyVerified = false;

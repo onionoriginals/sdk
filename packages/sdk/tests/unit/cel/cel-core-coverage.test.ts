@@ -42,21 +42,17 @@ import type {
 import type { BitcoinManager } from '../../../src/bitcoin/BitcoinManager';
 import type { DIDManager } from '../../../src/did/DIDManager';
 import type { DIDDocument, VerificationMethod } from '../../../src/types/did';
+import { createRealCelSigner } from '../../fixtures/celSigner';
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
 // ---------------------------------------------------------------------------
 
-/** Produces a structurally-valid DataIntegrityProof with a mock signature. */
-const createMockSigner = () =>
-  async (_data: unknown): Promise<DataIntegrityProof> => ({
-    type: 'DataIntegrityProof',
-    cryptosuite: 'eddsa-jcs-2022',
-    created: new Date().toISOString(),
-    verificationMethod: 'did:key:z6MkMockSigner#key-0',
-    proofPurpose: 'assertionMethod',
-    proofValue: 'z' + Buffer.from('mock-signature').toString('base64'),
-  });
+// One real Ed25519 did:key signer shared by every manager in this file: seal-time
+// self-verification (plan 034) rejects unverifiable proofs, and CEL authority
+// requires the same controller across appends.
+const realSigner = createRealCelSigner();
+const createMockSigner = () => realSigner.signer;
 
 /** BitcoinManager mock that returns deterministic inscription data. */
 const createMockBitcoinManager = (): BitcoinManager =>

@@ -111,7 +111,7 @@ describe('credential tamper resistance (issue #167)', () => {
   test('legacy signer path rejects undefined terms instead of silently dropping them', async () => {
     // Without a DIDManager the fallback local signer is used; it must not
     // sign a dataset from which unknown fields were silently excluded.
-    const cm = new CredentialManager(config);
+    const cm = new CredentialManager(config, new DIDManager(config as never));
     const cred = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential'],

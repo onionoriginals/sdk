@@ -21,7 +21,18 @@ Two audit runs so far:
 
 ## Execution order & status
 
-### Run 2 (current)
+### Run 3 (current) — first-implementer feedback
+
+Driven by the `boop` team's review, not a repo sweep. Headline finding: the SDK's
+recommended authorship path is unusable for any custody that never exports a key,
+and `publishToWeb` silently drops the CEL `migrate` event when it can't sign.
+
+| Plan | Title | Priority | Effort | Risk | Depends on | Status |
+|------|-------|----------|--------|------|------------|--------|
+| 033 | SDK v3 roadmap — signer abstraction, fail-loud, packaging (spawns 034–045) | P0 | XL | HIGH | — | IN PROGRESS (Phase 0 = 034–038 DONE) |
+| 034–038 | Phase 0 — stop the bleeding (seal-time self-verify, suite whitelist, external-signer credentials, required DIDManager, published-README de-rot) | P0 | M | MED | — | DONE (tsc 0; 3795 pass / 0 fail; browser+esm gates green; not yet pushed) |
+
+### Run 2
 
 | Plan | Title | Priority | Effort | Risk | Depends on | Status |
 |------|-------|----------|--------|------|------------|--------|

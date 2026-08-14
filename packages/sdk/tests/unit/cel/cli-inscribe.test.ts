@@ -15,16 +15,11 @@ import { serializeEventLogJson } from '../../../src/cel/serialization/json';
 import { parseEventLogJson } from '../../../src/cel/serialization/json';
 import type { DataIntegrityProof, EventLog } from '../../../src/cel/types';
 import { multikey } from '../../../src/crypto/Multikey';
+import { createRealCelSigner } from '../../fixtures/celSigner';
 
-function createMockSigner(verificationMethod: string = 'did:key:z6MkTest#key-1') {
-  return async (data: unknown): Promise<DataIntegrityProof> => ({
-    type: 'DataIntegrityProof',
-    cryptosuite: 'eddsa-jcs-2022',
-    created: new Date().toISOString(),
-    verificationMethod,
-    proofPurpose: 'assertionMethod',
-    proofValue: 'z3ABC123mockProofValue',
-  });
+const realSigner = createRealCelSigner();
+function createMockSigner(_verificationMethod?: string) {
+  return realSigner.signer;
 }
 
 async function createPeerLog(name: string = 'Test Asset') {

@@ -1,10 +1,11 @@
 import { test, expect } from 'bun:test';
 import { CredentialManager } from '../../src/vc/CredentialManager';
+import { DIDManager } from '../../src/did/DIDManager';
 import { multikey } from '../../src/crypto/Multikey';
 import * as secp from '@noble/secp256k1';
 
 test('forged credential signed with an unrelated key does NOT verify', async () => {
-  const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
+  const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any, new DIDManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any as never));
 
   // Attacker's own key — unrelated to the victim issuer DID
   const attackerSk = secp.utils.randomSecretKey();
@@ -29,7 +30,7 @@ test('forged credential signed with an unrelated key does NOT verify', async () 
 });
 
 test('embedded publicKeyMultibase in the proof is never trusted', async () => {
-  const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
+  const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any, new DIDManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any as never));
   const sk = secp.utils.randomSecretKey();
   const pk = secp.getPublicKey(sk, true);
   const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');

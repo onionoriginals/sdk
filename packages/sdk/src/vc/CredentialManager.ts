@@ -23,6 +23,7 @@ import { multikey } from '../crypto/Multikey.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { Issuer, VerificationMethodLike, isSecuritySigningRefusal } from './Issuer.js';
 import { createDocumentLoader } from './documentLoader.js';
+import { EdDSACryptosuiteManager } from './cryptosuites/eddsa.js';
 import { Verifier, checkCredentialValidityPeriod } from './Verifier.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
 import { MultiSigManager } from './MultiSigManager.js';
@@ -169,7 +170,20 @@ export class CredentialManager {
   private readonly metrics?: MetricsCollector;
   public readonly statusList: StatusListManager;
 
-  constructor(private config: OriginalsConfig, private didManager?: DIDManager, metrics?: MetricsCollector) {
+  constructor(private config: OriginalsConfig, private didManager: DIDManager, metrics?: MetricsCollector) {
+    // Required since plan 037. Without a resolver, Data Integrity proofs fell
+    // through to the legacy digest path — which no DI proof can satisfy — so
+    // `verifyCredential` returned a silent `false` indistinguishable from a bad
+    // signature, and `signCredential` silently downgraded to the legacy signer.
+    // Enforced at runtime because tests and JS callers bypass the type.
+    if (!didManager) {
+      throw new StructuredError(
+        'DID_MANAGER_REQUIRED',
+        'CredentialManager requires a DIDManager: without one it cannot resolve verification ' +
+        'methods, so Data Integrity proofs can neither be issued nor verified. ' +
+        'Use sdk.credentials, or pass a DIDManager explicitly.'
+      );
+    }
     this.metrics = metrics;
     this.statusList = new StatusListManager();
   }
@@ -202,7 +216,7 @@ export class CredentialManager {
     verificationMethod: string
   ): Promise<VerifiableCredential> {
     return this.tracked('credential.sign', async () => {
-    if (this.didManager && typeof verificationMethod === 'string' && verificationMethod.startsWith('did:')) {
+    if (typeof verificationMethod === 'string' && verificationMethod.startsWith('did:')) {
       try {
         const loader = createDocumentLoader(this.didManager);
         const { document } = await loader(verificationMethod);
@@ -276,10 +290,28 @@ export class CredentialManager {
   }
 
   /**
-   * Sign a credential using an external signer (e.g., hardware wallet, Turnkey)
+   * Sign a credential using an external signer (e.g. Turnkey, AWS KMS, an HSM).
+   *
+   * The SDK canonicalizes (RDFC-2022) and hashes; the signer signs exactly
+   * those bytes via {@link ExternalSigner.signBytes}. This is the same
+   * construction `createProof` and `MultiSigManager.signWithExternalSigner`
+   * use, so all three cannot drift.
+   *
+   * Requires `signBytes`. The document-level `sign({document, proof})` lets the
+   * signer choose its own canonicalization — and every didwebvh-shaped signer
+   * chooses JCS — while this proof is labelled `eddsa-rdfc-2022` and verified
+   * over RDFC bytes. Such a signature can NEVER verify, and until plan 036 it
+   * was produced with no error at sign time: the caller got a plausible signed
+   * credential that the SDK's own verifier rejected 100% of the time.
+   *
    * @param credential - The unsigned credential
-   * @param signer - External signer implementation
+   * @param signer - External signer implementation (must implement `signBytes`)
    * @returns Signed verifiable credential
+   * @throws StructuredError `EXTERNAL_SIGNER_SIGNBYTES_REQUIRED` for a
+   *   `sign()`-only signer; `EXTERNAL_SIGNER_INVALID_SIGNATURE` for a return
+   *   value that is not a 64-byte Ed25519 signature;
+   *   `ISSUER_BINDING_MISMATCH` when the credential claims an issuer the
+   *   signer's key does not control.
    */
   async signCredentialWithExternalSigner(
     credential: VerifiableCredential,
@@ -288,64 +320,103 @@ export class CredentialManager {
     return this.tracked('credential.signExternal', async () => {
     const verificationMethodId = signer.getVerificationMethodId();
 
-    // Create proof structure
-    const proofBase = {
-      type: 'DataIntegrityProof',
-      cryptosuite: 'eddsa-rdfc-2022', // Or derive from signer type
-      created: new Date().toISOString(),
-      verificationMethod: verificationMethodId,
-      proofPurpose: 'assertionMethod'
-    };
+    if (typeof signer.signBytes !== 'function') {
+      throw new StructuredError(
+        'EXTERNAL_SIGNER_SIGNBYTES_REQUIRED',
+        `External signer for ${verificationMethodId} must implement signBytes(data) to sign an ` +
+        `eddsa-rdfc-2022 credential. The SDK canonicalizes and hashes (RDFC-2022) and the signer ` +
+        `signs those bytes; a signer implementing only the document-level sign() canonicalizes ` +
+        `differently (e.g. JCS) and its credential can never verify.`
+      );
+    }
 
-    // Prepare unsigned credential
+    // Bind the key to the stated issuer, mirroring Issuer.issueCredential on the
+    // local-key path. Without this, a holder of did:me's key could mint a
+    // credential claiming issuer did:victim; the SDK would sign it and its own
+    // verifier would then reject it (Verifier.checkVerificationMethodController
+    // compares exactly this DID prefix). Fail closed at sign time instead.
+    const issuerId = typeof credential.issuer === 'string'
+      ? credential.issuer
+      : (credential.issuer as { id?: string } | undefined)?.id;
+    const keyController = verificationMethodId.split('#')[0];
+    if (issuerId && issuerId !== keyController) {
+      throw new StructuredError(
+        'ISSUER_BINDING_MISMATCH',
+        `Issuer DID (${issuerId}) does not match the verification method controller (${keyController})`
+      );
+    }
+
     const unsignedCredential: Record<string, unknown> = { ...credential };
     delete unsignedCredential.proof;
 
-    // Use external signer to sign
-    const { proofValue } = await signer.sign({
-      document: unsignedCredential,
-      proof: proofBase
-    });
-
-    // Return signed credential
-    return {
-      ...credential,
-      proof: {
-        ...proofBase,
-        proofValue
+    const { hashData, proofConfig } = await EdDSACryptosuiteManager.computeSigningInput(
+      unsignedCredential,
+      {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-rdfc-2022',
+        verificationMethod: verificationMethodId,
+        proofPurpose: 'assertionMethod',
+        documentLoader: createDocumentLoader(this.didManager),
       }
+    );
+
+    const signResult = await signer.signBytes(hashData);
+    const signature = signResult?.signature;
+    // eddsa-rdfc-2022 is Ed25519-only, so a valid signature is exactly 64
+    // bytes. Reject a wrong-length return rather than base58-encoding it into
+    // a syntactically valid but never-verifiable proofValue.
+    if (!(signature instanceof Uint8Array) || signature.length !== 64) {
+      throw new StructuredError(
+        'EXTERNAL_SIGNER_INVALID_SIGNATURE',
+        `External signer for ${verificationMethodId} returned an invalid signBytes result ` +
+        `(expected { signature: Uint8Array } of 64 bytes for Ed25519, got ` +
+        `${signature instanceof Uint8Array ? `${signature.length} bytes` : typeof signature}).`
+      );
+    }
+
+    const proof: Record<string, unknown> = {
+      ...proofConfig,
+      proofValue: EdDSACryptosuiteManager.encodeProofValue(signature),
     };
+    // computeSigningInput's proofConfig carries the @context used for hashing;
+    // it must not appear on the emitted proof (verify re-attaches the
+    // credential's @context, exactly as createProof does).
+    delete proof['@context'];
+
+    return { ...credential, proof: proof as unknown as Proof };
     }); // end tracked
   }
 
   async verifyCredential(credential: VerifiableCredential): Promise<boolean> {
     return this.tracked('credential.verify', async () => {
-    if (this.didManager) {
-      interface ProofWithCryptosuite {
-        cryptosuite?: string;
-      }
-      const proofValue = credential.proof;
-      const proofWithSuite = proofValue as ProofWithCryptosuite | ProofWithCryptosuite[] | undefined;
-      if (proofWithSuite) {
-        const hasCryptosuite = Array.isArray(proofWithSuite)
-          ? proofWithSuite[0]?.cryptosuite
-          : proofWithSuite.cryptosuite;
-        // A Data Integrity proof (cryptosuite present) must be checked by the
-        // strong verifier. Stripping the cryptosuite to force the legacy path is
-        // not a downgrade attack: the legacy path resolves the signing key from
-        // the issuer's DID (see resolveVerificationMethodMultibase) and the
-        // RDF-canonicalized signature will not match the legacy digest, so a
-        // stripped DI proof simply fails to verify rather than being forgeable.
-        if (hasCryptosuite) {
-          const verifier = new Verifier(this.didManager);
-          // Proof-only entry point: revocation/suspension is checked by the
-          // dedicated verifyCredentialWithStatus (which supplies the status
-          // list). Pass checkStatus:false so a valid, non-revoked credential
-          // that merely declares a credentialStatus is not rejected here for
-          // lack of a resolver.
-          const res = await verifier.verifyCredential(credential, { checkStatus: false });
-          return res.verified;
-        }
+    interface ProofWithCryptosuite {
+      cryptosuite?: string;
+    }
+    const proofWithSuite = credential.proof as ProofWithCryptosuite | ProofWithCryptosuite[] | undefined;
+    if (proofWithSuite) {
+      const hasCryptosuite = Array.isArray(proofWithSuite)
+        ? proofWithSuite[0]?.cryptosuite
+        : proofWithSuite.cryptosuite;
+      // A Data Integrity proof (cryptosuite present) must be checked by the
+      // strong verifier. Stripping the cryptosuite to force the legacy path is
+      // not a downgrade attack: the legacy path resolves the signing key from
+      // the issuer's DID (see resolveVerificationMethodMultibase) and the
+      // RDF-canonicalized signature will not match the legacy digest, so a
+      // stripped DI proof simply fails to verify rather than being forgeable.
+      //
+      // The DIDManager is now required (plan 037): a DI proof used to fall
+      // through to the legacy digest path when none was supplied, which NO DI
+      // proof can satisfy — so `verifyCredential` returned a silent `false`
+      // that read as "invalid signature" rather than "no resolver".
+      if (hasCryptosuite) {
+        const verifier = new Verifier(this.didManager);
+        // Proof-only entry point: revocation/suspension is checked by the
+        // dedicated verifyCredentialWithStatus (which supplies the status
+        // list). Pass checkStatus:false so a valid, non-revoked credential
+        // that merely declares a credentialStatus is not rejected here for
+        // lack of a resolver.
+        const res = await verifier.verifyCredential(credential, { checkStatus: false });
+        return res.verified;
       }
     }
 
@@ -555,7 +626,7 @@ export class CredentialManager {
       return vmDid.replace('did:key:', '');
     }
 
-    if (!this.didManager || !verificationMethod.startsWith('did:')) {
+    if (!verificationMethod.startsWith('did:')) {
       // No way to resolve/authenticate the key against an issuer DID.
       return null;
     }
@@ -1099,7 +1170,7 @@ export class CredentialManager {
     // If BBS+ key pair provided, create a real BBS+ base proof
     if (options.privateKey) {
       const { BBSCryptosuiteManager } = await import('./cryptosuites/bbsCryptosuite.js');
-      const documentLoader = this.didManager ? createDocumentLoader(this.didManager) : undefined;
+      const documentLoader = createDocumentLoader(this.didManager);
 
       const bbsProof = await BBSCryptosuiteManager.createProof(credential, {
         verificationMethod: options.verificationMethod || '',
@@ -1167,7 +1238,7 @@ export class CredentialManager {
     const proof = credential.proof as any;
     if (proof && proof.cryptosuite === 'bbs-2023') {
       const { BBSCryptosuiteManager } = await import('./cryptosuites/bbsCryptosuite.js');
-      const documentLoader = this.didManager ? createDocumentLoader(this.didManager) : undefined;
+      const documentLoader = createDocumentLoader(this.didManager);
 
       const derived = await BBSCryptosuiteManager.deriveProof(
         credential,

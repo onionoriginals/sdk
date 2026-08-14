@@ -3,27 +3,21 @@ import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
 import { computeDigestMultibase } from '../../../src/cel/hash';
 import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
+import { createRealCelSigner } from '../../fixtures/celSigner';
 import type { DataIntegrityProof, EventLog, CreateOptions, UpdateOptions } from '../../../src/cel/types';
 
 /**
- * Mock signer that creates a valid DataIntegrityProof structure.
- * In production, this would use actual Ed25519 signing with eddsa-jcs-2022.
+ * Real Ed25519 did:key signer. Seal-time self-verification (plan 034) rejects
+ * proofs that don't verify, so tests sign for real; `createMockSigner` is kept
+ * as a name so call sites read unchanged.
  */
-function createMockSigner(verificationMethod: string) {
-  return async (data: unknown): Promise<DataIntegrityProof> => {
-    return {
-      type: 'DataIntegrityProof',
-      cryptosuite: 'eddsa-jcs-2022',
-      created: new Date().toISOString(),
-      verificationMethod,
-      proofPurpose: 'assertionMethod',
-      proofValue: 'z' + Buffer.from('mock-signature-' + JSON.stringify(data)).toString('base64'),
-    };
-  };
+const realSigner = createRealCelSigner();
+function createMockSigner(_verificationMethod?: string) {
+  return realSigner.signer;
 }
 
 describe('updateEventLog', () => {
-  const verificationMethod = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+  const verificationMethod = realSigner.verificationMethod;
 
   describe('basic functionality', () => {
     test('appends an update event to existing log', async () => {

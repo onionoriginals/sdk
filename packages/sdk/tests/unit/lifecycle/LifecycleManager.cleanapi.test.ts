@@ -331,7 +331,7 @@ describe('LifecycleManager - Migration Validation', () => {
     test('rejects asset with no resources', async () => {
       const config: any = { network: 'regtest', defaultKeyType: 'Ed25519' };
       const didManager = new DIDManager(config);
-      const credentialManager = new CredentialManager(config);
+      const credentialManager = new CredentialManager(config, new DIDManager(config as never));
       const lm = new LifecycleManager(config, didManager, credentialManager);
       
       // Create a fake asset with no resources
@@ -351,7 +351,7 @@ describe('LifecycleManager - Migration Validation', () => {
     test('rejects asset with invalid resource hash', async () => {
       const config: any = { network: 'regtest', defaultKeyType: 'Ed25519' };
       const didManager = new DIDManager(config);
-      const credentialManager = new CredentialManager(config);
+      const credentialManager = new CredentialManager(config, new DIDManager(config as never));
       const lm = new LifecycleManager(config, didManager, credentialManager);
       
       const fakeAsset = {
@@ -393,7 +393,7 @@ describe('LifecycleManager - Migration Validation', () => {
     test('validates credentials structure', async () => {
       const config: any = { network: 'regtest', defaultKeyType: 'Ed25519' };
       const didManager = new DIDManager(config);
-      const credentialManager = new CredentialManager(config);
+      const credentialManager = new CredentialManager(config, new DIDManager(config as never));
       const lm = new LifecycleManager(config, didManager, credentialManager);
       
       const fakeAsset = {
@@ -413,7 +413,7 @@ describe('LifecycleManager - Migration Validation', () => {
     test('warns about credentials with missing fields', async () => {
       const config: any = { network: 'regtest', defaultKeyType: 'Ed25519' };
       const didManager = new DIDManager(config);
-      const credentialManager = new CredentialManager(config);
+      const credentialManager = new CredentialManager(config, new DIDManager(config as never));
       const lm = new LifecycleManager(config, didManager, credentialManager);
       
       const fakeAsset = {

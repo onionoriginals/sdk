@@ -215,7 +215,7 @@ describe('CredentialManager verification method resolution', () => {
   } as any;
 
   test('resolves DID verificationMethod to multibase key material', async () => {
-    const signingManager = new CredentialManager(baseConfig);
+    const signingManager = new CredentialManager(baseConfig, new DIDManager(baseConfig as never));
     const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
@@ -245,7 +245,7 @@ describe('CredentialManager verification method resolution', () => {
   });
 
   test('does NOT trust proof.publicKeyMultibase when DID resolution lacks key material', async () => {
-    const signingManager = new CredentialManager(baseConfig);
+    const signingManager = new CredentialManager(baseConfig, new DIDManager(baseConfig as never));
     const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
@@ -343,9 +343,12 @@ describe('CredentialManager DID path fallback when VM doc lacks type', () => {
 
 /** Inlined from CredentialManager.local-verify.no-did.part.ts */
 
-describe('CredentialManager local verify path without didManager', () => {
-  test('signs and verifies locally when didManager is undefined', async () => {
-    const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
+// The legacy (non-Data-Integrity) sign/verify path. A DIDManager is now required
+// (plan 037); this path is still reached for ES256K/ES256 keys, which
+// eddsa-rdfc-2022 cannot sign.
+describe('CredentialManager legacy local sign/verify path', () => {
+  test('signs and verifies locally for a key the Data Integrity path cannot use', async () => {
+    const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any, new DIDManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any as never));
     const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
@@ -364,7 +367,7 @@ describe('CredentialManager local verify path without didManager', () => {
   });
 
   test('signCredential is deterministic for reordered credentialSubject properties', async () => {
-    const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any);
+    const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any, new DIDManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any as never));
     const seed = new Uint8Array(32).fill(11);
     const skMb = multikey.encodePrivateKey(seed, 'Ed25519');
     const pk = await (ed25519 as any).getPublicKeyAsync(seed);
@@ -420,7 +423,7 @@ describe('CredentialManager local verify path without didManager', () => {
   });
 
   test('verifyCredential succeeds when proof fields are reordered', async () => {
-    const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any);
+    const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any, new DIDManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any as never));
     const seed = new Uint8Array(32).fill(13);
     const skMb = multikey.encodePrivateKey(seed, 'Ed25519');
     const pk = await (ed25519 as any).getPublicKeyAsync(seed);
@@ -490,7 +493,7 @@ describe('CredentialManager additional branches', () => {
     verificationMethodRegistry.clear();
   });
   test('getSigner default case used for unknown key type', async () => {
-    const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Unknown' as any });
+    const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Unknown' as any }, new DIDManager({ network: 'mainnet', defaultKeyType: 'Unknown' as any } as never));
     const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const sk = new Uint8Array(32).fill(1);
     const pk = new Uint8Array(33).fill(2);
@@ -558,7 +561,7 @@ describe('CredentialManager additional branches', () => {
 
 describe('CredentialManager.getSigner default case when config keyType undefined', () => {
   test('defaults to ES256K', async () => {
-    const cm = new CredentialManager({ network: 'mainnet' } as any);
+    const cm = new CredentialManager({ network: 'mainnet' } as any, new DIDManager({ network: 'mainnet' } as any as never));
     const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const sk = new Uint8Array(32).fill(3);
     const pk = new Uint8Array(33).fill(2);

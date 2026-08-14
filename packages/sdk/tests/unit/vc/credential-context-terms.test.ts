@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import originalsContext from '../../../src/contexts/originals.json';
 import type { OriginalsConfig } from '../../../src/types';
+import { DIDManager } from '../../../src/did/DIDManager';
 
 /**
  * #371 (narrowed): the ONLY credential the live lifecycle emits is the
@@ -20,7 +21,7 @@ import type { OriginalsConfig } from '../../../src/types';
  * here; whether they stay at all is the VC-vs-CEL question in #370/#405.
  */
 const config = { network: 'regtest', defaultKeyType: 'Ed25519' } as unknown as OriginalsConfig;
-const cm = new CredentialManager(config);
+const cm = new CredentialManager(config, new DIDManager(config as never));
 
 // Mirror the subject issuePublicationCredential builds (LifecycleManager).
 const resourceMigrated = cm.createResourceCredential(

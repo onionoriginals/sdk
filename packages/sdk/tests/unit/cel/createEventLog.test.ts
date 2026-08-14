@@ -1,26 +1,20 @@
 import { describe, test, expect } from 'bun:test';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
+import { createRealCelSigner } from '../../fixtures/celSigner';
 import type { DataIntegrityProof, EventLog, CreateOptions } from '../../../src/cel/types';
 
 /**
- * Mock signer that creates a valid DataIntegrityProof structure.
- * In production, this would use actual Ed25519 signing with eddsa-jcs-2022.
+ * Real Ed25519 did:key signer. Seal-time self-verification (plan 034) rejects
+ * proofs that don't verify, so tests sign for real; `createMockSigner` is kept
+ * as a name so call sites read unchanged.
  */
-function createMockSigner(verificationMethod: string) {
-  return async (data: unknown): Promise<DataIntegrityProof> => {
-    return {
-      type: 'DataIntegrityProof',
-      cryptosuite: 'eddsa-jcs-2022',
-      created: new Date().toISOString(),
-      verificationMethod,
-      proofPurpose: 'assertionMethod',
-      proofValue: 'z' + Buffer.from('mock-signature-' + JSON.stringify(data)).toString('base64'),
-    };
-  };
+const realSigner = createRealCelSigner();
+function createMockSigner(_verificationMethod?: string) {
+  return realSigner.signer;
 }
 
 describe('createEventLog', () => {
-  const verificationMethod = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+  const verificationMethod = realSigner.verificationMethod;
 
   describe('basic functionality', () => {
     test('creates an event log with a single create event', async () => {
@@ -194,22 +188,13 @@ describe('createEventLog', () => {
     });
 
     test('uses custom proofPurpose when specified', async () => {
-      // Create a signer that respects custom proofPurpose
-      const customSigner = async (data: unknown): Promise<DataIntegrityProof> => {
-        return {
-          type: 'DataIntegrityProof',
-          cryptosuite: 'eddsa-jcs-2022',
-          created: new Date().toISOString(),
-          verificationMethod,
-          proofPurpose: 'authentication',
-          proofValue: 'zMockSignature',
-        };
-      };
+      // A real signer that stamps a custom proofPurpose.
+      const custom = createRealCelSigner('authentication');
 
       const data = { name: 'Test Asset' };
       const options: CreateOptions = {
-        signer: customSigner,
-        verificationMethod,
+        signer: custom.signer,
+        verificationMethod: custom.verificationMethod,
         proofPurpose: 'authentication',
       };
 

@@ -152,7 +152,7 @@ import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 
 describe('LifecycleManager additional branch coverage', () => {
-  const lm = new LifecycleManager({ network: 'mainnet' } as any, new DIDManager({} as any), new CredentialManager({} as any));
+  const lm = new LifecycleManager({ network: 'mainnet' } as any, new DIDManager({} as any), new CredentialManager({} as any, new DIDManager({} as any as never)));
 
   test('publishToWeb throws when migrate not a function', async () => {
     const asset: any = { 
@@ -172,7 +172,7 @@ describe('LifecycleManager additional branch coverage', () => {
 
 const dummyConfig: any = {};
 const didManager = new DIDManager(dummyConfig as any);
-const credentialManager = new CredentialManager(dummyConfig as any);
+const credentialManager = new CredentialManager(dummyConfig as any, new DIDManager(dummyConfig as any as never));
 const lm = new LifecycleManager(dummyConfig as any, didManager, credentialManager);
 
 describe('LifecycleManager additional branches', () => {

@@ -37,6 +37,7 @@ import type { DataIntegrityProof, EventLog } from '../../../src/cel/types';
 // Multikey + canonicalize for real Ed25519 proofs
 import { multikey } from '../../../src/crypto/Multikey';
 import { canonicalizeEvent } from '../../../src/cel/canonicalize';
+import { createRealCelSigner } from '../../fixtures/celSigner';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -75,16 +76,14 @@ async function makeRealDidKeySigner(): Promise<{
   return { signer, verificationMethod };
 }
 
-/** Mock signer that does NOT perform real crypto (for structural tests). */
-function makeMockSigner(vm = 'did:key:z6MkMock#key-1'): (data: unknown) => Promise<DataIntegrityProof> {
-  return async (_data: unknown): Promise<DataIntegrityProof> => ({
-    type: 'DataIntegrityProof',
-    cryptosuite: 'eddsa-jcs-2022',
-    created: new Date().toISOString(),
-    verificationMethod: vm,
-    proofPurpose: 'assertionMethod',
-    proofValue: 'z3MockProofValue123',
-  });
+/**
+ * Signer for CLI-output tests. Signs for real: seal-time self-verification
+ * (plan 034) rejects proofs that don't verify, and these fixtures are all
+ * happy-path logs. Tests that need a BAD signature build the proof inline.
+ */
+const cliSigner = createRealCelSigner();
+function makeMockSigner(_vm?: string): (data: unknown) => Promise<DataIntegrityProof> {
+  return cliSigner.signer;
 }
 
 /** LEGACY genesis shape (pre-did:cel) — kept as the legacy-fixture per behavior. */
