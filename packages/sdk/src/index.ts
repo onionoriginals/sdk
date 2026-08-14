@@ -54,7 +54,9 @@ export {
   type MigrationValidation,
   type LifecycleProgress,
   type ProgressCallback,
-  type LifecycleOperationOptions
+  type LifecycleOperationOptions,
+  type CreateAssetOptions,
+  type InscribeOnBitcoinOptions
 } from './lifecycle/LifecycleManager.js';
 export { BitcoinManager } from './bitcoin/BitcoinManager.js';
 export { OrdinalsClient } from './bitcoin/OrdinalsClient.js';
@@ -93,6 +95,21 @@ export { MIME_TYPE_MAP, DEFAULT_RESOURCE_CONFIG } from './resources/index.js';
 export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from './crypto/Signer.js';
 export { multikey } from './crypto/Multikey.js';
 export type { MultikeyType } from './crypto/Multikey.js';
+
+// Signer abstraction (plan 039): one root interface, one signing-input
+// namespace, adapters in both directions, and the conformance harness (040).
+export type { OriginalsSigner } from './crypto/OriginalsSigner.js';
+export {
+  canonicalDidKeyVm,
+  signerFromKeyPair,
+  signerFromKeyStore,
+  signerFromExternalSigner,
+  toCelSigner,
+  toExternalSigner,
+} from './crypto/OriginalsSigner.js';
+export { signingInput, type SigningDocumentLoader } from './crypto/signingInput.js';
+export { assertSignerConformance } from './crypto/signerConformance.js';
+export { MockRemoteSigner } from './crypto/MockRemoteSigner.js';
 
 // Event system exports
 export * from './events/index.js';

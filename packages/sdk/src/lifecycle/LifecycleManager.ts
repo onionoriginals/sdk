@@ -13,7 +13,7 @@ import {
 } from '../types/index.js';
 import { BitcoinManager, MAX_REASONABLE_FEE_RATE } from '../bitcoin/BitcoinManager.js';
 import { inscribeOnSat } from '../bitcoin/inscribe-on-sat.js';
-import type { Utxo } from '../types/bitcoin.js';
+import type { Utxo, KeyPair } from '../types/bitcoin.js';
 import type { BitcoinSigner } from '../types/common.js';
 import { DIDManager } from '../did/DIDManager.js';
 import type { CredentialManager } from '../vc/CredentialManager.js';
@@ -32,6 +32,8 @@ import { parseSatoshiIdentifier, validateSatoshiNumber } from '../utils/satoshi-
 import { btcoDidPrefix, btcoDidFromSatoshi } from '../cel/btcoDid.js';
 import { KeyManager } from '../did/KeyManager.js';
 import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
+import { toCelSigner, canonicalDidKeyVm, type OriginalsSigner } from '../crypto/OriginalsSigner.js';
+import type { CelSigner } from '../cel/layers/PeerCelManager.js';
 import { createCelDidDocument, didCelMatchesLog, deriveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
 import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
@@ -156,6 +158,18 @@ export interface InscribeOnBitcoinOptions {
   satSigner?: BitcoinSigner;
   /** Change/reveal destination address. Required alongside fundingUtxo. */
   changeAddress?: string;
+  /** Signs the asset's CEL `migrate` event (remote custody, plan 039). */
+  signer?: OriginalsSigner;
+}
+
+/**
+ * Options for `createAsset` (plan 039). With a `signer`, the asset's genesis is
+ * signed by that (possibly remote) key: no controller key is generated, nothing
+ * is written to the keyStore, and `key:unpersisted` is never emitted.
+ */
+export interface CreateAssetOptions {
+  /** Authorship signer for the genesis `create` event (overrides `config.signer`). */
+  signer?: OriginalsSigner;
 }
 
 /**
@@ -177,6 +191,8 @@ export interface LifecycleOperationOptions {
    * are irreversible by nature and are NOT affected by this flag.
    */
   atomicRollback?: boolean;
+  /** Signs the asset's CEL `migrate` event (remote custody, plan 039). */
+  signer?: OriginalsSigner;
 }
 
 /**
@@ -290,7 +306,7 @@ export class LifecycleManager {
     await this.keyStore.setPrivateKey(verificationMethodId, privateKey);
   }
 
-  async createAsset(resources: AssetResource[]): Promise<OriginalsAsset> {
+  async createAsset(resources: AssetResource[], options?: CreateAssetOptions): Promise<OriginalsAsset> {
     const stopTimer = this.logger.startTimer('createAsset');
     const metricsStart = performance.now();
     this.logger.info('Creating asset', { resourceCount: resources.length });
@@ -335,10 +351,24 @@ export class LifecycleManager {
     
     // Mint the asset's genesis identity as a did:cel derived from a signed CEL
     // create event. The controller key is ALWAYS Ed25519 (CEL is Ed25519-only),
-    // independent of config.defaultKeyType. LifecycleManager holds no KeyManager;
-    // KeyManager is stateless, so we instantiate one locally.
-    const controllerKp = await new KeyManager().generateKeyPair('Ed25519');
-    const { signer, verificationMethod } = celSignerFromKeyPair(controllerKp);
+    // independent of config.defaultKeyType. With a supplied OriginalsSigner
+    // (per-call or config) the controller IS that signer's key — no key is
+    // generated, nothing touches the keyStore, key:unpersisted never fires.
+    const suppliedSigner = options?.signer ?? this.config.signer;
+    let signer: CelSigner;
+    let verificationMethod: string;
+    let controllerPublicKey: string;
+    let controllerKp: KeyPair | undefined;
+    if (suppliedSigner) {
+      signer = toCelSigner(suppliedSigner); // throws CEL_ED25519_REQUIRED for non-Ed25519 keys
+      verificationMethod = canonicalDidKeyVm(suppliedSigner.publicKeyMultibase);
+      controllerPublicKey = suppliedSigner.publicKeyMultibase;
+    } else {
+      // KeyManager is stateless, so we instantiate one locally.
+      controllerKp = await new KeyManager().generateKeyPair('Ed25519');
+      ({ signer, verificationMethod } = celSignerFromKeyPair(controllerKp));
+      controllerPublicKey = controllerKp.publicKey;
+    }
 
     // Bridge AssetResource hashes (hex sha256) to CEL ExternalReferences. The
     // resource id is bound into the genesis reference (#401) so the verifier can
@@ -355,15 +385,17 @@ export class LifecycleManager {
     const manager = new PeerCelManager(signer, { verificationMethod });
     const { log, did } = await manager.create(resources[0]?.id ?? 'asset', externalRefs);
 
-    const didDoc = createCelDidDocument(did, controllerKp.publicKey);
+    const didDoc = createCelDidDocument(did, controllerPublicKey);
 
-    // Register the controller key under BOTH the did:key VM (CEL signing) and
-    // `${did}#key-0` (so signWithKeyStore's `${issuer}#key-0` probe resolves).
+    // Locally generated controller key only (a supplied signer's key lives in
+    // its own custody — nothing to persist, nothing to warn about):
+    // register it under BOTH the did:key VM (CEL signing) and `${did}#key-0`
+    // (so signWithKeyStore's `${issuer}#key-0` probe resolves).
     // keyStore-less SDKs still get a fully-formed did:cel asset with its log.
-    if (this.keyStore) {
+    if (controllerKp && this.keyStore) {
       await this.keyStore.setPrivateKey(verificationMethod, controllerKp.privateKey);
       await this.keyStore.setPrivateKey(`${did}#key-0`, controllerKp.privateKey);
-    } else {
+    } else if (controllerKp) {
       // No keyStore: the freshly minted controller private key is held nowhere
       // and is dropped here, so the asset cannot author CEL events — publish/
       // inscribe/authorizeSigner appends will degrade (cel:append-skipped)
@@ -380,8 +412,10 @@ export class LifecycleManager {
 
     const asset = new OriginalsAsset(resources, didDoc, [], log);
     // Bind the controller append path so addResourceVersion can write signed
-    // `update` events with the same degrade contract as the other authorship ops.
-    asset._bindCelAppender((type, data, opts) => this.appendCelEventAndMaybeInscribe(asset, type, data, opts));
+    // `update` events with the same degrade contract as the other authorship
+    // ops. The signer that minted the asset stays its default authorship signer.
+    asset._bindCelAppender((type, data, opts) =>
+      this.appendCelEventAndMaybeInscribe(asset, type, data, { ...opts, signer: opts?.signer ?? suppliedSigner }));
 
     // Persist the genesis CEL at the conventional cel/<suffix>.json key so
     // the did:cel resolves from storage immediately (best-effort, never gates).
@@ -1575,7 +1609,7 @@ export class LifecycleManager {
           layer: 'webvh',
           domain: minted.domain,
           migratedAt
-        });
+        }, options?.signer);
         const celAppended = celHeadDigest !== null;
 
         // Host the signed DID log so the DID actually resolves.
@@ -2268,8 +2302,14 @@ export class LifecycleManager {
   /**
    * Append-first lifecycle CEL event with the same degrade contract as
    * publishToWeb: signed by the CURRENT controller folded from the log; when
-   * no keyStore / no CEL log / no signing key, skip and emit
-   * `cel:append-skipped` instead of failing the lifecycle operation.
+   * no custody (keyStore or signer) / no CEL log / no signing key, skip and
+   * emit `cel:append-skipped` instead of failing the lifecycle operation.
+   *
+   * Custody resolution (plan 039): a supplied OriginalsSigner — per-call
+   * override, else `config.signer` — signs WHEN its key is the current
+   * controller; otherwise the keyStore is probed for the controller's key.
+   * This is the fix for the headline bug: a remote-custody caller's CEL events
+   * now actually get signed instead of silently skipped.
    *
    * @returns the head digest (chain-link expression over the appended entry —
    * stable across later witness-proof attachment, since chain canonicalization
@@ -2278,16 +2318,23 @@ export class LifecycleManager {
   private async appendCelEventOrSkip(
     asset: OriginalsAsset,
     type: 'migrate' | 'rotateKey' | 'update',
-    data: unknown
+    data: unknown,
+    signerOverride?: OriginalsSigner
   ): Promise<string | null> {
     const logBefore = asset.celLog;
+    const candidate = signerOverride ?? this.config.signer;
     let skipReason: 'NO_KEYSTORE' | 'NO_CEL_LOG' | 'NO_SIGNING_KEY' =
-      !this.keyStore ? 'NO_KEYSTORE' : 'NO_CEL_LOG';
-    if (this.keyStore && logBefore) {
+      !this.keyStore && !candidate ? 'NO_KEYSTORE' : 'NO_CEL_LOG';
+    if ((this.keyStore || candidate) && logBefore) {
       const vm = currentControllerVm(logBefore);
-      if (await this.keyStore.getPrivateKey(vm)) {
-        const signer = createKeyStoreCelSigner(this.keyStore, vm);
-        const newLog = await appendEvent(logBefore, type, data, { signer, verificationMethod: vm });
+      let celSigner: CelSigner | undefined;
+      if (candidate && canonicalDidKeyVm(candidate.publicKeyMultibase) === vm) {
+        celSigner = toCelSigner(candidate);
+      } else if (this.keyStore && (await this.keyStore.getPrivateKey(vm))) {
+        celSigner = createKeyStoreCelSigner(this.keyStore, vm);
+      }
+      if (celSigner) {
+        const newLog = await appendEvent(logBefore, type, data, { signer: celSigner, verificationMethod: vm });
         asset._replaceCelLog(newLog);
         // Keep the hosted CEL copies fresh AFTER the append committed.
         await this.persistCelArtifacts(asset);
@@ -2322,7 +2369,7 @@ export class LifecycleManager {
     asset: OriginalsAsset,
     type: 'migrate' | 'rotateKey' | 'update',
     data: unknown,
-    opts?: { inscribeConfirm?: InscribeConfirm }
+    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
   ): Promise<string | null> {
     // Confirm gate (#407 phase 4): consent to the unavoidable on-chain cost BEFORE
     // any log mutation. Only paid appends prompt — a btco asset WITH a provider (the
@@ -2361,7 +2408,7 @@ export class LifecycleManager {
     // restore the log to itself, leaving it permanently ahead of the chain and
     // bricking future updates via UNPROVABLE_BASE). Fable I1.
     const celLogBefore = asset.celLog;
-    const digest = await this.appendCelEventOrSkip(asset, type, data);
+    const digest = await this.appendCelEventOrSkip(asset, type, data, opts?.signer);
     // Only inscribe genuine authorship appends that LANDED on a btco asset.
     if (digest === null || asset.currentLayer !== 'did:btco') {
       return digest;
@@ -2658,7 +2705,7 @@ export class LifecycleManager {
         network,
         to: btcoDidFromSatoshi(satoshi, network),
         migratedAt: new Date().toISOString()
-      });
+      }, options.signer);
       const btcoDoc = await this.didManager.migrateToDIDBTCO(asset.did, satoshi);
       btcoDoc.alsoKnownAs = backLinks;
       btcoDoc.service = [
@@ -2921,7 +2968,7 @@ export class LifecycleManager {
         inscriptionId: inscription.inscriptionId,
         txid: revealTxId,
         witnessedEventDigest: celHeadDigest
-      });
+      }, options.signer);
     }
 
     // Recoverable reveal failure: the asset is now fully in the migrated btco
@@ -3298,7 +3345,8 @@ export class LifecycleManager {
    */
   private async appendWitnessAcknowledgment(
     asset: OriginalsAsset,
-    ack: { satoshi: string; inscriptionId: string; txid?: string; witnessedEventDigest: string }
+    ack: { satoshi: string; inscriptionId: string; txid?: string; witnessedEventDigest: string },
+    signer?: OriginalsSigner
   ): Promise<void> {
     try {
       await this.appendCelEventOrSkip(asset, 'update', {
@@ -3307,7 +3355,7 @@ export class LifecycleManager {
         inscriptionId: ack.inscriptionId,
         ...(ack.txid ? { txid: ack.txid } : {}),
         witnessedEventDigest: ack.witnessedEventDigest
-      });
+      }, signer);
     } catch (err) {
       this.logger.warn('witness acknowledgment append failed (non-gating)', {
         assetId: asset.id,
@@ -3340,7 +3388,7 @@ export class LifecycleManager {
     asset: OriginalsAsset,
     newVerificationMethod: { publicKeyMultibase: string; privateKey?: string },
     feeRate?: number,
-    opts?: { inscribeConfirm?: InscribeConfirm }
+    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
   ): Promise<{ inscriptionId: string; did: string }> {
     if (asset.currentLayer !== 'did:btco') {
       throw new StructuredError('INVALID_STATE', 'Key rotation requires the asset to be on the did:btco layer.');
@@ -3419,10 +3467,12 @@ export class LifecycleManager {
     }
 
     const celLogBefore = asset.celLog;
+    // opts.signer is the OUTGOING controller's signer (the cooperative-rotation
+    // contract: the rotateKey is authorized by the outgoing authority).
     const celHeadDigest = await this.appendCelEventOrSkip(asset, 'rotateKey', {
       newController,
       rotatedAt: new Date().toISOString()
-    });
+    }, opts?.signer);
     // Re-embed #cel with the FRESH head (the rotateKey entry). On degrade the
     // event was not appended and no anchor is embedded.
     if (celHeadDigest !== null) {
@@ -3436,8 +3486,11 @@ export class LifecycleManager {
     // Key-custody probe: no private key was supplied, and a keyStore exists but
     // doesn't hold the new controller's key. Post-rotation appends will degrade
     // (nothing was SKIPPED here — the rotation succeeded — so cel:append-skipped
-    // is the wrong signal; key:unpersisted names the unpersisted VM).
+    // is the wrong signal; key:unpersisted names the unpersisted VM). Suppressed
+    // when config.signer IS the incoming controller — its custody is remote by
+    // design and future appends will sign through it.
     if (!newVerificationMethod.privateKey && this.keyStore &&
+        this.config.signer?.publicKeyMultibase !== newVerificationMethod.publicKeyMultibase &&
         !(await this.keyStore.getPrivateKey(newControllerVm))) {
       await this.eventEmitter.emit({
         type: 'key:unpersisted',
@@ -3461,12 +3514,14 @@ export class LifecycleManager {
     // reinscription. Folds to the CURRENT (post-rotation) controller; degrades
     // to a skip when that key isn't held. Only when the rotateKey landed.
     if (celHeadDigest !== null) {
+      // opts.signer is the OUTGOING controller — it cannot sign for the new
+      // one, but passing it yields the accurate NO_SIGNING_KEY degrade signal.
       await this.appendWitnessAcknowledgment(asset, {
         satoshi,
         inscriptionId: inscription.inscriptionId,
         txid: inscription.revealTxId ?? inscription.txid,
         witnessedEventDigest: celHeadDigest
-      });
+      }, opts?.signer);
     }
 
     await this.eventEmitter.emit({
@@ -3500,19 +3555,22 @@ export class LifecycleManager {
    * Differs from {@link rotateBtcoKeys} (the COOPERATIVE arm): the rotateKey is
    * SELF-SIGNED with the new key (explicitly NOT the standard append path,
    * which folds to the prior controller the sat holder does not hold),
-   * `privateKey` is REQUIRED (the signer must be able to sign), and a bitcoin
-   * witness proof is attached to the rotateKey post-inscription — that is what
-   * satisfies the verifier's check (a).
+   * signing capability for the NEW key is REQUIRED — either `privateKey` or a
+   * remote `opts.signer` holding it (plan 039) — and a bitcoin witness proof is
+   * attached to the rotateKey post-inscription — that is what satisfies the
+   * verifier's check (a).
    *
    * @throws INVALID_STATE when the asset is not on did:btco / has no binding.
-   * @throws INVALID_INPUT when no privateKey is supplied.
+   * @throws INVALID_INPUT when neither privateKey nor opts.signer is supplied,
+   *   or opts.signer's key differs from publicKeyMultibase.
    * @throws INVALID_KEY_PAIR / CEL_ED25519_REQUIRED for a bad keypair.
    * @throws OPERATION_IN_PROGRESS on a concurrent call for the same asset.
    */
   async authorizeSigner(
     asset: OriginalsAsset,
-    newVerificationMethod: { publicKeyMultibase: string; privateKey: string },
-    feeRate?: number
+    newVerificationMethod: { publicKeyMultibase: string; privateKey?: string },
+    feeRate?: number,
+    opts?: { signer?: OriginalsSigner }
   ): Promise<{ inscriptionId: string; did: string }> {
     if (asset.currentLayer !== 'did:btco') {
       throw new StructuredError('INVALID_STATE', 'Authorizing a signer requires the asset to be on the did:btco layer.');
@@ -3521,10 +3579,16 @@ export class LifecycleManager {
     if (!btcoDid) {
       throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to authorize a signer for.');
     }
-    // privateKey is REQUIRED: the sat holder self-signs the rotateKey with it
-    // (the prior controller is unavailable to fold onto).
-    if (!newVerificationMethod?.privateKey) {
-      throw new StructuredError('INVALID_INPUT', 'authorizeSigner requires the signer\'s private key to self-sign the rotation.');
+    // Signing capability for the NEW key is REQUIRED: the sat holder
+    // self-signs the rotateKey with it (the prior controller is unavailable to
+    // fold onto). Either a raw private key or a remote signer (plan 039).
+    if (!newVerificationMethod?.privateKey && !opts?.signer) {
+      throw new StructuredError('INVALID_INPUT',
+        'authorizeSigner requires signing capability for the new key to self-sign the rotation: pass privateKey or opts.signer.');
+    }
+    if (opts?.signer && opts.signer.publicKeyMultibase !== newVerificationMethod?.publicKeyMultibase) {
+      throw new StructuredError('INVALID_INPUT',
+        'opts.signer must hold the key being authorized: its publicKeyMultibase differs from newVerificationMethod.publicKeyMultibase.');
     }
     // Concurrency guard (issue #255, same pattern as rotateBtcoKeys): reserve the
     // asset synchronously before the first await so two overlapping calls
@@ -3543,9 +3607,11 @@ export class LifecycleManager {
     return await asset.runExclusive(async () => {
     const satoshi = btcoDid.split(':').pop()!;
     const pkm = newVerificationMethod.publicKeyMultibase;
-    // Derive-check the new signer's keypair (privateKey REQUIRED); register it
-    // so subsequent appends by the new controller can sign.
-    this.assertRotationKeyPair(pkm, newVerificationMethod.privateKey);
+    // Derive-check a RAW keypair; a remote signer has no exportable key — its
+    // pair check IS the seal-time self-verify of the rotateKey proof below.
+    if (newVerificationMethod.privateKey) {
+      this.assertRotationKeyPair(pkm, newVerificationMethod.privateKey);
+    }
     const newController = `did:key:${pkm}`;
     const newControllerVm = `${newController}#${pkm}`;
 
@@ -3558,17 +3624,18 @@ export class LifecycleManager {
       throw new StructuredError('INVALID_STATE', 'Asset has no CEL log to append the rotation to.');
     }
     // Guard above must run BEFORE registering the key: a doomed call (no CEL
-    // log) should not leave an unused key sitting in the keyStore.
-    if (this.keyStore) {
+    // log) should not leave an unused key sitting in the keyStore. A remote
+    // signer's key never touches the keyStore (nothing to persist).
+    if (this.keyStore && newVerificationMethod.privateKey) {
       await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
     }
 
     // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
     const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, pkm);
 
-    const { signer, verificationMethod } = celSignerFromKeyPair(
-      { publicKey: pkm, privateKey: newVerificationMethod.privateKey }
-    );
+    const { signer, verificationMethod } = newVerificationMethod.privateKey
+      ? celSignerFromKeyPair({ publicKey: pkm, privateKey: newVerificationMethod.privateKey })
+      : { signer: toCelSigner(opts!.signer!), verificationMethod: newControllerVm };
     const rotatedLog = await appendEvent(
       celLogBefore,
       'rotateKey',
@@ -3629,7 +3696,7 @@ export class LifecycleManager {
       inscriptionId: inscription.inscriptionId,
       txid: inscription.revealTxId ?? inscription.txid,
       witnessedEventDigest: celHeadDigest
-    });
+    }, opts?.signer);
 
     await this.eventEmitter.emit({
       type: 'key:rotated',

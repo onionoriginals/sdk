@@ -7,6 +7,7 @@ import {
 } from '../types/index.js';
 import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation.js';
 import { StructuredError } from '../utils/telemetry.js';
+import type { OriginalsSigner } from '../crypto/OriginalsSigner.js';
 import type { CredentialManager } from '../vc/CredentialManager.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { ProvenanceQuery, Migration } from './ProvenanceQuery.js';
@@ -76,7 +77,7 @@ export class OriginalsAsset {
   #celAppender?: (
     type: 'migrate' | 'rotateKey' | 'update',
     data: unknown,
-    opts?: { inscribeConfirm?: InscribeConfirm }
+    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
   ) => Promise<string | null>;
   // The SOLE per-asset lock for CEL #celLog read-modify-write (#400). The
   // sync→async cutover made every head→sign→_replaceCelLog span cross await
@@ -229,7 +230,7 @@ export class OriginalsAsset {
     fn: (
       type: 'migrate' | 'rotateKey' | 'update',
       data: unknown,
-      opts?: { inscribeConfirm?: InscribeConfirm }
+      opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
     ) => Promise<string | null>
   ): void {
     this.#celAppender = fn;
@@ -643,7 +644,7 @@ export class OriginalsAsset {
     newContent: string,
     contentType: string,
     changes?: string,
-    opts?: { inscribeConfirm?: InscribeConfirm }
+    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
   ): Promise<AssetResource> {
     // AssetResource.content is a string; a Buffer used to be silently dropped
     // (only its hash was stored), unrecoverably losing the binary content
@@ -695,7 +696,7 @@ export class OriginalsAsset {
     newContent: string,
     contentType: string,
     changes?: string,
-    opts?: { inscribeConfirm?: InscribeConfirm }
+    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
   ): Promise<AssetResource> {
     // RE-READ the current head inside the turn (a prior queued call may have
     // just committed a new version).

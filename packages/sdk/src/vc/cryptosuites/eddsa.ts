@@ -1,8 +1,7 @@
 import { base58 } from '@scure/base';
 import * as ed25519 from '@noble/ed25519';
-import { canonize, canonizeProof } from '../utils/jsonld.js';
 import { multikey } from '../../crypto/Multikey.js';
-import { sha256Bytes } from '../../utils/hash.js';
+import { signingInput } from '../../crypto/signingInput.js';
 
 // Re-export canonical DataIntegrityProof from shared types
 export type { DataIntegrityProof } from '../../types/proof.js';
@@ -45,8 +44,9 @@ export class EdDSACryptosuiteManager {
    */
   static async computeSigningInput(document: any, options: any): Promise<{ hashData: Uint8Array; proofConfig: Record<string, unknown> }> {
     const proofConfig = await this.createProofConfiguration(options, document?.['@context']);
-    const transformedData = await this.transform(document, options);
-    const hashData = await this.hash(transformedData, proofConfig, options);
+    // Routed through the SDK's single credential preimage (plan 039) so the
+    // local-key, external-signer, and verify paths cannot drift.
+    const hashData = await signingInput.credential(document, proofConfig, { documentLoader: options.documentLoader });
     return { hashData, proofConfig: proofConfig as Record<string, unknown> };
   }
 
@@ -59,11 +59,11 @@ export class EdDSACryptosuiteManager {
     try {
       const documentToVerify = { ...document };
       delete (documentToVerify).proof;
-      const transformedData = await this.transform(documentToVerify, options);
-      const hashData = await this.hash(
-        transformedData,
+      // Same single credential preimage as computeSigningInput (plan 039).
+      const hashData = await signingInput.credential(
+        documentToVerify,
         { '@context': document['@context'] ?? 'https://w3id.org/security/data-integrity/v2', ...proof },
-        options
+        { documentLoader: options.documentLoader }
       );
       const vmDoc = await options.documentLoader(proof.verificationMethod);
       // Fail closed on retired keys. A verification method that has been
@@ -103,17 +103,6 @@ export class EdDSACryptosuiteManager {
       ...(options.challenge && { challenge: options.challenge }),
       ...(options.domain && { domain: options.domain })
     };
-  }
-
-  private static async transform(document: any, options: any): Promise<string> {
-    return await canonize(document, { documentLoader: options.documentLoader });
-  }
-
-  private static async hash(transformedData: string, proofConfig: any, options: any): Promise<Uint8Array> {
-    const canonicalProofConfig = await canonizeProof(proofConfig, { documentLoader: options.documentLoader });
-    const proofConfigHash = await sha256Bytes(canonicalProofConfig);
-    const documentHash = await sha256Bytes(transformedData);
-    return new Uint8Array([...proofConfigHash, ...documentHash]);
   }
 
   static async sign({ data, privateKey }: { data: Uint8Array; privateKey: Uint8Array }): Promise<Uint8Array> {
