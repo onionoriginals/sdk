@@ -139,15 +139,46 @@ describe('remote-custody lifecycle (MockRemoteSigner, no keyStore)', () => {
     expect(await asset.verify()).toBe(true);
   });
 
-  test('createAsset per-call signer stays the asset default for later appends', async () => {
+  test('the minting signer is NOT retained — a later append with no signer degrades', async () => {
+    // An asset holding a signer passed once is hidden state that outlives the
+    // call: a session-backed signer goes stale inside it, and a reloaded asset
+    // has no binding at all. Custody is explicit at every append.
+    const remote = new MockRemoteSigner();
+    const { sdk } = makeSdk();
+    const skipped: EventTypeMap['cel:append-skipped'][] = [];
+    sdk.lifecycle.on('cel:append-skipped', (e) => { skipped.push(e); });
+
+    const asset = await sdk.lifecycle.createAsset(freshResources(), { signer: remote });
+    await asset.addResourceVersion('art', 'remote-art-v2', 'image/png');
+
+    expect(asset.celLog!.events.map(e => e.type)).toEqual(['create']);
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].reason).toBe('NO_KEYSTORE');
+  });
+
+  test('the same append signs once the signer is passed explicitly', async () => {
+    // A separate asset: once an update has degraded, that resource's in-memory
+    // head has advanced past the on-log head and further appends are refused
+    // (UNPROVABLE_BASE) rather than chained from a base no verifier can see.
     const remote = new MockRemoteSigner();
     const { sdk } = makeSdk();
     const asset = await sdk.lifecycle.createAsset(freshResources(), { signer: remote });
-    // No config signer, no per-call signer here — the minting signer carries.
-    await asset.addResourceVersion('art', 'remote-art-v2', 'image/png');
+
+    await asset.addResourceVersion('art', 'remote-art-v2', 'image/png', undefined, { signer: remote });
+
     expect(asset.celLog!.events.map(e => e.type)).toEqual(['create', 'update']);
     expect(asset.celLog!.events[1].proof[0].verificationMethod)
       .toBe(canonicalDidKeyVm(remote.publicKeyMultibase));
+    expect(await asset.verify()).toBe(true);
+  });
+
+  test('config.signer still serves later appends — explicit config, not carried state', async () => {
+    const remote = new MockRemoteSigner();
+    const { sdk } = makeSdk({ signer: remote });
+    const asset = await sdk.lifecycle.createAsset(freshResources(), { signer: remote });
+
+    await asset.addResourceVersion('art', 'remote-art-v2', 'image/png');
+    expect(asset.celLog!.events.map(e => e.type)).toEqual(['create', 'update']);
     expect(await asset.verify()).toBe(true);
   });
 

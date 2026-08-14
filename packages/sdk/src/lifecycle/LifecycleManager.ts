@@ -413,9 +413,12 @@ export class LifecycleManager {
     const asset = new OriginalsAsset(resources, didDoc, [], log);
     // Bind the controller append path so addResourceVersion can write signed
     // `update` events with the same degrade contract as the other authorship
-    // ops. The signer that minted the asset stays its default authorship signer.
+    // ops. The minting signer is deliberately NOT retained: an asset holding a
+    // live reference to a signer passed once is hidden state that outlives the
+    // call, and a session-backed signer (a Turnkey browser session, say) goes
+    // stale inside it. Later appends take a signer per call, or `config.signer`.
     asset._bindCelAppender((type, data, opts) =>
-      this.appendCelEventAndMaybeInscribe(asset, type, data, { ...opts, signer: opts?.signer ?? suppliedSigner }));
+      this.appendCelEventAndMaybeInscribe(asset, type, data, opts));
 
     // Persist the genesis CEL at the conventional cel/<suffix>.json key so
     // the did:cel resolves from storage immediately (best-effort, never gates).
