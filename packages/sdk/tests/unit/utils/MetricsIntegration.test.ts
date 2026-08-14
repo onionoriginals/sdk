@@ -4,7 +4,6 @@ import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { OriginalsSDK } from '../../../src/core/OriginalsSDK';
 import type { OriginalsConfig } from '../../../src/types';
-import { DIDManager } from '../../../src/did/DIDManager';
 
 const testConfig: OriginalsConfig = {
   network: 'regtest',

@@ -5,7 +5,6 @@ import { registerVerificationMethod } from '../../src/vc/documentLoader';
 import { multikey } from '../../src/crypto/Multikey';
 import * as ed25519 from '@noble/ed25519';
 import type { VerifiableCredential } from '../../src/types';
-import { DIDManager } from '../../src/did/DIDManager';
 
 /**
  * Regression tests for GitHub issue #167:

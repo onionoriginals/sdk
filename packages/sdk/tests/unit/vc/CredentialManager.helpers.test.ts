@@ -8,7 +8,6 @@ import {
   type VerifiableCredential
 } from '../../../src';
 import { DIDManager } from '../../../src/did/DIDManager';
-import { DIDManager } from '../../../src/did/DIDManager';
 
 const config: any = { 
   network: 'regtest', 

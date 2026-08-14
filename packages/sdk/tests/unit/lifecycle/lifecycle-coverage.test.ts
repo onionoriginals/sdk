@@ -16,7 +16,6 @@ import { KeyManager } from '../../../src/did/KeyManager';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 import { MockOrdinalsProvider, MockFeeOracle } from '../../mocks/adapters';
 import type { AssetResource, OriginalsConfig } from '../../../src/types';
-import { DIDManager } from '../../../src/did/DIDManager';
 
 // ---------------------------------------------------------------------------
 // Helpers

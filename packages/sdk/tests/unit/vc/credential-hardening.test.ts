@@ -8,7 +8,6 @@ import { MultiSigManager } from '../../../src/vc/MultiSigManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import type { VerifiableCredential, OriginalsConfig } from '../../../src/types';
-import { DIDManager } from '../../../src/did/DIDManager';
 
 const keyManager = new KeyManager();
 

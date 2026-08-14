@@ -150,7 +150,6 @@ import { LifecycleManager } from '../../../src/lifecycle/LifecycleManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
-import { DIDManager } from '../../../src/did/DIDManager';
 
 describe('LifecycleManager additional branch coverage', () => {
   const lm = new LifecycleManager({ network: 'mainnet' } as any, new DIDManager({} as any), new CredentialManager({} as any, new DIDManager({} as any as never)));

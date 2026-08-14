@@ -291,7 +291,6 @@ describe('CredentialManager verify with didManager present but legacy path', () 
 
 /** Inlined from CredentialManager.did-fallback-with-didmgr.part.ts */
 import { registerVerificationMethod, verificationMethodRegistry } from '../../../src/vc/documentLoader';
-import { DIDManager } from '../../../src/did/DIDManager';
 
 describe('CredentialManager with didManager provided falls back to local signer when VM incomplete', () => {
   afterEach(() => {

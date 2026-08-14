@@ -48,19 +48,29 @@ function makeRemoteSigner() {
   return { signer, verificationMethodId, did };
 }
 
-const baseVC: VerifiableCredential = {
-  '@context': ['https://www.w3.org/ns/credentials/v2', 'https://originals.build/context'],
-  type: ['VerifiableCredential', 'ResourceCreated'],
-  issuer: 'did:peer:issuer',
-  validFrom: new Date().toISOString(),
-  credentialSubject: {
-    id: 'did:peer:subject',
-    resourceId: 'res-001',
-    resourceType: 'text',
-    creator: 'did:peer:issuer',
-    createdAt: new Date().toISOString(),
-  } as never,
-};
+/**
+ * A credential issued BY `issuer`. The issuer must be the DID that controls the
+ * signing key: signing binds the two, so a mismatch is refused (see the
+ * issuer-binding tests below).
+ */
+function makeVC(issuer: string): VerifiableCredential {
+  return {
+    '@context': ['https://www.w3.org/ns/credentials/v2', 'https://originals.build/context'],
+    type: ['VerifiableCredential', 'ResourceCreated'],
+    issuer,
+    validFrom: new Date().toISOString(),
+    credentialSubject: {
+      id: 'did:peer:subject',
+      resourceId: 'res-001',
+      resourceType: 'text',
+      creator: issuer,
+      createdAt: new Date().toISOString(),
+    } as never,
+  };
+}
+
+/** Issued by the DID in the failing signers' verification methods below. */
+const vcFor = (vmId: string) => makeVC(vmId.split('#')[0]);
 
 describe('signCredentialWithExternalSigner — signer contract [plan 036]', () => {
   test('rejects a sign()-only signer instead of emitting an unverifiable credential', async () => {
@@ -71,7 +81,8 @@ describe('signCredentialWithExternalSigner — signer contract [plan 036]', () =
       sign: async () => ({ proofValue: 'zFakeValidProofValue' }),
     };
 
-    const rejection = manager.signCredentialWithExternalSigner(baseVC, signOnly);
+    const rejection = manager.signCredentialWithExternalSigner(
+      vcFor('did:key:z6MkTestKey#z6MkTestKey'), signOnly);
     await expect(rejection).rejects.toMatchObject({ code: 'EXTERNAL_SIGNER_SIGNBYTES_REQUIRED' });
     await expect(rejection).rejects.toThrow(/must implement signBytes/);
   });
@@ -83,7 +94,9 @@ describe('signCredentialWithExternalSigner — signer contract [plan 036]', () =
       sign: async () => ({ proofValue: 'zFake' }),
     };
 
-    const err = await manager.signCredentialWithExternalSigner(baseVC, signOnly).catch((e) => e);
+    const err = await manager
+      .signCredentialWithExternalSigner(vcFor('did:key:z6MkTestKey#z6MkTestKey'), signOnly)
+      .catch((e) => e);
     expect(err.message).toContain('JCS');
     expect(err.message).toContain('can never verify');
   });
@@ -96,14 +109,15 @@ describe('signCredentialWithExternalSigner — signer contract [plan 036]', () =
       signBytes: async () => ({ signature: new Uint8Array(32) }),
     };
 
-    const rejection = manager.signCredentialWithExternalSigner(baseVC, shortSigner);
+    const rejection = manager.signCredentialWithExternalSigner(
+      vcFor('did:key:z6MkShort#z6MkShort'), shortSigner);
     await expect(rejection).rejects.toMatchObject({ code: 'EXTERNAL_SIGNER_INVALID_SIGNATURE' });
     await expect(rejection).rejects.toThrow(/got 32 bytes/);
   });
 
   test('signs over the bytes the SDK computed, and emits an RDFC proof', async () => {
     const manager = makeManager();
-    const { signer, verificationMethodId } = makeRemoteSigner();
+    const { signer, verificationMethodId, did } = makeRemoteSigner();
 
     let received: Uint8Array | undefined;
     const spy: ExternalSigner = {
@@ -114,7 +128,7 @@ describe('signCredentialWithExternalSigner — signer contract [plan 036]', () =
       },
     };
 
-    const signed = await manager.signCredentialWithExternalSigner(baseVC, spy);
+    const signed = await manager.signCredentialWithExternalSigner(makeVC(did), spy);
     const proof = signed.proof as Record<string, unknown>;
 
     // The signer received a hash, not a document — canonicalization is the SDK's job.
@@ -132,7 +146,8 @@ describe('signCredentialWithExternalSigner — signer contract [plan 036]', () =
 
   test('an existing proof is excluded from the signed document (re-signing)', async () => {
     const manager = makeManager();
-    const { signer } = makeRemoteSigner();
+    const { signer, did } = makeRemoteSigner();
+    const baseVC = makeVC(did);
 
     const withOldProof: VerifiableCredential = {
       ...baseVC,
@@ -165,6 +180,39 @@ describe('signCredentialWithExternalSigner — signer contract [plan 036]', () =
   });
 });
 
+describe('signCredentialWithExternalSigner — issuer binding', () => {
+  test('refuses to sign a credential claiming an issuer the key does not control', async () => {
+    const manager = makeManager();
+    const { signer } = makeRemoteSigner();
+
+    // A holder of THIS key minting a credential that claims someone else issued it.
+    const impersonating = makeVC('did:webvh:example.com:victim');
+
+    const rejection = manager.signCredentialWithExternalSigner(impersonating, signer);
+    await expect(rejection).rejects.toMatchObject({ code: 'ISSUER_BINDING_MISMATCH' });
+  });
+
+  test('matches the local-key path: same failure, same code', async () => {
+    // Issuer.issueCredential refuses the same mismatch with the same typed code,
+    // so isSecuritySigningRefusal treats both paths identically.
+    const manager = makeManager();
+    const { signer } = makeRemoteSigner();
+    const err = await manager
+      .signCredentialWithExternalSigner(makeVC('did:webvh:example.com:victim'), signer)
+      .catch((e) => e);
+
+    expect(err.message).toContain('does not match the verification method controller');
+  });
+
+  test('an issuer matching the signing key is accepted', async () => {
+    const manager = makeManager();
+    const { signer, did } = makeRemoteSigner();
+
+    const signed = await manager.signCredentialWithExternalSigner(makeVC(did), signer);
+    expect((signed.proof as Record<string, unknown>).proofValue).toMatch(/^z/);
+  });
+});
+
 describe('signCredentialWithExternalSigner — error propagation [VC-003]', () => {
   test('propagates a rejection from signBytes()', async () => {
     const manager = makeManager();
@@ -176,9 +224,9 @@ describe('signCredentialWithExternalSigner — error propagation [VC-003]', () =
       },
     };
 
-    await expect(manager.signCredentialWithExternalSigner(baseVC, failing)).rejects.toThrow(
-      'HSM unavailable'
-    );
+    await expect(
+      manager.signCredentialWithExternalSigner(vcFor('did:key:z6MkTestKey#z6MkTestKey'), failing)
+    ).rejects.toThrow('HSM unavailable');
   });
 
   test('propagates the original error type (not wrapped)', async () => {
@@ -199,7 +247,8 @@ describe('signCredentialWithExternalSigner — error propagation [VC-003]', () =
       },
     };
 
-    const rejection = manager.signCredentialWithExternalSigner(baseVC, failing);
+    const rejection = manager.signCredentialWithExternalSigner(
+      vcFor('did:key:z6MkOther#z6MkOther'), failing);
     await expect(rejection).rejects.toBeInstanceOf(CustomSignerError);
     await expect(rejection).rejects.toThrow('Signer service timeout');
   });
@@ -212,9 +261,9 @@ describe('signCredentialWithExternalSigner — error propagation [VC-003]', () =
       signBytes: () => Promise.reject(new Error('Network error from KMS')),
     };
 
-    await expect(manager.signCredentialWithExternalSigner(baseVC, failing)).rejects.toThrow(
-      'Network error from KMS'
-    );
+    await expect(
+      manager.signCredentialWithExternalSigner(vcFor('did:key:z6MkReject#z6MkReject'), failing)
+    ).rejects.toThrow('Network error from KMS');
   });
 
   test('propagates an async-delayed rejection', async () => {
@@ -228,9 +277,9 @@ describe('signCredentialWithExternalSigner — error propagation [VC-003]', () =
         }),
     };
 
-    await expect(manager.signCredentialWithExternalSigner(baseVC, failing)).rejects.toThrow(
-      'Delayed HSM failure'
-    );
+    await expect(
+      manager.signCredentialWithExternalSigner(vcFor('did:key:z6MkDelayed#z6MkDelayed'), failing)
+    ).rejects.toThrow('Delayed HSM failure');
   });
 });
 

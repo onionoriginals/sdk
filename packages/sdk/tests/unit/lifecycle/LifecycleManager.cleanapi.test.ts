@@ -4,7 +4,6 @@ import { MockOrdinalsProvider } from '../../mocks/adapters';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
-import { DIDManager } from '../../../src/did/DIDManager';
 
 const resources = [
   {

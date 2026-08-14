@@ -21,7 +21,6 @@ import {
   registerVerificationMethod,
 } from '../../../src/vc/documentLoader';
 import { PRELOADED_CONTEXTS } from '../../../src/utils/serialization';
-import { DIDManager } from '../../../src/did/DIDManager';
 import type {
   VerifiableCredential,
   EscrowPolicy,

@@ -309,7 +309,9 @@ export class CredentialManager {
    * @returns Signed verifiable credential
    * @throws StructuredError `EXTERNAL_SIGNER_SIGNBYTES_REQUIRED` for a
    *   `sign()`-only signer; `EXTERNAL_SIGNER_INVALID_SIGNATURE` for a return
-   *   value that is not a 64-byte Ed25519 signature.
+   *   value that is not a 64-byte Ed25519 signature;
+   *   `ISSUER_BINDING_MISMATCH` when the credential claims an issuer the
+   *   signer's key does not control.
    */
   async signCredentialWithExternalSigner(
     credential: VerifiableCredential,
@@ -325,6 +327,22 @@ export class CredentialManager {
         `eddsa-rdfc-2022 credential. The SDK canonicalizes and hashes (RDFC-2022) and the signer ` +
         `signs those bytes; a signer implementing only the document-level sign() canonicalizes ` +
         `differently (e.g. JCS) and its credential can never verify.`
+      );
+    }
+
+    // Bind the key to the stated issuer, mirroring Issuer.issueCredential on the
+    // local-key path. Without this, a holder of did:me's key could mint a
+    // credential claiming issuer did:victim; the SDK would sign it and its own
+    // verifier would then reject it (Verifier.checkVerificationMethodController
+    // compares exactly this DID prefix). Fail closed at sign time instead.
+    const issuerId = typeof credential.issuer === 'string'
+      ? credential.issuer
+      : (credential.issuer as { id?: string } | undefined)?.id;
+    const keyController = verificationMethodId.split('#')[0];
+    if (issuerId && issuerId !== keyController) {
+      throw new StructuredError(
+        'ISSUER_BINDING_MISMATCH',
+        `Issuer DID (${issuerId}) does not match the verification method controller (${keyController})`
       );
     }
 
