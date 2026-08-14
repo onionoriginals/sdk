@@ -39,7 +39,7 @@ describe('resolveAssetFromSat — bare-sat chain recovery (#407 phase 2)', () =>
     const sat = asset.bindings!['did:btco'].split(':').pop()!;
 
     // Fresh SDK: only the sat + provider, no envelope, no host.
-    const fresh = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider });
+    const fresh = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider });
     const { asset: recovered, verification, warnings } = await fresh.lifecycle.resolveAssetFromSat(sat);
 
     expect(recovered.id).toBe(asset.id);

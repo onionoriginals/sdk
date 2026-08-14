@@ -9,11 +9,12 @@ import { createHash } from 'crypto';
 import { OriginalsSDK } from '../../../src';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const contentHash = (c: string) => createHash('sha256').update(c, 'utf8').digest('hex');
 
 const makeSdk = (extra: Record<string, unknown> = {}) =>
-  OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ...extra } as any);
+  OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ...extra } as any);
 
 const goodResource = () => ({
   id: 'res1',

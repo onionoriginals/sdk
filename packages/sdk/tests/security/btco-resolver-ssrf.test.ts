@@ -2,6 +2,7 @@ import { describe, test, expect, afterEach } from 'bun:test';
 import { OriginalsSDK } from '../../src';
 import { OrdinalsClient } from '../../src/bitcoin/OrdinalsClient';
 import { OrdinalsClientProviderAdapter } from '../../src/did/providers/OrdinalsClientProviderAdapter';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 /**
  * SSRF in the bitcoinRpcUrl did:btco resolution path.
@@ -174,7 +175,7 @@ describe('OrdinalsClientProviderAdapter same-origin RELATIVE content_url canonic
       return { ok: false, status: 404, statusText: 'Not Found', async text() { return ''; }, async json() { return {}; } };
     });
 
-    const sdk = OriginalsSDK.create({ network: 'mainnet', bitcoinRpcUrl: BASE });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'mainnet', bitcoinRpcUrl: BASE });
     const resolved = await sdk.did.resolveDID('did:btco:123456');
 
     expect(resolved).not.toBeNull();
@@ -204,7 +205,7 @@ describe('DIDManager bitcoinRpcUrl resolution path (end to end)', () => {
       return { ok: false, status: 404, statusText: 'Not Found', async text() { return ''; }, async json() { return {}; } };
     });
 
-    const sdk = OriginalsSDK.create({ network: 'mainnet', bitcoinRpcUrl: BASE });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'mainnet', bitcoinRpcUrl: BASE });
     await sdk.did.resolveDID('did:btco:123456');
 
     // The internal address must never have been requested.

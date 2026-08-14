@@ -9,6 +9,7 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import type { AssetResource } from '../../../src/types';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 // Fresh objects per test: createAsset holds references to the resource
 // objects it is given, so sharing one module-level array would leak url
@@ -60,7 +61,7 @@ describe('publishToWeb atomicRollback', () => {
     // Fail on the SECOND resource write (call 1 = genesis cel persist).
     const { adapter, deleted } = makeFailingAdapter(3);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sdk = OriginalsSDK.create({ network: 'regtest', storageAdapter: adapter as any });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', storageAdapter: adapter as any });
     const asset = await sdk.lifecycle.createAsset(makeResources());
 
     await expect(sdk.lifecycle.publishToWeb(asset, 'example.com')).rejects.toThrow('storage write exploded');
@@ -80,7 +81,7 @@ describe('publishToWeb atomicRollback', () => {
     // Fail on the SECOND resource write (call 1 = genesis cel persist).
     const { adapter, deleted } = makeFailingAdapter(3);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sdk = OriginalsSDK.create({ network: 'regtest', storageAdapter: adapter as any });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', storageAdapter: adapter as any });
     const asset = await sdk.lifecycle.createAsset(makeResources());
 
     await expect(
@@ -112,7 +113,7 @@ describe('publishToWeb atomicRollback', () => {
       }
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sdk = OriginalsSDK.create({ network: 'regtest', storageAdapter: adapter as any });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', storageAdapter: adapter as any });
     const asset = await sdk.lifecycle.createAsset(makeResources());
 
     await expect(sdk.lifecycle.publishToWeb(asset, 'example.com')).rejects.toThrow('storage write exploded');
@@ -125,7 +126,7 @@ describe('publishToWeb atomicRollback', () => {
   test('a successful publish is unaffected by the rollback machinery', async () => {
     const { adapter } = makeFailingAdapter(999);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sdk = OriginalsSDK.create({ network: 'regtest', storageAdapter: adapter as any });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', storageAdapter: adapter as any });
     const asset = await sdk.lifecycle.createAsset(makeResources());
 
     const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');

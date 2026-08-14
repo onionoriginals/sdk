@@ -16,10 +16,10 @@ import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 describe('LifecycleManager.verifyAsset', () => {
   test('verifies a did:peer asset with no ordinalsProvider needed', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519' });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '11'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
     expect(await sdk.lifecycle.verifyAsset(asset)).toBe(true);
   });
 
@@ -33,7 +33,7 @@ describe('LifecycleManager.verifyAsset', () => {
     });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '22'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
     // Bare call — no overrides. Bitcoin witness verification requires a
@@ -52,7 +52,7 @@ describe('LifecycleManager.verifyAsset', () => {
     });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '33'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
     // Delegates to the SAME underlying store (configProvider) so the
@@ -81,11 +81,11 @@ describe('LifecycleManager.verifyAsset', () => {
     });
     const asset = await sdkWithProvider.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '44'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
     await sdkWithProvider.lifecycle.inscribeOnBitcoin(asset);
 
     // A SEPARATE manager configured with no ordinalsProvider at all.
-    const sdkNoProvider = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519' });
+    const sdkNoProvider = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519' });
     expect(await sdkNoProvider.lifecycle.verifyAsset(asset)).toBe(false);
   });
 });

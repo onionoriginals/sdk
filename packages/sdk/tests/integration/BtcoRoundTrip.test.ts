@@ -8,7 +8,7 @@ import { verifyEventLog } from '../../src/cel/algorithms/verifyEventLog';
 
 describe('did:btco round-trip (#375)', () => {
   test('lifecycle-inscribed asset resolves through the SDK resolver', async () => {
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'ES256K',
       ordinalsProvider: new OrdMockProvider()
@@ -39,7 +39,7 @@ describe('did:btco round-trip (#375)', () => {
 describe('inscribeOnBitcoin commits to the CEL head digest (#365)', () => {
   test('inscribed doc carries #cel anchoring the post-append head; log verifies', async () => {
     const ordinalsProvider = new OrdMockProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider,
@@ -84,7 +84,7 @@ describe('inscribeOnBitcoin commits to the CEL head digest (#365)', () => {
 
   test('btco migrate event carries a bitcoin witness proof from the DID-doc inscription (#367)', async () => {
     const ordinalsProvider = new OrdMockProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider,
@@ -124,7 +124,7 @@ describe('inscribeOnBitcoin commits to the CEL head digest (#365)', () => {
   });
 
   test('keyStore-less inscribe degrades: cel:append-skipped, no #cel anchor, log untouched', async () => {
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ onAppendFailure: 'skip',
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider: new OrdMockProvider()
@@ -134,7 +134,7 @@ describe('inscribeOnBitcoin commits to the CEL head digest (#365)', () => {
 
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res-1', type: 'data', contentType: 'text/plain', hash: 'ef'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
     const logBefore = asset.celLog;
 
     await sdk.lifecycle.inscribeOnBitcoin(asset);
@@ -152,7 +152,7 @@ describe('inscribeOnBitcoin commits to the CEL head digest (#365)', () => {
         throw new Error('broadcast failed');
       }
     }
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider: new FailingProvider(),

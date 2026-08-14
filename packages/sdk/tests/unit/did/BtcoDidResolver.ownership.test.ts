@@ -19,12 +19,12 @@ describe('sat ownership (#366)', () => {
     const { OriginalsSDK } = await import('../../../src');
     const { OrdinalsProviderResolverAdapter } = await import('../../../src/did/providers/OrdinalsProviderResolverAdapter');
     const provider = new OrdMockProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'ES256K', ordinalsProvider: provider });
+    const sdk = OriginalsSDK.create({ onAppendFailure: 'skip', network: 'regtest', defaultKeyType: 'ES256K', ordinalsProvider: provider });
     // Inline content must hash-match its declared hash (#347).
     const hash = bytesToHex(sha256(new TextEncoder().encode('y')));
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash, content: 'y' }
-    ]);
+    ], { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     // Mirror DIDManager.resolveDID: adapt the configured provider and pin
     // content retrieval through the adapter's fetchContent.

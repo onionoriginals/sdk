@@ -22,6 +22,7 @@ import { KeyManager } from '../../../src/did/KeyManager';
 import { Ed25519Verifier } from '../../../src/did/Ed25519Verifier';
 import { OriginalsSDK } from '../../../src';
 import type { DIDDocument, VerifiableCredential } from '../../../src/types';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 /** Resolve a DID document from its log — the trust path a real verifier uses. */
 async function resolveFromLog(log: unknown): Promise<DIDDocument> {
@@ -373,7 +374,7 @@ describe('#334 — relationship arrays reference the published signing VM', () =
   }, 30000);
 
   test('create → resolve from log → verifyCredential succeeds (the #334 repro)', async () => {
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
     const created = await sdk.did.createDIDWebVH({ domain: 'example.com' });
 
     // Resolve the document from the signed log — the correct trust path a

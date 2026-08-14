@@ -14,6 +14,7 @@ import { StateTracker } from '../../../src/migration/state/StateTracker';
 import { MigrationStateEnum, MigrationState } from '../../../src/migration/types';
 import type { OriginalsConfig } from '../../../src/types';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -108,7 +109,7 @@ describe.skip('MIGRATION_IN_PROGRESS rejection produces no audit/event noise (it
 
   test('a guard-rejected concurrent migrate() emits no migration:failed and writes no audit record', async () => {
     MigrationManager.resetInstance();
-    const sdk = OriginalsSDK.create({ ...baseConfig });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), ...baseConfig });
     const manager = MigrationManager.getInstance(
       (sdk as unknown as { config: OriginalsConfig }).config,
       sdk.did,

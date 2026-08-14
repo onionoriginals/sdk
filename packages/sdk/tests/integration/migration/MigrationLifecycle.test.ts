@@ -17,10 +17,11 @@ import { OriginalsSDK } from '../../../src';
 import { MigrationManager } from '../../../src/migration';
 import { MigrationStateEnum } from '../../../src/migration/types';
 import { EventEmitter } from '../../../src/events/EventEmitter';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 function makeSdk() {
   MigrationManager.resetInstance();
-  const sdk = OriginalsSDK.create({
+  const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
     network: 'signet',
     defaultKeyType: 'Ed25519'
   });

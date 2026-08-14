@@ -197,7 +197,7 @@ import { BtcoDidResolver } from '../../../src/did/BtcoDidResolver';
 
 describe('DIDManager.resolveDID catch path', () => {
   test('returns null when resolver throws', async () => {
-    const sdk = OriginalsSDK.create({ bitcoinRpcUrl: 'http://localhost:3000', network: 'mainnet' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://localhost:3000', network: 'mainnet' });
     const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
     spy.mockImplementationOnce(async () => { throw new Error('resolver failed'); });
     const res = await sdk.did.resolveDID('did:btco:123');
@@ -289,7 +289,7 @@ describe('DIDManager.resolveDID did:btco provider selection (issue #266)', () =>
 
 describe('DIDManager.resolveDID covers btco method variants', () => {
   test('resolves did:btco:test:* via resolver', async () => {
-    const sdk = OriginalsSDK.create({ bitcoinRpcUrl: 'http://x', network: 'mainnet' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://x', network: 'mainnet' });
     const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
     spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:test:1' } });
     const res = await sdk.did.resolveDID('did:btco:test:1');
@@ -298,7 +298,7 @@ describe('DIDManager.resolveDID covers btco method variants', () => {
   });
 
   test('resolves did:btco:sig:* via resolver', async () => {
-    const sdk = OriginalsSDK.create({ bitcoinRpcUrl: 'http://x', network: 'mainnet' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://x', network: 'mainnet' });
     const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
     spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:sig:2' } });
     const res = await sdk.did.resolveDID('did:btco:sig:2');
@@ -322,6 +322,7 @@ describe('DIDManager.validateDIDDocument false branch', () => {
 
 
 import { createCelDidDocument } from '../../../src/cel/celDid';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 describe('DIDManager.resolveDID did:cel branch (#Phase2 Task 8)', () => {
   test('returns null on a cache miss — no fake resolution', async () => {

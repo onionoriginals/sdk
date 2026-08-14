@@ -267,7 +267,15 @@ export class OriginalsSDK {
     // Honor a keyStore supplied on the config object too (config.keyStore),
     // not only the dedicated options.keyStore — otherwise it is silently
     // dropped and signing later fails with KEYSTORE_REQUIRED.
-    const merged = { ...defaultConfig, ...configOptions };
+    // Keep the resolved keyStore ON the config, not only in the constructor
+    // argument. Stripping it made `config.keyStore` undefined everywhere
+    // downstream, so anything reading custody from the config (or any manager
+    // constructed directly from it) saw none.
+    const merged: OriginalsConfig = {
+      ...defaultConfig,
+      ...configOptions,
+      ...(keyStore ? { keyStore } : {}),
+    };
     // When the caller selects a webvhNetwork tier but does not explicitly set a
     // Bitcoin network, derive the network from the tier's fixed mapping
     // (magby→regtest, cleffa→signet, pichu→mainnet). Otherwise `network` would

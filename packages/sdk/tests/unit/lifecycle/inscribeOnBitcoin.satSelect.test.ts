@@ -41,7 +41,7 @@ const satSigner = {
 describe('inscribeOnBitcoin (sat-selected)', () => {
   const createSDK = () => {
     const provider = new SatSelectProvider();
-    return OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    return OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
   };
 
   const createAsset = () => new OriginalsAsset(
@@ -78,7 +78,7 @@ describe('inscribeOnBitcoin (sat-selected)', () => {
 
   test('throws FEE_RATE_REQUIRED when no feeRate and no fee estimate are available', async () => {
     const provider = new NoFeeSatSelectProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = createAsset();
     await expect(
       sdk.lifecycle.inscribeOnBitcoin(asset, { fundingUtxo: sampleUtxo, satSigner, changeAddress: sampleChangeAddress })
@@ -100,7 +100,7 @@ describe('inscribeOnBitcoin (sat-selected)', () => {
       }
     }
     const provider = new FailRevealProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider: provider,

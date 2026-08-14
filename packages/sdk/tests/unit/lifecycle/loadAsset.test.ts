@@ -31,7 +31,7 @@ function makeSDK() {
 async function createGenesisAsset(sdk: OriginalsSDK) {
   return sdk.lifecycle.createAsset([
     { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
-  ]);
+  ], { controller: 'ephemeral' });
 }
 
 describe('loadAsset — round-trip', () => {
@@ -179,7 +179,7 @@ describe('loadAsset — fail-closed verification', () => {
     const hash = hashResource(Buffer.from(content, 'utf8'));
     const asset = await sdk.lifecycle.createAsset([
       { id: 'doc', type: 'text', content, contentType: 'text/plain', hash }
-    ]);
+    ], { controller: 'ephemeral' });
     const envelope = asset.serialize();
     // Keep the honest hash (genesis binding still passes) but tamper the bytes.
     envelope.resources[0].content = 'goodbye world';
@@ -239,7 +239,7 @@ describe('loadAsset — captured DID document repopulation', () => {
     // No keyStore → the btco migrate event never lands in the log, so the fold
     // can't derive did:btco even though the live cache (and envelope) has it.
     const ordinalsProvider = new OrdMockProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ onAppendFailure: 'skip',
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider,
@@ -247,7 +247,7 @@ describe('loadAsset — captured DID document repopulation', () => {
     });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
     const envelope = asset.serialize();

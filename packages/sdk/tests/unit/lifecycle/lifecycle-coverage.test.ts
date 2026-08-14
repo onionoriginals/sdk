@@ -34,12 +34,12 @@ const baseResource: AssetResource = {
 };
 
 function makeSDK(opts?: Partial<OriginalsConfig>) {
-  return OriginalsSDK.create({ network: 'regtest', ...opts } as OriginalsConfig);
+  return OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ...opts } as OriginalsConfig);
 }
 
 function makeSDKWithProvider(opts?: Record<string, unknown>) {
   const provider = new MockOrdinalsProvider();
-  return OriginalsSDK.create({
+  return OriginalsSDK.create({ keyStore: new MockKeyStore(),
     network: 'regtest',
     ordinalsProvider: provider,
     ...opts,

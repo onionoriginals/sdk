@@ -11,7 +11,7 @@ describe('Resource-update handoff (e2e)', () => {
     const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
     await asset.addResourceVersion('note', 'v2', 'text/plain', 'edit');
 
     // The signed update landed on the log.
@@ -33,7 +33,7 @@ describe('Resource-update handoff (e2e)', () => {
       const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
       const asset = await creator.lifecycle.createAsset([
         { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-      ]);
+      ], { controller: 'ephemeral' });
       const big = 'x'.repeat(bytes);
       await asset.addResourceVersion('note', big, 'text/plain');
       return asset;
@@ -59,7 +59,7 @@ describe('Resource-update handoff (e2e)', () => {
     const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
     await asset.addResourceVersion('note', 'v2', 'text/plain');
     const envelope = asset.serialize();
 
@@ -82,7 +82,7 @@ describe('Resource-update handoff (e2e)', () => {
     const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
     const envelope = asset.serialize();
     envelope.resources.push({
       id: 'injected', type: 'text', content: 'attacker-payload',
@@ -97,7 +97,7 @@ describe('Resource-update handoff (e2e)', () => {
     const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
     await asset.addResourceVersion('note', 'v2', 'text/plain');
     const envelope = asset.serialize();
 
@@ -121,7 +121,7 @@ describe('Resource-update handoff (e2e)', () => {
     const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
     await asset.addResourceVersion('note', 'v2', 'text/plain');
     const envelope = asset.serialize();
 
@@ -143,7 +143,7 @@ describe('Resource-update handoff (e2e)', () => {
     const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
     await asset.addResourceVersion('note', 'v2', 'text/plain');
     const envelope = asset.serialize();
 
@@ -162,10 +162,10 @@ describe('Resource-update handoff (e2e)', () => {
     // serializes and hands off, that v2 is unprovable — indistinguishable from a
     // forgery. The buyer must not silently accept it (fail closed on a v≥2
     // resource with no backing verified update event).
-    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519' });
+    const creator = OriginalsSDK.create({ onAppendFailure: 'skip', network: 'regtest', defaultKeyType: 'Ed25519' });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
     await asset.addResourceVersion('note', 'v2', 'text/plain'); // degrades (no signer)
     expect(asset.celLog!.events.some(e => e.type === 'update')).toBe(false);
 
@@ -175,10 +175,10 @@ describe('Resource-update handoff (e2e)', () => {
 
   test('degrade: keyless creator emits cel:append-skipped and the update is not on the log', async () => {
     // No keyStore ⇒ createAsset drops the controller key ⇒ appends degrade.
-    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519' });
+    const creator = OriginalsSDK.create({ onAppendFailure: 'skip', network: 'regtest', defaultKeyType: 'Ed25519' });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
     const skipped: CelAppendSkippedEvent[] = [];
     creator.lifecycle.on('cel:append-skipped', (e) => skipped.push(e as CelAppendSkippedEvent));
 
@@ -199,12 +199,12 @@ describe('Resource-update handoff (e2e)', () => {
     const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: ks });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
 
     // 1) Key temporarily unavailable → this update degrades (in-memory only).
     const saved = ks.getAllKeys();
     ks.clear();
-    await asset.addResourceVersion('note', 'v2', 'text/plain');
+    await asset.addResourceVersion('note', 'v2', 'text/plain', undefined, { onAppendFailure: 'skip' });
     expect(asset.getResourceVersion('note', 2)?.content).toBe('v2'); // in-memory advanced
     expect(asset.celLog!.events.some(e => e.type === 'update')).toBe(false); // nothing on log
 
@@ -233,7 +233,7 @@ describe('Resource-update handoff (e2e)', () => {
     const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
 
     await Promise.all([
       asset.addResourceVersion('note', 'v2a', 'text/plain'),
@@ -259,7 +259,7 @@ describe('Resource-update handoff (e2e)', () => {
     const asset = await creator.lifecycle.createAsset([
       { id: 'a', type: 'text', content: 'a1', contentType: 'text/plain', hash: h('a1') },
       { id: 'b', type: 'text', content: 'b1', contentType: 'text/plain', hash: h('b1') }
-    ]);
+    ], { controller: 'ephemeral' });
 
     await Promise.all([
       asset.addResourceVersion('a', 'a2', 'text/plain'),

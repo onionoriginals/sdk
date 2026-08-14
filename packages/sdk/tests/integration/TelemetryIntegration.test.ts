@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, mock } from 'bun:test';
 import { OriginalsSDK } from '../../src/core/OriginalsSDK';
 import type { OriginalsConfig } from '../../src/types';
 import type { LogOutput, LogEntry } from '../../src/utils/Logger';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 describe('Telemetry Integration', () => {
   let logEntries: LogEntry[];
@@ -51,7 +52,7 @@ describe('Telemetry Integration', () => {
   
   describe('lifecycle operations with logging', () => {
     test('should log asset creation', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
@@ -87,7 +88,7 @@ describe('Telemetry Integration', () => {
     });
     
     test('should log with performance timing', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
@@ -125,7 +126,7 @@ describe('Telemetry Integration', () => {
   
   describe('event logging integration', () => {
     test('should automatically log events', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
@@ -162,7 +163,7 @@ describe('Telemetry Integration', () => {
   
   describe('metrics collection', () => {
     test('should collect metrics from lifecycle operations', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'ES256K',
         metrics: {
@@ -190,7 +191,7 @@ describe('Telemetry Integration', () => {
     });
     
     test('should export metrics in JSON format', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'ES256K'
       });
@@ -217,7 +218,7 @@ describe('Telemetry Integration', () => {
     });
     
     test('should export metrics in Prometheus format', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'ES256K'
       });
@@ -243,7 +244,7 @@ describe('Telemetry Integration', () => {
   
   describe('error logging', () => {
     test('should log errors during operations', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
@@ -267,7 +268,7 @@ describe('Telemetry Integration', () => {
     });
     
     test('should record error metrics', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'ES256K'
       });
@@ -288,7 +289,7 @@ describe('Telemetry Integration', () => {
   
   describe('child loggers', () => {
     test('should use hierarchical context in logs', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {
@@ -330,7 +331,7 @@ describe('Telemetry Integration', () => {
     });
     
     test('should support custom event logging configuration', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'ES256K',
         logging: {

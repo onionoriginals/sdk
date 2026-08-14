@@ -9,6 +9,7 @@ import { OriginalsSDK } from '../../../src';
 import { MigrationManager } from '../../../src/migration';
 import { AuditLogger, AuditSignerConfig } from '../../../src/migration/audit/AuditLogger';
 import { MigrationStateEnum } from '../../../src/migration/types';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 describe.skip('Peer to WebVH Migration', () => {
   let sdk: OriginalsSDK;
@@ -19,7 +20,7 @@ describe.skip('Peer to WebVH Migration', () => {
     MigrationManager.resetInstance();
 
     // Create SDK instance
-    sdk = OriginalsSDK.create({
+    sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'signet',
       defaultKeyType: 'Ed25519'
     });
@@ -183,7 +184,7 @@ describe.skip('Peer to WebVH Migration', () => {
     };
 
     MigrationManager.resetInstance();
-    const signedSdk = OriginalsSDK.create({ network: 'signet', defaultKeyType: 'Ed25519' });
+    const signedSdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'signet', defaultKeyType: 'Ed25519' });
     const signedManager = MigrationManager.getInstance(
       { ...signedSdk['config'], auditSigner } as any,
       signedSdk.did,

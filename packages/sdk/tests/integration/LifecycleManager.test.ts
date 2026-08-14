@@ -9,10 +9,10 @@ import { MockKeyStore } from '../mocks/MockKeyStore';
 describe('Integration: Lifecycle inscribe updates provenance and btco layer', () => {
   test('provenance updated and layer becomes did:btco', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res1', type: 'text', contentType: 'text/plain', hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9' }
-    ]);
+    ], { controller: 'ephemeral' });
     const updated = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
     expect(updated.currentLayer).toBe('did:btco');
     const prov = (updated as any).getProvenance();
@@ -31,7 +31,7 @@ describe('Integration: Lifecycle inscribe updates provenance and btco layer', ()
 
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) },
-    ]);
+    ], { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
     const btcoBinding = asset.bindings!['did:btco']!;

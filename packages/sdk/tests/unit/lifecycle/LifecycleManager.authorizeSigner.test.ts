@@ -36,7 +36,7 @@ describe('authorizeSigner (#366 non-cooperative rotation, write side; optional a
     const keyStore = new MockKeyStore();
     const sdk = makeSdk(provider, keyStore);
 
-    const asset = await sdk.lifecycle.createAsset(RES);
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     await sdk.lifecycle.transferOwnership(asset, NEW_OWNER);
     const satoshi = asset.bindings!['did:btco']!.split(':').pop()!;
@@ -115,7 +115,7 @@ describe('authorizeSigner (#366 non-cooperative rotation, write side; optional a
     }
     const provider = new CountingProvider();
     const sdk = makeSdk(provider, new MockKeyStore());
-    const asset = await sdk.lifecycle.createAsset(RES);
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const eventsBefore = asset.celLog!.events.length;
     const inscribeCallsBefore = provider.inscribeCalls;
@@ -132,7 +132,7 @@ describe('authorizeSigner (#366 non-cooperative rotation, write side; optional a
 
   test('rejects authorizing a signer on a non-btco asset with INVALID_STATE', async () => {
     const sdk = makeSdk(new OrdMockProvider(), new MockKeyStore());
-    const asset = await sdk.lifecycle.createAsset(RES); // did:peer
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' }); // did:peer
     const kp = await new KeyManager().generateKeyPair('Ed25519');
     await expect(
       sdk.lifecycle.authorizeSigner(asset, { publicKeyMultibase: kp.publicKey, privateKey: kp.privateKey })
@@ -142,7 +142,7 @@ describe('authorizeSigner (#366 non-cooperative rotation, write side; optional a
   test('concurrent authorizeSigner calls on the same asset reject with OPERATION_IN_PROGRESS', async () => {
     const provider = new OrdMockProvider();
     const sdk = makeSdk(provider, new MockKeyStore());
-    const asset = await sdk.lifecycle.createAsset(RES);
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
     const kp1 = await new KeyManager().generateKeyPair('Ed25519');
@@ -156,7 +156,7 @@ describe('authorizeSigner (#366 non-cooperative rotation, write side; optional a
   test('inscribeOnBitcoin appends a controller-signed acknowledgeWitness update', async () => {
     const provider = new OrdMockProvider();
     const sdk = makeSdk(provider, new MockKeyStore());
-    const asset = await sdk.lifecycle.createAsset(RES);
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const satoshi = asset.bindings!['did:btco']!.split(':').pop()!;
 
@@ -174,7 +174,7 @@ describe('authorizeSigner (#366 non-cooperative rotation, write side; optional a
   test('rotateBtcoKeys appends an acknowledgeWitness update signed by the NEW controller', async () => {
     const provider = new OrdMockProvider();
     const sdk = makeSdk(provider, new MockKeyStore());
-    const asset = await sdk.lifecycle.createAsset(RES);
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
     const newKp = await new KeyManager().generateKeyPair('Ed25519');
@@ -191,7 +191,7 @@ describe('authorizeSigner (#366 non-cooperative rotation, write side; optional a
   test('requires a private key to self-sign the rotation', async () => {
     const provider = new OrdMockProvider();
     const sdk = makeSdk(provider, new MockKeyStore());
-    const asset = await sdk.lifecycle.createAsset(RES);
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
     await expect(
@@ -206,14 +206,14 @@ describe('authorizeSigner (#366 non-cooperative rotation, write side; optional a
     // No keyStore: the trailing witness-ack append (the only other path to
     // persistCelArtifacts) degrades to a skip, so the direct persist after
     // the self-signed rotation is the only thing that can reach storage.
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ onAppendFailure: 'skip',
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider: provider,
       storageAdapter: storage
     } as any);
 
-    const asset = await sdk.lifecycle.createAsset(RES);
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
     const newSigner = await new KeyManager().generateKeyPair('Ed25519');
@@ -248,7 +248,7 @@ describe('authorizeSigner (#366 non-cooperative rotation, write side; optional a
     const credentialManager = new CredentialManager(config, didManager);
     const lifecycleManager = new LifecycleManager(config, didManager, credentialManager, undefined, keyStore);
 
-    const asset = await lifecycleManager.createAsset(RES);
+    const asset = await lifecycleManager.createAsset(RES, { controller: 'ephemeral' });
     await lifecycleManager.inscribeOnBitcoin(asset);
     const satoshi = asset.bindings!['did:btco']!.split(':').pop()!;
 

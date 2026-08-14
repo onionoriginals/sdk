@@ -38,12 +38,12 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) },
       { id: 'note', type: 'text', contentType: 'text/plain', content, hash: hashResource(Buffer.from(content, 'utf8')) }
-    ]);
+    ], { controller: 'ephemeral' });
     const didCel = asset.id;
 
-    await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
     const webvhBinding = asset.bindings!['did:webvh'];
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
     const btcoBinding = asset.bindings!['did:btco'];
 
     // A post-genesis resource version → appends a signed `update` CEL event.
@@ -87,7 +87,7 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const sdk = makeSDK();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'hello v1', contentType: 'text/plain', hash: hashResource(Buffer.from('hello v1', 'utf-8')) }
-    ]);
+    ], { controller: 'ephemeral' });
     await asset.addResourceVersion('note', 'hello v2', 'text/plain', 'edit');
 
     const env = asset.serialize();
@@ -105,9 +105,9 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const sdk = makeSDK();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
-    ]);
-    await sdk.lifecycle.publishToWeb(asset, 'example.com');
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    ], { controller: 'ephemeral' });
+    await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
+    await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
 
     const env = asset.serialize();
     const roundTripped = JSON.parse(JSON.stringify(env));
@@ -120,8 +120,8 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const sdk = makeSDK(false);
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
-    ]);
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    ], { controller: 'ephemeral' });
+    await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
     const btcoBinding = asset.bindings!['did:btco'];
 
     const env = asset.serialize();
@@ -152,9 +152,9 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const sdk = makeSDK();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
-    ]);
-    await sdk.lifecycle.publishToWeb(asset, 'example.com');
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    ], { controller: 'ephemeral' });
+    await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
+    await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
 
     const originalCelVmId = asset.did.verificationMethod?.[0]?.id;
     const originalCelKey = asset.did.verificationMethod?.[0]?.publicKeyMultibase;
@@ -180,7 +180,7 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const sdk = makeSDK();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
 
     const doc = {
       '@context': ['https://www.w3.org/ns/did/v1'],

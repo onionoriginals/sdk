@@ -18,6 +18,7 @@ import { MigrationManager } from '../../../src/migration';
 import { CheckpointManager } from '../../../src/migration/checkpoint/CheckpointManager';
 import type { OriginalsConfig } from '../../../src/types';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const baseConfig: OriginalsConfig = {
   network: 'regtest',
@@ -40,7 +41,7 @@ describe.skip('MigrationManager reclaims stranded checkpoints automatically (#32
     MigrationManager.resetInstance();
     const sweepSpy = spyOn(CheckpointManager.prototype, 'cleanupOldCheckpoints');
     try {
-      const sdk = OriginalsSDK.create({ ...baseConfig, storageAdapter: new MemoryStorageAdapter() });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), ...baseConfig, storageAdapter: new MemoryStorageAdapter() });
       const manager = MigrationManager.getInstance(
         (sdk as unknown as { config: OriginalsConfig }).config,
         sdk.did,

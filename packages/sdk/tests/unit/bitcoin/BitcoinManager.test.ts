@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import type { OrdinalsProvider } from '../../../src/adapters';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 // Use global Buffer available in Node test environment
 
 const createMockProvider = () => {
@@ -72,7 +73,7 @@ const createMockProvider = () => {
 describe('BitcoinManager integration with providers', () => {
   test('inscribeData surfaces provider metadata', async () => {
     const provider = createMockProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: provider,
       feeOracle: { estimateFeeRate: async () => 7 }
@@ -130,7 +131,7 @@ describe('BitcoinManager integration with providers', () => {
       }
     } as OrdinalsProvider;
 
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     const result = await sdk.bitcoin.inscribeData(Buffer.from('x'), 'text/plain');
     expect(result.satoshi).toBe('999888777');
   });
@@ -160,7 +161,7 @@ describe('BitcoinManager integration with providers', () => {
       }
     };
 
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     await expect(
       sdk.bitcoin.inscribeData(Buffer.from('data'), 'text/plain')
     ).rejects.toThrow('boom');
@@ -168,7 +169,7 @@ describe('BitcoinManager integration with providers', () => {
 
   test('trackInscription defers to provider data', async () => {
     const provider = createMockProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     const created = await sdk.bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
     const tracked = await sdk.bitcoin.trackInscription(created.inscriptionId);
     expect(tracked?.txid).toBe('tx-output-1');
@@ -177,7 +178,7 @@ describe('BitcoinManager integration with providers', () => {
 
   test('transferInscription returns provider transaction shape', async () => {
     const provider = createMockProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     const inscription = await sdk.bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
     const tx = await sdk.bitcoin.transferInscription(inscription, 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
     expect(tx.txid).toBe('tx-transfer-1');
@@ -186,7 +187,7 @@ describe('BitcoinManager integration with providers', () => {
 
   test('does not fabricate a vout when the provider reports none (#290)', async () => {
     const provider = createMockProvider();
-    const inscription0 = await OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any)
+    const inscription0 = await OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any)
       .bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
     // Provider reports only a txid — no vout. BitcoinManager must surface the
     // unknown outputs as empty rather than inventing a dust output.
@@ -196,20 +197,20 @@ describe('BitcoinManager integration with providers', () => {
         return { txid: 'tx', vin: [], vout: [], fee: 1 } as any;
       }
     } as OrdinalsProvider;
-    const sdk2 = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider2 } as any);
+    const sdk2 = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider2 } as any);
     const tx2 = await sdk2.bitcoin.transferInscription(inscription0, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
     expect(tx2.vout).toEqual([]);
     expect(tx2.vin).toEqual([]);
   });
 
   test('getSatoshiFromInscription returns null when provider missing', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest' });
     expect(await sdk.bitcoin.getSatoshiFromInscription('unknown')).toBeNull();
   });
 
   test('validateBTCODID checks provider assignments', async () => {
     const provider = createMockProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     await sdk.bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
     await expect(sdk.bitcoin.validateBTCODID('did:btco:reg:123456789')).resolves.toBe(true);
     await expect(sdk.bitcoin.validateBTCODID('did:btco:reg:999999999')).resolves.toBe(false);
@@ -217,7 +218,7 @@ describe('BitcoinManager integration with providers', () => {
 
   test('validateBTCODID rejects network prefixes that do not match the configured network', async () => {
     const provider = createMockProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     await sdk.bitcoin.inscribeData(Buffer.from('payload'), 'text/plain');
 
     // The satoshi lookup runs against the configured network's provider, so a
@@ -234,7 +235,7 @@ describe('BitcoinManager integration with providers', () => {
 
   test('resolveFeeRate honors an explicitly provided fee rate over estimators', async () => {
     const provider = createMockProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: provider,
       feeOracle: { estimateFeeRate: async () => 9 }
@@ -245,7 +246,7 @@ describe('BitcoinManager integration with providers', () => {
 
   test('resolveFeeRate falls back to feeOracle when no explicit rate is given', async () => {
     const provider = createMockProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: provider,
       feeOracle: { estimateFeeRate: async () => 9 }
@@ -258,7 +259,7 @@ describe('BitcoinManager integration with providers', () => {
     // Regression: only caller-provided fee rates were bounded; a fee oracle
     // returning e.g. 1e9 sat/vB was used directly and could drain funds.
     const provider = createMockProvider(); // provider.estimateFee => 5 sat/vB
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: provider,
       feeOracle: { estimateFeeRate: async () => 1_000_000_000 }
@@ -269,7 +270,7 @@ describe('BitcoinManager integration with providers', () => {
   });
 
   test('inscribeData throws ORD_PROVIDER_REQUIRED when provider not configured', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest' });
     try {
       await sdk.bitcoin.inscribeData(Buffer.from('data'), 'text/plain');
       throw new Error('Expected error to be thrown');
@@ -280,7 +281,7 @@ describe('BitcoinManager integration with providers', () => {
   });
 
   test('transferInscription throws ORD_PROVIDER_REQUIRED when provider not configured', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest' });
     const mockInscription = {
       inscriptionId: 'test-id',
       satoshi: 'sat-123',
@@ -299,13 +300,13 @@ describe('BitcoinManager integration with providers', () => {
   });
 
   test('validateBitcoinConfig throws when ordinalsProvider not configured', () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest' });
     expect(() => sdk.validateBitcoinConfig()).toThrow('Bitcoin operations require an ordinalsProvider');
   });
 
   test('validateBitcoinConfig passes when ordinalsProvider is configured', () => {
     const provider = createMockProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     expect(() => sdk.validateBitcoinConfig()).not.toThrow();
   });
 });

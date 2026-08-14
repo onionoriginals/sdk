@@ -1,6 +1,7 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import { signAsync, getPublicKeyAsync } from '@noble/ed25519';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 /**
  * Build a factory for external signers backed by real Ed25519 keys, so
@@ -48,7 +49,7 @@ describe('OriginalsSDK', () => {
   });
 
   test('create() accepts config overrides', () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest', enableLogging: true });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', enableLogging: true });
     expect(sdk).toBeInstanceOf(OriginalsSDK);
   });
 
@@ -56,17 +57,17 @@ describe('OriginalsSDK', () => {
     // Regression: choosing a webvhNetwork tier but leaving network unset left
     // network defaulting to 'mainnet', so Bitcoin ops ran on mainnet while
     // did:btco creation used the tier's network — a fund-loss footgun.
-    const magby = OriginalsSDK.create({ webvhNetwork: 'magby' });
+    const magby = OriginalsSDK.create({ keyStore: new MockKeyStore(), webvhNetwork: 'magby' });
     expect((magby as any).config.network).toBe('regtest');
 
-    const cleffa = OriginalsSDK.create({ webvhNetwork: 'cleffa' });
+    const cleffa = OriginalsSDK.create({ keyStore: new MockKeyStore(), webvhNetwork: 'cleffa' });
     expect((cleffa as any).config.network).toBe('signet');
 
-    const pichu = OriginalsSDK.create({ webvhNetwork: 'pichu' });
+    const pichu = OriginalsSDK.create({ keyStore: new MockKeyStore(), webvhNetwork: 'pichu' });
     expect((pichu as any).config.network).toBe('mainnet');
 
     // An explicit network is preserved (not overridden by the tier mapping).
-    const explicit = OriginalsSDK.create({ network: 'signet', webvhNetwork: 'magby' });
+    const explicit = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'signet', webvhNetwork: 'magby' });
     expect((explicit as any).config.network).toBe('signet');
   });
 
@@ -74,18 +75,18 @@ describe('OriginalsSDK', () => {
     // Regression: create({ network: 'regtest' }) with no tier used to leave
     // webvhNetwork defaulting to 'pichu' (the PRODUCTION domain) while doing
     // regtest Bitcoin. The tier must be derived from the network instead.
-    const reg = OriginalsSDK.create({ network: 'regtest' });
+    const reg = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest' });
     expect((reg as any).config.webvhNetwork).toBe('magby');
     expect((reg as any).config.network).toBe('regtest');
 
-    const sig = OriginalsSDK.create({ network: 'signet' });
+    const sig = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'signet' });
     expect((sig as any).config.webvhNetwork).toBe('cleffa');
 
-    const main = OriginalsSDK.create({ network: 'mainnet' });
+    const main = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'mainnet' });
     expect((main as any).config.webvhNetwork).toBe('pichu');
 
     // An explicit webvhNetwork still wins over the reverse derivation.
-    const explicitTier = OriginalsSDK.create({ network: 'regtest', webvhNetwork: 'pichu' });
+    const explicitTier = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', webvhNetwork: 'pichu' });
     expect((explicitTier as any).config.webvhNetwork).toBe('pichu');
   });
 
@@ -96,7 +97,7 @@ describe('OriginalsSDK', () => {
     // network:'testnet' threw 'Invalid network' — bricking e.g. the landing
     // demo whenever VITE_BTC_TESTNET was set.
     expect(() => new OriginalsSDK({ network: 'testnet', defaultKeyType: 'Ed25519' })).not.toThrow();
-    const sdk = OriginalsSDK.create({ network: 'testnet', webvhNetwork: 'magby' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'testnet', webvhNetwork: 'magby' });
     expect((sdk as any).config.network).toBe('testnet');
   });
 
@@ -167,7 +168,7 @@ describe('OriginalsSDK', () => {
         estimateFee: mock(() => Promise.resolve(10)),
       };
 
-      const sdk = OriginalsSDK.create({ ordinalsProvider: mockProvider });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), ordinalsProvider: mockProvider });
       expect(() => sdk.validateBitcoinConfig()).not.toThrow();
     });
 

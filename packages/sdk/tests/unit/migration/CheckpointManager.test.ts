@@ -8,11 +8,12 @@ import { CheckpointManager } from '../../../src/migration/checkpoint/CheckpointM
 import { CheckpointStorage } from '../../../src/migration/checkpoint/CheckpointStorage';
 import { OriginalsSDK } from '../../../src';
 import { MigrationManager } from '../../../src/migration';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 // Helper to create a fresh SDK and CheckpointManager for each test
 function makeManagers() {
   MigrationManager.resetInstance();
-  const sdk = OriginalsSDK.create({
+  const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
     network: 'signet',
     defaultKeyType: 'Ed25519'
   });
@@ -177,7 +178,7 @@ describe.skip('CheckpointManager', () => {
         get: async (_key: string) => null,
         delete: async (_key: string) => {},
       };
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'signet',
         defaultKeyType: 'Ed25519',
         storageAdapter: mockStorage as any
@@ -202,7 +203,7 @@ describe.skip('CheckpointManager', () => {
 
     it('should retrieve from storage adapter when not in memory', async () => {
       MigrationManager.resetInstance();
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'signet',
         defaultKeyType: 'Ed25519'
       });

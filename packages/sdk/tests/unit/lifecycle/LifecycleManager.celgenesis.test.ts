@@ -34,7 +34,7 @@ describe('createAsset mints did:cel genesis (#Phase2)', () => {
     const sdk = makeSdkWithKeyStore();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res-1', type: 'data', contentType: 'text/plain', hash: 'ab'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
     expect(asset.id.startsWith('did:cel:u')).toBe(true);
     expect(asset.celLog).toBeDefined();
     expect(deriveDidCel(asset.celLog!)).toBe(asset.id);
@@ -50,7 +50,7 @@ describe('createAsset mints did:cel genesis (#Phase2)', () => {
     const { sdk, keyStore } = makeSdkWithKeyStoreExposed();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: 'cd'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
     const genesis = asset.celLog!.events[0].data as { controller: string };
     const didKeyVm = `${genesis.controller}#${genesis.controller.slice('did:key:'.length)}`;
     expect(await keyStore.getPrivateKey(didKeyVm)).toBeTruthy();
@@ -66,7 +66,7 @@ describe('createAsset mints did:cel genesis (#Phase2)', () => {
 
     const asset = await lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: 'ef'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
 
     expect(unpersisted.length).toBe(1);
     expect(unpersisted[0].did).toBe(asset.id);
@@ -82,7 +82,7 @@ describe('createAsset mints did:cel genesis (#Phase2)', () => {
     sdk.lifecycle.on('key:unpersisted', (e) => { unpersisted.push(e); });
     await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '01'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
     expect(unpersisted.length).toBe(0);
   });
 });
@@ -92,7 +92,7 @@ describe('verify() binds in-memory resources to the CEL genesis', () => {
     const sdk = makeSdkWithKeyStore();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res-1', type: 'data', contentType: 'text/plain', hash: 'ab'.repeat(32) }
-    ]);
+    ], { controller: 'ephemeral' });
     // Baseline: genuine asset with the resource the genesis committed to.
     expect(await asset.verify()).toBe(true);
 

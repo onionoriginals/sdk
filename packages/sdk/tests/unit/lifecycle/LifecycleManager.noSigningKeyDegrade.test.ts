@@ -38,7 +38,7 @@ describe('appendCelEventOrSkip: NO_SIGNING_KEY (keyStore present, controller key
     const skipped: CelAppendSkippedEvent[] = [];
     sdkB.lifecycle.on('cel:append-skipped', (e) => skipped.push(e as CelAppendSkippedEvent));
 
-    await sdkB.lifecycle.publishToWeb(loaded, 'example.com');
+    await sdkB.lifecycle.publishToWeb(loaded, 'example.com', { onAppendFailure: 'skip' });
 
     expect(skipped.map((e) => e.reason)).toEqual(['NO_SIGNING_KEY']);
     // The layer migration itself is not gated by the append — degrade contract.
@@ -79,7 +79,7 @@ describe('appendCelEventOrSkip: NO_SIGNING_KEY (keyStore present, controller key
     const skipped: CelAppendSkippedEvent[] = [];
     sdkB.lifecycle.on('cel:append-skipped', (e) => skipped.push(e as CelAppendSkippedEvent));
 
-    await sdkB.lifecycle.publishToWeb(loaded, 'example.com');
+    await sdkB.lifecycle.publishToWeb(loaded, 'example.com', { onAppendFailure: 'skip' });
 
     expect(skipped).toEqual([]);
     const last = loaded.celLog!.events[loaded.celLog!.events.length - 1];

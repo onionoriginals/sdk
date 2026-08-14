@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import type { OrdinalsProvider } from '../../../src/adapters';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 // A valid regtest (bech32 'bcrt') P2WPKH destination address.
 const TO_ADDRESS = 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080';
@@ -58,7 +59,7 @@ const createNoVinVoutProvider = (): OrdinalsProvider =>
 
 describe('BitcoinManager.transferInscription returns only provider-attested data (#290)', () => {
   test('does not fabricate vin/vout and does not mutate the caller inscription', async () => {
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: createNoVinVoutProvider()
     } as any);

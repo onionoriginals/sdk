@@ -29,6 +29,7 @@ import { ValidationPipeline } from '../../../src/migration/validation/Validation
 import { BitcoinManager } from '../../../src/bitcoin/BitcoinManager';
 import type { OriginalsConfig } from '../../../src/types';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -46,7 +47,7 @@ const sampleResources = [
 ];
 
 function makeSdk(extra: Partial<OriginalsConfig> = {}) {
-  return OriginalsSDK.create({ ...baseConfig, ...extra });
+  return OriginalsSDK.create({ keyStore: new MockKeyStore(), ...baseConfig, ...extra });
 }
 
 function makeAuditRecord(overrides: Partial<MigrationAuditRecord> = {}): MigrationAuditRecord {

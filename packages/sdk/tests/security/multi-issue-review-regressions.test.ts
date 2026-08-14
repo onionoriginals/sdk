@@ -17,6 +17,7 @@ import { MetricsCollector } from '../../src/utils/MetricsCollector';
 import type { DIDDocument } from '../../src/types';
 import type { MultiSigPolicy, OriginalsConfig, VerifiableCredential } from '../../src/types';
 import { MigrationStateEnum } from '../../src/migration/types';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 describe('DID cache returns copies, not internal references (issue #291)', () => {
   test('mutating a resolved document does not poison the cache', async () => {
@@ -199,7 +200,7 @@ describe('publishToWeb rejects path-traversal in did:webvh (issue #274)', () => 
   test('a did:webvh whose path segments contain ".." is rejected', async () => {
     const { OriginalsSDK } = await import('../../src');
     const { MemoryStorageAdapter } = await import('../../src/storage/MemoryStorageAdapter');
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824' },
     ]);
@@ -212,7 +213,7 @@ describe('publishToWeb rejects path-traversal in did:webvh (issue #274)', () => 
   test('a domain that percent-decodes to a traversal path is rejected', async () => {
     const { OriginalsSDK } = await import('../../src');
     const { MemoryStorageAdapter } = await import('../../src/storage/MemoryStorageAdapter');
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824' },
     ]);

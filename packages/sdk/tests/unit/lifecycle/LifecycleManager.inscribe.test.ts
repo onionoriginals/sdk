@@ -2,11 +2,12 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK, OriginalsAsset } from '../../../src';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 describe('LifecycleManager.inscribeOnBitcoin', () => {
   const createSDK = (opts?: { feeOracle?: { estimateFeeRate: () => Promise<number> } }) => {
     const provider = new MockOrdinalsProvider();
-    return OriginalsSDK.create({
+    return OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: provider,
       ...opts,
@@ -224,7 +225,7 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
         return { inscriptionId: `insc-${satoshi}`, txid: `tx-${satoshi}`, satoshi };
       }
     };
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = createAssetAtLayer('did:webvh');
     const result = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
 
@@ -254,7 +255,7 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
         };
       }
     };
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = createAssetAtLayer('did:webvh');
     const result = await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
 
@@ -279,7 +280,7 @@ describe('LifecycleManager.inscribeOnBitcoin', () => {
         return { inscriptionId: 'insc-nosat', txid: 'tx-nosat' };
       }
     };
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: provider,
       keyStore: new (await import('../../mocks/MockKeyStore')).MockKeyStore()

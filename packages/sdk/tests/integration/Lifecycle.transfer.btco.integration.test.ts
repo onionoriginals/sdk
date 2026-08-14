@@ -2,10 +2,11 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK, OriginalsAsset } from '../../src';
 import { MockOrdinalsProvider } from '../mocks/adapters';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 describe('Integration: Lifecycle.transferOwnership for did:btco', () => {
   const provider = new MockOrdinalsProvider();
-  const sdk = OriginalsSDK.create({ network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
+  const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
 
   test('thin sat move: returns txid and leaves provenance untouched', async () => {
     const asset = new OriginalsAsset(

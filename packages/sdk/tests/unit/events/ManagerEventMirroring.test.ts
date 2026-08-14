@@ -13,6 +13,7 @@ import { OriginalsSDK } from '../../../src';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import type { AssetMigratedEvent, AssetTransferredEvent, BatchProgressEvent, VerificationCompletedEvent } from '../../../src/events/types';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 // Fresh objects per call: createAsset keeps resource objects by reference, so
 // a test that corrupts its asset must not poison the shared fixture.
@@ -26,7 +27,7 @@ const makeResources = () => [
   }
 ];
 
-const makeSdk = () => OriginalsSDK.create({
+const makeSdk = () => OriginalsSDK.create({ keyStore: new MockKeyStore(),
   storageAdapter: new MemoryStorageAdapter(),
   network: 'regtest',
   ordinalsProvider: new MockOrdinalsProvider()
@@ -38,7 +39,7 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
     const events: AssetMigratedEvent[] = [];
     sdk.lifecycle.on('asset:migrated', (e) => { events.push(e); });
 
-    const asset = await sdk.lifecycle.createAsset(makeResources());
+    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
 
     expect(events.length).toBe(1);
@@ -52,7 +53,7 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
     const events: AssetMigratedEvent[] = [];
     sdk.lifecycle.on('asset:migrated', (e) => { events.push(e); });
 
-    const asset = await sdk.lifecycle.createAsset(makeResources());
+    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     await sdk.lifecycle.inscribeOnBitcoin(asset, 7);
 
@@ -68,7 +69,7 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
     const events: AssetTransferredEvent[] = [];
     sdk.lifecycle.on('asset:transferred', (e) => { events.push(e); });
 
-    const asset = await sdk.lifecycle.createAsset(makeResources());
+    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     await sdk.lifecycle.inscribeOnBitcoin(asset, 7);
     const tx = await sdk.lifecycle.transferOwnership(asset, 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080');
@@ -83,7 +84,7 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
 
   test('asset-level subscriptions still fire (dual emit)', async () => {
     const sdk = makeSdk();
-    const asset = await sdk.lifecycle.createAsset(makeResources());
+    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
     const assetEvents: AssetMigratedEvent[] = [];
     asset.on('asset:migrated', (e) => { assetEvents.push(e); });
 
@@ -95,7 +96,7 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
 describe("'verification:completed' is emitted by OriginalsAsset.verify (issue #352)", () => {
   test('emits with the verification result', async () => {
     const sdk = makeSdk();
-    const asset = await sdk.lifecycle.createAsset(makeResources());
+    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
     const events: VerificationCompletedEvent[] = [];
     asset.on('verification:completed', (e) => { events.push(e); });
 
@@ -107,7 +108,7 @@ describe("'verification:completed' is emitted by OriginalsAsset.verify (issue #3
 
   test('emits result=false for a corrupted asset', async () => {
     const sdk = makeSdk();
-    const asset = await sdk.lifecycle.createAsset(makeResources());
+    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
     (asset.resources[0] as { hash: string }).hash = 'not-a-real-hash';
     const events: VerificationCompletedEvent[] = [];
     asset.on('verification:completed', (e) => { events.push(e); });

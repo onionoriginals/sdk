@@ -37,7 +37,7 @@ describe('CredentialManager', () => {
   });
 
   test('signCredential/verifyCredential works for ES256K', async () => {
-    const sdkES256K = OriginalsSDK.create({ defaultKeyType: 'ES256K' });
+    const sdkES256K = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256K' });
     const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
@@ -57,7 +57,7 @@ describe('CredentialManager', () => {
   test('legacy (non-cryptosuite) verifyCredential rejects an expired credential', async () => {
     // Regression: the legacy verify path validated the signature but skipped the
     // validity window, so an expired legacy-signed credential verified as true.
-    const sdkES256K = OriginalsSDK.create({ defaultKeyType: 'ES256K' });
+    const sdkES256K = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256K' });
     const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
@@ -90,7 +90,7 @@ describe('CredentialManager', () => {
     // unconditionally and verified true — an unbindable self-signed credential.
     // The Data Integrity path fails closed on a missing issuer; the legacy path
     // must too.
-    const sdkES256K = OriginalsSDK.create({ defaultKeyType: 'ES256K' });
+    const sdkES256K = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256K' });
     const sk = secp256k1.utils.randomSecretKey();
     const pk = secp256k1.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
@@ -138,7 +138,7 @@ describe('CredentialManager', () => {
   });
 
   test('verifyCredential uses data-integrity verifier path when cryptosuite present', async () => {
-    const sdkEd = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const sdkEd = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
     const edSk = new Uint8Array(32).fill(1);
     const signed = await sdkEd.credentials.signCredential(baseVC, multikey.encodePrivateKey(edSk, 'Ed25519'), 'did:ex#key');
     (signed as any).proof.cryptosuite = 'eddsa-rdfc-2022';
@@ -176,7 +176,7 @@ describe('CredentialManager', () => {
   });
 
   test('signCredential/verifyCredential works for Ed25519', async () => {
-    const sdkEd = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const sdkEd = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
     const sk = ed25519.utils.randomSecretKey();
     const pk = await (ed25519 as any).getPublicKeyAsync(sk);
     const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
@@ -188,7 +188,7 @@ describe('CredentialManager', () => {
   });
 
   test('signCredential/verifyCredential works for ES256', async () => {
-    const sdkES256 = OriginalsSDK.create({ defaultKeyType: 'ES256' });
+    const sdkES256 = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256' });
     const sk = p256.utils.randomSecretKey();
     const pk = p256.getPublicKey(sk, true);
     const skMb = multikey.encodePrivateKey(sk, 'P256');
@@ -291,6 +291,7 @@ describe('CredentialManager verify with didManager present but legacy path', () 
 
 /** Inlined from CredentialManager.did-fallback-with-didmgr.part.ts */
 import { registerVerificationMethod, verificationMethodRegistry } from '../../../src/vc/documentLoader';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 describe('CredentialManager with didManager provided falls back to local signer when VM incomplete', () => {
   afterEach(() => {

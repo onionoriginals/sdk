@@ -14,6 +14,7 @@ import type {
 } from '../../../src/types';
 import * as ed25519 from '@noble/ed25519';
 import { multikey } from '../../../src/crypto/Multikey';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 /**
  * Build a signBytes-capable external signer backed by a real Ed25519 key
@@ -1073,7 +1074,7 @@ describe('MultiSigManager', () => {
 
   describe('CredentialManager multi-sig integration', () => {
     test('signCredentialMultiSig via CredentialManager', async () => {
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const policy: MultiSigPolicy = {
         required: 2,
         total: 3,
@@ -1093,7 +1094,7 @@ describe('MultiSigManager', () => {
     });
 
     test('verifyCredentialMultiSig via CredentialManager', async () => {
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const policy: MultiSigPolicy = {
         required: 2,
         total: 3,
@@ -1114,7 +1115,7 @@ describe('MultiSigManager', () => {
     });
 
     test('verifyCredentialMultiSig rejects a single proof repeated to fake the threshold', async () => {
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const policy: MultiSigPolicy = {
         required: 2,
         total: 3,
@@ -1138,7 +1139,7 @@ describe('MultiSigManager', () => {
     });
 
     test('verifyCredentialMultiSig counts a valid proof even when preceded by an invalid one from the same signer', async () => {
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const policy: MultiSigPolicy = {
         required: 1,
         total: 1,
@@ -1163,7 +1164,7 @@ describe('MultiSigManager', () => {
 
 
     test('multiSig() returns a MultiSigManager instance', () => {
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const msm = sdk.credentials.multiSig();
       expect(msm).toBeInstanceOf(MultiSigManager);
     });

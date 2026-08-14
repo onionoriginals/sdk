@@ -26,6 +26,7 @@ import { OperationLock } from '../../src/utils/OperationLock';
 import { BitcoinManager } from '../../src/bitcoin/BitcoinManager';
 import { MockOrdinalsProvider } from '../mocks/adapters';
 import type { OriginalsConfig } from '../../src/types';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 const baseConfig: OriginalsConfig = {
   network: 'regtest',
@@ -84,7 +85,7 @@ class BlockingOrdinalsProvider extends MockOrdinalsProvider {
 describe('shared keyed inscription lock across managers (issue #303)', () => {
   it('a LifecycleManager inscribe and a second manager inscribing the SAME DID cannot both broadcast', async () => {
     const provider = new BlockingOrdinalsProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       ...baseConfig,
       ordinalsProvider: provider,
     });
@@ -99,7 +100,7 @@ describe('shared keyed inscription lock across managers (issue #303)', () => {
     // config, both managers coordinate on the one shared keyed mutex.
     const otherManager = new BitcoinManager(config);
 
-    const asset = await sdk.lifecycle.createAsset(sampleResources);
+    const asset = await sdk.lifecycle.createAsset(sampleResources, { controller: 'ephemeral' });
     const canonicalDid = asset.id; // did:cel — the SAME key both paths lock on
 
     // Caller A (LifecycleManager.inscribeOnBitcoin) enters inscribeData first and

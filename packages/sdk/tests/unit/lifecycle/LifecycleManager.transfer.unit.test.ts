@@ -9,7 +9,7 @@ const TO_ADDRESS = 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5
 
 describe('LifecycleManager.transferOwnership unit edge cases', () => {
   const provider = new MockOrdinalsProvider();
-  const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+  const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
 
   test('throws if not on btco layer', async () => {
     const asset = new OriginalsAsset(
@@ -74,7 +74,7 @@ describe('LifecycleManager.transferOwnership unit edge cases', () => {
       capturedInscriptionId = inscriptionId;
       return origTransfer(inscriptionId, toAddress, options);
     };
-    const spySdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: spyProvider } as any);
+    const spySdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: spyProvider } as any);
 
     const asset = new OriginalsAsset(
       [{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'h' }],
@@ -97,7 +97,7 @@ describe('LifecycleManager.transferOwnership unit edge cases', () => {
     // inscription must fail loudly rather than fabricate an `insc-<sat>` id.
     const emptyProvider = new MockOrdinalsProvider();
     emptyProvider.getInscriptionsBySatoshi = async () => [];
-    const s = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: emptyProvider } as any);
+    const s = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: emptyProvider } as any);
     const asset = new OriginalsAsset(
       [{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'h' }],
       { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:reg:999999' } as any,
@@ -111,7 +111,7 @@ describe('LifecycleManager.transferOwnership unit edge cases', () => {
 
 describe('transferOwnership is a pure sat move — writes NOTHING to the CEL (#366 ownership-is-sat)', () => {
   const makeSdk = (keyStore?: MockKeyStore, provider: OrdMockProvider = new OrdMockProvider()) =>
-    OriginalsSDK.create({
+    OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider: provider,

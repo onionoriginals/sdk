@@ -20,6 +20,7 @@ import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
 import { replayProvenance } from './replayProvenance.js';
 import { checkGenesisResourceBinding } from './genesisBinding.js';
+import type { AppendFailurePolicy } from '../types/common.js';
 import {
   ASSET_ENVELOPE_FORMAT,
   ASSET_ENVELOPE_VERSION,
@@ -77,7 +78,7 @@ export class OriginalsAsset {
   #celAppender?: (
     type: 'migrate' | 'rotateKey' | 'update',
     data: unknown,
-    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
+    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner; onAppendFailure?: AppendFailurePolicy }
   ) => Promise<string | null>;
   // The SOLE per-asset lock for CEL #celLog read-modify-write (#400). The
   // sync→async cutover made every head→sign→_replaceCelLog span cross await
@@ -230,7 +231,7 @@ export class OriginalsAsset {
     fn: (
       type: 'migrate' | 'rotateKey' | 'update',
       data: unknown,
-      opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
+      opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner; onAppendFailure?: AppendFailurePolicy }
     ) => Promise<string | null>
   ): void {
     this.#celAppender = fn;
@@ -644,7 +645,7 @@ export class OriginalsAsset {
     newContent: string,
     contentType: string,
     changes?: string,
-    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
+    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner; onAppendFailure?: AppendFailurePolicy }
   ): Promise<AssetResource> {
     // AssetResource.content is a string; a Buffer used to be silently dropped
     // (only its hash was stored), unrecoverably losing the binary content
@@ -696,7 +697,7 @@ export class OriginalsAsset {
     newContent: string,
     contentType: string,
     changes?: string,
-    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
+    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner; onAppendFailure?: AppendFailurePolicy }
   ): Promise<AssetResource> {
     // RE-READ the current head inside the turn (a prior queued call may have
     // just committed a new version).

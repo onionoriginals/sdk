@@ -3,9 +3,10 @@
 /** Inlined from DIDManager.btco.integration.part.ts */
 import { describe, test, expect, afterEach, spyOn } from 'bun:test';
 import { OriginalsSDK } from '../../src';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 describe('Integration: DIDManager btco resolve via OrdinalsClient adapter', () => {
-  const sdk = OriginalsSDK.create({ network: 'mainnet', bitcoinRpcUrl: 'http://ord' });
+  const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'mainnet', bitcoinRpcUrl: 'http://ord' });
 
   test('resolves did:btco using adapter with mocked fetch', async () => {
     const sat = '123456';
@@ -41,7 +42,7 @@ describe('Integration: DIDManager btco resolve via OrdinalsClient adapter', () =
 });
 
 describe('Integration: DIDManager did:webvh resolve requires a verifier', () => {
-  const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+  const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
 
   test('resolves a real did:webvh log (regression: verifier must be passed to didwebvh-ts)', async () => {
     // Build a genuine did:webvh with its signed log.

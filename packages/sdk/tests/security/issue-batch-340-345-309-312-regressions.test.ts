@@ -25,6 +25,7 @@ import { StructuredError } from '../../src/utils/telemetry';
 import { MockOrdinalsProvider } from '../mocks/adapters';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import type { MultiSigPolicy, VerifiableCredential } from '../../src/types';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 const did = 'did:peer:batch-issuer';
 const sk = new Uint8Array(32).map((_, i) => (i + 11) & 0xff);
@@ -110,7 +111,7 @@ describe('#340 — Verifier.verifyCredentialMultiSig enforces validity and revoc
 
 describe('#345 — low-level revocation helpers bind the supplied list', () => {
   test('checkRevocationStatus rejects a status list whose id differs from the credential reference', () => {
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
     const entry = sdk.statusList.allocateStatusEntry('https://issuer.example/status/1', 3, 'revocation');
     const credential = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
@@ -189,7 +190,7 @@ describe('#312 — cross-network did:btco documents cannot be served from cache'
 
 describe('#351 — cost quotes apply the MAX_REASONABLE_FEE_RATE cap', () => {
   test('an absurd fee-oracle estimate is ignored for estimateCost quotes', async () => {
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       storageAdapter: new MemoryStorageAdapter(),
       ordinalsProvider: new MockOrdinalsProvider(),

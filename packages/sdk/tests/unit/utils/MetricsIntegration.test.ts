@@ -4,6 +4,7 @@ import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { OriginalsSDK } from '../../../src/core/OriginalsSDK';
 import type { OriginalsConfig } from '../../../src/types';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const testConfig: OriginalsConfig = {
   network: 'regtest',
@@ -162,7 +163,7 @@ describe('Metrics Integration', () => {
 
   describe('OriginalsSDK shared metrics', () => {
     test('should share MetricsCollector across all managers', () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'Ed25519',
         webvhNetwork: 'magby',
@@ -174,7 +175,7 @@ describe('Metrics Integration', () => {
     });
 
     test('should aggregate metrics from all managers', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'Ed25519',
         webvhNetwork: 'magby',
@@ -188,7 +189,7 @@ describe('Metrics Integration', () => {
         type: 'code',
         contentType: 'application/javascript',
         hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
-      }]);
+      }], { controller: 'ephemeral' });
       await sdk.did.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-agg' });
 
       expect(asset).toBeDefined();
@@ -209,7 +210,7 @@ describe('Metrics Integration', () => {
     });
 
     test('should export aggregated Prometheus metrics', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'Ed25519',
         webvhNetwork: 'magby',
@@ -220,7 +221,7 @@ describe('Metrics Integration', () => {
         type: 'code',
         contentType: 'application/javascript',
         hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
-      }]);
+      }], { controller: 'ephemeral' });
       // createAsset no longer routes through DIDManager; exercise a DIDManager
       // op directly so the multi-manager Prometheus assertion holds.
       await sdk.did.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-prom' });
