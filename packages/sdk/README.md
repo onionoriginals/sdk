@@ -30,7 +30,7 @@ import { OriginalsSDK } from '@originals/sdk';
 const sdk = OriginalsSDK.create({
   network: 'mainnet',          // 'mainnet' | 'signet' | 'regtest'
   defaultKeyType: 'ES256K',    // 'ES256K' | 'Ed25519' | 'ES256'
-  keyStore: myKeyStore,        // REQUIRED to author events — see "Custody" below
+  keyStore: myKeyStore,        // custody: keyStore OR signer — see "Custody" below
 });
 
 // 1. Create an asset privately (did:cel genesis — offline, free)
@@ -63,7 +63,7 @@ Bitcoin operations (inscribe, transfer) require an `ordinalsProvider` in the con
 
 `createAsset` generates the asset's Ed25519 controller key and, **without a `keyStore`, has nowhere to put it.** The key is dropped, a `key:unpersisted` event is emitted, and the asset can never author another event: `publishToWeb` and `inscribeOnBitcoin` still succeed, but their CEL events are skipped with a `cel:append-skipped` event, so the asset's provenance log silently loses the migration.
 
-Configure a `keyStore` before minting anything you intend to keep, and subscribe to both signals:
+Configure custody — a `keyStore`, or a `signer` for remote custody (below) — before minting anything you intend to keep, and subscribe to both signals:
 
 ```typescript
 sdk.lifecycle.on('key:unpersisted', (e) => { throw new Error(`No custody for ${e.verificationMethod}`); });
@@ -72,14 +72,26 @@ sdk.lifecycle.on('cel:append-skipped', (e) => { throw new Error(`Provenance even
 
 A `keyStore` is `{ getPrivateKey(vmId), setPrivateKey(vmId, key) }` — it must be able to **return** the private key.
 
-> **Remote custody (Turnkey, KMS, HSM, passkeys) is not yet supported for authorship.**
-> The `keyStore` contract requires an exportable key, so custody that never releases
-> one cannot sign CEL events today. `ExternalSigner` authorizes the `did:webvh` DID
-> log only — it does not sign the asset's own provenance events. A single
-> `signBytes`-based signer interface accepted everywhere is in progress
-> ([plan 033](https://github.com/onionoriginals/sdk/blob/main/plans/033-sdk-v3-roadmap.md)).
-> Credentials already work with remote custody: `signCredentialWithExternalSigner`
-> requires `ExternalSigner.signBytes` and the SDK owns canonicalization.
+### Remote custody (Turnkey, KMS, HSM, passkeys)
+
+Custody that never exports a key implements `OriginalsSigner` — three members, no key export:
+
+```typescript
+import { OriginalsSigner, assertSignerConformance } from '@originals/sdk';
+
+const signer: OriginalsSigner = {
+  verificationMethodId: 'did:key:z6Mk…#z6Mk…', // absolute VM id
+  publicKeyMultibase: 'z6Mk…',                  // lets the SDK pick the suite + self-verify
+  signBytes: (bytes) => myCustody.sign(bytes),  // sign EXACTLY these bytes
+};
+await assertSignerConformance(signer);          // run this in your test suite
+
+const sdk = OriginalsSDK.create({ network: 'mainnet', defaultKeyType: 'Ed25519', signer });
+const asset = await sdk.lifecycle.createAsset(resources);        // genesis signed remotely
+await sdk.lifecycle.publishToWeb(asset, 'example.com');          // migrate event signed remotely
+```
+
+The SDK canonicalizes and hashes (`signingInput.celEvent/witness/didWebvh/credential`); the signer only ever signs opaque bytes. A `signer` is accepted on the config (default authorship signer) and per call on `createAsset`, `publishToWeb`, `inscribeOnBitcoin`, `rotateBtcoKeys`, `authorizeSigner`, and `addResourceVersion`. Adapters bridge the legacy shapes: `signerFromKeyPair`, `signerFromKeyStore`, `signerFromExternalSigner`, `toCelSigner`, `toExternalSigner`. CEL authorship is Ed25519-only.
 
 ## Documentation
 
@@ -93,7 +105,7 @@ A `keyStore` is `{ getPrivateKey(vmId), setPrivateKey(vmId, key) }` — it must 
 - **Signed provenance** — every authorship operation appends a hash-chained CEL event, verified end-to-end by `asset.verify()`
 - **Verifiable credentials** — W3C Data Integrity proofs (EdDSA and BBS+ cryptosuites), Multikey encoding
 - **Bitcoin Ordinals** — commit/reveal inscriptions with ordinal-aware UTXO selection (`sdk.bitcoin`)
-- **External signers** — Turnkey, AWS KMS and HSMs can issue **credentials** via `ExternalSigner.signBytes`, and authorize `did:webvh` logs; authorship custody is `keyStore`-only for now (see [Custody](#custody-configure-it-before-you-mint))
+- **Remote custody** — Turnkey, AWS KMS, HSMs and passkeys author assets, sign credentials, and authorize `did:webvh` logs through the sign-bytes-only `OriginalsSigner` interface (see [Custody](#custody-configure-it-before-you-mint)); `assertSignerConformance` validates any implementation
 - **Pluggable storage and providers** — bring your own storage adapter, ordinals backend, and fee oracle
 
 ## License

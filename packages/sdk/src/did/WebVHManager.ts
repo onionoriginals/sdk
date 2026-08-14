@@ -1,5 +1,6 @@
 import { KeyManager } from './KeyManager.js';
 import { multikey } from '../crypto/Multikey.js';
+import { signingInput } from '../crypto/signingInput.js';
 import { Ed25519Signer } from '../crypto/Signer.js';
 import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier, VerificationMethod as DidDocVerificationMethod } from '../types/index.js';
 import { StructuredError } from '../utils/telemetry.js';
@@ -131,24 +132,21 @@ class OriginalsWebVHSigner implements Signer, Verifier {
   private signer: Ed25519Signer;
   protected verificationMethod?: VerificationMethod | null;
   protected useStaticId: boolean;
-  private prepareDataForSigning: (document: Record<string, unknown>, proof: Record<string, unknown>) => Promise<Uint8Array>;
 
   constructor(
     privateKeyMultibase: string,
     verificationMethod: VerificationMethod,
-    prepareDataForSigning: (document: Record<string, unknown>, proof: Record<string, unknown>) => Promise<Uint8Array>,
     options: SignerOptions = {}
   ) {
     this.privateKeyMultibase = privateKeyMultibase;
     this.verificationMethod = options.verificationMethod || verificationMethod;
     this.useStaticId = options.useStaticId || false;
     this.signer = new Ed25519Signer();
-    this.prepareDataForSigning = prepareDataForSigning;
   }
 
   async sign(input: SigningInput): Promise<SigningOutput> {
-    // Prepare the data for signing using didwebvh-ts's canonical approach
-    const dataToSign = await this.prepareDataForSigning(input.document, input.proof);
+    // The SDK's single did:webvh preimage (plan 039) — delegates to didwebvh-ts.
+    const dataToSign = await signingInput.didWebvh(input.document, input.proof);
     
     // Sign using our Ed25519 signer
     const signature: Buffer = await this.signer.sign(
@@ -450,7 +448,6 @@ export class WebVHManager {
       const internalSigner = new OriginalsWebVHSigner(
         keyPair.privateKey,
         verificationMethods[0],
-        prepareDataForSigning,
         { verificationMethod: verificationMethods[0] }
       );
 
@@ -727,7 +724,7 @@ export class WebVHManager {
         proof: Record<string, unknown>
       ) => Promise<Uint8Array>;
     };
-    const { updateDID, prepareDataForSigning } = mod;
+    const { updateDID } = mod;
 
     if (typeof updateDID !== 'function') {
       throw new Error('Failed to load didwebvh-ts: invalid module exports');
@@ -752,7 +749,6 @@ export class WebVHManager {
       const internalSigner = new OriginalsWebVHSigner(
         keyPair.privateKey,
         verificationMethod,
-        prepareDataForSigning,
         { verificationMethod }
       );
       
@@ -1184,7 +1180,7 @@ export class WebVHManager {
         proof: Record<string, unknown>
       ) => Promise<Uint8Array>;
     };
-    const { updateDID, prepareDataForSigning } = mod;
+    const { updateDID } = mod;
     if (typeof updateDID !== 'function') {
       throw new Error('Failed to load didwebvh-ts: invalid module exports');
     }
@@ -1202,7 +1198,6 @@ export class WebVHManager {
     const signer = new OriginalsWebVHSigner(
       currentKeyPair.privateKey,
       currentVerificationMethod,
-      prepareDataForSigning,
       { verificationMethod: currentVerificationMethod }
     );
 
@@ -1260,7 +1255,7 @@ export class WebVHManager {
         proof: Record<string, unknown>
       ) => Promise<Uint8Array>;
     };
-    const { updateDID, prepareDataForSigning } = mod;
+    const { updateDID } = mod;
     if (typeof updateDID !== 'function') {
       throw new Error('Failed to load didwebvh-ts: invalid module exports');
     }
@@ -1300,7 +1295,6 @@ export class WebVHManager {
     const signer = new OriginalsWebVHSigner(
       activeKeyPair.privateKey,
       activeVerificationMethod,
-      prepareDataForSigning,
       { verificationMethod: activeVerificationMethod }
     );
 

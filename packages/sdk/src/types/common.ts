@@ -5,6 +5,7 @@ import type { EventLoggingConfig } from '../utils/EventLogger.js';
 import type { WebVHNetworkName } from './network.js';
 import type { DIDCacheConfig } from '../did/DIDCache.js';
 import type { OperationLock } from '../utils/OperationLock.js';
+import type { OriginalsSigner } from '../crypto/OriginalsSigner.js';
 
 // Base types for the Originals protocol
 export type LayerType = 'did:cel' | 'did:webvh' | 'did:btco';
@@ -55,6 +56,14 @@ export interface OriginalsConfig {
   bitcoinRpcUrl?: string;
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
   keyStore?: KeyStore;
+  /**
+   * Default authorship signer (plan 039). When set, lifecycle authorship ops
+   * (createAsset, publishToWeb, inscribeOnBitcoin, rotateBtcoKeys,
+   * addResourceVersion) sign CEL events with it instead of looking a private
+   * key up in `keyStore` — the path for custody that never exports keys
+   * (Turnkey, KMS, HSM, passkeys). Overridable per call via `{ signer }`.
+   */
+  signer?: OriginalsSigner;
   enableLogging?: boolean;
   // WebVH network selection (defaults to 'pichu' - production)
   webvhNetwork?: WebVHNetworkName;
@@ -105,6 +114,16 @@ export interface AssetResource {
   createdAt?: string;              // ISO timestamp of when this version was created
 }
 
+/**
+ * Key-persistence interface: stores and retrieves multibase-encoded private
+ * keys by verification method id.
+ *
+ * As a SIGNING authority, KeyStore is deprecated (plan 039): it requires the
+ * private key to be exportable, which locks out Turnkey/KMS/HSM/passkey
+ * custody. Prefer configuring an {@link OriginalsSigner} (`config.signer` or
+ * per-call `{ signer }`) — or wrap a KeyStore entry via `signerFromKeyStore`.
+ * KeyStore itself survives as the key-persistence interface.
+ */
 export interface KeyStore {
   getPrivateKey(verificationMethodId: string): Promise<string | null>;
   setPrivateKey(verificationMethodId: string, privateKey: string): Promise<void>;
@@ -113,6 +132,13 @@ export interface KeyStore {
 /**
  * External signer interface for DID operations (compatible with didwebvh-ts)
  * This allows integration with external key management systems like Turnkey
+ *
+ * @deprecated Use {@link OriginalsSigner} (plan 039): the document-level
+ * `sign()` here delegates canonicalization to the signer, which is the
+ * layering mistake that produced never-verifying proofs. Adapt an existing
+ * implementation with `signerFromExternalSigner`, or produce a didwebvh-
+ * compatible signer from an OriginalsSigner with `toExternalSigner`.
+ * Removal is planned for 3.0 (plan 041).
  */
 export interface ExternalSigner {
   /**

@@ -5,7 +5,8 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
-import { OriginalsSDK, encoding } from '@originals/sdk';
+import { OriginalsSDK, encoding, signingInput } from '@originals/sdk';
+import { turnkeySignBytes } from '../turnkey-sign-bytes.js';
 import type { TurnkeyWalletAccount } from '../types.js';
 import { TurnkeySessionExpiredError, withTokenExpiration } from './turnkey-client.js';
 
@@ -49,65 +50,53 @@ export class TurnkeyDIDSigner {
   async sign(input: SigningInput): Promise<SigningOutput> {
     return withTokenExpiration(async () => {
       try {
-        // Use SDK's prepareDIDDataForSigning
-        const dataToSign = await OriginalsSDK.prepareDIDDataForSigning(input.document, input.proof);
-
-        // Sign with Turnkey via server SDK
-        const result = await this.turnkeyClient.apiClient().signRawPayload({
-          organizationId: this.subOrgId,
-          signWith: this.signWith,
-          payload: Buffer.from(dataToSign).toString('hex'),
-          encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
-          hashFunction: 'HASH_FUNCTION_NO_OP',
-        });
-
-        // Turnkey's signRawPayload nests the signature under
-        // activity.result.signRawPayloadResult.{r, s} (same shape the
-        // server-side signer reads). Reading result.r/result.s directly is
-        // always undefined and breaks every real Turnkey response.
-        const signRawResult = result.activity?.result?.signRawPayloadResult;
-        const r = signRawResult?.r;
-        const s = signRawResult?.s;
-
-        if (!r || !s) {
-          throw new Error('Invalid signature response from Turnkey');
+        // didwebvh's preimage, produced by the SDK — never by this signer.
+        // Narrowed explicitly: lint runs before @originals/sdk is built, so the
+        // return type is unresolved there and must not flow on unchecked.
+        const prepared: unknown = await signingInput.didWebvh(input.document, input.proof);
+        if (!(prepared instanceof Uint8Array)) {
+          throw new Error('signingInput.didWebvh did not return a Uint8Array');
         }
-
-        // For Ed25519, combine r+s only (64 bytes total)
-        const cleanR = r.startsWith('0x') ? r.slice(2) : r;
-        const cleanS = s.startsWith('0x') ? s.slice(2) : s;
-        const combinedHex = cleanR + cleanS;
-
-        const signatureBytes = Uint8Array.from(Buffer.from(combinedHex, 'hex'));
-
-        if (signatureBytes.length !== 64) {
-          throw new Error(
-            `Invalid Ed25519 signature length: ${signatureBytes.length} (expected 64 bytes)`
-          );
-        }
-
-        const proofValue = encoding.multibase.encode(signatureBytes, 'base58btc');
-
-        return { proofValue };
+        const { signature } = await this.signBytes(prepared);
+        return { proofValue: encoding.multibase.encode(signature, 'base58btc') };
       } catch (error) {
         console.error('[TurnkeyDIDSigner] Error signing with Turnkey:', error);
-
-        const errorStr = JSON.stringify(error);
-        if (
-          errorStr.toLowerCase().includes('api_key_expired') ||
-          errorStr.toLowerCase().includes('expired api key') ||
-          errorStr.toLowerCase().includes('"code":16')
-        ) {
-          console.warn('Detected expired API key in sign method, calling onExpired');
-          if (this.onExpired) {
-            this.onExpired();
-          }
-          throw new TurnkeySessionExpiredError();
-        }
-
-        throw error;
+        throw this.asExpiryError(error);
       }
     }, this.onExpired);
+  }
+
+  /**
+   * Signs pre-canonicalized, pre-hashed bytes — the capability that lets a
+   * Turnkey key author CEL events and sign credentials, not just did:webvh
+   * logs. `signerFromExternalSigner` requires exactly this.
+   */
+  async signBytes(data: Uint8Array): Promise<{ signature: Uint8Array }> {
+    return withTokenExpiration(async () => {
+      try {
+        const signature = await turnkeySignBytes(
+          { turnkeyClient: this.turnkeyClient, organizationId: this.subOrgId, signWith: this.signWith },
+          data
+        );
+        return { signature };
+      } catch (error) {
+        throw this.asExpiryError(error);
+      }
+    }, this.onExpired);
+  }
+
+  /** Turnkey reports an expired session as a generic error; surface it typed. */
+  private asExpiryError(error: unknown): unknown {
+    const errorStr = JSON.stringify(error);
+    if (
+      errorStr.toLowerCase().includes('api_key_expired') ||
+      errorStr.toLowerCase().includes('expired api key') ||
+      errorStr.toLowerCase().includes('"code":16')
+    ) {
+      this.onExpired?.();
+      return new TurnkeySessionExpiredError();
+    }
+    return error;
   }
 
   /**

@@ -19,14 +19,17 @@
  * ```
  */
 
-// Re-export types
+// Types only. The root MUST stay free of server code: re-exporting
+// './server/index.js' here pulled jsonwebtoken, @turnkey/sdk-server and the
+// Express middleware into any bundle that imported so much as a type from
+// '@originals/auth' — contradicting the docstring above it (plan 045).
 export * from './types.js';
 
-// Re-export server utilities (for convenience, though subpath is preferred)
-export * from './server/index.js';
+// Isomorphic: byte-level Turnkey signing, safe in either environment.
+export { turnkeySignBytes, type TurnkeySignBytesOptions } from './turnkey-sign-bytes.js';
 
-// Note: Client utilities should be imported from '@originals/auth/client'
-// to avoid bundling React in server environments
+// Server utilities: import from '@originals/auth/server'.
+// Client utilities: import from '@originals/auth/client'.
 
 
 

@@ -71,6 +71,11 @@ export interface PeerAssetData {
 
 /**
  * Signer function type that produces a DataIntegrityProof
+ *
+ * @deprecated Implement {@link OriginalsSigner} instead (plan 039) — a
+ * CelSigner both canonicalizes and signs, so an incorrect implementation
+ * seals proofs that can never verify. Bridge with `toCelSigner(signer)`.
+ * Removal from the public API is planned for 3.0 (plan 041).
  */
 export type CelSigner = (data: unknown) => Promise<DataIntegrityProof>;
 
