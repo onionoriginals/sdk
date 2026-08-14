@@ -1,4 +1,5 @@
 import * as btc from '@scure/btc-signer';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { BitcoinTransaction, TransactionInput, TransactionOutput, Utxo, DUST_LIMIT_SATS } from '../types/index.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { selectUtxos, SelectionOptions, SelectionResult } from './utxo.js';
@@ -45,7 +46,7 @@ export function addressToScriptPubKey(address: string, network: typeof btc.NETWO
     throw new Error(`Invalid address: ${address}`);
   }
   const script = btc.OutScript.encode(decoded);
-  return Buffer.from(script).toString('hex');
+  return bytesToHex(script);
 }
 
 /**

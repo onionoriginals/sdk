@@ -66,8 +66,8 @@ export function getScureNetwork(network: BitcoinNetwork): typeof btc.NETWORK {
  * Parameters for creating a commit transaction
  */
 export interface CommitTransactionParams {
-  /** Inscription content as Buffer */
-  content: Buffer;
+  /** Inscription content bytes */
+  content: Uint8Array;
   /** MIME type of the content (e.g., 'text/plain', 'image/png') */
   contentType: string;
   /** Available UTXOs to fund the transaction */

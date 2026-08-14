@@ -3,7 +3,7 @@
  * or content plus the CBOR metadata to attach (the anchoring inscription's
  * `{ didDocument, celLog }` provenance).
  */
-export type InscriptionParts = Buffer | { content: Buffer; metadata?: Record<string, unknown> };
+export type InscriptionParts = Uint8Array | { content: Uint8Array; metadata?: Record<string, unknown> };
 
 export interface StoragePutOptions {
   contentType?: string;
@@ -11,12 +11,12 @@ export interface StoragePutOptions {
 }
 
 export interface StorageGetResult {
-  content: Buffer;
+  content: Uint8Array;
   contentType: string;
 }
 
 export interface StorageAdapter {
-  put(objectKey: string, data: Buffer | string, options?: StoragePutOptions): Promise<string>;
+  put(objectKey: string, data: Uint8Array | string, options?: StoragePutOptions): Promise<string>;
   get(objectKey: string): Promise<StorageGetResult | null>;
   delete?(objectKey: string): Promise<boolean>;
 }
@@ -30,7 +30,7 @@ export interface OrdinalsProvider {
   getInscriptionById(id: string): Promise<{
     inscriptionId: string;
     // Optional: deferred-content providers may not echo built content back.
-    content?: Buffer;
+    content?: Uint8Array;
     contentType: string;
     txid: string;
     vout: number;
@@ -61,12 +61,12 @@ export interface OrdinalsProvider {
   estimateFee(blocks?: number): Promise<number>;
   createInscription(params: {
     /** Static content. Provide exactly one of data / buildContent. */
-    data?: Buffer;
+    data?: Uint8Array;
     /**
      * Deferred content: called with the pinned satoshi between commit and
      * reveal, so content (and metadata) that must embed its own sat (a did:btco
      * DID document / the byte-light celLog) can be constructed. Provide exactly
-     * one of data / buildContent. May return a bare Buffer (content only) or
+     * one of data / buildContent. May return bare bytes (content only) or
      * `{ content, metadata }` — the returned metadata wins over the static
      * `metadata` param below (#407 phase 2).
      */
@@ -88,7 +88,7 @@ export interface OrdinalsProvider {
     txid?: string;
     vout?: number;
     blockHeight?: number;
-    content?: Buffer;
+    content?: Uint8Array;
     contentType?: string;
     feeRate?: number;
     metadata?: Record<string, unknown>;

@@ -67,7 +67,7 @@ export function signerFromKeyPair(keyPair: KeyPair): OriginalsSigner {
     verificationMethodId: canonicalDidKeyVm(keyPair.publicKey),
     publicKeyMultibase: keyPair.publicKey,
     async signBytes(bytes: Uint8Array): Promise<Uint8Array> {
-      return new Uint8Array(await signer.sign(Buffer.from(bytes), keyPair.privateKey));
+      return await signer.sign(bytes, keyPair.privateKey);
     },
   };
 }
@@ -100,7 +100,7 @@ export function signerFromKeyStore(
         throw new StructuredError('SIGNING_KEY_NOT_FOUND',
           `No private key in keyStore for ${verificationMethodId}`);
       }
-      return new Uint8Array(await signerForKeyType(pubType).sign(Buffer.from(bytes), priv));
+      return await signerForKeyType(pubType).sign(bytes, priv);
     },
   };
 }

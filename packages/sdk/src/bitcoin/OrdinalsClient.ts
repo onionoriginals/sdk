@@ -189,7 +189,7 @@ export class OrdinalsClient {
     if (contentArrayBuf.byteLength > this.maxContentBytes) {
       throw new Error(`OrdinalsClient: inscription content exceeds ${this.maxContentBytes} bytes`);
     }
-    const content = Buffer.from(new Uint8Array(contentArrayBuf));
+    const content = new Uint8Array(contentArrayBuf);
 
     // owner_output may be 'txid:vout'
     let txid = 'unknown';

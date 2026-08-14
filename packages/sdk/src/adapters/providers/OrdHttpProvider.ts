@@ -258,7 +258,7 @@ export class OrdHttpProvider implements OrdinalsProvider {
   }
 
   createInscription(params: {
-    data?: Buffer;
+    data?: Uint8Array;
     buildContent?: (satoshi: string) => InscriptionParts | Promise<InscriptionParts>;
     contentType: string;
     feeRate?: number;
@@ -272,7 +272,7 @@ export class OrdHttpProvider implements OrdinalsProvider {
     txid?: string;
     vout?: number;
     blockHeight?: number;
-    content?: Buffer;
+    content?: Uint8Array;
     contentType?: string;
     feeRate?: number;
     metadata?: Record<string, unknown>;

@@ -220,18 +220,18 @@ export class KeyManager {
 		return { didDocument: updatedDidDocument, recoveryCredential, newKeyPair };
 	}
 
-        encodePublicKeyMultibase(publicKey: Buffer, type: KeyType): string {
+        encodePublicKeyMultibase(publicKey: Uint8Array, type: KeyType): string {
                 const mkType = toMultikeyType(type);
-                return multikey.encodePublicKey(new Uint8Array(publicKey), mkType);
+                return multikey.encodePublicKey(publicKey, mkType);
         }
 
-        decodePublicKeyMultibase(encoded: string): { key: Buffer; type: KeyType } {
+        decodePublicKeyMultibase(encoded: string): { key: Uint8Array; type: KeyType } {
                 if (!encoded || typeof encoded !== 'string') {
                         throw new Error('Invalid multibase string');
                 }
                 try {
                         const decoded = multikey.decodePublicKey(encoded);
-                        return { key: Buffer.from(decoded.key), type: fromMultikeyType(decoded.type) };
+                        return { key: decoded.key, type: fromMultikeyType(decoded.type) };
                 } catch {
                         throw new Error('Invalid multibase string');
                 }

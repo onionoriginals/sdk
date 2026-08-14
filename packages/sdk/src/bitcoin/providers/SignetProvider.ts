@@ -176,7 +176,7 @@ export class SignetProvider implements OrdinalsProvider {
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async createInscription(_params: {
-    data: Buffer;
+    data: Uint8Array;
     contentType: string;
     feeRate?: number;
   }): Promise<never> {

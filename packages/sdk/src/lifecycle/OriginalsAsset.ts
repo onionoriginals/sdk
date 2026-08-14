@@ -503,7 +503,7 @@ export class OriginalsAsset {
 
         // If inline content is present, verify by hashing it
         if (typeof res.content === 'string') {
-          const data = Buffer.from(res.content, 'utf8');
+          const data = new TextEncoder().encode(res.content);
           const computed = hashResource(data);
           const expected = (res.hash || '').toLowerCase();
           if (computed.toLowerCase() !== expected) {
@@ -522,7 +522,7 @@ export class OriginalsAsset {
           }
           try {
             const response = await deps.fetch(res.url);
-            const buf = Buffer.from(await response.arrayBuffer());
+            const buf = new Uint8Array(await response.arrayBuffer());
             const computed = hashResource(buf);
             const expected = (res.hash || '').toLowerCase();
             if (computed.toLowerCase() !== expected) {
@@ -714,7 +714,7 @@ export class OriginalsAsset {
     })[0];
 
     // Compute new hash
-    const contentBuffer = Buffer.from(newContent, 'utf-8');
+    const contentBuffer = new TextEncoder().encode(newContent);
     const newHash = hashResource(contentBuffer);
 
     // Check if content has actually changed

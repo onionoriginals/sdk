@@ -1,4 +1,5 @@
 import * as cbor from '../../utils/cbor.js';
+import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../../utils/encoding.js';
 
 /**
  * Minimal BBS utility methods ported from legacy for working with
@@ -12,17 +13,12 @@ import * as cbor from '../../utils/cbor.js';
  */
 export class BBSCryptosuiteUtils {
   private static encodeBase64urlNoPad(bytes: Uint8Array): string {
-    const b64 = Buffer.from(bytes).toString('base64');
-    const b64url = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-    return 'u' + b64url;
+    return encodeBase64UrlMultibase(bytes);
   }
 
   private static decodeBase64urlNoPad(s: string): Uint8Array {
     if (!s.startsWith('u')) throw new Error('Not a multibase base64url (u- prefixed) string');
-    const raw = s.slice(1);
-    const b64 = raw.replace(/-/g, '+').replace(/_/g, '/');
-    const pad = b64.length % 4 === 2 ? '==' : b64.length % 4 === 3 ? '=' : '';
-    return new Uint8Array(Buffer.from(b64 + pad, 'base64'));
+    return decodeBase64UrlMultibase(s);
   }
   private static compareBytes(a: Uint8Array, b: number[]): boolean {
     if (a.length !== b.length) return false;

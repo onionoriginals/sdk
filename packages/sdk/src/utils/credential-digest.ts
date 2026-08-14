@@ -33,8 +33,8 @@ export async function computeCredentialDigest(
 
   const c14nProof = await canonicalizeDocument(proofInput);
   const c14nCred = await canonicalizeDocument(unsigned);
-  const hProof = sha256(Buffer.from(c14nProof, 'utf8'));
-  const hCred = sha256(Buffer.from(c14nCred, 'utf8'));
+  const hProof = sha256(new TextEncoder().encode(c14nProof));
+  const hCred = sha256(new TextEncoder().encode(c14nCred));
 
   const out = new Uint8Array(hProof.length + hCred.length);
   out.set(hProof, 0);

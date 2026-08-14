@@ -44,7 +44,7 @@ describe('BitcoinManager.inscribeData deferred content', () => {
       }),
       'image/png'
     );
-    expect(inscription.content?.toString()).toBe('media');
+    expect(new TextDecoder().decode(inscription.content)).toBe('media');
     expect((inscription.metadata as { didDocument: { id: string } }).didDocument.id)
       .toBe(`did:btco:reg:${inscription.satoshi}`);
   });

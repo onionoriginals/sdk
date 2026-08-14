@@ -642,7 +642,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
   // transaction locally, sign it, and submit via broadcastTransaction.
 
   createInscription(params: {
-    data?: Buffer;
+    data?: Uint8Array;
     buildContent?: (satoshi: string) => InscriptionParts | Promise<InscriptionParts>;
     contentType: string;
     feeRate?: number;
@@ -656,7 +656,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
     txid?: string;
     vout?: number;
     blockHeight?: number;
-    content?: Buffer;
+    content?: Uint8Array;
     contentType?: string;
     feeRate?: number;
     metadata?: Record<string, unknown>;
