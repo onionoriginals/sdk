@@ -5,6 +5,7 @@ import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
 import { deactivateEventLog } from '../../../src/cel/algorithms/deactivateEventLog';
 import { deriveDidCel } from '../../../src/cel/celDid';
 import { createRealCelSigner } from '../../fixtures/celSigner';
+import { CEL_CRYPTOSUITE } from '../../../src/cel/proofVerification';
 
 // Real Ed25519 did:key signer — seal-time self-verification (plan 034) rejects
 // proofs that don't verify, so tests sign for real.
@@ -154,12 +155,12 @@ describe('PeerCelManager', () => {
       expect(log.events[0].proof.length).toBeGreaterThanOrEqual(1);
     });
 
-    test('proof uses eddsa-jcs-2022 cryptosuite', async () => {
+    test('proof uses the CEL cryptosuite', async () => {
       const resources: ExternalReference[] = [];
       const { log } = await manager.create('Test Asset', resources);
       const proof = log.events[0].proof[0];
 
-      expect(proof.cryptosuite).toBe('eddsa-jcs-2022');
+      expect(proof.cryptosuite).toBe(CEL_CRYPTOSUITE);
     });
 
     test('proof has type DataIntegrityProof', async () => {
@@ -440,7 +441,7 @@ describe('PeerCelManager', () => {
 
       const proof = updatedLog.events[1].proof[0];
       expect(proof.type).toBe('DataIntegrityProof');
-      expect(proof.cryptosuite).toBe('eddsa-jcs-2022');
+      expect(proof.cryptosuite).toBe(CEL_CRYPTOSUITE);
       expect(proof.proofValue).toBeDefined();
     });
 

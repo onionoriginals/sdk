@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
 import { createRealCelSigner } from '../../fixtures/celSigner';
 import type { DataIntegrityProof, EventLog, CreateOptions } from '../../../src/cel/types';
+import { CEL_CRYPTOSUITE } from '../../../src/cel/proofVerification';
 
 /**
  * Real Ed25519 did:key signer. Seal-time self-verification (plan 034) rejects
@@ -87,7 +88,7 @@ describe('createEventLog', () => {
       expect(log.events[0].proof.length).toBeGreaterThanOrEqual(1);
     });
 
-    test('proof uses eddsa-jcs-2022 cryptosuite', async () => {
+    test('proof uses the CEL cryptosuite', async () => {
       const data = { name: 'Test Asset' };
       const options: CreateOptions = {
         signer: createMockSigner(verificationMethod),
@@ -97,7 +98,7 @@ describe('createEventLog', () => {
       const log = await createEventLog(data, options);
       const proof = log.events[0].proof[0];
 
-      expect(proof.cryptosuite).toBe('eddsa-jcs-2022');
+      expect(proof.cryptosuite).toBe(CEL_CRYPTOSUITE);
     });
 
     test('proof has type DataIntegrityProof', async () => {

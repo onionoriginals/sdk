@@ -11,6 +11,7 @@ import { PeerCelManager } from '../../../src/cel/layers/PeerCelManager';
 import type { EventLog, DataIntegrityProof, WitnessProof } from '../../../src/cel/types';
 import type { BitcoinManager } from '../../../src/bitcoin/BitcoinManager';
 import { createRealCelSigner } from '../../fixtures/celSigner';
+import { CEL_CRYPTOSUITE } from '../../../src/cel/proofVerification';
 
 // One real Ed25519 did:key signer shared by every manager in this file: seal-time
 // self-verification (plan 034) rejects unverifiable proofs, and CEL authority
@@ -790,7 +791,7 @@ describe('BtcoCelManager', () => {
       expect(migrationEvent.proof.length).toBeGreaterThanOrEqual(2);
       
       const hasControllerProof = migrationEvent.proof.some(
-        p => p.cryptosuite === 'eddsa-jcs-2022'
+        p => p.cryptosuite === CEL_CRYPTOSUITE
       );
       const hasBitcoinWitness = migrationEvent.proof.some(
         p => p.cryptosuite === 'bitcoin-ordinals-2024'

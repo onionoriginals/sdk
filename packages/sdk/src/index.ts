@@ -245,7 +245,14 @@ export {
   decodeDigestMultibase,
   digestMultibaseEquals,
 } from './cel/hash.js';
-export { witnessSigningBytes } from './cel/canonicalize.js';
+export { witnessSigningBytes, celProofSigningInput, canonicalizeEvent } from './cel/canonicalize.js';
+// The CEL suite labels (plan 042): one written, one accepted for pre-042 logs.
+export {
+  CEL_CRYPTOSUITE,
+  CEL_CRYPTOSUITE_LEGACY,
+  verifyDidKeyProof,
+  structuralCheckReason,
+} from './cel/proofVerification.js';
 export {
   DID_CEL_PREFIX,
   deriveDidCel,

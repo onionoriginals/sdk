@@ -10,20 +10,37 @@
 
 import { verifyAsync } from '@noble/ed25519';
 import { multikey } from '../crypto/Multikey.js';
-import { canonicalizeEvent } from './canonicalize.js';
+import { canonicalizeEvent, celProofSigningInput } from './canonicalize.js';
 import type { DataIntegrityProof } from './types.js';
 
 /**
- * The ONLY cryptosuite a CEL controller proof may use. CEL signs Ed25519 over
- * JCS bytes; `eddsa-rdfc-2022` was previously admitted by the structural check
- * while the dispatcher failed it closed — a suite the validator accepted but
- * that could never verify. The two are now the same list by construction.
+ * The cryptosuite CEL proofs are WRITTEN with (plan 042).
  *
- * NOTE: despite the label, this is NOT the W3C `eddsa-jcs-2022` construction —
- * there is no hashing step and the proof configuration is excluded from the
- * signature (see `canonicalize.ts`). Plan 042 renames it.
+ * Bespoke on purpose. The previous label was `eddsa-jcs-2022`, but the
+ * construction was not that suite: there was no hashing step and the proof
+ * configuration was excluded from the signature, so a conforming Data
+ * Integrity implementation could never interoperate in either direction while
+ * the name promised it could. This name claims nothing it does not do.
+ *
+ * The construction is `sha256(JCS(proofConfig)) || sha256(JCS(event))`, signed
+ * with Ed25519 — see `celProofSigningInput`.
  */
-export const CEL_CRYPTOSUITE = 'eddsa-jcs-2022';
+export const CEL_CRYPTOSUITE = 'originals-cel-ed25519-jcs-v1';
+
+/**
+ * The pre-042 label, accepted on READ and never written again.
+ *
+ * Its signature covers the event alone, so the proof configuration —
+ * `created`, `verificationMethod`, `proofPurpose`, and the suite label itself —
+ * is unattested and editable. Logs sealed before 042 cannot be re-signed, so
+ * they keep verifying under their original rules; new logs get the stronger
+ * ones. External artifacts (a competing anchoring's DID document, written by
+ * another implementation) may also still carry this label.
+ */
+export const CEL_CRYPTOSUITE_LEGACY = 'eddsa-jcs-2022';
+
+/** Suites a CEL proof may carry: one written, one read-only. */
+export const CEL_CRYPTOSUITES = [CEL_CRYPTOSUITE, CEL_CRYPTOSUITE_LEGACY] as const;
 
 /** Why a proof could not be verified. Surfaced in `VerificationResult.errors`. */
 export type ProofFailureReason =
@@ -55,8 +72,9 @@ export function structuralCheckReason(proof: DataIntegrityProof): string | null 
   }
   if (!proof.verificationMethod || typeof proof.verificationMethod !== 'string') return 'malformed proof';
   if (!proof.proofPurpose || typeof proof.proofPurpose !== 'string') return 'malformed proof';
-  if (proof.cryptosuite !== CEL_CRYPTOSUITE) {
-    return `unsupported cryptosuite "${proof.cryptosuite}" (CEL requires ${CEL_CRYPTOSUITE})`;
+  if (!(CEL_CRYPTOSUITES as readonly string[]).includes(proof.cryptosuite)) {
+    return `unsupported cryptosuite "${proof.cryptosuite}" (CEL requires ${CEL_CRYPTOSUITE}` +
+      `, or ${CEL_CRYPTOSUITE_LEGACY} for logs sealed before it)`;
   }
   if (!proof.proofValue.startsWith('z') && !proof.proofValue.startsWith('u')) return 'malformed proof';
   return null;
@@ -94,7 +112,7 @@ export async function verifyProofWithKey(
 ): Promise<ProofCheck> {
   try {
     const signatureBytes = multikey.decodeMultibase(proof.proofValue);
-    const ok = await verifyAsync(signatureBytes, canonicalizeEvent(data), publicKey);
+    const ok = await verifyAsync(signatureBytes, celPreimageFor(proof, data), publicKey);
     return ok
       ? { verified: true, cryptographicallyVerified: true }
       : { verified: false, cryptographicallyVerified: false, reason: 'signature mismatch' };
@@ -122,4 +140,20 @@ export async function verifyDidKeyProof(proof: DataIntegrityProof, data: unknown
   }
 
   return verifyProofWithKey(proof, data, publicKeyBytes);
+}
+
+/**
+ * The bytes a proof's signature must cover, chosen by its declared suite.
+ *
+ * Dispatching on the label is safe precisely because the new construction
+ * binds the label: a legacy proof relabelled to the new suite fails (its
+ * signature does not cover the config), and a new proof relabelled to the
+ * legacy suite fails too (the legacy preimage is not what was signed).
+ */
+function celPreimageFor(proof: DataIntegrityProof, data: unknown): Uint8Array {
+  if (proof.cryptosuite === CEL_CRYPTOSUITE_LEGACY) {
+    // Pre-042: the event alone, unhashed, with the config unattested.
+    return canonicalizeEvent(data);
+  }
+  return celProofSigningInput(data, proof as unknown as Record<string, unknown>);
 }

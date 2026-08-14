@@ -19,7 +19,7 @@ import { MockRemoteSigner } from '../../../src/crypto/MockRemoteSigner';
 import { signingInput } from '../../../src/crypto/signingInput';
 import { multikey } from '../../../src/crypto/Multikey';
 import { KeyManager } from '../../../src/did/KeyManager';
-import { verifyDidKeyProof } from '../../../src/cel/proofVerification';
+import { verifyDidKeyProof, CEL_CRYPTOSUITE } from '../../../src/cel/proofVerification';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 import type { ExternalSigner } from '../../../src/types';
 
@@ -114,12 +114,12 @@ describe('signerFromExternalSigner', () => {
 });
 
 describe('toCelSigner', () => {
-  test('produces an eddsa-jcs-2022 proof that self-verifies (did:key, offline)', async () => {
+  test('produces a CEL proof that self-verifies (did:key, offline)', async () => {
     const remote = new MockRemoteSigner();
     const celSigner = toCelSigner(remote);
     const eventBase = { type: 'create', data: { name: 'asset', controller: `did:key:${remote.publicKeyMultibase}` } };
     const proof = await celSigner(eventBase);
-    expect(proof.cryptosuite).toBe('eddsa-jcs-2022');
+    expect(proof.cryptosuite).toBe(CEL_CRYPTOSUITE);
     expect(proof.verificationMethod).toBe(remote.verificationMethodId);
     expect((await verifyDidKeyProof(proof, eventBase)).verified).toBe(true);
     expect(remote.signBytesCalls).toBe(1);

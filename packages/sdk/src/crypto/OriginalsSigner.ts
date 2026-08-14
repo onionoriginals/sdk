@@ -9,6 +9,7 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import { multikey } from './Multikey.js';
 import { signerForKeyType } from './Signer.js';
 import { signingInput } from './signingInput.js';
+import { CEL_CRYPTOSUITE } from '../cel/proofVerification.js';
 import { StructuredError } from '../utils/telemetry.js';
 import type { KeyStore, ExternalSigner } from '../types/common.js';
 import type { KeyPair } from '../types/bitcoin.js';
@@ -155,17 +156,21 @@ export function toCelSigner(s: OriginalsSigner): CelSigner {
   }
   const verificationMethod = canonicalDidKeyVm(s.publicKeyMultibase);
   return async (data: unknown): Promise<DataIntegrityProof> => {
-    const sig = await s.signBytes(
-      signingInput.celEvent(data as { type: unknown; data?: unknown; previousEvent?: unknown })
-    );
-    return {
-      type: 'DataIntegrityProof',
-      cryptosuite: 'eddsa-jcs-2022',
+    // Config first, then sign over config + event (plan 042).
+    const config = {
+      type: 'DataIntegrityProof' as const,
+      cryptosuite: CEL_CRYPTOSUITE,
       created: new Date().toISOString(),
       verificationMethod,
       proofPurpose: 'assertionMethod',
-      proofValue: multikey.encodeMultibase(sig),
     };
+    const sig = await s.signBytes(
+      signingInput.celEvent(
+        data as { type: unknown; data?: unknown; previousEvent?: unknown },
+        config
+      )
+    );
+    return { ...config, proofValue: multikey.encodeMultibase(sig) };
   };
 }
 
