@@ -88,7 +88,11 @@ function makeRealSigningClient(
       signRawPayload: async (request: { payload: string; [k: string]: unknown }) => {
         if (callSpy) callSpy.count++;
 
-        const payloadBytes = Buffer.from(request.payload, 'hex');
+        // Turnkey accepts PAYLOAD_ENCODING_HEXADECIMAL with or without the `0x`
+        // prefix; `Buffer.from(s, 'hex')` silently mis-parses the prefixed form,
+        // so strip it here rather than encode one signer's convention.
+        const hex = request.payload.startsWith('0x') ? request.payload.slice(2) : request.payload;
+        const payloadBytes = Buffer.from(hex, 'hex');
         const sigBytes = await ed.signAsync(payloadBytes, privateKeyBytes);
 
         // Ed25519 signature is always 64 bytes: first 32 = r, last 32 = s

@@ -110,6 +110,8 @@ export {
 export { signingInput, type SigningDocumentLoader } from './crypto/signingInput.js';
 export { assertSignerConformance } from './crypto/signerConformance.js';
 export { MockRemoteSigner } from './crypto/MockRemoteSigner.js';
+// Custody backends hand back addresses, not Multikeys (plan 045).
+export { base58AddressToEd25519Multikey } from './crypto/addressToMultikey.js';
 
 // Event system exports
 export * from './events/index.js';
