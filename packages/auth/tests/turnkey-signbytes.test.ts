@@ -10,6 +10,7 @@
 
 import { describe, test, expect, beforeAll } from 'bun:test';
 import * as ed25519Module from '@noble/ed25519';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import {
   signerFromExternalSigner,
   assertSignerConformance,
@@ -52,6 +53,28 @@ function makeTurnkey(privateKey: Uint8Array, spy?: { payloads: string[] }): Turn
   } as unknown as Turnkey;
 }
 
+/** Buffer-free variant of the double, for the no-Buffer environment test. */
+function makeTurnkeyNoBuffer(privateKey: Uint8Array): Turnkey {
+  return {
+    apiClient: () => ({
+      signRawPayload: async (req: { payload: string }) => {
+        const hex = req.payload.startsWith('0x') ? req.payload.slice(2) : req.payload;
+        const sig = await ed.signAsync(hexToBytes(hex), privateKey);
+        return {
+          activity: {
+            result: {
+              signRawPayloadResult: {
+                r: bytesToHex(sig.slice(0, 32)),
+                s: bytesToHex(sig.slice(32)),
+              },
+            },
+          },
+        };
+      },
+    }),
+  } as unknown as Turnkey;
+}
+
 describe('turnkeySignBytes', () => {
   const privateKey = ed.utils.randomSecretKey();
 
@@ -74,6 +97,26 @@ describe('turnkeySignBytes', () => {
       data
     );
     expect(spy.payloads[0].toLowerCase()).toContain('deadbeef');
+  });
+
+  test('works with no global Buffer — it is a browser-facing root export', async () => {
+    // The client signer runs in the browser, where `Buffer` is undefined
+    // without a bundler shim. Hex conversion must not depend on it.
+    const realBuffer = globalThis.Buffer;
+    // @ts-expect-error - deliberately removing a global for the duration
+    delete globalThis.Buffer;
+    try {
+      const data = new TextEncoder().encode('no Buffer here');
+      const sig = await turnkeySignBytes(
+        { turnkeyClient: makeTurnkeyNoBuffer(privateKey), organizationId: 'org', signWith: 'acct' },
+        data
+      );
+      expect(sig.length).toBe(64);
+      const publicKey = await ed.getPublicKeyAsync(privateKey);
+      expect(await ed.verifyAsync(sig, data, publicKey)).toBe(true);
+    } finally {
+      globalThis.Buffer = realBuffer;
+    }
   });
 
   test('rejects a legacy flat {r,s} response', async () => {

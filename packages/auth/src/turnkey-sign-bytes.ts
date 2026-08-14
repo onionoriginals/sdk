@@ -7,8 +7,13 @@
  * `OriginalsSigner.signBytes` / `ExternalSigner.signBytes` directly, so a
  * Turnkey key can author CEL events and sign credentials rather than only
  * did:webvh logs.
+ *
+ * Browser-safe: hex conversion goes through @noble/hashes, not `Buffer`. This
+ * is a root export of `@originals/auth` and the client signer runs in the
+ * browser, where `Buffer` is not defined without a bundler shim.
  */
 
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import type { Turnkey } from '@turnkey/sdk-server';
 
 export interface TurnkeySignBytesOptions {
@@ -35,7 +40,7 @@ export async function turnkeySignBytes(
   const result = await turnkeyClient.apiClient().signRawPayload({
     organizationId,
     signWith,
-    payload: `0x${Buffer.from(data).toString('hex')}`,
+    payload: `0x${bytesToHex(data)}`,
     encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
     hashFunction: 'HASH_FUNCTION_NO_OP',
   });
@@ -56,7 +61,7 @@ export async function turnkeySignBytes(
   // both are prefixed, corrupting the hex decode.
   const cleanR = r.startsWith('0x') ? r.slice(2) : r;
   const cleanS = s.startsWith('0x') ? s.slice(2) : s;
-  const signature = Uint8Array.from(Buffer.from(cleanR + cleanS, 'hex'));
+  const signature = hexToBytes(cleanR + cleanS);
 
   // Ed25519 signatures are exactly 64 bytes (32-byte r + 32-byte s). Never
   // truncate: a wrong length is not a valid signature with a spare byte, and
