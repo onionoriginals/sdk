@@ -9,7 +9,6 @@ import { Turnkey } from '@turnkey/sdk-server';
 import { ExternalSigner, ExternalVerifier, multikey, signingInput } from '@originals/sdk';
 import { turnkeySignBytes } from '../turnkey-sign-bytes.js';
 import { sha512 } from '@noble/hashes/sha2.js';
-import { bytesToHex } from '@noble/hashes/utils.js';
 import * as ed25519 from '@noble/ed25519';
 
 // Configure @noble/ed25519 with required SHA-512 function.
@@ -66,8 +65,13 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
   }): Promise<{ proofValue: string }> {
     try {
       // didwebvh's preimage, produced by the SDK — never by this signer.
-      const dataToSign = await signingInput.didWebvh(input.document, input.proof);
-      const { signature } = await this.signBytes(dataToSign);
+      // Narrowed explicitly: lint runs before @originals/sdk is built, so the
+      // return type is unresolved there and must not flow on unchecked.
+      const prepared: unknown = await signingInput.didWebvh(input.document, input.proof);
+      if (!(prepared instanceof Uint8Array)) {
+        throw new Error('signingInput.didWebvh did not return a Uint8Array');
+      }
+      const { signature } = await this.signBytes(prepared);
       return { proofValue: multikey.encodeMultibase(signature) };
     } catch (error) {
       console.error('Error signing with Turnkey:', error);

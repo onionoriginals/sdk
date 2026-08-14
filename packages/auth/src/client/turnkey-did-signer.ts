@@ -51,8 +51,13 @@ export class TurnkeyDIDSigner {
     return withTokenExpiration(async () => {
       try {
         // didwebvh's preimage, produced by the SDK — never by this signer.
-        const dataToSign = await signingInput.didWebvh(input.document, input.proof);
-        const { signature } = await this.signBytes(dataToSign);
+        // Narrowed explicitly: lint runs before @originals/sdk is built, so the
+        // return type is unresolved there and must not flow on unchecked.
+        const prepared: unknown = await signingInput.didWebvh(input.document, input.proof);
+        if (!(prepared instanceof Uint8Array)) {
+          throw new Error('signingInput.didWebvh did not return a Uint8Array');
+        }
+        const { signature } = await this.signBytes(prepared);
         return { proofValue: encoding.multibase.encode(signature, 'base58btc') };
       } catch (error) {
         console.error('[TurnkeyDIDSigner] Error signing with Turnkey:', error);
