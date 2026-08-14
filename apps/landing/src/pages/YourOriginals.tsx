@@ -47,7 +47,8 @@ export async function fetchOriginals(): Promise<OriginalRow[]> {
 // https, so a dev http origin returns false; the card still renders).
 async function resolveLive(did: string): Promise<boolean> {
   try {
-    const { OriginalsSDK, OrdMockProvider } = await import('@originals/sdk');
+    const { OriginalsSDK } = await import('@originals/sdk');
+    const { OrdMockProvider } = await import('@originals/sdk/testing');
     const { HttpHostingStorageAdapter } = await import('../sdk/http-hosting-adapter');
     const sdk = OriginalsSDK.create({
       network: 'regtest',

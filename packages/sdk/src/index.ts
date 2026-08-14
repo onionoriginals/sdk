@@ -1,6 +1,6 @@
 /* istanbul ignore file */
-// Initialize noble crypto libraries first (must run before any crypto operations)
-import './crypto/noble-init.js';
+// No side-effect imports here: noble sync-hash config happens at point of use
+// (crypto/Signer.ts, did/KeyManager.ts), so `sideEffects: false` holds.
 
 import { OriginalsSDK } from './core/OriginalsSDK.js';
 
@@ -73,7 +73,12 @@ export { calculateFee } from './bitcoin/fee-calculation.js';
 export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs.js';
 export { BBSCryptosuiteManager } from './vc/cryptosuites/bbsCryptosuite.js';
 export type { BBSProofOptions, BBSDeriveOptions, BBSVerifyOptions } from './vc/cryptosuites/bbsCryptosuite.js';
+// Remote-signer verification toolkit (plan 043): the verifier, the EdDSA suite
+// (shared signing-input construction), and the JSON-LD document loader.
+export { Verifier } from './vc/Verifier.js';
 export type { StatusListResolver } from './vc/Verifier.js';
+export { EdDSACryptosuiteManager } from './vc/cryptosuites/eddsa.js';
+export { createDocumentLoader } from './vc/documentLoader.js';
 export { MultiSigManager } from './vc/MultiSigManager.js';
 export * from './storage/index.js';
 
@@ -190,19 +195,17 @@ export { EventLogger } from './utils/EventLogger.js';
 export type { EventLoggingConfig } from './utils/EventLogger.js';
 export { OperationLock } from './utils/OperationLock.js';
 
-// Utility exports
+// Utility exports. retry/circuit-breaker are internal infrastructure, not API
+// (plan 043); they remain importable in-repo but are no longer re-exported.
 export * from './utils/validation.js';
 export * from './utils/bitcoin-address.js';
 export * from './utils/satoshi-validation.js';
 export * from './utils/serialization.js';
-export * from './utils/retry.js';
 export * from './utils/telemetry.js';
-export * from './utils/circuit-breaker.js';
 export { sha256Bytes } from './utils/hash.js';
 
-// Adapter exports (for testing and custom integrations)
-export { OrdMockProvider } from './adapters/providers/OrdMockProvider.js';
-export { FeeOracleMock } from './adapters/FeeOracleMock.js';
+// Adapter exports (custom integrations). Test doubles (OrdMockProvider,
+// FeeOracleMock) moved to '@originals/sdk/testing' (plan 043).
 export { SignetProvider } from './bitcoin/providers/SignetProvider.js';
 export type { SignetProviderOptions } from './bitcoin/providers/SignetProvider.js';
 export { QuickNodeProvider } from './adapters/providers/QuickNodeProvider.js';
@@ -288,6 +291,7 @@ export {
 export {
   celSignerFromKeyPair,
   createKeyStoreCelSigner,
+  currentControllerVm,
   hexSha256ToDigestMultibase,
 } from './cel/signerAdapter.js';
 

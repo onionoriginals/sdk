@@ -509,7 +509,7 @@ describe('BITCOIN-025: OrdNodeProvider resource resolution by satoshi', () => {
   // OrdNodeProvider is a stub (no real network). We verify the adapter wiring.
   // For a proper sat-resolution test using OrdMockProvider (an OrdinalsProvider)
   // we exercise getInscriptionsBySatoshi.
-  const { OrdMockProvider } = require('../../../src');
+  const { OrdMockProvider } = require('../../../src/adapters/providers/OrdMockProvider');
 
   test('OrdMockProvider resolves inscription by satoshi after creation', async () => {
     const provider = new OrdMockProvider();

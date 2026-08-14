@@ -1,6 +1,3 @@
-// Initialize noble crypto libraries first (idempotent - safe to import multiple times)
-import './noble-init.js';
-
 export abstract class Signer {
   abstract sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer>;
   abstract verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean>;
@@ -12,6 +9,11 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 import { multikey, MultikeyType } from './Multikey.js';
+import { initNobleCrypto } from './noble-init.js';
+
+// secp256k1.verify (sync) needs hashes.sha256 configured; explicit call, not a
+// side-effect import, so bundlers can tree-shake with sideEffects: false.
+initNobleCrypto();
 
 /**
  * Return the Signer that matches a key's multicodec type. The multikey header

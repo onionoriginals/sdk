@@ -170,7 +170,7 @@ export class BitcoinManager {
         'ORD_PROVIDER_REQUIRED',
         'Ordinals provider must be configured to inscribe data on Bitcoin. ' +
         'Please provide an ordinalsProvider in your SDK configuration. ' +
-        'For testing, use: import { OrdMockProvider } from \'@originals/sdk\';'
+        'For testing, use: import { OrdMockProvider } from \'@originals/sdk/testing\';'
       );
     }
 
@@ -326,7 +326,7 @@ export class BitcoinManager {
         'ORD_PROVIDER_REQUIRED',
         'Ordinals provider must be configured to transfer inscriptions on Bitcoin. ' +
         'Please provide an ordinalsProvider in your SDK configuration. ' +
-        'For testing, use: import { OrdMockProvider } from \'@originals/sdk\';'
+        'For testing, use: import { OrdMockProvider } from \'@originals/sdk/testing\';'
       );
     }
 

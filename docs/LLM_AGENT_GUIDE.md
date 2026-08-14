@@ -10,7 +10,8 @@
 ## Quick Reference
 
 ```typescript
-import { OriginalsSDK, OrdMockProvider } from '@originals/sdk';
+import { OriginalsSDK } from '@originals/sdk';
+import { OrdMockProvider } from '@originals/sdk/testing';
 
 // Create SDK instance (minimal)
 const sdk = OriginalsSDK.create({ network: 'regtest' });
@@ -1251,7 +1252,7 @@ interface OrdinalsProvider {
 ### Using OrdMockProvider (Testing)
 
 ```typescript
-import { OrdMockProvider } from '@originals/sdk';
+import { OrdMockProvider } from '@originals/sdk/testing';
 
 const sdk = OriginalsSDK.create({
   network: 'regtest',
@@ -1292,10 +1293,8 @@ const multibaseEncoded = multikey.encodeMultibase(dataBytes);
 ### Basic Lifecycle Flow
 
 ```typescript
-import { 
-  OriginalsSDK, 
-  OrdMockProvider
-} from '@originals/sdk';
+import { OriginalsSDK } from '@originals/sdk';
+import { OrdMockProvider } from '@originals/sdk/testing';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 // 1. Configure SDK
@@ -1360,7 +1359,8 @@ console.log('Transfer txid:', tx.txid);
 ### Creating a Typed Module Original
 
 ```typescript
-import { OriginalsSDK, OriginalKind, OrdMockProvider } from '@originals/sdk';
+import { OriginalsSDK, OriginalKind } from '@originals/sdk';
+import { OrdMockProvider } from '@originals/sdk/testing';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 const sdk = OriginalsSDK.create({
@@ -1671,9 +1671,8 @@ export { multikey } from './crypto/Multikey';
 // Storage
 export { MemoryStorageAdapter, LocalStorageAdapter } from './storage';
 
-// Adapters
-export { OrdMockProvider } from './adapters/providers/OrdMockProvider';
-export { FeeOracleMock } from './adapters/FeeOracleMock';
+// Test doubles live in the '@originals/sdk/testing' subpath, not the root:
+// import { OrdMockProvider, FeeOracleMock } from '@originals/sdk/testing';
 
 // Types - all exported from './types'
 export * from './types';
