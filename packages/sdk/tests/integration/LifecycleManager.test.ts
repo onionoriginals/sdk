@@ -2,7 +2,8 @@
 
 /** Inlined from LifecycleManager.btco.integration.part.ts */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK, OrdMockProvider } from '../../src';
+import { OriginalsSDK } from '../../src';
+import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MockOrdinalsProvider } from '../mocks/adapters';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 

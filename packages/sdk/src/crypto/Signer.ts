@@ -1,9 +1,6 @@
-// Initialize noble crypto libraries first (idempotent - safe to import multiple times)
-import './noble-init.js';
-
 export abstract class Signer {
-  abstract sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer>;
-  abstract verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean>;
+  abstract sign(data: Uint8Array, privateKeyMultibase: string): Promise<Uint8Array>;
+  abstract verify(data: Uint8Array, signature: Uint8Array, publicKeyMultibase: string): Promise<boolean>;
 }
 
 import { bls12_381 as bls } from '@noble/curves/bls12-381.js';
@@ -12,6 +9,11 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 import { multikey, MultikeyType } from './Multikey.js';
+import { initNobleCrypto } from './noble-init.js';
+
+// secp256k1.verify (sync) needs hashes.sha256 configured; explicit call, not a
+// side-effect import, so bundlers can tree-shake with sideEffects: false.
+initNobleCrypto();
 
 /**
  * Return the Signer that matches a key's multicodec type. The multikey header
@@ -35,7 +37,7 @@ export function signerForKeyType(type: MultikeyType): Signer {
 }
 
 export class ES256KSigner extends Signer {
-  async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
+  async sign(data: Uint8Array, privateKeyMultibase: string): Promise<Uint8Array> {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase key format. Keys must use multicodec headers.');
     }
@@ -68,10 +70,10 @@ export class ES256KSigner extends Signer {
           ? sigAny.toRawBytes()
           : new Uint8Array(sigAny);
     /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
-    return Buffer.from(sigBytes);
+    return sigBytes;
   }
 
-  async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
+  async verify(data: Uint8Array, signature: Uint8Array, publicKeyMultibase: string): Promise<boolean> {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase key format. Keys must use multicodec headers.');
     }
@@ -102,7 +104,7 @@ export class ES256KSigner extends Signer {
 }
 
 export class Ed25519Signer extends Signer {
-  async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
+  async sign(data: Uint8Array, privateKeyMultibase: string): Promise<Uint8Array> {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase key format. Keys must use multicodec headers.');
     }
@@ -125,10 +127,10 @@ export class Ed25519Signer extends Signer {
     const privateKey = decoded.key;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const signature = await (ed25519 as any).signAsync(data, privateKey);
-    return Buffer.from(signature);
+    return signature as Uint8Array;
   }
 
-  async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
+  async verify(data: Uint8Array, signature: Uint8Array, publicKeyMultibase: string): Promise<boolean> {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase key format. Keys must use multicodec headers.');
     }
@@ -159,7 +161,7 @@ export class Ed25519Signer extends Signer {
 }
 
 export class ES256Signer extends Signer {
-  async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
+  async sign(data: Uint8Array, privateKeyMultibase: string): Promise<Uint8Array> {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase key format. Keys must use multicodec headers.');
     }
@@ -192,10 +194,10 @@ export class ES256Signer extends Signer {
           ? sigAny.toRawBytes()
           : new Uint8Array(sigAny);
     /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
-    return await Promise.resolve(Buffer.from(sigBytes));
+    return await Promise.resolve(sigBytes);
   }
 
-  async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
+  async verify(data: Uint8Array, signature: Uint8Array, publicKeyMultibase: string): Promise<boolean> {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase key format. Keys must use multicodec headers.');
     }
@@ -226,7 +228,7 @@ export class ES256Signer extends Signer {
 }
 
 export class Bls12381G2Signer extends Signer {
-  async sign(data: Buffer, privateKeyMultibase: string): Promise<Buffer> {
+  async sign(data: Uint8Array, privateKeyMultibase: string): Promise<Uint8Array> {
     if (!privateKeyMultibase || privateKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase key format. Keys must use multicodec headers.');
     }
@@ -249,10 +251,10 @@ export class Bls12381G2Signer extends Signer {
     const sk = decoded.key;
     const hashedMessage = bls.shortSignatures.hash(data);
     const sig = bls.shortSignatures.sign(hashedMessage, sk);
-    return await Promise.resolve(Buffer.from(sig.toBytes()));
+    return await Promise.resolve(sig.toBytes());
   }
 
-  async verify(data: Buffer, signature: Buffer, publicKeyMultibase: string): Promise<boolean> {
+  async verify(data: Uint8Array, signature: Uint8Array, publicKeyMultibase: string): Promise<boolean> {
     if (!publicKeyMultibase || publicKeyMultibase[0] !== 'z') {
       throw new Error('Invalid multibase key format. Keys must use multicodec headers.');
     }

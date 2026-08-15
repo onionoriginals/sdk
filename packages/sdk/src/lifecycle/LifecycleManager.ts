@@ -26,6 +26,7 @@ import {
   type AssetEnvelope
 } from './assetEnvelope.js';
 import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { hashResource, validateCredential } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier, validateSatoshiNumber } from '../utils/satoshi-validation.js';
@@ -680,7 +681,7 @@ export class LifecycleManager {
       }
       for (const res of env.resources) {
         if (typeof res.content === 'string') {
-          const computed = hashResource(Buffer.from(res.content, 'utf8'));
+          const computed = hashResource(new TextEncoder().encode(res.content));
           if (computed.toLowerCase() !== String(res.hash).toLowerCase()) {
             throw new StructuredError(
               'ASSET_LOAD_VERIFICATION_FAILED',
@@ -728,7 +729,7 @@ export class LifecycleManager {
         // carries the bytes inline (AssetResource.content); a resource that omits
         // them is a pure reference and rides on the res.hash↔toHash match above.
         if (typeof res.content === 'string') {
-          const computed = hashResource(Buffer.from(res.content, 'utf8'));
+          const computed = hashResource(new TextEncoder().encode(res.content));
           if (computed.toLowerCase() !== match.toHash.toLowerCase()) {
             throw new StructuredError(
               'ASSET_LOAD_VERIFICATION_FAILED',
@@ -1175,7 +1176,7 @@ export class LifecycleManager {
       const dm = ref.digestMultibase;
       if (typeof dm !== 'string') continue;
       let hash: string;
-      try { hash = Buffer.from(decodeDigestMultibase(dm)).toString('hex'); } catch { continue; }
+      try { hash = bytesToHex(decodeDigestMultibase(dm)); } catch { continue; }
       const url = Array.isArray(ref.url) && typeof ref.url[0] === 'string' ? ref.url[0] : undefined;
       resources.push({
         id: typeof ref.id === 'string' ? ref.id : '',
@@ -1208,7 +1209,7 @@ export class LifecycleManager {
     const head = mostRecentResourceHead(log);
     if (headContent && head) {
       const contentStr = new TextDecoder().decode(headContent);
-      if (hashResource(Buffer.from(contentStr, 'utf8')).toLowerCase() === head.hash.toLowerCase()) {
+      if (hashResource(new TextEncoder().encode(contentStr)).toLowerCase() === head.hash.toLowerCase()) {
         const target = resources.find(r => (!head.resourceId || r.id === head.resourceId) && r.hash === head.hash && r.content === undefined);
         if (target) target.content = contentStr;
       }
@@ -1518,7 +1519,7 @@ export class LifecycleManager {
       if (resource.size) {
         dataSize += resource.size;
       } else if (resource.content) {
-        dataSize += Buffer.from(resource.content).length;
+        dataSize += new TextEncoder().encode(resource.content).length;
       } else {
         // Estimate based on hash length (assume average resource size)
         dataSize += 1000;
@@ -1539,7 +1540,7 @@ export class LifecycleManager {
       metadata: manifest.metadata,
       timestamp: new Date().toISOString()
     };
-    dataSize += Buffer.from(JSON.stringify(inscriptionManifest)).length;
+    dataSize += new TextEncoder().encode(JSON.stringify(inscriptionManifest)).length;
     
     // Get fee rate from oracle or use provided/default
     let effectiveFeeRate = feeRate;
@@ -1931,7 +1932,7 @@ export class LifecycleManager {
    */
   private assertContentMatchesDeclaredHash(resource: AssetResource, operation: string): void {
     if (typeof resource.content !== 'string') return;
-    const computed = hashResource(Buffer.from(resource.content, 'utf8'));
+    const computed = hashResource(new TextEncoder().encode(resource.content));
     if (computed.toLowerCase() !== resource.hash.toLowerCase()) {
       throw new StructuredError(
         'RESOURCE_HASH_MISMATCH',
@@ -1989,11 +1990,11 @@ export class LifecycleManager {
     const jsonl = log.map((e) => JSON.stringify(e)).join('\n');
 
     const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
-    const withPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<unknown> } | undefined;
+    const withPut = storage as { put?: (key: string, data: Uint8Array, options: { contentType: string }) => Promise<unknown> } | undefined;
     const withPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<unknown> } | undefined;
 
     if (withPut && typeof withPut.put === 'function') {
-      await withPut.put(`${domain}/${relativePath}`, Buffer.from(jsonl), { contentType: 'application/jsonl' });
+      await withPut.put(`${domain}/${relativePath}`, new TextEncoder().encode(jsonl), { contentType: 'application/jsonl' });
       writtenObjects?.push({ domain, relativePath });
     } else if (withPutObject && typeof withPutObject.putObject === 'function') {
       await withPutObject.putObject(domain, relativePath, new TextEncoder().encode(jsonl));
@@ -2023,11 +2024,11 @@ export class LifecycleManager {
     const json = serializeEventLogJson(log);
 
     const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
-    const withPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<unknown> } | undefined;
+    const withPut = storage as { put?: (key: string, data: Uint8Array, options: { contentType: string }) => Promise<unknown> } | undefined;
     const withPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<unknown> } | undefined;
 
     if (withPut && typeof withPut.put === 'function') {
-      await withPut.put(`${domain}/${relativePath}`, Buffer.from(json), { contentType: 'application/json' });
+      await withPut.put(`${domain}/${relativePath}`, new TextEncoder().encode(json), { contentType: 'application/json' });
       writtenObjects?.push({ domain, relativePath });
     } else if (withPutObject && typeof withPutObject.putObject === 'function') {
       await withPutObject.putObject(domain, relativePath, new TextEncoder().encode(json));
@@ -2055,10 +2056,10 @@ export class LifecycleManager {
     try {
       const suffix = deriveDidCel(log).slice(DID_CEL_PREFIX.length);
       const json = serializeEventLogJson(log);
-      const withPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<unknown> };
+      const withPut = storage as { put?: (key: string, data: Uint8Array, options: { contentType: string }) => Promise<unknown> };
       const withPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<unknown> };
       if (typeof withPut.put === 'function') {
-        await withPut.put(`cel/${suffix}.json`, Buffer.from(json), { contentType: 'application/json' });
+        await withPut.put(`cel/${suffix}.json`, new TextEncoder().encode(json), { contentType: 'application/json' });
       } else if (typeof withPutObject.putObject === 'function') {
         await withPutObject.putObject('cel', `${suffix}.json`, new TextEncoder().encode(json));
       }
@@ -2156,9 +2157,9 @@ export class LifecycleManager {
       // hash (issue #347).
       this.assertContentMatchesDeclaredHash(resource, 'publish');
 
-      const data = Buffer.from(resource.content);
+      const data = new TextEncoder().encode(resource.content);
 
-      const storageWithPut = storage as { put?: (key: string, data: Buffer, options: { contentType: string }) => Promise<void> };
+      const storageWithPut = storage as { put?: (key: string, data: Uint8Array, options: { contentType: string }) => Promise<void> };
       const storageWithPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<void> };
 
       if (typeof storageWithPut.put === 'function') {
@@ -2583,12 +2584,12 @@ export class LifecycleManager {
     const bitcoinManager = this.deps?.bitcoinManager ?? new BitcoinManager(this.config);
     const headMedia = this.tryResolveHeadMedia(asset);
     // Cost surfacing (spec §0/§5): estimate + emit BEFORE the paid broadcast.
-    await this.emitInscribeCost(bitcoinManager, asset, headMedia?.content ?? Buffer.from(JSON.stringify(btcoDoc)));
+    await this.emitInscribeCost(bitcoinManager, asset, headMedia?.content ?? new TextEncoder().encode(JSON.stringify(btcoDoc)));
 
     let inscription: { inscriptionId: string; satoshi?: string; txid?: string; revealTxId?: string };
     try {
       inscription = await bitcoinManager.inscribeData(
-        headMedia ? headMedia.content : Buffer.from(JSON.stringify(btcoDoc)),
+        headMedia ? headMedia.content : new TextEncoder().encode(JSON.stringify(btcoDoc)),
         headMedia ? headMedia.contentType : 'application/did+json',
         undefined,
         { targetSatoshi: satoshi, metadata, lockKey: asset.id }
@@ -2642,7 +2643,7 @@ export class LifecycleManager {
    * cost (fee rate × rough vsize). Never gates — an estimator failure must not
    * block the paid op the caller already intends.
    */
-  private async emitInscribeCost(bitcoinManager: BitcoinManager, asset: OriginalsAsset, content: Buffer): Promise<void> {
+  private async emitInscribeCost(bitcoinManager: BitcoinManager, asset: OriginalsAsset, content: Uint8Array): Promise<void> {
     try {
       const feeRate = await bitcoinManager.estimateFeeRate();
       // Rough commit+reveal vsize: content bytes / 4 (witness discount) + ~200
@@ -2675,7 +2676,7 @@ export class LifecycleManager {
    * so such assets carry NO media on-chain (honest, per the reference-only
    * pattern this SDK supports — content-as-ordinal applies to inline media only).
    */
-  private tryResolveHeadMedia(asset: OriginalsAsset): { content: Buffer; contentType: string } | null {
+  private tryResolveHeadMedia(asset: OriginalsAsset): { content: Uint8Array; contentType: string } | null {
     const log = asset.celLog;
     if (!log) return null;
     const head = mostRecentResourceHead(log);
@@ -2686,14 +2687,14 @@ export class LifecycleManager {
     const pending = asset.pendingHeadMedia;
     if (pending && pending.hash === head.hash && (!head.resourceId || pending.resourceId === head.resourceId)) {
       return {
-        content: Buffer.from(pending.content, 'utf8'),
+        content: new TextEncoder().encode(pending.content),
         contentType: pending.contentType ?? head.contentType ?? 'application/octet-stream'
       };
     }
     const res = asset.resources.find(r => (!head.resourceId || r.id === head.resourceId) && r.hash === head.hash);
     if (!res || typeof res.content !== 'string') return null;
     return {
-      content: Buffer.from(res.content, 'utf8'),
+      content: new TextEncoder().encode(res.content),
       contentType: res.contentType ?? head.contentType ?? 'application/octet-stream'
     };
   }
@@ -2837,7 +2838,7 @@ export class LifecycleManager {
       // Metadata = { didDocument, celLog }. Snapshot the log AFTER the migrate
       // append so the embedded celLog head equals the #cel anchor digest.
       return {
-        content: headMedia ? headMedia.content : Buffer.from(JSON.stringify(btcoDoc)),
+        content: headMedia ? headMedia.content : new TextEncoder().encode(JSON.stringify(btcoDoc)),
         contentType: inscriptionContentType,
         metadata: {
           didDocument: btcoDoc,
@@ -2853,7 +2854,7 @@ export class LifecycleManager {
       inscriptionId: string;
       satoshi?: string;
       feeRate?: number;
-      content?: Buffer;
+      content?: Uint8Array;
       metadata?: Record<string, unknown>;
     };
     // Set only on a RECOVERABLE reveal-broadcast failure (sat-selected path): the
@@ -3218,7 +3219,7 @@ export class LifecycleManager {
     const inscription = {
       satoshi,
       inscriptionId,
-      content: Buffer.alloc(0),
+      content: new Uint8Array(0),
       contentType: 'application/octet-stream',
       // Not used by transferInscription (which reads only inscriptionId); kept
       // for shape. Empty rather than a fabricated 'unknown-tx'.
@@ -3395,7 +3396,7 @@ export class LifecycleManager {
     };
     try {
       return await bitcoinManager.inscribeData(
-        headMedia ? headMedia.content : Buffer.from(JSON.stringify(rotatedDoc)),
+        headMedia ? headMedia.content : new TextEncoder().encode(JSON.stringify(rotatedDoc)),
         headMedia ? headMedia.contentType : 'application/did+json',
         feeRate,
         { targetSatoshi: satoshi, metadata }
@@ -4284,7 +4285,7 @@ export class LifecycleManager {
   async estimateAppendCost(
     asset: OriginalsAsset,
     appendKind: AppendKind,
-    opts?: { content?: string | Buffer; contentType?: string; feeRate?: number }
+    opts?: { content?: string | Uint8Array; contentType?: string; feeRate?: number }
   ): Promise<AppendCostEstimate> {
     const provider = this.config.ordinalsProvider ?? this.deps?.bitcoinManager?.ordinalsProvider;
     if (!provider) {
@@ -4331,14 +4332,14 @@ export class LifecycleManager {
   private resolveAppendPayloadBytes(
     asset: OriginalsAsset,
     appendKind: AppendKind,
-    opts?: { content?: string | Buffer }
+    opts?: { content?: string | Uint8Array }
   ): number {
     if (opts?.content !== undefined) {
-      const buf = Buffer.isBuffer(opts.content) ? opts.content : Buffer.from(String(opts.content), 'utf8');
+      const buf = typeof opts.content === 'string' ? new TextEncoder().encode(opts.content) : opts.content;
       return buf.byteLength;
     }
     if (appendKind === 'update' && asset.pendingHeadMedia) {
-      return Buffer.from(asset.pendingHeadMedia.content, 'utf8').byteLength;
+      return new TextEncoder().encode(asset.pendingHeadMedia.content).byteLength;
     }
     // Head media is the inscribed CONTENT for BOTH kinds when present (update:
     // reinscribeCelAppend; rotate: reinscribeRotatedDoc) — so this is the paid size.
@@ -4353,7 +4354,7 @@ export class LifecycleManager {
       const vm = currentControllerVm(log);
       const controllerPubMb = vm.split('#')[0].slice('did:key:'.length);
       const btcoDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, controllerPubMb);
-      return Buffer.from(JSON.stringify(btcoDoc)).byteLength;
+      return new TextEncoder().encode(JSON.stringify(btcoDoc)).byteLength;
     }
     return 0;
   }
@@ -4409,7 +4410,7 @@ export class LifecycleManager {
         })),
         timestamp: new Date().toISOString()
       };
-      const dataSize = Buffer.from(JSON.stringify(manifest)).length;
+      const dataSize = new TextEncoder().encode(JSON.stringify(manifest)).length;
       
       // Get fee rate from oracle or use provided/default
       let effectiveFeeRate = feeRate;

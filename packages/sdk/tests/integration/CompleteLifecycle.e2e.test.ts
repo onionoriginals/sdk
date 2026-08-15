@@ -250,7 +250,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
       // most-recent resource's bytes), and the btco DID document + resource
       // manifest ride in the inscription METADATA.
       expect(inscription?.contentType).toBe('image/png');
-      expect(inscription!.content!.toString()).toBe('mock-image-data');
+      expect(new TextDecoder().decode(inscription!.content)).toBe('mock-image-data');
       const inscribedDoc = (inscription!.metadata as { didDocument: { id: string; service: Array<{ type: string; serviceEndpoint: { resources: unknown[] } }> } }).didDocument;
       expect(inscribedDoc.id).toMatch(/^did:btco:/);
       const inscribedManifest = inscribedDoc.service.find((s) => s.type === 'OriginalsResourceManifest');

@@ -3,7 +3,8 @@
 ## Initialization
 
 ```typescript
-import { OriginalsSDK, OrdMockProvider } from '@originals/sdk';
+import { OriginalsSDK } from '@originals/sdk';
+import { OrdMockProvider } from '@originals/sdk/testing';
 
 const sdk = OriginalsSDK.create({
   network: 'regtest',           // 'mainnet' | 'regtest' | 'signet'

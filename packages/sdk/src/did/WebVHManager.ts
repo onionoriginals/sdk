@@ -149,10 +149,7 @@ class OriginalsWebVHSigner implements Signer, Verifier {
     const dataToSign = await signingInput.didWebvh(input.document, input.proof);
     
     // Sign using our Ed25519 signer
-    const signature: Buffer = await this.signer.sign(
-      Buffer.from(dataToSign),
-      this.privateKeyMultibase
-    );
+    const signature = await this.signer.sign(dataToSign, this.privateKeyMultibase);
 
     // Encode signature as multibase
     const proofValue = multikey.encodeMultibase(signature);
@@ -165,14 +162,7 @@ class OriginalsWebVHSigner implements Signer, Verifier {
     const publicKeyMultibase = multikey.encodePublicKey(publicKey, 'Ed25519');
     
     // Verify using our Ed25519 signer
-    const messageBuffer: Buffer = Buffer.from(message);
-    const signatureBuffer: Buffer = Buffer.from(signature);
-    
-    return this.signer.verify(
-      messageBuffer,
-      signatureBuffer,
-      publicKeyMultibase
-    );
+    return this.signer.verify(message, signature, publicKeyMultibase);
   }
 
   getVerificationMethodId(): string {

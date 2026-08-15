@@ -16,6 +16,7 @@ import { randomBytes } from '@noble/hashes/utils.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { BBSCryptosuiteUtils } from './bbs.js';
 import { multikey } from '../../crypto/Multikey.js';
+import { decodeBase64UrlMultibase } from '../../utils/encoding.js';
 import { canonize } from '../utils/jsonld.js';
 import type { DataIntegrityProof, VerificationResult } from './eddsa.js';
 import {
@@ -113,9 +114,7 @@ function resolveKey(key: Uint8Array | string | undefined, isPrivate: boolean): U
 /** Multibase base64url-no-pad decode (the 'u' prefix used by proof values). */
 function decodeMultibaseB64url(s: string): Uint8Array {
   if (!s || s[0] !== 'u') throw new Error('Proof value must be multibase-base64url-no-pad-encoded (start with "u")');
-  const raw = s.slice(1).replace(/-/g, '+').replace(/_/g, '/');
-  const pad = raw.length % 4 === 2 ? '==' : raw.length % 4 === 3 ? '=' : '';
-  return new Uint8Array(Buffer.from(raw + pad, 'base64'));
+  return decodeBase64UrlMultibase(s);
 }
 
 export class BBSCryptosuiteManager {

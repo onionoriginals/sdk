@@ -445,9 +445,7 @@ export class CredentialManager {
     const signature = this.decodeMultibase(proofValue);
     if (!signature) return false;
 
-    const digest = Buffer.from(
-      await computeCredentialDigest(credential as unknown as Record<string, unknown>, proof as unknown as Record<string, unknown>)
-    );
+    const digest = await computeCredentialDigest(credential as unknown as Record<string, unknown>, proof as unknown as Record<string, unknown>);
     try {
       const resolvedKey = await this.resolveVerificationMethodMultibase(
         verificationMethod,
@@ -460,7 +458,7 @@ export class CredentialManager {
       // algorithm; selecting it from config.defaultKeyType made verification
       // fail whenever the verifier's config differed from the issuer's key.
       const signer = signerForKeyType(multikey.decodePublicKey(resolvedKey).type);
-      return await signer.verify(Buffer.from(digest), Buffer.from(signature), resolvedKey);
+      return await signer.verify(digest, signature, resolvedKey);
     } catch {
       return false;
     }
@@ -585,13 +583,11 @@ export class CredentialManager {
     privateKeyMultibase: string,
     proofBase: Proof
   ): Promise<string> {
-    const digest = Buffer.from(
-      await computeCredentialDigest(credential as unknown as Record<string, unknown>, proofBase as unknown as Record<string, unknown>)
-    );
+    const digest = await computeCredentialDigest(credential as unknown as Record<string, unknown>, proofBase as unknown as Record<string, unknown>);
     // Sign with the algorithm the private key actually is, not whatever
     // config.defaultKeyType happens to be on this instance.
     const signer = signerForKeyType(multikey.decodePrivateKey(privateKeyMultibase).type);
-    const sig = await signer.sign(Buffer.from(digest), privateKeyMultibase);
+    const sig = await signer.sign(digest, privateKeyMultibase);
     return encodeBase64UrlMultibase(sig);
   }
 
@@ -1062,7 +1058,7 @@ export class CredentialManager {
   async computeCredentialHash(credential: VerifiableCredential): Promise<string> {
     return this.tracked('credential.computeHash', async () => {
     const canonicalized = await canonicalizeDocument(credential);
-    const hash = sha256(Buffer.from(canonicalized, 'utf8'));
+    const hash = sha256(new TextEncoder().encode(canonicalized));
     return bytesToHex(hash);
     }); // end tracked
   }

@@ -14,7 +14,7 @@ describe('OrdMockProvider deferred content', () => {
     });
     expect(seenSat).toBe(result.satoshi);
     const stored = await provider.getInscriptionById(result.inscriptionId);
-    expect(JSON.parse(stored!.content.toString()).id).toBe(`did:btco:${result.satoshi}`);
+    expect(JSON.parse(new TextDecoder().decode(stored!.content)).id).toBe(`did:btco:${result.satoshi}`);
   });
 
   test('targetSatoshi reinscribes on the same sat (appends to sat history)', async () => {

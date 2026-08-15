@@ -20,6 +20,7 @@ import { resolveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
 import { parseEventLogJson } from '../cel/serialization/json.js';
 import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
 
@@ -184,7 +185,7 @@ export class DIDManager {
       .toLowerCase();
     const slug = rawSlug.length <= MAX_HUMAN_READABLE_SLUG_LENGTH
       ? rawSlug
-      : Buffer.from(sha256(new TextEncoder().encode(originalSuffix))).toString('hex').slice(0, 32);
+      : bytesToHex(sha256(new TextEncoder().encode(originalSuffix))).slice(0, 32);
 
     // Carry the source document's multikey verification methods over as
     // verification-only keys (they do not become updateKeys — log updates are

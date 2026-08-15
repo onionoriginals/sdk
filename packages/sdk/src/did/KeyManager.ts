@@ -1,11 +1,13 @@
-// Initialize noble crypto libraries first (idempotent - safe to import multiple times)
-import '../crypto/noble-init.js';
-
 import { DIDDocument, KeyPair, KeyType, KeyRecoveryCredential } from '../types/index.js';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 import { p256 } from '@noble/curves/nist.js';
 import { multikey, MultikeyType } from '../crypto/Multikey.js';
+import { initNobleCrypto } from '../crypto/noble-init.js';
+
+// secp256k1.getPublicKey (sync) is used below; explicit call, not a side-effect
+// import, so bundlers can tree-shake with sideEffects: false.
+initNobleCrypto();
 
 function toMultikeyType(type: KeyType): MultikeyType {
         if (type === 'ES256K') return 'Secp256k1';
@@ -218,18 +220,18 @@ export class KeyManager {
 		return { didDocument: updatedDidDocument, recoveryCredential, newKeyPair };
 	}
 
-        encodePublicKeyMultibase(publicKey: Buffer, type: KeyType): string {
+        encodePublicKeyMultibase(publicKey: Uint8Array, type: KeyType): string {
                 const mkType = toMultikeyType(type);
-                return multikey.encodePublicKey(new Uint8Array(publicKey), mkType);
+                return multikey.encodePublicKey(publicKey, mkType);
         }
 
-        decodePublicKeyMultibase(encoded: string): { key: Buffer; type: KeyType } {
+        decodePublicKeyMultibase(encoded: string): { key: Uint8Array; type: KeyType } {
                 if (!encoded || typeof encoded !== 'string') {
                         throw new Error('Invalid multibase string');
                 }
                 try {
                         const decoded = multikey.decodePublicKey(encoded);
-                        return { key: Buffer.from(decoded.key), type: fromMultikeyType(decoded.type) };
+                        return { key: decoded.key, type: fromMultikeyType(decoded.type) };
                 } catch {
                         throw new Error('Invalid multibase string');
                 }

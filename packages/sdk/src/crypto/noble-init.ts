@@ -156,14 +156,17 @@ export function initEd25519(
   }
 }
 
+// Once-guard: modules that use noble sync APIs call this at module scope, so
+// there is no import-time side effect for bundlers to preserve (sideEffects: false).
+let initialized = false;
+
 /**
- * Initialize all noble crypto libraries
- * This should be called once at SDK startup
+ * Initialize all noble crypto libraries. Idempotent; call before any sync
+ * noble API use (`sign`, `verify`, `getPublicKey`). Async variants need no init.
  */
 export function initNobleCrypto(): void {
+  if (initialized) return;
+  initialized = true;
   initSecp256k1();
   initEd25519();
 }
-
-// Auto-initialize when this module is imported
-initNobleCrypto();

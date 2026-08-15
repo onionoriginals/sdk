@@ -280,7 +280,7 @@ describe('OrdinalsClient (real HTTP behavior with mocked fetch)', () => {
   test('resolveInscription returns mapped inscription with content bytes', async () => {
     const insc = await client.resolveInscription('insc-888');
     expect(insc).toEqual(expect.objectContaining({ inscriptionId: 'insc-888', txid: 'tx888', vout: 2 }));
-    expect(insc!.content).toBeInstanceOf(Buffer);
+    expect(insc!.content).toBeInstanceOf(Uint8Array);
     expect(insc!.content.length).toBe(2);
   });
 

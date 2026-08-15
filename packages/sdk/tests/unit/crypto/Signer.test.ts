@@ -94,7 +94,7 @@ describe('Signer classes', () => {
       const pk = secp256k1.getPublicKey(sk);
       const signer = new ES256KSigner();
       const sig = await signer.sign(data, secpPrivMb(sk));
-      expect(Buffer.isBuffer(sig)).toBe(true);
+      expect(sig).toBeInstanceOf(Uint8Array);
       const ok = await signer.verify(data, sig, secpPubMb(pk));
       expect(ok).toBe(true);
     });
@@ -175,7 +175,7 @@ describe('Signer classes', () => {
       const pk = p256.getPublicKey(sk);
       const signer = new ES256Signer();
       const sig = await signer.sign(data, p256PrivMb(sk));
-      expect(Buffer.isBuffer(sig)).toBe(true);
+      expect(sig).toBeInstanceOf(Uint8Array);
       const ok = await signer.verify(data, sig, p256PubMb(pk));
       expect(ok).toBe(true);
     });
@@ -404,7 +404,7 @@ describe('ES256KSigner branch: sign returns direct Uint8Array', () => {
     const bytes = new Uint8Array(64).fill(5);
     const spy = spyOn(secp256k1, 'signAsync').mockResolvedValue(bytes as any);
     const sig = await signer.sign(Buffer.from('x'), secpPrivMb(sk));
-    expect(Buffer.isBuffer(sig)).toBe(true);
+    expect(sig).toBeInstanceOf(Uint8Array);
     expect(sig).toEqual(Buffer.from(bytes));
     spy.mockRestore();
   });

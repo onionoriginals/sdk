@@ -7,13 +7,15 @@
  */
 
 import * as readline from 'node:readline';
-import '../crypto/noble-init.js';
+import { initNobleCrypto } from '../crypto/noble-init.js';
 import { OriginalsSDK } from '../core/OriginalsSDK.js';
 import { OrdMockProvider } from '../adapters/providers/OrdMockProvider.js';
 import { ResourceManager } from '../resources/index.js';
 import { MemoryStorageAdapter } from '../storage/MemoryStorageAdapter.js';
 import type { OriginalsAsset } from '../lifecycle/OriginalsAsset.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+
+initNobleCrypto();
 
 interface SessionState {
   sdk: OriginalsSDK;

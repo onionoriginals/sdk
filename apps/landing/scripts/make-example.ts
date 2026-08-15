@@ -12,13 +12,13 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   OriginalsSDK,
-  OrdMockProvider,
   MemoryStorageAdapter,
   Ed25519Signer,
   Ed25519Verifier,
-  KeyManager
+  KeyManager,
+  multikey
 } from '@originals/sdk';
-import { multikey } from '@originals/sdk/crypto/Multikey';
+import { OrdMockProvider } from '@originals/sdk/testing';
 import { prepareDataForSigning } from 'didwebvh-ts';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { generateArtwork } from '../src/sdk/artwork';

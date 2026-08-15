@@ -170,7 +170,7 @@ export class BitcoinManager {
         'ORD_PROVIDER_REQUIRED',
         'Ordinals provider must be configured to inscribe data on Bitcoin. ' +
         'Please provide an ordinalsProvider in your SDK configuration. ' +
-        'For testing, use: import { OrdMockProvider } from \'@originals/sdk\';'
+        'For testing, use: import { OrdMockProvider } from \'@originals/sdk/testing\';'
       );
     }
 
@@ -254,10 +254,10 @@ export class BitcoinManager {
       satoshi,
       inscriptionId: creation.inscriptionId,
       // On the deferred path `data` is a content-BUILDER function, never valid
-      // inscription content — only fall back to it when it is a real Buffer,
+      // inscription content — only fall back to it when it is real bytes,
       // else leave content undefined (a function here crashes downstream JSON
       // parsing after migrate + payment).
-      content: creation.content ?? (Buffer.isBuffer(data) ? data : undefined),
+      content: creation.content ?? (data instanceof Uint8Array ? data : undefined),
       contentType: creation.contentType ?? contentType,
       txid,
       vout: typeof creation.vout === 'number' ? creation.vout : 0,
@@ -326,7 +326,7 @@ export class BitcoinManager {
         'ORD_PROVIDER_REQUIRED',
         'Ordinals provider must be configured to transfer inscriptions on Bitcoin. ' +
         'Please provide an ordinalsProvider in your SDK configuration. ' +
-        'For testing, use: import { OrdMockProvider } from \'@originals/sdk\';'
+        'For testing, use: import { OrdMockProvider } from \'@originals/sdk/testing\';'
       );
     }
 

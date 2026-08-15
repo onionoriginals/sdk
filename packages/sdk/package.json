@@ -13,6 +13,7 @@
   "bin": {
     "originals-cel": "./dist/cel/cli/index.js"
   },
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -25,70 +26,15 @@
       "import": "./dist/cel/index.js",
       "default": "./dist/cel/index.js"
     },
-    "./cel/*": {
-      "types": "./dist/cel/*.d.ts",
-      "import": "./dist/cel/*.js",
-      "default": "./dist/cel/*.js"
-    },
-    "./core/*": {
-      "types": "./dist/core/*.d.ts",
-      "import": "./dist/core/*.js",
-      "default": "./dist/core/*.js"
-    },
-    "./did/*": {
-      "types": "./dist/did/*.d.ts",
-      "import": "./dist/did/*.js",
-      "default": "./dist/did/*.js"
-    },
-    "./vc/*": {
-      "types": "./dist/vc/*.d.ts",
-      "import": "./dist/vc/*.js",
-      "default": "./dist/vc/*.js"
-    },
-    "./vc/cryptosuites/*": {
-      "types": "./dist/vc/cryptosuites/*.d.ts",
-      "import": "./dist/vc/cryptosuites/*.js",
-      "default": "./dist/vc/cryptosuites/*.js"
-    },
-    "./bitcoin/*": {
-      "types": "./dist/bitcoin/*.d.ts",
-      "import": "./dist/bitcoin/*.js",
-      "default": "./dist/bitcoin/*.js"
-    },
-    "./lifecycle/*": {
-      "types": "./dist/lifecycle/*.d.ts",
-      "import": "./dist/lifecycle/*.js",
-      "default": "./dist/lifecycle/*.js"
-    },
-    "./crypto/*": {
-      "types": "./dist/crypto/*.d.ts",
-      "import": "./dist/crypto/*.js",
-      "default": "./dist/crypto/*.js"
-    },
-    "./resources/*": {
-      "types": "./dist/resources/*.d.ts",
-      "import": "./dist/resources/*.js",
-      "default": "./dist/resources/*.js"
-    },
-    "./storage/*": {
-      "types": "./dist/storage/*.d.ts",
-      "import": "./dist/storage/*.js",
-      "default": "./dist/storage/*.js"
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js",
+      "default": "./dist/testing/index.js"
     },
     "./types": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/types/index.js",
       "default": "./dist/types/index.js"
-    },
-    "./types/*": {
-      "types": "./dist/types/*.d.ts",
-      "import": "./dist/types/*.js",
-      "default": "./dist/types/*.js"
-    },
-    "./utils/*": {
-      "types": "./dist/utils/*.d.ts",
-      "import": "./dist/utils/*.js",
-      "default": "./dist/utils/*.js"
     }
   },
   "scripts": {

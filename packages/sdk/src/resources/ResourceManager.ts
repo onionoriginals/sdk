@@ -38,6 +38,7 @@ import type {
   ResourceType,
 } from './types.js';
 import { MIME_TYPE_MAP, DEFAULT_RESOURCE_CONFIG } from './types.js';
+import { base64, utf8 } from '../utils/encoding.js';
 
 /**
  * Regular expression for validating MIME types according to RFC 6838.
@@ -66,7 +67,7 @@ export class ResourceManager {
   /**
    * Create a new resource from content.
    * 
-   * @param content - The resource content (string for text, Buffer for binary)
+   * @param content - The resource content (string for text, bytes for binary)
    * @param options - Creation options including type and contentType
    * @returns The created Resource
    * @throws Error if content or options are invalid
@@ -80,14 +81,14 @@ export class ResourceManager {
    * });
    * 
    * // Create a binary resource (image)
-   * const imageBuffer = fs.readFileSync('image.png');
-   * const imageResource = manager.createResource(imageBuffer, {
+   * const imageBytes = fs.readFileSync('image.png');
+   * const imageResource = manager.createResource(imageBytes, {
    *   type: 'image',
    *   contentType: 'image/png'
    * });
    * ```
    */
-  createResource(content: Buffer | string, options: ResourceOptions): Resource {
+  createResource(content: Uint8Array | string, options: ResourceOptions): Resource {
     // Validate inputs
     if (content === null || content === undefined) {
       throw new Error('Content is required');
@@ -153,9 +154,9 @@ export class ResourceManager {
     // Store content if configured to do so
     if (this.config.storeContent) {
       if (this.isBinaryContent(content)) {
-        resource.contentBase64 = contentBuffer.toString('base64');
+        resource.contentBase64 = base64.encode(contentBuffer);
       } else {
-        resource.content = typeof content === 'string' ? content : contentBuffer.toString('utf-8');
+        resource.content = typeof content === 'string' ? content : utf8.decode(contentBuffer);
       }
     }
 
@@ -187,7 +188,7 @@ export class ResourceManager {
    */
   updateResource(
     resource: Resource | string,
-    newContent: Buffer | string,
+    newContent: Uint8Array | string,
     options?: ResourceUpdateOptions
   ): Resource {
     const resourceId = typeof resource === 'string' ? resource : resource.id;
@@ -252,9 +253,9 @@ export class ResourceManager {
     // Store content if configured
     if (this.config.storeContent) {
       if (this.isBinaryContent(newContent)) {
-        newVersion.contentBase64 = contentBuffer.toString('base64');
+        newVersion.contentBase64 = base64.encode(contentBuffer);
       } else {
-        newVersion.content = typeof newContent === 'string' ? newContent : contentBuffer.toString('utf-8');
+        newVersion.content = typeof newContent === 'string' ? newContent : utf8.decode(contentBuffer);
       }
     }
 
@@ -439,9 +440,9 @@ export class ResourceManager {
 
     // Content hash verification (if content is present)
     if (resource.content || resource.contentBase64) {
-      const content = resource.content 
-        ? Buffer.from(resource.content, 'utf-8')
-        : Buffer.from(resource.contentBase64 || '', 'base64');
+      const content = resource.content
+        ? utf8.encode(resource.content)
+        : base64.decode(resource.contentBase64 || '');
       const computedHash = this.hashContent(content);
       
       if (computedHash !== resource.hash) {
@@ -513,7 +514,7 @@ export class ResourceManager {
   /**
    * Hash content using SHA-256.
    * 
-   * @param content - Content to hash (string or Buffer)
+   * @param content - Content to hash (string or bytes)
    * @returns Hex-encoded SHA-256 hash
    * 
    * @example
@@ -522,7 +523,7 @@ export class ResourceManager {
    * console.log(hash); // 64-character hex string
    * ```
    */
-  hashContent(content: Buffer | string): string {
+  hashContent(content: Uint8Array | string): string {
     const buffer = this.toBuffer(content);
     const hash = sha256(buffer);
     return bytesToHex(hash);
@@ -666,20 +667,20 @@ export class ResourceManager {
   }
 
   /**
-   * Convert content to Buffer.
+   * Normalize content to bytes (browser-safe: no Buffer).
    */
-  private toBuffer(content: Buffer | string): Buffer {
-    if (Buffer.isBuffer(content)) {
-      return content;
+  private toBuffer(content: Uint8Array | string): Uint8Array {
+    if (typeof content === 'string') {
+      return new TextEncoder().encode(content);
     }
-    return Buffer.from(content, 'utf-8');
+    return content;
   }
 
   /**
-   * Check if content is binary (Buffer) rather than text.
+   * Check if content is binary (bytes) rather than text.
    */
-  private isBinaryContent(content: Buffer | string): boolean {
-    return Buffer.isBuffer(content);
+  private isBinaryContent(content: Uint8Array | string): boolean {
+    return typeof content !== 'string';
   }
 }
 

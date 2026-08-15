@@ -252,6 +252,13 @@ interface SerializedIPFSIndex {
 
 ## 6. Configuration
 
+> **Packaging note (plan 043).** The `exports` map is now a curated list rather
+> than a set of directory wildcards, so the `@originals/sdk/storage/ipfs` and
+> `.../storage/hybrid` subpaths used in the examples below do **not** resolve
+> today — this remains a proposal, and neither adapter exists yet. Whoever
+> implements it must add those subpaths to `packages/sdk/package.json`
+> explicitly; the old `./storage/*` wildcard would have covered them silently.
+
 ### 6.1 SDK Integration
 
 ```typescript

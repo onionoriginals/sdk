@@ -8,7 +8,7 @@ import { createCommitTransaction, createRevealTransaction } from './transactions
 import { scriptPubKeyForAddress } from './transfer.js';
 
 export interface InscribeOnSatParams {
-  buildContent: (satoshi: string) => Promise<{ content: Buffer; contentType: string; metadata?: Record<string, unknown> }>;
+  buildContent: (satoshi: string) => Promise<{ content: Uint8Array; contentType: string; metadata?: Record<string, unknown> }>;
   fundingUtxo: Utxo;
   satSigner: BitcoinSigner;
   changeAddress: string;

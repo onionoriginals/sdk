@@ -101,7 +101,7 @@ describe('CEL storage persistence (#Phase3 Task 3)', () => {
     const expectedKey = `cel/${celStoragePath(asset.id)}`;
     const write = puts.find(p => p.key === expectedKey);
     expect(write).toBeDefined();
-    const log = parseEventLogJson(write!.data.toString('utf8'));
+    const log = parseEventLogJson(new TextDecoder().decode(write!.data));
     expect(log.events[0].type).toBe('create');
     expect(write!.contentType).toBe('application/json');
   });

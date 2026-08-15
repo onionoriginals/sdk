@@ -45,9 +45,10 @@ if (typeof globalThis.crypto === 'undefined') {
   globalThis.crypto = webcrypto as unknown as Crypto;
 }
 
-// Initialize noble crypto libraries (uses shared initialization module)
-// This ensures libraries are configured before any tests run
-import '../src/crypto/noble-init.js';
+// Initialize noble crypto libraries before any tests run. The module no longer
+// auto-inits at import time (sideEffects: false), so call it explicitly.
+import { initNobleCrypto } from '../src/crypto/noble-init.js';
+initNobleCrypto();
 
 // Global cleanup after each test
 afterEach(() => {

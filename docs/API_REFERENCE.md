@@ -21,7 +21,8 @@ The main entry point for the Originals SDK. Orchestrates all managers and provid
 ### Creating an Instance
 
 ```typescript
-import { OriginalsSDK, OrdMockProvider } from '@originals/sdk';
+import { OriginalsSDK } from '@originals/sdk';
+import { OrdMockProvider } from '@originals/sdk/testing';
 
 // Basic creation with defaults
 const sdk = OriginalsSDK.create();

@@ -74,7 +74,7 @@ export async function assertSignerConformance(signer: OriginalsSigner): Promise<
 
   // 4 — signature verifies against the claimed public key
   const verifier = signerForKeyType(keyType);
-  if (!(await verifier.verify(Buffer.from(message1), Buffer.from(sig1), signer.publicKeyMultibase))) {
+  if (!(await verifier.verify(message1, sig1, signer.publicKeyMultibase))) {
     fail(
       'the signature does not verify against publicKeyMultibase. The signer must sign EXACTLY ' +
       'the bytes it is given (no extra hashing or canonicalization) with the key it claims.'
@@ -83,7 +83,7 @@ export async function assertSignerConformance(signer: OriginalsSigner): Promise<
 
   // 5 — message-bound signatures
   const sig2 = await signer.signBytes(message2);
-  if (await verifier.verify(Buffer.from(message1), Buffer.from(sig2), signer.publicKeyMultibase)) {
+  if (await verifier.verify(message1, sig2, signer.publicKeyMultibase)) {
     fail('a signature over one message verified a different message — the signer is ignoring its input');
   }
 }

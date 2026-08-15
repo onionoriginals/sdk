@@ -3,7 +3,7 @@ import { OrdinalsProvider, InscriptionParts } from '../types.js';
 export interface OrdMockState {
   inscriptionsById: Map<string, {
     inscriptionId: string;
-    content: Buffer;
+    content: Uint8Array;
     contentType: string;
     txid: string;
     vout: number;
@@ -76,7 +76,7 @@ export class OrdMockProvider implements OrdinalsProvider {
   }
 
   async createInscription(params: {
-    data?: Buffer;
+    data?: Uint8Array;
     buildContent?: (satoshi: string) => InscriptionParts | Promise<InscriptionParts>;
     contentType: string;
     feeRate?: number;
@@ -91,21 +91,21 @@ export class OrdMockProvider implements OrdinalsProvider {
     // Pin the sat FIRST (mirrors real commit-phase sat assignment), then let
     // deferred content embed it.
     const satoshi = params.targetSatoshi ?? `${Math.floor(Math.random() * 1e12)}`;
-    // Normalize the deferred build result: a bare Buffer (content only) or
+    // Normalize the deferred build result: bare bytes (content only) or
     // `{ content, metadata }` (#407 phase 2). Deferred metadata wins over the
     // static `metadata` param.
-    let content: Buffer;
+    let content: Uint8Array;
     let deferredMetadata: Record<string, unknown> | undefined;
     if (params.buildContent) {
       const built = await params.buildContent(satoshi);
-      if (Buffer.isBuffer(built)) {
-        content = Buffer.from(built);
+      if (built instanceof Uint8Array) {
+        content = new Uint8Array(built);
       } else {
-        content = Buffer.from(built.content);
+        content = new Uint8Array(built.content);
         deferredMetadata = built.metadata;
       }
     } else {
-      content = params.data!;
+      content = new Uint8Array(params.data!);
     }
     const metadata = deferredMetadata ?? params.metadata;
     const vout = 0;
@@ -166,7 +166,7 @@ export class OrdMockProvider implements OrdinalsProvider {
       let doc: unknown = (rec.metadata as { didDocument?: unknown } | undefined)?.didDocument;
       if (doc === undefined) {
         try {
-          doc = JSON.parse(rec.content.toString('utf8'));
+          doc = JSON.parse(new TextDecoder().decode(rec.content));
         } catch {
           continue; // non-JSON, no metadata DID doc — not an anchoring inscription
         }

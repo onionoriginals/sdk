@@ -19,6 +19,7 @@ export * from './keyResolver.js';
 export {
   celSignerFromKeyPair,
   createKeyStoreCelSigner,
+  currentControllerVm,
   hexSha256ToDigestMultibase,
 } from './signerAdapter.js';
 // The CLI is intentionally NOT re-exported here. It statically imports fs and
