@@ -115,6 +115,12 @@ jobs:
       - name: Verify browser-facing entry points have no eager Node builtins
         run: node scripts/check-browser-safety.mjs
 
+      # apps/ is outside the ./packages/* filter every other job uses, so a
+      # breaking change to the SDK's public entry lands green here and fails
+      # only at deploy — which is exactly how #470 happened (plan 046, item 4).
+      - name: Build the landing app against the built SDK
+        run: cd apps/landing && bun run typecheck && bun run build
+
   changeset:
     name: Changeset present
     # Only on PRs, and skip the "Version Packages" PR (which intentionally has no

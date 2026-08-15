@@ -68,3 +68,20 @@ afterEach(() => {
   verificationMethodRegistry.clear();
 });
 
+// An unhandled rejection makes `bun test` exit non-zero while every suite still
+// reports `0 fail` — the process dies after the summary, so CI shows a red X
+// with nothing to point at. That has now happened on three PRs, including a
+// docs-only one (plan 046, item 5).
+//
+// This does NOT swallow the rejection: it prints the stack and the test that
+// was running when it escaped, so the next occurrence identifies itself instead
+// of costing another investigation. A provenance SDK quietly discarding a
+// rejected promise is precisely the bug class this suite exists to catch.
+process.on('unhandledRejection', (reason: unknown) => {
+  const err = reason instanceof Error ? reason.stack : String(reason);
+  originalConsole.error(
+    '\n=== UNHANDLED REJECTION (this is why the run exits non-zero) ===\n' +
+      `${err}\n` +
+      '=== A promise escaped a test lifecycle. Await it, or catch it. ===\n'
+  );
+});
