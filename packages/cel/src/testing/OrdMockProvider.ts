@@ -43,7 +43,7 @@ export class OrdMockProvider {
     return {
       ...rec,
       ...(rec.metadata !== undefined
-        ? { metadata: structuredClone(rec.metadata) as Record<string, unknown> }
+        ? { metadata: structuredClone(rec.metadata) }
         : {})
     };
   }
@@ -119,7 +119,7 @@ export class OrdMockProvider {
     // object after inscription cannot retroactively change the stored copy
     // (mirrors a real CBOR encode/decode boundary).
     const storedMetadata = metadata !== undefined
-      ? (structuredClone(metadata) as Record<string, unknown>)
+      ? (structuredClone(metadata))
       : undefined;
     const record = {
       inscriptionId,
@@ -147,7 +147,7 @@ export class OrdMockProvider {
       content,
       contentType: params.contentType,
       feeRate: params.feeRate,
-      ...(storedMetadata !== undefined ? { metadata: structuredClone(storedMetadata) as Record<string, unknown> } : {})
+      ...(storedMetadata !== undefined ? { metadata: structuredClone(storedMetadata) } : {})
     };
   }
 

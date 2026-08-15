@@ -270,7 +270,7 @@ export class BtcoCelManager {
     const inscription = await bitcoinManager.inscribeData(
       async (satoshi: string) => {
         const migrationData: BtcoMigrationData = {
-          sourceDid: currentDid!,
+          sourceDid: currentDid,
           layer: 'btco',
           // The network lives in the SIGNED data so replaying the log is
           // deterministic; the sat completes the resolvable `to` anchor.
@@ -306,12 +306,7 @@ export class BtcoCelManager {
       // inscription of the same asset (even from another manager) is rejected
       // before broadcast rather than double-paying (mirrors LifecycleManager, #303).
       { lockKey: didCel ?? currentDid }
-    ) as {
-      txid: string;
-      inscriptionId: string;
-      satoshi?: string;
-      blockHeight?: number;
-    };
+    );
 
     if (!signedLog || signedTo === undefined) {
       throw new Error('Bitcoin inscription did not invoke the buildContent callback to sign the migrate event');

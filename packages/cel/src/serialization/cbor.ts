@@ -65,7 +65,7 @@ function parseProof(proof: unknown): DataIntegrityProof | WitnessProof {
     return {
       ...baseProof,
       witnessedAt: p.witnessedAt,
-    } as WitnessProof;
+    };
   }
   
   return baseProof;

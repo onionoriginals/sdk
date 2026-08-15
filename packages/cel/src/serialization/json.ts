@@ -22,7 +22,7 @@ function sortKeys(obj: unknown): unknown {
   
   if (typeof obj === 'object') {
     const sorted: Record<string, unknown> = {};
-    const keys = Object.keys(obj as Record<string, unknown>).sort();
+    const keys = Object.keys(obj).sort();
     for (const key of keys) {
       sorted[key] = sortKeys((obj as Record<string, unknown>)[key]);
     }
@@ -114,7 +114,7 @@ function parseProof(proof: unknown): DataIntegrityProof | WitnessProof {
     return {
       ...baseProof,
       witnessedAt: p.witnessedAt,
-    } as WitnessProof;
+    };
   }
   
   return baseProof;
