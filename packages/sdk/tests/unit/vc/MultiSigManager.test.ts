@@ -13,7 +13,7 @@ import type {
   ExternalSigner,
 } from '../../../src/types';
 import * as ed25519 from '@noble/ed25519';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 /**

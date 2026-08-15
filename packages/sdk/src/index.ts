@@ -31,7 +31,7 @@ export { computeNextKeyHash, normalizeUpdateKey } from './did/WebVHManager.js';
 export { DIDCache, type DIDCacheConfig, type DIDCacheStorage, type DIDCacheEntry } from './did/DIDCache.js';
 export { KeyManager } from './did/KeyManager.js';
 export { Ed25519Verifier } from './did/Ed25519Verifier.js';
-export * as encoding from './utils/encoding.js';
+export * as encoding from '@originals/cel/encoding';
 export { 
   CredentialManager,
   type ResourceCreatedSubject,
@@ -98,8 +98,8 @@ export { MIME_TYPE_MAP, DEFAULT_RESOURCE_CONFIG } from './resources/index.js';
 
 // Crypto exports
 export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from './crypto/Signer.js';
-export { multikey } from './crypto/Multikey.js';
-export type { MultikeyType } from './crypto/Multikey.js';
+export { multikey } from '@originals/cel';
+export type { MultikeyType } from '@originals/cel';
 
 // Signer abstraction (plan 039): one root interface, one signing-input
 // namespace, adapters in both directions, and the conformance harness (040).
@@ -197,12 +197,22 @@ export { OperationLock } from './utils/OperationLock.js';
 
 // Utility exports. retry/circuit-breaker are internal infrastructure, not API
 // (plan 043); they remain importable in-repo but are no longer re-exported.
+// satoshi-validation / telemetry / sha256Bytes moved to @originals/cel — named
+// re-exports (not `export *`) so the SDK surface stays exactly what it was.
 export * from './utils/validation.js';
 export * from './utils/bitcoin-address.js';
-export * from './utils/satoshi-validation.js';
+export {
+  MAX_SATOSHI_SUPPLY,
+  validateSatoshiNumber,
+  canonicalizeSatoshi,
+  parseSatoshiIdentifier,
+  assertValidSatoshi,
+} from '@originals/cel';
+export type { SatoshiValidationResult } from '@originals/cel';
 export * from './utils/serialization.js';
-export * from './utils/telemetry.js';
-export { sha256Bytes } from './utils/hash.js';
+export { StructuredError, emitTelemetry, emitError } from '@originals/cel';
+export type { TelemetryLevel, TelemetryEvent, TelemetryHooks } from '@originals/cel';
+export { sha256Bytes } from '@originals/cel';
 
 // Adapter exports (custom integrations). Test doubles (OrdMockProvider,
 // FeeOracleMock) moved to '@originals/sdk/testing' (plan 043).
@@ -219,7 +229,7 @@ export {
   type CelSigner,
   type OriginalsCelConfig,
   type OriginalsCelOptions,
-} from './cel/OriginalsCel.js';
+} from '@originals/cel';
 export type {
   EventLog,
   LogEntry,
@@ -234,28 +244,28 @@ export type {
   UpdateOptions,
   DeactivateOptions,
   VerifyOptions,
-} from './cel/types.js';
+} from '@originals/cel';
 export {
   createEventLog,
   updateEventLog,
   deactivateEventLog,
   verifyEventLog,
   witnessEvent,
-} from './cel/algorithms/index.js';
+} from '@originals/cel';
 export {
   computeDigestMultibase,
   verifyDigestMultibase,
   decodeDigestMultibase,
   digestMultibaseEquals,
-} from './cel/hash.js';
-export { witnessSigningBytes, celProofSigningInput, canonicalizeEvent } from './cel/canonicalize.js';
+} from '@originals/cel';
+export { witnessSigningBytes, celProofSigningInput, canonicalizeEvent } from '@originals/cel';
 // The CEL suite labels (plan 042): one written, one accepted for pre-042 logs.
 export {
   CEL_CRYPTOSUITE,
   CEL_CRYPTOSUITE_LEGACY,
   verifyDidKeyProof,
   structuralCheckReason,
-} from './cel/proofVerification.js';
+} from '@originals/cel';
 export {
   DID_CEL_PREFIX,
   deriveDidCel,
@@ -264,36 +274,36 @@ export {
   didCelMatchesLog,
   createCelDidDocument,
   resolveDidCel,
-} from './cel/celDid.js';
+} from '@originals/cel';
 export {
   createExternalReference,
   verifyExternalReference,
-} from './cel/ExternalReferenceManager.js';
+} from '@originals/cel';
 export {
   PeerCelManager,
   type CelAssetData,
   type PeerAssetData,
   type PeerCelConfig,
-} from './cel/layers/PeerCelManager.js';
-export { WebVHCelManager } from './cel/layers/WebVHCelManager.js';
-export { BtcoCelManager } from './cel/layers/BtcoCelManager.js';
-export type { WitnessService } from './cel/witnesses/WitnessService.js';
-export { HttpWitness, HttpWitnessError } from './cel/witnesses/HttpWitness.js';
-export { BitcoinWitness, BitcoinWitnessError, type BitcoinWitnessProof } from './cel/witnesses/BitcoinWitness.js';
+} from '@originals/cel';
+export { WebVHCelManager } from '@originals/cel';
+export { BtcoCelManager } from '@originals/cel';
+export type { WitnessService } from '@originals/cel';
+export { HttpWitness, HttpWitnessError } from '@originals/cel';
+export { BitcoinWitness, BitcoinWitnessError, type BitcoinWitnessProof } from '@originals/cel';
 export {
   serializeEventLogJson,
   parseEventLogJson,
-} from './cel/serialization/json.js';
+} from '@originals/cel';
 export {
   serializeEventLogCbor,
   parseEventLogCbor,
-} from './cel/serialization/cbor.js';
+} from '@originals/cel';
 export {
   celSignerFromKeyPair,
   createKeyStoreCelSigner,
   currentControllerVm,
   hexSha256ToDigestMultibase,
-} from './cel/signerAdapter.js';
+} from '@originals/cel';
 
 // Default export
 export default OriginalsSDK;

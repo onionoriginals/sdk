@@ -11,7 +11,7 @@
 import jsonld from 'jsonld';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { base64url } from '../../utils/encoding.js';
+import { base64url } from '@originals/cel/encoding';
 
 // Specification default recommended URN scheme to use for skolemization
 const CUSTOM_URN_SCHEME = 'custom-scheme';

@@ -1,5 +1,5 @@
 import type { ResourceProvider, LinkedResource, ResourceInfo, Inscription, ResourceCrawlOptions, InscriptionRefWithLocation } from './types.js';
-import { StructuredError } from '../../utils/telemetry.js';
+import { StructuredError } from '@originals/cel';
 
 export interface OrdNodeProviderOptions {
   nodeUrl: string;

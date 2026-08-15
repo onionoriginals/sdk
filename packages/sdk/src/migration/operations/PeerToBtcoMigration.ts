@@ -9,7 +9,7 @@ import {
 } from '../types.js';
 import { DIDDocument, OriginalsConfig } from '../../types/index.js';
 import { BaseMigration } from './BaseMigration.js';
-import { StructuredError } from '../../utils/telemetry.js';
+import { StructuredError } from '@originals/cel';
 import { BitcoinManager } from '../../bitcoin/BitcoinManager.js';
 import { DIDManager } from '../../did/DIDManager.js';
 import { CredentialManager } from '../../vc/CredentialManager.js';

@@ -10,9 +10,9 @@ import { assertSignerConformance } from '../../../src/crypto/signerConformance';
 import { MockRemoteSigner } from '../../../src/crypto/MockRemoteSigner';
 import { signerFromKeyPair } from '../../../src/crypto/OriginalsSigner';
 import { KeyManager } from '../../../src/did/KeyManager';
-import { multikey } from '../../../src/crypto/Multikey';
-import { sha256Bytes } from '../../../src/utils/hash';
-import { StructuredError } from '../../../src/utils/telemetry';
+import { multikey } from '@originals/cel';
+import { sha256Bytes } from '@originals/cel';
+import { StructuredError } from '@originals/cel';
 import type { OriginalsSigner } from '../../../src/crypto/OriginalsSigner';
 
 async function expectNonconformant(signer: OriginalsSigner, pattern: RegExp) {

@@ -3,8 +3,8 @@ import { OriginalsSDK } from '../../../src';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
-import { parseEventLogJson, serializeEventLogJson } from '../../../src/cel/serialization/json';
-import { multikey } from '../../../src/crypto/Multikey';
+import { parseEventLogJson, serializeEventLogJson } from '@originals/cel';
+import { multikey } from '@originals/cel';
 
 // Conventional layer-agnostic storage location for an asset's CEL:
 // canonical adapters: putObject('cel', '<suffix>.json'); legacy: put('cel/<suffix>.json').

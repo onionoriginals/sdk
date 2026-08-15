@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { OrdHttpProvider, createOrdinalsProviderFromEnv } from '../../../src/adapters/providers/OrdHttpProvider';
-import { StructuredError } from '../../../src/utils/telemetry';
+import { StructuredError } from '@originals/cel';
 
 /**
  * Pre-release blocker (#318 checkbox 3): OrdHttpProvider used to FABRICATE

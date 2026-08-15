@@ -9,14 +9,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { inspectCommand, InspectFlags } from '../../../src/cel/cli/inspect';
-import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
-import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
-import { deactivateEventLog } from '../../../src/cel/algorithms/deactivateEventLog';
-import { appendEvent } from '../../../src/cel/algorithms/appendEvent';
-import { deriveDidCel } from '../../../src/cel/celDid';
-import { serializeEventLogJson } from '../../../src/cel/serialization/json';
-import { serializeEventLogCbor } from '../../../src/cel/serialization/cbor';
-import type { DataIntegrityProof, WitnessProof, EventLog, ExternalReference } from '../../../src/cel/types';
+import { createEventLog } from '@originals/cel';
+import { updateEventLog } from '@originals/cel';
+import { deactivateEventLog } from '@originals/cel';
+import { appendEvent } from '@originals/cel';
+import { deriveDidCel } from '@originals/cel';
+import { serializeEventLogJson } from '@originals/cel';
+import { serializeEventLogCbor } from '@originals/cel';
+import type { DataIntegrityProof, WitnessProof, EventLog, ExternalReference } from '@originals/cel';
 import { createRealCelSigner } from '../../fixtures/celSigner';
 
 // Mock signer that creates valid proofs

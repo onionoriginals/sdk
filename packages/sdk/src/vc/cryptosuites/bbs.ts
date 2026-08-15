@@ -1,5 +1,5 @@
-import * as cbor from '../../utils/cbor.js';
-import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../../utils/encoding.js';
+import * as cbor from '@originals/cel/cbor';
+import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '@originals/cel/encoding';
 
 /**
  * Minimal BBS utility methods ported from legacy for working with

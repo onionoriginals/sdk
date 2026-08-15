@@ -144,7 +144,7 @@ Key files: `src/types/common.ts`, `src/did/WebVHManager.ts`
 
 ### Lifecycle Management (src/lifecycle/)
 
-An Original asset **IS a CEL** (Cryptographic Event Log, src/cel/): every *authorship* lifecycle operation appends a signed event to `asset.celLog`, and the log — not the in-memory caches — is the source of provenance truth. Ownership is the exception: it IS Bitcoin sat control, read live (`getCurrentOwner()`), and a transfer writes nothing to the CEL.
+An Original asset **IS a CEL** (Cryptographic Event Log — `@originals/cel`, packages/cel/): every *authorship* lifecycle operation appends a signed event to `asset.celLog`, and the log — not the in-memory caches — is the source of provenance truth. Ownership is the exception: it IS Bitcoin sat control, read live (`getCurrentOwner()`), and a transfer writes nothing to the CEL.
 
 **LifecycleManager (LifecycleManager.ts)** - Orchestrates asset migration; each authorship op appends a signed CEL event (transfers are the exception — pure sat moves)
 - `createAsset()` - Mints a `did:cel` genesis (`create` event); `asset.id` is the derived did:cel and `currentLayer` is `'did:cel'`
@@ -412,8 +412,10 @@ These rules ensure consistent collaboration patterns and prevent miscommunicatio
 ## Monorepo Structure
 
 This is a monorepo with:
-- `packages/sdk/` - The main SDK (where most development happens)
-- `apps/` - Example applications (future)
-- Root scripts in `scripts/` - CI/CD and coverage checks
+- `packages/cel/` - `@originals/cel`: the browser-safe CEL core (create/append/verify event logs, multikey, shared primitives). No Bitcoin stack, no jsonld, no Node builtins.
+- `packages/sdk/` - The main SDK (where most development happens); depends on `@originals/cel` and re-exports its surface (incl. the `@originals/sdk/cel` subpath)
+- `packages/auth/` - Turnkey-based authentication
+- `apps/` - Example applications
+- Root scripts in `scripts/` - CI/CD, coverage, and browser-safety/ESM gates
 
-Work primarily in `packages/sdk/` directory. Root-level commands delegate to SDK.
+Work primarily in `packages/sdk/` directory. Root-level commands delegate to the packages. CEL core changes belong in `packages/cel/src/` (its tests in `packages/cel/tests/`); the CEL CLI stays in `packages/sdk/src/cel/cli/`.

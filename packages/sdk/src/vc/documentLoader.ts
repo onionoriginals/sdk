@@ -1,7 +1,7 @@
 import { DIDManager } from '../did/DIDManager.js';
 import { PRELOADED_CONTEXTS } from '../utils/serialization.js';
-import { multikey } from '../crypto/Multikey.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { multikey } from '@originals/cel';
+import { StructuredError } from '@originals/cel';
 
 type LoadedDocument = { document: unknown; documentUrl: string; contextUrl: string | null };
 

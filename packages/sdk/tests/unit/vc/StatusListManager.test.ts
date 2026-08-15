@@ -837,7 +837,7 @@ describe('StatusListManager', () => {
       // would treat a possibly-revoked credential as valid. It must fail closed,
       // mirroring the Data Integrity path (Verifier.verifyCredential).
       const { OriginalsSDK } = await import('../../../src');
-      const { multikey } = await import('../../../src/crypto/Multikey');
+      const { multikey } = await import('@originals/cel');
       const ed = await import('@noble/ed25519');
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
 

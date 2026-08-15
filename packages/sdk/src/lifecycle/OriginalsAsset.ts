@@ -6,7 +6,7 @@ import {
   InscribeConfirm
 } from '../types/index.js';
 import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { StructuredError } from '@originals/cel';
 import type { OriginalsSigner } from '../crypto/OriginalsSigner.js';
 import type { CredentialManager } from '../vc/CredentialManager.js';
 import { DIDManager } from '../did/DIDManager.js';
@@ -14,10 +14,10 @@ import { ProvenanceQuery, Migration } from './ProvenanceQuery.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning.js';
-import type { EventLog, OrdinalsLookup } from '../cel/types.js';
-import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
-import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
-import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
+import type { EventLog, OrdinalsLookup } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel';
+import { createDidManagerKeyResolver } from '@originals/cel';
+import { serializeEventLogJson, parseEventLogJson } from '@originals/cel';
 import { replayProvenance } from './replayProvenance.js';
 import { checkGenesisResourceBinding } from './genesisBinding.js';
 import type { AppendFailurePolicy } from '../types/common.js';

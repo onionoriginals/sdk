@@ -16,14 +16,15 @@ import { dirname, resolve, relative } from 'node:path';
 import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-const DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../packages/sdk/dist');
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Entry points that must stay importable in a browser. */
+/** Entry points that must stay importable in a browser, per package dist. */
 const GUARDED_ENTRIES = [
-  'index.js',
-  'lifecycle/LifecycleManager.js',
-  'lifecycle/OriginalsAsset.js',
-  'cel/index.js',
+  { dist: 'packages/sdk/dist', entry: 'index.js' },
+  { dist: 'packages/sdk/dist', entry: 'lifecycle/LifecycleManager.js' },
+  { dist: 'packages/sdk/dist', entry: 'lifecycle/OriginalsAsset.js' },
+  { dist: 'packages/sdk/dist', entry: 'cel/index.js' },
+  { dist: 'packages/cel/dist', entry: 'index.js' },
 ];
 
 const builtins = new Set([...builtinModules, ...builtinModules.map((m) => `node:${m}`)]);
@@ -53,10 +54,10 @@ function resolveRelative(fromFile, spec) {
 }
 
 /** Breadth-first so the reported chain is the shortest one that pulls the builtin in. */
-function findEagerBuiltins(entry) {
+function findEagerBuiltins(entry, dist) {
   const seen = new Set();
   const violations = new Map();
-  const queue = [[entry, [relative(DIST, entry)]]];
+  const queue = [[entry, [relative(dist, entry)]]];
   while (queue.length) {
     const [file, chain] = queue.shift();
     if (seen.has(file)) continue;
@@ -67,27 +68,29 @@ function findEagerBuiltins(entry) {
         continue;
       }
       const next = resolveRelative(file, spec);
-      if (next && !seen.has(next)) queue.push([next, [...chain, relative(DIST, next)]]);
+      if (next && !seen.has(next)) queue.push([next, [...chain, relative(dist, next)]]);
     }
   }
   return violations;
 }
 
 let failed = false;
-for (const entry of GUARDED_ENTRIES) {
-  const abs = resolve(DIST, entry);
+for (const { dist, entry } of GUARDED_ENTRIES) {
+  const distAbs = resolve(ROOT, dist);
+  const abs = resolve(distAbs, entry);
+  const label = `${dist}/${entry}`;
   if (!existsSync(abs)) {
-    console.error(`✗ ${entry} — not found in dist. Run \`bun run build\` first.`);
+    console.error(`✗ ${label} — not found in dist. Run \`bun run build\` first.`);
     failed = true;
     continue;
   }
-  const violations = findEagerBuiltins(abs);
+  const violations = findEagerBuiltins(abs, distAbs);
   if (violations.size === 0) {
-    console.log(`✓ ${entry} — no Node builtins statically reachable`);
+    console.log(`✓ ${label} — no Node builtins statically reachable`);
     continue;
   }
   failed = true;
-  console.error(`✗ ${entry} — ${violations.size} Node builtin(s) statically reachable:`);
+  console.error(`✗ ${label} — ${violations.size} Node builtin(s) statically reachable:`);
   for (const [builtin, chain] of violations) {
     console.error(`    ${builtin}`);
     console.error(`      via ${chain.join(' -> ')}`);

@@ -15,13 +15,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { verifyCommand, VerifyFlags } from '../../../src/cel/cli/verify';
-import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
-import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
-import { serializeEventLogJson } from '../../../src/cel/serialization/json';
-import { serializeEventLogCbor } from '../../../src/cel/serialization/cbor';
-import type { DataIntegrityProof, WitnessProof, EventLog } from '../../../src/cel/types';
-import { multikey } from '../../../src/crypto/Multikey';
-import { canonicalizeEvent } from '../../../src/cel/canonicalize';
+import { createEventLog } from '@originals/cel';
+import { updateEventLog } from '@originals/cel';
+import { serializeEventLogJson } from '@originals/cel';
+import { serializeEventLogCbor } from '@originals/cel';
+import type { DataIntegrityProof, WitnessProof, EventLog } from '@originals/cel';
+import { multikey } from '@originals/cel';
+import { canonicalizeEvent } from '@originals/cel';
 
 /**
  * Creates a real Ed25519 did:key signer — identical to the approach in

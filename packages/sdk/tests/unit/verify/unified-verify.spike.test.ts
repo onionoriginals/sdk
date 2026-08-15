@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import * as ed25519 from '@noble/ed25519';
 import { UnifiedVerifier, classifyDocument } from '../../../src/verify/UnifiedVerifier';
 import { Issuer } from '../../../src/vc/Issuer';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { registerVerificationMethod, verificationMethodRegistry } from '../../../src/vc/documentLoader';
 import { DIDManager } from '../../../src/did/DIDManager';
 

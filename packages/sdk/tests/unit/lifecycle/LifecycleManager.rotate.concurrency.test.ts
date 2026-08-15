@@ -10,7 +10,7 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 describe('rotateBtcoKeys concurrency guard', () => {

@@ -6,7 +6,7 @@
  */
 
 import { ed25519 } from '@noble/curves/ed25519.js';
-import { multikey } from './Multikey.js';
+import { multikey } from '@originals/cel';
 import { canonicalDidKeyVm, type OriginalsSigner } from './OriginalsSigner.js';
 
 export class MockRemoteSigner implements OriginalsSigner {

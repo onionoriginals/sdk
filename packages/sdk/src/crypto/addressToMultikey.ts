@@ -14,8 +14,8 @@
  */
 
 import { base58 } from '@scure/base';
-import { multikey } from './Multikey.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { multikey } from '@originals/cel';
+import { StructuredError } from '@originals/cel';
 
 /**
  * Decodes a base58 raw Ed25519 public-key address (Solana address format) and

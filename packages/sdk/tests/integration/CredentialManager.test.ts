@@ -4,7 +4,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { OriginalsSDK } from '../../src';
 import * as ed25519 from '@noble/ed25519';
-import { multikey } from '../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { registerVerificationMethod, verificationMethodRegistry } from '../../src/vc/documentLoader';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 

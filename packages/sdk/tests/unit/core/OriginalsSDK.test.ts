@@ -11,7 +11,7 @@ import { MockKeyStore } from '../../mocks/MockKeyStore';
 async function makeSignerFactory() {
   const { KeyManager } = await import('../../../src/did/KeyManager');
   const { Ed25519Signer } = await import('../../../src/crypto/Signer');
-  const { multikey } = await import('../../../src/crypto/Multikey');
+  const { multikey } = await import('@originals/cel');
   const { prepareDataForSigning } = await import('didwebvh-ts');
 
   const keyManager = new KeyManager();

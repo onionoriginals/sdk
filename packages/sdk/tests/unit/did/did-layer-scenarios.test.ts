@@ -91,7 +91,7 @@ describe('DID-006 — did:webvh with external (mock Turnkey-style) signer', () =
 
     // Import the Ed25519 signing infrastructure used internally
     const { Ed25519Signer } = await import('../../../src/crypto/Signer');
-    const { multikey } = await import('../../../src/crypto/Multikey');
+    const { multikey } = await import('@originals/cel');
     const internalSigner = new Ed25519Signer();
 
     // We also need prepareDataForSigning from didwebvh-ts

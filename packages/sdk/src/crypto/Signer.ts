@@ -8,7 +8,7 @@ import { p256 } from '@noble/curves/nist.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
-import { multikey, MultikeyType } from './Multikey.js';
+import { multikey, MultikeyType } from '@originals/cel';
 import { initNobleCrypto } from './noble-init.js';
 
 // secp256k1.verify (sync) needs hashes.sha256 configured; explicit call, not a

@@ -1,12 +1,12 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
-import { computeDigestMultibase } from '../../../src/cel/hash';
-import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
+import { computeDigestMultibase } from '@originals/cel';
+import { canonicalizeEntryForChain } from '@originals/cel';
 import { KeyManager } from '../../../src/did/KeyManager';
-import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { verifyEventLog } from '@originals/cel';
 
 describe('rotateBtcoKeys (#366 rotation-first)', () => {
   test('reinscribes same-id document with the new key; resolver serves it', async () => {

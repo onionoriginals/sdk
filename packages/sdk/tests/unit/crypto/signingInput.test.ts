@@ -8,10 +8,10 @@
 import { describe, test, expect } from 'bun:test';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { signingInput } from '../../../src/crypto/signingInput';
-import { canonicalizeEvent, canonicalizeEntryForChain, witnessSigningBytes } from '../../../src/cel/canonicalize';
-import { verifyDidKeyProof, CEL_CRYPTOSUITE } from '../../../src/cel/proofVerification';
+import { canonicalizeEvent, canonicalizeEntryForChain, witnessSigningBytes } from '@originals/cel';
+import { verifyDidKeyProof, CEL_CRYPTOSUITE } from '@originals/cel';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { EdDSACryptosuiteManager } from '../../../src/vc/cryptosuites/eddsa';
 
 describe('signingInput.celEvent', () => {

@@ -1,6 +1,6 @@
 import { describe, test, expect, it } from 'bun:test';
 import { createBtcoDidDocument } from '../../../src/did/createBtcoDidDocument';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 
 function rangeBytes(len: number, start: number): Uint8Array {
 	return new Uint8Array(len).map((_, i) => (start + i) & 0xff);

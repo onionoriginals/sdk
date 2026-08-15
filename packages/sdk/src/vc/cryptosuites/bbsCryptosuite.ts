@@ -15,8 +15,8 @@ import jsonld from 'jsonld';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { BBSCryptosuiteUtils } from './bbs.js';
-import { multikey } from '../../crypto/Multikey.js';
-import { decodeBase64UrlMultibase } from '../../utils/encoding.js';
+import { multikey } from '@originals/cel';
+import { decodeBase64UrlMultibase } from '@originals/cel/encoding';
 import { canonize } from '../utils/jsonld.js';
 import type { DataIntegrityProof, VerificationResult } from './eddsa.js';
 import {

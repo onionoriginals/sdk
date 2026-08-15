@@ -10,11 +10,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { EventLog, LogEntry, DataIntegrityProof, WitnessProof, AssetState, ExternalReference } from '../types.js';
-import { parseEventLogJson } from '../serialization/json.js';
-import { parseEventLogCbor } from '../serialization/cbor.js';
-import { btcoDidFromSatoshi } from '../btcoDid.js';
-import { deriveDidCel } from '../celDid.js';
+import type { EventLog, LogEntry, DataIntegrityProof, WitnessProof, AssetState, ExternalReference } from '@originals/cel';
+import { parseEventLogJson } from '@originals/cel';
+import { parseEventLogCbor } from '@originals/cel';
+import { btcoDidFromSatoshi } from '@originals/cel';
+import { deriveDidCel } from '@originals/cel';
 
 /**
  * Flags parsed from command line arguments

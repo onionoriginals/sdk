@@ -1,0 +1,9 @@
+[test]
+# Bun only reads bunfig.toml from the current working directory, so the root
+# bunfig's preload does not apply when tests run with cwd packages/cel.
+preload = ["./tests/setup.bun.ts"]
+coveragePathIgnorePatterns = [
+  "tests/fixtures/**",
+  "tests/setup.bun.ts",
+  "dist/**"
+]

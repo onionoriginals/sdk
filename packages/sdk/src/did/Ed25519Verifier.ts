@@ -1,6 +1,6 @@
 import { verifyAsync } from '@noble/ed25519';
 import type { ExternalVerifier } from '../types/common.js';
-import { multikey } from '../crypto/Multikey.js';
+import { multikey } from '@originals/cel';
 
 /**
  * Ed25519Verifier - A simple Ed25519 verifier for DID operations

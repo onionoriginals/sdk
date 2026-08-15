@@ -15,7 +15,7 @@ import { StatusListManager } from '../../../src/vc/StatusListManager';
 import { BBSCryptosuiteManager } from '../../../src/vc/cryptosuites/bbsCryptosuite';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { DIDManager } from '../../../src/did/DIDManager';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import {
   verificationMethodRegistry,
   registerVerificationMethod,
