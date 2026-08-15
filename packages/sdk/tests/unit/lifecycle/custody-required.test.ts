@@ -70,6 +70,39 @@ describe('createAsset requires custody [plan 041]', () => {
   });
 });
 
+describe("'ephemeral' is honoured, not merely a guard bypass", () => {
+  test('the key is NOT persisted even when a keyStore is configured', async () => {
+    // Otherwise the flag would be a no-op wherever custody exists: the caller
+    // asks for write-once and silently gets an asset that can still author.
+    const keyStore = new MockKeyStore();
+    const sdk = makeSdk({ keyStore });
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
+
+    const controller = (asset.celLog!.events[0].data as { controller: string }).controller;
+    const vm = `${controller}#${controller.slice('did:key:'.length)}`;
+    expect(await keyStore.getPrivateKey(vm)).toBeNull();
+    expect(await keyStore.getPrivateKey(`${asset.id}#key-0`)).toBeNull();
+  });
+
+  test('so the asset really is write-once: a later append cannot be signed', async () => {
+    const sdk = makeSdk({ keyStore: new MockKeyStore() });
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
+
+    await expect(sdk.lifecycle.publishToWeb(asset, 'example.com'))
+      .rejects.toMatchObject({ code: 'CEL_APPEND_FAILED' });
+  });
+
+  test('a non-ephemeral mint with a keyStore still persists, as before', async () => {
+    const keyStore = new MockKeyStore();
+    const sdk = makeSdk({ keyStore });
+    const asset = await sdk.lifecycle.createAsset(RES);
+
+    const controller = (asset.celLog!.events[0].data as { controller: string }).controller;
+    const vm = `${controller}#${controller.slice('did:key:'.length)}`;
+    expect(await keyStore.getPrivateKey(vm)).toBeTruthy();
+  });
+});
+
 describe('a provenance append that cannot be signed throws [plan 041]', () => {
   test('publishToWeb fails instead of returning an asset with a hole in its log', async () => {
     const sdk = makeSdk();

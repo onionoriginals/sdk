@@ -62,7 +62,7 @@ describe('publishToWeb atomicRollback', () => {
     const { adapter, deleted } = makeFailingAdapter(3);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', storageAdapter: adapter as any });
-    const asset = await sdk.lifecycle.createAsset(makeResources());
+    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
 
     await expect(sdk.lifecycle.publishToWeb(asset, 'example.com')).rejects.toThrow('storage write exploded');
 
@@ -114,7 +114,7 @@ describe('publishToWeb atomicRollback', () => {
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', storageAdapter: adapter as any });
-    const asset = await sdk.lifecycle.createAsset(makeResources());
+    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
 
     await expect(sdk.lifecycle.publishToWeb(asset, 'example.com')).rejects.toThrow('storage write exploded');
     for (const resource of asset.resources) {

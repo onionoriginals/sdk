@@ -31,7 +31,7 @@ function makeSDK() {
 async function createGenesisAsset(sdk: OriginalsSDK) {
   return sdk.lifecycle.createAsset([
     { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
-  ], { controller: 'ephemeral' });
+  ]);
 }
 
 describe('loadAsset — round-trip', () => {
@@ -179,7 +179,7 @@ describe('loadAsset — fail-closed verification', () => {
     const hash = hashResource(Buffer.from(content, 'utf8'));
     const asset = await sdk.lifecycle.createAsset([
       { id: 'doc', type: 'text', content, contentType: 'text/plain', hash }
-    ], { controller: 'ephemeral' });
+    ]);
     const envelope = asset.serialize();
     // Keep the honest hash (genesis binding still passes) but tamper the bytes.
     envelope.resources[0].content = 'goodbye world';

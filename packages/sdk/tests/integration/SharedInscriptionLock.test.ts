@@ -100,7 +100,7 @@ describe('shared keyed inscription lock across managers (issue #303)', () => {
     // config, both managers coordinate on the one shared keyed mutex.
     const otherManager = new BitcoinManager(config);
 
-    const asset = await sdk.lifecycle.createAsset(sampleResources, { controller: 'ephemeral' });
+    const asset = await sdk.lifecycle.createAsset(sampleResources);
     const canonicalDid = asset.id; // did:cel — the SAME key both paths lock on
 
     // Caller A (LifecycleManager.inscribeOnBitcoin) enters inscribeData first and

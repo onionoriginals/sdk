@@ -20,7 +20,7 @@ describe('publishToWeb mints a real did:webvh (#376)', () => {
     const hash = bytesToHex(sha256(new TextEncoder().encode(content)));
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res-1', type: 'data', contentType: 'text/plain', hash, content }
-    ], { controller: 'ephemeral' });
+    ]);
     const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
     const binding = published.bindings?.['did:webvh'];
     // Real shape: did:webvh:{SCID}:{domain}[:slug] — SCID segment present, no ":user" fabrication.
@@ -43,7 +43,7 @@ describe('publishToWeb mints a real did:webvh (#376)', () => {
     const logMeHash = bytesToHex(sha256(new TextEncoder().encode('log me')));
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res-1', type: 'data', contentType: 'text/plain', hash: logMeHash, content: 'log me' }
-    ], { controller: 'ephemeral' });
+    ]);
     const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
     const did = published.bindings!['did:webvh']!;
     // did:webvh:{SCID}:example.com[:slug...] -> example.com/{slug...}/did.jsonl
@@ -72,7 +72,7 @@ describe('publishToWeb mints a real did:webvh (#376)', () => {
     const hash = bytesToHex(sha256(new TextEncoder().encode(content)));
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res-1', type: 'data', contentType: 'text/plain', hash, content }
-    ], { controller: 'ephemeral' });
+    ]);
     const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
     const did = published.bindings!['did:webvh']!;
     // Regression (#376): the storage key must derive from the MINTED DID's
@@ -152,7 +152,7 @@ describe('publishToWeb appends the signed migrate event (#Phase2 Task 4)', () =>
     const hash = bytesToHex(sha256(new TextEncoder().encode(content)));
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res-1', type: 'data', contentType: 'text/plain', hash, content }
-    ], { controller: 'ephemeral' });
+    ]);
     const sourceDid = asset.id;
     const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
 

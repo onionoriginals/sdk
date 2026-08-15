@@ -275,7 +275,7 @@ describe('Telemetry Integration', () => {
       
       // Try to create asset with invalid resources
       try {
-        await sdk.lifecycle.createAsset([]);
+        await sdk.lifecycle.createAsset([], { controller: 'ephemeral' });
       } catch (error) {
         // Expected to fail
       }

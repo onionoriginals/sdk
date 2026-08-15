@@ -39,7 +39,7 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
     const events: AssetMigratedEvent[] = [];
     sdk.lifecycle.on('asset:migrated', (e) => { events.push(e); });
 
-    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
+    const asset = await sdk.lifecycle.createAsset(makeResources());
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
 
     expect(events.length).toBe(1);
@@ -53,7 +53,7 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
     const events: AssetMigratedEvent[] = [];
     sdk.lifecycle.on('asset:migrated', (e) => { events.push(e); });
 
-    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
+    const asset = await sdk.lifecycle.createAsset(makeResources());
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     await sdk.lifecycle.inscribeOnBitcoin(asset, 7);
 
@@ -69,7 +69,7 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
     const events: AssetTransferredEvent[] = [];
     sdk.lifecycle.on('asset:transferred', (e) => { events.push(e); });
 
-    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
+    const asset = await sdk.lifecycle.createAsset(makeResources());
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     await sdk.lifecycle.inscribeOnBitcoin(asset, 7);
     const tx = await sdk.lifecycle.transferOwnership(asset, 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080');
@@ -84,7 +84,7 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
 
   test('asset-level subscriptions still fire (dual emit)', async () => {
     const sdk = makeSdk();
-    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
+    const asset = await sdk.lifecycle.createAsset(makeResources());
     const assetEvents: AssetMigratedEvent[] = [];
     asset.on('asset:migrated', (e) => { assetEvents.push(e); });
 
@@ -96,7 +96,7 @@ describe('manager-level asset:migrated / asset:transferred (issue #346)', () => 
 describe("'verification:completed' is emitted by OriginalsAsset.verify (issue #352)", () => {
   test('emits with the verification result', async () => {
     const sdk = makeSdk();
-    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
+    const asset = await sdk.lifecycle.createAsset(makeResources());
     const events: VerificationCompletedEvent[] = [];
     asset.on('verification:completed', (e) => { events.push(e); });
 
@@ -108,7 +108,7 @@ describe("'verification:completed' is emitted by OriginalsAsset.verify (issue #3
 
   test('emits result=false for a corrupted asset', async () => {
     const sdk = makeSdk();
-    const asset = await sdk.lifecycle.createAsset(makeResources(), { controller: 'ephemeral' });
+    const asset = await sdk.lifecycle.createAsset(makeResources());
     (asset.resources[0] as { hash: string }).hash = 'not-a-real-hash';
     const events: VerificationCompletedEvent[] = [];
     asset.on('verification:completed', (e) => { events.push(e); });

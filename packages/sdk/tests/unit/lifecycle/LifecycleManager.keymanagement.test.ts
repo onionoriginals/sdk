@@ -111,7 +111,7 @@ describe('LifecycleManager Key Management', () => {
 
   describe('createAsset with keyStore', () => {
     test('should automatically register key when keyStore is provided', async () => {
-      const asset = await lifecycleManager.createAsset(resources, { controller: 'ephemeral' });
+      const asset = await lifecycleManager.createAsset(resources);
 
       expect(asset.currentLayer).toBe('did:cel');
       expect(asset.did.verificationMethod).toBeDefined();
@@ -139,7 +139,7 @@ describe('LifecycleManager Key Management', () => {
 
   describe('publishToWeb with DID keys', () => {
     test('should sign credential with DID document key from keyStore', async () => {
-      const asset = await lifecycleManager.createAsset(resources, { controller: 'ephemeral' });
+      const asset = await lifecycleManager.createAsset(resources);
       
       // Verify key was stored
       let vmId = asset.did.verificationMethod![0].id;
@@ -202,7 +202,7 @@ describe('LifecycleManager Key Management', () => {
     });
 
     test('should use keys from keyStore not ephemeral keys', async () => {
-      const asset = await lifecycleManager.createAsset(resources, { controller: 'ephemeral' });
+      const asset = await lifecycleManager.createAsset(resources);
       
       // Get the stored key
       let vmId = asset.did.verificationMethod![0].id;
@@ -226,7 +226,7 @@ describe('LifecycleManager Key Management', () => {
     });
 
     test('should use correct verification method from DID document', async () => {
-      const asset = await lifecycleManager.createAsset(resources, { controller: 'ephemeral' });
+      const asset = await lifecycleManager.createAsset(resources);
       let vmId = asset.did.verificationMethod![0].id;
       const publicKey = asset.did.verificationMethod![0].publicKeyMultibase;
 
@@ -261,7 +261,7 @@ describe('LifecycleManager Key Management', () => {
       // can be keyed to it — the peer DID is what signWithKeyStore resolves.
       const rotatedKeyStore = new MockKeyStore();
       const lm = new LifecycleManager(config, didManager, credentialManager, undefined, rotatedKeyStore);
-      const asset = await lm.createAsset(resources, { controller: 'ephemeral' });
+      const asset = await lm.createAsset(resources);
       const peerDid = asset.id;
 
       const oldVmId = `${peerDid}#key-0`;
@@ -323,7 +323,7 @@ describe('LifecycleManager Key Management', () => {
       // rejected — the credential is signed with the peer DID's key-0.
       const activeKeyStore = new MockKeyStore();
       const lm = new LifecycleManager(config, didManager, credentialManager, undefined, activeKeyStore);
-      const asset = await lm.createAsset(resources, { controller: 'ephemeral' });
+      const asset = await lm.createAsset(resources);
       const published = await lm.publishToWeb(asset, publisherDid, { onAppendFailure: 'skip' });
 
       expect(published.credentials.length).toBe(1);
@@ -353,7 +353,7 @@ describe('LifecycleManager Key Management', () => {
   describe('End-to-end credential management', () => {
     test('should create signed credentials throughout asset lifecycle', async () => {
       // Create asset with automatic key registration
-      const asset = await lifecycleManager.createAsset(resources, { controller: 'ephemeral' });
+      const asset = await lifecycleManager.createAsset(resources);
       expect(asset.did.verificationMethod).toBeDefined();
 
       // Publish to web - should create signed credential

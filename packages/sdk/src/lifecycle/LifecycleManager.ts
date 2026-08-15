@@ -402,13 +402,14 @@ export class LifecycleManager {
     // (per-call or config) the controller IS that signer's key — no key is
     // generated, nothing touches the keyStore, key:unpersisted never fires.
     const suppliedSigner = options?.signer ?? this.config.signer;
+    const ephemeral = options?.controller === 'ephemeral';
     // Custody is required to mint (plan 041). With neither a signer nor a
     // keyStore the generated controller key is dropped on the floor and the
     // asset can never author another event — publish and inscribe still
     // "succeed" while silently omitting their provenance events. Refuse rather
     // than hand back an asset that is already broken; `controller: 'ephemeral'`
     // is the explicit opt-in for a throwaway.
-    if (!suppliedSigner && !this.keyStore && options?.controller !== 'ephemeral') {
+    if (!suppliedSigner && !this.keyStore && !ephemeral) {
       throw new StructuredError(
         'NO_CUSTODY',
         'createAsset needs somewhere to keep the asset\'s controller key: pass options.signer ' +
@@ -454,11 +455,15 @@ export class LifecycleManager {
     // its own custody — nothing to persist, nothing to warn about):
     // register it under BOTH the did:key VM (CEL signing) and `${did}#key-0`
     // (so signWithKeyStore's `${issuer}#key-0` probe resolves).
-    // keyStore-less SDKs still get a fully-formed did:cel asset with its log.
-    if (controllerKp && this.keyStore) {
+    //
+    // `controller: 'ephemeral'` is honoured even when a keyStore exists: the
+    // caller asked for a write-once asset, and persisting the key anyway would
+    // hand back something that can still author — the opposite of what was
+    // requested, decided silently.
+    if (controllerKp && this.keyStore && !ephemeral) {
       await this.keyStore.setPrivateKey(verificationMethod, controllerKp.privateKey);
       await this.keyStore.setPrivateKey(`${did}#key-0`, controllerKp.privateKey);
-    } else if (controllerKp) {
+    } else if (controllerKp && !ephemeral) {
       // No keyStore: the freshly minted controller private key is held nowhere
       // and is dropped here, so the asset cannot author CEL events — publish/
       // inscribe/authorizeSigner appends will degrade (cel:append-skipped)

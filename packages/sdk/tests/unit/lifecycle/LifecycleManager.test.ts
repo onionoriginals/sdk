@@ -47,7 +47,7 @@ describe('LifecycleManager', () => {
 
   test('inscribeOnBitcoin without provider throws error', async () => {
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
-    const asset = await sdk.lifecycle.createAsset(resources);
+    const asset = await sdk.lifecycle.createAsset(resources, { controller: 'ephemeral' });
     await expect(sdk.lifecycle.inscribeOnBitcoin(asset, 5)).rejects.toThrow('Ordinals provider must be configured');
   });
 

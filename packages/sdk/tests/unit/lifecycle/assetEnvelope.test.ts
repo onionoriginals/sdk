@@ -38,7 +38,7 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) },
       { id: 'note', type: 'text', contentType: 'text/plain', content, hash: hashResource(Buffer.from(content, 'utf8')) }
-    ], { controller: 'ephemeral' });
+    ]);
     const didCel = asset.id;
 
     await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
@@ -87,7 +87,7 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const sdk = makeSDK();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'hello v1', contentType: 'text/plain', hash: hashResource(Buffer.from('hello v1', 'utf-8')) }
-    ], { controller: 'ephemeral' });
+    ]);
     await asset.addResourceVersion('note', 'hello v2', 'text/plain', 'edit');
 
     const env = asset.serialize();
@@ -105,7 +105,7 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const sdk = makeSDK();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
     await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
     await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
 
@@ -152,7 +152,7 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const sdk = makeSDK();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
     await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
     await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
 
@@ -180,7 +180,7 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const sdk = makeSDK();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
 
     const doc = {
       '@context': ['https://www.w3.org/ns/did/v1'],

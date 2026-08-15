@@ -32,7 +32,7 @@ describe('issue #347: content/hash verification', () => {
       // Valid hex, valid length — but the hash of DIFFERENT bytes.
       hash: contentHash('some other bytes entirely')
     };
-    await expect(sdk.lifecycle.createAsset([mismatched])).rejects.toThrow(/RESOURCE_HASH_MISMATCH|does not match its declared hash/);
+    await expect(sdk.lifecycle.createAsset([mismatched], { controller: 'ephemeral' })).rejects.toThrow(/RESOURCE_HASH_MISMATCH|does not match its declared hash/);
   });
 
   test('createAsset accepts inline content whose hash matches (case-insensitive)', async () => {

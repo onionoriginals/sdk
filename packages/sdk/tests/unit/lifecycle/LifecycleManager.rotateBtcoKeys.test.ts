@@ -14,7 +14,7 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const btcoDid = asset.bindings!['did:btco']!;
 
@@ -36,7 +36,7 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const btcoDid = asset.bindings!['did:btco']!;
 
@@ -57,7 +57,7 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), webvhNetwork: 'magby', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '9a'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const btcoDid = asset.bindings!['did:btco']!;
     expect(btcoDid.startsWith('did:btco:reg:')).toBe(true);
@@ -77,7 +77,7 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const btcoDid = asset.bindings!['did:btco']!;
 
@@ -143,7 +143,7 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '78'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const logBefore = asset.celLog;
 
@@ -166,7 +166,7 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
     // A REAL Ed25519 keypair so the new controller can actually sign appends
@@ -210,7 +210,7 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     sdk.lifecycle.on('key:unpersisted', (e) => { unpersisted.push(e); });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
     const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
@@ -237,7 +237,7 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const eventsBefore = asset.celLog!.events.length;
     const inscribeCallsBefore = provider.inscribeCalls;
@@ -264,7 +264,7 @@ describe('rotateBtcoKeys (#366 rotation-first)', () => {
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: new OrdMockProvider() });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '78'.repeat(32) }
-    ], { controller: 'ephemeral' });
+    ]);
     await expect(
       sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: 'z6Mkfake' })
     ).rejects.toThrow(/btco/i);

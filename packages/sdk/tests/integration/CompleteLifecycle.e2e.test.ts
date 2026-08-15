@@ -541,7 +541,7 @@ describe('E2E Integration: Complete Lifecycle Flow', () => {
 
     test('handles empty resources array', async () => {
       // Empty resources should throw an error per validation rules
-      await expect(sdk.lifecycle.createAsset([])).rejects.toThrow('At least one resource is required');
+      await expect(sdk.lifecycle.createAsset([], { controller: 'ephemeral' })).rejects.toThrow('At least one resource is required');
     });
 
     test('handles multiple resources with different content types', async () => {

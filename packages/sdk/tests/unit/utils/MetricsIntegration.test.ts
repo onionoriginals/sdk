@@ -189,7 +189,7 @@ describe('Metrics Integration', () => {
         type: 'code',
         contentType: 'application/javascript',
         hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
-      }], { controller: 'ephemeral' });
+      }]);
       await sdk.did.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-agg' });
 
       expect(asset).toBeDefined();
@@ -221,7 +221,7 @@ describe('Metrics Integration', () => {
         type: 'code',
         contentType: 'application/javascript',
         hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
-      }], { controller: 'ephemeral' });
+      }]);
       // createAsset no longer routes through DIDManager; exercise a DIDManager
       // op directly so the multi-manager Prometheus assertion holds.
       await sdk.did.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-prom' });

@@ -84,14 +84,14 @@ function makeAuditRecord(overrides: Partial<MigrationAuditRecord> = {}): Migrati
 describe('CORE-MIG-EVENTS-002/boundary: createAsset with zero resources', () => {
   it('throws a structured error when resources array is empty', async () => {
     const sdk = makeSdk();
-    await expect(sdk.lifecycle.createAsset([])).rejects.toThrow(/At least one resource/i);
+    await expect(sdk.lifecycle.createAsset([], { controller: 'ephemeral' })).rejects.toThrow(/At least one resource/i);
   });
 
   it('error is synchronously deterministic (not a flaky network error)', async () => {
     const sdk = makeSdk();
     // Run twice — both must throw with the same guard
-    await expect(sdk.lifecycle.createAsset([])).rejects.toThrow();
-    await expect(sdk.lifecycle.createAsset([])).rejects.toThrow();
+    await expect(sdk.lifecycle.createAsset([], { controller: 'ephemeral' })).rejects.toThrow();
+    await expect(sdk.lifecycle.createAsset([], { controller: 'ephemeral' })).rejects.toThrow();
   });
 });
 
