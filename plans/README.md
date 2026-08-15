@@ -29,8 +29,12 @@ and `publishToWeb` silently drops the CEL `migrate` event when it can't sign.
 
 | Plan | Title | Priority | Effort | Risk | Depends on | Status |
 |------|-------|----------|--------|------|------------|--------|
-| 033 | SDK v3 roadmap — signer abstraction, fail-loud, packaging (spawns 034–045) | P0 | XL | HIGH | — | IN PROGRESS (Phase 0 = 034–038 DONE) |
-| 034–038 | Phase 0 — stop the bleeding (seal-time self-verify, suite whitelist, external-signer credentials, required DIDManager, published-README de-rot) | P0 | M | MED | — | DONE (tsc 0; 3795 pass / 0 fail; browser+esm gates green; not yet pushed) |
+| 033 | SDK v3 roadmap — signer abstraction, fail-loud, packaging (spawns 034–045) | P0 | XL | HIGH | — | DONE except the `@originals/cel` split (044 item 6) |
+| 034–038 | Phase 0 — stop the bleeding | P0 | M | MED | — | DONE (merged, PR #464 `0d241bcb`) |
+| 039–040, 045 | Phase 1 — signer core, conformance harness, Turnkey signBytes | P0 | L | MED | 034–038 | DONE (merged, PR #465 `ed327d9b`) |
+| 041–042 | Phase 2 — custody required, appends throw, cryptosuite renamed + bound | P0 | L | HIGH | 039 | DONE (merged, PR #466 `ae9f8cb8`) |
+| 043–044 | Phase 3 — packaging, curated exports, Buffer purge | P1 | M | MED | 039 | DONE (merged, PR #467 `636417c4`); split deferred |
+| 046 | CI gaps that let two shipped bugs through | P2 | S | LOW | — | TODO (not started) |
 
 ### Run 2
 
