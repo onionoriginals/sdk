@@ -2,11 +2,12 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK, OriginalsAsset } from '../../../src';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 describe('LifecycleManager.transferOwnership comprehensive', () => {
   const createSDK = () => {
     const provider = new MockOrdinalsProvider();
-    return OriginalsSDK.create({
+    return OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: provider,
     } as any);

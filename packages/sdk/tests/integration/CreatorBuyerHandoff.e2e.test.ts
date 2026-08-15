@@ -197,7 +197,7 @@ describe('creator→buyer hand-off end-to-end (#Phase3 Task8)', () => {
 
     // ---- A third, fully independent verifier verifies the WHOLE chain,
     // including the non-cooperatively-accepted rotation. ----
-    const sdkC = OriginalsSDK.create({
+    const sdkC = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider,

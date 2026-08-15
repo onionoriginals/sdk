@@ -35,6 +35,7 @@ import { MIGRATION_STORAGE_DOMAIN } from '../../../src/migration/storage/Migrati
 import { OriginalsSDK } from '../../../src';
 import { MigrationManager } from '../../../src/migration';
 import type { LogEntry } from '../../../src/utils/Logger';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const PENDING_PREFIX = 'checkpoints/pending-deletion/';
 const TOMBSTONE = '__originals_deleted__';
@@ -121,7 +122,7 @@ async function makeHarness(adapter: unknown): Promise<{
 }> {
   MigrationManager.resetInstance();
   const logEntries: LogEntry[] = [];
-  const sdk = OriginalsSDK.create({
+  const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
     network: 'regtest',
     defaultKeyType: 'Ed25519',
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

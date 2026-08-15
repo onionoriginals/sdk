@@ -19,6 +19,7 @@ import type { MigrationOptions, MigrationResult } from '../../../src/migration/t
 import { MigrationStateEnum } from '../../../src/migration/types';
 import type { OriginalsConfig } from '../../../src/types';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const baseConfig: OriginalsConfig = {
   network: 'regtest',
@@ -30,7 +31,7 @@ const baseConfig: OriginalsConfig = {
 
 function makeManager() {
   MigrationManager.resetInstance();
-  const sdk = OriginalsSDK.create({ ...baseConfig });
+  const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), ...baseConfig });
   const manager = MigrationManager.getInstance(
     (sdk as unknown as { config: OriginalsConfig }).config,
     sdk.did,

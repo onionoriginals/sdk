@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 /**
  * migrateToDIDWebVH derives the did:webvh slug from the last segment of the
@@ -8,7 +9,7 @@ import { OriginalsSDK } from '../../../src';
  */
 
 describe('migrateToDIDWebVH slug', () => {
-  const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+  const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
 
   // The numalgo-4 long-form slug tests (did:peer createDIDPeer + the special
   // "longest did:peer suffix" branch) were removed with the did:peer purge

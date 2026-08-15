@@ -12,6 +12,7 @@ import { createCommand, CreateFlags } from '../../../src/cel/cli/create';
 import { parseEventLogJson } from '../../../src/cel/serialization/json';
 import { parseEventLogCbor } from '../../../src/cel/serialization/cbor';
 import { multikey } from '../../../src/crypto/Multikey';
+import { CEL_CRYPTOSUITE } from '../../../src/cel/proofVerification';
 
 describe('CLI create command', () => {
   let tempDir: string;
@@ -349,7 +350,7 @@ describe('CLI create command', () => {
   });
   
   describe('proof structure', () => {
-    it('generates DataIntegrityProof with eddsa-jcs-2022 cryptosuite', async () => {
+    it('generates DataIntegrityProof with the CEL cryptosuite', async () => {
       const outputPath = path.join(tempDir, 'proof-test.cel.json');
       
       await createCommand({
@@ -363,7 +364,7 @@ describe('CLI create command', () => {
       const proof = log.events[0].proof[0];
       
       expect(proof.type).toBe('DataIntegrityProof');
-      expect(proof.cryptosuite).toBe('eddsa-jcs-2022');
+      expect(proof.cryptosuite).toBe(CEL_CRYPTOSUITE);
       expect(proof.proofPurpose).toBe('assertionMethod');
       expect(proof.verificationMethod).toMatch(/^did:key:/);
       expect(proof.proofValue).toMatch(/^z[a-zA-Z0-9]+$/);

@@ -130,7 +130,7 @@ describe('LifecycleManager Key Management', () => {
 
     test('should create asset without keyStore gracefully', async () => {
       const lifecycleWithoutKeyStore = new LifecycleManager(config, didManager, credentialManager);
-      const asset = await lifecycleWithoutKeyStore.createAsset(resources);
+      const asset = await lifecycleWithoutKeyStore.createAsset(resources, { controller: 'ephemeral' });
 
       expect(asset.currentLayer).toBe('did:cel');
       expect(asset.did.verificationMethod).toBeDefined();
@@ -149,7 +149,7 @@ describe('LifecycleManager Key Management', () => {
       const storedKey = await keyStore.getPrivateKey(vmId);
       expect(storedKey).not.toBeNull();
       
-      const published = await lifecycleManager.publishToWeb(asset, publisherDid);
+      const published = await lifecycleManager.publishToWeb(asset, publisherDid, { onAppendFailure: 'skip' });
 
       expect(published.currentLayer).toBe('did:webvh');
       expect(published.credentials.length).toBeGreaterThan(0);
@@ -168,10 +168,10 @@ describe('LifecycleManager Key Management', () => {
 
     test('should not add credential when keyStore not provided', async () => {
       const lifecycleWithoutKeyStore = new LifecycleManager(config, didManager, credentialManager);
-      const asset = await lifecycleWithoutKeyStore.createAsset(resources);
+      const asset = await lifecycleWithoutKeyStore.createAsset(resources, { controller: 'ephemeral' });
 
       // Publishing should succeed but no credential should be added (best-effort)
-      const published = await lifecycleWithoutKeyStore.publishToWeb(asset, publisherDid);
+      const published = await lifecycleWithoutKeyStore.publishToWeb(asset, publisherDid, { onAppendFailure: 'skip' });
       
       expect(published.currentLayer).toBe('did:webvh');
       // No credential should be added due to missing keyStore
@@ -181,7 +181,7 @@ describe('LifecycleManager Key Management', () => {
     test('should not add credential when private key not found in keyStore', async () => {
       // Create asset without keyStore
       const lifecycleWithoutKeyStore = new LifecycleManager(config, didManager, credentialManager);
-      const asset = await lifecycleWithoutKeyStore.createAsset(resources);
+      const asset = await lifecycleWithoutKeyStore.createAsset(resources, { controller: 'ephemeral' });
 
       // Try to publish with a different lifecycle manager that has keyStore but no keys
       const emptyKeyStore = new MockKeyStore();
@@ -194,7 +194,7 @@ describe('LifecycleManager Key Management', () => {
       );
 
       // Publishing should succeed but no credential should be added (best-effort)
-      const published = await lifecycleWithEmptyKeyStore.publishToWeb(asset, publisherDid);
+      const published = await lifecycleWithEmptyKeyStore.publishToWeb(asset, publisherDid, { onAppendFailure: 'skip' });
       
       expect(published.currentLayer).toBe('did:webvh');
       // No credential should be added due to missing private key
@@ -211,7 +211,7 @@ describe('LifecycleManager Key Management', () => {
       }
       const storedKeyBefore = await keyStore.getPrivateKey(vmId);
       
-      const published = await lifecycleManager.publishToWeb(asset, publisherDid);
+      const published = await lifecycleManager.publishToWeb(asset, publisherDid, { onAppendFailure: 'skip' });
       
       // Verify the same key is still there (not replaced)
       const storedKeyAfter = await keyStore.getPrivateKey(vmId);
@@ -235,7 +235,7 @@ describe('LifecycleManager Key Management', () => {
         vmId = `${asset.did.id}${vmId}`;
       }
 
-      const published = await lifecycleManager.publishToWeb(asset, publisherDid);
+      const published = await lifecycleManager.publishToWeb(asset, publisherDid, { onAppendFailure: 'skip' });
       const credential = published.credentials[0];
       const proof = credential.proof as any;
 
@@ -296,7 +296,7 @@ describe('LifecycleManager Key Management', () => {
       // Resolve the peer DID (the signing DID) to the rotated document.
       (didManager as any).resolveDID = async () => didDoc;
 
-      const published = await lm.publishToWeb(asset, publisherDid);
+      const published = await lm.publishToWeb(asset, publisherDid, { onAppendFailure: 'skip' });
       return { published, oldVmId, newVmId };
     }
 
@@ -324,7 +324,7 @@ describe('LifecycleManager Key Management', () => {
       const activeKeyStore = new MockKeyStore();
       const lm = new LifecycleManager(config, didManager, credentialManager, undefined, activeKeyStore);
       const asset = await lm.createAsset(resources);
-      const published = await lm.publishToWeb(asset, publisherDid);
+      const published = await lm.publishToWeb(asset, publisherDid, { onAppendFailure: 'skip' });
 
       expect(published.credentials.length).toBe(1);
       const proof = published.credentials[0].proof as any;
@@ -357,7 +357,7 @@ describe('LifecycleManager Key Management', () => {
       expect(asset.did.verificationMethod).toBeDefined();
 
       // Publish to web - should create signed credential
-      const published = await lifecycleManager.publishToWeb(asset, publisherDid);
+      const published = await lifecycleManager.publishToWeb(asset, publisherDid, { onAppendFailure: 'skip' });
       expect(published.credentials.length).toBe(1);
 
       // Check credential structure
@@ -379,7 +379,7 @@ describe('LifecycleManager Key Management', () => {
   describe('Error handling', () => {
     test('should handle missing verification method in DID document gracefully', async () => {
       const lifecycleWithoutKeyStore = new LifecycleManager(config, didManager, credentialManager);
-      const asset = await lifecycleWithoutKeyStore.createAsset(resources);
+      const asset = await lifecycleWithoutKeyStore.createAsset(resources, { controller: 'ephemeral' });
       
       // Manually remove verification methods to simulate error case
       (asset.did as any).verificationMethod = [];
@@ -393,7 +393,7 @@ describe('LifecycleManager Key Management', () => {
       );
 
       // Should not throw - credentials can be issued using publisher's keys from keyStore
-      const published = await lifecycleWithKeyStore.publishToWeb(asset, publisherDid);
+      const published = await lifecycleWithKeyStore.publishToWeb(asset, publisherDid, { onAppendFailure: 'skip' });
       
       expect(published.currentLayer).toBe('did:webvh');
       // Credential should be added using publisher's verification method from keyStore

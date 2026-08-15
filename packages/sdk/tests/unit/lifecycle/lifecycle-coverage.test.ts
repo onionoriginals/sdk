@@ -34,12 +34,12 @@ const baseResource: AssetResource = {
 };
 
 function makeSDK(opts?: Partial<OriginalsConfig>) {
-  return OriginalsSDK.create({ network: 'regtest', ...opts } as OriginalsConfig);
+  return OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ...opts } as OriginalsConfig);
 }
 
 function makeSDKWithProvider(opts?: Record<string, unknown>) {
   const provider = new MockOrdinalsProvider();
-  return OriginalsSDK.create({
+  return OriginalsSDK.create({ keyStore: new MockKeyStore(),
     network: 'regtest',
     ordinalsProvider: provider,
     ...opts,
@@ -56,7 +56,7 @@ describe('LIFECYCLE-001/invalid-input – createAsset resource validation', () =
   test('non-object resource throws INVALID_RESOURCE', async () => {
     await expect(
       // @ts-expect-error deliberately invalid
-      sdk.lifecycle.createAsset([null])
+      sdk.lifecycle.createAsset([null], { controller: 'ephemeral' })
     ).rejects.toThrow(/Invalid resource/);
   });
 
@@ -65,7 +65,7 @@ describe('LIFECYCLE-001/invalid-input – createAsset resource validation', () =
       sdk.lifecycle.createAsset([
         // @ts-expect-error missing id
         { type: 'text', contentType: 'text/plain', hash: 'deadbeef' },
-      ])
+      ], { controller: 'ephemeral' })
     ).rejects.toThrow(/Invalid resource/);
   });
 
@@ -73,7 +73,7 @@ describe('LIFECYCLE-001/invalid-input – createAsset resource validation', () =
     await expect(
       sdk.lifecycle.createAsset([
         { id: 'r', type: 'text', contentType: 'text/plain', hash: 'not-hex!!' },
-      ])
+      ], { controller: 'ephemeral' })
     ).rejects.toThrow('Invalid resource: missing or invalid hash (must be hex string)');
   });
 
@@ -81,7 +81,7 @@ describe('LIFECYCLE-001/invalid-input – createAsset resource validation', () =
     await expect(
       sdk.lifecycle.createAsset([
         { id: 'r', type: 'text', contentType: 'not_a_mime', hash: 'deadbeef' },
-      ])
+      ], { controller: 'ephemeral' })
     ).rejects.toThrow('Invalid resource: invalid contentType MIME format');
   });
 });
@@ -242,14 +242,14 @@ describe('LIFECYCLE-006/invalid-input – inscribeOnBitcoin invalid fee rate', (
   const sdk = makeSDKWithProvider();
 
   test('negative fee rate throws', async () => {
-    const asset = await sdk.lifecycle.createAsset([baseResource]);
+    const asset = await sdk.lifecycle.createAsset([baseResource], { controller: 'ephemeral' });
     await expect(sdk.lifecycle.inscribeOnBitcoin(asset, -1)).rejects.toThrow(
       /must be a positive number|Invalid feeRate/
     );
   });
 
   test('zero fee rate throws', async () => {
-    const asset = await sdk.lifecycle.createAsset([baseResource]);
+    const asset = await sdk.lifecycle.createAsset([baseResource], { controller: 'ephemeral' });
     await expect(sdk.lifecycle.inscribeOnBitcoin(asset, 0)).rejects.toThrow(
       /must be a positive number|Invalid feeRate/
     );

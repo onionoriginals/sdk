@@ -297,6 +297,18 @@ async function processCommand(state: SessionState, input: string): Promise<boole
   return true;
 }
 
+/** Scratch custody for the session: keys live only as long as the REPL. */
+class InMemoryKeyStore {
+  #keys = new Map<string, string>();
+  getPrivateKey(vm: string): Promise<string | null> {
+    return Promise.resolve(this.#keys.get(vm) ?? null);
+  }
+  setPrivateKey(vm: string, privateKey: string): Promise<void> {
+    this.#keys.set(vm, privateKey);
+    return Promise.resolve();
+  }
+}
+
 // --- Main execution (top-level await for Bun compatibility) ---
 
 console.log(BANNER);
@@ -309,6 +321,9 @@ const state: SessionState = {
     webvhNetwork: 'magby',
     ordinalsProvider: new OrdMockProvider(),
     storageAdapter: new MemoryStorageAdapter(),
+    // Custody is required to mint (plan 041), and the playground publishes and
+    // inscribes — an in-memory store is the right scope for a scratch session.
+    keyStore: new InMemoryKeyStore(),
     logging: { level: 'error' },
   }),
   resourceManager: new ResourceManager(),

@@ -13,6 +13,7 @@ import { multikey } from '../../../src/crypto/Multikey';
 import { canonicalizeEvent, canonicalizeEntryForChain, witnessSigningBytes } from '../../../src/cel/canonicalize';
 import { computeDigestMultibase, decodeDigestMultibase } from '../../../src/cel/hash';
 import { createRealCelSigner } from '../../fixtures/celSigner';
+import { CEL_CRYPTOSUITE } from '../../../src/cel/proofVerification';
 
 /**
  * Mock signer that creates a structurally valid DataIntegrityProof.
@@ -647,7 +648,7 @@ describe('verifyEventLog', () => {
       await verifyEventLog(log, { verifier: customVerifier });
 
       expect(receivedProof).not.toBeNull();
-      expect(receivedProof?.cryptosuite).toBe('eddsa-jcs-2022');
+      expect(receivedProof?.cryptosuite).toBe(CEL_CRYPTOSUITE);
       expect(receivedData).not.toBeNull();
       expect((receivedData as any).type).toBe('create');
       expect((receivedData as any).data).toEqual(eventData);

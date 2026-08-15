@@ -14,7 +14,7 @@ import {
 import { BitcoinManager, MAX_REASONABLE_FEE_RATE } from '../bitcoin/BitcoinManager.js';
 import { inscribeOnSat } from '../bitcoin/inscribe-on-sat.js';
 import type { Utxo, KeyPair } from '../types/bitcoin.js';
-import type { BitcoinSigner } from '../types/common.js';
+import type { BitcoinSigner, AppendFailurePolicy } from '../types/common.js';
 import { DIDManager } from '../did/DIDManager.js';
 import type { CredentialManager } from '../vc/CredentialManager.js';
 import { OriginalsAsset, type ProvenanceChain } from './OriginalsAsset.js';
@@ -150,6 +150,11 @@ export interface LifecycleProgress {
  * post-broadcast re-check — the caller owns confirmation monitoring.
  */
 export interface InscribeOnBitcoinOptions {
+  /**
+   * What to do when the `migrate` event cannot be signed (default
+   * `config.onAppendFailure`, else `'throw'`). See plan 041.
+   */
+  onAppendFailure?: AppendFailurePolicy;
   /** Fee rate for the inscription (sat/vB). */
   feeRate?: number;
   /** Caller-selected funding UTXO whose first sat becomes the did:btco identity. */
@@ -167,15 +172,47 @@ export interface InscribeOnBitcoinOptions {
  * signed by that (possibly remote) key: no controller key is generated, nothing
  * is written to the keyStore, and `key:unpersisted` is never emitted.
  */
+/**
+ * Points at the specific missing piece, so a failed append names its own fix
+ * rather than only its symptom.
+ */
+function appendFailureHint(reason: 'NO_KEYSTORE' | 'NO_CEL_LOG' | 'NO_SIGNING_KEY'): string {
+  switch (reason) {
+    case 'NO_KEYSTORE':
+      return 'No custody is configured: pass { signer } for this call, or set config.signer / config.keyStore.';
+    case 'NO_CEL_LOG':
+      return 'This asset has no CEL log (a legacy asset), so there is no chain to append to.';
+    case 'NO_SIGNING_KEY':
+      return "The available custody does not hold the log's CURRENT controller key — after a rotation, " +
+        'the signer for the NEW controller must be supplied.';
+  }
+}
+
 export interface CreateAssetOptions {
   /** Authorship signer for the genesis `create` event (overrides `config.signer`). */
   signer?: OriginalsSigner;
+  /**
+   * Mint with a generated controller key that is thrown away (plan 041).
+   *
+   * Without a signer or a keyStore there is nowhere to put the controller key,
+   * so the asset can never author another event: publish/inscribe would appear
+   * to succeed while dropping their provenance events. That used to be the
+   * default and the documented quickstart. It is now an explicit choice, for
+   * throwaway assets that only need to exist and verify — never for anything
+   * you intend to keep.
+   */
+  controller?: 'ephemeral';
 }
 
 /**
  * Options for lifecycle operations with progress tracking
  */
 export interface LifecycleOperationOptions {
+  /**
+   * What to do when this operation cannot sign its provenance event
+   * (default `config.onAppendFailure`, else `'throw'`). See plan 041.
+   */
+  onAppendFailure?: AppendFailurePolicy;
   /** Fee rate for Bitcoin operations (sat/vB) */
   feeRate?: number;
   /** Progress callback for operation updates */
@@ -240,7 +277,7 @@ export class LifecycleManager {
     private didManager: DIDManager,
     private credentialManager: CredentialManager,
     private deps?: { bitcoinManager?: BitcoinManager },
-    private keyStore?: KeyStore,
+    private injectedKeyStore?: KeyStore,
     metrics?: MetricsCollector
   ) {
     this.eventEmitter = new EventEmitter();
@@ -306,6 +343,16 @@ export class LifecycleManager {
     await this.keyStore.setPrivateKey(verificationMethodId, privateKey);
   }
 
+  /**
+   * The effective keyStore. `OriginalsSDK.create` forwards `config.keyStore`
+   * into the constructor, but a directly-constructed LifecycleManager would
+   * otherwise ignore a keyStore the caller had put in the config — custody
+   * silently absent depending on how the manager was built.
+   */
+  private get keyStore(): KeyStore | undefined {
+    return this.injectedKeyStore ?? this.config.keyStore;
+  }
+
   async createAsset(resources: AssetResource[], options?: CreateAssetOptions): Promise<OriginalsAsset> {
     const stopTimer = this.logger.startTimer('createAsset');
     const metricsStart = performance.now();
@@ -354,7 +401,43 @@ export class LifecycleManager {
     // independent of config.defaultKeyType. With a supplied OriginalsSigner
     // (per-call or config) the controller IS that signer's key — no key is
     // generated, nothing touches the keyStore, key:unpersisted never fires.
-    const suppliedSigner = options?.signer ?? this.config.signer;
+    const ephemeral = options?.controller === 'ephemeral';
+
+    // Two explicit, mutually exclusive instructions for the same call: "sign as
+    // this key" and "make this unauthorable". Picking a winner silently is the
+    // failure mode this plan exists to remove, and ignoring a signer the caller
+    // deliberately passed would be the worse half — the asset's controller
+    // identity would not be the one they asked for.
+    if (options?.signer && ephemeral) {
+      throw new StructuredError(
+        'CONTRADICTORY_CUSTODY',
+        'createAsset was given both options.signer and { controller: \'ephemeral\' }: a signer ' +
+        'makes the asset authorable by that key, which is the opposite of write-once. Pass one ' +
+        'or the other. (config.signer is different — an ambient signer is simply overridden by ' +
+        'a per-call ephemeral controller.)'
+      );
+    }
+
+    // `ephemeral` also overrides an AMBIENT config.signer: wanting one throwaway
+    // asset inside an app that otherwise has custody is a coherent request, and
+    // per-call options beat configuration.
+    const suppliedSigner = ephemeral ? undefined : (options?.signer ?? this.config.signer);
+    // Custody is required to mint (plan 041). With neither a signer nor a
+    // keyStore the generated controller key is dropped on the floor and the
+    // asset can never author another event — publish and inscribe still
+    // "succeed" while silently omitting their provenance events. Refuse rather
+    // than hand back an asset that is already broken; `controller: 'ephemeral'`
+    // is the explicit opt-in for a throwaway.
+    if (!suppliedSigner && !this.keyStore && !ephemeral) {
+      throw new StructuredError(
+        'NO_CUSTODY',
+        'createAsset needs somewhere to keep the asset\'s controller key: pass options.signer ' +
+        '(an OriginalsSigner — works with Turnkey/KMS/HSM custody), or configure config.signer ' +
+        'or config.keyStore. Without one the key is discarded at mint and the asset can never ' +
+        'author another event. Pass { controller: \'ephemeral\' } if you genuinely want a ' +
+        'write-once asset.'
+      );
+    }
     let signer: CelSigner;
     let verificationMethod: string;
     let controllerPublicKey: string;
@@ -391,11 +474,15 @@ export class LifecycleManager {
     // its own custody — nothing to persist, nothing to warn about):
     // register it under BOTH the did:key VM (CEL signing) and `${did}#key-0`
     // (so signWithKeyStore's `${issuer}#key-0` probe resolves).
-    // keyStore-less SDKs still get a fully-formed did:cel asset with its log.
-    if (controllerKp && this.keyStore) {
+    //
+    // `controller: 'ephemeral'` is honoured even when a keyStore exists: the
+    // caller asked for a write-once asset, and persisting the key anyway would
+    // hand back something that can still author — the opposite of what was
+    // requested, decided silently.
+    if (controllerKp && this.keyStore && !ephemeral) {
       await this.keyStore.setPrivateKey(verificationMethod, controllerKp.privateKey);
       await this.keyStore.setPrivateKey(`${did}#key-0`, controllerKp.privateKey);
-    } else if (controllerKp) {
+    } else if (controllerKp && !ephemeral) {
       // No keyStore: the freshly minted controller private key is held nowhere
       // and is dropped here, so the asset cannot author CEL events — publish/
       // inscribe/authorizeSigner appends will degrade (cel:append-skipped)
@@ -1612,7 +1699,7 @@ export class LifecycleManager {
           layer: 'webvh',
           domain: minted.domain,
           migratedAt
-        }, options?.signer);
+        }, options?.signer, options?.onAppendFailure);
         const celAppended = celHeadDigest !== null;
 
         // Host the signed DID log so the DID actually resolves.
@@ -2303,26 +2390,31 @@ export class LifecycleManager {
   }
 
   /**
-   * Append-first lifecycle CEL event with the same degrade contract as
-   * publishToWeb: signed by the CURRENT controller folded from the log; when
-   * no custody (keyStore or signer) / no CEL log / no signing key, skip and
-   * emit `cel:append-skipped` instead of failing the lifecycle operation.
+   * Append-first lifecycle CEL event: signed by the CURRENT controller folded
+   * from the log.
    *
    * Custody resolution (plan 039): a supplied OriginalsSigner — per-call
    * override, else `config.signer` — signs WHEN its key is the current
    * controller; otherwise the keyStore is probed for the controller's key.
-   * This is the fix for the headline bug: a remote-custody caller's CEL events
-   * now actually get signed instead of silently skipped.
+   *
+   * When nothing can sign, this THROWS (plan 041). An operation that cannot
+   * write its own provenance event has not succeeded: `publishToWeb` used to
+   * return a published asset whose log was missing the migration that just
+   * happened, and report success. `onAppendFailure: 'skip'` restores the old
+   * degrade — the `cel:append-skipped` event and a null return — for callers
+   * who genuinely want a best-effort append.
    *
    * @returns the head digest (chain-link expression over the appended entry —
    * stable across later witness-proof attachment, since chain canonicalization
-   * excludes proofs) or null when the append was skipped.
+   * excludes proofs), or null when the append was skipped under `'skip'`.
+   * @throws StructuredError `CEL_APPEND_FAILED` under the default `'throw'`.
    */
   private async appendCelEventOrSkip(
     asset: OriginalsAsset,
     type: 'migrate' | 'rotateKey' | 'update',
     data: unknown,
-    signerOverride?: OriginalsSigner
+    signerOverride?: OriginalsSigner,
+    onAppendFailure?: AppendFailurePolicy
   ): Promise<string | null> {
     const logBefore = asset.celLog;
     const candidate = signerOverride ?? this.config.signer;
@@ -2344,6 +2436,24 @@ export class LifecycleManager {
         return computeDigestMultibase(canonicalizeEntryForChain(newLog.events[newLog.events.length - 1]));
       }
       skipReason = 'NO_SIGNING_KEY';
+    }
+
+    // NO_CEL_LOG is not a custody mistake — a legacy (pre-CEL) asset has no
+    // chain to append to, and no configuration would give it one. Throwing
+    // there would refuse to operate on such assets at all, which is a far
+    // harsher policy than "you have a log but cannot sign it". Only the
+    // fixable custody failures gate.
+    const policy = skipReason === 'NO_CEL_LOG'
+      ? 'skip'
+      : (onAppendFailure ?? this.config.onAppendFailure ?? 'throw');
+    if (policy === 'throw') {
+      throw new StructuredError(
+        'CEL_APPEND_FAILED',
+        `Cannot sign the '${type}' provenance event for ${asset.id} (${skipReason}). ` +
+        `${appendFailureHint(skipReason)} ` +
+        `The operation was NOT completed. Pass onAppendFailure: 'skip' to append best-effort ` +
+        `instead, which emits cel:append-skipped and leaves the event out of the log.`
+      );
     }
     await this.eventEmitter.emit({
       type: 'cel:append-skipped',
@@ -2372,7 +2482,7 @@ export class LifecycleManager {
     asset: OriginalsAsset,
     type: 'migrate' | 'rotateKey' | 'update',
     data: unknown,
-    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
+    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner; onAppendFailure?: AppendFailurePolicy }
   ): Promise<string | null> {
     // Confirm gate (#407 phase 4): consent to the unavoidable on-chain cost BEFORE
     // any log mutation. Only paid appends prompt — a btco asset WITH a provider (the
@@ -2411,7 +2521,7 @@ export class LifecycleManager {
     // restore the log to itself, leaving it permanently ahead of the chain and
     // bricking future updates via UNPROVABLE_BASE). Fable I1.
     const celLogBefore = asset.celLog;
-    const digest = await this.appendCelEventOrSkip(asset, type, data, opts?.signer);
+    const digest = await this.appendCelEventOrSkip(asset, type, data, opts?.signer, opts?.onAppendFailure);
     // Only inscribe genuine authorship appends that LANDED on a btco asset.
     if (digest === null || asset.currentLayer !== 'did:btco') {
       return digest;
@@ -2708,7 +2818,7 @@ export class LifecycleManager {
         network,
         to: btcoDidFromSatoshi(satoshi, network),
         migratedAt: new Date().toISOString()
-      }, options.signer);
+      }, options.signer, options.onAppendFailure);
       const btcoDoc = await this.didManager.migrateToDIDBTCO(asset.did, satoshi);
       btcoDoc.alsoKnownAs = backLinks;
       btcoDoc.service = [
@@ -3352,13 +3462,17 @@ export class LifecycleManager {
     signer?: OriginalsSigner
   ): Promise<void> {
     try {
+      // Explicitly 'skip', not the 041 default: this append is NON-GATING (the
+      // rotation itself already landed). 'skip' keeps the failure observable as
+      // a cel:append-skipped event; letting it throw here would reduce the same
+      // condition to a log line in the catch below.
       await this.appendCelEventOrSkip(asset, 'update', {
         operation: 'acknowledgeWitness',
         satoshi: ack.satoshi,
         inscriptionId: ack.inscriptionId,
         ...(ack.txid ? { txid: ack.txid } : {}),
         witnessedEventDigest: ack.witnessedEventDigest
-      }, signer);
+      }, signer, 'skip');
     } catch (err) {
       this.logger.warn('witness acknowledgment append failed (non-gating)', {
         assetId: asset.id,
@@ -3391,7 +3505,22 @@ export class LifecycleManager {
     asset: OriginalsAsset,
     newVerificationMethod: { publicKeyMultibase: string; privateKey?: string },
     feeRate?: number,
-    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner }
+    opts?: {
+      inscribeConfirm?: InscribeConfirm;
+      /** Signs the rotateKey event: the OUTGOING controller authorizes the hand-off. */
+      signer?: OriginalsSigner;
+      /**
+       * Signs the post-rotation witness acknowledgment, which folds to the NEW
+       * controller (plan 041). Without it a remote-custody rotation completes
+       * but drops its acknowledgment — the last silently-dropped event.
+       */
+      incomingSigner?: OriginalsSigner;
+      /**
+       * What to do when the `rotateKey` event cannot be signed (default
+       * `config.onAppendFailure`, else `'throw'`).
+       */
+      onAppendFailure?: AppendFailurePolicy;
+    }
   ): Promise<{ inscriptionId: string; did: string }> {
     if (asset.currentLayer !== 'did:btco') {
       throw new StructuredError('INVALID_STATE', 'Key rotation requires the asset to be on the did:btco layer.');
@@ -3475,7 +3604,7 @@ export class LifecycleManager {
     const celHeadDigest = await this.appendCelEventOrSkip(asset, 'rotateKey', {
       newController,
       rotatedAt: new Date().toISOString()
-    }, opts?.signer);
+    }, opts?.signer, opts?.onAppendFailure);
     // Re-embed #cel with the FRESH head (the rotateKey entry). On degrade the
     // event was not appended and no anchor is embedded.
     if (celHeadDigest !== null) {
@@ -3517,14 +3646,16 @@ export class LifecycleManager {
     // reinscription. Folds to the CURRENT (post-rotation) controller; degrades
     // to a skip when that key isn't held. Only when the rotateKey landed.
     if (celHeadDigest !== null) {
-      // opts.signer is the OUTGOING controller — it cannot sign for the new
-      // one, but passing it yields the accurate NO_SIGNING_KEY degrade signal.
+      // The ack folds to the NEW controller, so the OUTGOING signer cannot sign
+      // it. `incomingSigner` is the remote-custody answer; a keyStore holding
+      // the new key (the local-key path) also resolves. Falling back to
+      // opts.signer still yields the accurate NO_SIGNING_KEY signal otherwise.
       await this.appendWitnessAcknowledgment(asset, {
         satoshi,
         inscriptionId: inscription.inscriptionId,
         txid: inscription.revealTxId ?? inscription.txid,
         witnessedEventDigest: celHeadDigest
-      }, opts?.signer);
+      }, opts?.incomingSigner ?? opts?.signer);
     }
 
     await this.eventEmitter.emit({
@@ -3795,7 +3926,7 @@ export class LifecycleManager {
    */
   async createDraft(
     resources: AssetResource[],
-    options?: LifecycleOperationOptions
+    options?: LifecycleOperationOptions & CreateAssetOptions
   ): Promise<OriginalsAsset> {
     const onProgress = options?.onProgress;
     
@@ -3818,7 +3949,12 @@ export class LifecycleManager {
         message: 'Creating DID document...'
       });
       
-      const asset = await this.createAsset(resources);
+      // Forward custody: createDraft is the ergonomic wrapper, not a way to
+      // bypass the requirement that an asset have somewhere to keep its key.
+      const asset = await this.createAsset(resources, {
+        ...(options?.signer ? { signer: options.signer } : {}),
+        ...(options?.controller ? { controller: options.controller } : {}),
+      });
       
       onProgress?.({
         phase: 'complete',

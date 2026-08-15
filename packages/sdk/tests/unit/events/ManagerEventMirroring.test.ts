@@ -13,6 +13,7 @@ import { OriginalsSDK } from '../../../src';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import type { AssetMigratedEvent, AssetTransferredEvent, BatchProgressEvent, VerificationCompletedEvent } from '../../../src/events/types';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 // Fresh objects per call: createAsset keeps resource objects by reference, so
 // a test that corrupts its asset must not poison the shared fixture.
@@ -26,7 +27,7 @@ const makeResources = () => [
   }
 ];
 
-const makeSdk = () => OriginalsSDK.create({
+const makeSdk = () => OriginalsSDK.create({ keyStore: new MockKeyStore(),
   storageAdapter: new MemoryStorageAdapter(),
   network: 'regtest',
   ordinalsProvider: new MockOrdinalsProvider()

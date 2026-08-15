@@ -11,6 +11,7 @@ import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { multikey } from '../../../src/crypto/Multikey';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 describe('rotateBtcoKeys concurrency guard', () => {
   test('a second concurrent rotation of the same asset is rejected with OPERATION_IN_PROGRESS', async () => {
@@ -23,7 +24,7 @@ describe('rotateBtcoKeys concurrency guard', () => {
       }
     }
     const provider = new SlowProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
     ]);
@@ -52,17 +53,22 @@ describe('rotateBtcoKeys concurrency guard', () => {
 
   test('the guard is released after a rotation completes (sequential rotations work)', async () => {
     const provider = new OrdMockProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
     ]);
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
 
     const newKey1 = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
     const newKey2 = multikey.encodePublicKey(new Uint8Array(32).fill(8), 'Ed25519');
 
-    const rot1 = await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey1 });
-    const rot2 = await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey2 });
+    // These rotate to fabricated public keys nobody holds the private half of,
+    // so the follow-on appends cannot be signed. This test is about the
+    // concurrency guard releasing, not rotation authority — degrade explicitly.
+    const rot1 = await sdk.lifecycle.rotateBtcoKeys(
+      asset, { publicKeyMultibase: newKey1 }, undefined, { onAppendFailure: 'skip' });
+    const rot2 = await sdk.lifecycle.rotateBtcoKeys(
+      asset, { publicKeyMultibase: newKey2 }, undefined, { onAppendFailure: 'skip' });
     expect(typeof rot1.inscriptionId).toBe('string');
     expect(typeof rot2.inscriptionId).toBe('string');
   });
@@ -79,11 +85,11 @@ describe('rotateBtcoKeys concurrency guard', () => {
       }
     }
     const provider = new FailOnceProvider();
-    const sdk = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider: provider });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }
     ]);
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
 
     const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
     provider.failNext = true;

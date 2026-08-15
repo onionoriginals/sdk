@@ -236,7 +236,7 @@ describe('Migration event contracts and edge cases', () => {
       const { OriginalsSDK } = require('../../../src');
       MigrationManager.resetInstance();
 
-      const sdk = OriginalsSDK.create({ network: 'signet', defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'signet', defaultKeyType: 'Ed25519' });
       const pipeline = new ValidationPipeline(sdk['config'], sdk.did, sdk.credentials);
 
       const errors = pipeline.validateQuick({
@@ -253,7 +253,7 @@ describe('Migration event contracts and edge cases', () => {
       const { OriginalsSDK } = require('../../../src');
       MigrationManager.resetInstance();
 
-      const sdk = OriginalsSDK.create({ network: 'signet', defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'signet', defaultKeyType: 'Ed25519' });
       const pipeline = new ValidationPipeline(sdk['config'], sdk.did, sdk.credentials);
 
       const errors = pipeline.validateQuick({
@@ -270,7 +270,7 @@ describe('Migration event contracts and edge cases', () => {
       const { OriginalsSDK } = require('../../../src');
       MigrationManager.resetInstance();
 
-      const sdk = OriginalsSDK.create({ network: 'signet', defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'signet', defaultKeyType: 'Ed25519' });
       const pipeline = new ValidationPipeline(sdk['config'], sdk.did, sdk.credentials);
 
       const errors = pipeline.validateQuick({
@@ -287,7 +287,7 @@ describe('Migration event contracts and edge cases', () => {
       const { OriginalsSDK } = require('../../../src');
       MigrationManager.resetInstance();
 
-      const sdk = OriginalsSDK.create({ network: 'signet', defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'signet', defaultKeyType: 'Ed25519' });
       const pipeline = new ValidationPipeline(sdk['config'], sdk.did, sdk.credentials);
 
       const errors = pipeline.validateQuick({
@@ -304,7 +304,7 @@ describe('Migration event contracts and edge cases', () => {
       const { OriginalsSDK } = require('../../../src');
       MigrationManager.resetInstance();
 
-      const sdk = OriginalsSDK.create({ network: 'signet', defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'signet', defaultKeyType: 'Ed25519' });
       const pipeline = new ValidationPipeline(sdk['config'], sdk.did, sdk.credentials);
 
       const errors = pipeline.validateQuick({
@@ -320,3 +320,4 @@ describe('Migration event contracts and edge cases', () => {
 
 // Bring MigrationManager into scope for beforeEach-free use
 import { MigrationManager } from '../../../src/migration';
+import { MockKeyStore } from '../../mocks/MockKeyStore';

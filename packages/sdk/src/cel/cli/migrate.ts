@@ -22,7 +22,8 @@ import { parseEventLogCbor } from '../serialization/cbor.js';
 import { serializeEventLogJson } from '../serialization/json.js';
 import { serializeEventLogCbor } from '../serialization/cbor.js';
 import { multikey } from '../../crypto/Multikey.js';
-import { canonicalizeEvent } from '../canonicalize.js';
+import { signingInput } from '../../crypto/signingInput.js';
+import { CEL_CRYPTOSUITE } from '../proofVerification.js';
 import { btcoDidFromSatoshi } from '../btcoDid.js';
 import { deriveDidCel } from '../celDid.js';
 
@@ -247,21 +248,23 @@ function createSigner(privateKey: string, publicKey: string): CelSigner {
     const ed25519 = await import('@noble/ed25519');
     const decoded = multikey.decodePrivateKey(privateKey);
     
-    // Serialize data for signing using canonical JCS serialization
-    const dataBytes = canonicalizeEvent(data);
-    
-    // Sign the data
-    const signature = await (ed25519 as any).signAsync(dataBytes, decoded.key);
-    const proofValue = multikey.encodeMultibase(new Uint8Array(signature));
-    
-    return {
-      type: 'DataIntegrityProof',
-      cryptosuite: 'eddsa-jcs-2022',
+    // The proof configuration is signed along with the event (plan 042).
+    const config = {
+      type: 'DataIntegrityProof' as const,
+      cryptosuite: CEL_CRYPTOSUITE,
       created: new Date().toISOString(),
       verificationMethod: `did:key:${publicKey}#${publicKey}`,
       proofPurpose: 'assertionMethod',
-      proofValue,
     };
+    const dataBytes = signingInput.celEvent(
+      data as { type: unknown; data?: unknown; previousEvent?: unknown },
+      config
+    );
+
+    const signature = await (ed25519 as any).signAsync(dataBytes, decoded.key);
+    const proofValue = multikey.encodeMultibase(new Uint8Array(signature));
+
+    return { ...config, proofValue };
   };
 }
 

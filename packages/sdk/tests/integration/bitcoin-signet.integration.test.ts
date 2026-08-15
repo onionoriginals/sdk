@@ -19,6 +19,7 @@ import { OrdinalsClient } from '../../src/bitcoin/OrdinalsClient';
 import { BitcoinManager } from '../../src/bitcoin/BitcoinManager';
 import { OriginalsSDK } from '../../src/core/OriginalsSDK';
 import type { OriginalsConfig } from '../../src/types';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 const ORD_SIGNET_URL = process.env.ORD_SIGNET_URL;
 const BITCOIN_SIGNET_RPC_URL = process.env.BITCOIN_SIGNET_RPC_URL;
@@ -175,7 +176,7 @@ describeSignet('OriginalsSDK with signet provider', () => {
 
   beforeAll(() => {
     const provider = new OrdHttpProvider({ baseUrl: ORD_SIGNET_URL! });
-    sdk = OriginalsSDK.create({
+    sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'signet',
       webvhNetwork: 'cleffa',
       ordinalsProvider: provider,

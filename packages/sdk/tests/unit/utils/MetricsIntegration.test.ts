@@ -4,6 +4,7 @@ import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { OriginalsSDK } from '../../../src/core/OriginalsSDK';
 import type { OriginalsConfig } from '../../../src/types';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const testConfig: OriginalsConfig = {
   network: 'regtest',
@@ -162,7 +163,7 @@ describe('Metrics Integration', () => {
 
   describe('OriginalsSDK shared metrics', () => {
     test('should share MetricsCollector across all managers', () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'Ed25519',
         webvhNetwork: 'magby',
@@ -174,7 +175,7 @@ describe('Metrics Integration', () => {
     });
 
     test('should aggregate metrics from all managers', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'Ed25519',
         webvhNetwork: 'magby',
@@ -209,7 +210,7 @@ describe('Metrics Integration', () => {
     });
 
     test('should export aggregated Prometheus metrics', async () => {
-      const sdk = OriginalsSDK.create({
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
         network: 'regtest',
         defaultKeyType: 'Ed25519',
         webvhNetwork: 'magby',

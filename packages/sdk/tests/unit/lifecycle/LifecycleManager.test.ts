@@ -14,25 +14,25 @@ const resources = [
 
 describe('LifecycleManager', () => {
   test('createAsset creates a did:cel-layer asset', async () => {
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset(resources);
     expect(asset.currentLayer).toBe('did:cel');
     expect(asset.id.startsWith('did:cel:')).toBe(true);
   });
 
   test('publishToWeb migrates and records binding', async () => {
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset(resources);
-    const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    const published = await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
     expect(published.currentLayer).toBe('did:webvh');
     expect(published.bindings?.['did:webvh']).toContain('example.com');
   });
 
   test('inscribeOnBitcoin uses provider details for provenance', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset(resources);
-    await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
     const btco = await sdk.lifecycle.inscribeOnBitcoin(asset, 9);
     expect(btco.currentLayer).toBe('did:btco');
     const provenance = btco.getProvenance();
@@ -46,27 +46,27 @@ describe('LifecycleManager', () => {
   });
 
   test('inscribeOnBitcoin without provider throws error', async () => {
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
-    const asset = await sdk.lifecycle.createAsset(resources);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
+    const asset = await sdk.lifecycle.createAsset(resources, { controller: 'ephemeral' });
     await expect(sdk.lifecycle.inscribeOnBitcoin(asset, 5)).rejects.toThrow('Ordinals provider must be configured');
   });
 
   test('inscribeOnBitcoin enforces migration guard', async () => {
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const fakeAsset = { currentLayer: 'did:webvh', migrate: undefined } as unknown as OriginalsAsset;
     await expect(sdk.lifecycle.inscribeOnBitcoin(fakeAsset, 5)).rejects.toThrow('not yet implemented for this asset type');
   });
 
   test('publishToWeb throws Not implemented (coverage for throw)', async () => {
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const fakeAsset: any = { currentLayer: 'did:peer' };
     await expect(
-      sdk.lifecycle.publishToWeb(fakeAsset, 'example.com')
+      sdk.lifecycle.publishToWeb(fakeAsset, 'example.com', { onAppendFailure: 'skip' })
     ).rejects.toThrow();
   });
 
   test('inscribeOnBitcoin throws Not implemented (coverage for throw)', async () => {
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const fakeAsset: any = { currentLayer: 'did:webvh' };
     await expect(
       sdk.lifecycle.inscribeOnBitcoin(fakeAsset, 10)
@@ -75,7 +75,7 @@ describe('LifecycleManager', () => {
 
   test('transferOwnership succeeds when on btco (returns tx)', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r', type: 'text', contentType: 'text/plain', hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9' }
     ]);
@@ -88,7 +88,7 @@ describe('LifecycleManager', () => {
   });
 
   test('transferOwnership errors if not on btco layer', async () => {
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     // This one should pass given current guard
     const asset = await (async () => {
       try {
@@ -111,7 +111,7 @@ import { PSBTBuilder } from '../../../src/bitcoin/PSBTBuilder';
 describe('Bitcoin inscription MVP - dry run', () => {
   test('dry-run using mocked provider and broadcaster', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
 
     // Inject mocked dependencies
     const mockBroadcast = new BroadcastClient(async (_hex) => 'tx-dryrun', async (_txid) => ({ confirmed: true, confirmations: 1 }));
@@ -150,6 +150,7 @@ import { LifecycleManager } from '../../../src/lifecycle/LifecycleManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 describe('LifecycleManager additional branch coverage', () => {
   const lm = new LifecycleManager({ network: 'mainnet' } as any, new DIDManager({} as any), new CredentialManager({} as any, new DIDManager({} as any as never)));
@@ -161,7 +162,7 @@ describe('LifecycleManager additional branch coverage', () => {
       resources: [{ id: 'r1', type: 'data', contentType: 'text/plain', hash: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08', content: 'test' }],
       migrate: undefined  // This should cause an error when called
     };
-    await expect(lm.publishToWeb(asset, 'example.com')).rejects.toThrow();
+    await expect(lm.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' })).rejects.toThrow();
   });
 });
 
@@ -178,12 +179,12 @@ const lm = new LifecycleManager(dummyConfig as any, didManager, credentialManage
 describe('LifecycleManager additional branches', () => {
   test('publishToWeb throws when currentLayer is not did:peer', async () => {
     const asset: any = { currentLayer: 'did:webvh', migrate: async () => { } };
-    await expect(lm.publishToWeb(asset, 'example.com')).rejects.toThrow();
+    await expect(lm.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' })).rejects.toThrow();
   });
 
   test('inscribeOnBitcoin throws for invalid layer', async () => {
     const asset: any = { currentLayer: 'did:wrong', migrate: async () => { } };
-    await expect(lm.inscribeOnBitcoin(asset)).rejects.toThrow('not yet implemented for this layer');
+    await expect(lm.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' })).rejects.toThrow('not yet implemented for this layer');
   });
 });
 
@@ -195,9 +196,9 @@ describe('LifecycleManager additional branches', () => {
 describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
   test('uses provider.estimateFee when feeRate not provided', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
-    const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9' }]);
-    const result = await sdk.lifecycle.inscribeOnBitcoin(asset);
+    const sdk = OriginalsSDK.create({ onAppendFailure: 'skip', storageAdapter: new MemoryStorageAdapter(), network: 'regtest', bitcoinRpcUrl: 'http://ord', ordinalsProvider: provider } as any);
+    const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9' }], { controller: 'ephemeral' });
+    const result = await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
     expect(result.currentLayer).toBe('did:btco');
     const prov = (result as any).getProvenance();
     const latest = prov.migrations[prov.migrations.length - 1];
@@ -206,9 +207,9 @@ describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
 
   test('transferOwnership uses provenance inscription data', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = await sdk.lifecycle.createAsset(resources);
-    await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
     await sdk.lifecycle.inscribeOnBitcoin(asset, 8);
     const tx = await sdk.lifecycle.transferOwnership(asset, 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7');
     // Pure sat move: txid is returned; ownership history is the sat's UTXO chain, not provenance.
@@ -220,7 +221,7 @@ describe('LifecycleManager.inscribeOnBitcoin without explicit feeRate', () => {
 describe('LifecycleManager.issuePublicationCredential guard', () => {
   test('publishToWeb with empty resources does not crash on credential issuance', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ordinalsProvider: provider } as any);
     // Create asset then clear its resources to simulate empty-resource edge case
     const asset = await sdk.lifecycle.createAsset([{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9' }]);
     // Forcefully empty the resources array
@@ -229,7 +230,7 @@ describe('LifecycleManager.issuePublicationCredential guard', () => {
 
     // publishToWeb should not throw due to empty resources in credential issuance
     // The credential issuance should be skipped gracefully
-    await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
     // Verify no ResourceMigrated credential was issued (since resources were empty)
     expect(asset.credentials.length).toBe(0);
   });
@@ -237,22 +238,22 @@ describe('LifecycleManager.issuePublicationCredential guard', () => {
 
 describe('publishToWeb storage requirement (issue #244)', () => {
   test('throws STORAGE_REQUIRED when no storageAdapter is configured', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', url: undefined as any }
     ] as any);
-    await expect(sdk.lifecycle.publishToWeb(asset, 'example.com'))
+    await expect(sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' }))
       .rejects.toThrow(/storageAdapter must be configured/);
     // The asset must NOT have migrated
     expect(asset.currentLayer).toBe('did:cel');
   });
 
   test('throws STORAGE_REQUIRED when the adapter implements neither put nor putObject', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest', storageAdapter: { get: async () => null } as any });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', storageAdapter: { get: async () => null } as any });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', url: undefined as any }
     ] as any);
-    await expect(sdk.lifecycle.publishToWeb(asset, 'example.com'))
+    await expect(sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' }))
       .rejects.toThrow(/neither put\(\) nor putObject\(\)/);
     expect(asset.currentLayer).toBe('did:cel');
   });
@@ -260,12 +261,12 @@ describe('publishToWeb storage requirement (issue #244)', () => {
 
 describe('publishToWeb with URL-only resources (review follow-up on #244)', () => {
   test('publishes without a storageAdapter when no resource carries inline content', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
       { id: 'r1', type: 'text', contentType: 'text/plain', hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9', url: 'https://cdn.example.com/r1' }
     ] as any);
     // No inline content → no storage writes needed → no STORAGE_REQUIRED
-    const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    const published = await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
     expect(published.currentLayer).toBe('did:webvh');
   });
 });

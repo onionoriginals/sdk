@@ -24,6 +24,7 @@ import { OrdinalsClient } from '../../src/bitcoin/OrdinalsClient';
 import { BitcoinManager } from '../../src/bitcoin/BitcoinManager';
 import { OriginalsSDK } from '../../src/core/OriginalsSDK';
 import type { OriginalsConfig } from '../../src/types';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 const ORD_REGTEST_URL = process.env.ORD_REGTEST_URL;
 const BITCOIN_REGTEST_RPC_URL = process.env.BITCOIN_REGTEST_RPC_URL;
@@ -141,7 +142,7 @@ describeRegtest('OriginalsSDK with regtest provider', () => {
 
   beforeAll(() => {
     const provider = new OrdHttpProvider({ baseUrl: ORD_REGTEST_URL! });
-    sdk = OriginalsSDK.create({
+    sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       webvhNetwork: 'magby',
       ordinalsProvider: provider,

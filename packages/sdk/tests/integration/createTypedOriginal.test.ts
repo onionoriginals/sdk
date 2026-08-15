@@ -12,12 +12,13 @@ import {
   KindRegistry,
 } from '../../src/kinds';
 import { hashResource } from '../../src/utils/validation';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 describe('LifecycleManager.createTypedOriginal', () => {
   let sdk: OriginalsSDK;
   
   beforeEach(() => {
-    sdk = OriginalsSDK.create({
+    sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       enableLogging: false,
@@ -341,7 +342,7 @@ describe('LifecycleManager.createTypedOriginal', () => {
 
 describe('KindRegistry integration', () => {
   it('should use KindRegistry for validation in createTypedOriginal', async () => {
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'Ed25519',
     });

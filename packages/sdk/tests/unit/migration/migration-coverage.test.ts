@@ -29,6 +29,7 @@ import { ValidationPipeline } from '../../../src/migration/validation/Validation
 import { BitcoinManager } from '../../../src/bitcoin/BitcoinManager';
 import type { OriginalsConfig } from '../../../src/types';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -46,7 +47,7 @@ const sampleResources = [
 ];
 
 function makeSdk(extra: Partial<OriginalsConfig> = {}) {
-  return OriginalsSDK.create({ ...baseConfig, ...extra });
+  return OriginalsSDK.create({ keyStore: new MockKeyStore(), ...baseConfig, ...extra });
 }
 
 function makeAuditRecord(overrides: Partial<MigrationAuditRecord> = {}): MigrationAuditRecord {
@@ -83,14 +84,14 @@ function makeAuditRecord(overrides: Partial<MigrationAuditRecord> = {}): Migrati
 describe('CORE-MIG-EVENTS-002/boundary: createAsset with zero resources', () => {
   it('throws a structured error when resources array is empty', async () => {
     const sdk = makeSdk();
-    await expect(sdk.lifecycle.createAsset([])).rejects.toThrow(/At least one resource/i);
+    await expect(sdk.lifecycle.createAsset([], { controller: 'ephemeral' })).rejects.toThrow(/At least one resource/i);
   });
 
   it('error is synchronously deterministic (not a flaky network error)', async () => {
     const sdk = makeSdk();
     // Run twice — both must throw with the same guard
-    await expect(sdk.lifecycle.createAsset([])).rejects.toThrow();
-    await expect(sdk.lifecycle.createAsset([])).rejects.toThrow();
+    await expect(sdk.lifecycle.createAsset([], { controller: 'ephemeral' })).rejects.toThrow();
+    await expect(sdk.lifecycle.createAsset([], { controller: 'ephemeral' })).rejects.toThrow();
   });
 });
 

@@ -97,7 +97,7 @@ describe('head-freshness e2e: truncated-log hand-off attack', () => {
     const { envelope } = await buildRotatedAsset(provider);
 
     // A manager with NO ordinals provider cannot check freshness on a btco log.
-    const offlineSdk = OriginalsSDK.create({
+    const offlineSdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       storageAdapter: new MemoryStorageAdapter(),

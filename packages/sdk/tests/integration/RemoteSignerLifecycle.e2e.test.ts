@@ -22,15 +22,17 @@ import type { EventTypeMap } from '../../src/events/types';
 
 const contentHash = (c: string) => createHash('sha256').update(c, 'utf8').digest('hex');
 
-function makeSdk(opts?: { signer?: MockRemoteSigner }) {
+function makeSdk(opts?: { signer?: MockRemoteSigner; onAppendFailure?: 'throw' | 'skip' }) {
   const ordinalsProvider = new OrdMockProvider();
   const sdk = OriginalsSDK.create({
     network: 'regtest',
     defaultKeyType: 'Ed25519',
     ordinalsProvider,
     storageAdapter: new MemoryStorageAdapter(),
-    // Deliberately NO keyStore: custody never exports a key.
+    // Deliberately NO keyStore: custody never exports a key. That is the whole
+    // point of this suite — nothing here may fall back to a local key.
     ...(opts?.signer ? { signer: opts.signer } : {}),
+    ...(opts?.onAppendFailure ? { onAppendFailure: opts.onAppendFailure } : {}),
   });
   return { sdk, ordinalsProvider };
 }
@@ -144,7 +146,7 @@ describe('remote-custody lifecycle (MockRemoteSigner, no keyStore)', () => {
     // call: a session-backed signer goes stale inside it, and a reloaded asset
     // has no binding at all. Custody is explicit at every append.
     const remote = new MockRemoteSigner();
-    const { sdk } = makeSdk();
+    const { sdk } = makeSdk({ onAppendFailure: 'skip' });
     const skipped: EventTypeMap['cel:append-skipped'][] = [];
     sdk.lifecycle.on('cel:append-skipped', (e) => { skipped.push(e); });
 
@@ -190,11 +192,13 @@ describe('remote-custody lifecycle (MockRemoteSigner, no keyStore)', () => {
     await expect(sdk.lifecycle.createAsset(freshResources(), { signer: secp })).rejects.toThrow(/Ed25519/);
   });
 
-  test('without any custody the old degrade contract is unchanged (cel:append-skipped)', async () => {
-    const { sdk } = makeSdk();
+  test('the degrade contract still exists, but only when opted into (plan 041)', async () => {
+    // Pre-041 this was the default and publish silently lost its migrate event.
+    // The behavior is unchanged — it is just no longer what you get by accident.
+    const { sdk } = makeSdk({ onAppendFailure: 'skip' });
     const skipped: EventTypeMap['cel:append-skipped'][] = [];
     sdk.lifecycle.on('cel:append-skipped', (e) => { skipped.push(e); });
-    const asset = await sdk.lifecycle.createAsset(freshResources());
+    const asset = await sdk.lifecycle.createAsset(freshResources(), { controller: 'ephemeral' });
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     expect(skipped).toHaveLength(1);
     expect(skipped[0].reason).toBe('NO_KEYSTORE');

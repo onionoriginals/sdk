@@ -73,7 +73,7 @@ describe('LifecycleManager.getCurrentOwner', () => {
   });
 
   test('throws ORD_PROVIDER_REQUIRED when the SDK has no ordinalsProvider configured', async () => {
-    const sdk = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519' });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519' });
     const asset = new OriginalsAsset(
       [{ id: 'r', type: 'text', contentType: 'text/plain', hash: 'h' }],
       { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:42' } as any,

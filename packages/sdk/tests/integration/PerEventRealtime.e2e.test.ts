@@ -56,7 +56,7 @@ describe('per-event real-time chain recovery (#407 phase 3)', () => {
     expect(inssOnSat(ordinalsProvider, sat)!.length).toBe(afterMigrate + 3);
 
     // Fresh resolver: only the sat + provider.
-    const fresh = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider });
+    const fresh = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519', ordinalsProvider });
     const { asset: recovered, verification } = await fresh.lifecycle.resolveAssetFromSat(sat);
 
     expect(verification?.verified).toBe(true);

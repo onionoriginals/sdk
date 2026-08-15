@@ -9,42 +9,98 @@ import { describe, test, expect } from 'bun:test';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { signingInput } from '../../../src/crypto/signingInput';
 import { canonicalizeEvent, canonicalizeEntryForChain, witnessSigningBytes } from '../../../src/cel/canonicalize';
-import { verifyDidKeyProof } from '../../../src/cel/proofVerification';
+import { verifyDidKeyProof, CEL_CRYPTOSUITE } from '../../../src/cel/proofVerification';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { multikey } from '../../../src/crypto/Multikey';
 import { EdDSACryptosuiteManager } from '../../../src/vc/cryptosuites/eddsa';
 
 describe('signingInput.celEvent', () => {
-  test('matches the chain-canonicalization of the committed fields', () => {
+  const CONFIG = {
+    type: 'DataIntegrityProof',
+    cryptosuite: CEL_CRYPTOSUITE,
+    created: '2026-01-01T00:00:00Z',
+    verificationMethod: 'did:key:zAbc#zAbc',
+    proofPurpose: 'assertionMethod',
+  };
+
+  test('binds the proof configuration: sha256(JCS(config)) || sha256(JCS(event))', () => {
     const entry = { type: 'update', data: { a: 1, z: [2, 3] }, previousEvent: 'uEiDprev' };
-    expect(signingInput.celEvent(entry)).toEqual(canonicalizeEntryForChain(entry));
+    const bytes = signingInput.celEvent(entry, CONFIG);
+
+    expect(bytes.length).toBe(64);
+    expect(Buffer.from(bytes.slice(0, 32))).toEqual(Buffer.from(sha256(canonicalizeEvent(CONFIG))));
+    expect(Buffer.from(bytes.slice(32))).toEqual(
+      Buffer.from(sha256(canonicalizeEntryForChain(entry)))
+    );
+  });
+
+  test('a different proof configuration changes the preimage', () => {
+    // The pre-042 construction signed the event alone, so `created` and
+    // `verificationMethod` could be edited after signing without detection.
+    const entry = { type: 'update', data: { a: 1 } };
+    const other = { ...CONFIG, created: '2027-06-06T00:00:00Z' };
+    expect(signingInput.celEvent(entry, CONFIG)).not.toEqual(signingInput.celEvent(entry, other));
+  });
+
+  test('proofValue is excluded from the bound configuration', () => {
+    const entry = { type: 'update', data: { a: 1 } };
+    expect(signingInput.celEvent(entry, { ...CONFIG, proofValue: 'zSomething' }))
+      .toEqual(signingInput.celEvent(entry, CONFIG));
   });
 
   test('omits previousEvent for a genesis-shaped entry', () => {
-    const entry = { type: 'create', data: { name: 'x' } };
-    expect(new TextDecoder().decode(signingInput.celEvent(entry)))
-      .toBe('{"data":{"name":"x"},"type":"create"}');
+    const genesis = { type: 'create', data: { name: 'x' } };
+    const withPrev = { type: 'create', data: { name: 'x' }, previousEvent: 'uEiD' };
+    expect(signingInput.celEvent(genesis, CONFIG)).not.toEqual(signingInput.celEvent(withPrev, CONFIG));
+    expect(Buffer.from(signingInput.celEvent(genesis, CONFIG).slice(32))).toEqual(
+      Buffer.from(sha256(new TextEncoder().encode('{"data":{"name":"x"},"type":"create"}')))
+    );
   });
 
   test('never signs stray keys (proof etc. excluded from the preimage)', () => {
     const clean = { type: 'update', data: { a: 1 } };
     const dirty = { ...clean, proof: [{ proofValue: 'zXX' }], extra: true };
-    expect(signingInput.celEvent(dirty)).toEqual(signingInput.celEvent(clean));
+    expect(signingInput.celEvent(dirty, CONFIG)).toEqual(signingInput.celEvent(clean, CONFIG));
   });
 
   test('a signature over celEvent verifies through the CEL proof verifier', async () => {
     const secret = ed25519.utils.randomSecretKey();
     const pub = multikey.encodePublicKey(ed25519.getPublicKey(secret), 'Ed25519');
     const eventBase = { type: 'create', data: { name: 'asset', controller: `did:key:${pub}` } };
-    const proof = {
+    const config = {
       type: 'DataIntegrityProof',
-      cryptosuite: 'eddsa-jcs-2022',
+      cryptosuite: CEL_CRYPTOSUITE,
       created: new Date().toISOString(),
       verificationMethod: `did:key:${pub}#${pub}`,
       proofPurpose: 'assertionMethod',
-      proofValue: multikey.encodeMultibase(ed25519.sign(signingInput.celEvent(eventBase), secret)),
+    };
+    const proof = {
+      ...config,
+      proofValue: multikey.encodeMultibase(ed25519.sign(signingInput.celEvent(eventBase, config), secret)),
     };
     const check = await verifyDidKeyProof(proof, eventBase);
     expect(check.verified).toBe(true);
+  });
+
+  test('tampering with the emitted proof configuration invalidates it', async () => {
+    const secret = ed25519.utils.randomSecretKey();
+    const pub = multikey.encodePublicKey(ed25519.getPublicKey(secret), 'Ed25519');
+    const eventBase = { type: 'create', data: { name: 'asset' } };
+    const config = {
+      type: 'DataIntegrityProof',
+      cryptosuite: CEL_CRYPTOSUITE,
+      created: '2026-01-01T00:00:00Z',
+      verificationMethod: `did:key:${pub}#${pub}`,
+      proofPurpose: 'assertionMethod',
+    };
+    const proof = {
+      ...config,
+      proofValue: multikey.encodeMultibase(ed25519.sign(signingInput.celEvent(eventBase, config), secret)),
+    };
+
+    // Backdating the proof used to be undetectable.
+    const backdated = { ...proof, created: '2020-01-01T00:00:00Z' };
+    expect((await verifyDidKeyProof(backdated, eventBase)).verified).toBe(false);
   });
 });
 

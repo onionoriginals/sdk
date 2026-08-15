@@ -9,11 +9,12 @@ import { createHash } from 'crypto';
 import { OriginalsSDK } from '../../../src';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const contentHash = (c: string) => createHash('sha256').update(c, 'utf8').digest('hex');
 
 const makeSdk = (extra: Record<string, unknown> = {}) =>
-  OriginalsSDK.create({ storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ...extra } as any);
+  OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest', ...extra } as any);
 
 const goodResource = () => ({
   id: 'res1',
@@ -31,7 +32,7 @@ describe('issue #347: content/hash verification', () => {
       // Valid hex, valid length — but the hash of DIFFERENT bytes.
       hash: contentHash('some other bytes entirely')
     };
-    await expect(sdk.lifecycle.createAsset([mismatched])).rejects.toThrow(/RESOURCE_HASH_MISMATCH|does not match its declared hash/);
+    await expect(sdk.lifecycle.createAsset([mismatched], { controller: 'ephemeral' })).rejects.toThrow(/RESOURCE_HASH_MISMATCH|does not match its declared hash/);
   });
 
   test('createAsset accepts inline content whose hash matches (case-insensitive)', async () => {

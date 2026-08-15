@@ -206,14 +206,14 @@ describe('authorizeSigner (#366 non-cooperative rotation, write side; optional a
     // No keyStore: the trailing witness-ack append (the only other path to
     // persistCelArtifacts) degrades to a skip, so the direct persist after
     // the self-signed rotation is the only thing that can reach storage.
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ onAppendFailure: 'skip',
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider: provider,
       storageAdapter: storage
     } as any);
 
-    const asset = await sdk.lifecycle.createAsset(RES);
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
     const newSigner = await new KeyManager().generateKeyPair('Ed25519');

@@ -1,3 +1,5 @@
+import { sha256 } from '@noble/hashes/sha2.js';
+
 /**
  * CEL Event Canonicalization
  *
@@ -91,6 +93,20 @@ export function witnessSigningBytes(digestMultibase: string): Uint8Array {
 export function canonicalizeEntryForChain(
   entry: { type: unknown; data: unknown; previousEvent?: unknown }
 ): Uint8Array {
+  return canonicalizeEvent(committedFields(entry));
+}
+
+/**
+ * The committed subset of a log entry — `{ type, data, previousEvent? }` — as
+ * a plain object. The signature and the chain link both cover exactly this;
+ * the `proof` array is excluded (see {@link canonicalizeEntryForChain}).
+ *
+ * `previousEvent` is omitted when absent so a first event's payload is
+ * `{ type, data }`, matching what the verifier reconstructs.
+ */
+export function committedFields(
+  entry: { type: unknown; data: unknown; previousEvent?: unknown }
+): { type: unknown; data: unknown; previousEvent?: unknown } {
   const committed: { type: unknown; data: unknown; previousEvent?: unknown } = {
     type: entry.type,
     data: entry.data,
@@ -98,5 +114,47 @@ export function canonicalizeEntryForChain(
   if (entry.previousEvent !== undefined) {
     committed.previousEvent = entry.previousEvent;
   }
-  return canonicalizeEvent(committed);
+  return committed;
+}
+
+/**
+ * The CEL proof signing input (plan 042): `sha256(JCS(proofConfig)) ||
+ * sha256(JCS(committedEvent))`, mirroring the W3C Data Integrity hashing step.
+ *
+ * The proof CONFIGURATION is bound into the signature. Before 042 the signer
+ * signed the event alone, so `created`, `verificationMethod`, `proofPurpose`
+ * and even `cryptosuite` were unattested: they could be edited after the fact
+ * without invalidating anything. `created` in particular was a freely
+ * forgeable timestamp sitting inside a structure whose whole purpose is
+ * tamper-evidence.
+ *
+ * Binding the configuration also makes the two constructions mutually
+ * exclusive, which is what lets the verifier dispatch on `cryptosuite` safely:
+ * relabelling a legacy proof to the new suite breaks it (the legacy signature
+ * does not cover the config), and relabelling a new proof to the legacy suite
+ * breaks it too (the legacy preimage is not what was signed). Both directions
+ * fail closed.
+ *
+ * The payload is canonicalized AS GIVEN rather than reshaped: this primitive
+ * also secures the proofless did:btco documents that authenticate a competing
+ * anchoring, which are not events and would be destroyed by forcing the
+ * `{ type, data, previousEvent }` shape onto them. Callers pass exactly the
+ * bytes they mean, on both the signing and verifying side.
+ *
+ * @param payload - the object the proof attests to (for an event, its
+ *   committed fields — `{ type, data, previousEvent? }`)
+ * @param proofConfig - the proof WITHOUT `proofValue`
+ */
+export function celProofSigningInput(
+  payload: unknown,
+  proofConfig: Record<string, unknown>
+): Uint8Array {
+  const config = { ...proofConfig };
+  delete config.proofValue;
+  const configHash = sha256(canonicalizeEvent(config));
+  const eventHash = sha256(canonicalizeEvent(payload));
+  const out = new Uint8Array(configHash.length + eventHash.length);
+  out.set(configHash, 0);
+  out.set(eventHash, configHash.length);
+  return out;
 }

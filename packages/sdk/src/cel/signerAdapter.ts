@@ -6,6 +6,7 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { multikey } from '../crypto/Multikey.js';
 import { signingInput } from '../crypto/signingInput.js';
+import { CEL_CRYPTOSUITE } from './proofVerification.js';
 import { StructuredError } from '../utils/telemetry.js';
 import { multibase } from '../utils/encoding.js';
 import type { KeyStore } from '../types/common.js';
@@ -25,19 +26,25 @@ function assertEd25519(privateKeyMultibase: string): Uint8Array {
 }
 
 function buildProof(secret: Uint8Array, verificationMethod: string, data: unknown): DataIntegrityProof {
-  // @noble/curves' ed25519.sign is synchronous (unlike @noble/ed25519's signAsync).
-  const sig = ed25519.sign(
-    signingInput.celEvent(data as { type: unknown; data?: unknown; previousEvent?: unknown }),
-    secret
-  );
-  return {
-    type: 'DataIntegrityProof',
-    cryptosuite: 'eddsa-jcs-2022',
+  // The configuration is built FIRST and signed along with the event (plan
+  // 042), so `created`/`verificationMethod`/`proofPurpose`/`cryptosuite` are
+  // attested rather than editable metadata riding alongside the signature.
+  const config = {
+    type: 'DataIntegrityProof' as const,
+    cryptosuite: CEL_CRYPTOSUITE,
     created: new Date().toISOString(),
     verificationMethod,
     proofPurpose: 'assertionMethod',
-    proofValue: multikey.encodeMultibase(sig)
   };
+  // @noble/curves' ed25519.sign is synchronous (unlike @noble/ed25519's signAsync).
+  const sig = ed25519.sign(
+    signingInput.celEvent(
+      data as { type: unknown; data?: unknown; previousEvent?: unknown },
+      config
+    ),
+    secret
+  );
+  return { ...config, proofValue: multikey.encodeMultibase(sig) };
 }
 
 export function celSignerFromKeyPair(keyPair: KeyPair): {

@@ -13,7 +13,8 @@
 
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { multikey } from '../../src/crypto/Multikey';
-import { canonicalizeEvent } from '../../src/cel/canonicalize';
+import { signingInput } from '../../src/crypto/signingInput';
+import { CEL_CRYPTOSUITE } from '../../src/cel/proofVerification';
 import type { DataIntegrityProof } from '../../src/cel/types';
 
 export interface RealCelSigner {
@@ -39,14 +40,22 @@ export function createRealCelSigner(proofPurpose = 'assertionMethod'): RealCelSi
   const controller = `did:key:${publicKeyMultibase}`;
   const verificationMethod = `${controller}#${publicKeyMultibase}`;
 
-  const signer = async (data: unknown): Promise<DataIntegrityProof> => ({
-    type: 'DataIntegrityProof',
-    cryptosuite: 'eddsa-jcs-2022',
-    created: new Date().toISOString(),
-    verificationMethod,
-    proofPurpose,
-    proofValue: multikey.encodeMultibase(ed25519.sign(canonicalizeEvent(data), privateKeyBytes)),
-  });
+  const signer = async (data: unknown): Promise<DataIntegrityProof> => {
+    // Mirrors what the SDK emits since plan 042: the proof configuration is
+    // built first and signed along with the event.
+    const config = {
+      type: 'DataIntegrityProof' as const,
+      cryptosuite: CEL_CRYPTOSUITE,
+      created: new Date().toISOString(),
+      verificationMethod,
+      proofPurpose,
+    };
+    const bytes = signingInput.celEvent(
+      data as { type: unknown; data?: unknown; previousEvent?: unknown },
+      config
+    );
+    return { ...config, proofValue: multikey.encodeMultibase(ed25519.sign(bytes, privateKeyBytes)) };
+  };
 
   return { signer, verificationMethod, controller, publicKeyMultibase, privateKeyBytes };
 }

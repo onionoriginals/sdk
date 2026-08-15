@@ -10,7 +10,7 @@
  * safe to import from the browser-slim entry points.
  */
 
-import { canonicalizeEntryForChain, witnessSigningBytes } from '../cel/canonicalize.js';
+import { celProofSigningInput, committedFields, witnessSigningBytes } from '../cel/canonicalize.js';
 import { sha256Bytes } from '../utils/hash.js';
 import { StructuredError } from '../utils/telemetry.js';
 
@@ -30,8 +30,16 @@ export const signingInput = {
    * `{ type, data, previousEvent? }` — exactly what `verifyEventLog`
    * reconstructs and verifies. Stray keys are never signed.
    */
-  celEvent(entry: { type: unknown; data?: unknown; previousEvent?: unknown }): Uint8Array {
-    return canonicalizeEntryForChain(entry as { type: unknown; data: unknown; previousEvent?: unknown });
+  celEvent(
+    entry: { type: unknown; data?: unknown; previousEvent?: unknown },
+    proofConfig: Record<string, unknown>
+  ): Uint8Array {
+    // The proof configuration is part of the signature since plan 042 — pass
+    // the proof you are about to emit, minus its proofValue.
+    return celProofSigningInput(
+      committedFields(entry as { type: unknown; data: unknown; previousEvent?: unknown }),
+      proofConfig
+    );
   },
 
   /**

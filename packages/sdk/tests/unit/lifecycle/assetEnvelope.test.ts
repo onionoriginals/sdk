@@ -41,9 +41,9 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     ]);
     const didCel = asset.id;
 
-    await sdk.lifecycle.publishToWeb(asset, 'example.com');
+    await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
     const webvhBinding = asset.bindings!['did:webvh'];
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
     const btcoBinding = asset.bindings!['did:btco'];
 
     // A post-genesis resource version → appends a signed `update` CEL event.
@@ -106,8 +106,8 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
     ]);
-    await sdk.lifecycle.publishToWeb(asset, 'example.com');
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
+    await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
 
     const env = asset.serialize();
     const roundTripped = JSON.parse(JSON.stringify(env));
@@ -120,8 +120,8 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const sdk = makeSDK(false);
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
-    ]);
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    ], { controller: 'ephemeral' });
+    await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
     const btcoBinding = asset.bindings!['did:btco'];
 
     const env = asset.serialize();
@@ -153,8 +153,8 @@ describe('AssetEnvelope + serialize() (#377)', () => {
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }
     ]);
-    await sdk.lifecycle.publishToWeb(asset, 'example.com');
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
+    await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
+    await sdk.lifecycle.inscribeOnBitcoin(asset, { onAppendFailure: 'skip' });
 
     const originalCelVmId = asset.did.verificationMethod?.[0]?.id;
     const originalCelKey = asset.did.verificationMethod?.[0]?.publicKeyMultibase;

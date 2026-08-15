@@ -9,10 +9,11 @@ import { CheckpointManager } from '../../../src/migration/checkpoint/CheckpointM
 import { MigrationStateEnum, MigrationErrorType } from '../../../src/migration/types';
 import { OriginalsSDK } from '../../../src';
 import { MigrationManager } from '../../../src/migration';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 function makeRollbackSetup() {
   MigrationManager.resetInstance();
-  const sdk = OriginalsSDK.create({
+  const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
     network: 'signet',
     defaultKeyType: 'Ed25519'
   });

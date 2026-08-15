@@ -162,10 +162,10 @@ describe('Resource-update handoff (e2e)', () => {
     // serializes and hands off, that v2 is unprovable — indistinguishable from a
     // forgery. The buyer must not silently accept it (fail closed on a v≥2
     // resource with no backing verified update event).
-    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519' });
+    const creator = OriginalsSDK.create({ onAppendFailure: 'skip', network: 'regtest', defaultKeyType: 'Ed25519' });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
     await asset.addResourceVersion('note', 'v2', 'text/plain'); // degrades (no signer)
     expect(asset.celLog!.events.some(e => e.type === 'update')).toBe(false);
 
@@ -175,10 +175,10 @@ describe('Resource-update handoff (e2e)', () => {
 
   test('degrade: keyless creator emits cel:append-skipped and the update is not on the log', async () => {
     // No keyStore ⇒ createAsset drops the controller key ⇒ appends degrade.
-    const creator = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519' });
+    const creator = OriginalsSDK.create({ onAppendFailure: 'skip', network: 'regtest', defaultKeyType: 'Ed25519' });
     const asset = await creator.lifecycle.createAsset([
       { id: 'note', type: 'text', content: 'v1', contentType: 'text/plain', hash: h('v1') }
-    ]);
+    ], { controller: 'ephemeral' });
     const skipped: CelAppendSkippedEvent[] = [];
     creator.lifecycle.on('cel:append-skipped', (e) => skipped.push(e as CelAppendSkippedEvent));
 
@@ -204,7 +204,7 @@ describe('Resource-update handoff (e2e)', () => {
     // 1) Key temporarily unavailable → this update degrades (in-memory only).
     const saved = ks.getAllKeys();
     ks.clear();
-    await asset.addResourceVersion('note', 'v2', 'text/plain');
+    await asset.addResourceVersion('note', 'v2', 'text/plain', undefined, { onAppendFailure: 'skip' });
     expect(asset.getResourceVersion('note', 2)?.content).toBe('v2'); // in-memory advanced
     expect(asset.celLog!.events.some(e => e.type === 'update')).toBe(false); // nothing on log
 

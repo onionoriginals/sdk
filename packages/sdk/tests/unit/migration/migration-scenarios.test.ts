@@ -35,6 +35,7 @@ import { BitcoinManager } from '../../../src/bitcoin/BitcoinManager';
 import type { OriginalsConfig } from '../../../src/types';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 // ---------------------------------------------------------------------------
 // Shared test helpers
@@ -62,7 +63,7 @@ describe.skip('CORE-MIG-EVENTS-025: RollbackManager.canRollback', () => {
   let rollbackManager: RollbackManager;
 
   beforeEach(() => {
-    sdk = OriginalsSDK.create({ ...baseConfig });
+    sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), ...baseConfig });
     checkpointManager = new CheckpointManager(
       (sdk as any).config,
       sdk.did,
@@ -169,7 +170,7 @@ describe.skip('CORE-MIG-EVENTS-032: DIDCompatibilityValidator', () => {
   let validator: DIDCompatibilityValidator;
 
   beforeEach(() => {
-    sdk = OriginalsSDK.create({ ...baseConfig });
+    sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), ...baseConfig });
     validator = new DIDCompatibilityValidator((sdk as any).config, sdk.did);
   });
 
@@ -787,7 +788,7 @@ describe.skip('CORE-MIG-EVENTS-039: Peer→WebVH migration preserves asset resou
   });
 
   test('[happy] LifecycleManager.publishToWeb preserves all asset resources after migration', async () => {
-    const sdk = OriginalsSDK.create({ ...baseConfig });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), ...baseConfig });
     const resources = [
       { id: 'img-1', type: 'Image', contentType: 'image/png', hash: 'a5c741c7dea3a96944022b4b9a0b1480cfbeef5f4cc934850e8afacb48e18c5e', content: 'imgdata' },
       { id: 'doc-1', type: 'Document', contentType: 'application/pdf', hash: 'aef55fef7217f696b6624c1770f9e955a4d9f90d9e9261119e301c1309e2fd99', content: 'docdata' },
@@ -809,7 +810,7 @@ describe.skip('CORE-MIG-EVENTS-039: Peer→WebVH migration preserves asset resou
 
   test('[happy] MigrationManager peer→webvh records correct source and target DIDs', async () => {
     MigrationManager.resetInstance();
-    const sdk = OriginalsSDK.create({ ...baseConfig });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), ...baseConfig });
     const migrationManager = MigrationManager.getInstance(
       (sdk as any).config,
       sdk.did,
@@ -840,7 +841,7 @@ describe.skip('CORE-MIG-EVENTS-039: Peer→WebVH migration preserves asset resou
 describe.skip('CORE-MIG-EVENTS-040: WebVH→Bitcoin migration via LifecycleManager', () => {
   test('[happy] inscribeOnBitcoin returns inscriptionId in provenance', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       ...baseConfig,
       ordinalsProvider: provider,
     } as any);
@@ -861,7 +862,7 @@ describe.skip('CORE-MIG-EVENTS-040: WebVH→Bitcoin migration via LifecycleManag
 
   test('[boundary] inscribeOnBitcoin respects explicit feeRate parameter', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       ...baseConfig,
       ordinalsProvider: provider,
     } as any);
@@ -892,7 +893,7 @@ describe.skip('CORE-MIG-EVENTS-041: Peer→Bitcoin direct migration', () => {
 
   test('[happy] direct peer→btco migration succeeds via LifecycleManager', async () => {
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       ...baseConfig,
       ordinalsProvider: provider,
     } as any);
@@ -912,7 +913,7 @@ describe.skip('CORE-MIG-EVENTS-041: Peer→Bitcoin direct migration', () => {
   test('[happy] MigrationManager peer→btco creates a did:btco DID', async () => {
     MigrationManager.resetInstance();
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       ...baseConfig,
       ordinalsProvider: provider,
     } as any);
@@ -944,7 +945,7 @@ describe.skip('CORE-MIG-EVENTS-041: Peer→Bitcoin direct migration', () => {
     // PeerToBtcoMigration takes the direct path — no webvh intermediate.
     MigrationManager.resetInstance();
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       ...baseConfig,
       ordinalsProvider: provider,
     } as any);
@@ -983,7 +984,7 @@ describe.skip('CORE-MIG-EVENTS-042: Cost estimation webvh→btco includes Bitcoi
   test('[happy] estimateMigrationCost for webvh→btco returns non-zero networkFees', async () => {
     MigrationManager.resetInstance();
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       ...baseConfig,
       ordinalsProvider: provider,
     } as any);
@@ -1011,7 +1012,7 @@ describe.skip('CORE-MIG-EVENTS-042: Cost estimation webvh→btco includes Bitcoi
   test('[boundary] webvh→btco higher feeRate produces larger cost estimate', async () => {
     MigrationManager.resetInstance();
     const provider = new MockOrdinalsProvider();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       ...baseConfig,
       ordinalsProvider: provider,
     } as any);
@@ -1037,7 +1038,7 @@ describe.skip('CORE-MIG-EVENTS-042: Cost estimation webvh→btco includes Bitcoi
 
   test('[happy] peer→webvh cost estimation returns zero networkFees', async () => {
     MigrationManager.resetInstance();
-    const sdk = OriginalsSDK.create({ ...baseConfig });
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), ...baseConfig });
     const migrationManager = MigrationManager.getInstance(
       (sdk as any).config,
       sdk.did,

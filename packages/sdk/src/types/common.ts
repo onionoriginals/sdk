@@ -51,10 +51,24 @@ export type InscribeConfirm =
   | 'now'
   | ((estimate: AppendCostEstimate) => boolean | Promise<boolean>);
 
+/**
+ * What a lifecycle operation does when it cannot sign its own provenance event
+ * (plan 041). `'throw'` (default) fails the operation — it has not really
+ * succeeded if the log is missing the event it just described. `'skip'` is the
+ * pre-041 behavior: emit `cel:append-skipped` and carry on.
+ */
+export type AppendFailurePolicy = 'throw' | 'skip';
+
 export interface OriginalsConfig {
   network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
   bitcoinRpcUrl?: string;
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
+  /**
+   * Key PERSISTENCE (plan 041). This is not a signing authority: it cannot
+   * represent custody that never exports a key, so prefer `signer` for
+   * authorship. A keyStore still backs local-key flows and is probed for the
+   * controller's key when no signer matches.
+   */
   keyStore?: KeyStore;
   /**
    * Default authorship signer (plan 039). When set, lifecycle authorship ops
@@ -64,6 +78,8 @@ export interface OriginalsConfig {
    * (Turnkey, KMS, HSM, passkeys). Overridable per call via `{ signer }`.
    */
   signer?: OriginalsSigner;
+  /** Default policy when a provenance append cannot be signed (default 'throw'). */
+  onAppendFailure?: AppendFailurePolicy;
   enableLogging?: boolean;
   // WebVH network selection (defaults to 'pichu' - production)
   webvhNetwork?: WebVHNetworkName;

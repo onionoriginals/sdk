@@ -13,6 +13,7 @@ import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK, OriginalsAsset } from '../../../src';
 import { BatchValidator } from '../../../src/lifecycle/BatchOperations';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
+import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const VALID_ADDR = 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7';
 
@@ -37,7 +38,7 @@ describe('transferOwnership concurrency guard', () => {
       return origTransfer(inscriptionId, toAddress, options);
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = makeBtcoAsset('777001');
 
     const [first, second] = await Promise.allSettled([
@@ -61,7 +62,7 @@ describe('transferOwnership concurrency guard', () => {
   test('the guard is released after a transfer completes (sequential transfers work)', async () => {
     const provider = new MockOrdinalsProvider();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = makeBtcoAsset('777002');
 
     const tx1 = await sdk.lifecycle.transferOwnership(asset, VALID_ADDR);
@@ -82,7 +83,7 @@ describe('transferOwnership concurrency guard', () => {
       return origTransfer(inscriptionId, toAddress, options);
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sdk = OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider } as any);
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = makeBtcoAsset('777003');
 
     await expect(sdk.lifecycle.transferOwnership(asset, VALID_ADDR)).rejects.toThrow('broadcast failed');

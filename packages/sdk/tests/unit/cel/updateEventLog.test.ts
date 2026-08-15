@@ -5,6 +5,7 @@ import { computeDigestMultibase } from '../../../src/cel/hash';
 import { canonicalizeEntryForChain } from '../../../src/cel/canonicalize';
 import { createRealCelSigner } from '../../fixtures/celSigner';
 import type { DataIntegrityProof, EventLog, CreateOptions, UpdateOptions } from '../../../src/cel/types';
+import { CEL_CRYPTOSUITE } from '../../../src/cel/proofVerification';
 
 /**
  * Real Ed25519 did:key signer. Seal-time self-verification (plan 034) rejects
@@ -216,7 +217,7 @@ describe('updateEventLog', () => {
       expect(updatedLog.events[1].proof.length).toBeGreaterThanOrEqual(1);
     });
 
-    test('proof uses eddsa-jcs-2022 cryptosuite', async () => {
+    test('proof uses the CEL cryptosuite', async () => {
       const createOptions: CreateOptions = {
         signer: createMockSigner(verificationMethod),
         verificationMethod,
@@ -232,7 +233,7 @@ describe('updateEventLog', () => {
       const updatedLog = await updateEventLog(initialLog, { name: 'Changed' }, updateOptions);
       const proof = updatedLog.events[1].proof[0];
       
-      expect(proof.cryptosuite).toBe('eddsa-jcs-2022');
+      expect(proof.cryptosuite).toBe(CEL_CRYPTOSUITE);
     });
 
     test('proof includes verificationMethod', async () => {

@@ -6,9 +6,10 @@ import { OriginalsSDK } from '../../src';
 import * as ed25519 from '@noble/ed25519';
 import { multikey } from '../../src/crypto/Multikey';
 import { registerVerificationMethod, verificationMethodRegistry } from '../../src/vc/documentLoader';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 describe('Integration: CredentialManager issue/verify roundtrip', () => {
-  const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+  const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
 
   beforeEach(() => {
     verificationMethodRegistry.clear();

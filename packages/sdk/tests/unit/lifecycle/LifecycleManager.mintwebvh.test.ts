@@ -9,7 +9,7 @@ import { serializeEventLogJson, parseEventLogJson } from '../../../src/cel/seria
 
 describe('publishToWeb mints a real did:webvh (#376)', () => {
   test('binding is a SCID DID owned by the asset, not the publisher shorthand', async () => {
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'ES256K',
       storageAdapter: new MemoryStorageAdapter()
@@ -34,7 +34,7 @@ describe('publishToWeb mints a real did:webvh (#376)', () => {
 
   test('hosts the signed DID log as JSONL in storage at the resolution path', async () => {
     const storage = new MemoryStorageAdapter();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'ES256K',
       storageAdapter: storage
@@ -63,7 +63,7 @@ describe('publishToWeb mints a real did:webvh (#376)', () => {
 
   test('hosts resources under the minted-DID slug path, matching resource.url', async () => {
     const storage = new MemoryStorageAdapter();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'ES256K',
       storageAdapter: storage
@@ -94,7 +94,7 @@ describe('publishToWeb mints a real did:webvh (#376)', () => {
 
   test('hostDIDLog emits did:log-unhosted (EMPTY_LOG) and writes nothing for an empty log', async () => {
     const storage = new MemoryStorageAdapter();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'ES256K',
       storageAdapter: storage
@@ -119,7 +119,7 @@ describe('publishToWeb mints a real did:webvh (#376)', () => {
 
   test('hostDIDLog emits did:log-unhosted (EMPTY_LOG) for a non-array log', async () => {
     const storage = new MemoryStorageAdapter();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'ES256K',
       storageAdapter: storage
@@ -184,7 +184,7 @@ describe('publishToWeb appends the signed migrate event (#Phase2 Task 4)', () =>
 
   test('keyStore-less publish succeeds and emits cel:append-skipped (NO_KEYSTORE)', async () => {
     const storage = new MemoryStorageAdapter();
-    const sdk = OriginalsSDK.create({
+    const sdk = OriginalsSDK.create({ onAppendFailure: 'skip',
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       storageAdapter: storage
@@ -198,7 +198,7 @@ describe('publishToWeb appends the signed migrate event (#Phase2 Task 4)', () =>
     const hash = bytesToHex(sha256(new TextEncoder().encode(content)));
     const asset = await sdk.lifecycle.createAsset([
       { id: 'res-1', type: 'data', contentType: 'text/plain', hash, content }
-    ]);
+    ], { controller: 'ephemeral' });
     const published = await sdk.lifecycle.publishToWeb(asset, 'example.com');
 
     expect(published.currentLayer).toBe('did:webvh');

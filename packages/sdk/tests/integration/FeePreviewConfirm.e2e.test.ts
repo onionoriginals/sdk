@@ -71,7 +71,7 @@ describe('fee preview + confirm (#407 phase 4)', () => {
     // Build a btco asset WITH a provider, then quote via a provider-less SDK.
     const { sdk } = makeSDK();
     const { asset } = await btcoAsset(sdk);
-    const noProvider = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519' });
+    const noProvider = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', defaultKeyType: 'Ed25519' });
     await expect(noProvider.lifecycle.estimateAppendCost(asset, 'update', { content: 'x' }))
       .rejects.toMatchObject({ code: 'ORD_PROVIDER_REQUIRED' });
   });

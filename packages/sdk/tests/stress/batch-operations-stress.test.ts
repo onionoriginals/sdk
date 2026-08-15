@@ -12,6 +12,7 @@ import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { BatchOperationExecutor } from '../../src/lifecycle/BatchOperations';
 import { MemoryKeyStore } from '../../src/storage/MemoryKeyStore';
 import type { AssetResource, OriginalsConfig } from '../../src/types';
+import { MockKeyStore } from '../mocks/MockKeyStore';
 
 describe('Batch Operations Stress Tests', () => {
   let sdk: OriginalsSDK;
@@ -22,7 +23,10 @@ describe('Batch Operations Stress Tests', () => {
       network: 'regtest',
       defaultKeyType: 'ES256K',
       ordinalsProvider: new OrdMockProvider(),
-      enableLogging: false
+      enableLogging: false,
+      // Stress assets are minted in bulk and then migrated, so they need real
+      // custody like any other caller (plan 041).
+      keyStore: new MockKeyStore()
     };
     sdk = OriginalsSDK.create(config);
   });
@@ -561,7 +565,8 @@ async function runConcurrentBatches(
     network: 'regtest',
     defaultKeyType: 'ES256K',
     ordinalsProvider: new OrdMockProvider(),
-    enableLogging: false
+    enableLogging: false,
+    keyStore: new MockKeyStore()
   };
 
   const startTime = Date.now();
