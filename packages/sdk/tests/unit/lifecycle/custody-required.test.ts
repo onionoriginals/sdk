@@ -92,6 +92,32 @@ describe("'ephemeral' is honoured, not merely a guard bypass", () => {
       .rejects.toMatchObject({ code: 'CEL_APPEND_FAILED' });
   });
 
+  test('a per-call signer plus ephemeral is refused as contradictory', async () => {
+    // Both are explicit instructions for this call and they cannot both hold.
+    // Silently honouring either one is the failure mode plan 041 removes.
+    const sdk = makeSdk();
+    const p = sdk.lifecycle.createAsset(RES, {
+      signer: new MockRemoteSigner(),
+      controller: 'ephemeral',
+    });
+    await expect(p).rejects.toMatchObject({ code: 'CONTRADICTORY_CUSTODY' });
+  });
+
+  test('but an AMBIENT config.signer is simply overridden by a per-call ephemeral', async () => {
+    // Wanting one throwaway asset inside an app that otherwise has custody is a
+    // coherent request; per-call options beat configuration.
+    const ambient = new MockRemoteSigner();
+    const sdk = makeSdk({ signer: ambient });
+    const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
+
+    // The controller is a freshly generated throwaway, NOT the ambient signer.
+    const controller = (asset.celLog!.events[0].data as { controller: string }).controller;
+    expect(controller).not.toBe(`did:key:${ambient.publicKeyMultibase}`);
+    // And it really is write-once: the ambient signer cannot author for it.
+    await expect(sdk.lifecycle.publishToWeb(asset, 'example.com'))
+      .rejects.toMatchObject({ code: 'CEL_APPEND_FAILED' });
+  });
+
   test('a non-ephemeral mint with a keyStore still persists, as before', async () => {
     const keyStore = new MockKeyStore();
     const sdk = makeSdk({ keyStore });

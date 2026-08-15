@@ -19,6 +19,7 @@ One exception, deliberately: `NO_CEL_LOG` — a legacy pre-CEL asset with no cha
 **Breaking:**
 
 - `createAsset` / `createDraft` throw `NO_CUSTODY` unless a signer, a keyStore, or `{ controller: 'ephemeral' }` is supplied.
+- `createAsset` throws `CONTRADICTORY_CUSTODY` when given both `options.signer` and `{ controller: 'ephemeral' }` — a signer makes the asset authorable by that key, which is the opposite of write-once, and silently honouring either instruction would be a guess. An *ambient* `config.signer` is different: a per-call ephemeral controller simply overrides it.
 - `publishToWeb`, `inscribeOnBitcoin`, `rotateBtcoKeys` and `addResourceVersion` throw `CEL_APPEND_FAILED` where they previously degraded. Pass `onAppendFailure: 'skip'` for the old behavior.
 
 Callers relying on the old defaults were, in every case, producing assets whose provenance logs were missing events they believed had been recorded.

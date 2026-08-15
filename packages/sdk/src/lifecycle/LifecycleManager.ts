@@ -401,8 +401,27 @@ export class LifecycleManager {
     // independent of config.defaultKeyType. With a supplied OriginalsSigner
     // (per-call or config) the controller IS that signer's key — no key is
     // generated, nothing touches the keyStore, key:unpersisted never fires.
-    const suppliedSigner = options?.signer ?? this.config.signer;
     const ephemeral = options?.controller === 'ephemeral';
+
+    // Two explicit, mutually exclusive instructions for the same call: "sign as
+    // this key" and "make this unauthorable". Picking a winner silently is the
+    // failure mode this plan exists to remove, and ignoring a signer the caller
+    // deliberately passed would be the worse half — the asset's controller
+    // identity would not be the one they asked for.
+    if (options?.signer && ephemeral) {
+      throw new StructuredError(
+        'CONTRADICTORY_CUSTODY',
+        'createAsset was given both options.signer and { controller: \'ephemeral\' }: a signer ' +
+        'makes the asset authorable by that key, which is the opposite of write-once. Pass one ' +
+        'or the other. (config.signer is different — an ambient signer is simply overridden by ' +
+        'a per-call ephemeral controller.)'
+      );
+    }
+
+    // `ephemeral` also overrides an AMBIENT config.signer: wanting one throwaway
+    // asset inside an app that otherwise has custody is a coherent request, and
+    // per-call options beat configuration.
+    const suppliedSigner = ephemeral ? undefined : (options?.signer ?? this.config.signer);
     // Custody is required to mint (plan 041). With neither a signer nor a
     // keyStore the generated controller key is dropped on the floor and the
     // asset can never author another event — publish and inscribe still
