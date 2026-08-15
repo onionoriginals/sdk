@@ -149,7 +149,7 @@ export class AuditLogger implements IAuditLogger {
    * signature) used for both signing and verification.
    */
   private canonicalBytes(record: MigrationAuditRecord): Uint8Array {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     const { signature: _signature, ...recordWithoutSig } = record as any;
     return Buffer.from(JSON.stringify(recordWithoutSig), 'utf8');
   }
@@ -315,7 +315,7 @@ export class AuditLogger implements IAuditLogger {
               }
             }
           }
-        } catch (error) {
+        } catch (_error) {
           // Skip invalid audit records
         }
       }

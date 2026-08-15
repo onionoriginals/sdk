@@ -38,8 +38,8 @@
   "scripts": {
     "build": "bunx tsc && bunx tsc-alias",
     "test": "bun test tests/",
-    "lint": "eslint src/**/*.ts",
-    "format": "prettier --write src/**/*.ts"
+    "lint": "eslint \"src/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\""
   },
   "keywords": [
     "originals",

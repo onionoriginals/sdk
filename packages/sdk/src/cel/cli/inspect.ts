@@ -50,6 +50,24 @@ interface MigrationData {
 /**
  * Check if a proof is a WitnessProof (has witnessedAt field)
  */
+/**
+ * Renders an untrusted value for display. CEL event data is arbitrary JSON from
+ * whoever wrote the log, so a field the CLI expects to be a string can be an
+ * object — `String(obj)` would print "[object Object]" and hide it.
+ */
+function display(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value) ?? String(typeof value);
+  } catch {
+    return '[unserializable]';
+  }
+}
+
 function isWitnessProof(proof: DataIntegrityProof | WitnessProof): proof is WitnessProof {
   return 'witnessedAt' in proof && typeof (proof).witnessedAt === 'string';
 }
@@ -408,7 +426,7 @@ function outputInspection(log: EventLog, state: AssetState): void {
   if (state.deactivated) {
     console.log(`   Status: 🔒 DEACTIVATED`);
     if (state.metadata?.deactivationReason) {
-      console.log(`   Reason: ${String(state.metadata.deactivationReason)}`);
+      console.log(`   Reason: ${display(state.metadata.deactivationReason)}`);
     }
   } else {
     console.log(`   Status: ✅ ACTIVE`);
@@ -523,10 +541,10 @@ function outputInspection(log: EventLog, state: AssetState): void {
 
     // Event-specific details
     if (event.type === 'create') {
-      if (data.name) console.log(` ${connector}   Name: ${String(data.name)}`);
+      if (data.name) console.log(` ${connector}   Name: ${display(data.name)}`);
       if (data.did) console.log(` ${connector}   DID: ${formatDid(data.did as string)}`);
       if (data.controller) console.log(` ${connector}   Controller: ${formatDid(data.controller as string)}`);
-      if (data.layer) console.log(` ${connector}   Layer: ${String(data.layer)}`);
+      if (data.layer) console.log(` ${connector}   Layer: ${display(data.layer)}`);
       if (data.resources && Array.isArray(data.resources)) {
         console.log(` ${connector}   Resources: ${data.resources.length} file(s)`);
       }
@@ -546,7 +564,7 @@ function outputInspection(log: EventLog, state: AssetState): void {
     } else if (event.type === 'update') {
       // Show what changed
       const changes: string[] = [];
-      if (data.name) changes.push(`name → "${String(data.name)}"`);
+      if (data.name) changes.push(`name → "${display(data.name)}"`);
       if (data.resources) changes.push(`resources updated`);
       if (isMigrationEvent(event.data)) {
         const migrationData = event.data;
@@ -565,7 +583,7 @@ function outputInspection(log: EventLog, state: AssetState): void {
         }
       }
     } else if (event.type === 'deactivate') {
-      if (data.reason) console.log(` ${connector}   Reason: ${String(data.reason)}`);
+      if (data.reason) console.log(` ${connector}   Reason: ${display(data.reason)}`);
     }
     
     // Proof summary

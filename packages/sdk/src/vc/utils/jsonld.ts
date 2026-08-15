@@ -14,7 +14,7 @@ export async function canonize(input: any, { documentLoader }: any): Promise<str
 }
 
 export async function canonizeProof(proof: any, { documentLoader }: any): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const { jws: _jws, signatureValue: _signatureValue, proofValue: _proofValue, ...rest } = proof;
   return await canonize(rest, { documentLoader });
 }

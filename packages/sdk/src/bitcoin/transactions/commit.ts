@@ -200,7 +200,6 @@ export async function createRevealTransaction(
 
   const leafScript = inscriptionScript.script;
   const controlBlock = inscriptionScript.controlBlock;
-  const leafVersion = inscriptionScript.leafVersion ?? 0xc0;
 
   // Reveal fee from the real serialized leaf + control block (witness-discounted).
   const revealFee = Number(calculateFee(estimateRevealTxSize(leafScript.length, controlBlock.length), feeRate));

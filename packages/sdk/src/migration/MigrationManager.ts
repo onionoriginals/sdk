@@ -196,7 +196,7 @@ export class MigrationManager {
   private maybeRunStartupReclaim(): void {
     if (this.startupReclaimDone) return;
     this.startupReclaimDone = true;
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+     
     void this.checkpointManager.cleanupOldCheckpoints();
   }
 
@@ -297,7 +297,7 @@ export class MigrationManager {
       }
 
       // Step 1: Create migration state
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       
       migrationState = await this.stateTracker.createMigration(options);
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       const migrationId = migrationState.migrationId;
@@ -337,7 +337,7 @@ export class MigrationManager {
         progress: 20
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       checkpoint = await this.checkpointManager.createCheckpoint(migrationId, options);
 
       // Persist checkpointId immediately so rollback can locate it
@@ -353,7 +353,7 @@ export class MigrationManager {
       // Step 4: Execute migration
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const migration = this.getMigrationOperation(options);
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
       const result = await migration.executeMigration(options, migrationId);
 
       // Step 5: Complete migration
@@ -418,7 +418,7 @@ export class MigrationManager {
         // (retryPendingDeletions + storage-truth enumeration sweep), so a
         // checkpoint stranded by a delete whose tombstone and pending-marker
         // writes both failed is reclaimed here too. Fire-and-forget; never throws.
-        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+         
         void this.checkpointManager.cleanupOldCheckpoints();
       }, 24 * 60 * 60 * 1000); // Sweep after 24 hours
       cleanupTimer.unref?.();
@@ -707,9 +707,9 @@ export class MigrationManager {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
         const rollbackResult = await this.rollbackManager.rollback(migrationId, checkpoint.checkpointId, { error, stateAtFailure });
         rollbackOutcome = rollbackResult;
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+         
         rollbackSuccess = rollbackResult.success;
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+         
         finalState = rollbackResult.restoredState;
 
         // Advance the tracked state to reflect the rollback outcome
@@ -727,7 +727,7 @@ export class MigrationManager {
         // machinery failure — only genuine QUARANTINED outcomes raise the
         // quarantine event.
         if (!rollbackSuccess && finalState === MigrationStateEnum.QUARANTINED) {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+           
           await this.emitEvent('migration:quarantine', {
             migrationId,
             // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -746,7 +746,7 @@ export class MigrationManager {
         } catch (stateError) {
           console.error('Failed to update migration state after rollback failure:', stateError);
         }
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+         
         await this.emitEvent('migration:quarantine', {
           migrationId,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -880,7 +880,7 @@ export class MigrationManager {
   /**
    * Emit event
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async emitEvent(type: string, data: any): Promise<void> {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
