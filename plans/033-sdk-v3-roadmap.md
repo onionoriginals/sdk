@@ -9,7 +9,7 @@
 ## Status
 
 - **Priority**: P0 (the SDK's recommended path is unusable for remote custody)
-- **Effort**: XL (spans 2.1 → 3.0)
+- **Effort**: XL (one 3.0.0 release; see Sequencing)
 - **Risk**: HIGH (breaking API + a cryptosuite relabel)
 - **Category**: architecture / correctness / DX
 
@@ -148,7 +148,7 @@ provenance event has failed, and should say so.
 
 ## Work items
 
-### Phase 0 — stop the bleeding (2.1, additive, no API break)
+### Phase 0 — stop the bleeding (additive, no API break)
 
 **Status: DONE** (2026-08-13). tsc 0; 3795 tests pass / 0 fail across unit,
 integration, security and stress; `verify:browser` and `verify:esm` gates green.
@@ -175,50 +175,94 @@ also failing to LOAD (silently reducing the suite) — fixed, which is why the
 count rose from 3587 to 3795.
 
 Phase 0 converts the four worst silent failures into loud ones.
-Ship as 2.1 before starting phase 1.
+Landed before phase 1, as its own PR (#464).
 
-### Phase 1 — the signer core (2.2, additive)
+### Phase 1 — the signer core (additive)
+
+**Status: DONE** — merged in #465 (`ed327d9b`), together with plan 045 pulled
+forward from Phase 4.
 
 | # | Item | Effort |
 |---|---|---|
-| 039 | `OriginalsSigner` + `signingInput` namespace + the five adapters. Every internal signing path routed through them (`celSignerFromKeyPair`, `createKeyStoreCelSigner`, `WebVHManager`, `Issuer`, `MultiSigManager`, `witnessEvent`). `signer` accepted on `OriginalsConfig` and on `createAsset`/`publishToWeb`/`inscribeOnBitcoin`/`rotateBtcoKeys`/`authorizeSigner`/`addResourceVersion`. `ExternalSigner`/`CelSigner`/`KeyStore`-as-signer marked `@deprecated`. | L |
-| 040 | **`assertSignerConformance(signer)` + `MockRemoteSigner`.** A published conformance harness any custody backend can run, plus an in-repo signer that implements **only** `signBytes` — no key export, no `sign()`. Rule: every documented end-to-end flow gets a test that runs it under `MockRemoteSigner`. | M |
+| 039 | ✅ `OriginalsSigner` + `signingInput` namespace + the five adapters. Every internal signing path routed through them (`celSignerFromKeyPair`, `createKeyStoreCelSigner`, `WebVHManager`, `Issuer`, `MultiSigManager`, `witnessEvent`). `signer` accepted on `OriginalsConfig` and on `createAsset`/`publishToWeb`/`inscribeOnBitcoin`/`rotateBtcoKeys`/`authorizeSigner`/`addResourceVersion`. `ExternalSigner`/`CelSigner`/`KeyStore`-as-signer marked `@deprecated`. | L |
+| 040 | ✅ **`assertSignerConformance(signer)` + `MockRemoteSigner`.** A published conformance harness any custody backend can run, plus an in-repo signer that implements **only** `signBytes` — no key export, no `sign()`. Rule: every documented end-to-end flow gets a test that runs it under `MockRemoteSigner`. | M |
 
 **040 is the durable fix.** The reason this class of bug shipped is that no test in
 76k lines of test code exercises a non-exporting custody backend, so every
 remote-custody path could rot undetected. The interface redesign fixes today's bug;
 the conformance harness is what stops the next one.
 
-### Phase 2 — 3.0, defaults flip
+### Phase 2 — defaults flip
+
+**Status: DONE** — merged in #466 (`ae9f8cb8`).
 
 | # | Item | Effort |
 |---|---|---|
-| 041 | Remove `ExternalSigner`/`CelSigner` from public API (adapters remain). `createAsset` requires custody. `onAppendFailure` defaults to `'throw'`. `KeyStore` documented as persistence-only. | M |
-| 042 | **CEL cryptosuite: rename *and* bind the proof configuration**, in one breaking change. Emit a bespoke id (`originals-cel-ed25519-jcs-v1`); the verifier dispatches on the label and keeps a legacy read path for `eddsa-jcs-2022` logs forever. Two notes that make this cheaper than it looks: (a) because the proof config is currently excluded from the preimage, relabelling alone does not invalidate a single existing signature; (b) binding the config closes a real gap — `created` and `proofPurpose` are presently unattested. Do both at once or pay the migration twice. | M |
+| 041 | ✅ Remove `ExternalSigner`/`CelSigner` from public API (adapters remain). `createAsset` requires custody. `onAppendFailure` defaults to `'throw'`. `KeyStore` documented as persistence-only. | M |
+| 042 | ✅ **CEL cryptosuite: rename *and* bind the proof configuration**, in one breaking change. Emit a bespoke id (`originals-cel-ed25519-jcs-v1`); the verifier dispatches on the label and keeps a legacy read path for `eddsa-jcs-2022` logs forever. Two notes that make this cheaper than it looks: (a) because the proof config is currently excluded from the preimage, relabelling alone does not invalidate a single existing signature; (b) binding the config closes a real gap — `created` and `proofPurpose` are presently unattested. Do both at once or pay the migration twice. | M |
 
-### Phase 3 — packaging (3.0)
+### Phase 3 — packaging
+
+**Status: DONE for 043 and 044's Buffer purge** — merged in #467 (`636417c4`).
+The `@originals/cel` split (044 item 6) is the roadmap's last open item; see the
+scope correction below.
 
 | # | Item | Effort |
 |---|---|---|
-| 043 | Remove the side-effect import from `index.ts` (make `noble-init` explicit at point of use), set `"sideEffects": false`. Replace the 11 `/*` wildcards with a curated subpath list; add the missing `verify`, and move `OrdMockProvider`/`FeeOracleMock` to `@originals/sdk/testing`; drop `retry`/`circuit-breaker` from root. Add the missing remote-signer toolkit to root: `signingInput`, `canonicalizeEvent`, `currentControllerVm`, `createDocumentLoader`, `Verifier`, `EdDSACryptosuiteManager`. | M |
-| 044 | **Purge `Buffer` from public signatures** → `Uint8Array` (51 dist files; `crypto/Signer.ts` first, it's root-exported). Then split `@originals/cel` — zero Bitcoin, zero `jsonld`, browser-safe. The `/cel` entry and `scripts/check-browser-safety.mjs` gate already exist, so the seam is half-built. | L |
+| 043 | ✅ Remove the side-effect import from `index.ts` (make `noble-init` explicit at point of use), set `"sideEffects": false`. Replace the 11 `/*` wildcards with a curated subpath list; add the missing `verify`, and move `OrdMockProvider`/`FeeOracleMock` to `@originals/sdk/testing`; drop `retry`/`circuit-breaker` from root. Add the missing remote-signer toolkit to root: `signingInput`, `canonicalizeEvent`, `currentControllerVm`, `createDocumentLoader`, `Verifier`, `EdDSACryptosuiteManager`. | M |
+| 044 | ✅ (Buffer purge; split deferred) **Purge `Buffer` from public signatures** → `Uint8Array` (51 dist files; `crypto/Signer.ts` first, it's root-exported). Then split `@originals/cel` — zero Bitcoin, zero `jsonld`, browser-safe. The `/cel` entry and `scripts/check-browser-safety.mjs` gate already exist, so the seam is half-built. | L |
 
 ### Phase 4 — `@originals/auth`
 
+**Status: DONE** — pulled forward into Phase 1 and merged in #465, because
+without it Phase 1 shipped an interface no signer the project ships could
+satisfy.
+
 | # | Item | Effort |
 |---|---|---|
-| 045 | Root exports types only (`export * from './types.js'`) — server stays behind `/server`. Extract one `turnkeySignBytes()` primitive; both Turnkey signers become thin `OriginalsSigner` wrappers over it, deleting the "kept in sync by comment" duplication. Move `turnkeyAddressToMultikey` upstream into the SDK (Turnkey Ed25519 accounts are `ADDRESS_FORMAT_SOLANA`, so the address is base58 of the raw key — **not** a Multikey, and consumers keep re-deriving this wrong). | M |
+| 045 | ✅ Root exports types only (`export * from './types.js'`) — server stays behind `/server`. Extract one `turnkeySignBytes()` primitive; both Turnkey signers become thin `OriginalsSigner` wrappers over it, deleting the "kept in sync by comment" duplication. Move `turnkeyAddressToMultikey` upstream into the SDK (Turnkey Ed25519 accounts are `ADDRESS_FORMAT_SOLANA`, so the address is base58 of the raw key — **not** a Multikey, and consumers keep re-deriving this wrong). | M |
 
 ---
 
+### Correction: the `@originals/cel` split is smaller than this plan assumed
+
+Plan 044 called the seam "half-built", and the agent that executed Phase 3
+reported the opposite — that `/cel` is not Bitcoin-free because it re-exports
+`BtcoCelManager` and `BitcoinWitness`, which reach `BitcoinManager`. **Both are
+wrong.** Those are `import type`, erased at compile time. Walking the BUILT
+graph of `dist/cel/index.js`:
+
+```
+modules in graph: 38
+bitcoin/ modules pulled: 0
+heavy externals (jsonld / btc-signer / micro-ordinals): none
+```
+
+`/cel` is already Bitcoin-free and browser-safe at runtime. Nothing needs
+carving out of the barrel and the `/cel` surface need not break. The real job is
+relocating **8 modules** — `crypto/Multikey`, `crypto/signingInput`, and six
+`utils/*` — plus packaging mechanics (new package, invert the dependency, turbo
+and CI wiring). The one hazard is duplication: `Multikey` and `telemetry` are
+used well outside the CEL graph, so the SDK must import them FROM the new
+package. Two copies of `multikey` or `StructuredError` in one tree breaks
+`instanceof` checks.
+
 ## Sequencing and compatibility
 
-- **2.1** = phase 0. No API change; four silent failures become throws. Some
-  consumers' currently-"working" code will start failing — that is the point, and
-  the release notes must say so plainly.
-- **2.2** = phase 1. Purely additive; the old paths still work with deprecation
-  warnings. Publish a migration guide here, not at 3.0.
-- **3.0** = phases 2–4. One breaking release, one migration.
+**Superseded — everything ships as one 3.0.0.** The staged plan below assumed a
+migration window that stopped existing the moment phase 0 shipped with a `major`
+changeset: the next publish is 3.0.0 regardless of what later phases declare.
+The maintainer's decision was that nothing releases until every phase is merged,
+so consumers get a single migration rather than three, and the migration guide
+belongs with the 3.0.0 release notes.
+
+What still holds from the original plan is the *warning*: consumers' currently
+"working" code will start failing, because in every case it was producing
+artifacts that could not verify. The release notes must say so plainly.
+
+~~- **2.1** = phase 0. No API change; four silent failures become throws.~~
+~~- **2.2** = phase 1. Purely additive; old paths work with deprecation warnings.~~
+~~- **3.0** = phases 2–4. One breaking release, one migration.~~
 
 ## Done criteria for the roadmap
 
