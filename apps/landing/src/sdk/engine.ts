@@ -17,9 +17,11 @@ import { short } from './format';
 export { short };
 import {
   OriginalsSDK,
-  OrdMockProvider,
   type OriginalsAsset
 } from '@originals/sdk';
+// Test doubles moved out of the root entry in plan 043 so they are not shipped
+// to production consumers.
+import { OrdMockProvider } from '@originals/sdk/testing';
 import { HttpHostingStorageAdapter } from './http-hosting-adapter';
 import { DurableHostingStorageAdapter } from './durable-hosting-adapter';
 import { HttpOrdinalsProvider } from './http-ordinals-provider';

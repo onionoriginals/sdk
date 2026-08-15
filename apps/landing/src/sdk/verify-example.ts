@@ -10,9 +10,9 @@
  * verification via the SDK — so the page never asks anyone to take its word.
  */
 import '../shims/buffer-global';
+import { OrdMockProvider } from '@originals/sdk/testing';
 import {
   OriginalsSDK,
-  OrdMockProvider,
   MemoryStorageAdapter,
   Ed25519Verifier,
   resolveDidCel
