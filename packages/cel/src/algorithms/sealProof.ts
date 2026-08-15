@@ -66,7 +66,7 @@ export async function sealProof(
         `(${proof.verificationMethod}): ${reason}. The event was NOT appended. ` +
         `The usual cause is signing the wrong bytes: a CEL proof signs ` +
         `canonicalizeEvent({ type, data, previousEvent? }) — import canonicalizeEvent from ` +
-        `'@originals/sdk/cel/canonicalize' to produce exactly those bytes.`
+        `'@originals/cel' to produce exactly those bytes.`
     );
   }
   return proof;
