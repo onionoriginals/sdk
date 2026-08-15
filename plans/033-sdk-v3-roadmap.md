@@ -9,7 +9,7 @@
 ## Status
 
 - **Priority**: P0 (the SDK's recommended path is unusable for remote custody)
-- **Effort**: XL (spans 2.1 → 3.0)
+- **Effort**: XL (one 3.0.0 release; see Sequencing)
 - **Risk**: HIGH (breaking API + a cryptosuite relabel)
 - **Category**: architecture / correctness / DX
 
@@ -148,7 +148,7 @@ provenance event has failed, and should say so.
 
 ## Work items
 
-### Phase 0 — stop the bleeding (2.1, additive, no API break)
+### Phase 0 — stop the bleeding (additive, no API break)
 
 **Status: DONE** (2026-08-13). tsc 0; 3795 tests pass / 0 fail across unit,
 integration, security and stress; `verify:browser` and `verify:esm` gates green.
@@ -175,7 +175,7 @@ also failing to LOAD (silently reducing the suite) — fixed, which is why the
 count rose from 3587 to 3795.
 
 Phase 0 converts the four worst silent failures into loud ones.
-Ship as 2.1 before starting phase 1.
+Landed before phase 1, as its own PR (#464).
 
 ### Phase 1 — the signer core (additive)
 
@@ -249,12 +249,20 @@ package. Two copies of `multikey` or `StructuredError` in one tree breaks
 
 ## Sequencing and compatibility
 
-- **2.1** = phase 0. No API change; four silent failures become throws. Some
-  consumers' currently-"working" code will start failing — that is the point, and
-  the release notes must say so plainly.
-- **2.2** = phase 1. Purely additive; the old paths still work with deprecation
-  warnings. Publish a migration guide here, not at 3.0.
-- **3.0** = phases 2–4. One breaking release, one migration.
+**Superseded — everything ships as one 3.0.0.** The staged plan below assumed a
+migration window that stopped existing the moment phase 0 shipped with a `major`
+changeset: the next publish is 3.0.0 regardless of what later phases declare.
+The maintainer's decision was that nothing releases until every phase is merged,
+so consumers get a single migration rather than three, and the migration guide
+belongs with the 3.0.0 release notes.
+
+What still holds from the original plan is the *warning*: consumers' currently
+"working" code will start failing, because in every case it was producing
+artifacts that could not verify. The release notes must say so plainly.
+
+~~- **2.1** = phase 0. No API change; four silent failures become throws.~~
+~~- **2.2** = phase 1. Purely additive; old paths work with deprecation warnings.~~
+~~- **3.0** = phases 2–4. One breaking release, one migration.~~
 
 ## Done criteria for the roadmap
 
