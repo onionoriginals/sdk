@@ -360,9 +360,9 @@ export const developers = {
   quickstartLabel: 'Quickstart',
   quickstart: `import {
   OriginalsSDK,
-  OrdMockProvider,
   MemoryStorageAdapter
 } from '@originals/sdk';
+import { OrdMockProvider } from '@originals/sdk/testing';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 // In-memory key store — swap for Turnkey, KMS, or your own
