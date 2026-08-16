@@ -2,8 +2,8 @@
   "title": "First Light",
   "medium": "Artwork",
   "dids": {
-    "did:cel": "did:cel:uEiD6909LPnH10_myIoEODhInq6jVmhbAl0hR_i0bpUpDKQ",
-    "did:webvh": "did:webvh:QmWFcneg2iKFwgbqDVCVTDmk3snraYH8TJRiqsBX3SLz9c:magby.originals.build:examples:first-light"
+    "did:cel": "did:cel:uEiBRPCnG78u4EqkM3w3sRYXsh-CTOUdkwd61KFei6evP1g",
+    "did:webvh": "did:webvh:QmSfnni9ePBT34t5Xhu5QoAhSqYNN8QfUnTCQ3ayoDMMn6:magby.originals.build:examples:first-light"
   },
   "resources": [
     {
@@ -18,13 +18,13 @@
     }
   ],
   "provenance": {
-    "createdAt": "2026-07-16T05:56:22.039Z",
-    "creator": "did:cel:uEiD6909LPnH10_myIoEODhInq6jVmhbAl0hR_i0bpUpDKQ",
+    "createdAt": "2026-08-16T00:37:02.672Z",
+    "creator": "did:cel:uEiBRPCnG78u4EqkM3w3sRYXsh-CTOUdkwd61KFei6evP1g",
     "migrations": [
       {
         "from": "did:cel",
         "to": "did:webvh",
-        "timestamp": "2026-07-16T05:56:22.055Z"
+        "timestamp": "2026-08-16T00:37:02.687Z"
       }
     ],
     "resourceUpdates": []

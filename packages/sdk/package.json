@@ -40,7 +40,7 @@
   "scripts": {
     "build": "tsc && tsc-alias",
     "typecheck": "tsc --noEmit -p .",
-    "test": "bun test tests/integration && bun test tests/unit && bun test tests/security && bun test tests/stress",
+    "test": "bun test tests/integration && bun test tests/unit && bun test tests/security && bun test tests/stress && bun test tests/mocks tests/performance tests/index.test.ts tests/sdk.test.ts",
     "test:coverage": "bun test tests/integration tests/unit --coverage",
     "check-coverage": "bun run ../../scripts/check-coverage.ts",
     "test:ci": "bash -o pipefail -c 'bun test tests/integration tests/unit --coverage 2>&1 | bun run ../../scripts/check-coverage.ts'",
