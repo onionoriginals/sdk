@@ -247,6 +247,10 @@ For detailed information about the DID:WebVH integration, including Turnkey setu
 
 ## Documentation
 
+### Upgrading
+
+- **[docs/MIGRATION_3.0.md](./docs/MIGRATION_3.0.md)** - Upgrading from 2.x to 3.0. Most breaking changes surface as code that used to "work" now throwing — 3.0 makes several silently-broken paths fail loudly.
+
 ### For LLM Agents
 
 If you're an AI/LLM agent working with this SDK, we provide optimized documentation:
