@@ -98,15 +98,6 @@ jobs:
       - name: Build
         run: bun run build
 
-      # apps/ is outside the ./packages/* filter every other job uses, so a
-      # breaking change to the SDK's public entry lands green and fails only at
-      # deploy — which is how #470 happened (plan 046, item 4). Runs on Bun and
-      # BEFORE the Node pin below: vite needs node:util's styleText, which
-      # Node 20.10 does not have. Build only, not typecheck — apps/landing does
-      # not declare @types/node, so its typecheck is separately fragile.
-      - name: Build the landing app against the built SDK
-        run: cd apps/landing && bun run build
-
       # The Bun test suite tolerates extensionless/attribute-less imports, so
       # importing the built dist under Node is the only gate that catches a
       # publish npm consumers cannot actually load.
@@ -124,9 +115,26 @@ jobs:
       - name: Verify browser-facing entry points have no eager Node builtins
         run: node scripts/check-browser-safety.mjs
 
-      # apps/ is outside the ./packages/* filter every other job uses, so a
-      # breaking change to the SDK's public entry lands green here and fails
-      # only at deploy — which is exactly how #470 happened (plan 046, item 4).
+  landing:
+    name: Landing app typechecks, tests and builds
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies (bun)
+        run: bun install
+
+      # apps/ is outside the ./packages/* filter every other job uses, so SDK
+      # entry-point breakage lands green and fails at deploy (#470, plan 046 §4).
+      # Not landing:ci — that page-drive needs an API server + TURNKEY_* secrets.
+      - name: Typecheck, test and build the landing app against the built SDK
+        run: bun run landing:check
 
   changeset:
     name: Changeset present
