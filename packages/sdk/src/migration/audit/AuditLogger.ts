@@ -149,7 +149,6 @@ export class AuditLogger implements IAuditLogger {
    * signature) used for both signing and verification.
    */
   private canonicalBytes(record: MigrationAuditRecord): Uint8Array {
-     
     const { signature: _signature, ...recordWithoutSig } = record as any;
     return Buffer.from(JSON.stringify(recordWithoutSig), 'utf8');
   }

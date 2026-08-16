@@ -196,7 +196,6 @@ export class MigrationManager {
   private maybeRunStartupReclaim(): void {
     if (this.startupReclaimDone) return;
     this.startupReclaimDone = true;
-     
     void this.checkpointManager.cleanupOldCheckpoints();
   }
 
@@ -297,7 +296,6 @@ export class MigrationManager {
       }
 
       // Step 1: Create migration state
-       
       migrationState = await this.stateTracker.createMigration(options);
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       const migrationId = migrationState.migrationId;
@@ -418,7 +416,6 @@ export class MigrationManager {
         // (retryPendingDeletions + storage-truth enumeration sweep), so a
         // checkpoint stranded by a delete whose tombstone and pending-marker
         // writes both failed is reclaimed here too. Fire-and-forget; never throws.
-         
         void this.checkpointManager.cleanupOldCheckpoints();
       }, 24 * 60 * 60 * 1000); // Sweep after 24 hours
       cleanupTimer.unref?.();
@@ -707,9 +704,7 @@ export class MigrationManager {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
         const rollbackResult = await this.rollbackManager.rollback(migrationId, checkpoint.checkpointId, { error, stateAtFailure });
         rollbackOutcome = rollbackResult;
-         
         rollbackSuccess = rollbackResult.success;
-         
         finalState = rollbackResult.restoredState;
 
         // Advance the tracked state to reflect the rollback outcome
@@ -727,7 +722,6 @@ export class MigrationManager {
         // machinery failure — only genuine QUARANTINED outcomes raise the
         // quarantine event.
         if (!rollbackSuccess && finalState === MigrationStateEnum.QUARANTINED) {
-           
           await this.emitEvent('migration:quarantine', {
             migrationId,
             // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -746,7 +740,6 @@ export class MigrationManager {
         } catch (stateError) {
           console.error('Failed to update migration state after rollback failure:', stateError);
         }
-         
         await this.emitEvent('migration:quarantine', {
           migrationId,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
