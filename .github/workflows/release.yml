@@ -13,9 +13,10 @@ permissions:
   id-token: write       # npm provenance
 
 jobs:
-  # Gate 1 — maintain the "Version Packages" PR. While changesets are pending on
-  # main this job opens/updates that PR (versions + CHANGELOGs). Merging the PR is
-  # the human approval that a release should happen. No publishing happens here.
+  # Maintain the "Version Packages" PR. While changesets are pending on main this
+  # job opens/updates that PR (versions + CHANGELOGs) and comments the publish
+  # plan on it. That PR is the SINGLE approval surface for a release: merging it
+  # publishes. No publishing happens here.
   version:
     name: Version (open release PR)
     runs-on: ubuntu-latest
@@ -46,17 +47,41 @@ jobs:
         uses: changesets/action@v1
         with:
           version: bun run version
-          # No publish here — publishing is the separately-gated job below.
+          # No publish here — the publish job below runs once this PR merges.
           publish: ""
         env:
           GITHUB_TOKEN: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
 
+      # Merging the Version PR IS the release approval, so the PR must state what
+      # merging does. changesets' own body lists changelogs but never the target
+      # versions' dist-tags — and the surprising one (a brand-new package skipping
+      # `next` for `latest`) is invisible without this.
+      - name: Comment the publish plan on the Version PR
+        if: steps.changesets.outputs.hasChangesets == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git fetch origin changeset-release/main
+          node scripts/publish-plan.mjs origin/changeset-release/main > /tmp/plan.md
+          pr=$(gh pr list --head changeset-release/main --state open --json number --jq '.[0].number // empty')
+          if [ -z "$pr" ]; then echo "no open Version PR — nothing to comment on"; exit 0; fi
+          # Upsert by marker so repeated pushes edit one comment instead of piling up.
+          id=$(gh api "repos/$REPO/issues/$pr/comments" --paginate \
+                 --jq 'map(select(.body | startswith("<!-- publish-plan -->"))) | .[0].id // empty')
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@/tmp/plan.md >/dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$pr/comments" -F body=@/tmp/plan.md >/dev/null
+          fi
+
   # Decide whether there is actually a new version to publish. `hasChangesets ==
   # false` is true both after the Version PR merges (a real release) AND on any
   # changeset-less push to main (docs/CI, or the first push after enabling this
-  # workflow). Without this guard the env-gated publish job below would prompt a
-  # reviewer for those no-op pushes too. We only proceed when a package's local
-  # version is not yet on the registry — i.e. a genuine pending release.
+  # workflow). We only proceed when a package's local version is not yet on the
+  # registry — i.e. a genuine pending release. This is what keeps "merge the
+  # Version PR" the only trigger: an ordinary push to main never reaches publish.
   check-publish:
     name: Check for unpublished versions
     needs: version
@@ -100,16 +125,19 @@ jobs:
           done
           echo "should=$should" >> "$GITHUB_OUTPUT"
 
-  # Gate 2 — publish. Runs only for a genuine pending release (Version PR merged
-  # and a version is not yet on npm). The `npm-publish` Environment carries a
-  # required reviewer, so a human must approve in the GitHub UI before anything
-  # reaches npm, and we refuse to publish a build that fails the Node-ESM check.
+  # Publish. Runs only for a genuine pending release (Version PR merged and a
+  # version is not yet on npm).
+  #
+  # Deliberately NOT bound to the `npm-publish` Environment. That environment's
+  # required reviewer was a SECOND approval for a decision already made by
+  # merging the Version PR — invisible from the PR, so a merged release would sit
+  # unpublished with nothing on the PR saying so. The PR is the gate now; the
+  # automated gates below (Node-ESM + browser-safety) still block a bad build.
   publish:
     name: Publish to npm
     needs: [version, check-publish]
     if: needs.check-publish.outputs.shouldPublish == 'true'
     runs-on: ubuntu-latest
-    environment: npm-publish
     steps:
       - name: Checkout
         uses: actions/checkout@v7
