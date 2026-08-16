@@ -73,9 +73,16 @@ describe('originals routes — auth gating', () => {
     expect((await shadow('magby.originals.build/index.html')).status).toBe(403);
     // A bare 'resources/<name>' whose name isn't a multibase is refused too.
     expect((await shadow('magby.originals.build/assets/resources/evil.js')).status).toBe(403);
+    // A 'cel/…' key that isn't the content-digest copy is refused.
+    expect((await shadow('cel/index.html')).status).toBe(403);
+    expect((await shadow('cel/evil.json')).status).toBe(403); // no 'u' multibase prefix
+    expect((await shadow('cel/uAbc.json/../../index.html')).status).toBe(403);
+    expect((await shadow('magby.originals.build/cel/uAbc.json')).status).toBe(403); // 2 segments only
     // But real did:webvh artifacts are allowed.
     expect((await shadow('magby.originals.build/user-sub-1/did.jsonl')).status).toBe(200);
     expect((await shadow('magby.originals.build/ueibabc/resources/uJZtLeUr')).status).toBe(200);
+    // …as is the SDK's layer-agnostic CEL copy (persistCelArtifacts).
+    expect((await shadow('cel/uEiCGpqek6fgu3Ut-2k4Pj8KTiobAgA6PiAHuJ-Fw0dcGDA.json')).status).toBe(200);
   });
 
   test('rejects an oversized upload by Content-Length (413)', async () => {
