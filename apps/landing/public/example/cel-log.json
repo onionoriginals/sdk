@@ -3,10 +3,10 @@
     {
       "type": "create",
       "data": {
-        "controller": "did:key:z6MkhhHvRLSgmvgneytgm64PBFzgrr1maxVjEgCr4gWGZ85p",
-        "createdAt": "2026-07-16T05:56:22.011Z",
+        "controller": "did:key:z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD",
+        "createdAt": "2026-08-16T05:28:08.247Z",
         "name": "artwork.svg",
-        "nonce": "uKV70s9aH52rZ1nzK6Uog9w",
+        "nonce": "uMKUVYScE-LOi6Il-WzYGUg",
         "resources": [
           {
             "digestMultibase": "uEiDq42LG0UdTeZMLYrsckqR3sn7DCIZuAV6nnKrn11NgWg",
@@ -22,12 +22,12 @@
       },
       "proof": [
         {
-          "created": "2026-07-16T05:56:22.038Z",
-          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-08-16T05:28:08.247Z",
+          "cryptosuite": "originals-cel-ed25519-jcs-v1",
           "proofPurpose": "assertionMethod",
-          "proofValue": "z2nTv6dFXWK9hgjqYoF6z1f8AtEUjEie4AhCbstzU1qk7uu5Pqey9vTeSg3uUniDjkKPAXKHTeMhUo3RkqX9avzUC",
+          "proofValue": "z5Bcr9Z54HZcm7S6rPF1zT9mzu7M3bRMebvZVHxDDLR5vN32bjwVqfvAqPpcFF2TAQvfyiogXykDzLGw2ixJA62at",
           "type": "DataIntegrityProof",
-          "verificationMethod": "did:key:z6MkhhHvRLSgmvgneytgm64PBFzgrr1maxVjEgCr4gWGZ85p#z6MkhhHvRLSgmvgneytgm64PBFzgrr1maxVjEgCr4gWGZ85p"
+          "verificationMethod": "did:key:z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD#z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD"
         }
       ]
     },
@@ -36,21 +36,21 @@
       "data": {
         "domain": "magby.originals.build",
         "layer": "webvh",
-        "migratedAt": "2026-07-16T05:56:22.053Z",
-        "sourceDid": "did:cel:uEiD6909LPnH10_myIoEODhInq6jVmhbAl0hR_i0bpUpDKQ",
-        "targetDid": "did:webvh:QmcXLu1DgoXZh344onb6tpPoesMUveyZ6mUwD3GXKeohM8:magby.originals.build:ueid6909lpnh10_myioeodhinq6jvmhbal0hr_i0bpupdkq"
+        "migratedAt": "2026-08-16T05:28:08.289Z",
+        "sourceDid": "did:cel:uEiBApL3JUD_-pK44pwONLAvJ-5Znsd97OPbjYYbFpvXE0g",
+        "targetDid": "did:webvh:QmTmT6hf5tLcf5kjrBUFn5tYc6KcUQcRwvvWGFdtGZ7Lac:magby.originals.build:ueibapl3jud_-pk44pwonlavj-5znsd97opbjyybfpvxe0g"
       },
       "proof": [
         {
-          "created": "2026-07-16T05:56:22.054Z",
-          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-08-16T05:28:08.289Z",
+          "cryptosuite": "originals-cel-ed25519-jcs-v1",
           "proofPurpose": "assertionMethod",
-          "proofValue": "z47VVZiFZSgFjn1ECRQPcgKFT5Dkas7NXFiHfriVY3KKzySSseRom65MEtUmJxvZG282W1ykTrNpbNMykpSzQoF1E",
+          "proofValue": "z4QH1iA1JAqTcnifEXHyW5Lby2wwabEFQJaXWKkUPa6GKnRHqmznaAXb9W3zx4p6AwXSjFVobiqv7x6tULy9FSiqQ",
           "type": "DataIntegrityProof",
-          "verificationMethod": "did:key:z6MkhhHvRLSgmvgneytgm64PBFzgrr1maxVjEgCr4gWGZ85p#z6MkhhHvRLSgmvgneytgm64PBFzgrr1maxVjEgCr4gWGZ85p"
+          "verificationMethod": "did:key:z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD#z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD"
         }
       ],
-      "previousEvent": "uEiD6909LPnH10_myIoEODhInq6jVmhbAl0hR_i0bpUpDKQ"
+      "previousEvent": "uEiBApL3JUD_-pK44pwONLAvJ-5Znsd97OPbjYYbFpvXE0g"
     }
   ]
 }
