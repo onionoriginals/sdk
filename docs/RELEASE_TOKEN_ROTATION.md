@@ -14,13 +14,13 @@ none of which should be rushed through days before a token expiry. Rotate now
   **2026-07-27T06:53:55Z** — this matches issue #449's claim that the token
   was set on 2026-07-27.
 - npm caps **write-capable** granular access tokens (GATs) at a **90-day**
-  maximum lifetime as of the Feb 2026 security changes ([GitHub Changelog,
+  maximum lifetime as of the Nov 2025 security changes ([GitHub Changelog,
   2025-11-05](https://github.blog/changelog/2025-11-05-npm-security-update-classic-token-creation-disabled-and-granular-token-changes/)).
   90 days after 2026-07-27 is **2026-10-25**.
 - **What is NOT confirmed**: the *actual* expiry the token was created with.
   GitHub's secret metadata only exposes `updated_at`, not npm's token expiry,
   and we have no read access to npm's token list from here. If a shorter
-  expiry was chosen at creation (the pre-Oct-2026 default was 30 days unless
+  expiry was chosen at creation (the pre-Oct-2025 default was 30 days unless
   overridden), the real expiry is earlier than 2026-10-25.
 - **Action**: treat 2026-10-25 as an upper bound, not a fact. Check
   npmjs.com → Access Tokens for the exact date before relying on it, and
@@ -30,9 +30,9 @@ none of which should be rushed through days before a token expiry. Rotate now
 
 1. Go to **npmjs.com → Access Tokens → Generate New Token → Granular Access
    Token**.
-2. **Expiration**: pick **90 days** explicitly. (Starting mid-October 2026,
-   npm's UI *default* for write-enabled GATs drops to 7 days — don't accept
-   the default without checking it.)
+2. **Expiration**: pick **90 days** explicitly. (Since mid-October 2025,
+   npm's UI *default* for write-enabled GATs is 7 days — don't accept the
+   default without checking it.)
 3. **Packages and scopes**: select the **`@originals`** scope (not just the
    two individual packages) with permission **Read and write**. Selecting the
    whole scope — not `@originals/sdk` + `@originals/auth` individually — is
@@ -40,7 +40,7 @@ none of which should be rushed through days before a token expiry. Rotate now
    without another token change (see the cel caveat below).
 4. **Bypass 2FA**: enable it. Without this, CI publishing fails with `EOTP`
    (the account requires 2FA for writes; CI has no prompt to answer). Note:
-   as of early August 2026, 2FA-bypass GATs no longer bypass 2FA for
+   as of 2026-07-31, 2FA-bypass GATs no longer bypass 2FA for
    *account/management* actions (creating tokens, changing package
    settings) — you'll need to complete 2FA to create the token itself, that's
    expected and separate from the bypass working for publish operations.
@@ -73,8 +73,10 @@ npm whoami --registry=https://registry.npmjs.org/ \
 # 2. Confirms write access on the actual packages, without writing anything.
 npm access list packages --registry=https://registry.npmjs.org/ \
   --//registry.npmjs.org/:_authToken=<TOKEN>
-# Look for "@originals/sdk": "read-write" and "@originals/auth": "read-write"
-# in the output. @originals/cel won't appear (never published) — that's expected.
+# Plain-text output, one package per line. Look for:
+#   @originals/sdk: read-write
+#   @originals/auth: read-write
+# @originals/cel won't appear (never published) — that's expected.
 ```
 
 If both succeed, the secret is good. The token's first real use will be the
