@@ -93,10 +93,8 @@ export interface ResourceUtxoSelectionResult {
 
 export const DUST_LIMIT_SATS = 546;
 
-export interface KeyPair {
-  privateKey: string; // multibase encoded
-  publicKey: string;  // multibase encoded
-}
+// Canonical definition lives in @originals/cel (signer adapters take it).
+export type { KeyPair } from '@originals/cel';
 
 export type KeyType = 'ES256K' | 'Ed25519' | 'ES256';
 

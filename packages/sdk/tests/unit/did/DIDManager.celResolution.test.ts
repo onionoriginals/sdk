@@ -3,7 +3,7 @@ import { OriginalsSDK } from '../../../src';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 
 const RES = [{ id: 'res-1', type: 'data', contentType: 'text/plain', hash: '56'.repeat(32) }];
 

@@ -2,7 +2,7 @@ import { DIDDocument, KeyPair, KeyType, KeyRecoveryCredential } from '../types/i
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 import { p256 } from '@noble/curves/nist.js';
-import { multikey, MultikeyType } from '../crypto/Multikey.js';
+import { multikey, MultikeyType } from '@originals/cel';
 import { initNobleCrypto } from '../crypto/noble-init.js';
 
 // secp256k1.getPublicKey (sync) is used below; explicit call, not a side-effect

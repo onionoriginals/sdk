@@ -40,9 +40,9 @@
  *    the signed log never carries them (they are not part of the CEL data
  *    Phase 2 signs).
  */
-import type { EventLog } from '../cel/types.js';
-import { deriveDidCel } from '../cel/celDid.js';
-import { parseSatoshiIdentifier } from '../utils/satoshi-validation.js';
+import type { EventLog } from '@originals/cel';
+import { deriveDidCel } from '@originals/cel';
+import { parseSatoshiIdentifier } from '@originals/cel';
 
 /** Honest sentinel: a btco migration whose satoshi cannot be recovered from the log. */
 export const BTCO_SATOSHI_UNKNOWN = 'did:btco:?';

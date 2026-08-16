@@ -10,14 +10,14 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { DataIntegrityProof } from '../types.js';
-import { PeerCelManager, CelSigner } from '../layers/PeerCelManager.js';
-import { createExternalReference } from '../ExternalReferenceManager.js';
-import { serializeEventLogJson } from '../serialization/json.js';
-import { serializeEventLogCbor } from '../serialization/cbor.js';
-import { multikey } from '../../crypto/Multikey.js';
+import type { DataIntegrityProof } from '@originals/cel';
+import { PeerCelManager, CelSigner } from '@originals/cel';
+import { createExternalReference } from '@originals/cel';
+import { serializeEventLogJson } from '@originals/cel';
+import { serializeEventLogCbor } from '@originals/cel';
+import { multikey } from '@originals/cel';
 import { signingInput } from '../../crypto/signingInput.js';
-import { CEL_CRYPTOSUITE } from '../proofVerification.js';
+import { CEL_CRYPTOSUITE } from '@originals/cel';
 
 /**
  * Flags parsed from command line arguments

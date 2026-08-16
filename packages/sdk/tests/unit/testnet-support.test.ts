@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { btcoDidPrefix, btcoDidFromSatoshi } from '../../src/cel/btcoDid.js';
+import { btcoDidPrefix, btcoDidFromSatoshi } from '@originals/cel';
 import { createBtcoDidDocument } from '../../src/did/createBtcoDidDocument.js';
 import { validateBitcoinAddress, isValidBitcoinAddress } from '../../src/utils/bitcoin-address.js';
 

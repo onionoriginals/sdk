@@ -19,8 +19,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { createCommand } from '../../../src/cel/cli/create';
 import { migrateCommand } from '../../../src/cel/cli/migrate';
-import { parseEventLogJson } from '../../../src/cel/serialization/json';
-import { multikey } from '../../../src/crypto/Multikey';
+import { parseEventLogJson } from '@originals/cel';
+import { multikey } from '@originals/cel';
 
 async function createTestWallet(dir: string): Promise<string> {
   const ed25519 = await import('@noble/ed25519');
@@ -122,9 +122,9 @@ describe('CLI two-step migration chain (peer → webvh → btco)', () => {
 
   it('legacy update-sniffed migration chain still detects webvh (fallback kept)', async () => {
     // Legacy log: genesis embeds did/layer; migration recorded as an `update`.
-    const { createEventLog } = await import('../../../src/cel/algorithms/createEventLog');
-    const { updateEventLog } = await import('../../../src/cel/algorithms/updateEventLog');
-    const { serializeEventLogJson } = await import('../../../src/cel/serialization/json');
+    const { createEventLog } = await import('@originals/cel');
+    const { updateEventLog } = await import('@originals/cel');
+    const { serializeEventLogJson } = await import('@originals/cel');
 
     const signer = async (data: unknown) => ({
       type: 'DataIntegrityProof' as const,

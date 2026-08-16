@@ -25,34 +25,34 @@ import {
   ASSET_ENVELOPE_VERSION,
   type AssetEnvelope
 } from './assetEnvelope.js';
-import { encodeBase64UrlMultibase, hexToBytes } from '../utils/encoding.js';
+import { encodeBase64UrlMultibase, hexToBytes } from '@originals/cel/encoding';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { hashResource, validateCredential } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
-import { parseSatoshiIdentifier, validateSatoshiNumber } from '../utils/satoshi-validation.js';
-import { btcoDidPrefix, btcoDidFromSatoshi } from '../cel/btcoDid.js';
+import { parseSatoshiIdentifier, validateSatoshiNumber } from '@originals/cel';
+import { btcoDidPrefix, btcoDidFromSatoshi } from '@originals/cel';
 import { KeyManager } from '../did/KeyManager.js';
-import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '../cel/signerAdapter.js';
+import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '@originals/cel';
 import { toCelSigner, canonicalDidKeyVm, type OriginalsSigner } from '../crypto/OriginalsSigner.js';
-import type { CelSigner } from '../cel/layers/PeerCelManager.js';
-import { createCelDidDocument, didCelMatchesLog, deriveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
-import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
-import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
-import { PeerCelManager } from '../cel/layers/PeerCelManager.js';
-import { appendEvent } from '../cel/algorithms/appendEvent.js';
-import { computeDigestMultibase, digestMultibaseEquals, decodeDigestMultibase } from '../cel/hash.js';
-import { mostRecentResourceHead } from '../cel/resourceHead.js';
-import { canonicalizeEntryForChain } from '../cel/canonicalize.js';
-import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
-import type { EventLog, LogEntry, ExternalReference, WitnessProof, OrdinalsLookup, VerificationResult } from '../cel/types.js';
+import type { CelSigner } from '@originals/cel';
+import { createCelDidDocument, didCelMatchesLog, deriveDidCel, DID_CEL_PREFIX } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel';
+import { createDidManagerKeyResolver } from '@originals/cel';
+import { PeerCelManager } from '@originals/cel';
+import { appendEvent } from '@originals/cel';
+import { computeDigestMultibase, digestMultibaseEquals, decodeDigestMultibase } from '@originals/cel';
+import { mostRecentResourceHead } from '@originals/cel';
+import { canonicalizeEntryForChain } from '@originals/cel';
+import { serializeEventLogJson, parseEventLogJson } from '@originals/cel';
+import type { EventLog, LogEntry, ExternalReference, WitnessProof, OrdinalsLookup, VerificationResult } from '@originals/cel';
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
-import { multikey } from '../crypto/Multikey.js';
+import { multikey } from '@originals/cel';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { createBtcoDidDocument } from '../did/createBtcoDidDocument.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 import { Logger } from '../utils/Logger.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { StructuredError } from '@originals/cel';
 import { MetricsCollector } from '../utils/MetricsCollector.js';
 import {
   type BatchResult,

@@ -1,5 +1,5 @@
 import { gzipBytes, boundedGunzip, boundedUnzlib } from './utils/bounded-decompress.js';
-import { base64url } from '../utils/encoding.js';
+import { base64url } from '@originals/cel/encoding';
 import { MAX_DECOMPRESSED_BITSTRING_BYTES } from './StatusListManager.js';
 
 const MINIMUM_LIST_SIZE = 131072; // 16KB = 131072 bits per W3C spec recommendation

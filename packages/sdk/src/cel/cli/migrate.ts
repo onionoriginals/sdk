@@ -13,19 +13,19 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { EventLog, DataIntegrityProof } from '../types.js';
-import { WebVHCelManager } from '../layers/WebVHCelManager.js';
-import { BtcoCelManager } from '../layers/BtcoCelManager.js';
-import type { CelSigner } from '../layers/PeerCelManager.js';
-import { parseEventLogJson } from '../serialization/json.js';
-import { parseEventLogCbor } from '../serialization/cbor.js';
-import { serializeEventLogJson } from '../serialization/json.js';
-import { serializeEventLogCbor } from '../serialization/cbor.js';
-import { multikey } from '../../crypto/Multikey.js';
+import type { EventLog, DataIntegrityProof } from '@originals/cel';
+import { WebVHCelManager } from '@originals/cel';
+import { BtcoCelManager } from '@originals/cel';
+import type { CelSigner } from '@originals/cel';
+import { parseEventLogJson } from '@originals/cel';
+import { parseEventLogCbor } from '@originals/cel';
+import { serializeEventLogJson } from '@originals/cel';
+import { serializeEventLogCbor } from '@originals/cel';
+import { multikey } from '@originals/cel';
 import { signingInput } from '../../crypto/signingInput.js';
-import { CEL_CRYPTOSUITE } from '../proofVerification.js';
-import { btcoDidFromSatoshi } from '../btcoDid.js';
-import { deriveDidCel } from '../celDid.js';
+import { CEL_CRYPTOSUITE } from '@originals/cel';
+import { btcoDidFromSatoshi } from '@originals/cel';
+import { deriveDidCel } from '@originals/cel';
 
 /**
  * Flags parsed from command line arguments

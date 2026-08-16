@@ -9,10 +9,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createCommand, CreateFlags } from '../../../src/cel/cli/create';
-import { parseEventLogJson } from '../../../src/cel/serialization/json';
-import { parseEventLogCbor } from '../../../src/cel/serialization/cbor';
-import { multikey } from '../../../src/crypto/Multikey';
-import { CEL_CRYPTOSUITE } from '../../../src/cel/proofVerification';
+import { parseEventLogJson } from '@originals/cel';
+import { parseEventLogCbor } from '@originals/cel';
+import { multikey } from '@originals/cel';
+import { CEL_CRYPTOSUITE } from '@originals/cel';
 
 describe('CLI create command', () => {
   let tempDir: string;

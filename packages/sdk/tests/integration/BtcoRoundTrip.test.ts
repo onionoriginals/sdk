@@ -2,9 +2,9 @@ import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../src';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MockKeyStore } from '../mocks/MockKeyStore';
-import { computeDigestMultibase } from '../../src/cel/hash';
-import { canonicalizeEntryForChain } from '../../src/cel/canonicalize';
-import { verifyEventLog } from '../../src/cel/algorithms/verifyEventLog';
+import { computeDigestMultibase } from '@originals/cel';
+import { canonicalizeEntryForChain } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel';
 
 describe('did:btco round-trip (#375)', () => {
   test('lifecycle-inscribed asset resolves through the SDK resolver', async () => {

@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll } from 'bun:test';
 import { Ed25519Verifier } from '../../../src/did/Ed25519Verifier';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { signAsync, getPublicKeyAsync } from '@noble/ed25519';
 
 describe('Ed25519Verifier', () => {

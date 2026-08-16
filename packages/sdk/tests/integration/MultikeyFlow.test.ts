@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { KeyManager } from '../../src/did/KeyManager';
 import { createBtcoDidDocument } from '../../src/did/createBtcoDidDocument';
-import { multikey } from '../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { DIDManager } from '../../src/did/DIDManager';
 import { Issuer } from '../../src/vc/Issuer';
 import { Verifier } from '../../src/vc/Verifier';

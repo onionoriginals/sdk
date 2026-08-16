@@ -3,7 +3,7 @@
 /** Inlined from eddsa.branch-more.part.ts */
 import { describe, test, expect } from 'bun:test';
 import { EdDSACryptosuiteManager } from '../../../../src/vc/cryptosuites/eddsa';
-import { multikey } from '../../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { PRELOADED_CONTEXTS } from '../../../../src/utils/serialization';
 
 // Safe-mode canonicalization requires real context documents (issue #167);

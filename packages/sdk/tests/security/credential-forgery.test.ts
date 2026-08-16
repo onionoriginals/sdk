@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test';
 import { CredentialManager } from '../../src/vc/CredentialManager';
 import { DIDManager } from '../../src/did/DIDManager';
-import { multikey } from '../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import * as secp from '@noble/secp256k1';
 
 test('forged credential signed with an unrelated key does NOT verify', async () => {

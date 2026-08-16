@@ -5,8 +5,8 @@ import { OrdinalsClient } from '../bitcoin/OrdinalsClient.js';
 import { createBtcoDidDocument } from './createBtcoDidDocument.js';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter.js';
 import { OrdinalsProviderResolverAdapter } from './providers/OrdinalsProviderResolverAdapter.js';
-import { StructuredError } from '../utils/telemetry.js';
-import { multikey } from '../crypto/Multikey.js';
+import { StructuredError } from '@originals/cel';
+import { multikey } from '@originals/cel';
 import { WebVHManager } from './WebVHManager.js';
 import { Ed25519Verifier } from './Ed25519Verifier.js';
 import type {
@@ -15,10 +15,10 @@ import type {
   RecoverWebVHOptions,
   RecoverWebVHResult,
 } from './WebVHManager.js';
-import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
-import { resolveDidCel, DID_CEL_PREFIX } from '../cel/celDid.js';
-import { parseEventLogJson } from '../cel/serialization/json.js';
-import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
+import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '@originals/cel';
+import { resolveDidCel, DID_CEL_PREFIX } from '@originals/cel';
+import { parseEventLogJson } from '@originals/cel';
+import { createDidManagerKeyResolver } from '@originals/cel';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { DIDCache } from './DIDCache.js';

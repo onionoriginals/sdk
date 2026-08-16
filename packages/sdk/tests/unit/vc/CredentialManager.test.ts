@@ -4,7 +4,7 @@ import { VerifiableCredential, CredentialSubject, Proof } from '../../../src/typ
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 import { p256 } from '@noble/curves/nist.js';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 
 describe('CredentialManager', () => {
   const sdk = OriginalsSDK.create();
@@ -507,10 +507,10 @@ describe('CredentialManager additional branches', () => {
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any, dm);
     const sk = new Uint8Array(32).fill(9);
     const pk = new Uint8Array(32).fill(7);
-    const vm = { id: 'did:ex:vm#1', controller: 'did:ex', publicKeyMultibase: (await import('../../../src/crypto/Multikey')).multikey.encodePublicKey(pk, 'Ed25519'), type: 'Multikey' } as any;
+    const vm = { id: 'did:ex:vm#1', controller: 'did:ex', publicKeyMultibase: (await import('@originals/cel')).multikey.encodePublicKey(pk, 'Ed25519'), type: 'Multikey' } as any;
     registerVerificationMethod(vm as any);
     const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'], type: ['VerifiableCredential'], issuer: 'did:ex', issuanceDate: new Date().toISOString(), credentialSubject: {} };
-    const skMb = (await import('../../../src/crypto/Multikey')).multikey.encodePrivateKey(sk, 'Ed25519');
+    const skMb = (await import('@originals/cel')).multikey.encodePrivateKey(sk, 'Ed25519');
     const signed = await cm.signCredential(vc, skMb, 'did:ex:vm#1');
     expect(signed.proof).toBeDefined();
   });
@@ -520,7 +520,7 @@ describe('CredentialManager additional branches', () => {
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any, dm);
     const sk = new Uint8Array(32).fill(4);
     const pk = new Uint8Array(32).fill(6);
-    const { multikey } = await import('../../../src/crypto/Multikey');
+    const { multikey } = await import('@originals/cel');
     const vm = { id: 'did:ex:vm#2', controller: 'did:ex', publicKeyMultibase: multikey.encodePublicKey(pk, 'Ed25519'), type: 'Multikey' } as any;
     registerVerificationMethod(vm as any);
     const vc: any = { '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'], type: ['VerifiableCredential'], issuer: { id: 'did:ex' }, issuanceDate: new Date().toISOString(), credentialSubject: {} };
@@ -532,7 +532,7 @@ describe('CredentialManager additional branches', () => {
   test('verifyCredential takes cryptosuite from proof array first element', async () => {
     const dm = new DIDManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any);
     const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'Ed25519' } as any, dm);
-    const { multikey } = await import('../../../src/crypto/Multikey');
+    const { multikey } = await import('@originals/cel');
     const sk = new Uint8Array(32).fill(11);
     const pk = new Uint8Array(32).fill(12);
     const skMb = multikey.encodePrivateKey(sk, 'Ed25519');

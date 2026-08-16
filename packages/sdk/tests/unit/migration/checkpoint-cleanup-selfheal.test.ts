@@ -28,8 +28,8 @@ import { MIGRATION_STORAGE_DOMAIN } from '../../../src/migration/storage/Migrati
 import { OriginalsSDK } from '../../../src';
 import { MigrationManager } from '../../../src/migration';
 import type { LogEntry } from '../../../src/utils/Logger';
-import type { TelemetryEvent } from '../../../src/utils/telemetry';
-import { StructuredError } from '../../../src/utils/telemetry';
+import type { TelemetryEvent } from '@originals/cel';
+import { StructuredError } from '@originals/cel';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const PENDING_PREFIX = 'checkpoints/pending-deletion/';

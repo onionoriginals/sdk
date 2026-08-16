@@ -1,8 +1,8 @@
 /* istanbul ignore file */
 import type { OrdinalsProvider, InscriptionParts } from '../types.js';
-import { StructuredError } from '../../utils/telemetry.js';
-import { decode as decodeCbor } from '../../utils/cbor.js';
-import { hexToBytes } from '../../utils/encoding.js';
+import { StructuredError } from '@originals/cel';
+import { decode as decodeCbor } from '@originals/cel/cbor';
+import { hexToBytes } from '@originals/cel/encoding';
 
 interface HttpProviderOptions {
   baseUrl: string;

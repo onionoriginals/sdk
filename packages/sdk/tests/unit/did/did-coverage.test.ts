@@ -24,7 +24,7 @@ import { DIDManager } from '../../../src/did/DIDManager';
 import { WebVHManager } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { Ed25519Signer } from '../../../src/crypto/Signer';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import type { ExternalSigner, ExternalVerifier, OriginalsConfig } from '../../../src/types';
 
 // ---------------------------------------------------------------------------

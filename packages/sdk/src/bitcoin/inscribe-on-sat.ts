@@ -2,8 +2,8 @@ import * as btc from '@scure/btc-signer';
 import { Utxo } from '../types/bitcoin.js';
 import { BitcoinSigner } from '../types/common.js';
 import { OrdinalsProvider } from '../adapters/types.js';
-import { StructuredError } from '../utils/telemetry.js';
-import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
+import { StructuredError } from '@originals/cel';
+import { validateSatoshiNumber } from '@originals/cel';
 import { createCommitTransaction, createRevealTransaction } from './transactions/commit.js';
 import { scriptPubKeyForAddress } from './transfer.js';
 

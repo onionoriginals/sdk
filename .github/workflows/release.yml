@@ -77,7 +77,7 @@ jobs:
         id: check
         run: |
           should=false
-          for dir in packages/sdk packages/auth; do
+          for dir in packages/cel packages/sdk packages/auth; do
             name=$(node -p "require('./$dir/package.json').name")
             ver=$(node -p "require('./$dir/package.json').version")
             set +e

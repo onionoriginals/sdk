@@ -1,9 +1,9 @@
 import { VerifiableCredential, VerifiablePresentation } from '../types/index.js';
-import { multikey, MultikeyType } from '../crypto/Multikey.js';
+import { multikey, MultikeyType } from '@originals/cel';
 import { DIDManager } from '../did/DIDManager.js';
 import { createDocumentLoader } from './documentLoader.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { StructuredError } from '@originals/cel';
 
 /**
  * True when the error is a SECURITY refusal that must fail closed (never fall

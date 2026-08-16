@@ -2,9 +2,9 @@ import { describe, test, expect } from 'bun:test';
 import { CredentialManager } from '../../src/vc/CredentialManager';
 import { DIDManager } from '../../src/did/DIDManager';
 import { computeCredentialDigest } from '../../src/utils/credential-digest';
-import { encodeBase64UrlMultibase } from '../../src/utils/encoding';
+import { encodeBase64UrlMultibase } from '@originals/cel/encoding';
 import { signerForKeyType } from '../../src/crypto/Signer';
-import { multikey } from '../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import * as ed25519 from '@noble/ed25519';
 import type { VerifiableCredential, Proof } from '../../src/types';
 

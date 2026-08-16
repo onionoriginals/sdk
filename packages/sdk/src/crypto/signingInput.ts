@@ -10,9 +10,7 @@
  * safe to import from the browser-slim entry points.
  */
 
-import { celProofSigningInput, committedFields, witnessSigningBytes } from '../cel/canonicalize.js';
-import { sha256Bytes } from '../utils/hash.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { celProofSigningInput, committedFields, witnessSigningBytes, sha256Bytes, StructuredError } from '@originals/cel';
 
 /** Minimal documentLoader shape (same contract the VC stack uses). */
 export type SigningDocumentLoader = (url: string) => Promise<{ document: unknown }>;

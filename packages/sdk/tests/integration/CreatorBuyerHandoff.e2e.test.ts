@@ -42,10 +42,10 @@ import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import { KeyManager } from '../../src/did/KeyManager';
-import { verifyEventLog } from '../../src/cel/algorithms/verifyEventLog';
+import { verifyEventLog } from '@originals/cel';
 import { replayProvenance } from '../../src/lifecycle/replayProvenance';
-import { resolveDidCel } from '../../src/cel/celDid';
-import { createDidManagerKeyResolver } from '../../src/cel/keyResolver';
+import { resolveDidCel } from '@originals/cel';
+import { createDidManagerKeyResolver } from '@originals/cel';
 import type { AssetEnvelope } from '../../src/lifecycle/assetEnvelope';
 import type { CelAppendSkippedEvent } from '../../src/events/types';
 

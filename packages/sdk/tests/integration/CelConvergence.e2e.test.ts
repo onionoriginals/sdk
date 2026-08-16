@@ -14,12 +14,12 @@ import { OriginalsSDK } from '../../src';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';
-import { multikey } from '../../src/crypto/Multikey';
-import { computeDigestMultibase } from '../../src/cel/hash';
-import { canonicalizeEntryForChain } from '../../src/cel/canonicalize';
-import { verifyEventLog } from '../../src/cel/algorithms/verifyEventLog';
+import { multikey } from '@originals/cel';
+import { computeDigestMultibase } from '@originals/cel';
+import { canonicalizeEntryForChain } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel';
 import { replayProvenance } from '../../src/lifecycle/replayProvenance';
-import { deriveDidCel } from '../../src/cel/celDid';
+import { deriveDidCel } from '@originals/cel';
 
 // regtest accepts this bech32 address in the SDK's validator (see the other
 // transferOwnership integration tests).

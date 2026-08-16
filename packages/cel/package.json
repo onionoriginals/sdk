@@ -1,0 +1,85 @@
+{
+  "name": "@originals/cel",
+  "version": "0.1.0",
+  "description": "Cryptographic Event Log core for the Originals Protocol - create, append, and verify CELs offline; browser-safe",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json",
+    "./encoding": {
+      "types": "./dist/utils/encoding.d.ts",
+      "import": "./dist/utils/encoding.js",
+      "default": "./dist/utils/encoding.js"
+    },
+    "./cbor": {
+      "types": "./dist/utils/cbor.d.ts",
+      "import": "./dist/utils/cbor.js",
+      "default": "./dist/utils/cbor.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js",
+      "default": "./dist/testing/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "bun test tests/",
+    "test:coverage": "bun test tests/ --coverage",
+    "test:ci": "bash -o pipefail -c 'bun test tests/ --coverage 2>&1 | bun run ../../scripts/check-coverage.ts'",
+    "lint": "eslint \"src/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\""
+  },
+  "keywords": [
+    "originals",
+    "cel",
+    "cryptographic-event-log",
+    "did",
+    "provenance",
+    "decentralized-identity"
+  ],
+  "author": "Aviary Tech",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/onionoriginals/sdk"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "dependencies": {
+    "@aviarytech/did-peer": "^1.1.2",
+    "@noble/curves": "^2.2.0",
+    "@noble/ed25519": "^3.1.0",
+    "@noble/hashes": "^2.0.1",
+    "@scure/base": "^2.2.0",
+    "cborg": "^5.1.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/bun": "^1.3.0",
+    "@types/node": "^26.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.62.0",
+    "@typescript-eslint/parser": "^8.62.0",
+    "bun-types": "^1.3.1",
+    "eslint": "^10.6.0",
+    "prettier": "^3.0.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=20.10.0"
+  }
+}

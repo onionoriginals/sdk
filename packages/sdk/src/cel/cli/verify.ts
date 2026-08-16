@@ -10,11 +10,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { EventLog, VerificationResult, DataIntegrityProof, WitnessProof } from '../types.js';
-import { verifyEventLog } from '../algorithms/verifyEventLog.js';
-import { createDidManagerKeyResolver } from '../keyResolver.js';
-import { parseEventLogJson } from '../serialization/json.js';
-import { parseEventLogCbor } from '../serialization/cbor.js';
+import type { EventLog, VerificationResult, DataIntegrityProof, WitnessProof } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel';
+import { createDidManagerKeyResolver } from '@originals/cel';
+import { parseEventLogJson } from '@originals/cel';
+import { parseEventLogCbor } from '@originals/cel';
 import { OriginalsSDK } from '../../core/OriginalsSDK.js';
 import type { BitcoinNetworkName } from '../../types/network.js';
 

@@ -5,9 +5,9 @@ import {
 } from '../types/index.js';
 import type { FeeOracleAdapter, OrdinalsProvider, InscriptionParts } from '../adapters/index.js';
 import type { OperationLock } from '../utils/OperationLock.js';
-import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
+import { emitTelemetry, StructuredError } from '@originals/cel';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
-import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
+import { validateSatoshiNumber } from '@originals/cel';
 
 /**
  * Upper bound on any fee rate the SDK will use, whether caller-provided or
