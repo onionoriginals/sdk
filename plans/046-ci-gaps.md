@@ -116,7 +116,7 @@ the auth 401s alone trip. A gate that is red on arrival gets disabled.
 `CEL entry glosses > no event type renders as its own bare name`; the dead
 import in the rendered snippet fails the new `content.quickstart.test.ts`, which
 resolves every specifier the snippet names. Runs in parallel with the existing
-jobs, ~1 min, so wall-clock CI time is unchanged.
+jobs and finishes in ~25s, so wall-clock CI time is unchanged.
 
 ### 5. A GC-sensitive stress test flaked under CI load — FIXED
 
