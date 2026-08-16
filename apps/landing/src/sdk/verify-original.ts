@@ -4,12 +4,13 @@
  * Mirrors verify-example.ts, but runs against the artifacts the Original
  * actually hosts at this origin (fetched by the detail page): the resource
  * bytes are re-hashed, the did:webvh log's SCID + Ed25519 proof chain is
- * re-verified via didwebvh-ts, and the CEL event log's whole signed chain is
- * re-verified via the SDK — binding it to this DID through the migrate event.
- * Nothing is taken on faith from the server; the checks are the proof.
+ * re-verified via didwebvh-ts, and the CEL event log's signed chain is
+ * re-verified via the SDK up to the web publication — binding it to this DID
+ * through the migrate event. Nothing is taken on faith from the server; the
+ * checks are the proof, and each one reports exactly what it proved.
  */
 import '../shims/buffer-global';
-import { Ed25519Verifier, resolveDidCel } from '@originals/sdk';
+import { Ed25519Verifier, verifyEventLog } from '@originals/sdk';
 import { resolveDIDFromLog } from 'didwebvh-ts';
 import { sha256 } from '@noble/hashes/sha2.js';
 import type { CelLog } from '../pages/original-detail-data';
@@ -24,6 +25,28 @@ const toHex = (bytes: Uint8Array) =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 
 const short = (did: string) => (did.length > 42 ? `${did.slice(0, 36)}…` : did);
+
+/**
+ * True when every verification error is "this event's Bitcoin anchor needs an
+ * on-chain lookup" AND belongs to an event AFTER `upTo` (the web publication).
+ * Once an asset is inscribed, its btco events carry a `bitcoin-ordinals-2024`
+ * witness proof that verifyEventLog fails closed on without an ordinalsProvider
+ * — and the browser has none (this origin proxies fee/broadcast, not inscription
+ * lookups). Those errors say "not checkable here", not "the chain is broken", so
+ * they must not condemn the genesis → did:webvh chain the page actually claims.
+ * Errors on earlier events, or of any other kind, fail the check as before.
+ */
+function onlyUncheckableAnchorErrors(errors: string[], upTo: number): boolean {
+  if (errors.length === 0) return false;
+  return errors.every((err) => {
+    const idx = Number(/^Event (\d+)/.exec(err)?.[1]);
+    return (
+      Number.isInteger(idx) &&
+      idx > upTo &&
+      /ordinalsProvider|ordinals provider/.test(err)
+    );
+  });
+}
 
 export async function verifyOriginal(input: {
   /** The Original's did:webvh identifier. */
@@ -72,23 +95,42 @@ export async function verifyOriginal(input: {
   }
   checks.push({ id: 'log', ok: logOk, detail: logDetail });
 
-  // 3 · Provenance: re-derive the did:cel genesis identity from the CEL log —
-  //     resolveDidCel verifies the WHOLE signed event chain and binds the DID
-  //     to it (null otherwise) — and confirm its migrate event targets this
-  //     did:webvh, chaining genesis → published identity.
+  // 3 · Provenance: re-verify the CEL's whole signed event chain against the
+  //     did:cel its genesis event derives (expectedDid — so a doctored log
+  //     fails closed) and confirm its migrate event targets this did:webvh,
+  //     chaining genesis → published identity.
+  //
+  //     An INSCRIBED asset's log continues past that migrate with Bitcoin-
+  //     anchored events whose witness proofs need an on-chain lookup the
+  //     browser can't make. Verifying only up to the web publication — the
+  //     exact claim this page makes — keeps those assets honest-green with a
+  //     detail that says how much was checked, instead of reporting the whole
+  //     chain broken (which is what it did before, on every inscribed asset).
+  const events = input.celLog?.events ?? [];
+  const migrateIdx = events.findIndex((e) => e.type === 'migrate' && e.data?.layer === 'webvh');
+  const migrate = migrateIdx >= 0 ? events[migrateIdx] : undefined;
+  const celDid = migrate?.data?.sourceDid;
   let celOk = false;
   let celDetail = 'CEL log could not be fetched';
-  const migrate = input.celLog?.events?.find(
-    (e) => e.type === 'migrate' && e.data?.layer === 'webvh'
-  );
-  const celDid = migrate?.data?.sourceDid;
   if (input.celLog && celDid) {
+    celDetail = 'CEL event chain did not verify';
     try {
-      const celDoc = await resolveDidCel(celDid, input.celLog as never);
-      celOk = !!celDoc && migrate?.data?.targetDid === input.did;
-      celDetail = celOk
-        ? `${input.celLog.events.length} signed events verified → ${short(celDid)}`
-        : 'CEL event chain did not verify';
+      if (migrate?.data?.targetDid !== input.did) {
+        celDetail = 'CEL log does not bind to this DID';
+      } else {
+        const full = await verifyEventLog(input.celLog as never, { expectedDid: celDid } as never);
+        if (full.verified) {
+          celOk = true;
+          celDetail = `${events.length} signed events verified → ${short(celDid)}`;
+        } else if (onlyUncheckableAnchorErrors(full.errors ?? [], migrateIdx)) {
+          const head = { ...input.celLog, events: events.slice(0, migrateIdx + 1) };
+          const prefix = await verifyEventLog(head as never, { expectedDid: celDid } as never);
+          celOk = prefix.verified;
+          celDetail = celOk
+            ? `${migrateIdx + 1} of ${events.length} signed events verified → ${short(celDid)} · the Bitcoin anchor needs an on-chain lookup this page can't make`
+            : 'CEL event chain did not verify';
+        }
+      }
     } catch (err) {
       console.error('[originals-sdk] original CEL verification failed', err);
       celDetail = 'CEL event chain did not verify';
