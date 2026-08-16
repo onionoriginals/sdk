@@ -496,10 +496,11 @@ export const canonicalizeAndGroup = async (
     await skolemizeCompactJsonLd(document, CUSTOM_URN_SCHEME, options);
   const deskolemizedNQuads = await toDeskolemizedNQuads(skolemizedCompactDocument, options);
 
-  let { nquads, labelMap } =
+  // Only labelMap is reassigned below; nquads is not.
+  const { nquads, labelMap: canonicalLabelMap } =
     await labelReplacementCanonicalizeNQuads(labelMapFactoryFunction, deskolemizedNQuads, options);
 
-  labelMap = stripBlankNodePrefixes(labelMap);
+  const labelMap = stripBlankNodePrefixes(canonicalLabelMap);
   const selections = new Map<string, SelectionResult>();
   for (const [name, pointers] of Object.entries(groupDefinitions)) {
     selections.set(name, await selectCanonicalNQuads(

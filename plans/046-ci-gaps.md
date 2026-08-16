@@ -16,7 +16,7 @@
 
 ## Why this matters
 
-Three gaps, each of which let something real through during run 3. None are
+Four gaps, each of which let something real through during run 3. None are
 hypothetical: for each, the bug shipped to a PR and was caught by a human or a
 review bot rather than by CI.
 
@@ -70,6 +70,11 @@ before eslint sees it. Without `globstar`, `src/**/*.ts` expands to `src/*/*.ts`
 **What it let through**: unknown — which is the point. Quoting the glob surfaces
 **38 pre-existing errors** across those directories.
 
+> **Note (from implementing this):** `eslint --fix` removes disable directives
+> for rules that are no longer enabled, but replaces each comment with a line of
+> leftover indentation rather than deleting it. Sweep those up, and check what
+> the directives were suppressing before accepting their removal.
+
 **Fix**: quote the glob (`eslint "src/**/*.ts"`) in both packages. Then decide,
 and record the decision in the PR:
 
@@ -81,6 +86,41 @@ and record the decision in the PR:
 
 **Do NOT** leave the glob unquoted to keep CI green. A lint job that silently
 skips two thirds of the source tree is worse than one that fails.
+
+### 5. A GC-sensitive stress test flaked under CI load — FIXED
+
+`Batch Operations Stress Tests > should not leak memory during repeated batch
+operations` failed intermittently with `[STRESS] Memory window never stabilised`,
+taking ~43s to do so, on PRs that could not possibly have caused it.
+
+**Root cause**: `process.memoryUsage().heapUsed` is not a usable signal in Bun
+without forcing collection first — holding 300k live `Uint8Array`s reports
+~0.2MB, and the same measurement after a synchronous collection reports ~38MB.
+The test called `Bun.gc(false)`, the INCREMENTAL collector, which cannot force a
+full collection, so major GCs fired at arbitrary points and produced 80MB → 14MB
+cliffs mid-window. It coped by discarding the measurement window on any >30%
+drop and restarting, requiring 10 consecutive GC-free readings; under CI memory
+pressure the resets fire repeatedly and the run exhausts its iteration cap.
+
+**Fix**: `Bun.gc(true)` performs a synchronous full collection, so every reading
+comes from a settled heap. Collection stops being a random event to detect and
+becomes a step in the measurement, which removed the reset machinery, the
+iteration cap and the throw path. Halves are now compared by median rather than
+mean, so one unusually large iteration cannot move the result. Verified the
+detection still works: a steadily rising series yields 100% growth and fails,
+while a GC sawtooth yields −67% and passes.
+
+> **This was originally misdiagnosed as an escaped promise rejection.** Every
+> suite appeared to print `0 fail` with no `(fail)` line anywhere — but that came
+> from reading truncated `gh run view --log-failed` output; the `(fail)` was in
+> the stress section, which is last. Read the tail of the log before theorising
+> about the middle.
+>
+> One finding from that investigation is worth keeping: an `unhandledRejection`
+> listener MUST set a non-zero exit code, because registering one REPLACES the
+> runtime's default handling. Measured in Bun 1.3 — no listener: exit 1;
+> log-only listener: exit **0**; log + `process.exitCode = 1`: exit 1. A
+> logging-only reporter silently turns a red run green.
 
 ## Done criteria
 

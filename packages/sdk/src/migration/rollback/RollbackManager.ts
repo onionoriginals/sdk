@@ -242,7 +242,7 @@ export class RollbackManager implements IRollbackManager {
       // Bitcoin transactions cannot be rolled back
       // But we can still restore the source DID to working state
       return true;
-    } catch (error) {
+    } catch (_error) {
       return false;
     }
   }

@@ -102,7 +102,7 @@ export class BBSCryptosuiteUtils {
     // proofs use only the even tags 0x02/0x04/0x06/0x08.
     else throw new Error('Invalid BBS base proof header');
 
-    const components: any[] = cbor.decode(decoded.slice(3)) as any[];
+    const components: any[] = cbor.decode(decoded.slice(3));
     const base = {
       bbsSignature: components[0] as Uint8Array,
       bbsHeader: components[1] as Uint8Array,
@@ -230,7 +230,7 @@ export class BBSCryptosuiteUtils {
     else if (this.compareBytes(header, [0xd9, 0x5d, 0x07])) featureOption = 'pseudonym';
     else throw new Error('Invalid BBS derived proof header');
 
-    const components: any[] = cbor.decode(decoded.slice(3)) as any[];
+    const components: any[] = cbor.decode(decoded.slice(3));
     const decompressedLabelMap = this.decompressLabelMap(components[1]);
     const result: any = {
       bbsProof: components[0],

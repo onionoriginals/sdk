@@ -104,7 +104,7 @@ export class ModuleValidator extends BaseKindValidator<OriginalKind.Module> {
             continue;
           } else if (typeof value === 'object' && value !== null) {
             // Conditional exports object
-            const exportObj = value as { import?: string; require?: string; types?: string };
+            const exportObj = value;
             if (!exportObj.import && !exportObj.require) {
               warnings.push(ValidationUtils.warning(
                 'INCOMPLETE_EXPORT',
