@@ -19,8 +19,10 @@
     "fix-gzip-bomb-timing-flake",
     "fix-ordmock-uint8array-tostring",
     "flat-words-sniff",
+    "landing-cel-event-log",
     "packaging-curated-exports",
     "prerelease-unblock",
+    "release-single-pr-approval",
     "remote-custody-signer-core"
   ]
 }
