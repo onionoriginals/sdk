@@ -12,6 +12,7 @@
     "build": "turbo run build --filter='./packages/*'",
     "landing": "turbo run build --filter='./packages/*' && cd apps/landing && bunx vite build && bunx vite preview",
     "landing:ci": "bun apps/landing/scripts/ci.mjs",
+    "landing:check": "turbo run build --filter='./packages/*' && cd apps/landing && bun run typecheck && bun run typecheck:server && bun test && bun run build",
     "verify:esm": "node scripts/verify-esm.mjs",
     "verify:browser": "node scripts/check-browser-safety.mjs",
     "test": "turbo run test --filter='./packages/*'",

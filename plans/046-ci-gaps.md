@@ -87,6 +87,37 @@ and record the decision in the PR:
 **Do NOT** leave the glob unquoted to keep CI green. A lint job that silently
 skips two thirds of the source tree is worse than one that fails.
 
+### 4. `apps/landing` is never built in CI — FIXED
+
+Every job filters `./packages/*`, so the landing app was never typechecked,
+tested or built. A breaking change to the SDK's public entry landed fully green
+and failed only at deploy.
+
+**What it let through**: three times. (a) Plan 043 moved `OrdMockProvider` off
+the root entry; `engine.ts`/`verify-example.ts` kept importing it from
+`@originals/sdk` (#470). (b) The quickstart sample *rendered on the page* taught
+visitors the same dead import. (c) PR #455 shipped two silent-render bugs — the
+accent map and gloss keyed off `updateResource`, not a member of `EventType`,
+and the two migrate shapes differ (`targetDid` on webvh, `to` on btco) so a
+btco entry rendered with no identifier. #455 added tests pinning both, but those
+tests live in `apps/landing` and therefore never ran.
+
+**Fix**: a `landing` job running `bun run landing:check` — packages build, then
+`tsc` (client + server), the 194-test landing suite, and `vite build`. Replaces
+the build-only step previously bolted onto `esm-importable`.
+
+**Scope**: the headless page-drive (`bun run landing:ci`) stays OUT. It is red on
+unmodified `main` — it needs the standalone API server plus `TURNKEY_*` and
+`JWT_SECRET`, unavailable on fork PRs, and gates on zero console errors, which
+the auth 401s alone trip. A gate that is red on arrival gets disabled.
+
+**Verified red-then-green** by reintroducing each real regression: the dead
+`OrdMockProvider` import fails `tsc` (`TS2614`); the `updateResource` key fails
+`CEL entry glosses > no event type renders as its own bare name`; the dead
+import in the rendered snippet fails the new `content.quickstart.test.ts`, which
+resolves every specifier the snippet names. Runs in parallel with the existing
+jobs, ~1 min, so wall-clock CI time is unchanged.
+
 ### 5. A GC-sensitive stress test flaked under CI load — FIXED
 
 `Batch Operations Stress Tests > should not leak memory during repeated batch
@@ -130,6 +161,9 @@ while a GC sawtooth yields −67% and passes.
    fails on a `Buffer` reference in a guarded graph. Verify by temporarily
    reintroducing `Buffer.from` into `turnkeySignBytes` and confirming CI fails.
 3. `bun run lint` in both packages lints the entire `src` tree, and passes.
+4. CI typechecks, tests and builds `apps/landing` on every PR, and is green on
+   `main`. Verify by reintroducing the `OrdMockProvider` root import or the
+   `updateResource` key and confirming the job fails.
 
 ## STOP conditions
 
