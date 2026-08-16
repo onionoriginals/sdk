@@ -1,5 +1,160 @@
 # @originals/sdk
 
+## 3.0.0-next.0
+
+### Major Changes
+
+- 18fb3bf: **Security:** BBS+ selective disclosure now fails closed. Both no-key paths threw away the caller's privacy intent while reporting success.
+
+  `deriveSelectiveProof` fell back, for any credential without a `bbs-2023` proof, to returning the credential **unchanged** while listing the undisclosed paths in `hiddenFields`. A caller who trusted that report and forwarded `result.credential` published every field it claimed to withhold. It now throws `BBS_BASE_PROOF_REQUIRED`.
+
+  `prepareSelectiveDisclosure` had the matching hole: given no key pair it returned a "metadata-only" result — the credential untouched, pointer arrays attached — which read as success but created no proof, so nothing could ever be derived from it. It now throws `BBS_KEY_REQUIRED`.
+
+  These combined into one trap: the example in `docs/LLM_AGENT_GUIDE.md` passed no key, so it demonstrated the metadata-only path, and a reader following it got a credential with no proof and then a "derived" result that redacted nothing. The example is corrected to show the real flow.
+
+  **Breaking:** calls that previously resolved now throw. Any code relying on either fallback was not performing selective disclosure — it was either producing an unusable credential or leaking. Pass a BBS+ key pair to `prepareSelectiveDisclosure` and derive from its output.
+
+  Note the SDK still cannot generate BLS12-381 keys (`KeyManager` covers ES256K / Ed25519 / ES256), so issuers must bring their own via `@digitalbazaar/bbs-signatures`; `multikey.encodePublicKey(publicKey, 'Bls12381G2')` encodes it for the DID document. The documented example shows this.
+
+- 636417c: **`Buffer` is purged from every public signature — the API speaks `Uint8Array`** (plan 044).
+
+  `Buffer` is a Node global; any browser consumer without a bundler shim got `ReferenceError` the moment a Buffer-typed path executed. Public signatures now use `Uint8Array` throughout, and the browser-reachable entry points (`index`, `LifecycleManager`, `OriginalsAsset`, `cel`) no longer construct Buffers at runtime.
+
+  **Signature changes** (callers passing `Buffer` still compile — `Buffer` extends `Uint8Array`; code that called Buffer methods on _returned_ values must convert):
+
+  - `Signer` and all four implementations (`ES256KSigner`, `Ed25519Signer`, `ES256Signer`, `Bls12381G2Signer`): `sign`/`verify` take and return `Uint8Array`. The returned signature is no longer a `Buffer` instance — use `Buffer.from(sig)` in Node if you need one.
+  - `OrdinalsProvider` (and every shipped provider): `createInscription({ data })`, `InscriptionParts`, and returned/`getInscriptionById` `content` are `Uint8Array`. Decode text content with `new TextDecoder().decode(content)`, not `content.toString('utf8')`.
+  - `StorageAdapter.put(data: Uint8Array | string)` and `StorageGetResult.content: Uint8Array`.
+  - `OrdinalsInscription.content?: Uint8Array` (`types/bitcoin`).
+  - `ResourceManager.createResource` / `updateResource` / `hashContent` accept `Uint8Array | string`.
+  - `KeyManager.encodePublicKeyMultibase(publicKey: Uint8Array, …)` / `decodePublicKeyMultibase` returns `{ key: Uint8Array, … }`.
+  - `LifecycleManager.estimateAppendCost` `content` option: `string | Uint8Array`.
+
+  Internal Node-only paths (transaction building, CLI, server providers) still use `Buffer` where appropriate — the guarantee is about the public surface and the browser-reachable graph.
+
+- ae9f8cb: **The CEL cryptosuite is renamed, and the proof configuration is now signed** (plan 042).
+
+  CEL proofs were labelled `eddsa-jcs-2022`, but the construction was not that suite. There was no hashing step, and the proof configuration was deliberately excluded from the signature. Two consequences, both now fixed:
+
+  **The name promised interop it could not deliver.** A conforming Data Integrity implementation could never verify an Originals CEL proof, nor could we verify theirs, while the label said otherwise. New proofs carry `originals-cel-ed25519-jcs-v1` — a bespoke name that claims exactly what it does.
+
+  **The proof configuration was unattested.** Because the signature covered only the event, `created`, `verificationMethod`, `proofPurpose` and even `cryptosuite` were editable after the fact without invalidating anything — a freely forgeable timestamp inside a structure whose entire purpose is tamper-evidence. The signing input is now `sha256(JCS(proofConfig)) || sha256(JCS(event))`, mirroring the Data Integrity hashing step.
+
+  Binding the configuration is also what makes the migration safe. The verifier dispatches on the suite label, and the two constructions cannot be swapped: relabelling a pre-042 proof to the new suite fails (its signature never covered the configuration), and downgrading a new proof to the old label fails too (the old preimage is not what was signed). Both directions fail closed, so an attacker cannot pick whichever ruleset suits them.
+
+  **Logs sealed before this change keep verifying.** They cannot be re-signed, so `eddsa-jcs-2022` remains accepted on READ — permanently, and never written again. Such logs necessarily keep their original weakness: editing `created` on a pre-042 proof is still undetectable, which is precisely why the construction changed. Externally produced artifacts (a competing anchoring's did:btco document, written by another implementation) may also still carry the old label.
+
+  `celProofSigningInput`, `canonicalizeEvent`, `CEL_CRYPTOSUITE`, `CEL_CRYPTOSUITE_LEGACY`, `verifyDidKeyProof` and `structuralCheckReason` are now root exports, so an external signer or verifier can produce and check the exact bytes without reverse-engineering them.
+
+  **Breaking:**
+
+  - New CEL proofs carry `cryptosuite: 'originals-cel-ed25519-jcs-v1'`. Anything matching on the literal `'eddsa-jcs-2022'` must accept both.
+  - `signingInput.celEvent(entry)` now takes the proof configuration as a second argument: `signingInput.celEvent(entry, proofConfig)`. A signer that ignores it produces a proof that fails at seal time rather than silently later.
+  - Third-party CEL signers must build the proof configuration first and sign over it. Seal-time self-verification (plan 034) catches implementations that have not migrated, at the call site.
+
+- ae9f8cb: **Custody is required, and a provenance append that cannot be signed now fails loudly** (plan 041).
+
+  Two defaults are inverted. Both used to produce assets that looked fine and were quietly broken.
+
+  **`createAsset` requires somewhere to keep the controller key.** Without a signer or a keyStore the freshly generated key was discarded at mint, so the asset could never author another event — `publishToWeb` and `inscribeOnBitcoin` would still "succeed" while omitting their provenance events. That was the default, and the shape of the documented quickstart. It now throws `NO_CUSTODY` naming every way to supply custody. `{ controller: 'ephemeral' }` is the explicit opt-in for a genuinely write-once asset; it still verifies, it simply can never gain another event. It is honoured even when a keyStore is configured — the generated key is not persisted, and no `key:unpersisted` event fires, because that event signals custody lost by accident and this was requested.
+
+  **A lifecycle operation that cannot sign its own event throws `CEL_APPEND_FAILED`** instead of emitting `cel:append-skipped` and carrying on. An operation has not succeeded if the log is missing the migration it just performed. The old behavior is available per call (`{ onAppendFailure: 'skip' }` on `publishToWeb`, `inscribeOnBitcoin`, `rotateBtcoKeys`, `addResourceVersion`) or globally (`config.onAppendFailure`), and still emits `cel:append-skipped`.
+
+  One exception, deliberately: `NO_CEL_LOG` — a legacy pre-CEL asset with no chain to append to — always degrades. No configuration could give such an asset a log, so gating on it would refuse to operate on them at all, which is a different and much harsher policy than "you have a log but cannot sign it".
+
+  **`rotateBtcoKeys` accepts `incomingSigner`.** The post-rotation witness acknowledgment folds to the NEW controller, so the outgoing signer cannot sign it. Without this a remote-custody rotation completed but dropped its acknowledgment — the last silently-dropped event in the lifecycle. The acknowledgment remains non-gating.
+
+  **`config.keyStore` is honoured however the manager is constructed.** `OriginalsSDK.create` destructured `keyStore` out of the config it passed downstream, so anything reading custody from the config — including a `LifecycleManager` built directly from it — saw none. `KeyStore` is also now documented as key _persistence_ rather than a signing authority; prefer `signer` for authorship.
+
+  **Breaking:**
+
+  - `createAsset` / `createDraft` throw `NO_CUSTODY` unless a signer, a keyStore, or `{ controller: 'ephemeral' }` is supplied.
+  - `createAsset` throws `CONTRADICTORY_CUSTODY` when given both `options.signer` and `{ controller: 'ephemeral' }` — a signer makes the asset authorable by that key, which is the opposite of write-once, and silently honouring either instruction would be a guess. An _ambient_ `config.signer` is different: a per-call ephemeral controller simply overrides it.
+  - `publishToWeb`, `inscribeOnBitcoin`, `rotateBtcoKeys` and `addResourceVersion` throw `CEL_APPEND_FAILED` where they previously degraded. Pass `onAppendFailure: 'skip'` for the old behavior.
+
+  Callers relying on the old defaults were, in every case, producing assets whose provenance logs were missing events they believed had been recorded.
+
+- 0d241bc: **Four silent signing failures are now loud.** Each one produced a plausible signed artifact that the SDK's own verifier rejected, with no error at sign time — so the failure surfaced arbitrarily far from its cause, often after an asset was already inscribed.
+
+  **CEL proofs are verified before they are sealed.** `createEventLog` / `appendEvent` checked only that the signer returned something proof-shaped. A signer using the wrong preimage sealed a genesis whose `did:cel` derived fine, whose log looked well-formed, and which could never verify. Both now verify the proof against its own `did:key` verification method before sealing it — offline, one Ed25519 verify per append. Set `{ verifyOnSign: false }` only to deliberately construct an invalid log, e.g. a tamper-detection fixture.
+
+  **The CEL cryptosuite whitelist matches what the verifier can check.** The structural validator admitted `eddsa-rdfc-2022` while the dispatcher failed it closed — a suite the validator accepted but that could never verify. Verification failures now also carry a reason (`unsupported cryptosuite`, `signature mismatch`, `no resolver for <vm>`) instead of a bare "Verification failed".
+
+  **`signCredentialWithExternalSigner` signs the bytes the SDK computed.** It hardcoded `cryptosuite: 'eddsa-rdfc-2022'` and then called `signer.sign({document, proof})`, letting the signer choose its own canonicalization. Every didwebvh-shaped signer chooses JCS, so the proof was labelled RDFC and signed over JCS bytes: **no credential signed this way could ever verify.** The SDK now canonicalizes and hashes (RDFC-2022) and the signer signs exactly those bytes via `ExternalSigner.signBytes`. It also binds the signing key to the credential's stated issuer, matching the local-key path.
+
+  **`CredentialManager` requires a `DIDManager`.** Without one, Data Integrity proofs fell through to a legacy digest path that no DI proof can satisfy, so `verifyCredential` returned a `false` indistinguishable from a bad signature.
+
+  **Breaking:**
+
+  - `ExternalSigner` implementations used with `signCredentialWithExternalSigner` must implement `signBytes(data)`. A `sign()`-only signer now throws `EXTERNAL_SIGNER_SIGNBYTES_REQUIRED` rather than emitting an unverifiable credential — such credentials never verified, so no working code depended on this.
+  - `new CredentialManager(config)` now throws `DID_MANAGER_REQUIRED`; pass a `DIDManager`, or use `sdk.credentials`.
+  - Signers producing proofs over the wrong preimage now throw at append time instead of writing an unverifiable event.
+  - Credentials whose `issuer` is not controlled by the signing key now throw `ISSUER_BINDING_MISMATCH` at sign time.
+
+  The published `packages/sdk/README.md` also documented `did:peer` as the creation layer (it is `did:cel`) and advertised Turnkey/KMS/HSM support the authorship path does not have. It now carries a **Custody** section making `keyStore` step zero and naming both degrade signals, `key:unpersisted` and `cel:append-skipped`.
+
+- 636417c: **Packaging: tree-shakeable entry, curated `exports`, test doubles moved to `/testing`** (plan 043).
+
+  The package is no longer hostile to bundlers, and the export surface now matches what a remote-custody integrator needs instead of what the repo happened to contain.
+
+  - **`"sideEffects": false`.** The root entry's side-effect-only `import './crypto/noble-init.js'` is gone; the noble sync-hash configuration now happens explicitly (an idempotent `initNobleCrypto()` call) inside the modules that use sync noble APIs (`crypto/Signer.ts`, `did/KeyManager.ts`). A bundler can now drop the ~150-module graph (jsonld included) when you only import types. If you imported the SDK purely for its import-time noble setup, call the exported `initNobleCrypto` — but no SDK path requires you to.
+  - **Curated `exports` map.** The 11 internal `./dir/*` wildcards are gone; every internal file is no longer a semver commitment. The supported entry points are now exactly: `.` (root), `./cel` (browser-safe genesis entry), `./testing` (test doubles), `./types`, and `./package.json`. Deep imports like `@originals/sdk/crypto/Multikey` no longer resolve — everything public is exported from the root (e.g. `multikey`).
+  - **Test doubles off the root.** `OrdMockProvider` and `FeeOracleMock` moved from the root entry to `@originals/sdk/testing`. Update imports: `import { OrdMockProvider, FeeOracleMock } from '@originals/sdk/testing'`. Production bundles no longer carry mock providers.
+  - **Remote-signer toolkit added to the root:** `Verifier` (issuer-bound credential verification), `EdDSACryptosuiteManager` (shared signing-input construction), `createDocumentLoader` (JSON-LD loader bound to a `DIDManager`), and `currentControllerVm` (fold a CEL log to the current controller's verification method; also exported from `./cel`).
+  - **Dropped from the root:** `withRetry`/`RetryOptions` (`utils/retry`) and `CircuitBreaker`/`withCircuitBreaker` (`utils/circuit-breaker`). These are internal infrastructure, not Originals API; vendor your own if you depended on them.
+
+- ed327d9: **Remote custody can author assets.** Turnkey, KMS, HSM, MPC and passkey backends never export a private key, and the SDK's authorship path required one — `KeyStore.getPrivateKey(vmId)`. Any such backend was locked out of the recommended tier entirely.
+
+  **One signer interface.** `OriginalsSigner` is three members — `verificationMethodId`, `publicKeyMultibase`, and `signBytes(bytes)` — the smallest capability a custody backend can offer. The SDK canonicalizes and hashes; the signer only ever signs opaque bytes. It is accepted on `OriginalsConfig` and per call on `createAsset`, `publishToWeb`, `inscribeOnBitcoin`, `rotateBtcoKeys`, `authorizeSigner` and `addResourceVersion`. Adapters convert in both directions: `signerFromKeyPair`, `signerFromKeyStore`, `signerFromExternalSigner`, `toCelSigner`, `toExternalSigner`.
+
+  **The provenance leak this closes:** `publishToWeb` accepted an `ExternalSigner`, but that signer only authorized the did:webvh log. The asset's own CEL `migrate` event was appended by a keyStore-only path, so a remote-custody caller doing everything right got a published asset whose provenance log was **missing its migration event** — reported as success. Every authorship append now accepts the configured or per-call signer.
+
+  **One signing-input namespace.** `signingInput` exposes the four (and only four) preimages this SDK signs: `celEvent`, `witness`, `didWebvh`, `credential`. Every internal signing path routes through it, so "which bytes do I sign?" has one answer and the four cannot drift apart. Note `didWebvh` delegates to didwebvh-ts's own `prepareDataForSigning` — it is `sha256(JCS(proof)) || sha256(JCS(document))`, not JCS over the pair, and reimplementing it by hand produces proofs that never verify.
+
+  **A conformance harness.** `assertSignerConformance(signer)` lets any custody backend prove its implementation before shipping, and `MockRemoteSigner` (signBytes-only, no key export) exercises the full create → publish → inscribe → rotate flow in the SDK's own tests. No test previously exercised a non-exporting backend, which is why this went unnoticed.
+
+  **`@originals/auth`:** both Turnkey signers now implement `signBytes` via a single shared `turnkeySignBytes` primitive, so a Turnkey key satisfies `OriginalsSigner` and can author CEL events and sign credentials — not only did:webvh logs. The byte-level code already existed, duplicated across the two signers and kept in sync by comment.
+
+  Custody is explicit at every append: a signer passed to `createAsset` is **not** retained on the asset. An asset holding a signer handed to it once is hidden state that outlives the call — a session-backed signer (a Turnkey browser session) goes stale inside it, and a serialized/reloaded asset has no binding at all. Later appends take a signer per call, or fall back to `config.signer`.
+
+  **Breaking:**
+
+  - `@originals/auth`'s root entry no longer re-exports `./server`. Importing so much as a type from `@originals/auth` pulled `jsonwebtoken`, `@turnkey/sdk-server` and Express into browser bundles. Import server utilities from `@originals/auth/server` and client utilities from `@originals/auth/client`; the root now exports types plus `turnkeySignBytes`, which is browser-safe (hex via @noble/hashes, no `Buffer`).
+  - `ExternalSigner`, `CelSigner`, and using a `KeyStore` as a signing authority are deprecated in favour of `OriginalsSigner`. They still work; removal is a later release. `KeyStore` remains supported for key _persistence_.
+  - The Turnkey signers' "no signature returned" error message is now one shared string naming the expected `activity.result.signRawPayloadResult.{r,s}` shape.
+
+  Also adds `base58AddressToEd25519Multikey`: custody backends hand back an address, not a Multikey, and Turnkey's Ed25519 accounts use `ADDRESS_FORMAT_SOLANA` — base58 of the raw key, with no multicodec header. Building `did:key:${address}` from it yields something that is not a valid did:key, a mistake consumers kept re-deriving.
+
+### Minor Changes
+
+- 5e89cba: Extract the CEL core into `@originals/cel` (plan 044, item 6).
+
+  `@originals/cel` is the browser-safe half of the protocol: create, append, and
+  verify Cryptographic Event Logs offline. It carries only `@noble/*`,
+  `@scure/base`, `cborg`, and a lazily-loaded `@aviarytech/did-peer` (legacy
+  did:peer:4 read path) — no Bitcoin stack, no `jsonld`, no `didwebvh-ts`, no
+  Node builtins. Subpath exports: `.` (CEL core + shared primitives: `multikey`,
+  `StructuredError`, satoshi validation, DID/proof types), `./encoding`,
+  `./cbor`, and `./testing` (`OrdMockProvider`).
+
+  `@originals/sdk` now depends on `@originals/cel` and re-exports everything it
+  exported before — the root entry, `@originals/sdk/cel`, and
+  `@originals/sdk/testing` surfaces are unchanged, so no consumer imports break.
+  The `originals-cel` CLI still ships from the SDK (it drives the full
+  OriginalsSDK lifecycle and needs `fs`/`path`). Type-only couplings were cut
+  structurally: `BtcoCelManager`/`BitcoinWitness`/`OriginalsCel` now accept a
+  `CelBitcoinManager` structural slice (satisfied by `BitcoinManager` as-is) and
+  `createDidManagerKeyResolver` a `CelDidResolver` (satisfied by `DIDManager`).
+
+### Patch Changes
+
+- 00d0c07: **`originals-cel inspect` no longer prints `[object Object]`.** CEL event data is arbitrary JSON written by whoever produced the log, so a field the CLI renders as a string — an asset `name`, a `layer`, a deactivation `reason` — can legitimately be an object. `String(value)` turned those into `[object Object]`, hiding the content at exactly the moment someone is inspecting a log to understand it. Non-primitives are now JSON-rendered. The `Unsupported proof type` error from the Data Integrity proof path had the same flaw and is fixed the same way.
+
+  Found by quoting the `lint` script's glob: it was unquoted, so the shell expanded it to one directory level and `cel/cli`, `bitcoin/transactions`, `migration/*` and several other directories had never been linted at all.
+
+- Updated dependencies [5e89cba]
+  - @originals/cel@0.2.0-next.0
+
 ## 2.1.0
 
 ### Minor Changes

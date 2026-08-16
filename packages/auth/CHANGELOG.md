@@ -1,5 +1,44 @@
 # @originals/auth
 
+## 3.0.0-next.0
+
+### Major Changes
+
+- ed327d9: **Remote custody can author assets.** Turnkey, KMS, HSM, MPC and passkey backends never export a private key, and the SDK's authorship path required one — `KeyStore.getPrivateKey(vmId)`. Any such backend was locked out of the recommended tier entirely.
+
+  **One signer interface.** `OriginalsSigner` is three members — `verificationMethodId`, `publicKeyMultibase`, and `signBytes(bytes)` — the smallest capability a custody backend can offer. The SDK canonicalizes and hashes; the signer only ever signs opaque bytes. It is accepted on `OriginalsConfig` and per call on `createAsset`, `publishToWeb`, `inscribeOnBitcoin`, `rotateBtcoKeys`, `authorizeSigner` and `addResourceVersion`. Adapters convert in both directions: `signerFromKeyPair`, `signerFromKeyStore`, `signerFromExternalSigner`, `toCelSigner`, `toExternalSigner`.
+
+  **The provenance leak this closes:** `publishToWeb` accepted an `ExternalSigner`, but that signer only authorized the did:webvh log. The asset's own CEL `migrate` event was appended by a keyStore-only path, so a remote-custody caller doing everything right got a published asset whose provenance log was **missing its migration event** — reported as success. Every authorship append now accepts the configured or per-call signer.
+
+  **One signing-input namespace.** `signingInput` exposes the four (and only four) preimages this SDK signs: `celEvent`, `witness`, `didWebvh`, `credential`. Every internal signing path routes through it, so "which bytes do I sign?" has one answer and the four cannot drift apart. Note `didWebvh` delegates to didwebvh-ts's own `prepareDataForSigning` — it is `sha256(JCS(proof)) || sha256(JCS(document))`, not JCS over the pair, and reimplementing it by hand produces proofs that never verify.
+
+  **A conformance harness.** `assertSignerConformance(signer)` lets any custody backend prove its implementation before shipping, and `MockRemoteSigner` (signBytes-only, no key export) exercises the full create → publish → inscribe → rotate flow in the SDK's own tests. No test previously exercised a non-exporting backend, which is why this went unnoticed.
+
+  **`@originals/auth`:** both Turnkey signers now implement `signBytes` via a single shared `turnkeySignBytes` primitive, so a Turnkey key satisfies `OriginalsSigner` and can author CEL events and sign credentials — not only did:webvh logs. The byte-level code already existed, duplicated across the two signers and kept in sync by comment.
+
+  Custody is explicit at every append: a signer passed to `createAsset` is **not** retained on the asset. An asset holding a signer handed to it once is hidden state that outlives the call — a session-backed signer (a Turnkey browser session) goes stale inside it, and a serialized/reloaded asset has no binding at all. Later appends take a signer per call, or fall back to `config.signer`.
+
+  **Breaking:**
+
+  - `@originals/auth`'s root entry no longer re-exports `./server`. Importing so much as a type from `@originals/auth` pulled `jsonwebtoken`, `@turnkey/sdk-server` and Express into browser bundles. Import server utilities from `@originals/auth/server` and client utilities from `@originals/auth/client`; the root now exports types plus `turnkeySignBytes`, which is browser-safe (hex via @noble/hashes, no `Buffer`).
+  - `ExternalSigner`, `CelSigner`, and using a `KeyStore` as a signing authority are deprecated in favour of `OriginalsSigner`. They still work; removal is a later release. `KeyStore` remains supported for key _persistence_.
+  - The Turnkey signers' "no signature returned" error message is now one shared string naming the expected `activity.result.signRawPayloadResult.{r,s}` shape.
+
+  Also adds `base58AddressToEd25519Multikey`: custody backends hand back an address, not a Multikey, and Turnkey's Ed25519 accounts use `ADDRESS_FORMAT_SOLANA` — base58 of the raw key, with no multicodec header. Building `did:key:${address}` from it yields something that is not a valid did:key, a mistake consumers kept re-deriving.
+
+### Patch Changes
+
+- Updated dependencies [18fb3bf]
+- Updated dependencies [636417c]
+- Updated dependencies [ae9f8cb]
+- Updated dependencies [5e89cba]
+- Updated dependencies [00d0c07]
+- Updated dependencies [ae9f8cb]
+- Updated dependencies [0d241bc]
+- Updated dependencies [636417c]
+- Updated dependencies [ed327d9]
+  - @originals/sdk@3.0.0-next.0
+
 ## 2.0.0
 
 Initial published release. Version 2.0.0 was tagged internally but never published to npm, so all changes accumulated during the pre-release stabilization effort ship as part of this initial 2.0.0 release. The consumed changesets are consolidated below.
@@ -22,6 +61,7 @@ Initial published release. Version 2.0.0 was tagged internally but never publish
   The SDK release also includes opt-in `did:webvh` pre-rotation key support
   (`createDIDWebVH`/`rotateDIDWebVHKeys` `prerotation` option, returned
   `nextKeyPair`), with guards that reject misuse on pre-rotation chains.
+
 - 5981ec2: Migrate the OTP verification flow to the Turnkey v6 encrypted-bundle API (`@turnkey/sdk-server` 5.3.0 → 6.1.1, new dependency `@turnkey/crypto`).
 
   Turnkey v6 replaced plaintext OTP verification: `initOtp` (ACTIVITY_TYPE_INIT_OTP_V3) now returns an `otpEncryptionTargetBundle` (a signed bundle containing a target encryption key), and `verifyOtp` (ACTIVITY_TYPE_VERIFY_OTP_V2) requires an `encryptedOtpBundle` — the OTP code plus a client-generated P-256 public key, HPKE-encrypted to that target key — instead of the previous plaintext `otpCode` field. The previous release preserved the pre-v6 plaintext call shape behind a type cast, which type-checked but could not succeed against the real Turnkey v6 API.
