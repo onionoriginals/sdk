@@ -18,6 +18,7 @@ import { OrdHttpProvider } from '../../../src/adapters/providers/OrdHttpProvider
 const SAT = '1234567890';
 const TXID = 'a860baeecae8c2d9fb95f09608d3b3e2bbaf207f25a6361e0d07a326906f8be6';
 const INSCRIPTION_ID = `${TXID}i0`;
+const OTHER_INSCRIPTION_ID = `${'b'.repeat(64)}i0`;
 const DID_CEL = 'did:cel:uEXAMPLEEXAMPLEEXAMPLE';
 
 function backLinkedDoc(didCel: string = DID_CEL) {
@@ -115,6 +116,16 @@ describe('QuickNodeProvider.getAnchoringsForDidCel (sat-scoped, JSON-RPC wire)',
     expect(anchorings).toEqual([]);
   });
 
+  test('a fetched record echoing a DIFFERENT id than the listed one is dropped (inconsistent indexer data)', async () => {
+    serve(backLinkedDoc());
+    // Listed as INSCRIPTION_ID, but the per-inscription record claims another id.
+    (results.ord_getInscription as { id: string }).id = OTHER_INSCRIPTION_ID;
+
+    const anchorings = await provider().getAnchoringsForDidCel(DID_CEL, { satoshi: SAT });
+
+    expect(anchorings).toEqual([]);
+  });
+
   test('a sat with no inscriptions enumerates empty (fails closed at the uniqueness gate)', async () => {
     errors.ord_getSat = { code: -5, message: 'sat not found' };
 
@@ -180,6 +191,22 @@ describe('OrdHttpProvider.getAnchoringsForDidCel (sat-scoped, HTTP wire)', () =>
 
   test('an inscription that does not back-link this did:cel is not an anchoring', async () => {
     serve(backLinkedDoc('did:cel:uSOMEONE-ELSE'));
+    const provider = new OrdHttpProvider({ baseUrl: BASE });
+
+    const anchorings = await provider.getAnchoringsForDidCel(DID_CEL, { satoshi: SAT });
+
+    expect(anchorings).toEqual([]);
+  });
+
+  test('a fetched record echoing a DIFFERENT id than the listed one is dropped (inconsistent indexer data)', async () => {
+    serve(backLinkedDoc());
+    routes[`/api/inscription/${INSCRIPTION_ID}`] = () =>
+      new Response(JSON.stringify({
+        inscription_id: OTHER_INSCRIPTION_ID,
+        sat: SAT,
+        block_height: 100,
+        content_type: 'application/did+json',
+      }), { status: 200 });
     const provider = new OrdHttpProvider({ baseUrl: BASE });
 
     const anchorings = await provider.getAnchoringsForDidCel(DID_CEL, { satoshi: SAT });

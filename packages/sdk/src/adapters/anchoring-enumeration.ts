@@ -55,6 +55,9 @@ export async function enumerateAnchoringsOnSat(
     // A listed-but-unfetchable id can only shrink the result — absence fails
     // the log CLOSED at the uniqueness gate, never passes it.
     if (!insc) continue;
+    // A fetched record whose echoed id differs from the listed id is
+    // inconsistent indexer data — never attribute its doc to this sat.
+    if (insc.inscriptionId !== inscriptionId) continue;
     // An id listed on this sat whose record reports a DIFFERENT sat is
     // inconsistent indexer data — never surface it as a cross-sat competitor.
     if (typeof insc.satoshi === 'string' && insc.satoshi.length > 0 && insc.satoshi !== satoshi) continue;
