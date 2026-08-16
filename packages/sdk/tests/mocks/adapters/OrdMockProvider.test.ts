@@ -185,7 +185,7 @@ describe('OrdMockProvider', () => {
     expect(res.metadata).toEqual(metadata);
     const fetched = await prov.getInscriptionById(res.inscriptionId);
     expect(fetched?.metadata).toEqual(metadata);
-    expect(fetched?.content?.toString()).toBe('media-bytes');
+    expect(new TextDecoder().decode(fetched?.content)).toBe('media-bytes');
   });
 
   test('deferred buildContent may return { content, metadata }', async () => {
@@ -198,7 +198,7 @@ describe('OrdMockProvider', () => {
       })
     });
     const fetched = await prov.getInscriptionById(res.inscriptionId);
-    expect(fetched?.content?.toString()).toBe('deferred-media');
+    expect(new TextDecoder().decode(fetched?.content)).toBe('deferred-media');
     expect((fetched?.metadata as { didDocument: { id: string } }).didDocument.id)
       .toBe(`did:btco:reg:${res.satoshi}`);
   });
