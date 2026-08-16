@@ -3,23 +3,15 @@
  *   bun scripts/make-example.ts
  *
  * Uses the actual @originals/sdk (workspace source) to create a genuine
- * asset: real Ed25519 keys, a real did:cel genesis, a real did:webvh publisher with
+ * asset: real Ed25519 keys, a real did:cel genesis, the asset's own did:webvh with
  * a signed DID log, and a signed publication credential. The artifacts are
  * written to public/example/ and shipped statically; the landing page then
  * re-verifies all of it cryptographically in the visitor's browser.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  OriginalsSDK,
-  MemoryStorageAdapter,
-  Ed25519Signer,
-  Ed25519Verifier,
-  KeyManager,
-  multikey
-} from '@originals/sdk';
+import { OriginalsSDK, MemoryStorageAdapter } from '@originals/sdk';
 import { OrdMockProvider } from '@originals/sdk/testing';
-import { prepareDataForSigning } from 'didwebvh-ts';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { generateArtwork } from '../src/sdk/artwork';
 
@@ -29,13 +21,34 @@ mkdirSync(outDir, { recursive: true });
 const toHex = (bytes: Uint8Array) =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 
+/**
+ * The signed did:webvh log exactly as the SDK hosted it — read back from the
+ * storage adapter rather than reconstructed here, so the shipped did-log.jsonl
+ * is the published DID's log by construction and cannot drift from it.
+ */
+async function readHostedDidLog(did: string): Promise<string> {
+  const parts = did.split(':');
+  const domain = decodeURIComponent(parts[3]);
+  const pathParts = parts.slice(4);
+  const relativePath = pathParts.length
+    ? `${pathParts.join('/')}/did.jsonl`
+    : '.well-known/did.jsonl';
+  const stored = await storage.getObject(domain, relativePath);
+  if (!stored) {
+    throw new Error(`No hosted DID log at ${domain}/${relativePath} for ${did}`);
+  }
+  return new TextDecoder().decode(stored.content);
+}
+
 const keys = new Map<string, string>();
+const storage = new MemoryStorageAdapter();
+const DOMAIN = 'magby.originals.build';
 const sdk = OriginalsSDK.create({
   network: 'regtest',
   webvhNetwork: 'magby',
   defaultKeyType: 'Ed25519',
   ordinalsProvider: new OrdMockProvider(),
-  storageAdapter: new MemoryStorageAdapter(),
+  storageAdapter: storage,
   enableLogging: false,
   keyStore: {
     async getPrivateKey(id: string) {
@@ -97,47 +110,48 @@ const asset = await sdk.lifecycle.createAsset([
   }
 ]);
 
-// 3 · Real did:webvh publisher with a signed log. An explicit external
-//     signer lets us pin the verification-method id to '#key-0' so the
-//     document's authentication/assertionMethod relationships (which the
-//     SDK emits as ['#key-0']) reference the actual key — required for
-//     third-party credential verification to pass its proof-purpose check.
-const keyPair = await new KeyManager().generateKeyPair('Ed25519');
-const signer = new Ed25519Signer();
-const updateKeyVmId = `did:key:${keyPair.publicKey}#${keyPair.publicKey}`;
-const externalSigner = {
-  async sign(input: { document: Record<string, unknown>; proof: Record<string, unknown> }) {
-    const data = await prepareDataForSigning(input.document, input.proof);
-    const signature = await signer.sign(Buffer.from(data), keyPair.privateKey);
-    return { proofValue: multikey.encodeMultibase(signature) };
-  },
-  getVerificationMethodId() {
-    return updateKeyVmId;
-  }
-};
-
-const webvh = await sdk.did.createDIDWebVH({
-  paths: ['examples', 'first-light'],
-  externalSigner,
-  externalVerifier: new Ed25519Verifier(),
-  updateKeys: [keyPair.publicKey],
-  verificationMethods: [
-    { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey }
-  ] as never
-});
-const result = webvh as unknown as {
-  did: string;
-  didDocument: { id: string; verificationMethod?: Array<{ id: string }> };
-  log: unknown;
-};
-await sdk.lifecycle.registerKey(`${result.did}#key-0`, keyPair.privateKey);
-await sdk.did.cache.set(result.did, result.didDocument as never);
-
-// 4 · Real publication — migrates to did:webvh and signs the credential.
-await sdk.lifecycle.publishToWeb(asset, result.did);
+// 3 · Real publication. publishToWeb mints the asset's OWN did:webvh (genuine
+//     SCID, signed genesis log); the argument contributes only the domain. Pass
+//     the bare domain: minting a separate "publisher" did:webvh here and
+//     shipping ITS log produced an example whose manifest/DID-log named one
+//     did:webvh while the CEL migrate event and the credential named the
+//     asset's — a green verifier checking two unrelated identities.
+await sdk.lifecycle.publishToWeb(asset, DOMAIN);
 
 if (asset.credentials.length === 0) {
   throw new Error('No credential was issued — the example must ship a real signed credential');
+}
+
+// 4 · The asset's published did:webvh and the signed log the SDK hosted for it.
+const publishedDid = (asset.bindings as Record<string, string> | undefined)?.['did:webvh'];
+if (!publishedDid) {
+  throw new Error('publishToWeb did not bind a did:webvh to the asset');
+}
+const didLogJsonl = await readHostedDidLog(publishedDid);
+
+// One identity, or nothing ships. Every artifact must name the SAME published
+// did:webvh — a manifest/DID-log pair describing one identity while the CEL
+// migrate event and credential describe another still verifies green, because
+// each check only ever compares an artifact against itself.
+const eventLog = asset.serialize().eventLog as unknown as {
+  events: Array<{ type: string; data?: Record<string, unknown> }>;
+};
+const migrateTarget = eventLog.events.find((e) => e.type === 'migrate')?.data?.targetDid;
+const credentialTarget = (
+  asset.credentials[0] as unknown as { credentialSubject?: { migratedTo?: string } }
+).credentialSubject?.migratedTo;
+const logDid = (JSON.parse(didLogJsonl.trim().split('\n')[0]) as { state?: { id?: string } }).state
+  ?.id;
+for (const [source, value] of [
+  ['did-log.jsonl', logDid],
+  ['cel-log migrate.targetDid', migrateTarget],
+  ['credential migratedTo', credentialTarget]
+] as const) {
+  if (value !== publishedDid) {
+    throw new Error(
+      `Inconsistent example: ${source} is ${String(value)}, expected ${publishedDid}`
+    );
+  }
 }
 
 // 5 · Ship the artifacts.
@@ -146,7 +160,7 @@ writeFileSync(join(outDir, 'metadata.json'), metadata);
 writeFileSync(join(outDir, 'credential.json'), JSON.stringify(asset.credentials[0], null, 2));
 writeFileSync(
   join(outDir, 'did-log.jsonl'),
-  (result.log as unknown[]).map((entry) => JSON.stringify(entry)).join('\n') + '\n'
+  didLogJsonl.endsWith('\n') ? didLogJsonl : `${didLogJsonl}\n`
 );
 // The CEL event log (create + migrate) — the browser re-derives the did:cel
 // genesis identity from it (resolveDidCel verifies the whole signed chain and
@@ -164,7 +178,7 @@ writeFileSync(
       medium: MEDIUM,
       dids: {
         'did:cel': (asset.bindings as Record<string, string>)['did:cel'] ?? asset.id,
-        'did:webvh': result.did
+        'did:webvh': publishedDid
       },
       resources: asset.resources.map((r) => ({
         id: r.id,
@@ -181,6 +195,6 @@ writeFileSync(
 
 console.log('Example Original written to public/example/');
 console.log('  did:cel  :', asset.bindings?.['did:cel'] ?? asset.id);
-console.log('  did:webvh:', result.did);
+console.log('  did:webvh:', publishedDid);
 console.log('  artwork  :', svgHash);
 console.log('  credential types:', asset.credentials[0].type.join(', '));

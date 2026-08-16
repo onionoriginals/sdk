@@ -3,10 +3,10 @@
     {
       "type": "create",
       "data": {
-        "controller": "did:key:z6MktCHzK5f7stjdErX2D4jdjsX6vGKYY5MhXFHbcjfN4nCe",
-        "createdAt": "2026-08-16T00:37:02.644Z",
+        "controller": "did:key:z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD",
+        "createdAt": "2026-08-16T05:28:08.247Z",
         "name": "artwork.svg",
-        "nonce": "uKYA6quYAIanCBUptabdstg",
+        "nonce": "uMKUVYScE-LOi6Il-WzYGUg",
         "resources": [
           {
             "digestMultibase": "uEiDq42LG0UdTeZMLYrsckqR3sn7DCIZuAV6nnKrn11NgWg",
@@ -22,12 +22,12 @@
       },
       "proof": [
         {
-          "created": "2026-08-16T00:37:02.644Z",
+          "created": "2026-08-16T05:28:08.247Z",
           "cryptosuite": "originals-cel-ed25519-jcs-v1",
           "proofPurpose": "assertionMethod",
-          "proofValue": "z37gdUEzkLsA3mcMzR2UTb6VNKLoJrSe8rri8qTE5iPFDpubChCcgTVQ1mpLgDJNGHmtB89HF24CY1zboUyFsLr4Q",
+          "proofValue": "z5Bcr9Z54HZcm7S6rPF1zT9mzu7M3bRMebvZVHxDDLR5vN32bjwVqfvAqPpcFF2TAQvfyiogXykDzLGw2ixJA62at",
           "type": "DataIntegrityProof",
-          "verificationMethod": "did:key:z6MktCHzK5f7stjdErX2D4jdjsX6vGKYY5MhXFHbcjfN4nCe#z6MktCHzK5f7stjdErX2D4jdjsX6vGKYY5MhXFHbcjfN4nCe"
+          "verificationMethod": "did:key:z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD#z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD"
         }
       ]
     },
@@ -36,21 +36,21 @@
       "data": {
         "domain": "magby.originals.build",
         "layer": "webvh",
-        "migratedAt": "2026-08-16T00:37:02.684Z",
-        "sourceDid": "did:cel:uEiBRPCnG78u4EqkM3w3sRYXsh-CTOUdkwd61KFei6evP1g",
-        "targetDid": "did:webvh:QmcmzKceFz36G5L3viBYXCGYGMyumEcrZUfK9gfyFPta2F:magby.originals.build:ueibrpcng78u4eqkm3w3sryxsh-ctoudkwd61kfei6evp1g"
+        "migratedAt": "2026-08-16T05:28:08.289Z",
+        "sourceDid": "did:cel:uEiBApL3JUD_-pK44pwONLAvJ-5Znsd97OPbjYYbFpvXE0g",
+        "targetDid": "did:webvh:QmTmT6hf5tLcf5kjrBUFn5tYc6KcUQcRwvvWGFdtGZ7Lac:magby.originals.build:ueibapl3jud_-pk44pwonlavj-5znsd97opbjyybfpvxe0g"
       },
       "proof": [
         {
-          "created": "2026-08-16T00:37:02.685Z",
+          "created": "2026-08-16T05:28:08.289Z",
           "cryptosuite": "originals-cel-ed25519-jcs-v1",
           "proofPurpose": "assertionMethod",
-          "proofValue": "z9Aqe4B9wTuasQALAzP5C9RjtaxoNv3gAtRh5omXtRegA1AL3eAVpnorfAijYAy1ds547qsGPhU5FPNaobth3zfz",
+          "proofValue": "z4QH1iA1JAqTcnifEXHyW5Lby2wwabEFQJaXWKkUPa6GKnRHqmznaAXb9W3zx4p6AwXSjFVobiqv7x6tULy9FSiqQ",
           "type": "DataIntegrityProof",
-          "verificationMethod": "did:key:z6MktCHzK5f7stjdErX2D4jdjsX6vGKYY5MhXFHbcjfN4nCe#z6MktCHzK5f7stjdErX2D4jdjsX6vGKYY5MhXFHbcjfN4nCe"
+          "verificationMethod": "did:key:z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD#z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD"
         }
       ],
-      "previousEvent": "uEiBRPCnG78u4EqkM3w3sRYXsh-CTOUdkwd61KFei6evP1g"
+      "previousEvent": "uEiBApL3JUD_-pK44pwONLAvJ-5Znsd97OPbjYYbFpvXE0g"
     }
   ]
 }

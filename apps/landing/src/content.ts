@@ -281,8 +281,8 @@ export const realExample = {
   },
   pendingLabel: 'Verifying in your browser…',
   checkFailDetails: {
-    log: 'DID log did not verify',
-    credential: 'Credential signature did not verify'
+    log: 'DID log did not verify, or is not the identity this asset migrated to',
+    credential: 'Credential signature did not verify, or attests a different identity'
   },
   verifiedBadge: 'Verified in this tab',
   failedBadge: 'Verification incomplete',

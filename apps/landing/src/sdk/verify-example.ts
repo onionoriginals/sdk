@@ -63,7 +63,7 @@ export async function verifyExample(): Promise<VerifiedExample> {
     issuer: string | { id: string };
     validFrom?: string;
     issuanceDate?: string;
-    credentialSubject: { id?: string };
+    credentialSubject: { id?: string; migratedTo?: string };
   };
   const checks: ExampleCheck[] = [];
 
@@ -94,7 +94,16 @@ export async function verifyExample(): Promise<VerifiedExample> {
   } catch (err) {
     console.error('[originals-sdk] example DID log verification failed', err);
   }
-  const logOk = !!didDocument && resolvedDid === manifest.dids['did:webvh'];
+  // The DID the log resolves to must be the one the asset's own provenance
+  // migrated to. Without this the page verifies a log for one did:webvh and a
+  // CEL log binding the asset to another, and still renders all-green.
+  const celEvents = (celLogJson as unknown as { events?: Array<{ type: string; data?: Record<string, unknown> }> })
+    .events ?? [];
+  const celMigrateTarget = celEvents.find((e) => e.type === 'migrate')?.data?.targetDid;
+  const logOk =
+    !!didDocument &&
+    resolvedDid === manifest.dids['did:webvh'] &&
+    celMigrateTarget === resolvedDid;
   checks.push({
     id: 'log',
     ok: logOk,
@@ -130,7 +139,10 @@ export async function verifyExample(): Promise<VerifiedExample> {
       credentialOk =
         signatureOk &&
         issuer === celDid &&
-        credential.credentialSubject.id === celDid;
+        credential.credentialSubject.id === celDid &&
+        // ...and it must attest the migration to the SAME did:webvh the log above
+        // verified, not some other identity.
+        credential.credentialSubject.migratedTo === manifest.dids['did:webvh'];
     }
   } catch (err) {
     console.error('[originals-sdk] example credential verification failed', err);

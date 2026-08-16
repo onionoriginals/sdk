@@ -12,8 +12,12 @@
  * This asserts allOk, and each check individually so a failure names itself.
  */
 import { describe, test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { verifyExample } from './verify-example';
 import manifestJson from '../../public/example/manifest.json';
+import credentialJson from '../../public/example/credential.json';
+import celLogJson from '../../public/example/cel-log.json';
 
 // Real Ed25519 + did:webvh log resolution + credential verification.
 const TIMEOUT_MS = 30_000;
@@ -73,6 +77,35 @@ describe('verifyExample — the shipped real example', () => {
     },
     TIMEOUT_MS
   );
+
+  test('every shipped artifact names the same published did:webvh', () => {
+    // The mint once shipped a manifest + DID log for a throwaway "publisher"
+    // did:webvh while the CEL migrate event and the credential named the
+    // asset's own — and every check still passed, because each only ever
+    // compared an artifact against itself.
+    const manifest = manifestJson as unknown as { dids: Record<string, string> };
+    const expected = manifest.dids['did:webvh'];
+    expect(expected.startsWith('did:webvh:')).toBe(true);
+
+    const didLogRaw = readFileSync(
+      join(import.meta.dir, '../../public/example/did-log.jsonl'),
+      'utf8'
+    );
+    const firstEntry = JSON.parse(didLogRaw.trim().split('\n')[0]) as {
+      state?: { id?: string };
+    };
+    expect(firstEntry.state?.id).toBe(expected);
+
+    const migrate = (
+      celLogJson as unknown as { events: Array<{ type: string; data?: Record<string, unknown> }> }
+    ).events.find((e) => e.type === 'migrate');
+    expect(migrate?.data?.targetDid).toBe(expected);
+
+    const credential = credentialJson as unknown as {
+      credentialSubject: { migratedTo?: string };
+    };
+    expect(credential.credentialSubject.migratedTo).toBe(expected);
+  });
 
   test(
     'the rendered summary is derived from the artifacts',
