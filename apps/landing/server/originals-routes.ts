@@ -23,23 +23,35 @@ const HOST_PREFIX = '/api/originals/host/';
 // users hit.
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
+/** A content digest suffix — multibase base64url, always 'u'-prefixed. */
+const DIGEST_MULTIBASE = /^u[A-Za-z0-9_-]+$/;
+/** The CEL copy's filename: the did:cel digest plus `.json`. */
+const CEL_COPY_FILE = /^u[A-Za-z0-9_-]+\.json$/;
+
 /**
- * A host key must name a did:webvh hosting artifact: `<segs…>/did.jsonl`,
- * `<segs…>/cel.json`, or `<segs…>/resources/<multibase>`. This confines every
- * authed PUT to the shapes the SDK actually publishes and — crucially — makes
- * it impossible to plant bytes at a path that would SHADOW the app's own static
- * assets (`index.html`, `assets/app-*.js`). `buildFetch` runs `originals.serve`
- * before the SPA/static fallback, so an unconfined key like
- * `<host>/assets/app-abc.js` would otherwise be served (as a forced download,
- * via untrustedHeaders) to every visitor, breaking the page. Cross-user
- * OVERWRITE of a claimed key is separately blocked by the store's owner sidecar.
+ * A host key must name an artifact the SDK actually publishes: `<segs…>/did.jsonl`,
+ * `<segs…>/cel.json`, `<segs…>/resources/<multibase>`, or the layer-agnostic CEL
+ * copy `cel/<multibase>.json`. This confines every authed PUT to those shapes
+ * and — crucially — makes it impossible to plant bytes at a path that would
+ * SHADOW the app's own static assets (`index.html`, `assets/app-*.js`).
+ * `buildFetch` runs `originals.serve` before the SPA/static fallback, so an
+ * unconfined key like `<host>/assets/app-abc.js` would otherwise be served (as a
+ * forced download, via untrustedHeaders) to every visitor, breaking the page.
+ * Cross-user OVERWRITE of a claimed key is separately blocked by the store's
+ * owner sidecar.
  */
 function isWebvhArtifactKey(key: string): boolean {
   const segs = key.split('/');
   const last = segs[segs.length - 1];
   if (last === 'did.jsonl' || last === 'cel.json') return true;
+  // The SDK's layer-agnostic CEL copy, `cel/<did:cel digest>.json`
+  // (LifecycleManager.persistCelArtifacts) — the conventional key
+  // DIDManager.resolveDID's did:cel branch reads back. Exactly two segments and
+  // a content-derived digest, so `serve` can only ever reach it as host `cel`
+  // plus `/<digest>.json`: it cannot name a path on the app's own origin.
+  if (segs.length === 2 && segs[0] === 'cel' && CEL_COPY_FILE.test(last)) return true;
   // Published resource: `…/resources/<base64url-multibase>` (multibase 'u' prefix).
-  return segs[segs.length - 2] === 'resources' && /^u[A-Za-z0-9_-]+$/.test(last);
+  return segs[segs.length - 2] === 'resources' && DIGEST_MULTIBASE.test(last);
 }
 
 /** The caller's per-user namespace slug — mirrors userWebvhSlug in src/auth/webvh.ts. */
