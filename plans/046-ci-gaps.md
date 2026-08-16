@@ -103,7 +103,7 @@ btco entry rendered with no identifier. #455 added tests pinning both, but those
 tests live in `apps/landing` and therefore never ran.
 
 **Fix**: a `landing` job running `bun run landing:check` — packages build, then
-`tsc` (client + server), the 194-test landing suite, and `vite build`. Replaces
+`tsc` (client + server), the 196-test landing suite, and `vite build`. Replaces
 the build-only step previously bolted onto `esm-importable`.
 
 **Scope**: the headless page-drive (`bun run landing:ci`) stays OUT. It is red on
@@ -115,7 +115,8 @@ the auth 401s alone trip. A gate that is red on arrival gets disabled.
 `OrdMockProvider` import fails `tsc` (`TS2614`); the `updateResource` key fails
 `CEL entry glosses > no event type renders as its own bare name`; the dead
 import in the rendered snippet fails the new `content.quickstart.test.ts`, which
-resolves every specifier the snippet names. Runs in parallel with the existing
+resolves every specifier the snippet names and fails closed if its parser does
+not account for every import statement. Runs in parallel with the existing
 jobs and finishes in ~25s, so wall-clock CI time is unchanged.
 
 ### 5. A GC-sensitive stress test flaked under CI load — FIXED
