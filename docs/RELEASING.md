@@ -17,7 +17,9 @@ is no second approval and no reason to open the Actions tab.
    Releases. A failed gate blocks the publish.
 
 Read the publish plan before merging. npm publishes are effectively permanent —
-unpublish is limited to 72 hours and breaks anyone who already installed.
+unpublish is limited to 72 hours and breaks anyone who already installed. If the
+comment says the plan could not be generated (a registry error — it never guesses),
+re-run the `Release` workflow rather than merging on an earlier plan.
 
 ## Prerelease mode
 
@@ -30,10 +32,12 @@ is.
   have already shipped in a prerelease; writing pending ones into it tells
   changesets they are already out, and the version job silently no-ops with
   `All changesets are empty; not creating PR`.
-- A package with **no prior normal release** publishes to `latest` even in
-  prerelease mode. That is `changeset publish`'s behaviour for a first publish —
-  it is the only way a brand-new package is installable at all. The publish plan
-  flags this explicitly.
+- A package whose **every published version is already a `next` prerelease** goes
+  to `latest`, not `next` — `changeset publish` treats "no normal release yet" as
+  a reason to move `latest` onto the prerelease, so `npm install` with no tag gets
+  it. A **never-published** package is not that case: its first publish uses
+  `next`, and npm additionally auto-assigns `latest` on a package's first publish.
+  The publish plan flags both.
 - A brand-new package's packument can 404 for a few minutes after its first
   publish while the registry propagates, even though the tarball is already
   live. Re-check before assuming the publish failed.

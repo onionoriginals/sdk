@@ -31,9 +31,8 @@ bun run changeset --empty
 
 1. Merging PRs accumulates changesets on `main`.
 2. A GitHub Action opens/updates a **"Version Packages"** PR that applies the
-   pending changesets (bumps versions, writes CHANGELOGs). Reviewing and merging
-   that PR is the first approval gate.
-3. Merging the Version PR triggers the publish job, which is gated behind the
-   `npm-publish` GitHub Environment (a required reviewer must approve before
-   anything is published to npm) and only publishes after the built packages
-   pass the Node-ESM import check.
+   pending changesets (bumps versions, writes CHANGELOGs) and comments a publish
+   plan on it. Reviewing and merging that PR is the **only** approval gate.
+3. Merging the Version PR publishes immediately — no second approval. The publish
+   job only runs the automated build gates (Node-ESM import + browser safety)
+   before `changeset publish`. See [docs/RELEASING.md](../docs/RELEASING.md).

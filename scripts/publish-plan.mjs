@@ -5,11 +5,12 @@
  * The Version PR is the single approval surface for a release: merging it
  * publishes. So it has to state plainly what merging will DO — every package,
  * its old and new version, and the dist-tag it lands on. That last column is
- * the one that surprises: `changeset publish` sends a package with no prior
- * NORMAL release to `latest` even in prerelease mode, so a brand-new package
- * skips `next` entirely.
+ * the one that surprises: in prerelease mode `changeset publish` sends a
+ * package whose ONLY published versions are already `-<pre.tag>.N` prereleases
+ * to `latest` instead of the pre tag (see the dist-tag rule below).
  *
  * Usage: node scripts/publish-plan.mjs <git-ref>   (e.g. origin/changeset-release/main)
+ * Exits non-zero on a registry error — a plan that guessed would be worse than none.
  */
 import { execFileSync } from 'node:child_process';
 
@@ -18,6 +19,12 @@ if (!ref) {
   console.error('usage: publish-plan.mjs <git-ref>');
   process.exit(2);
 }
+
+// A stack trace here would land verbatim in the PR comment's failure notice.
+process.on('uncaughtException', (err) => {
+  console.error(err.message);
+  process.exit(1);
+});
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
 
@@ -34,21 +41,46 @@ function show(path) {
   }
 }
 
-/** Published versions from the registry; [] when the package is brand new. */
+/**
+ * Published versions from the registry; [] only for a genuine 404.
+ * Anything else (timeout, auth, rate limit) throws: mistaking a blip for "never
+ * published" would print a wrong `from` and a wrong dist-tag on the one surface
+ * a maintainer approves the release from. Mirrors changesets' own infoAllow404.
+ */
 function publishedVersions(name) {
+  let out;
   try {
-    const out = execFileSync('npm', ['view', name, 'versions', '--json'], {
+    out = execFileSync('npm', ['view', name, 'versions', '--json'], {
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore']
+      stdio: ['ignore', 'pipe', 'pipe']
     });
-    const parsed = JSON.parse(out);
-    return Array.isArray(parsed) ? parsed : [parsed];
-  } catch {
-    return []; // 404 (never published) or a registry blip — treated the same downstream
+  } catch (err) {
+    // npm --json puts `{"error":{"code":"E404",...}}` on stdout even when it exits 1.
+    const body = String(err.stdout ?? '');
+    let reported;
+    try {
+      reported = JSON.parse(body)?.error;
+    } catch {
+      /* not JSON — fall through to the throw below */
+    }
+    if (reported?.code === 'E404') return [];
+    const detail =
+      reported?.summary?.trim() ||
+      String(err.stderr ?? '')
+        .trim()
+        .split('\n')
+        .slice(0, 3)
+        .join(' ') ||
+      `exit ${err.status}`;
+    throw new Error(`npm view ${name} versions failed (${reported?.code ?? 'unknown error'}): ${detail}`);
   }
+  if (!out.trim()) return []; // registries without an auto-`latest` answer empty for a new package
+  const parsed = JSON.parse(out);
+  return Array.isArray(parsed) ? parsed : [parsed];
 }
 
-const isPrerelease = (v) => /-/.test(v);
+/** First prerelease identifier: `next` for `1.2.3-next.0`, null for a normal version. */
+const prereleaseId = (v) => /^\d+\.\d+\.\d+-([0-9A-Za-z-]+)/.exec(v)?.[1] ?? null;
 
 // Package manifests live one level under packages/ and apps/.
 const manifests = git('ls-tree', '-r', '--name-only', ref, '--', 'packages', 'apps')
@@ -68,10 +100,12 @@ for (const path of manifests) {
   const published = publishedVersions(pkg.name);
   if (published.includes(pkg.version)) continue; // already on the registry — publish skips it
 
-  // changesets' own rule: pre mode uses its tag, EXCEPT for a package with no
-  // prior normal release, which goes to `latest` regardless.
-  const hadNormalRelease = published.some((v) => !isPrerelease(v));
-  const tag = pre && hadNormalRelease ? pre.tag : 'latest';
+  // changesets' actual rule (getReleaseTag: `publishedState !== "only-pre"`):
+  // pre mode uses its tag, EXCEPT a package already published and whose every
+  // published version carries that same pre identifier — that one goes to
+  // `latest`. A never-published package is NOT the exception; it gets pre.tag.
+  const onlyPre = published.length > 0 && published.every((v) => prereleaseId(v) === pre?.tag);
+  const tag = pre && !onlyPre ? pre.tag : 'latest';
 
   rows.push({
     name: pkg.name,
@@ -99,9 +133,19 @@ if (rows.length === 0) {
     if (promoted.length) {
       const names = promoted.map((r) => `\`${r.name}\``).join(', ');
       out.push(
-        `> ⚠️ ${names} ${promoted.length === 1 ? 'has' : 'have'} no prior normal release, ` +
-          `so ${promoted.length === 1 ? 'it lands' : 'they land'} on \`latest\` rather than \`${pre.tag}\` — ` +
-          'that is `changeset publish`\'s behaviour for a first publish, not a misconfiguration.'
+        `> ⚠️ ${names} ${promoted.length === 1 ? 'has' : 'have'} only ever been published as ` +
+          `\`${pre.tag}\` prereleases, so \`changeset publish\` moves \`latest\` onto ` +
+          `${promoted.length === 1 ? 'this prerelease' : 'these prereleases'} rather than using \`${pre.tag}\` — ` +
+          'that is its rule for a package with no normal release yet, not a misconfiguration. ' +
+          '`npm install` with no tag will get the prerelease.'
+      );
+    }
+    const fresh = rows.filter((r) => r.brandNew);
+    if (fresh.length) {
+      const names = fresh.map((r) => `\`${r.name}\``).join(', ');
+      out.push(
+        `> ℹ️ ${names} ${fresh.length === 1 ? 'has' : 'have'} never been published; a first publish ` +
+          `goes to \`${pre.tag}\`, and npm additionally auto-assigns \`latest\` to it.`
       );
     }
   } else {

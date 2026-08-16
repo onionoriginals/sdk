@@ -2,9 +2,11 @@
 
 ## Release Workflow (`release.yml`)
 
-Publishing of `@originals/sdk` and `@originals/auth` to npm is handled by the
-`release.yml` workflow using [Changesets](https://github.com/changesets/changesets),
-gated by two human-in-the-loop steps. It triggers on every push to `main`.
+Publishing of `@originals/cel`, `@originals/sdk` and `@originals/auth` to npm is
+handled by the `release.yml` workflow using
+[Changesets](https://github.com/changesets/changesets). It triggers on every push
+to `main`, and the **Version Packages PR is the single human gate**: merging it
+publishes. See [docs/RELEASING.md](../../docs/RELEASING.md).
 
 ### Required Secrets
 
@@ -33,19 +35,22 @@ added. Falls back to `GITHUB_TOKEN` when unset.
 
 ### How It Works
 
-1. **Gate 1 — Version (open release PR).** While changesets are pending on `main`,
+1. **The gate — Version (open release PR).** While changesets are pending on `main`,
    the `version` job opens/updates a "Version Packages" PR that bumps versions and
-   updates CHANGELOGs. **Merging that PR is the human approval that a release should
-   happen.** No publishing occurs here.
+   updates CHANGELOGs, and comments a publish plan on it (`scripts/publish-plan.mjs`:
+   every package, from → to, dist-tag). **Merging that PR is the approval that a
+   release should happen** — the only one. No publishing occurs here.
 2. **Check for unpublished versions.** After the Version PR merges, `check-publish`
    compares each package's local version against the npm registry and only proceeds
    when a version is genuinely not yet published (any other registry error fails
    loudly rather than over-publishing).
-3. **Gate 2 — Publish.** The `publish` job runs under the `npm-publish` GitHub
-   Environment, which carries a **required reviewer** — a human must approve in the
-   GitHub UI before anything reaches npm. It builds, runs `scripts/verify-esm.mjs`
-   (refusing to publish a dist Node ESM consumers can't import), then publishes via
-   `changeset publish`, pushing tags and creating GitHub Releases as one step.
+3. **Publish.** The `publish` job builds, runs `scripts/verify-esm.mjs` and
+   `scripts/check-browser-safety.mjs` (refusing to publish a dist that Node ESM or
+   browser consumers can't import), then publishes via `changeset publish`, pushing
+   tags and creating GitHub Releases as one step. There is deliberately **no second
+   human approval**: the `npm-publish` Environment gate was removed because it was
+   invisible from the PR, which let a merged release sit unpublished. The gates left
+   here are automated build checks, not sign-offs.
 
 ### Adding a Changeset
 

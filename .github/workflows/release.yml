@@ -58,18 +58,32 @@ jobs:
       # `next` for `latest`) is invisible without this.
       - name: Comment the publish plan on the Version PR
         if: steps.changesets.outputs.hasChangesets == 'true'
+        # Commentary must never fail the release workflow: a gh/registry blip here
+        # would otherwise redden main for a run that published nothing.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          git fetch origin changeset-release/main
-          node scripts/publish-plan.mjs origin/changeset-release/main > /tmp/plan.md
+          # Look the PR up before fetching: with no PR there is nothing to comment
+          # on and the branch may not exist yet (changesets no-ops on empty changesets).
           pr=$(gh pr list --head changeset-release/main --state open --json number --jq '.[0].number // empty')
           if [ -z "$pr" ]; then echo "no open Version PR — nothing to comment on"; exit 0; fi
+          git fetch --no-tags origin changeset-release/main
+          # On failure say so on the PR rather than leaving the previous push's
+          # now-stale table standing as if it still described the merge.
+          if ! node scripts/publish-plan.mjs FETCH_HEAD > /tmp/plan.md 2>/tmp/plan.err; then
+            cat /tmp/plan.err
+            {
+              printf '%s\n\n' '<!-- publish-plan -->' '## What merging this PR publishes' \
+                '⚠️ The publish plan could not be generated for this push — do not rely on an earlier plan.'
+              printf '```\n%s\n```\n' "$(tail -c 2000 /tmp/plan.err)"
+            } > /tmp/plan.md
+          fi
           # Upsert by marker so repeated pushes edit one comment instead of piling up.
           id=$(gh api "repos/$REPO/issues/$pr/comments" --paginate \
-                 --jq 'map(select(.body | startswith("<!-- publish-plan -->"))) | .[0].id // empty')
+                 --jq 'map(select(.body | startswith("<!-- publish-plan -->"))) | .[0].id // empty' | head -n1)
           if [ -n "$id" ]; then
             gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@/tmp/plan.md >/dev/null
           else
