@@ -60,8 +60,13 @@ afterEach(() => {
 process.on('unhandledRejection', (reason: unknown) => {
   const err = reason instanceof Error ? reason.stack : String(reason);
   console.error(
-    '\n=== UNHANDLED REJECTION (this is why the run exits non-zero) ===\n' +
+    '\n=== UNHANDLED REJECTION ===\n' +
       `${err}\n` +
       '=== A promise escaped a test lifecycle. Await it, or catch it. ===\n'
   );
+  // Registering a listener REPLACES the runtime's default handling, which is
+  // what would otherwise fail the process. Without this line the reporter would
+  // convert a red run into a green one — turning a diagnostic into exactly the
+  // false-green it was added to investigate. Force the failing status instead.
+  process.exitCode = 1;
 });
