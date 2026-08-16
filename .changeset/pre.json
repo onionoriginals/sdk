@@ -7,18 +7,5 @@
     "@originals/cel": "0.1.0",
     "@originals/sdk": "2.1.0"
   },
-  "changesets": [
-    "bbs-selective-disclosure-fail-closed",
-    "buffer-purged-from-public-api",
-    "cel-cryptosuite-rename-and-bind",
-    "cel-package-extraction",
-    "cli-display-untrusted-values",
-    "custody-required-defaults-flip",
-    "example-credential-reverify",
-    "fail-loud-signing-phase-0",
-    "fix-gzip-bomb-timing-flake",
-    "fix-ordmock-uint8array-tostring",
-    "packaging-curated-exports",
-    "remote-custody-signer-core"
-  ]
+  "changesets": []
 }
