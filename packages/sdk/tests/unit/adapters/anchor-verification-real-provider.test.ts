@@ -10,7 +10,10 @@
  *
  * This drives `verifyEventLog`'s anchoring branch through `QuickNodeProvider`
  * over mocked JSON-RPC — the real wire format — so the anchor document reaches
- * the verifier the way it would from an ord node.
+ * the verifier the way it would from an ord node. Since #473 the provider also
+ * implements the SAT-SCOPED `getAnchoringsForDidCel` tier (ord_getSat +
+ * ord_getInscription), so a btco-anchored log verifies END TO END against the
+ * provider exactly as it ships — no capability shim.
  *
  * What still needs #328: a live node. The transport is mocked here; the
  * provider's own parsing, validation and error mapping are not.
@@ -76,36 +79,20 @@ function provider(): OrdinalsLookup {
   }) as unknown as OrdinalsLookup;
 }
 
-/**
- * The production provider PLUS the one capability it does not implement (see
- * the `UNIQUENESS_UNVERIFIABLE` test below). Everything the anchoring branch
- * actually decodes still comes from `QuickNodeProvider` over mocked JSON-RPC;
- * only the enumeration is supplied, so the rest of the branch is reachable.
- */
-function providerWithEnumeration(didCel: string): OrdinalsLookup {
-  const inner = provider();
-  return new Proxy(inner as object, {
-    get(target, prop, receiver) {
-      if (prop === 'getAnchoringsForDidCel') {
-        return async (requested: string) =>
-          requested === didCel ? [{ satoshi: SAT, inscriptionId: INSCRIPTION_ID, blockHeight: 100 }] : [];
-      }
-      const value = Reflect.get(target, prop, receiver) as unknown;
-      return typeof value === 'function' ? (value as () => unknown).bind(target) : value;
-    },
-  }) as OrdinalsLookup;
-}
-
 /** Serve `doc` as the inscription on SAT, in ord's real response shape. */
 function serveAnchor(doc: unknown, overrides?: { sat?: string | number; satpoint?: string }): void {
   results.ord_getInscription = {
     id: INSCRIPTION_ID,
     satpoint: overrides?.satpoint ?? `${TXID}:0:0`,
     sat: overrides?.sat ?? SAT,
+    height: 100,
     content_type: 'application/did+json',
   };
   // ord returns content base64-encoded over JSON-RPC.
   results.ord_getContent = Buffer.from(JSON.stringify(doc)).toString('base64');
+  // The sat's inscription list, as ord_getSat returns it (oldest-first) — the
+  // source for the provider's sat-scoped getAnchoringsForDidCel (#473).
+  results.ord_getSat = { inscriptions: [INSCRIPTION_ID] };
 }
 
 // ------------------------------------------------------------- log construction
@@ -198,97 +185,87 @@ async function anchoredLog(): Promise<{ log: EventLog; doc: unknown; didCel: str
 // ------------------------------------------------------------------------ tests
 
 describe('bitcoin anchoring verified through QuickNodeProvider (real wire format)', () => {
-  /**
-   * LIMITATION, pinned deliberately.
-   *
-   * `getAnchoringsForDidCel` (#402, first-anchor-wins uniqueness) is implemented
-   * ONLY by `OrdMockProvider`. Neither production provider the SDK ships —
-   * QuickNodeProvider or OrdHttpProvider — has it, and `verifyEventLog` fails
-   * closed without it. So today NO btco-anchored did:cel asset can be verified
-   * against a real endpoint, whatever the rest of the anchoring branch does.
-   *
-   * When a provider grows the capability, this test SHOULD fail. That is the
-   * signal to delete it and drop the `providerWithEnumeration` shim below.
-   */
-  test('KNOWN GAP: the shipped provider cannot enumerate anchorings, so uniqueness fails closed', async () => {
+  test('a btco-anchored did:cel log verifies END TO END against the provider exactly as it ships', async () => {
     const { log, doc } = await anchoredLog();
     serveAnchor(doc);
 
     const result = await verifyEventLog(log, { ordinalsProvider: provider() });
 
-    expect(result.verified).toBe(false);
-    expect(result.errors.join(' ')).toMatch(/UNIQUENESS_UNVERIFIABLE/);
-    expect(typeof (provider() as { getAnchoringsForDidCel?: unknown }).getAnchoringsForDidCel)
-      .not.toBe('function');
-  });
-
-  test('an honestly anchored log verifies when the anchor is served over JSON-RPC', async () => {
-    const { log, doc, didCel } = await anchoredLog();
-    serveAnchor(doc);
-
-    const result = await verifyEventLog(log, { ordinalsProvider: providerWithEnumeration(didCel) });
-
     expect(result.errors).toEqual([]);
     expect(result.verified).toBe(true);
-    // The provider was genuinely exercised: chain guard, inscription, content.
+    // The provider was genuinely exercised: chain guard, inscription, content,
+    // and the sat-scoped anchoring enumeration (#473).
     expect(seen).toContain('getblockchaininfo');
     expect(seen).toContain('ord_getInscription');
     expect(seen).toContain('ord_getContent');
+    expect(seen).toContain('ord_getSat');
   });
 
   test('base64 content decoding is exercised, not bypassed', async () => {
-    const { log, doc, didCel } = await anchoredLog();
+    const { log, doc } = await anchoredLog();
     serveAnchor(doc);
     // Corrupt only the ENCODING, leaving the document itself intact: if the
     // verifier were reading anything other than the provider's decoded bytes,
     // this would still pass.
     results.ord_getContent = Buffer.from(JSON.stringify(doc)).toString('base64').slice(0, -8) + 'AAAAAAAA';
 
-    const result = await verifyEventLog(log, { ordinalsProvider: providerWithEnumeration(didCel) });
+    const result = await verifyEventLog(log, { ordinalsProvider: provider() });
 
     expect(result.verified).toBe(false);
   });
 
   test('an anchor on a DIFFERENT sat than the signed one is rejected', async () => {
-    const { log, doc, didCel } = await anchoredLog();
+    const { log, doc } = await anchoredLog();
     // The provider reports the inscription living on another sat.
     serveAnchor(doc, { sat: '9999999999' });
 
-    const result = await verifyEventLog(log, { ordinalsProvider: providerWithEnumeration(didCel) });
+    const result = await verifyEventLog(log, { ordinalsProvider: provider() });
 
     expect(result.verified).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
   test('a missing inscription fails closed rather than skipping the anchor check', async () => {
-    const { log, didCel } = await anchoredLog();
+    const { log } = await anchoredLog();
     errors.ord_getInscription = { code: -32000, message: 'inscription not found' };
 
-    const result = await verifyEventLog(log, { ordinalsProvider: providerWithEnumeration(didCel) });
+    const result = await verifyEventLog(log, { ordinalsProvider: provider() });
 
     expect(result.verified).toBe(false);
     expect(result.errors.join(' ')).toMatch(/not found on chain/i);
   });
 
   test('a malformed sat from the endpoint is a contract violation, not a pass', async () => {
-    const { log, doc, didCel } = await anchoredLog();
+    const { log, doc } = await anchoredLog();
     // #350: a compromised endpoint must not be able to inject arbitrary values
     // into provenance. The provider throws; the verifier must not treat that
     // as a verified anchor.
     serveAnchor(doc, { sat: 'not-a-sat' });
 
-    const result = await verifyEventLog(log, { ordinalsProvider: providerWithEnumeration(didCel) });
+    const result = await verifyEventLog(log, { ordinalsProvider: provider() });
 
     expect(result.verified).toBe(false);
   });
 
   test('a wrong-chain endpoint is refused before any anchor is trusted', async () => {
-    const { log, doc, didCel } = await anchoredLog();
+    const { log, doc } = await anchoredLog();
     serveAnchor(doc);
     results.getblockchaininfo = { chain: 'main' };
 
-    const result = await verifyEventLog(log, { ordinalsProvider: providerWithEnumeration(didCel) });
+    const result = await verifyEventLog(log, { ordinalsProvider: provider() });
 
     expect(result.verified).toBe(false);
+  });
+
+  test('an anchor with no confirmed height still fails uniqueness closed (ordering unprovable)', async () => {
+    const { log, doc } = await anchoredLog();
+    serveAnchor(doc);
+    // Same wire responses, but ord_getInscription omits height entirely.
+    delete (results.ord_getInscription as Record<string, unknown>).height;
+
+    const result = await verifyEventLog(log, { ordinalsProvider: provider() });
+
+    expect(result.verified).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/UNIQUENESS_UNVERIFIABLE/);
   });
 });

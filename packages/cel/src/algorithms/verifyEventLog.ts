@@ -626,7 +626,9 @@ async function verifyUniqueness(
 
   let rawAnchorings: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number; didDocument?: Record<string, unknown> }>;
   try {
-    rawAnchorings = await ordinalsProvider.getAnchoringsForDidCel(didCel);
+    // Sat-scope hint (#473): a provider without a global back-link index may
+    // enumerate only the log's own anchored sat (see OrdinalsLookup contract).
+    rawAnchorings = await ordinalsProvider.getAnchoringsForDidCel(didCel, { satoshi: anchoredSat.satoshi });
   } catch (e) {
     return `UNIQUENESS_UNVERIFIABLE: failed to enumerate anchorings for ${didCel}: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -646,6 +648,9 @@ async function verifyUniqueness(
   // also silently suppressing legit-dupe detection (a genuine earlier
   // controller-signed mint on another sat would be ignored). Providers must
   // surface the doc (see OrdinalsLookup/OrdinalsProvider docs) to restore it.
+  // A SAT-SCOPED enumeration (#473: only the log's own sat, the tier the
+  // shipped production providers implement) lands in the SAME accepted state
+  // by construction: competitors are never enumerated, so never counted.
   const anchorings: Array<{ satoshi: string; inscriptionId: string; blockHeight?: number }> = [];
   for (const a of rawAnchorings) {
     if (a.satoshi === anchoredSat.satoshi) {
