@@ -191,13 +191,32 @@ export interface OrdinalsLookup {
    */
   getInscriptionsBySatoshi?(satoshi: string): Promise<Array<{ inscriptionId: string }>>;
   /**
-   * Enumerate every on-chain btco DID-doc anchoring whose `alsoKnownAs`
-   * back-links this did:cel. `blockHeight` is the canonical ordering signal
+   * Enumerate on-chain btco DID-doc anchorings whose `alsoKnownAs` back-links
+   * this did:cel. `blockHeight` is the canonical ordering signal
    * (first-anchor-wins). Required for btco-anchored did:cel verification: a
    * btco log already needs a provider, so a provider that cannot enumerate
    * fails uniqueness CLOSED (`UNIQUENESS_UNVERIFIABLE`). Multiple inscriptions
    * on the SAME sat (migrate + rotation reinscriptions) are expected and do
    * not compete — only a different, earlier sat wins.
+   *
+   * Two conformance tiers (#473):
+   * - FULL: enumerate every back-linked anchoring on ANY sat. Needs an index
+   *   over inscription content/metadata (OrdMockProvider's in-memory state, or
+   *   an app-maintained index). Enables cross-sat legitimate-duplicate
+   *   detection via authenticated competitors (#402).
+   * - SAT-SCOPED: enumerate only the anchorings on `opts.satoshi` — the log's
+   *   own anchored sat, which the verifier always passes. Ord exposes no
+   *   did:cel back-link index, so the shipped production providers
+   *   (QuickNodeProvider, OrdHttpProvider) implement this tier from
+   *   getInscriptionsBySatoshi + getInscriptionById. It proves the claimed
+   *   anchoring EXISTS on-chain, back-linked and height-confirmed; it CANNOT
+   *   see a competing anchoring on another sat, so cross-sat first-anchor
+   *   canonicality is NOT checked. Behaviourally identical to the accepted
+   *   didDocument-omitting degraded mode (see verifyUniqueness): the #402
+   *   anti-front-running property is unaffected (fail-closed, competitors
+   *   never counted); only cross-sat dupe detection is suppressed.
+   * A sat-scoped implementation MUST fail loudly when called without
+   * `opts.satoshi` — never fabricate an empty enumeration.
    *
    * `didDocument` (#402) is the inscribed did:btco document carrying its
    * DataIntegrityProof. Uniqueness uses it to AUTHENTICATE a competing anchoring
@@ -206,8 +225,11 @@ export interface OrdinalsLookup {
    * could inscribe a bare `alsoKnownAs` back-link on an earlier sat and deny an
    * honest mint. Optional/backward-compatible: an omitted `didDocument` simply
    * means that competitor cannot be authenticated and does not count.
+   *
+   * KEEP IN SYNC with the identical guarantee on OrdinalsProvider in
+   * packages/sdk/src/adapters/types.ts.
    */
-  getAnchoringsForDidCel?(didCel: string): Promise<Array<{
+  getAnchoringsForDidCel?(didCel: string, opts?: { satoshi?: string }): Promise<Array<{
     satoshi: string;
     inscriptionId: string;
     blockHeight?: number;

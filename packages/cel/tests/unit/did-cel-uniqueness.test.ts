@@ -281,6 +281,35 @@ describe('did:cel uniqueness — first-anchor-wins', () => {
     expect(hasCode(result, 'UNIQUENESS_UNVERIFIABLE')).toBe(true);
   });
 
+  // #473: production providers have no global back-link index, so the verifier
+  // passes the log's own anchored sat and a SAT-SCOPED enumeration (only that
+  // sat's anchorings) must verify — the same accepted state as the
+  // didDocument-omitting degraded mode, since competitors are never counted.
+  test('SAT-SCOPED PROVIDER (#473): verifier passes the anchored sat; own-sat-only enumeration verifies', async () => {
+    const p = new OrdMockProvider();
+    const a = await makeKey();
+    const { base, didCel } = await genesis(a, 'uniq-satscope');
+    const X = '100000001';
+    const bx = await branch(base, a, p, X, didCel);
+
+    const scopeHints: Array<string | undefined> = [];
+    const provider = {
+      getInscriptionById: (id: string) => p.getInscriptionById(id),
+      getInscriptionsBySatoshi: (s: string) => p.getInscriptionsBySatoshi(s),
+      // Sat-scoped tier: refuse an unscoped call, return ONLY the hinted sat's
+      // anchorings (what QuickNodeProvider/OrdHttpProvider can actually see).
+      getAnchoringsForDidCel: async (dc: string, opts?: { satoshi?: string }) => {
+        scopeHints.push(opts?.satoshi);
+        if (!opts?.satoshi) throw new Error('sat-scoped provider called without opts.satoshi');
+        return (await p.getAnchoringsForDidCel!(dc)).filter((an) => an.satoshi === opts.satoshi);
+      },
+    };
+    const result = await verifyEventLog(bx.log, { ordinalsProvider: provider });
+    expect(result.errors).toEqual([]);
+    expect(result.verified).toBe(true);
+    expect(scopeHints).toEqual([X]);
+  });
+
   // #402: only CONTROLLER-authenticated competitors count. A non-controller who
   // inscribes a bare {alsoKnownAs:[didCel]} back-link on an earlier sat must NOT
   // be able to deny an honest mint (deny-only front-run). These are the

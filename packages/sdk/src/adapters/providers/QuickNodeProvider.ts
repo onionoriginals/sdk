@@ -1,4 +1,5 @@
 import type { OrdinalsProvider, InscriptionParts } from '../types.js';
+import { enumerateAnchoringsOnSat, type DidCelAnchoring } from '../anchoring-enumeration.js';
 import { StructuredError } from '@originals/cel';
 import { validateSatoshiNumber } from '@originals/cel';
 import { decode as decodeCbor } from '@originals/cel/cbor';
@@ -549,6 +550,16 @@ export class QuickNodeProvider implements OrdinalsProvider {
     return ids
       .filter((x): x is string => typeof x === 'string' && INSCRIPTION_ID_RE.test(x))
       .map((inscriptionId) => ({ inscriptionId }));
+  }
+
+  /**
+   * SAT-SCOPED tier of the OrdinalsProvider contract (#473): enumerates only
+   * the anchorings on `opts.satoshi` via ord_getSat + ord_getInscription.
+   * Proves the claimed anchoring exists back-linked and confirmed on that sat;
+   * does NOT check cross-sat canonicality. Throws without a sat scope.
+   */
+  async getAnchoringsForDidCel(didCel: string, opts?: { satoshi?: string }): Promise<DidCelAnchoring[]> {
+    return enumerateAnchoringsOnSat(this, didCel, opts?.satoshi, 'QuickNodeProvider');
   }
 
   async broadcastTransaction(txHexOrObj: unknown): Promise<string> {

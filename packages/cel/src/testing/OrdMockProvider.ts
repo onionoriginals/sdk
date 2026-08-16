@@ -156,8 +156,10 @@ export class OrdMockProvider {
     return this.state.ownershipBySatoshi.get(satoshi) ?? null;
   }
 
+  // FULL tier of the getAnchoringsForDidCel contract (#473): the in-memory
+  // state IS a global index, so the sat-scope hint is unnecessary and ignored.
   // eslint-disable-next-line @typescript-eslint/require-await
-  async getAnchoringsForDidCel(didCel: string): Promise<Array<{
+  async getAnchoringsForDidCel(didCel: string, _opts?: { satoshi?: string }): Promise<Array<{
     satoshi: string;
     inscriptionId: string;
     blockHeight?: number;
