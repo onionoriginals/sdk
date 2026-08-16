@@ -133,10 +133,15 @@ import { multikey } from '@originals/sdk';
 ```ts
 // before
 const hex = sig.toString('hex');
-// after
-import { bytesToHex } from '@noble/hashes/utils.js';
-const hex = bytesToHex(sig);
+
+// after, on Node — Buffer still exists, it just isn't handed to you
+const hex = Buffer.from(sig).toString('hex');
+
+// after, portable — no dependency, works in a browser
+const hex = [...sig].map((b) => b.toString(16).padStart(2, '0')).join('');
 ```
+
+Going the other way, the SDK exports `encoding.hexToBytes`.
 
 ## 8. `@originals/auth`: the root no longer re-exports server code
 
@@ -157,7 +162,7 @@ If you were reaching into `@originals/auth` for Turnkey key encoding, see §3 �
 
 The CEL core — create, append, verify event logs — is now its own package with no Bitcoin stack, no `jsonld`, and no Node builtins. If you only create and verify logs, depend on it directly and skip the rest.
 
-`@originals/sdk` re-exports its entire surface, including the `@originals/sdk/cel` subpath, so **no existing import breaks**.
+**No existing import breaks.** `@originals/sdk/cel` re-exports the *entire* `@originals/cel` surface — that subpath and the standalone package are now interchangeable. The `@originals/sdk` root carries most of it but not all: eleven symbols (`appendEvent`, `committedFields`, `canonicalizeEntryForChain`, `cbor`, `btcoDidFromSatoshi`, …) live only on `./cel`. If a CEL import fails from the root, take it from `@originals/sdk/cel`.
 
 ---
 
