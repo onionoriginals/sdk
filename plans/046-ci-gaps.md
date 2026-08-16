@@ -16,7 +16,7 @@
 
 ## Why this matters
 
-Three gaps, each of which let something real through during run 3. None are
+Six gaps, each of which let something real through during run 3. None are
 hypothetical: for each, the bug shipped to a PR and was caught by a human or a
 review bot rather than by CI.
 
@@ -82,6 +82,31 @@ and record the decision in the PR:
 **Do NOT** leave the glob unquoted to keep CI green. A lint job that silently
 skips two thirds of the source tree is worse than one that fails.
 
+### 6. The SDK `test` script does not run the whole `tests` tree
+
+> Items 4 (`apps/landing` never built in CI) and 5 (`bun run test` intermittently
+> exits 1 with every suite reporting `0 fail`) are tracked in PR #471; both are
+> implemented on this branch by `53d8fbc5`. This item is new.
+
+`"test"` enumerated four directories — `tests/{integration,unit,security,stress}`
+— and the split is deliberate (see item 5). But enumeration drifts: everything
+outside those four was silently never run.
+
+**What it let through**: 75 tests across 8 files — `tests/mocks/`, all six
+`tests/performance/` suites, `tests/index.test.ts` and `tests/sdk.test.ts`.
+**Two of them had been failing on main**, reproducibly and in isolation:
+`tests/mocks/adapters/OrdMockProvider.test.ts` asserted Buffer `.toString()`
+semantics on inscription content that plan 044 retyped to `Uint8Array`. Plan 044
+noted it had updated the tests that asserted Buffer semantics; these two were
+missed, and nothing was running them to say so.
+
+**Fix**: extend the script with a fifth invocation covering the remainder, and —
+because the next new directory would drift the same way — add
+`tests/unit/test-script-covers-tree.test.ts`, which parses the `test` script out
+of `package.json`, walks `tests/` for `*.test.ts`, and fails with the offending
+paths if any file is unreachable from it. `packages/cel` already runs
+`bun test tests/`, so it has no equivalent gap.
+
 ## Done criteria
 
 1. `turbo.json`'s lint task depends on `^build`; deleting `dist` and running lint
@@ -90,6 +115,8 @@ skips two thirds of the source tree is worse than one that fails.
    fails on a `Buffer` reference in a guarded graph. Verify by temporarily
    reintroducing `Buffer.from` into `turnkeySignBytes` and confirming CI fails.
 3. `bun run lint` in both packages lints the entire `src` tree, and passes.
+4. `bun run test` runs every `*.test.ts` under `packages/sdk/tests`, and the
+   drift guard fails when the script stops covering one.
 
 ## STOP conditions
 
