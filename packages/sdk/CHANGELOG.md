@@ -1,5 +1,37 @@
 # @originals/sdk
 
+## 3.0.0-next.1
+
+### Minor Changes
+
+- 5f0788f: Production providers can now verify btco-anchored did:cel assets end to end (#473).
+
+  `getAnchoringsForDidCel` — the capability `verifyEventLog` requires for #402 first-anchor-wins uniqueness — was implemented only by the `OrdMockProvider` test double, so every btco-anchored asset failed verification (`UNIQUENESS_UNVERIFIABLE`) against `QuickNodeProvider` or `OrdHttpProvider`.
+
+  The contract now has two documented conformance tiers, and the verifier passes the log's own anchored sat as a scope hint (`getAnchoringsForDidCel(didCel, { satoshi })`):
+
+  - **FULL** (a global back-link index, e.g. `OrdMockProvider`): enumerates anchorings on any sat; cross-sat legitimate-duplicate detection via authenticated competitors (#402) works.
+  - **SAT-SCOPED** (now implemented by `QuickNodeProvider` and `OrdHttpProvider` via a shared helper): enumerates only the log's own anchored sat, since ord exposes no did:cel back-link index. This proves the claimed anchoring EXISTS on-chain, back-linked and height-confirmed; it does NOT check cross-sat canonicality — behaviourally identical to the already-accepted `didDocument`-omitting degraded mode, so no #402 security property is weakened: uniqueness stays fail-closed and non-opt-in, and sat-scoped providers throw (`ANCHORING_ENUMERATION_UNSCOPED`) rather than fabricate an empty enumeration when called without a scope.
+
+  Backward compatible: existing single-argument implementations of the optional method remain valid.
+
+- c9f0842: `addResourceVersion` now hosts the new version's bytes when the asset is published, so a `did:webvh` asset can be updated without its log out-running what the origin serves.
+
+  Recording a new resource version appends a signed `update` event carrying the new `toHash`. For an asset bound to a `did:webvh` that hash implies a resource URL — but nothing ever wrote the bytes there: `publishResources` runs only inside `publishToWeb`. Updating a published asset therefore produced a signed, verifying log that named a file the origin answered with 404. In practice that made post-publish updates unusable, which is why callers were left doing revisions only at `did:cel`.
+
+  The update path now writes the new bytes to exactly the key `publishToWeb` would have used — `{domain}/{userPath}/resources/{multibase(hash)}`. The derivation is shared with `publishResources` rather than duplicated, so the two cannot drift. Earlier versions stay hosted at their own content-addressed keys, so old URLs keep resolving.
+
+  Hosting runs **before** the append, mirroring the `inscribeConfirm` gate's abort-before-mutate rule: if the bytes cannot be hosted, `addResourceVersion` throws `STORAGE_REQUIRED` with the log untouched and no version pushed in memory. The reverse ordering has no clean recovery — the event would already be signed into the chain — whereas the only cost of a later append failure is one unreferenced object at a content-addressed key.
+
+  Unpublished (`did:cel`) assets are unaffected: there is nothing hosted, so nothing to write.
+
+  No new event is emitted: `resource:published` cannot be announced correctly from the update path (it would run inside the append, before the version reaches `asset.resources`), and `resource:version:created` already announces a new version after the push, carrying `toHash`.
+
+### Patch Changes
+
+- Updated dependencies [5f0788f]
+  - @originals/cel@0.2.0-next.1
+
 ## 3.0.0-next.0
 
 ### Major Changes
