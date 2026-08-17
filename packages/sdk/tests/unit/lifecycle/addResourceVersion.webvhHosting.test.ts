@@ -44,22 +44,23 @@ function served(storage: MemoryStorageAdapter, webvhDid: string, hash: string) {
   return storage.getObject(domain, path);
 }
 
-function makeSdk(storage: MemoryStorageAdapter) {
-  return OriginalsSDK.create({
+function makeSdk(storage: MemoryStorageAdapter, keyStore: MockKeyStore = new MockKeyStore()) {
+  const sdk = OriginalsSDK.create({
     network: 'regtest',
     defaultKeyType: 'Ed25519',
     ordinalsProvider: new OrdMockProvider(),
-    keyStore: new MockKeyStore(),
+    keyStore,
     storageAdapter: storage
   } as never);
+  return { sdk, keyStore };
 }
 
 async function publishedAsset(storage: MemoryStorageAdapter) {
-  const sdk = makeSdk(storage);
+  const { sdk, keyStore } = makeSdk(storage);
   const asset = await sdk.lifecycle.createAsset(resources() as never);
   const publisher = await sdk.did.createDIDWebVH({ domain: 'example.com', paths: ['pub'] });
   await sdk.lifecycle.publishToWeb(asset, (publisher as { did: string }).did);
-  return { sdk, asset };
+  return { sdk, asset, keyStore };
 }
 
 describe('addResourceVersion on a published (did:webvh) asset', () => {
@@ -133,9 +134,47 @@ describe('addResourceVersion on a published (did:webvh) asset', () => {
     expect(asset.resources.filter((r) => r.id === 'doc.txt')).toHaveLength(1);
   });
 
+  // The bytes must be written before the log names them, but a version the
+  // append then rejected is hosted, NOT published. Announcing at write time
+  // would hand subscribers a resource that is in neither the log nor
+  // asset.resources.
+  test('no resource:published when the append is skipped', async () => {
+    const storage = new MemoryStorageAdapter();
+    const { asset, keyStore } = await publishedAsset(storage);
+    const published: unknown[] = [];
+    asset.on('resource:published', (e) => published.push(e));
+
+    // Drop custody so the append degrades to a skip instead of landing.
+    keyStore.clear();
+    const before = asset.celLog!.events.length;
+
+    await asset.addResourceVersion('doc.txt', V2, 'text/plain', undefined, {
+      onAppendFailure: 'skip'
+    });
+
+    expect(asset.celLog!.events.length).toBe(before); // nothing landed
+    expect(published).toHaveLength(0);                // …so nothing was announced
+    // Not vacuous: the write DID happen (that is the ordering under test) —
+    // the bytes are hosted, they are simply not announced as published.
+    const webvhDid = asset.bindings!['did:webvh']!;
+    const v2Hash = hashResource(new TextEncoder().encode(V2));
+    expect(await served(storage, webvhDid, v2Hash)).not.toBeNull();
+  });
+
+  test('resource:published fires once the append lands', async () => {
+    const storage = new MemoryStorageAdapter();
+    const { asset } = await publishedAsset(storage);
+    const published: Array<{ resource: { hash: string } }> = [];
+    asset.on('resource:published', (e) => published.push(e as never));
+
+    const v2 = await asset.addResourceVersion('doc.txt', V2, 'text/plain');
+
+    expect(published.map((e) => e.resource.hash)).toEqual([v2.hash]);
+  });
+
   test('an unpublished (did:cel) asset needs no hosting and still updates', async () => {
     const storage = new MemoryStorageAdapter();
-    const sdk = makeSdk(storage);
+    const { sdk } = makeSdk(storage);
     const asset = await sdk.lifecycle.createAsset(resources() as never);
 
     const v2 = await asset.addResourceVersion('doc.txt', V2, 'text/plain');
