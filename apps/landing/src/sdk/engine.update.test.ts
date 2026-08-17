@@ -26,6 +26,19 @@ const SVG = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/
 const SVG_V2 = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="8" height="8"/></svg>';
 const SVG_V3 = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="3"/></svg>';
 
+const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+
+/** Where the SDK hosts a resource version: {origin}/{path}/resources/{multibase}. */
+function resourceUrl(webvhDid: string, hashHex: string): string {
+  const parts = webvhDid.split(':');
+  const domain = decodeURIComponent(parts[3]);
+  const path = parts.slice(4).map(decodeURIComponent).join('/');
+  const bytes = Uint8Array.from(hashHex.match(/../g)!.map((h) => parseInt(h, 16)));
+  const multibase =
+    'u' + btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `https://${domain}/${path}/resources/${multibase}`;
+}
+
 /**
  * Revising an asset after creating it: a signed `update` event appended to the
  * asset's own event log. These assert the demo shows the REAL chain growing —
@@ -85,11 +98,40 @@ describe('revise a created asset', () => {
     await expect(engine.update(SVG)).rejects.toThrow(/unchanged/i);
   });
 
-  test('revising is refused once the asset is published', async () => {
+  test('a PUBLISHED asset is still revisable, and the new bytes are hosted', async () => {
+    const engine = new DemoEngine();
+    await engine.create('Revisable', 'Artwork', SVG);
+    const published = await engine.publish();
+    expect(published.layer).toBe('did:webvh');
+
+    const updated = await engine.update(SVG_V2);
+
+    expect(updated.resource.version).toBe(2);
+    expect(updated.celLog.map((e) => e.type)).toEqual(['create', 'migrate', 'update']);
+    // The bytes the update names are fetchable at the URL the DID implies —
+    // a published log must never out-run what the origin serves.
+    const res = await fetch(resourceUrl(updated.webvhDid!, updated.resource.hash));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(SVG_V2);
+  });
+
+  test('a published revision leaves the previous version resolvable', async () => {
+    const engine = new DemoEngine();
+    const created = await engine.create('Revisable', 'Artwork', SVG);
+    const published = await engine.publish();
+    await engine.update(SVG_V2);
+
+    const old = await fetch(resourceUrl(published.webvhDid!, created.resource.hash));
+    expect(old.status).toBe(200);
+    expect(await old.text()).toBe(SVG);
+  });
+
+  test('an inscribed asset is refused — that append is paid on-chain', async () => {
     const engine = new DemoEngine();
     await engine.create('Revisable', 'Artwork', SVG);
     await engine.publish();
-    await expect(engine.update(SVG_V2)).rejects.toThrow(/did:cel/);
+    await engine.inscribe();
+    await expect(engine.update(SVG_V2)).rejects.toThrow(/on-chain/);
   });
 
   test('update before create is refused', async () => {

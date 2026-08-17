@@ -2157,23 +2157,101 @@ export class LifecycleManager {
       // hash (issue #347).
       this.assertContentMatchesDeclaredHash(resource, 'publish');
 
-      const data = new TextEncoder().encode(resource.content);
-
-      const storageWithPut = storage as { put?: (key: string, data: Uint8Array, options: { contentType: string }) => Promise<void> };
-      const storageWithPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<void> };
-
-      if (typeof storageWithPut.put === 'function') {
-        await storageWithPut.put(`${domain}/${relativePath}`, data, { contentType: resource.contentType });
-        writtenObjects?.push({ domain, relativePath });
-      } else if (typeof storageWithPutObject.putObject === 'function') {
-        await storageWithPutObject.putObject(domain, relativePath, new TextEncoder().encode(resource.content));
-        writtenObjects?.push({ domain, relativePath });
-      }
+      const wrote = await this.writeResourceBytes(
+        domain,
+        relativePath,
+        resource.content,
+        resource.contentType
+      );
+      if (wrote) writtenObjects?.push({ domain, relativePath });
 
       (resource as { url?: string }).url = resourceUrl;
 
       await this.emitResourcePublishedEvent(asset, resource, resourceUrl, publisherDid, domain);
     }
+  }
+
+  /**
+   * The hosted location of one resource version's bytes under a did:webvh —
+   * `{domain}/{userPath}/resources/{multibase(hash)}`. Split out so the update
+   * path (hostUpdatedResourceBytes) writes the EXACT key publishResources does;
+   * two derivations of this would drift and serve 404s at URLs the log names.
+   */
+  private webvhResourceLocation(webvhDid: string, hash: string): { domain: string; relativePath: string } {
+    const { domain, userPath } = this.parseWebVHDid(webvhDid);
+    const multibase = encodeBase64UrlMultibase(hexToBytes(hash));
+    return {
+      domain,
+      relativePath: userPath ? `${userPath}/resources/${multibase}` : `resources/${multibase}`
+    };
+  }
+
+  /** Writes resource bytes through whichever storage interface the adapter implements. */
+  private async writeResourceBytes(
+    domain: string,
+    relativePath: string,
+    content: string,
+    contentType: string
+  ): Promise<boolean> {
+    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
+    const data = new TextEncoder().encode(content);
+    const withPut = storage as { put?: (key: string, data: Uint8Array, options: { contentType: string }) => Promise<void> } | undefined;
+    const withPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<void> } | undefined;
+
+    if (withPut && typeof withPut.put === 'function') {
+      await withPut.put(`${domain}/${relativePath}`, data, { contentType });
+      return true;
+    }
+    if (withPutObject && typeof withPutObject.putObject === 'function') {
+      await withPutObject.putObject(domain, relativePath, data);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Hosts the bytes of the resource version an `update` is about to record, for
+   * an asset bound to a did:webvh.
+   *
+   * A published asset's resources are served from its own origin, so an update
+   * that appended a signed `toHash` without hosting the matching bytes would
+   * publish a log naming a URL that 404s — the log would out-run what anyone
+   * can fetch. Called BEFORE the append for the same reason the inscribeConfirm
+   * gate is: a failure here aborts with the log untouched. The reverse ordering
+   * has no clean recovery, whereas the only cost of a later append failure is
+   * one unreferenced object at a content-addressed key.
+   *
+   * Throws when there is content to host and no adapter can host it — silently
+   * skipping is exactly the "attests content is hosted when it is not" failure
+   * publishResources already refuses (issue #244).
+   */
+  private async hostUpdatedResourceBytes(asset: OriginalsAsset): Promise<void> {
+    const webvhDid = (asset.bindings ?? {})['did:webvh'];
+    const pending = asset.pendingHeadMedia;
+    if (!webvhDid || !pending) return;
+
+    const { domain, relativePath } = this.webvhResourceLocation(webvhDid, pending.hash);
+    const wrote = await this.writeResourceBytes(
+      domain,
+      relativePath,
+      pending.content,
+      pending.contentType
+    );
+    if (!wrote) {
+      throw new StructuredError(
+        'STORAGE_REQUIRED',
+        `Cannot record a new version of "${pending.resourceId}" for published asset ${asset.id}: ` +
+        'its bytes must be hosted, but no storageAdapter with put()/putObject() is configured. ' +
+        'The update was NOT appended — the log would otherwise name a resource URL that serves nothing.'
+      );
+    }
+    await this.emitResourcePublishedEvent(
+      asset,
+      { id: pending.resourceId, hash: pending.hash, contentType: pending.contentType } as AssetResource,
+      `${webvhDid}/resources/${encodeBase64UrlMultibase(hexToBytes(pending.hash))}`,
+      webvhDid,
+      domain
+    );
   }
 
   private async emitResourcePublishedEvent(
@@ -2515,6 +2593,14 @@ export class LifecycleManager {
           'The inscribeConfirm gate declined the paid did:btco append; nothing was appended or inscribed.'
         );
       }
+    }
+
+    // Publication invariant: a published asset serves its resource bytes from
+    // its own origin, so a new version must be fetchable at the URL its signed
+    // `toHash` implies. Host the bytes BEFORE the append, mirroring the confirm
+    // gate above — a failure here aborts with the log untouched.
+    if (type === 'update') {
+      await this.hostUpdatedResourceBytes(asset);
     }
 
     // Snapshot the pre-append log BEFORE appendCelEventOrSkip advances it — the

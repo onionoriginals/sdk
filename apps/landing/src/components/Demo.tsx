@@ -15,19 +15,18 @@ type Phase =
   | 'idle'
   | 'creating'
   | 'created'
-  | 'updating'
   | 'publishing'
   | 'published'
   | 'inscribing'
   | 'inscribed';
 
-// 'updating' sits at the same step as 'created': revising is authorship at
-// did:cel, not a move to the next layer.
+// Revising is deliberately NOT a phase: it is authorship AT the current layer,
+// repeatable, and never moves the asset on. Modelling it as one would put it in
+// the pipeline's step math, where every value would be wrong by a layer.
 const phaseToStep: Record<Phase, number> = {
   idle: 0,
   creating: 0,
   created: 1,
-  updating: 1,
   publishing: 1,
   published: 2,
   inscribing: 2,
@@ -82,6 +81,7 @@ export function Demo() {
   // The nonce whose artwork is actually committed to the log. While it differs
   // from `nonce` the preview is showing bytes nothing has signed yet.
   const [committedNonce, setCommittedNonce] = useState<number | null>(null);
+  const [updating, setUpdating] = useState(false);
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'events' | 'provenance' | 'resource'>('events');
@@ -140,12 +140,21 @@ export function Demo() {
       setCommittedNonce(nonce); // what's on screen is now what's in the log
       return state;
     });
-  const update = () =>
-    run('created', 'updating', 'created', async (engine) => {
-      const state = await engine.update(artwork.svg, `Artwork revised (nonce ${nonce})`);
+  // Revising leaves `phase` alone — the asset stays exactly where it was.
+  const update = async () => {
+    setError(null);
+    setUpdating(true);
+    try {
+      const engine = await getEngine();
+      setAsset(await engine.update(artwork.svg, `Artwork revised (nonce ${nonce})`));
       setCommittedNonce(nonce);
-      return state;
-    });
+    } catch (err) {
+      console.error('[originals-demo]', err);
+      setError((err as Error).message);
+    } finally {
+      setUpdating(false);
+    }
+  };
   const publish = () =>
     run('created', 'publishing', 'published', (engine) => engine.publish());
   const inscribe = () =>
@@ -181,6 +190,7 @@ export function Demo() {
     setError(null);
     setTab('events');
     setCommittedNonce(null);
+    setUpdating(false);
     setNonce(Math.floor(Math.random() * 1e9)); // fresh artwork for the next run
     // Next run gets a fresh engine — fresh keys, fresh DIDs, fresh publisher.
     // window.__originalsDemo keeps pointing at the old engine until the new
@@ -206,9 +216,10 @@ export function Demo() {
 
   const step = phaseToStep[phase];
   const busy =
-    phase === 'creating' || phase === 'updating' || phase === 'publishing' || phase === 'inscribing';
-  // Revising is only offered at did:cel — see DemoEngine.update for why.
-  const canRevise = phase === 'created' || phase === 'updating';
+    phase === 'creating' || phase === 'publishing' || phase === 'inscribing' || updating;
+  // Revisable while the asset is authorable for free — did:cel and did:webvh.
+  // Not once inscribed: that append is paid on-chain (see DemoEngine.update).
+  const canRevise = phase === 'created' || phase === 'published';
   // The preview has drifted from the committed bytes: an unsigned revision.
   const pendingRevision = canRevise && committedNonce !== null && nonce !== committedNonce;
   const discardRevision = () => {
@@ -239,11 +250,11 @@ export function Demo() {
         <Reveal>
           <div className="demo-shell card">
             <div className="demo-pipeline">
-              {/* 'updating' shares a step index with 'created', but it is
-                  authorship AT did:cel — keep the pipeline on stage 0 instead
-                  of lighting up did:webvh as if a migration were running. */}
+              {/* A revision works AT the current layer, so hold the pipeline
+                  one stage back (step points at the NEXT layer) rather than
+                  lighting up the one the asset hasn't moved to. */}
               <Pipeline
-                active={phase === 'updating' ? 0 : busy ? step : step > 2 ? 2 : step}
+                active={updating ? Math.max(step - 1, 0) : busy ? step : step > 2 ? 2 : step}
                 busy={busy}
               />
             </div>
@@ -257,7 +268,7 @@ export function Demo() {
                       <button
                         type="button"
                         className="demo-art-refresh"
-                        disabled={phase === 'updating'}
+                        disabled={updating}
                         onClick={() => setNonce((n) => n + 1)}
                       >
                         <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -351,7 +362,7 @@ export function Demo() {
                                   // Publishing an asset while the preview shows
                                   // bytes nothing signed would publish something
                                   // other than what's on screen.
-                                  (i === 1 && (pendingRevision || phase === 'updating'))
+                                  (i === 1 && (pendingRevision || updating))
                                 }
                                 data-busy={state === 'busy' || undefined}
                                 onClick={stepActions[i]}
@@ -387,11 +398,11 @@ export function Demo() {
                       <button
                         type="button"
                         className="btn btn-primary demo-step-btn"
-                        disabled={!pendingRevision || phase === 'updating'}
-                        data-busy={phase === 'updating' || undefined}
+                        disabled={!pendingRevision || updating}
+                        data-busy={updating || undefined}
                         onClick={update}
                       >
-                        {phase === 'updating' ? (
+                        {updating ? (
                           <>
                             <span className="demo-spinner" aria-hidden="true" />
                             {demo.revise.pending}
@@ -400,7 +411,7 @@ export function Demo() {
                           demo.revise.action
                         )}
                       </button>
-                      {pendingRevision && phase !== 'updating' && (
+                      {pendingRevision && !updating && (
                         <button type="button" className="demo-revise-discard" onClick={discardRevision}>
                           {demo.revise.discard}
                         </button>
@@ -412,7 +423,7 @@ export function Demo() {
                   </div>
                 )}
 
-                {(phase === 'published' || phase === 'inscribing' || phase === 'inscribed') && (
+                {(phase === 'inscribing' || phase === 'inscribed') && (
                   <p className="demo-revise-locked">{demo.revise.lockedNote}</p>
                 )}
 

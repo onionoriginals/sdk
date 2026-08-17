@@ -284,20 +284,17 @@ export class DemoEngine {
    * Revise the artwork — a signed `update` event appended to the asset's own
    * event log, chaining the new bytes to the version before them.
    *
-   * did:cel ONLY, deliberately. Genesis is the protocol's private drafting
-   * layer: an update there is free, offline, and nothing is hosted yet, so
-   * nothing can go stale. Once the asset is published the SDK has no
-   * re-publish-resources API, so a did:webvh update would append an event
-   * naming a `toHash` whose bytes are not hosted — a log that points at
-   * something the origin doesn't serve. That is worth having, but it is an SDK
-   * change, not a demo one.
+   * Works at did:cel (free, offline, nothing hosted yet) AND at did:webvh: the
+   * SDK hosts the new version's bytes before appending, so the published log
+   * never names a resource URL that 404s. did:btco is refused here because an
+   * update there is a PAID on-chain append — real sats, not a demo click.
    */
   async update(newArtworkSvg: string, changes?: string): Promise<DemoAssetState> {
     const asset = this.asset;
     if (!asset) throw new Error('Create an asset first');
-    if (asset.currentLayer !== 'did:cel') {
+    if (asset.currentLayer === 'did:btco') {
       throw new Error(
-        'Revisions are authored at did:cel, before publishing — this asset is already public.'
+        'Revising an inscribed asset writes a new inscription on its satoshi — a paid on-chain append, not a demo click.'
       );
     }
     const primaryId = asset.resources[0].id;
