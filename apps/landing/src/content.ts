@@ -139,6 +139,23 @@ export const demo = {
         'Coming soon: inscribe the published Original onto a satoshi as did:btco — real Bitcoin inscription lands once testnet4 ordinals support ships.'
     }
   ],
+  revise: {
+    heading: 'Revise it before you publish',
+    body:
+      'did:cel is the private drafting layer — free, offline, nothing hosted yet. Regenerate the artwork and commit it: the SDK signs an update event that chains the new bytes to the version before them. Revise as many times as you like; every version stays in the log.',
+    regenerateAction: 'Revise artwork',
+    action: 'Commit update',
+    pending: 'Signing update…',
+    discard: 'Discard revision',
+    unsignedBadge: 'not in the log yet',
+    unsignedNote:
+      'This revision is only in the browser. Commit it to add a signed update event — or discard it and publish the version you have.',
+    versionLabel: 'artwork',
+    committedNote:
+      'Every revision is a signed event chained to the one before it — open the Event log to see them.',
+    lockedNote:
+      'Revisions are authored at did:cel, before publishing. Once an asset is public its bytes are hosted, so a new version needs re-hosting the SDK does not expose yet.'
+  },
   eventLog: {
     title: 'Event log',
     empty: 'Awaiting genesis event',

@@ -15,15 +15,19 @@ type Phase =
   | 'idle'
   | 'creating'
   | 'created'
+  | 'updating'
   | 'publishing'
   | 'published'
   | 'inscribing'
   | 'inscribed';
 
+// 'updating' sits at the same step as 'created': revising is authorship at
+// did:cel, not a move to the next layer.
 const phaseToStep: Record<Phase, number> = {
   idle: 0,
   creating: 0,
   created: 1,
+  updating: 1,
   publishing: 1,
   published: 2,
   inscribing: 2,
@@ -75,6 +79,9 @@ export function Demo() {
   useEffect(() => {
     setArtSeed({ title: title.trim() || demo.form.defaultTitle, medium, nonce });
   }, [title, medium, nonce]);
+  // The nonce whose artwork is actually committed to the log. While it differs
+  // from `nonce` the preview is showing bytes nothing has signed yet.
+  const [committedNonce, setCommittedNonce] = useState<number | null>(null);
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'events' | 'provenance' | 'resource'>('events');
@@ -128,9 +135,17 @@ export function Demo() {
   };
 
   const create = () =>
-    run('idle', 'creating', 'created', (engine) =>
-      engine.create(title.trim() || demo.form.defaultTitle, medium, artwork.svg)
-    );
+    run('idle', 'creating', 'created', async (engine) => {
+      const state = await engine.create(title.trim() || demo.form.defaultTitle, medium, artwork.svg);
+      setCommittedNonce(nonce); // what's on screen is now what's in the log
+      return state;
+    });
+  const update = () =>
+    run('created', 'updating', 'created', async (engine) => {
+      const state = await engine.update(artwork.svg, `Artwork revised (nonce ${nonce})`);
+      setCommittedNonce(nonce);
+      return state;
+    });
   const publish = () =>
     run('created', 'publishing', 'published', (engine) => engine.publish());
   const inscribe = () =>
@@ -165,6 +180,7 @@ export function Demo() {
     setAsset(null);
     setError(null);
     setTab('events');
+    setCommittedNonce(null);
     setNonce(Math.floor(Math.random() * 1e9)); // fresh artwork for the next run
     // Next run gets a fresh engine — fresh keys, fresh DIDs, fresh publisher.
     // window.__originalsDemo keeps pointing at the old engine until the new
@@ -189,7 +205,15 @@ export function Demo() {
   }, [identity]);
 
   const step = phaseToStep[phase];
-  const busy = phase === 'creating' || phase === 'publishing' || phase === 'inscribing';
+  const busy =
+    phase === 'creating' || phase === 'updating' || phase === 'publishing' || phase === 'inscribing';
+  // Revising is only offered at did:cel — see DemoEngine.update for why.
+  const canRevise = phase === 'created' || phase === 'updating';
+  // The preview has drifted from the committed bytes: an unsigned revision.
+  const pendingRevision = canRevise && committedNonce !== null && nonce !== committedNonce;
+  const discardRevision = () => {
+    if (committedNonce !== null) setNonce(committedNonce);
+  };
   const stepActions = [create, publish, inscribe];
   const stepPhases: Phase[][] = [
     ['creating'],
@@ -215,7 +239,13 @@ export function Demo() {
         <Reveal>
           <div className="demo-shell card">
             <div className="demo-pipeline">
-              <Pipeline active={busy ? step : step > 2 ? 2 : step} busy={busy} />
+              {/* 'updating' shares a step index with 'created', but it is
+                  authorship AT did:cel — keep the pipeline on stage 0 instead
+                  of lighting up did:webvh as if a migration were running. */}
+              <Pipeline
+                active={phase === 'updating' ? 0 : busy ? step : step > 2 ? 2 : step}
+                busy={busy}
+              />
             </div>
 
             <div className="demo-body">
@@ -223,18 +253,22 @@ export function Demo() {
                 <div className="demo-asset" data-layer={asset?.layer ?? 'draft'}>
                   <div className="demo-art">
                     <img src={artwork.dataUri} alt={`Generated artwork for “${title || demo.form.defaultTitle}”`} />
-                    {phase === 'idle' && (
+                    {(phase === 'idle' || canRevise) && (
                       <button
                         type="button"
                         className="demo-art-refresh"
+                        disabled={phase === 'updating'}
                         onClick={() => setNonce((n) => n + 1)}
                       >
                         <svg viewBox="0 0 16 16" aria-hidden="true">
                           <path d="M13.3 6.6A5.6 5.6 0 0 0 3.1 5.2M2.7 9.4a5.6 5.6 0 0 0 10.2 1.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                           <path d="M3 2.4v2.9h2.9M13 13.6v-2.9h-2.9" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
-                        {demo.form.regenerate}
+                        {phase === 'idle' ? demo.form.regenerate : demo.revise.regenerateAction}
                       </button>
+                    )}
+                    {pendingRevision && (
+                      <span className="demo-art-unsigned">{demo.revise.unsignedBadge}</span>
                     )}
                     <span className="demo-art-badge layer-pill" data-layer={asset?.layer ?? undefined}>
                       <span className="dot" />
@@ -313,7 +347,11 @@ export function Demo() {
                                 className="btn btn-primary demo-step-btn"
                                 disabled={
                                   (state !== 'ready' && state !== 'busy') ||
-                                  (i === 0 && title.trim().length === 0)
+                                  (i === 0 && title.trim().length === 0) ||
+                                  // Publishing an asset while the preview shows
+                                  // bytes nothing signed would publish something
+                                  // other than what's on screen.
+                                  (i === 1 && (pendingRevision || phase === 'updating'))
                                 }
                                 data-busy={state === 'busy' || undefined}
                                 onClick={stepActions[i]}
@@ -333,6 +371,50 @@ export function Demo() {
                     );
                   })}
                 </ol>
+
+                {canRevise && asset && (
+                  <div className="demo-revise" data-pending={pendingRevision || undefined}>
+                    <div className="demo-revise-head">
+                      <h4>{demo.revise.heading}</h4>
+                      <span className="demo-revise-version">
+                        {demo.revise.versionLabel} <code>v{asset.resource.version}</code>
+                      </span>
+                    </div>
+                    <p className="demo-revise-body">
+                      {pendingRevision ? demo.revise.unsignedNote : demo.revise.body}
+                    </p>
+                    <div className="demo-revise-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary demo-step-btn"
+                        disabled={!pendingRevision || phase === 'updating'}
+                        data-busy={phase === 'updating' || undefined}
+                        onClick={update}
+                      >
+                        {phase === 'updating' ? (
+                          <>
+                            <span className="demo-spinner" aria-hidden="true" />
+                            {demo.revise.pending}
+                          </>
+                        ) : (
+                          demo.revise.action
+                        )}
+                      </button>
+                      {pendingRevision && phase !== 'updating' && (
+                        <button type="button" className="demo-revise-discard" onClick={discardRevision}>
+                          {demo.revise.discard}
+                        </button>
+                      )}
+                    </div>
+                    {asset.resource.version > 1 && !pendingRevision && (
+                      <p className="demo-revise-note">{demo.revise.committedNote}</p>
+                    )}
+                  </div>
+                )}
+
+                {(phase === 'published' || phase === 'inscribing' || phase === 'inscribed') && (
+                  <p className="demo-revise-locked">{demo.revise.lockedNote}</p>
+                )}
 
                 {error && <p className="demo-error" role="alert">{error}</p>}
 
@@ -484,6 +566,12 @@ export function Demo() {
                               <dt>file</dt>
                               <dd>
                                 <code>{asset.resource.id} · {asset.resource.contentType}</code>
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>version</dt>
+                              <dd>
+                                <code>v{asset.resource.version}</code>
                               </dd>
                             </div>
                             <div>

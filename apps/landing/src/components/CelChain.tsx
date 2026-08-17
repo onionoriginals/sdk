@@ -60,7 +60,13 @@ export function summarize(entry: CelEntry): string {
     return target ? `Moves to ${where} — ${truncate(target, 46)}` : `Moves to ${where}`;
   }
   if (entry.type === 'rotateKey') return 'Rotates the controlling key';
-  if (entry.type === 'update') return 'Records a new resource version';
+  if (entry.type === 'update') {
+    // The body is reference-shaped: it carries the signed toHash, never bytes.
+    const id = str(data.resourceId);
+    const to = typeof data.toVersion === 'number' ? data.toVersion : undefined;
+    if (id && to) return `New version — ${truncate(id, 28)} → v${to}, chained to the bytes before it`;
+    return 'Records a new resource version';
+  }
   return entry.type;
 }
 
