@@ -223,17 +223,12 @@ export class DemoEngine {
     const svgBytes = new TextEncoder().encode(artworkSvg);
     const svgHash = toHex(sha256(svgBytes));
 
-    const metadata = JSON.stringify(
-      {
-        title,
-        medium,
-        creator: 'you',
-        created: new Date().toISOString(),
-        artwork: { file: 'artwork.svg', sha256: svgHash }
-      },
-      null,
-      2
-    );
+    const metadata = buildMetadata({
+      title,
+      medium,
+      created: new Date().toISOString(),
+      artworkHash: svgHash
+    });
     const metaBytes = new TextEncoder().encode(metadata);
 
     const asset = await this.sdk.lifecycle.createAsset([
@@ -289,7 +284,7 @@ export class DemoEngine {
    * never names a resource URL that 404s. did:btco is refused here because an
    * update there is a PAID on-chain append — real sats, not a demo click.
    */
-  async update(newArtworkSvg: string, changes?: string): Promise<DemoAssetState> {
+  async update(title: string, medium: string, artworkSvg: string): Promise<DemoAssetState> {
     const asset = this.asset;
     if (!asset) throw new Error('Create an asset first');
     if (asset.currentLayer === 'did:btco') {
@@ -297,15 +292,45 @@ export class DemoEngine {
         'Revising an inscribed asset writes a new inscription on its satoshi — a paid on-chain append, not a demo click.'
       );
     }
-    const primaryId = asset.resources[0].id;
-    const version = await asset.addResourceVersion(
-      primaryId,
-      newArtworkSvg,
-      'image/svg+xml',
-      changes
-    );
-    // Keep the /me summary pointing at the current bytes (posted on publish).
-    this.assetResourceHash = version.hash;
+
+    const current = this.snapshot();
+    const svgHash = toHex(sha256(new TextEncoder().encode(artworkSvg)));
+
+    // The artwork is generated FROM the title, so a text edit changes these
+    // bytes — that is the edit. Skip when identical: addResourceVersion refuses
+    // a no-op version rather than logging one.
+    if (artworkSvg !== current.resource.content) {
+      await asset.addResourceVersion(
+        current.resource.id,
+        artworkSvg,
+        'image/svg+xml',
+        `Artwork regenerated for "${title}"`
+      );
+      this.assetResourceHash = svgHash; // the /me summary posts this on publish
+    }
+
+    // metadata.json embeds the title, the medium AND the artwork's sha-256, so
+    // leaving it at v1 would have the asset's own metadata describe bytes it no
+    // longer carries. Genesis `created` is preserved — it is when the asset was
+    // made, not when it was last edited.
+    if (current.metadata) {
+      const next = buildMetadata({
+        title,
+        medium,
+        created: createdAtOf(current.metadata.content),
+        artworkHash: svgHash
+      });
+      if (next !== current.metadata.content) {
+        await asset.addResourceVersion(
+          current.metadata.id,
+          next,
+          'application/json',
+          `Metadata follows the artwork to "${title}"`
+        );
+      }
+    }
+
+    this.assetTitle = title;
     return this.snapshot();
   }
 
@@ -506,6 +531,40 @@ export class DemoEngine {
   }
 }
 
+
+/**
+ * The asset's metadata resource. One builder for genesis and every revision —
+ * two shapes here would let an edit silently change a field it never meant to.
+ */
+function buildMetadata(input: {
+  title: string;
+  medium: string;
+  created: string;
+  artworkHash: string;
+}): string {
+  return JSON.stringify(
+    {
+      title: input.title,
+      medium: input.medium,
+      creator: 'you',
+      created: input.created,
+      artwork: { file: 'artwork.svg', sha256: input.artworkHash }
+    },
+    null,
+    2
+  );
+}
+
+/** Genesis `created` read back off the current metadata; now if unreadable. */
+function createdAtOf(metadataJson: string): string {
+  try {
+    const created = (JSON.parse(metadataJson) as { created?: unknown }).created;
+    if (typeof created === 'string' && created) return created;
+  } catch {
+    // A hand-edited or truncated blob must not break the edit.
+  }
+  return new Date().toISOString();
+}
 
 interface VersionedResource {
   id: string;

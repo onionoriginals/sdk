@@ -49,65 +49,97 @@ describe('revise a created asset', () => {
   beforeEach(() => { restore = installHostFetch('demo.test'); });
   afterEach(() => restore());
 
-  test('appends a signed update event and advances the resource version', async () => {
+  test('a title edit revises BOTH the artwork and the metadata that describes it', async () => {
     const engine = new DemoEngine();
-    const created = await engine.create('Revisable', 'Artwork', SVG);
+    const created = await engine.create('First Title', 'Artwork', SVG);
     expect(created.resource.version).toBe(1);
     expect(created.celLog.map((e) => e.type)).toEqual(['create']);
 
-    const updated = await engine.update(SVG_V2, 'second pass');
+    const updated = await engine.update('Second Title', 'Artwork', SVG_V2);
 
     expect(updated.resource.version).toBe(2);
     expect(updated.resource.content).toBe(SVG_V2);
-    expect(updated.resource.hash).not.toBe(created.resource.hash);
-    expect(updated.celLog.map((e) => e.type)).toEqual(['create', 'update']);
+    // metadata.json embeds the title AND the artwork hash, so it follows —
+    // leaving it behind would have the asset describe bytes it no longer holds.
+    expect(updated.celLog.map((e) => e.type)).toEqual(['create', 'update', 'update']);
+    const meta = JSON.parse(updated.metadata!.content) as {
+      title: string;
+      created: string;
+      artwork: { sha256: string };
+    };
+    expect(meta.title).toBe('Second Title');
+    expect(meta.artwork.sha256).toBe(updated.resource.hash);
+    // Genesis `created` is when the asset was made, not when it was last edited.
+    expect(meta.created).toBe(
+      (JSON.parse(created.metadata!.content) as { created: string }).created
+    );
+  });
 
-    // The update event is genuinely signed and chained, like every other entry.
+  test('the update event is signed, chained and reference-shaped', async () => {
+    const engine = new DemoEngine();
+    const created = await engine.create('First Title', 'Artwork', SVG);
+    const updated = await engine.update('Second Title', 'Artwork', SVG_V2);
+
     const event = updated.celLog[1];
+    expect(event.type).toBe('update');
     expect(event.proof[0]?.proofValue).toBeTruthy();
     expect(event.previousEvent).toBeTruthy();
-    // Reference-shaped body: the signed toHash, never the bytes.
     expect(event.data.resourceId).toBe('artwork.svg');
     expect(event.data.toVersion).toBe(2);
     expect(event.data.previousVersionHash).toBe(created.resource.hash);
+    // The signed body carries the toHash, never the bytes.
     expect(JSON.stringify(event.data)).not.toContain('<svg');
+  });
+
+  test('re-committing identical text and artwork logs nothing', async () => {
+    const engine = new DemoEngine();
+    await engine.create('Same', 'Artwork', SVG);
+    const again = await engine.update('Same', 'Artwork', SVG);
+    // No no-op versions: addResourceVersion would refuse them, so update skips.
+    expect(again.celLog.map((e) => e.type)).toEqual(['create']);
+    expect(again.resource.version).toBe(1);
+  });
+
+  test('editing only the medium still revises the metadata', async () => {
+    const engine = new DemoEngine();
+    await engine.create('Same', 'Artwork', SVG);
+    const updated = await engine.update('Same', 'Photograph', SVG);
+
+    // Artwork bytes unchanged here (the caller passed the same SVG), so only
+    // metadata.json gains a version.
+    expect(updated.resource.version).toBe(1);
+    expect(updated.celLog.map((e) => e.type)).toEqual(['create', 'update']);
+    expect((JSON.parse(updated.metadata!.content) as { medium: string }).medium).toBe('Photograph');
   });
 
   test('revisions stack — each one chains to the version before it', async () => {
     const engine = new DemoEngine();
-    await engine.create('Revisable', 'Artwork', SVG);
-    const v2 = await engine.update(SVG_V2);
-    const v3 = await engine.update(SVG_V3);
+    await engine.create('One', 'Artwork', SVG);
+    const v2 = await engine.update('Two', 'Artwork', SVG_V2);
+    const v3 = await engine.update('Three', 'Artwork', SVG_V3);
 
     expect(v3.resource.version).toBe(3);
-    expect(v3.celLog.map((e) => e.type)).toEqual(['create', 'update', 'update']);
-    expect(v3.celLog[2].data.previousVersionHash).toBe(v2.resource.hash);
+    const updates = v3.celLog.filter((e) => e.type === 'update' && e.data.resourceId === 'artwork.svg');
+    expect(updates).toHaveLength(2);
+    expect(updates[1].data.previousVersionHash).toBe(v2.resource.hash);
   });
 
   test('the asset still verifies after being revised', async () => {
     const engine = new DemoEngine();
-    await engine.create('Revisable', 'Artwork', SVG);
-    await engine.update(SVG_V2);
-    // The whole signed chain — genesis plus the update — must still verify.
+    await engine.create('One', 'Artwork', SVG);
+    await engine.update('Two', 'Artwork', SVG_V2);
     expect(await engine.asset!.verify()).toBe(true);
-  });
-
-  test('the same bytes are refused rather than logged as a no-op version', async () => {
-    const engine = new DemoEngine();
-    await engine.create('Revisable', 'Artwork', SVG);
-    await expect(engine.update(SVG)).rejects.toThrow(/unchanged/i);
   });
 
   test('a PUBLISHED asset is still revisable, and the new bytes are hosted', async () => {
     const engine = new DemoEngine();
-    await engine.create('Revisable', 'Artwork', SVG);
+    await engine.create('One', 'Artwork', SVG);
     const published = await engine.publish();
     expect(published.layer).toBe('did:webvh');
 
-    const updated = await engine.update(SVG_V2);
+    const updated = await engine.update('Two', 'Artwork', SVG_V2);
 
     expect(updated.resource.version).toBe(2);
-    expect(updated.celLog.map((e) => e.type)).toEqual(['create', 'migrate', 'update']);
     // The bytes the update names are fetchable at the URL the DID implies —
     // a published log must never out-run what the origin serves.
     const res = await fetch(resourceUrl(updated.webvhDid!, updated.resource.hash));
@@ -117,9 +149,9 @@ describe('revise a created asset', () => {
 
   test('a published revision leaves the previous version resolvable', async () => {
     const engine = new DemoEngine();
-    const created = await engine.create('Revisable', 'Artwork', SVG);
+    const created = await engine.create('One', 'Artwork', SVG);
     const published = await engine.publish();
-    await engine.update(SVG_V2);
+    await engine.update('Two', 'Artwork', SVG_V2);
 
     const old = await fetch(resourceUrl(published.webvhDid!, created.resource.hash));
     expect(old.status).toBe(200);
@@ -128,34 +160,33 @@ describe('revise a created asset', () => {
 
   test('an inscribed asset is refused — that append is paid on-chain', async () => {
     const engine = new DemoEngine();
-    await engine.create('Revisable', 'Artwork', SVG);
+    await engine.create('One', 'Artwork', SVG);
     await engine.publish();
     await engine.inscribe();
-    await expect(engine.update(SVG_V2)).rejects.toThrow(/on-chain/);
+    await expect(engine.update('Two', 'Artwork', SVG_V2)).rejects.toThrow(/on-chain/);
   });
 
   test('update before create is refused', async () => {
     const engine = new DemoEngine();
-    await expect(engine.update(SVG_V2)).rejects.toThrow(/Create an asset first/);
+    await expect(engine.update('Two', 'Artwork', SVG_V2)).rejects.toThrow(/Create an asset first/);
   });
 
   // Regression: `resources` GROWS by append, so index-based reads pinned the
   // panel to genesis and showed v1's bytes and hash after every revision.
-  test('the snapshot reports the newest version, not genesis', async () => {
+  test('the snapshot reports the newest version of each resource', async () => {
     const engine = new DemoEngine();
-    const created = await engine.create('Revisable', 'Artwork', SVG);
-    const updated = await engine.update(SVG_V2);
+    const created = await engine.create('One', 'Artwork', SVG);
+    const updated = await engine.update('Two', 'Artwork', SVG_V2);
 
     expect(updated.resource.content).not.toBe(created.resource.content);
-    // The metadata resource is untouched by an artwork revision.
     expect(updated.metadata?.id).toBe('metadata.json');
-    expect(updated.metadata?.content).toBe(created.metadata?.content);
+    expect(updated.metadata?.content).not.toBe(created.metadata?.content);
   });
 
   test('the chain panel glosses an update with its resource and version', async () => {
     const engine = new DemoEngine();
-    await engine.create('Revisable', 'Artwork', SVG);
-    const updated = await engine.update(SVG_V2);
+    await engine.create('One', 'Artwork', SVG);
+    const updated = await engine.update('Two', 'Artwork', SVG_V2);
     const gloss = summarize(updated.celLog[1]);
     expect(gloss).toContain('artwork.svg');
     expect(gloss).toContain('v2');

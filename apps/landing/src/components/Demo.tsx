@@ -78,9 +78,10 @@ export function Demo() {
   useEffect(() => {
     setArtSeed({ title: title.trim() || demo.form.defaultTitle, medium, nonce });
   }, [title, medium, nonce]);
-  // The nonce whose artwork is actually committed to the log. While it differs
-  // from `nonce` the preview is showing bytes nothing has signed yet.
-  const [committedNonce, setCommittedNonce] = useState<number | null>(null);
+  // The title/medium/nonce whose artwork is actually committed to the log —
+  // what Discard restores to. Divergence is detected from the BYTES, not from
+  // these, so any route to new artwork counts as a revision.
+  const [committed, setCommitted] = useState<{ title: string; medium: string; nonce: number } | null>(null);
   const [updating, setUpdating] = useState(false);
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -137,7 +138,7 @@ export function Demo() {
   const create = () =>
     run('idle', 'creating', 'created', async (engine) => {
       const state = await engine.create(title.trim() || demo.form.defaultTitle, medium, artwork.svg);
-      setCommittedNonce(nonce); // what's on screen is now what's in the log
+      setCommitted({ title, medium, nonce }); // what's on screen is now what's in the log
       return state;
     });
   // Revising leaves `phase` alone — the asset stays exactly where it was.
@@ -146,8 +147,8 @@ export function Demo() {
     setUpdating(true);
     try {
       const engine = await getEngine();
-      setAsset(await engine.update(artwork.svg, `Artwork revised (nonce ${nonce})`));
-      setCommittedNonce(nonce);
+      setAsset(await engine.update(title.trim() || demo.form.defaultTitle, medium, artwork.svg));
+      setCommitted({ title, medium, nonce });
     } catch (err) {
       console.error('[originals-demo]', err);
       setError((err as Error).message);
@@ -189,7 +190,7 @@ export function Demo() {
     setAsset(null);
     setError(null);
     setTab('events');
-    setCommittedNonce(null);
+    setCommitted(null);
     setUpdating(false);
     setNonce(Math.floor(Math.random() * 1e9)); // fresh artwork for the next run
     // Next run gets a fresh engine — fresh keys, fresh DIDs, fresh publisher.
@@ -220,11 +221,20 @@ export function Demo() {
   // Revisable while the asset is authorable for free — did:cel and did:webvh.
   // Not once inscribed: that append is paid on-chain (see DemoEngine.update).
   const canRevise = phase === 'created' || phase === 'published';
-  // The preview has drifted from the committed bytes: an unsigned revision.
-  const pendingRevision = canRevise && committedNonce !== null && nonce !== committedNonce;
+  // Compare the BYTES on screen against the bytes in the log. Retyping the
+  // title back to its committed value therefore clears the pending state, and
+  // a nonce bump that happened to reproduce the same art would too.
+  const pendingRevision = canRevise && !!asset && artwork.svg !== asset.resource.content;
   const discardRevision = () => {
-    if (committedNonce !== null) setNonce(committedNonce);
+    if (!committed) return;
+    setTitle(committed.title);
+    setMedium(committed.medium);
+    setNonce(committed.nonce);
   };
+  // The form is the edit surface once an asset exists: typing a new title
+  // regenerates the artwork, which IS the new version. Locked only while an
+  // operation is in flight, or once inscribed (that append costs sats).
+  const formLocked = busy || phase === 'inscribed';
   const stepActions = [create, publish, inscribe];
   const stepPhases: Phase[][] = [
     ['creating'],
@@ -286,7 +296,7 @@ export function Demo() {
                       {asset?.layer ?? 'draft'}
                     </span>
                   </div>
-                  <div className="demo-form" data-disabled={phase !== 'idle' || undefined}>
+                  <div className="demo-form" data-disabled={formLocked || undefined}>
                     <label className="demo-field">
                       <span>{demo.form.titleLabel}</span>
                       <input
@@ -294,7 +304,7 @@ export function Demo() {
                         value={title}
                         maxLength={80}
                         placeholder={demo.form.titlePlaceholder}
-                        disabled={phase !== 'idle'}
+                        disabled={formLocked}
                         onChange={(e) => setTitle(e.target.value)}
                       />
                     </label>
@@ -302,7 +312,7 @@ export function Demo() {
                       <span>{demo.form.mediumLabel}</span>
                       <select
                         value={medium}
-                        disabled={phase !== 'idle'}
+                        disabled={formLocked}
                         onChange={(e) => setMedium(e.target.value)}
                       >
                         {demo.form.mediums.map((m) => (

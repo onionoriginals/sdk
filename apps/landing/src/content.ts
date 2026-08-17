@@ -140,16 +140,16 @@ export const demo = {
     }
   ],
   revise: {
-    heading: 'Revise it — the log keeps every version',
+    heading: 'Edit it — the log keeps every version',
     body:
-      'Regenerate the artwork and commit it: the SDK signs an update event that chains the new bytes to the version before them. At did:cel that is free and offline; once published, the SDK hosts the new bytes before it signs, so the log never names a file this origin won’t serve. Old versions stay resolvable.',
-    regenerateAction: 'Revise artwork',
+      'Change the title and the artwork is regenerated from it. Commit, and the SDK signs an update event chaining the new bytes to the version before them — plus one for the metadata that describes them. At did:cel that is free and offline; once published, the SDK hosts the new bytes before it signs, so the log never names a file this origin won’t serve. Old versions stay resolvable.',
+    regenerateAction: 'Shuffle artwork',
     action: 'Commit update',
     pending: 'Signing update…',
     discard: 'Discard revision',
     unsignedBadge: 'not in the log yet',
     unsignedNote:
-      'This revision is only in the browser. Commit it to add a signed update event — or discard it and keep the version you have.',
+      'This edit is only in the browser. Commit it to add a signed update event — or discard it and keep the version you have.',
     versionLabel: 'artwork',
     committedNote:
       'Every revision is a signed event chained to the one before it — open the Event log to see them.',
