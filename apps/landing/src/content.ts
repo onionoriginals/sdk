@@ -139,6 +139,23 @@ export const demo = {
         'Coming soon: inscribe the published Original onto a satoshi as did:btco — real Bitcoin inscription lands once testnet4 ordinals support ships.'
     }
   ],
+  revise: {
+    heading: 'Revise it — the log keeps every version',
+    body:
+      'Regenerate the artwork and commit it: the SDK signs an update event that chains the new bytes to the version before them. At did:cel that is free and offline; once published, the SDK hosts the new bytes before it signs, so the log never names a file this origin won’t serve. Old versions stay resolvable.',
+    regenerateAction: 'Revise artwork',
+    action: 'Commit update',
+    pending: 'Signing update…',
+    discard: 'Discard revision',
+    unsignedBadge: 'not in the log yet',
+    unsignedNote:
+      'This revision is only in the browser. Commit it to add a signed update event — or discard it and keep the version you have.',
+    versionLabel: 'artwork',
+    committedNote:
+      'Every revision is a signed event chained to the one before it — open the Event log to see them.',
+    lockedNote:
+      'Revising an inscribed asset writes a new inscription on its satoshi — a paid on-chain append, so the demo stops here.'
+  },
   eventLog: {
     title: 'Event log',
     empty: 'Awaiting genesis event',

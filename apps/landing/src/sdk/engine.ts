@@ -84,6 +84,8 @@ export interface DemoAssetState {
     hash: string;
     contentType: string;
     content: string;
+    /** 1 at genesis; bumped by each signed `update` event. */
+    version: number;
   };
   metadata?: {
     id: string;
@@ -264,6 +266,46 @@ export class DemoEngine {
       );
     });
 
+    asset.on(
+      'resource:version:created',
+      (e: { resource: { id: string; fromVersion: number; toVersion: number } }) => {
+        this.emit(
+          'resource:version:created',
+          `"${e.resource.id}" revised to v${e.resource.toVersion} — a signed update event chains the new bytes to v${e.resource.fromVersion}`,
+          e
+        );
+      }
+    );
+
+    return this.snapshot();
+  }
+
+  /**
+   * Revise the artwork — a signed `update` event appended to the asset's own
+   * event log, chaining the new bytes to the version before them.
+   *
+   * Works at did:cel (free, offline, nothing hosted yet) AND at did:webvh: the
+   * SDK hosts the new version's bytes before appending, so the published log
+   * never names a resource URL that 404s. did:btco is refused here because an
+   * update there is a PAID on-chain append — real sats, not a demo click.
+   */
+  async update(newArtworkSvg: string, changes?: string): Promise<DemoAssetState> {
+    const asset = this.asset;
+    if (!asset) throw new Error('Create an asset first');
+    if (asset.currentLayer === 'did:btco') {
+      throw new Error(
+        'Revising an inscribed asset writes a new inscription on its satoshi — a paid on-chain append, not a demo click.'
+      );
+    }
+    const primaryId = asset.resources[0].id;
+    const version = await asset.addResourceVersion(
+      primaryId,
+      newArtworkSvg,
+      'image/svg+xml',
+      changes
+    );
+    // Keep the /me summary pointing at the current bytes (posted on publish).
+    this.assetResourceHash = version.hash;
     return this.snapshot();
   }
 
@@ -423,8 +465,13 @@ export class DemoEngine {
     };
     const last = provenance.migrations[provenance.migrations.length - 1];
     const bindings = (asset.bindings ?? {}) as Record<string, string>;
-    const res = asset.resources[0];
-    const meta = asset.resources[1] as { id: string; hash: string; content?: string } | undefined;
+    // `resources` GROWS by append — addResourceVersion pushes v2 rather than
+    // replacing v1 — so index-based reads would pin the panel to genesis
+    // forever. Select the newest version of each logical resource by id.
+    const primaryId = asset.resources[0].id;
+    const res = latestVersion(asset.resources, primaryId)!;
+    const metaId = asset.resources.find((r) => r.id !== primaryId)?.id;
+    const meta = metaId ? latestVersion(asset.resources, metaId) : undefined;
     return {
       layer: asset.currentLayer as LayerId,
       did: asset.id,
@@ -436,7 +483,8 @@ export class DemoEngine {
         id: res.id,
         hash: res.hash,
         contentType: res.contentType,
-        content: (res as { content?: string }).content ?? ''
+        content: res.content ?? '',
+        version: res.version ?? 1
       },
       metadata: meta
         ? { id: meta.id, hash: meta.hash, content: meta.content ?? '' }
@@ -458,6 +506,27 @@ export class DemoEngine {
   }
 }
 
+
+interface VersionedResource {
+  id: string;
+  hash: string;
+  contentType: string;
+  content?: string;
+  version?: number;
+}
+
+/** The newest version of one logical resource (v1 when nothing was revised). */
+function latestVersion(
+  resources: readonly VersionedResource[],
+  id: string
+): VersionedResource | undefined {
+  return resources
+    .filter((r) => r.id === id)
+    .reduce<VersionedResource | undefined>(
+      (best, r) => (!best || (r.version ?? 1) > (best.version ?? 1) ? r : best),
+      undefined
+    );
+}
 
 /**
  * Read the asset's CEL defensively: it is the source of provenance truth, but a
