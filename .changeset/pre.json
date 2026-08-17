@@ -8,10 +8,12 @@
     "@originals/sdk": "2.1.0"
   },
   "changesets": [
+    "anchoring-enumeration-production-providers",
     "bbs-selective-disclosure-fail-closed",
     "buffer-purged-from-public-api",
     "cel-cryptosuite-rename-and-bind",
     "cel-package-extraction",
+    "chatty-apples-melt",
     "cli-display-untrusted-values",
     "custody-required-defaults-flip",
     "example-credential-reverify",
@@ -19,10 +21,15 @@
     "fix-gzip-bomb-timing-flake",
     "fix-ordmock-uint8array-tostring",
     "flat-words-sniff",
+    "floppy-llamas-remain",
+    "landing-cel-copy-host-key",
     "landing-cel-event-log",
+    "landing-inscribed-verification",
+    "landing-revise-at-genesis",
     "packaging-curated-exports",
     "prerelease-unblock",
     "release-single-pr-approval",
-    "remote-custody-signer-core"
+    "remote-custody-signer-core",
+    "webvh-update-hosts-resource-bytes"
   ]
 }
