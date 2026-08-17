@@ -44,7 +44,7 @@ jobs:
 
       - name: Create or update the Version Packages PR
         id: changesets
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
           version: bun run version
           # No publish here — the publish job below runs once this PR merges.
@@ -183,7 +183,7 @@ jobs:
       # re-enter this job). `changeset publish` is idempotent: already-published
       # versions are skipped.
       - name: Publish to npm, push tags, and create GitHub releases
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
           publish: bun run release
         env:
