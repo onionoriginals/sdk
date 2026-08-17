@@ -134,42 +134,40 @@ describe('addResourceVersion on a published (did:webvh) asset', () => {
     expect(asset.resources.filter((r) => r.id === 'doc.txt')).toHaveLength(1);
   });
 
-  // The bytes must be written before the log names them, but a version the
-  // append then rejected is hosted, NOT published. Announcing at write time
-  // would hand subscribers a resource that is in neither the log nor
-  // asset.resources.
-  test('no resource:published when the append is skipped', async () => {
+  // resource:published cannot be announced correctly from the update path: it
+  // would run inside the append, before the version reaches asset.resources.
+  // resource:version:created is the correctly-ordered signal, so no second,
+  // earlier one is emitted.
+  test('no resource:published is emitted for an update', async () => {
     const storage = new MemoryStorageAdapter();
-    const { asset, keyStore } = await publishedAsset(storage);
+    const { asset } = await publishedAsset(storage);
     const published: unknown[] = [];
     asset.on('resource:published', (e) => published.push(e));
 
-    // Drop custody so the append degrades to a skip instead of landing.
-    keyStore.clear();
-    const before = asset.celLog!.events.length;
-
-    await asset.addResourceVersion('doc.txt', V2, 'text/plain', undefined, {
-      onAppendFailure: 'skip'
-    });
-
-    expect(asset.celLog!.events.length).toBe(before); // nothing landed
-    expect(published).toHaveLength(0);                // …so nothing was announced
-    // Not vacuous: the write DID happen (that is the ordering under test) —
-    // the bytes are hosted, they are simply not announced as published.
-    const webvhDid = asset.bindings!['did:webvh']!;
-    const v2Hash = hashResource(new TextEncoder().encode(V2));
-    expect(await served(storage, webvhDid, v2Hash)).not.toBeNull();
-  });
-
-  test('resource:published fires once the append lands', async () => {
-    const storage = new MemoryStorageAdapter();
-    const { asset } = await publishedAsset(storage);
-    const published: Array<{ resource: { hash: string } }> = [];
-    asset.on('resource:published', (e) => published.push(e as never));
-
     const v2 = await asset.addResourceVersion('doc.txt', V2, 'text/plain');
 
-    expect(published.map((e) => e.resource.hash)).toEqual([v2.hash]);
+    expect(published).toHaveLength(0);
+    // …and the bytes really were hosted; the event is what's absent, not the write.
+    const webvhDid = asset.bindings!['did:webvh']!;
+    expect(await served(storage, webvhDid, v2.hash)).not.toBeNull();
+  });
+
+  test('resource:version:created lands AFTER the version is in asset.resources', async () => {
+    const storage = new MemoryStorageAdapter();
+    const { asset } = await publishedAsset(storage);
+    let seen: { inResources: boolean; count: number } | null = null;
+    asset.on('resource:version:created', (e) => {
+      const hash = (e as { resource: { toHash: string } }).resource.toHash;
+      seen = {
+        inResources: asset.resources.some((r) => r.hash === hash),
+        count: asset.resources.filter((r) => r.id === 'doc.txt').length
+      };
+    });
+
+    await asset.addResourceVersion('doc.txt', V2, 'text/plain');
+    await new Promise((r) => setTimeout(r, 10)); // it is queueMicrotask-deferred
+
+    expect(seen).toEqual({ inResources: true, count: 2 });
   });
 
   test('an unpublished (did:cel) asset needs no hosting and still updates', async () => {

@@ -2225,19 +2225,21 @@ export class LifecycleManager {
    * skipping is exactly the "attests content is hosted when it is not" failure
    * publishResources already refuses (issue #244).
    *
-   * Writes ONLY. `resource:published` is announced by the caller once the append
-   * has landed: the bytes must exist before the log names them, but a version
-   * the append then rejected is not published — announcing here would hand
-   * subscribers a resource that is in neither the log nor `asset.resources`.
-   *
-   * @returns what to announce if the append lands, or null when nothing was hosted.
+   * Deliberately emits NO event. `resource:published` cannot be announced
+   * correctly from here: this runs inside the append, so it precedes both the
+   * append landing and `addResourceVersion` pushing the version into
+   * `asset.resources` — a subscriber would be handed a resource the asset does
+   * not have. `resource:version:created` already announces a new version AFTER
+   * the push (via queueMicrotask in addResourceVersion) and carries `toHash`,
+   * so the correctly-ordered signal exists; a second, earlier one would only
+   * ever be wrong. Announcing this properly needs a post-commit hook on
+   * OriginalsAsset, which is not worth adding to that concurrency-sensitive
+   * path for an event that duplicates one already emitted.
    */
-  private async hostUpdatedResourceBytes(
-    asset: OriginalsAsset
-  ): Promise<{ resource: AssetResource; resourceUrl: string; webvhDid: string; domain: string } | null> {
+  private async hostUpdatedResourceBytes(asset: OriginalsAsset): Promise<void> {
     const webvhDid = (asset.bindings ?? {})['did:webvh'];
     const pending = asset.pendingHeadMedia;
-    if (!webvhDid || !pending) return null;
+    if (!webvhDid || !pending) return;
 
     const { domain, relativePath } = this.webvhResourceLocation(webvhDid, pending.hash);
     const wrote = await this.writeResourceBytes(
@@ -2254,16 +2256,6 @@ export class LifecycleManager {
         'The update was NOT appended — the log would otherwise name a resource URL that serves nothing.'
       );
     }
-    return {
-      resource: {
-        id: pending.resourceId,
-        hash: pending.hash,
-        contentType: pending.contentType
-      } as AssetResource,
-      resourceUrl: `${webvhDid}/resources/${encodeBase64UrlMultibase(hexToBytes(pending.hash))}`,
-      webvhDid,
-      domain
-    };
   }
 
   private async emitResourcePublishedEvent(
@@ -2611,7 +2603,9 @@ export class LifecycleManager {
     // its own origin, so a new version must be fetchable at the URL its signed
     // `toHash` implies. Host the bytes BEFORE the append, mirroring the confirm
     // gate above — a failure here aborts with the log untouched.
-    const hosted = type === 'update' ? await this.hostUpdatedResourceBytes(asset) : null;
+    if (type === 'update') {
+      await this.hostUpdatedResourceBytes(asset);
+    }
 
     // Snapshot the pre-append log BEFORE appendCelEventOrSkip advances it — the
     // inscribe-failure rollback restores THIS (capturing after the append would
@@ -2619,19 +2613,6 @@ export class LifecycleManager {
     // bricking future updates via UNPROVABLE_BASE). Fable I1.
     const celLogBefore = asset.celLog;
     const digest = await this.appendCelEventOrSkip(asset, type, data, opts?.signer, opts?.onAppendFailure);
-    // Announce the new version only now that the append has LANDED. Emitting
-    // when the bytes were written would report a resource that a skipped or
-    // failed append left out of both the log and asset.resources — hosted, but
-    // not published. (A throw above skips this for the same reason.)
-    if (hosted && digest !== null) {
-      await this.emitResourcePublishedEvent(
-        asset,
-        hosted.resource,
-        hosted.resourceUrl,
-        hosted.webvhDid,
-        hosted.domain
-      );
-    }
     // Only inscribe genuine authorship appends that LANDED on a btco asset.
     if (digest === null || asset.currentLayer !== 'did:btco') {
       return digest;
