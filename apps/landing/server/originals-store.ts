@@ -23,7 +23,18 @@ import {
 import { dirname, join, resolve, sep } from 'node:path';
 import { untrustedHeaders } from './webvh-host';
 
-export interface OriginalSummary {
+/** Bitcoin inscription state carried on an Original once it migrates to did:btco. */
+export interface OriginalInscription {
+  btcoDid?: string;
+  inscriptionId?: string;
+  commitTxId?: string;
+  revealTxId?: string;
+  satoshi?: string;
+  /** pending = broadcast, not yet confirmed on-chain. */
+  inscriptionStatus?: 'pending' | 'confirmed';
+}
+
+export interface OriginalSummary extends OriginalInscription {
   did: string;
   title: string;
   resourceHash: string;
@@ -33,7 +44,9 @@ export interface OriginalSummary {
 }
 
 interface UserIndex {
-  originals: Array<{ did: string; title: string; resourceHash: string; createdAt: string }>;
+  originals: Array<
+    { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription
+  >;
   sizes: Record<string, number>;
   totalBytes: number;
 }
@@ -42,7 +55,7 @@ export interface OriginalsStore {
   saveBytes(subOrgId: string, key: string, bytes: Uint8Array, contentType: string): void;
   recordOriginal(
     subOrgId: string,
-    o: { did: string; title: string; resourceHash: string; createdAt: string }
+    o: { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription
   ): void;
   list(subOrgId: string): OriginalSummary[];
   serve(url: URL): Response | null;
@@ -128,12 +141,25 @@ export function createOriginalsStore(opts: {
 
   function recordOriginal(
     subOrgId: string,
-    o: { did: string; title: string; resourceHash: string; createdAt: string }
+    o: { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription
   ): void {
     const idx = readIndex(subOrgId);
-    // Idempotent: a best-effort record retry (POST timed out, user re-published)
-    // must not list the same did twice.
-    if (idx.originals.some((e) => e.did === o.did)) return;
+    // Idempotent by did, upsert-merge for the inscription fields: the engine
+    // posts once at publish (no inscription yet) and again after inscribing —
+    // the second post must enrich the SAME row, never list the did twice.
+    // Identity fields (title/hash/createdAt) are set once at publish and are
+    // NOT overwritten by later merges.
+    const existing = idx.originals.find((e) => e.did === o.did);
+    if (existing) {
+      // Generic per-key merge keeps the key↔value correlation TS loses in a
+      // plain indexed loop over the union of keys.
+      const merge = <K extends keyof OriginalInscription>(k: K): void => {
+        if (o[k] !== undefined) existing[k] = o[k];
+      };
+      (['btcoDid', 'inscriptionId', 'commitTxId', 'revealTxId', 'satoshi', 'inscriptionStatus'] as const).forEach(merge);
+      writeIndex(subOrgId, idx);
+      return;
+    }
     if (idx.originals.length >= maxOriginals) throw new Error('STORE_FULL');
     idx.originals.push(o);
     writeIndex(subOrgId, idx);

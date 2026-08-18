@@ -27,11 +27,11 @@ import { DurableHostingStorageAdapter } from './durable-hosting-adapter';
 import { HttpOrdinalsProvider } from './http-ordinals-provider';
 import { TurnkeySatSigner } from './turnkey-sat-signer';
 import { userWebvhSlug } from '../auth/webvh';
-import { btcNetwork } from './network-flag';
+import { btcNetwork, btcoExplorerUrl } from './network-flag';
 import type { TurnkeyBitcoinClient } from '../auth/turnkey-session';
 import { sha256 } from '@noble/hashes/sha2.js';
 
-export { btcNetwork, btcRealEnabled } from './network-flag';
+export { btcNetwork, btcRealEnabled, btcoExplorerUrl } from './network-flag';
 
 export type LayerId = 'did:cel' | 'did:webvh' | 'did:btco';
 
@@ -103,6 +103,7 @@ export interface DemoAssetState {
     txid: string;
     inscriptionId: string;
     satoshi: string;
+    commitTxId?: string;
     feeRate?: number;
     explorerUrl?: string;
   };
@@ -474,6 +475,33 @@ export class DemoEngine {
         state.inscription
       );
     }
+
+    // Signed-in real inscription: enrich the durable /me record with the
+    // did:btco state (upsert-merge by did on the server). Best-effort — a
+    // failure must not break the inscribe UX; the on-chain state is the truth.
+    if (this.authed && opts?.funding && state.inscription && state.webvhDid) {
+      try {
+        const res = await fetch('/api/originals', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            did: state.webvhDid,
+            title: this.assetTitle,
+            resourceHash: this.assetResourceHash,
+            btcoDid: state.btcoDid,
+            inscriptionId: state.inscription.inscriptionId,
+            commitTxId: state.inscription.commitTxId,
+            revealTxId: state.inscription.txid,
+            satoshi: state.inscription.satoshi,
+            status: 'pending',
+          }),
+        });
+        if (!res.ok) log('originals:record-failed', res.status);
+      } catch (err) {
+        log('originals:record-failed', err);
+      }
+    }
     return state;
   }
 
@@ -486,6 +514,7 @@ export class DemoEngine {
         transactionId?: string;
         inscriptionId?: string;
         satoshi?: string;
+        commitTxId?: string;
         feeRate?: number;
       }>;
     };
@@ -523,6 +552,7 @@ export class DemoEngine {
               txid: last.transactionId,
               inscriptionId: last.inscriptionId ?? '',
               satoshi: last.satoshi ?? '',
+              commitTxId: last.commitTxId,
               feeRate: last.feeRate,
               explorerUrl: btcoExplorerUrl(last.transactionId)
             }
@@ -613,15 +643,8 @@ function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// The block explorer link for a real inscription's reveal txid, on whichever
-// network the deploy enabled. A mock/regtest txid has no public explorer.
-export function btcoExplorerUrl(txid: string): string | undefined {
-  const net = btcNetwork();
-  if (net === 'off' || !txid) return undefined;
-  return net === 'mainnet'
-    ? `https://mempool.space/tx/${txid}`
-    : `https://mempool.space/testnet4/tx/${txid}`;
-}
+// btcoExplorerUrl moved to ./network-flag (re-exported above) so light page
+// chunks can link explorers without pulling in this heavy engine module.
 
 // The origin host we host did:webvh logs under. In the browser this is the
 // live origin; VITE_WEBVH_HOST overrides it for the deployed host or tests.

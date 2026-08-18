@@ -540,12 +540,32 @@ export function createBitcoinRoutes(deps: {
     return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: 'reveal_broadcast' });
   };
 
-  /** GET /api/btc/inscribe — the user's inscription records (no tx hex; ids + status only). */
-  const inscribeList: Handler = (req) => {
+  /**
+   * GET /api/btc/inscribe — the user's inscription records (no tx hex; ids +
+   * status only). Broadcast-but-unconfirmed records get a best-effort
+   * confirmation check; a confirmed reveal is persisted as 'confirmed'
+   * (sticky), so each record costs at most a handful of provider lookups over
+   * its lifetime and none once confirmed.
+   */
+  const inscribeList: Handler = async (req) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
-    const inscriptions = deps.inscriptions.list(sub).map((r) => ({
+    const store = deps.inscriptions;
+    const records = store.list(sub);
+    for (const r of records) {
+      if (r.status !== 'reveal_broadcast') continue;
+      try {
+        const st = await provider.getTransactionStatus(r.revealTxId);
+        if (st?.confirmed) {
+          store.setStatus(sub, r.commitTxId, 'confirmed');
+          r.status = 'confirmed';
+        }
+      } catch {
+        // Lookup unsupported/down — report the stored status.
+      }
+    }
+    const inscriptions = records.map((r) => ({
       commitTxId: r.commitTxId,
       revealTxId: r.revealTxId,
       inscriptionId: r.inscriptionId,
@@ -574,6 +594,9 @@ export function createBitcoinRoutes(deps: {
     if (typeof commitTxId !== 'string' || !commitTxId) return json({ error: 'bad_request' }, 400);
     const rec = store.get(sub, commitTxId);
     if (!rec) return json({ error: 'not_found' }, 404);
+    if (rec.status === 'confirmed') {
+      return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
+    }
 
     // Already CONFIRMED on-chain? Then just record that and succeed. An
     // unknown or merely-unconfirmed reveal falls through to the (idempotent)
@@ -582,8 +605,8 @@ export function createBitcoinRoutes(deps: {
     try {
       const st = await provider.getTransactionStatus(rec.revealTxId);
       if (st?.confirmed) {
-        store.setStatus(sub, commitTxId, 'reveal_broadcast');
-        return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'reveal_broadcast' });
+        store.setStatus(sub, commitTxId, 'confirmed');
+        return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
       }
     } catch {
       // No lookup support / transport failure — fall through to rebroadcast.

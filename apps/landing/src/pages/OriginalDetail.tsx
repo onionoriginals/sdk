@@ -13,6 +13,7 @@ import { useAuth } from '../auth/useAuth';
 import { navigate } from '../router';
 import { short } from '../sdk/format';
 import type { OriginalCheck } from '../sdk/verify-original';
+import { btcoExplorerUrl } from '../sdk/network-flag';
 import { fetchOriginals, type OriginalRow } from './YourOriginals';
 import {
   webvhArtifacts,
@@ -225,6 +226,7 @@ export function OriginalDetail({ did }: { did: string }) {
               <p className="od-note">{originalDetail.artifactsMissing}</p>
             )}
             {data.resources.length > 0 && <Resources data={data} />}
+            {data.row.btcoDid && <Bitcoin row={data.row} />}
             {data.logSummary && <Identity summary={data.logSummary} />}
             <Artifacts did={did} />
           </>
@@ -537,6 +539,62 @@ function Identity({ summary }: { summary: DidLogSummary }) {
             <summary>{originalDetail.identity.documentToggle}</summary>
             <pre>{JSON.stringify(summary.document, null, 2)}</pre>
           </details>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Bitcoin({ row }: { row: OriginalRow }) {
+  const b = originalDetail.bitcoin;
+  const explorerUrl = row.revealTxId ? btcoExplorerUrl(row.revealTxId) : undefined;
+  return (
+    <section className="od-section">
+      <div className="section-head">
+        <h2>{b.heading}</h2>
+        <p>{b.subhead}</p>
+      </div>
+      <div className="card od-identity">
+        <div className="od-hero-pills">
+          <span className="layer-pill" data-layer="did:btco">
+            <span className="dot" />
+            did:btco
+          </span>
+          <span className="od-badge" data-state={row.inscriptionStatus === 'confirmed' ? 'ok' : 'pending'}>
+            {row.inscriptionStatus === 'confirmed' ? b.confirmedBadge : b.pendingBadge}
+          </span>
+        </div>
+        <dl className="od-identity-kv">
+          {row.btcoDid && (
+            <div>
+              <dt>{b.didLabel}</dt>
+              <dd><code title={row.btcoDid}>{row.btcoDid}</code></dd>
+            </div>
+          )}
+          {row.inscriptionId && (
+            <div>
+              <dt>{b.inscriptionLabel}</dt>
+              <dd><code title={row.inscriptionId}>{short(row.inscriptionId, 24, 8)}</code></dd>
+            </div>
+          )}
+          {row.satoshi && (
+            <div>
+              <dt>{b.satoshiLabel}</dt>
+              <dd><code>{row.satoshi}</code></dd>
+            </div>
+          )}
+          {row.revealTxId && (
+            <div>
+              <dt>{b.txLabel}</dt>
+              <dd><code title={row.revealTxId}>{short(row.revealTxId, 24, 8)}</code></dd>
+            </div>
+          )}
+        </dl>
+        {explorerUrl && (
+          <a className="od-raw-link" href={explorerUrl} target="_blank" rel="noreferrer">
+            {b.explorerLabel}
+            <ExternalIcon />
+          </a>
         )}
       </div>
     </section>

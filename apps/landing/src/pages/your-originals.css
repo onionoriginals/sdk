@@ -136,3 +136,40 @@
 }
 
 .your-original-card:hover .your-original-view { color: var(--text-primary); gap: 7px; }
+
+/* Inscription state pill (in the card body, unlike the absolutely-positioned
+   cover badge it borrows base styling from). */
+.your-original-inscription {
+  position: static;
+  align-self: flex-start;
+}
+
+/* "Finish inscription" recovery banner — stranded commit+reveal pairs. */
+.your-originals-finish {
+  margin-top: var(--sp-6);
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.your-originals-finish-title {
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.your-originals-finish ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.your-originals-finish li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}

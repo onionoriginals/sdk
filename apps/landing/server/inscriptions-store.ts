@@ -13,7 +13,7 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-export type InscriptionStatus = 'signed' | 'commit_broadcast' | 'reveal_broadcast';
+export type InscriptionStatus = 'signed' | 'commit_broadcast' | 'reveal_broadcast' | 'confirmed';
 
 export interface InscriptionRecord {
   commitTxId: string;

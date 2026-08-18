@@ -259,6 +259,38 @@ describe('GET /api/btc/inscribe', () => {
     expect(inscriptions[0].revealTxHex).toBeUndefined();
   });
 
+  test('confirmation is refreshed and STICKY: once confirmed, no further provider lookups', async () => {
+    let lookups = 0;
+    const pair = buildPair();
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'insc-')) });
+    const provider = {
+      async broadcastTransaction() { return 'f'.repeat(64); },
+      async getTransactionStatus() { lookups++; return { confirmed: true }; },
+      async estimateFee() { return 3; },
+    } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
+    const routes = createBitcoinRoutes({
+      jwtSecret: JWT,
+      provider,
+      faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
+      inscriptions: store,
+    });
+    await post(routes, pair); // broadcast both → reveal_broadcast
+
+    const listReq = () => authedReq('/api/btc/inscribe', undefined, 'GET');
+    let req = listReq();
+    let res = await routes.inscribeList(req, new URL(req.url));
+    let body = (await res.json()) as { inscriptions: Array<{ status: string }> };
+    expect(body.inscriptions[0].status).toBe('confirmed');
+    expect(lookups).toBe(1);
+    expect(store.get('sub-1', pair.commitTxId)!.status).toBe('confirmed'); // persisted
+
+    req = listReq();
+    res = await routes.inscribeList(req, new URL(req.url));
+    body = (await res.json()) as { inscriptions: Array<{ status: string }> };
+    expect(body.inscriptions[0].status).toBe('confirmed');
+    expect(lookups).toBe(1); // sticky: no second lookup
+  });
+
   test('is scoped to the authenticated user', async () => {
     const { routes } = harness();
     await post(routes, buildPair());
@@ -290,7 +322,7 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
     const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
     const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { status: string }).status).toBe('reveal_broadcast');
+    expect(((await res.json()) as { status: string }).status).toBe('confirmed');
     expect(h.broadcasts.length).toBe(before); // nothing rebroadcast
   });
 });

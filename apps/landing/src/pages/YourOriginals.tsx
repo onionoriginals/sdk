@@ -19,6 +19,40 @@ export interface OriginalRow {
   resourceHash: string;
   createdAt: string;
   resourceUrl?: string;
+  /** Present once the Original migrated to did:btco (real inscription). */
+  btcoDid?: string;
+  inscriptionId?: string;
+  commitTxId?: string;
+  revealTxId?: string;
+  satoshi?: string;
+  inscriptionStatus?: 'pending' | 'confirmed';
+}
+
+/** One in-flight inscription record from GET /api/btc/inscribe. */
+export interface PendingInscription {
+  commitTxId: string;
+  revealTxId: string;
+  inscriptionId: string;
+  fundingOutpoint: string;
+  status: 'signed' | 'commit_broadcast' | 'reveal_broadcast' | 'confirmed';
+  createdAt: string;
+}
+
+/** Records whose reveal is NOT yet broadcast — the "finish inscription" set. */
+export function unfinishedInscriptions(records: PendingInscription[]): PendingInscription[] {
+  return records.filter((r) => r.status === 'signed' || r.status === 'commit_broadcast');
+}
+
+/** The user's inscription records ([] when signed out / unavailable). */
+export async function fetchInscriptions(): Promise<PendingInscription[]> {
+  try {
+    const res = await fetch('/api/btc/inscribe', { credentials: 'same-origin' });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { inscriptions?: PendingInscription[] };
+    return body.inscriptions ?? [];
+  } catch {
+    return [];
+  }
 }
 
 // Pure view selector — testable without a DOM.
@@ -68,6 +102,9 @@ export function YourOriginals() {
   const { isAuthenticated } = useAuth();
   const [originals, setOriginals] = useState<OriginalRow[]>([]);
   const [resolved, setResolved] = useState<Record<string, boolean>>({});
+  const [unfinished, setUnfinished] = useState<PendingInscription[]>([]);
+  const [finishing, setFinishing] = useState<string | null>(null);
+  const [finishNote, setFinishNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -77,8 +114,36 @@ export function YourOriginals() {
       setOriginals(rows);
       rows.forEach((r) => resolveLive(r.did).then((ok) => live && setResolved((m) => ({ ...m, [r.did]: ok }))));
     });
+    // Stranded-inscription check (step-1 recovery surface): any record whose
+    // reveal never broadcast gets a "finish inscription" offer — the signed
+    // txs are on the server, nothing needs re-signing.
+    fetchInscriptions().then((recs) => {
+      if (live) setUnfinished(unfinishedInscriptions(recs));
+    });
     return () => { live = false; };
   }, [isAuthenticated]);
+
+  const finishInscription = async (commitTxId: string) => {
+    setFinishing(commitTxId);
+    setFinishNote(null);
+    try {
+      const res = await fetch('/api/btc/inscribe/rebroadcast', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ commitTxId }),
+      });
+      const ok = res.ok && ['reveal_broadcast', 'confirmed'].includes(
+        ((await res.json().catch(() => ({}))) as { status?: string }).status ?? ''
+      );
+      setFinishNote(ok ? yourOriginals.finish.done : yourOriginals.finish.failed);
+      if (ok) setUnfinished((u) => u.filter((r) => r.commitTxId !== commitTxId));
+    } catch {
+      setFinishNote(yourOriginals.finish.failed);
+    } finally {
+      setFinishing(null);
+    }
+  };
 
   const view = originalsView({ authenticated: isAuthenticated, originals });
 
@@ -90,6 +155,29 @@ export function YourOriginals() {
         <p className="your-originals-sub">{yourOriginals.subhead}</p>
 
         {view.mode === 'signed-out' && <p className="your-originals-note">{yourOriginals.signedOut}</p>}
+
+        {isAuthenticated && unfinished.length > 0 && (
+          <div className="card your-originals-finish" role="alert">
+            <p className="your-originals-finish-title">{yourOriginals.finish.heading}</p>
+            <p>{yourOriginals.finish.body}</p>
+            <ul>
+              {unfinished.map((rec) => (
+                <li key={rec.commitTxId}>
+                  <code title={rec.inscriptionId}>{rec.inscriptionId.slice(0, 16)}…</code>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={finishing === rec.commitTxId}
+                    onClick={() => void finishInscription(rec.commitTxId)}
+                  >
+                    {finishing === rec.commitTxId ? yourOriginals.finish.busy : yourOriginals.finish.cta}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {finishNote && <p className="your-originals-note">{finishNote}</p>}
+          </div>
+        )}
 
         {view.mode === 'empty' && (
           <div className="your-originals-empty">
@@ -128,10 +216,20 @@ export function YourOriginals() {
                       </span>
                     </span>
                     <span className="your-original-card-body">
-                      <span className="layer-pill" data-layer="did:webvh">
+                      <span className="layer-pill" data-layer={row.btcoDid ? 'did:btco' : 'did:webvh'}>
                         <span className="dot" />
-                        did:webvh
+                        {row.btcoDid ? 'did:btco' : 'did:webvh'}
                       </span>
+                      {row.btcoDid && (
+                        <span
+                          className="your-original-badge your-original-inscription"
+                          data-ok={row.inscriptionStatus === 'confirmed' || undefined}
+                        >
+                          {row.inscriptionStatus === 'confirmed'
+                            ? yourOriginals.inscribedBadge
+                            : yourOriginals.inscriptionPendingBadge}
+                        </span>
+                      )}
                       <h2>{row.title}</h2>
                       <code className="your-original-did" title={row.did}>{row.did}</code>
                       <span className="your-original-foot">

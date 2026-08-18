@@ -13,7 +13,7 @@ import { verifyToken } from '@originals/auth/server';
 import { json, type Handler } from './router';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
-import type { OriginalsStore } from './originals-store';
+import type { OriginalsStore, OriginalInscription } from './originals-store';
 
 const HOST_PREFIX = '/api/originals/host/';
 
@@ -170,16 +170,44 @@ export function createOriginalsRoutes(deps: {
   const record: Handler = async (req) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const { did, title, resourceHash } = (await req.json().catch(() => ({}))) as {
+    const body = (await req.json().catch(() => ({}))) as {
       did?: string;
       title?: string;
       resourceHash?: string;
+      btcoDid?: unknown;
+      inscriptionId?: unknown;
+      commitTxId?: unknown;
+      revealTxId?: unknown;
+      satoshi?: unknown;
+      status?: unknown;
     };
+    const { did, title, resourceHash } = body;
     if (typeof did !== 'string' || typeof title !== 'string' || typeof resourceHash !== 'string') {
       return json({ error: 'bad_request' }, 400);
     }
+    // Optional inscription fields (posted after the did:btco migrate). Each is
+    // taken only when it is a well-formed string — a malformed value 400s
+    // rather than silently landing in the durable record.
+    const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 256;
+    const inscription: OriginalInscription = {};
+    for (const k of ['btcoDid', 'inscriptionId', 'commitTxId', 'revealTxId', 'satoshi'] as const) {
+      const v = body[k];
+      if (v === undefined) continue;
+      if (!str(v)) return json({ error: 'bad_request' }, 400);
+      inscription[k] = v;
+    }
+    if (body.status !== undefined) {
+      if (body.status !== 'pending' && body.status !== 'confirmed') return json({ error: 'bad_request' }, 400);
+      inscription.inscriptionStatus = body.status;
+    }
     try {
-      store.recordOriginal(sub, { did, title, resourceHash, createdAt: new Date(now()).toISOString() });
+      store.recordOriginal(sub, {
+        did,
+        title,
+        resourceHash,
+        createdAt: new Date(now()).toISOString(),
+        ...inscription,
+      });
     } catch (e) {
       return storeError(e);
     }

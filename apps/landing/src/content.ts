@@ -226,6 +226,16 @@ export const yourOriginals = {
   openLog: 'Open the signed DID log',
   createdLabel: 'Created',
   viewLabel: 'View provenance',
+  inscribedBadge: 'inscribed ✓',
+  inscriptionPendingBadge: 'inscription pending',
+  finish: {
+    heading: 'Unfinished inscription',
+    body: 'A previous inscription was interrupted before it finished broadcasting. The signed transactions are safely stored — finish it now; nothing needs re-signing and no funds are lost.',
+    cta: 'Finish inscription',
+    busy: 'Finishing…',
+    done: 'Inscription broadcast — it will confirm on-chain shortly.',
+    failed: 'Could not finish the inscription — try again in a moment.',
+  },
 };
 
 export const originalDetail = {
@@ -300,6 +310,18 @@ export const originalDetail = {
       'Nothing hidden: these are the exact files the resolver fetches. Take them anywhere — the signatures travel with the bytes.',
     logLabel: 'did.jsonl — signed version history',
     celLabel: 'cel.json — cryptographic event log'
+  },
+  bitcoin: {
+    heading: 'On Bitcoin',
+    subhead:
+      'This Original is inscribed on a satoshi — ownership is live sat control, transferable on Bitcoin without any platform.',
+    didLabel: 'did:btco',
+    inscriptionLabel: 'Inscription',
+    satoshiLabel: 'Satoshi',
+    txLabel: 'Reveal transaction',
+    pendingBadge: 'awaiting confirmation',
+    confirmedBadge: 'confirmed on-chain',
+    explorerLabel: 'View on mempool.space'
   }
 };
 

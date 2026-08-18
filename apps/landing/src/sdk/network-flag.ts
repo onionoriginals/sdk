@@ -27,3 +27,15 @@ export function btcNetwork(): BtcNetworkFlag {
 export function btcRealEnabled(): boolean {
   return btcNetwork() !== 'off';
 }
+
+// The block explorer link for a real inscription's reveal txid, on whichever
+// network the deploy enabled. A mock/regtest txid has no public explorer.
+// Lives here (not engine.ts) so light page chunks can link explorers without
+// pulling in the heavy engine module.
+export function btcoExplorerUrl(txid: string): string | undefined {
+  const net = btcNetwork();
+  if (net === 'off' || !txid) return undefined;
+  return net === 'mainnet'
+    ? `https://mempool.space/tx/${txid}`
+    : `https://mempool.space/testnet4/tx/${txid}`;
+}
