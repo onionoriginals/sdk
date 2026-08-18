@@ -171,7 +171,24 @@ export function createBitcoinRoutes(deps: {
   // Real-spend + QuickNode-quota routes get their own per-user caps: the cost
   // vector on mainnet is the user's BTC and our API quota, not the faucet.
   const inscribeUserLimiter = createRateLimiter({ limit: 10, windowMs: 60 * 60_000 });
+  // Shared per-user cap for the proxy reads/broadcasts that burn QuickNode
+  // quota (sat lookup, fee estimate, raw broadcast, deposit polls).
+  const quotaUserLimiter = createRateLimiter({ limit: 120, windowMs: 60 * 60_000 });
   const provider = deps.provider as FaucetProvider;
+
+  // 60s fee-estimate cache for the deposit poll (see the deposit handler).
+  let feeCache: { at: number; rate: number } | null = null;
+
+  /** 429 when the per-user QuickNode-quota cap is hit, else null. */
+  function quotaCapped(sub: string): Response | null {
+    const q = quotaUserLimiter.check(sub);
+    if (!q.allowed) {
+      return json({ error: 'user_quota_cap' }, 429, {
+        'Retry-After': String(Math.ceil(q.retryAfterMs / 1000)),
+      });
+    }
+    return null;
+  }
 
   // Best-effort IP key (behind the auth gate + per-user cap, which are the real
   // protection). X-Forwarded-For is spoofable, so the per-user limiter keyed on
@@ -202,8 +219,9 @@ export function createBitcoinRoutes(deps: {
   }
 
   const sat: Handler = async (req) => {
-    if (!authSub(req)) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req);
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(req) ?? quotaCapped(sub);
     if (limited) return limited;
     const { txid, vout } = (await req.json().catch(() => ({}))) as { txid?: string; vout?: number };
     if (typeof txid !== 'string' || typeof vout !== 'number') return json({ error: 'bad_request' }, 400);
@@ -230,8 +248,9 @@ export function createBitcoinRoutes(deps: {
   };
 
   const broadcast: Handler = async (req) => {
-    if (!authSub(req)) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req);
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(req) ?? quotaCapped(sub);
     if (limited) return limited;
     const { txHex } = (await req.json().catch(() => ({}))) as { txHex?: string };
     if (typeof txHex !== 'string' || !/^(?:[0-9a-fA-F]{2})+$/.test(txHex)) return json({ error: 'bad_tx_hex' }, 400);
@@ -375,8 +394,18 @@ export function createBitcoinRoutes(deps: {
     } catch (e) {
       return json({ error: 'utxo_lookup_failed', message: (e as Error).message }, 502);
     }
+    // The UI polls this route while waiting for a deposit; cache the fee
+    // estimate briefly so polling costs mempool.space reads (free), not
+    // QuickNode quota on every tick.
     let feeRate = 1;
-    try { feeRate = Math.max(1, Math.ceil(await provider.estimateFee(1))); } catch { /* floor */ }
+    if (feeCache && now() - feeCache.at < 60_000) {
+      feeRate = feeCache.rate;
+    } else {
+      try {
+        feeRate = Math.max(1, Math.ceil(await provider.estimateFee(1)));
+        feeCache = { at: now(), rate: feeRate };
+      } catch { /* floor */ }
+    }
     // Commit ≈ 153 vB (P2WPKH input, P2TR commit output, P2WPKH change) and
     // reveal ≈ 111 vB + the witness-discounted envelope (content + ~300 bytes
     // of tags/script overhead) — the same shape commit.ts estimates precisely

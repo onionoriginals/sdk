@@ -157,6 +157,28 @@ console.log(
   `[landing] durable Originals dir: ${originalsDataDir}${originalsDataDirIsExplicit ? '' : ' (default — NOT set via ORIGINALS_DATA_DIR)'}`
 );
 
+// Monitoring sweep (stranger-safe checklist): pending inscriptions older than
+// 24h mean a stranded commit — funds waiting on a reveal rebroadcast that
+// nobody clicked. Warn hourly so they can't silently accumulate; the fix is
+// the per-user "Finish inscription" flow (or POST /api/btc/inscribe/rebroadcast).
+if (api) {
+  const sweep = () => {
+    try {
+      const stale = inscriptionsStore.sweepStale(24 * 60 * 60_000);
+      if (stale.length > 0) {
+        console.warn(
+          `[landing] ${stale.length} pending inscription(s) older than 24h — stranded commits awaiting reveal rebroadcast:\n` +
+            stale.map((s) => `  sub=${s.subOrgId} commit=${s.commitTxId} status=${s.status} createdAt=${s.createdAt}`).join('\n')
+        );
+      }
+    } catch (err) {
+      console.warn('[landing] stale-inscription sweep failed', err);
+    }
+  };
+  sweep();
+  setInterval(sweep, 60 * 60_000);
+}
+
 // Loud guard against the silent data-loss trap: durable Originals only matter
 // when the auth API is enabled (signed-in users), and only persist across
 // redeploys if ORIGINALS_DATA_DIR points at a mounted volume. Warn — don't

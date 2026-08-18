@@ -10,7 +10,7 @@
  * `<dataDir>/inscriptions/<sub>.json`, namespaced by the JWT `sub` so a user
  * only ever sees their own records.
  */
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export type InscriptionStatus = 'signed' | 'commit_broadcast' | 'reveal_broadcast' | 'confirmed';
@@ -39,6 +39,18 @@ export interface InscriptionsStore {
   list(subOrgId: string): InscriptionRecord[];
   /** The record (if any) whose commit spends this `${txid}:${vout}` outpoint. */
   findByOutpoint(subOrgId: string, outpoint: string): InscriptionRecord | null;
+  /**
+   * ALL users' records whose reveal never broadcast (signed/commit_broadcast)
+   * and that are older than `olderThanMs` — the monitoring sweep, so stranded
+   * states can't silently accumulate. Read-only; acting on them stays with the
+   * per-user rebroadcast route.
+   */
+  sweepStale(olderThanMs: number): Array<{
+    subOrgId: string;
+    commitTxId: string;
+    status: InscriptionStatus;
+    createdAt: string;
+  }>;
 }
 
 /** A subOrgId used as a filename — Turnkey sub-orgs are UUID-safe; reject anything else. */
@@ -91,6 +103,28 @@ export function createInscriptionsStore(opts: {
     },
     findByOutpoint(subOrgId, outpoint) {
       return readAll(subOrgId).find((r) => r.fundingOutpoint === outpoint) ?? null;
+    },
+    sweepStale(olderThanMs) {
+      const dir = join(opts.dataDir, 'inscriptions');
+      if (!existsSync(dir)) return [];
+      const cutoff = now() - olderThanMs;
+      const stale: Array<{ subOrgId: string; commitTxId: string; status: InscriptionStatus; createdAt: string }> = [];
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith('.json')) continue;
+        const subOrgId = file.slice(0, -'.json'.length);
+        let recs: InscriptionRecord[];
+        try {
+          recs = JSON.parse(readFileSync(join(dir, file), 'utf8')) as InscriptionRecord[];
+        } catch {
+          continue; // a torn write must not kill the sweep
+        }
+        for (const r of recs) {
+          if (r.status !== 'signed' && r.status !== 'commit_broadcast') continue;
+          if (Date.parse(r.createdAt) > cutoff) continue;
+          stale.push({ subOrgId, commitTxId: r.commitTxId, status: r.status, createdAt: r.createdAt });
+        }
+      }
+      return stale;
     },
   };
 }
