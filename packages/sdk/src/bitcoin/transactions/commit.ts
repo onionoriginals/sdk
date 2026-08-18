@@ -20,6 +20,12 @@ import { scriptPubKeyForAddress } from '../transfer.js';
 // Define minimum dust limit (satoshis)
 const MIN_DUST_LIMIT = 546;
 
+// BIP-125 opt-in replace-by-fee sequence. @scure/btc-signer defaults every
+// input to the final sequence (0xffffffff), which makes the tx non-replaceable;
+// a fee spike would then park a real-BTC commit in the mempool with no bump
+// path. Every input we build signals RBF.
+export const RBF_SEQUENCE = 0xfffffffd;
+
 // Maximum iterations for UTXO reselection to prevent infinite loops
 const MAX_SELECTION_ITERATIONS = 5;
 
@@ -238,6 +244,7 @@ export async function createRevealTransaction(
   tx.addInput({
     txid: commitTxId,
     index: commitVout,
+    sequence: RBF_SEQUENCE,
     witnessUtxo: { script: commitP2tr.script, amount: BigInt(commitAmount) },
     tapLeafScript: commitP2tr.tapLeafScript
   });
@@ -663,6 +670,7 @@ export async function createCommitTransaction(
     tx.addInput({
       txid: utxo.txid,
       index: utxo.vout,
+      sequence: RBF_SEQUENCE,
       witnessUtxo: {
         script: Buffer.from(utxo.scriptPubKey, 'hex'),
         amount: BigInt(utxo.value)

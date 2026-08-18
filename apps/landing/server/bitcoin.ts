@@ -226,6 +226,9 @@ export function createBitcoinRoutes(deps: {
       tx.addInput({
         txid: hex.decode(u.txid),
         index: u.vout,
+        // BIP-125 opt-in RBF: a final-sequence funding tx would be un-bumpable
+        // through a fee spike (mirrors the SDK's commit/reveal builders).
+        sequence: 0xfffffffd,
         witnessUtxo: { script: hex.decode(u.scriptPubKey), amount: BigInt(u.value) },
       });
     }
