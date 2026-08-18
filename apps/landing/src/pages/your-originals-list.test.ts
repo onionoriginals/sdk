@@ -54,3 +54,31 @@ describe('unfinishedInscriptions', () => {
     expect(unfinishedInscriptions([])).toEqual([]);
   });
 });
+
+describe('withLiveInscriptionStatus', () => {
+  test('overlays confirmed from the inscription records by commitTxId', async () => {
+    const { withLiveInscriptionStatus } = await import('./YourOriginals');
+    const row: OriginalRow = {
+      did: 'did:webvh:S:h:studio:you:abc',
+      title: 'Piece',
+      resourceHash: 'aa',
+      createdAt: '2026-08-18T00:00:00.000Z',
+      btcoDid: 'did:btco:1',
+      commitTxId: 'c'.repeat(64),
+      inscriptionStatus: 'pending',
+    };
+    const rec: PendingInscription = {
+      commitTxId: 'c'.repeat(64),
+      revealTxId: 'r'.repeat(64),
+      inscriptionId: `${'r'.repeat(64)}i0`,
+      fundingOutpoint: 'a:0',
+      status: 'confirmed',
+      createdAt: '2026-08-18T00:00:00.000Z',
+    };
+    const [merged] = withLiveInscriptionStatus([row], [rec]);
+    expect(merged.inscriptionStatus).toBe('confirmed');
+    // No matching record → row unchanged.
+    const [same] = withLiveInscriptionStatus([row], []);
+    expect(same.inscriptionStatus).toBe('pending');
+  });
+});

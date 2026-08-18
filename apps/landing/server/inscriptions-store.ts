@@ -10,7 +10,7 @@
  * `<dataDir>/inscriptions/<sub>.json`, namespaced by the JWT `sub` so a user
  * only ever sees their own records.
  */
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export type InscriptionStatus = 'signed' | 'commit_broadcast' | 'reveal_broadcast' | 'confirmed';
@@ -34,6 +34,12 @@ export interface InscriptionRecord {
 export interface InscriptionsStore {
   /** Insert a new record (no-op if the same commitTxId already exists). */
   create(subOrgId: string, rec: InscriptionRecord): void;
+  /**
+   * Remove a record. ONLY safe for status 'signed' (nothing broadcast — the
+   * funding UTXO is unspent, so the pair can be superseded by a rebuilt one);
+   * callers must never remove a record whose commit may be on-chain.
+   */
+  remove(subOrgId: string, commitTxId: string): void;
   get(subOrgId: string, commitTxId: string): InscriptionRecord | null;
   setStatus(subOrgId: string, commitTxId: string, status: InscriptionStatus): void;
   list(subOrgId: string): InscriptionRecord[];
@@ -73,10 +79,17 @@ export function createInscriptionsStore(opts: {
     return JSON.parse(readFileSync(path, 'utf8')) as InscriptionRecord[];
   }
 
+  // Atomic write (temp + rename): this file holds the ONLY copy of a signed
+  // reveal once the client is gone — a torn write here would destroy exactly
+  // the recovery artifact the store exists to protect. rename(2) on the same
+  // filesystem replaces the file atomically, so readers see the old complete
+  // JSON or the new complete JSON, never a truncated one.
   function writeAll(subOrgId: string, recs: InscriptionRecord[]): void {
     const path = subFile(opts.dataDir, subOrgId);
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(recs));
+    const tmp = `${path}.tmp`;
+    writeFileSync(tmp, JSON.stringify(recs));
+    renameSync(tmp, path);
   }
 
   return {
@@ -86,6 +99,11 @@ export function createInscriptionsStore(opts: {
       if (recs.length >= maxPerUser) throw new Error('STORE_FULL');
       recs.push(rec);
       writeAll(subOrgId, recs);
+    },
+    remove(subOrgId, commitTxId) {
+      const recs = readAll(subOrgId);
+      const next = recs.filter((r) => r.commitTxId !== commitTxId);
+      if (next.length !== recs.length) writeAll(subOrgId, next);
     },
     get(subOrgId, commitTxId) {
       return readAll(subOrgId).find((r) => r.commitTxId === commitTxId) ?? null;

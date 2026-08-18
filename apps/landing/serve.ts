@@ -69,7 +69,11 @@ function createFaucetProviderFromEnv(): FaucetProvider {
     endpoint: process.env.QUICKNODE_ENDPOINT!,
     expectedNetwork: providerNetwork,
   }) as unknown as FaucetProvider;
-  provider.getSpendableUtxos = (address: string) => fetchFaucetUtxos({ api: mempoolApi, address });
+  // Network threaded through so the P2WPKH script derivation matches the
+  // address prefix (bc1q on mainnet, tb1q on testnet4) — only the faucet
+  // calls this today, but a mainnet caller must not hit the tb1q-only path.
+  provider.getSpendableUtxos = (address: string) =>
+    fetchFaucetUtxos({ api: mempoolApi, address, network: providerNetwork });
   return provider;
 }
 

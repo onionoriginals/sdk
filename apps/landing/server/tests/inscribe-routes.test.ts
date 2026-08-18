@@ -219,6 +219,72 @@ describe('POST /api/btc/inscribe', () => {
     expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
   });
 
+  test('a never-broadcast pair (status signed) is SUPERSEDED by a rebuilt pair on the same outpoint — no deadlock', async () => {
+    const pair = buildPair();
+    let failCommit = true;
+    const { routes, store } = harness({
+      broadcast: async (txHex) => {
+        if (failCommit && txHex === pair.signedCommitHex) throw new Error('min relay fee not met');
+        return 'f'.repeat(64);
+      },
+    });
+    // First attempt: commit rejected → 502, record persists as 'signed'.
+    expect((await post(routes, pair)).status).toBe(502);
+    expect(store.get('sub-1', pair.commitTxId)!.status).toBe('signed');
+
+    // Rebuilt pair (fresh reveal keypair → different commit txid), same outpoint:
+    // must replace the dead pair instead of 409ing forever.
+    const rebuilt = (() => {
+      const commit = new btc.Transaction();
+      commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
+      commit.addOutputAddress(USER_ADDRESS, 30_000n, btc.TEST_NETWORK);
+      commit.sign(USER_PRIV);
+      commit.finalize();
+      const reveal = new btc.Transaction();
+      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 30_000n } });
+      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
+      reveal.sign(USER_PRIV);
+      reveal.finalize();
+      return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
+    })();
+    const res = await post(routes, rebuilt);
+    expect(res.status).toBe(200);
+    expect(store.get('sub-1', pair.commitTxId)).toBeNull(); // dead pair removed
+    expect(store.get('sub-1', rebuilt.commitTxId)!.status).toBe('reveal_broadcast');
+    expect(store.list('sub-1')).toHaveLength(1);
+  });
+
+  test('malformed submissions do not consume the per-user inscribe cap', async () => {
+    const { routes } = harness();
+    // Burn well past the 10/hour cap with garbage — every one must 400, and
+    // the eventual VALID pair must still get through.
+    for (let i = 0; i < 12; i++) {
+      const res = await post(routes, { ...buildPair(), signedCommitHex: 'abcd' });
+      expect(res.status).toBe(400);
+    }
+    expect((await post(routes, buildPair())).status).toBe(200);
+  });
+
+  test('the body cap holds for chunked requests without Content-Length', async () => {
+    const { routes } = harness();
+    const token = signToken('sub-1', 'a@b.com', undefined, { secret: JWT });
+    const cookie = serializeCookie(getAuthCookieConfig(token));
+    const big = new TextEncoder().encode(JSON.stringify({ ...buildPair(), signedCommitHex: 'ab'.repeat(60 * 1024) }));
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < big.length; i += 8192) controller.enqueue(big.slice(i, i + 8192));
+        controller.close();
+      },
+    });
+    // No content-length header: the streaming reader must cut it off anyway.
+    const req = new Request('http://host/api/btc/inscribe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: stream,
+    });
+    expect((await routes.inscribe(req, new URL(req.url))).status).toBe(413);
+  });
+
   test('resubmitting the SAME pair is idempotent (200, single record)', async () => {
     const { routes, store } = harness();
     const pair = buildPair();

@@ -199,7 +199,7 @@ export const demo = {
     heading: 'Fund your inscription',
     signInPrompt: 'Sign in to inscribe on Bitcoin — your own key signs it, your own BTC funds it.',
     sendPrefix: 'Send at least',
-    sendSuffix: 'of BTC to your deposit address. It’s yours: the change and the inscribed sat come back to it.',
+    sendSuffix: 'of BTC to your deposit address, in a single payment (the inscription spends one confirmed deposit). It’s yours: the change and the inscribed sat come back to it.',
     addressLabel: 'Your deposit address',
     waiting: 'Waiting for your deposit…',
     detected: 'Deposit detected — waiting for one confirmation.',

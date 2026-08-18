@@ -43,6 +43,23 @@ export function unfinishedInscriptions(records: PendingInscription[]): PendingIn
   return records.filter((r) => r.status === 'signed' || r.status === 'commit_broadcast');
 }
 
+/**
+ * Overlay live confirmation onto stored rows: the durable Original record is
+ * written once as 'pending' at inscribe time, while the inscriptions store
+ * tracks confirmation sticky — join them by commitTxId so /me and the proof
+ * page show 'confirmed' without any re-posting.
+ */
+export function withLiveInscriptionStatus(
+  rows: OriginalRow[],
+  records: PendingInscription[]
+): OriginalRow[] {
+  return rows.map((r) => {
+    if (!r.commitTxId || r.inscriptionStatus === 'confirmed') return r;
+    const rec = records.find((x) => x.commitTxId === r.commitTxId);
+    return rec?.status === 'confirmed' ? { ...r, inscriptionStatus: 'confirmed' as const } : r;
+  });
+}
+
 /** The user's inscription records ([] when signed out / unavailable). */
 export async function fetchInscriptions(): Promise<PendingInscription[]> {
   try {
@@ -109,16 +126,17 @@ export function YourOriginals() {
   useEffect(() => {
     if (!isAuthenticated) return;
     let live = true;
-    fetchOriginals().then((rows) => {
+    // Fetch rows + inscription records together: the records carry the live
+    // (sticky) confirmation state that the durable rows only hold as
+    // 'pending', and any record whose reveal never broadcast gets a
+    // "finish inscription" offer — the signed txs are on the server, nothing
+    // needs re-signing (step-1 recovery surface).
+    Promise.all([fetchOriginals(), fetchInscriptions()]).then(([rows, recs]) => {
       if (!live) return;
-      setOriginals(rows);
-      rows.forEach((r) => resolveLive(r.did).then((ok) => live && setResolved((m) => ({ ...m, [r.did]: ok }))));
-    });
-    // Stranded-inscription check (step-1 recovery surface): any record whose
-    // reveal never broadcast gets a "finish inscription" offer — the signed
-    // txs are on the server, nothing needs re-signing.
-    fetchInscriptions().then((recs) => {
-      if (live) setUnfinished(unfinishedInscriptions(recs));
+      const merged = withLiveInscriptionStatus(rows, recs);
+      setOriginals(merged);
+      setUnfinished(unfinishedInscriptions(recs));
+      merged.forEach((r) => resolveLive(r.did).then((ok) => live && setResolved((m) => ({ ...m, [r.did]: ok }))));
     });
     return () => { live = false; };
   }, [isAuthenticated]);

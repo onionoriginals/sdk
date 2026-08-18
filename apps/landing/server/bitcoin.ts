@@ -109,6 +109,7 @@ export async function fetchAddressUtxos(opts: {
 export async function fetchFaucetUtxos(opts: {
   api: string;
   address: string;
+  network?: BtcNet;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }): Promise<Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>> {
@@ -133,6 +134,38 @@ const MAX_INSCRIBE_BODY_BYTES = 100 * 1024;
  */
 export function isAlreadyKnownTxError(e: unknown): boolean {
   return /already/i.test((e as Error)?.message ?? '');
+}
+
+/**
+ * Read at most maxBytes of the request body; null when it exceeds the cap.
+ * Streams the body so a chunked request WITHOUT Content-Length is cut off at
+ * the cap instead of being buffered whole (req.text() would buffer first and
+ * check after — the cap must hold for dishonest clients too).
+ */
+export async function readBodyCapped(req: Request, maxBytes: number): Promise<string | null> {
+  const declared = Number(req.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) return null;
+  const reader = req.body?.getReader();
+  if (!reader) return '';
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const buf = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    buf.set(c, offset);
+    offset += c.byteLength;
+  }
+  return new TextDecoder().decode(buf);
 }
 
 export function createBitcoinRoutes(deps: {
@@ -235,8 +268,9 @@ export function createBitcoinRoutes(deps: {
   };
 
   const fee: Handler = async (req) => {
-    if (!authSub(req)) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req);
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(req) ?? quotaCapped(sub);
     if (limited) return limited;
     const { blocks } = (await req.json().catch(() => ({}))) as { blocks?: number };
     try {
@@ -462,20 +496,10 @@ export function createBitcoinRoutes(deps: {
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
 
-    const perUser = inscribeUserLimiter.check(sub);
-    if (!perUser.allowed) {
-      return json({ error: 'inscribe_user_cap' }, 429, {
-        'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
-      });
-    }
-
-    // Size cap BEFORE buffering/parsing: this bounds inscription content too.
-    const declared = Number(req.headers.get('content-length'));
-    if (Number.isFinite(declared) && declared > MAX_INSCRIBE_BODY_BYTES) {
-      return json({ error: 'payload_too_large' }, 413);
-    }
-    const bodyText = await req.text();
-    if (bodyText.length > MAX_INSCRIBE_BODY_BYTES) return json({ error: 'payload_too_large' }, 413);
+    // Size cap enforced WHILE streaming (bounds inscription content too, and
+    // holds even for chunked requests that omit Content-Length).
+    const bodyText = await readBodyCapped(req, MAX_INSCRIBE_BODY_BYTES);
+    if (bodyText === null) return json({ error: 'payload_too_large' }, 413);
 
     let body: {
       signedCommitHex?: string;
@@ -523,13 +547,29 @@ export function createBitcoinRoutes(deps: {
     }
     const revealTxId = reveal.id;
 
+    // Consume a per-user slot only now that the request has proven valid —
+    // malformed submissions must not burn the hourly cap for free (mirrors
+    // the funding route's validate-before-consuming rule).
+    const perUser = inscribeUserLimiter.check(sub);
+    if (!perUser.allowed) {
+      return json({ error: 'inscribe_user_cap' }, 429, {
+        'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
+      });
+    }
+
     // Outpoint idempotency: one pending inscription per funding UTXO. A retry
-    // of the SAME pair continues below (create is a no-op); a DIFFERENT pair on
-    // the same outpoint is a double-spend attempt (double-click) → 409.
+    // of the SAME pair continues below (create is a no-op). A DIFFERENT pair
+    // on the same outpoint is allowed to SUPERSEDE a pair whose commit was
+    // never broadcast (status 'signed' — the UTXO is unspent, and rebuilt
+    // commits always have fresh txids, so refusing here would deadlock the
+    // outpoint forever); anything later is a live double-spend attempt → 409.
     const outpoint = `${fundingUtxo.txid.toLowerCase()}:${fundingUtxo.vout}`;
     const existing = store.findByOutpoint(sub, outpoint);
     if (existing && existing.commitTxId !== commitTxId) {
-      return json({ error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
+      if (existing.status !== 'signed') {
+        return json({ error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
+      }
+      store.remove(sub, existing.commitTxId);
     }
 
     // Persist BEFORE any broadcast — the whole point: from here on, recovery
@@ -579,11 +619,18 @@ export function createBitcoinRoutes(deps: {
   const inscribeList: Handler = async (req) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(req) ?? quotaCapped(sub);
+    if (limited) return limited;
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
     const records = store.list(sub);
-    for (const r of records) {
-      if (r.status !== 'reveal_broadcast') continue;
+    // Bound the per-request provider fan-out: at most a handful of
+    // confirmation lookups per call (newest first — the ones a user is
+    // actually waiting on), on top of the per-user quota cap above.
+    let lookups = 0;
+    for (const r of [...records].reverse()) {
+      if (r.status !== 'reveal_broadcast' || lookups >= 5) continue;
+      lookups++;
       try {
         const st = await provider.getTransactionStatus(r.revealTxId);
         if (st?.confirmed) {
@@ -614,7 +661,7 @@ export function createBitcoinRoutes(deps: {
   const inscribeRebroadcast: Handler = async (req) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req);
+    const limited = rateLimited(req) ?? quotaCapped(sub);
     if (limited) return limited;
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;

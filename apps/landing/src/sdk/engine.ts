@@ -450,22 +450,25 @@ export class DemoEngine {
     };
   }): Promise<DemoAssetState> {
     if (!this.asset) throw new Error('Create an asset first');
-    const feeRate = opts?.feeRate ?? 7;
     if (opts?.funding) {
       // Real sat-selected path: the user's Turnkey key signs the commit.
       const satSigner = new TurnkeySatSigner({
         client: opts.funding.signingClient,
-        signWith: opts.funding.changeAddress, // the user's tb1q funding address IS signWith
+        signWith: opts.funding.changeAddress, // the user's funding address IS signWith
       });
       await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, {
         fundingUtxo: opts.funding.fundingUtxo,
         satSigner,
         changeAddress: opts.funding.changeAddress,
-        feeRate,
+        // No default here: real BTC must be built at the LIVE rate. Left
+        // undefined, the SDK resolves it from the provider's estimateFee
+        // (the same /api/btc/fee estimate the deposit target was sized from)
+        // and fails closed rather than guessing (FEE_RATE_REQUIRED).
+        feeRate: opts.feeRate,
       });
     } else {
-      // Mock path (unchanged): bare feeRate against OrdMockProvider.
-      await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, feeRate);
+      // Mock path (unchanged): fixed demo feeRate against OrdMockProvider.
+      await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, opts?.feeRate ?? 7);
     }
     const state = this.snapshot();
     if (state.inscription) {

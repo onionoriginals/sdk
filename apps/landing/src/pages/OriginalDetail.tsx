@@ -14,7 +14,12 @@ import { navigate } from '../router';
 import { short } from '../sdk/format';
 import type { OriginalCheck } from '../sdk/verify-original';
 import { btcoExplorerUrl } from '../sdk/network-flag';
-import { fetchOriginals, type OriginalRow } from './YourOriginals';
+import {
+  fetchOriginals,
+  fetchInscriptions,
+  withLiveInscriptionStatus,
+  type OriginalRow,
+} from './YourOriginals';
 import {
   webvhArtifacts,
   celTimeline,
@@ -82,12 +87,14 @@ export function OriginalDetail({ did }: { did: string }) {
 
     (async () => {
       const arts = webvhArtifacts(did, window.location.host);
-      const [rows, logRaw, celRaw] = await Promise.all([
+      const [rows, inscriptionRecs, logRaw, celRaw] = await Promise.all([
         fetchOriginals(),
+        fetchInscriptions(),
         arts ? fetchText(arts.logUrl) : null,
         arts ? fetchText(arts.celUrl) : null
       ]);
-      const row = rows.find((r) => r.did === did) ?? null;
+      // Overlay live confirmation state (the stored row stays 'pending').
+      const row = withLiveInscriptionStatus(rows, inscriptionRecs).find((r) => r.did === did) ?? null;
 
       let logEntries: ReturnType<typeof parseDidLog> | null = null;
       try {
