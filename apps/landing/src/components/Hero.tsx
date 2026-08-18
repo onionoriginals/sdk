@@ -3,7 +3,6 @@ import { hero } from '../content';
 import { generateArtwork } from '../sdk/artwork';
 import { getArtSeed, subscribeArtSeed } from '../sdk/artwork-sync';
 import { IdentityPanel } from './IdentityPanel';
-import { InstallCommand } from './InstallCommand';
 import { Pipeline } from './Pipeline';
 import './hero.css';
 
@@ -41,8 +40,9 @@ export function Hero() {
               />
             </svg>
           </a>
-          <span className="hero-or">{hero.installHint}</span>
-          <InstallCommand />
+          <a className="hero-example-link" href={hero.exampleLink.href}>
+            {hero.exampleLink.label}
+          </a>
         </div>
         <figure className="hero-visual card">
           <Pipeline autoplay />

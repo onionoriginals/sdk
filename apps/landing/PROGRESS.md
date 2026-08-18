@@ -3,7 +3,33 @@
 Status board for the landing page at `apps/landing/`. Updated every
 build→grade cycle. Craft bar and grading protocol: see `GRADING.md`.
 
-## Current status — cycle 9: share cards, crawler/production polish, deploy-ready
+## Current status — cycle 10: creator-first reframing (dependency-free slice of the landing punch list)
+
+The 2026-08 landing-page critique reorients the page from SDK marketing to
+creators. This cycle lands every fix that is truthful against the current
+build (no mainnet inscription, no creator-app upload yet); the rest stays
+blocked on the Bitcoin build plan and creator-app v1:
+- **Hero**: eyebrow → “Anchored on Bitcoin · Yours even if we disappear”;
+  headline → “Proof you made it. Carved into Bitcoin.”; primary CTA →
+  “Make your first Original” (interim target `#demo` until upload ships);
+  InstallCommand removed from the hero — replaced by a quiet
+  “See one that already exists” link to `#example`; pipeline caption
+  rewritten. Subhead unchanged: the critique’s replacement promises
+  upload + publicly-checkable links that don’t exist yet.
+- **Nav**: “Live demo” → “Try it”; `nav.cta` → “Start” targeting `#demo`.
+- **Developers slimmed**: headline/subhead/bullets/install kept; the
+  60-line quickstart + events snippet replaced by one line + a GitHub
+  README link (snippets live there). `highlight.tsx` and the quickstart
+  import-check test deleted with them; new `content.creator-framing.test.ts`
+  pins the CTA targets and the no-inline-quickstart rule.
+- **Not done here (blocked)**: real inscribe copy/wiring (“coming soon”
+  strings stay until mainnet + deposit flow exist — deleting them now would
+  make the demo lie), First Light did:btco completion (#332), creator-pays
+  cost rows (need the approve-with-exact-quote flow), `site.url` swap (#330,
+  awaiting the domain decision).
+- Verified: 216 landing tests green, `tsc --noEmit` clean, vite build clean.
+
+## Cycle 9 — share cards, crawler/production polish, deploy-ready
 
 Shipping the unblocked halves of issues #331, #335, and #330 (prep):
 - **Social cards (#331)**: og:title/description/url/image (1200×630) +

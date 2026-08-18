@@ -26,22 +26,25 @@ export const site = {
 export const nav = {
   links: [
     { label: 'Why Originals', href: '#why' },
-    { label: 'Live demo', href: '#demo' },
+    { label: 'Try it', href: '#demo' },
     { label: 'Protocol', href: '#protocol' },
     { label: 'Developers', href: '#developers' }
   ],
-  cta: { label: 'Get started', href: '#developers' },
+  /** Interim target: points at the demo until the creator-app upload flow ships. */
+  cta: { label: 'Start', href: '#demo' },
   github: { label: 'GitHub', href: 'https://github.com/onionoriginals/sdk' }
 };
 
 export const hero = {
-  eyebrow: 'Open protocol · W3C DIDs · Anchored on Bitcoin',
-  headline: 'Proof of origin for every digital asset.',
+  eyebrow: 'Anchored on Bitcoin · Yours even if we disappear',
+  headline: 'Proof you made it. Carved into Bitcoin.',
   subhead:
     'The internet is perfect at copying and terrible at remembering. Originals fixes the remembering: every asset carries a signed, verifiable history of who made it, where it lives, and who owns it — from private draft to Bitcoin-anchored original.',
-  primaryCta: { label: 'Run the live demo', href: '#demo' },
-  installHint: 'or install the SDK',
-  pipelineCaption: 'One asset, three layers. Migration is one-way: value moves up, history never rewrites.'
+  /** Interim target: points at the demo until the creator-app upload flow ships. */
+  primaryCta: { label: 'Make your first Original', href: '#demo' },
+  exampleLink: { label: 'See one that already exists', href: '#example' },
+  pipelineCaption:
+    'One asset, three layers: private draft, public, inscribed on Bitcoin. Each step signed. The path only moves forward.'
 };
 
 export const layers = [
@@ -108,7 +111,7 @@ export const demo = {
     mediumLabel: 'Medium',
     mediums: ['Artwork', 'Music', 'Writing', 'Photograph', 'Dataset'],
     regenerate: 'Regenerate',
-    artHint: 'Generated in your browser from the title — its exact bytes are what gets hashed and inscribed.'
+    artHint: 'Generated in your browser from the title — its exact bytes are what get hashed and inscribed.'
   },
   steps: [
     {
@@ -379,61 +382,12 @@ export const developers = {
     'W3C Verifiable Credentials out of the box'
   ],
   installLabel: 'Install',
-  quickstartLabel: 'Quickstart',
-  quickstart: `import {
-  OriginalsSDK,
-  MemoryStorageAdapter
-} from '@originals/sdk';
-import { OrdMockProvider } from '@originals/sdk/testing';
-import { sha256 } from '@noble/hashes/sha2.js';
-
-// In-memory key store — swap for Turnkey, KMS, or your own
-const keys = new Map<string, string>();
-const keyStore = {
-  getPrivateKey: async (id: string) => keys.get(id) ?? null,
-  setPrivateKey: async (id: string, key: string) => {
-    keys.set(id, key);
+  sdkNote:
+    'Everything on this page — sealing, publishing, inscription, verification — is @originals/sdk, MIT licensed.',
+  docsLink: {
+    label: 'Quickstart and docs on GitHub',
+    href: 'https://github.com/onionoriginals/sdk#readme'
   }
-};
-
-// Mock Bitcoin provider — use OrdinalsClient in production
-const sdk = OriginalsSDK.create({
-  network: 'regtest',
-  ordinalsProvider: new OrdMockProvider(),
-  storageAdapter: new MemoryStorageAdapter(),
-  keyStore
-});
-
-// 1 · Create a private did:cel asset — offline, free
-const content = JSON.stringify({ title: 'Genesis #001' });
-const hash = Buffer
-  .from(sha256(Buffer.from(content)))
-  .toString('hex');
-const asset = await sdk.lifecycle.createAsset([{
-  id: 'meta.json',
-  type: 'data',
-  content,
-  contentType: 'application/json',
-  hash,
-  size: content.length
-}]);
-
-// 2 · Publish to did:webvh for public discovery
-await sdk.lifecycle.publishToWeb(
-  asset,
-  'did:webvh:yourdomain.com:studio:you'
-);
-
-// 3 · Inscribe on Bitcoin as did:btco — ownership, anchored
-await sdk.lifecycle.inscribeOnBitcoin(asset, 7);
-
-// The signed history travels with the asset
-console.log(asset.getProvenance());`,
-  eventsLabel: 'Every step observable',
-  eventsSnippet: `sdk.lifecycle.on('asset:migrated', (event) => {
-  const { fromLayer, toLayer } = event.asset;
-  console.log(fromLayer, '→', toLayer);
-});`
 };
 
 export const footer = {
