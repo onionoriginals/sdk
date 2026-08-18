@@ -195,6 +195,19 @@ export const demo = {
     faucetEmpty: 'The testnet4 faucet is temporarily out of funds — try again in a bit.',
     mockNote: 'Bitcoin inscription runs against a mock provider in this environment (no wallet, no chain). Deploy with a testnet4 endpoint + faucet to make it real.'
   },
+  deposit: {
+    heading: 'Fund your inscription',
+    signInPrompt: 'Sign in to inscribe on Bitcoin — your own key signs it, your own BTC funds it.',
+    sendPrefix: 'Send at least',
+    sendSuffix: 'of BTC to your deposit address. It’s yours: the change and the inscribed sat come back to it.',
+    addressLabel: 'Your deposit address',
+    waiting: 'Waiting for your deposit…',
+    detected: 'Deposit detected — waiting for one confirmation.',
+    ready: 'Deposit confirmed — ready to inscribe.',
+    needed: 'No confirmed deposit covering the fee yet — send BTC to your deposit address and wait for one confirmation.',
+    nonRefundable: 'Creator pays: the network fee is non-refundable. You own the keys, the change, and the inscribed sat — nothing is custodied.',
+    yourKeyNote: 'Your Turnkey key signs this inscription in your browser; your own deposit pays the fee. The server never sees a private key.'
+  },
   comingSoon: 'Coming soon — inscribing on Bitcoin (did:btco) is not enabled yet. Your Original is already real and resolvable as did:webvh.',
   reset: 'Start over with a new asset'
 };

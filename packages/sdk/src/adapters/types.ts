@@ -57,6 +57,27 @@ export interface OrdinalsProvider {
    */
   getInscriptionsBySatoshi(satoshi: string): Promise<Array<{ inscriptionId: string }>>;
   broadcastTransaction(txHexOrObj: unknown): Promise<string>;
+  /**
+   * Atomically submit a signed commit + reveal pair for broadcast. Optional:
+   * when present, the sat-selected inscribe path (inscribe-on-sat.ts) calls
+   * this ONCE instead of two broadcastTransaction calls, so an implementation
+   * can persist both signed transactions durably BEFORE anything is broadcast
+   * — the stranded-funds fix: if the caller dies between commit and reveal,
+   * the reveal can still be rebroadcast from the persisted copy. The
+   * implementation must broadcast the commit first, then the reveal, and
+   * treat an already-known transaction as success (idempotent).
+   *
+   * `status` reports how far broadcasting got: 'reveal_broadcast' means both
+   * landed; 'commit_broadcast' means the commit is on-chain and the reveal is
+   * persisted for later rebroadcast (still a success — the inscription will
+   * complete without the caller re-signing anything).
+   */
+  submitInscription?(params: {
+    signedCommitHex: string;
+    revealTxHex: string;
+    fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey?: string };
+    changeAddress: string;
+  }): Promise<{ commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' }>;
   getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }>;
   estimateFee(blocks?: number): Promise<number>;
   createInscription(params: {

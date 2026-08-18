@@ -37,7 +37,7 @@ export interface TurnkeyBitcoinClient {
       curve: 'CURVE_SECP256K1';
       pathFormat: 'PATH_FORMAT_BIP32';
       path: string;
-      addressFormat: 'ADDRESS_FORMAT_BITCOIN_TESTNET_P2WPKH';
+      addressFormat: 'ADDRESS_FORMAT_BITCOIN_TESTNET_P2WPKH' | 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2WPKH';
     }>;
   }): Promise<{ addresses: string[] }>;
   getWallets(params: { organizationId: string }): Promise<{
@@ -45,7 +45,19 @@ export interface TurnkeyBitcoinClient {
   }>;
 }
 
-const TESTNET_P2WPKH_PATH = "m/84'/1'/0'/0/0";
+export type FundingNetwork = 'testnet4' | 'mainnet';
+
+// ⚠️ A user's testnet path and mainnet path are DIFFERENT accounts on the same
+// Turnkey wallet (BIP-84 coin type 1' vs 0'): anywhere a funding address is
+// cached it must be keyed by network, never treated as "the" address.
+const P2WPKH_ACCOUNTS: Record<FundingNetwork, {
+  path: string;
+  addressFormat: 'ADDRESS_FORMAT_BITCOIN_TESTNET_P2WPKH' | 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2WPKH';
+  prefix: string;
+}> = {
+  testnet4: { path: "m/84'/1'/0'/0/0", addressFormat: 'ADDRESS_FORMAT_BITCOIN_TESTNET_P2WPKH', prefix: 'tb1' },
+  mainnet: { path: "m/84'/0'/0'/0/0", addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2WPKH', prefix: 'bc1' },
+};
 
 /**
  * Run OTP_LOGIN: sign the login challenge (the verificationToken) with the
@@ -77,18 +89,21 @@ export async function otpLoginToSession(deps: {
 }
 
 /**
- * Ensure the user's wallet has a testnet4 P2WPKH account and return its tb1
- * address. Idempotent: if the path already exists, the cached address wins —
- * re-creating would waste an activity and could error on a duplicate path.
+ * Ensure the user's wallet has a P2WPKH account for the given network and
+ * return its bech32 address (tb1… on testnet4, bc1… on mainnet). Idempotent:
+ * if the path already exists, the cached address wins — re-creating would
+ * waste an activity and could error on a duplicate path.
  */
 export async function ensureBitcoinFundingAccount(
   client: TurnkeyBitcoinClient,
-  subOrgId: string
+  subOrgId: string,
+  network: FundingNetwork = 'testnet4'
 ): Promise<string> {
+  const account = P2WPKH_ACCOUNTS[network];
   const { wallets } = await client.getWallets({ organizationId: subOrgId });
   const wallet = wallets[0];
   if (!wallet) throw new Error('No Turnkey wallet found for the sub-organization.');
-  const existing = wallet.accounts?.find((a) => a.path === TESTNET_P2WPKH_PATH);
+  const existing = wallet.accounts?.find((a) => a.path === account.path);
   if (existing?.address) return existing.address;
   const { addresses } = await client.createWalletAccounts({
     walletId: wallet.walletId,
@@ -97,13 +112,13 @@ export async function ensureBitcoinFundingAccount(
       {
         curve: 'CURVE_SECP256K1',
         pathFormat: 'PATH_FORMAT_BIP32',
-        path: TESTNET_P2WPKH_PATH,
-        addressFormat: 'ADDRESS_FORMAT_BITCOIN_TESTNET_P2WPKH',
+        path: account.path,
+        addressFormat: account.addressFormat,
       },
     ],
   });
   const address = addresses[0];
-  if (!address || !address.startsWith('tb1')) {
+  if (!address || !address.startsWith(account.prefix)) {
     throw new Error(`Turnkey returned an unexpected funding address: ${String(address)}`);
   }
   return address;

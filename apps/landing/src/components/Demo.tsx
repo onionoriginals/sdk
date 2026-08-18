@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine } from '../sdk/engine';
 import { engineIdentity } from '../sdk/engine';
-import { btcTestnetEnabled } from '../sdk/testnet-flag';
+import { btcNetwork } from '../sdk/network-flag';
 import { useAuth } from '../auth/useAuth';
 import { generateArtwork } from '../sdk/artwork';
 import { getArtSeed, setArtSeed } from '../sdk/artwork-sync';
@@ -19,6 +19,14 @@ type Phase =
   | 'published'
   | 'inscribing'
   | 'inscribed';
+
+/** GET /api/btc/deposit — the creator's own UTXOs + the estimated fee target. */
+interface DepositInfo {
+  address: string;
+  confirmedUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
+  unconfirmedSats: number;
+  estimatedCostSats: number;
+}
 
 // Revising is deliberately NOT a phase: it is authorship AT the current layer,
 // repeatable, and never moves the asset on. Modelling it as one would put it in
@@ -63,7 +71,8 @@ function useEngine(authed: boolean, subOrgId?: string) {
 export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
   const { isAuthenticated, bitcoin, user } = useAuth();
-  const testnet = btcTestnetEnabled();
+  const network = btcNetwork();
+  const real = network !== 'off';
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [medium, setMedium] = useState(demo.form.mediums[0]);
   const [nonce, setNonce] = useState(() => getArtSeed().nonce);
@@ -158,16 +167,53 @@ export function Demo() {
   };
   const publish = () =>
     run('created', 'publishing', 'published', (engine) => engine.publish());
+
+  // Creator-pays deposit state (mainnet): the user's own confirmed UTXOs at
+  // their Turnkey-derived address, polled while the inscribe step is live so
+  // "deposit detected → confirmed" updates without a reload.
+  const [deposit, setDeposit] = useState<DepositInfo | null>(null);
+  const fetchDeposit = useCallback(async (): Promise<DepositInfo | null> => {
+    if (!bitcoin) return null;
+    const res = await fetch(
+      `/api/btc/deposit?address=${encodeURIComponent(bitcoin.fundingAddress)}`,
+      { credentials: 'same-origin' }
+    );
+    if (!res.ok) return null;
+    const info = (await res.json()) as DepositInfo;
+    setDeposit(info);
+    return info;
+  }, [bitcoin]);
+  useEffect(() => {
+    if (network !== 'mainnet' || phase !== 'published' || !isAuthenticated || !bitcoin) return;
+    void fetchDeposit();
+    const t = setInterval(() => void fetchDeposit(), 15_000);
+    return () => clearInterval(t);
+  }, [network, phase, isAuthenticated, bitcoin, fetchDeposit]);
+
   const inscribe = () =>
     run('published', 'inscribing', 'inscribed', async (engine) => {
-      // Mock path (testnet disabled): unchanged bare inscribe.
-      if (!testnet) return engine.inscribe();
-      // Real path: must be signed in with a provisioned testnet4 session.
+      // Mock path (no real network enabled): unchanged bare inscribe.
+      if (!real) return engine.inscribe();
+      // Real path: must be signed in with a provisioned Bitcoin session.
       if (!isAuthenticated || !bitcoin) {
-        throw new Error(demo.inscribeGate.signInPrompt);
+        throw new Error(network === 'mainnet' ? demo.deposit.signInPrompt : demo.inscribeGate.signInPrompt);
       }
-      // Ask the server faucet to fund the user's address, then inscribe with the
-      // user's Turnkey key. faucet_empty (507) surfaces a friendly message.
+      if (network === 'mainnet') {
+        // Creator-pays: spend the user's OWN confirmed deposit UTXO. Re-fetch
+        // at click time — a 15s-old snapshot must not pick a spent outpoint.
+        const info = await fetchDeposit();
+        const utxo = info?.confirmedUtxos.find((u) => u.value >= info.estimatedCostSats);
+        if (!utxo) throw new Error(demo.deposit.needed);
+        return engine.inscribe({
+          funding: {
+            fundingUtxo: utxo,
+            changeAddress: bitcoin.fundingAddress,
+            signingClient: bitcoin.signingClient,
+          },
+        });
+      }
+      // testnet4: ask the server faucet to fund the user's address, then
+      // inscribe with the user's Turnkey key. 507 surfaces a friendly message.
       const res = await fetch('/api/btc/funding', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -355,10 +401,11 @@ export function Demo() {
                           </div>
                           <p>{s.description}</p>
                           {state !== 'done' &&
-                            (i === 2 && !testnet ? (
-                              // did:btco inscription is not live yet — disabled,
-                              // never calls engine.inscribe(). The gated testnet4
-                              // path (testnet === true) is unchanged.
+                            (i === 2 && !real ? (
+                              // did:btco inscription is not live on this deploy —
+                              // disabled, never calls engine.inscribe(). The gated
+                              // real paths (testnet4 faucet / mainnet deposit) are
+                              // handled in inscribe().
                               <button type="button" className="btn demo-step-btn" disabled>
                                 {demo.comingSoon}
                               </button>
@@ -439,14 +486,52 @@ export function Demo() {
 
                 {error && <p className="demo-error" role="alert">{error}</p>}
 
-                {phase === 'published' && (
+                {phase === 'published' && network !== 'mainnet' && (
                   <p className="demo-inscribe-note">
-                    {testnet
+                    {real
                       ? isAuthenticated && bitcoin
                         ? demo.inscribeGate.yourKeyNote
                         : demo.inscribeGate.signInPrompt
                       : demo.comingSoon}
                   </p>
+                )}
+
+                {phase === 'published' && network === 'mainnet' && (
+                  isAuthenticated && bitcoin ? (
+                    <div className="demo-deposit">
+                      <div className="demo-deposit-head">
+                        <strong>{demo.deposit.heading}</strong>
+                        <span
+                          className="demo-resolved-badge"
+                          data-ok={
+                            !!deposit &&
+                            deposit.confirmedUtxos.some((u) => u.value >= deposit.estimatedCostSats)
+                              ? true
+                              : undefined
+                          }
+                        >
+                          {!deposit || (deposit.confirmedUtxos.length === 0 && deposit.unconfirmedSats === 0)
+                            ? demo.deposit.waiting
+                            : deposit.confirmedUtxos.some((u) => u.value >= deposit.estimatedCostSats)
+                              ? demo.deposit.ready
+                              : demo.deposit.detected}
+                        </span>
+                      </div>
+                      {deposit && (
+                        <p className="demo-inscribe-note">
+                          {demo.deposit.sendPrefix}{' '}
+                          <code>{deposit.estimatedCostSats.toLocaleString()} sats</code>{' '}
+                          {demo.deposit.sendSuffix}
+                        </p>
+                      )}
+                      <p className="demo-inscribe-note">
+                        {demo.deposit.addressLabel}: <code>{bitcoin.fundingAddress}</code>
+                      </p>
+                      <p className="demo-inscribe-note">{demo.deposit.nonRefundable}</p>
+                    </div>
+                  ) : (
+                    <p className="demo-inscribe-note">{demo.deposit.signInPrompt}</p>
+                  )
                 )}
 
                 {(phase === 'published' || phase === 'inscribing' || phase === 'inscribed') &&

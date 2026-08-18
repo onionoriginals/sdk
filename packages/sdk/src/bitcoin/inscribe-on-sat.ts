@@ -119,17 +119,47 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
     destinationAddress: changeAddress, feeRate, network
   });
 
-  // 7) Broadcast the commit.
-  await provider.broadcastTransaction(signedCommit);
+  // 7+8) Broadcast commit then reveal. When the provider offers the atomic
+  // submitInscription seam, use it: the implementation persists BOTH signed
+  // txs durably before broadcasting anything, so a caller that dies between
+  // commit and reveal can never strand the committed funds (the reveal is
+  // rebroadcast from the persisted copy). Otherwise fall back to the two
+  // sequential broadcasts with in-memory recovery data.
+  if (typeof provider.submitInscription === 'function') {
+    try {
+      await provider.submitInscription({
+        signedCommitHex: signedCommit,
+        revealTxHex: reveal.revealTxHex,
+        fundingUtxo,
+        changeAddress
+      });
+    } catch (e) {
+      // Ambiguous by construction: the submit may have failed before anything
+      // was persisted/broadcast (nothing spent) or after (server-side recovery
+      // owns it). Attach the full recovery data either way so no funds path
+      // depends on this process's memory surviving.
+      throw new StructuredError('INSCRIPTION_SUBMIT_FAILED',
+        `Submitting the signed commit+reveal pair failed: ${e instanceof Error ? e.message : String(e)}. ` +
+        'If the submission reached the server it will complete the inscription from its persisted copy; ' +
+        'otherwise nothing was broadcast and the funding UTXO is unspent.',
+        {
+          commitTxId, revealTxId: reveal.revealTxId, revealTxHex: reveal.revealTxHex,
+          signedCommitHex: signedCommit, satoshi, inscriptionId: reveal.inscriptionId
+        });
+    }
+  } else {
+    // Broadcast the commit.
+    await provider.broadcastTransaction(signedCommit);
 
-  // 8) Broadcast the reveal; on failure the commit is already on-chain, so
-  // attach recovery data (rebroadcast revealTxHex to complete the inscription).
-  try {
-    await provider.broadcastTransaction(reveal.revealTxHex);
-  } catch {
-    throw new StructuredError('REVEAL_BROADCAST_FAILED',
-      `Commit ${commitTxId} broadcast but the reveal failed; rebroadcast revealTxHex to recover the committed funds and complete the inscription.`,
-      { commitTxId, revealTxId: reveal.revealTxId, revealTxHex: reveal.revealTxHex, satoshi, inscriptionId: reveal.inscriptionId });
+    // Broadcast the reveal; on failure the commit is already on-chain, so
+    // attach recovery data (rebroadcast revealTxHex to complete the inscription).
+    try {
+      await provider.broadcastTransaction(reveal.revealTxHex);
+    } catch {
+      throw new StructuredError('REVEAL_BROADCAST_FAILED',
+        `Commit ${commitTxId} broadcast but the reveal failed; rebroadcast revealTxHex to recover the committed funds and complete the inscription.`,
+        { commitTxId, revealTxId: reveal.revealTxId, revealTxHex: reveal.revealTxHex, satoshi, inscriptionId: reveal.inscriptionId });
+    }
   }
 
   return { satoshi, inscriptionId: reveal.inscriptionId, commitTxId, revealTxId: reveal.revealTxId };

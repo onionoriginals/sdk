@@ -5,7 +5,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../cookies';
-import { createBitcoinRoutes, rawKeyFaucetSigner, fetchFaucetUtxos } from '../bitcoin';
+import { createBitcoinRoutes, rawKeyFaucetSigner, fetchFaucetUtxos, fetchAddressUtxos, p2wpkhScriptHex } from '../bitcoin';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
 
@@ -106,6 +106,104 @@ describe('bitcoin routes', () => {
     const req = authedReq('/api/btc/funding', { address: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4' });
     const res = await r.funding(req, new URL(req.url));
     expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /api/btc/deposit (creator-pays)', () => {
+  const MAINNET_P2WPKH = btc.p2wpkh(FAUCET_PUB, btc.NETWORK);
+  const MAINNET_ADDRESS = MAINNET_P2WPKH.address!;
+
+  function depositDeps(utxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }>) {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify(utxos), { status: 200 })) as unknown as typeof fetch;
+    return {
+      jwtSecret: JWT,
+      provider: fakeProvider(),
+      network: 'mainnet' as const,
+      depositApi: 'https://mempool.example/api',
+      fetchImpl,
+    };
+  }
+
+  function depositReq(address: string) {
+    const token = signToken('sub-1', 'a@b.com', undefined, { secret: JWT });
+    const cookie = serializeCookie(getAuthCookieConfig(token));
+    return new Request(`http://host/api/btc/deposit?address=${encodeURIComponent(address)}`, {
+      method: 'GET',
+      headers: { cookie },
+    });
+  }
+
+  test('returns confirmed UTXOs, unconfirmed sum, and a buffered cost estimate', async () => {
+    const r = createBitcoinRoutes(depositDeps([
+      { txid: 'a'.repeat(64), vout: 0, value: 40_000, status: { confirmed: true } },
+      { txid: 'b'.repeat(64), vout: 1, value: 15_000, status: { confirmed: false } },
+    ]));
+    const req = depositReq(MAINNET_ADDRESS);
+    const res = await r.deposit(req, new URL(req.url));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      address: string;
+      confirmedUtxos: Array<{ txid: string; value: number; scriptPubKey: string }>;
+      unconfirmedSats: number;
+      estimatedCostSats: number;
+    };
+    expect(body.address).toBe(MAINNET_ADDRESS);
+    expect(body.confirmedUtxos).toHaveLength(1);
+    expect(body.confirmedUtxos[0].value).toBe(40_000);
+    // scriptPubKey derived from the bc1q address — required by the SDK's commit builder.
+    expect(body.confirmedUtxos[0].scriptPubKey).toBe(p2wpkhScriptHex(MAINNET_ADDRESS, 'mainnet'));
+    expect(body.unconfirmedSats).toBe(15_000);
+    // fee 3 sat/vB (fakeProvider) on a bounded tx + 1.5x buffer + postage:
+    // sane range, never zero.
+    expect(body.estimatedCostSats).toBeGreaterThan(546);
+    expect(body.estimatedCostSats).toBeLessThan(100_000);
+  });
+
+  test('rejects a testnet address on mainnet', async () => {
+    const r = createBitcoinRoutes(depositDeps([]));
+    const req = depositReq('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
+    const res = await r.deposit(req, new URL(req.url));
+    expect(res.status).toBe(400);
+  });
+
+  test('401 for anonymous; 503 when no deposit API is configured', async () => {
+    const r = createBitcoinRoutes(depositDeps([]));
+    const anon = new Request(`http://host/api/btc/deposit?address=${MAINNET_ADDRESS}`);
+    expect((await r.deposit(anon, new URL(anon.url))).status).toBe(401);
+
+    const noApi = createBitcoinRoutes({ jwtSecret: JWT, provider: fakeProvider() });
+    const req = depositReq(MAINNET_ADDRESS);
+    expect((await noApi.deposit(req, new URL(req.url))).status).toBe(503);
+  });
+});
+
+describe('mainnet plumbing', () => {
+  test('funding returns 404 when no faucet is configured (creator-pays deploy)', async () => {
+    const r = createBitcoinRoutes({ jwtSecret: JWT, provider: fakeProvider(), network: 'mainnet' });
+    const req = authedReq('/api/btc/funding', { address: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4' });
+    const res = await r.funding(req, new URL(req.url));
+    expect(res.status).toBe(404);
+  });
+
+  test('p2wpkhScriptHex handles bc1q on mainnet and rejects cross-network decode', () => {
+    const mainnetAddr = btc.p2wpkh(FAUCET_PUB, btc.NETWORK).address!;
+    expect(p2wpkhScriptHex(mainnetAddr, 'mainnet')).toMatch(/^0014[0-9a-f]{40}$/);
+    expect(() => p2wpkhScriptHex(mainnetAddr, 'testnet')).toThrow();
+  });
+
+  test('fetchAddressUtxos splits confirmed from unconfirmed', async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify([
+          { txid: 'a'.repeat(64), vout: 0, value: 50_000, status: { confirmed: true } },
+          { txid: 'b'.repeat(64), vout: 1, value: 30_000, status: { confirmed: false } },
+        ]),
+        { status: 200 }
+      )) as unknown as typeof fetch;
+    const out = await fetchAddressUtxos({ api: 'https://x/api', address: FAUCET_ADDRESS, fetchImpl });
+    expect(out.confirmed).toHaveLength(1);
+    expect(out.unconfirmedSats).toBe(30_000);
   });
 });
 

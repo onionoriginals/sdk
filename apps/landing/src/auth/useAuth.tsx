@@ -8,7 +8,7 @@ import {
   type TurnkeyBitcoinClient,
   type TurnkeySessionApi,
 } from './turnkey-session';
-import { btcTestnetEnabled } from '../sdk/testnet-flag';
+import { btcNetwork } from '../sdk/network-flag';
 
 export interface BitcoinSession {
   fundingAddress: string;
@@ -52,10 +52,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSessionId(null);
 
     // Track B bootstrap: install the P-256 session credential (OTP_LOGIN), then
-    // build the signing client + ensure the testnet4 funding account. Best-
+    // build the signing client + ensure the network's funding account. Best-
     // effort: a failure here must NOT block login — the demo simply falls back
-    // to the mock inscribe path. Only runs when the deploy enabled testnet4.
-    if (!btcTestnetEnabled() || !result.verificationToken) return;
+    // to the mock inscribe path. Only runs when the deploy enabled a real network.
+    const network = btcNetwork();
+    if (network === 'off' || !result.verificationToken) return;
     try {
       // Lazy-load the browser Turnkey client so its browser-only dependency
       // graph never loads unless Track B is actually active.
@@ -72,11 +73,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         p256PublicKey: result.p256PublicKey,
         p256PrivateKey: result.p256PrivateKey,
       });
-      const fundingAddress = await ensureBitcoinFundingAccount(signingClient, result.subOrgId);
+      const fundingAddress = await ensureBitcoinFundingAccount(signingClient, result.subOrgId, network);
       setBitcoin({ fundingAddress, signingClient });
     } catch (err) {
       // Non-fatal: log for the console-visible demo narrative; UI stays on mock.
-      console.warn('[originals-demo] testnet4 session bootstrap failed; inscribe stays on mock', err);
+      console.warn('[originals-demo] bitcoin session bootstrap failed; inscribe stays on mock', err);
       setBitcoin(null);
     }
   }, [sessionId]);

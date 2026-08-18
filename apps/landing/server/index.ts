@@ -17,7 +17,9 @@ export function buildRoutes(deps: {
   turnkey: Turnkey;
   sessions: SessionStorage;
   jwtSecret: string;
-  bitcoin?: BitcoinRoutes;
+  // `funding` is optional so a mainnet (creator-pays) deploy can strip the
+  // faucet route entirely instead of leaving a disabled endpoint mounted.
+  bitcoin?: Omit<BitcoinRoutes, 'funding'> & { funding?: BitcoinRoutes['funding'] };
   originals?: OriginalsRoutes;
 }): Record<string, Handler> {
   const auth = createAuthRoutes(deps);
@@ -29,10 +31,16 @@ export function buildRoutes(deps: {
     'POST /api/auth/logout': auth.logout,
   };
   if (deps.bitcoin) {
-    routes['POST /api/btc/funding'] = deps.bitcoin.funding;
+    // `funding` is optional: the faucet is a testnet-only harness and is not
+    // mounted on mainnet (creator-pays deposits replace it — see serve.ts).
+    if (deps.bitcoin.funding) routes['POST /api/btc/funding'] = deps.bitcoin.funding;
     routes['POST /api/btc/sat'] = deps.bitcoin.sat;
     routes['POST /api/btc/fee'] = deps.bitcoin.fee;
     routes['POST /api/btc/broadcast'] = deps.bitcoin.broadcast;
+    routes['GET /api/btc/deposit'] = deps.bitcoin.deposit;
+    routes['POST /api/btc/inscribe'] = deps.bitcoin.inscribe;
+    routes['GET /api/btc/inscribe'] = deps.bitcoin.inscribeList;
+    routes['POST /api/btc/inscribe/rebroadcast'] = deps.bitcoin.inscribeRebroadcast;
   }
   if (deps.originals) {
     routes['POST /api/originals'] = deps.originals.record;

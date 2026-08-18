@@ -52,6 +52,21 @@ export class HttpOrdinalsProvider implements OrdinalsProvider {
     return txid;
   }
 
+  /**
+   * The stranded-funds fix: one POST carries BOTH signed txs, and the server
+   * persists them before broadcasting — a dying tab can no longer orphan a
+   * broadcast commit. inscribe-on-sat.ts prefers this over two
+   * broadcastTransaction calls whenever a provider implements it.
+   */
+  async submitInscription(params: {
+    signedCommitHex: string;
+    revealTxHex: string;
+    fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey?: string };
+    changeAddress: string;
+  }): Promise<{ commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' }> {
+    return this.post('/api/btc/inscribe', params);
+  }
+
   // --- Not implemented (the sat-selected inscribe path never calls these). ---
   getInscriptionById(): Promise<never> {
     return Promise.reject(new Error('HttpOrdinalsProvider.getInscriptionById is not implemented in the browser demo.'));

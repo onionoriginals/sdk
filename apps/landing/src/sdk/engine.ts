@@ -27,11 +27,11 @@ import { DurableHostingStorageAdapter } from './durable-hosting-adapter';
 import { HttpOrdinalsProvider } from './http-ordinals-provider';
 import { TurnkeySatSigner } from './turnkey-sat-signer';
 import { userWebvhSlug } from '../auth/webvh';
-import { btcTestnetEnabled } from './testnet-flag';
+import { btcNetwork } from './network-flag';
 import type { TurnkeyBitcoinClient } from '../auth/turnkey-session';
 import { sha256 } from '@noble/hashes/sha2.js';
 
-export { btcTestnetEnabled } from './testnet-flag';
+export { btcNetwork, btcRealEnabled } from './network-flag';
 
 export type LayerId = 'did:cel' | 'did:webvh' | 'did:btco';
 
@@ -141,15 +141,16 @@ export class DemoEngine {
     // construction so it always points at the engine currently driving the UI.
     (globalThis as Record<string, unknown>).__originalsDemo = this;
     const keys = this.keys;
-    // Track B: when the deploy enables testnet4 signing, inscribe for real over
-    // the /api/btc/* QuickNode proxies on Bitcoin testnet4; otherwise keep the
-    // self-contained OrdMockProvider mock (regtest) unchanged.
-    const testnet = btcTestnetEnabled();
+    // Track B: when the deploy enables real signing (VITE_BTC_NETWORK=testnet4
+    // or mainnet), inscribe for real over the /api/btc/* QuickNode proxies;
+    // otherwise keep the self-contained OrdMockProvider mock (regtest).
+    const netFlag = btcNetwork();
+    const real = netFlag !== 'off';
     this.sdk = OriginalsSDK.create({
-      network: testnet ? 'testnet' : 'regtest',
+      network: netFlag === 'mainnet' ? 'mainnet' : netFlag === 'testnet4' ? 'testnet' : 'regtest',
       webvhNetwork: 'magby',
       defaultKeyType: 'Ed25519',
-      ordinalsProvider: testnet ? new HttpOrdinalsProvider() : new OrdMockProvider(),
+      ordinalsProvider: real ? new HttpOrdinalsProvider() : new OrdMockProvider(),
       // Signed-in users host DURABLY (persisted under their account, PUT
       // /api/originals/host/*); anonymous users keep the ephemeral TTL host
       // (PUT /api/host/*). Both make the did:webvh log resolvable over HTTP(S).
@@ -612,11 +613,14 @@ function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// The testnet4 block explorer link for a real inscription's reveal txid. Only
-// produced when testnet is enabled — a mock/regtest txid has no public explorer.
+// The block explorer link for a real inscription's reveal txid, on whichever
+// network the deploy enabled. A mock/regtest txid has no public explorer.
 export function btcoExplorerUrl(txid: string): string | undefined {
-  if (!btcTestnetEnabled() || !txid) return undefined;
-  return `https://mempool.space/testnet4/tx/${txid}`;
+  const net = btcNetwork();
+  if (net === 'off' || !txid) return undefined;
+  return net === 'mainnet'
+    ? `https://mempool.space/tx/${txid}`
+    : `https://mempool.space/testnet4/tx/${txid}`;
 }
 
 // The origin host we host did:webvh logs under. In the browser this is the

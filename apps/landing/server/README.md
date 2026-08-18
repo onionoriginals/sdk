@@ -51,10 +51,25 @@ Bitcoin testnet4 inscription (worthless tBTC):
    testnet4 faucet, and set `BTC_FAUCET_WIF` (the address's WIF) + `BTC_FAUCET_ADDRESS`.
    (Or use a Turnkey-org wallet via `BTC_FAUCET_WALLET_ID` instead of the WIF.)
    The faucet's confirmed UTXOs are read from mempool.space testnet4 — no add-on needed.
-3. **Browser flag:** set `VITE_BTC_TESTNET=1` and **rebuild** the SPA (`bun run build`)
-   — Vite bakes it at build time; a runtime-only change does nothing.
+3. **Browser flag:** set `VITE_BTC_NETWORK=testnet4` and **rebuild** the SPA
+   (`bun run build`) — Vite bakes it at build time; a runtime-only change does
+   nothing. (Legacy `VITE_BTC_TESTNET=1` still works as an alias.)
 4. Sign in → Create → Publish → Inscribe. The user's own Turnkey key signs the
    commit; the faucet funds it; the UI links the real tx on mempool.space/testnet4.
+
+Bitcoin **mainnet** inscription (creator-pays — real BTC):
+
+1. **QuickNode:** a mainnet endpoint **with the Ordinals & Runes add-on** →
+   `QUICKNODE_ENDPOINT`, and `BTC_NETWORK=mainnet`. No faucet vars — the faucet
+   route is not mounted on mainnet.
+2. **Browser flag:** `VITE_BTC_NETWORK=mainnet` + rebuild the SPA.
+3. Sign in → Create → Publish → the Inscribe step shows the user's own
+   Turnkey-derived `bc1q…` deposit address and the estimated cost. They send
+   BTC to it (from anywhere), wait for one confirmation, and inscribe: their
+   key signs the commit, their UTXO pays, change + the inscribed sat return to
+   their address. Signed commit+reveal pairs are persisted server-side BEFORE
+   broadcast (`POST /api/btc/inscribe`), so a dying tab can never strand
+   committed funds — `POST /api/btc/inscribe/rebroadcast` finishes them.
 
 Everything is gated: with any of the above absent, `/api/btc/*` is unmounted and
 the demo silently falls back to the mock path.

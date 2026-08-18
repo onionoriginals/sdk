@@ -21,6 +21,7 @@ import { getTurnkey } from './server/turnkey';
 import {
   createBitcoinRoutes,
   isBitcoinConfigured,
+  serverBtcNetwork,
   rawKeyFaucetSigner,
   turnkeyFaucetSigner,
   fetchFaucetUtxos,
@@ -29,6 +30,7 @@ import {
 } from './server/bitcoin';
 import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
+import { createInscriptionsStore } from './server/inscriptions-store';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
 import { isLikelyDeployed } from './server/deploy-env';
 
@@ -42,17 +44,32 @@ const hostStore = createWebvhHostStore();
 const originalsDataDir = process.env.ORIGINALS_DATA_DIR ?? './.originals-data';
 const originalsDataDirIsExplicit = !!process.env.ORIGINALS_DATA_DIR;
 const originalsStore = createOriginalsStore({ dataDir: originalsDataDir });
+// In-flight commit+reveal pairs persist next to the Originals (same data dir,
+// same JWT-sub namespacing) so a dead tab can never strand committed funds.
+const inscriptionsStore = createInscriptionsStore({ dataDir: originalsDataDir });
+
+// The server-side Bitcoin network (BTC_NETWORK=mainnet|testnet4, default
+// testnet4). The QuickNodeProvider verifies getblockchaininfo.chain against
+// this on first RPC (the CHAIN_TO_NETWORK guard from issue #350) and fails
+// loudly on a mismatch — the seatbelt against a wrong-network endpoint.
+const btcNet = serverBtcNetwork();
+const providerNetwork = btcNet === 'mainnet' ? 'mainnet' : 'testnet';
+// mempool.space REST base: free address/UTXO reads on both networks.
+const mempoolApi =
+  process.env.MEMPOOL_API ??
+  (btcNet === 'mainnet'
+    ? 'https://mempool.space/api'
+    : process.env.MEMPOOL_TESTNET4_API ?? 'https://mempool.space/testnet4/api');
 
 // QuickNode gives the ordinals-aware sat lookup + fee + broadcast. The faucet's
 // own confirmed UTXOs come from mempool.space's testnet4 address API (free, no
 // add-on needed) — see fetchFaucetUtxos in server/bitcoin.ts.
-function createFaucetProviderFromEnv(faucetAddress: string): FaucetProvider {
+function createFaucetProviderFromEnv(): FaucetProvider {
   const provider = new QuickNodeProvider({
     endpoint: process.env.QUICKNODE_ENDPOINT!,
-    expectedNetwork: 'testnet',
+    expectedNetwork: providerNetwork,
   }) as unknown as FaucetProvider;
-  const api = process.env.MEMPOOL_TESTNET4_API ?? 'https://mempool.space/testnet4/api';
-  provider.getSpendableUtxos = (address: string) => fetchFaucetUtxos({ api, address });
+  provider.getSpendableUtxos = (address: string) => fetchFaucetUtxos({ api: mempoolApi, address });
   return provider;
 }
 
@@ -67,31 +84,51 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
   const turnkey = getTurnkey();
   let bitcoin;
   if (isBitcoinConfigured()) {
-    // Pick the faucet signer: a raw testnet WIF (simplest) or a Turnkey-org wallet.
-    let faucetAddress = process.env.BTC_FAUCET_ADDRESS!;
-    let signFundingTx: FaucetTxSigner;
-    if (process.env.BTC_FAUCET_WIF) {
-      const signer = rawKeyFaucetSigner(process.env.BTC_FAUCET_WIF);
-      signFundingTx = signer.signFundingTx;
-      if (signer.address !== faucetAddress) {
-        console.warn(
-          `[landing] BTC_FAUCET_ADDRESS (${faucetAddress}) != the WIF's address (${signer.address}) — using the WIF's.`
-        );
-        faucetAddress = signer.address;
-      }
-      console.log('[landing] testnet4 inscription configured — /api/btc/* live (raw-key faucet)');
+    if (btcNet === 'mainnet') {
+      // Creator-pays mainnet: NO faucet — the creator deposits to their own
+      // Turnkey-derived bc1q address and the inscription spends their UTXO.
+      // The funding route is stripped entirely (not merely disabled).
+      const routes = createBitcoinRoutes({
+        jwtSecret,
+        provider: createFaucetProviderFromEnv(),
+        network: 'mainnet',
+        depositApi: mempoolApi,
+        inscriptions: inscriptionsStore,
+      });
+      bitcoin = { ...routes, funding: undefined };
+      console.log('[landing] MAINNET inscription configured — /api/btc/* live (creator-pays, no faucet)');
     } else {
-      signFundingTx = turnkeyFaucetSigner(turnkey, faucetAddress);
-      console.log('[landing] testnet4 inscription configured — /api/btc/* live (Turnkey-org faucet)');
+      // Pick the faucet signer: a raw testnet WIF (simplest) or a Turnkey-org wallet.
+      let faucetAddress = process.env.BTC_FAUCET_ADDRESS!;
+      let signFundingTx: FaucetTxSigner;
+      if (process.env.BTC_FAUCET_WIF) {
+        const signer = rawKeyFaucetSigner(process.env.BTC_FAUCET_WIF);
+        signFundingTx = signer.signFundingTx;
+        if (signer.address !== faucetAddress) {
+          console.warn(
+            `[landing] BTC_FAUCET_ADDRESS (${faucetAddress}) != the WIF's address (${signer.address}) — using the WIF's.`
+          );
+          faucetAddress = signer.address;
+        }
+        console.log('[landing] testnet4 inscription configured — /api/btc/* live (raw-key faucet)');
+      } else {
+        signFundingTx = turnkeyFaucetSigner(turnkey, faucetAddress);
+        console.log('[landing] testnet4 inscription configured — /api/btc/* live (Turnkey-org faucet)');
+      }
+      bitcoin = createBitcoinRoutes({
+        jwtSecret,
+        provider: createFaucetProviderFromEnv(),
+        faucet: { address: faucetAddress, signFundingTx },
+        faucetSats: Number(process.env.BTC_FAUCET_SATS ?? 20_000),
+        network: 'testnet',
+        depositApi: mempoolApi,
+        inscriptions: inscriptionsStore,
+      });
     }
-    bitcoin = createBitcoinRoutes({
-      jwtSecret,
-      provider: createFaucetProviderFromEnv(faucetAddress),
-      faucet: { address: faucetAddress, signFundingTx },
-      faucetSats: Number(process.env.BTC_FAUCET_SATS ?? 20_000),
-    });
   } else {
-    console.warn('[landing] testnet4 inscription disabled (QUICKNODE_ENDPOINT/BTC_FAUCET_* absent) — inscribe stays mock');
+    console.warn(
+      `[landing] ${btcNet} inscription disabled (QUICKNODE_ENDPOINT${btcNet === 'mainnet' ? '' : '/BTC_FAUCET_*'} absent) — inscribe stays mock`
+    );
   }
   const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore });
   return {
