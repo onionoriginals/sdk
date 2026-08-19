@@ -785,6 +785,41 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
   });
 });
 
+describe('persist-before-broadcast is load-bearing', () => {
+  /**
+   * The whole ordering guarantee in one assertion: the store write precedes
+   * the commit broadcast, so if persistence fails for ANY reason the commit
+   * must never go out. That is what makes the store's durability strictness
+   * safe — fsync failing closed (see inscriptions-store) can only ever cost a
+   * 500, never a real-BTC commit whose signed reveal was not written down.
+   */
+  test('a store write that fails means NOTHING is broadcast', async () => {
+    const h = harness();
+    const failing = {
+      ...h.store,
+      create() { throw new Error('EIO: directory fsync failed'); },
+    };
+    const routes = createBitcoinRoutes({
+      jwtSecret: JWT,
+      provider: {
+        broadcastTransaction: async (txHex: string) => { h.broadcasts.push(txHex); return 'f'.repeat(64); },
+        getTransactionStatus: async () => ({ confirmed: false }),
+        estimateFee: async () => 3,
+      } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'],
+      faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
+      inscriptions: failing,
+    });
+    const pair = buildPair();
+    const req = authedReq('/api/btc/inscribe', pair);
+    const res = await routes.inscribe(req, new URL(req.url));
+
+    expect(res.status).toBe(500);
+    expect((await res.json() as { error: string }).error).toBe('store_error');
+    // The funding UTXO is untouched: the creator can simply retry.
+    expect(h.broadcasts).toEqual([]);
+  });
+});
+
 describe('isAlreadyKnownTxError', () => {
   test('matches already-known rejections, not conflicts', () => {
     expect(isAlreadyKnownTxError(new Error('txn-already-in-mempool'))).toBe(true);
