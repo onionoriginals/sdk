@@ -2,28 +2,24 @@ import { file } from 'bun';
 import { normalize } from 'node:path';
 import { route, json, type Handler } from './router';
 import type { OriginalsRoutes } from './originals-routes';
+import {
+  resolveClientIp,
+  trustedProxyHops,
+  formatProxySample,
+  type SocketPeerSource,
+} from './client-ip';
 
 // Minimal surface buildFetch depends on; the real store (webvh-host.ts)
-// implements exactly these two methods. `handlePut` takes the resolved,
-// trustworthy client IP (Bun socket peer) for rate-limit keying — never a
-// client-supplied header, which is spoofable.
+// implements exactly these two methods. `handlePut` takes the resolved client
+// identity (client-ip.ts) for rate-limit keying — never a raw client-supplied
+// header, which is spoofable.
 export interface WebvhHostStore {
   handlePut(req: Request, url: URL, clientIp: string): Promise<Response>;
   read(url: URL): Response;
   serve(req: Request, url: URL): Response | null;
 }
 
-// Just the slice of Bun's Server we use: the real peer IP of the connection.
-interface BunServerLike {
-  requestIP?(req: Request): { address: string } | null;
-}
-
-// The rate-limit key: the actual socket peer IP, which a client cannot spoof.
-// (Behind a proxy this is the proxy's IP — coarse but fail-safe: a spoofed
-// X-Forwarded-For can no longer mint unlimited buckets.)
-function resolveClientIp(req: Request, server?: BunServerLike): string {
-  return server?.requestIP?.(req)?.address || 'local';
-}
+type BunServerLike = SocketPeerSource;
 
 // The application document is the one response that will hold a live signing
 // credential (and, on the browser-readable fallback, a plaintext authorship
@@ -100,32 +96,49 @@ export function buildFetch(deps: {
   distDir: string;
   // Durable per-user Originals (auth-gated). Present only when auth is configured.
   originals?: OriginalsRoutes | null;
+  // How many proxies sit in front of this process. Snapshotted at construction
+  // from TRUSTED_PROXY_HOPS; tests pass it explicitly.
+  trustedProxyHops?: number;
+  log?: (message: string) => void;
 }): (req: Request, server?: BunServerLike) => Promise<Response> {
   const { apiRoutes, hostStore, distDir, originals } = deps;
+  const hops = deps.trustedProxyHops ?? trustedProxyHops();
+  const log = deps.log ?? ((m: string) => console.log(m));
+  // One sample per process so the hop count can be checked against the live
+  // proxy (see client-ip.ts) without a debug endpoint or per-request logging.
+  let sampled = false;
+
   // Bun calls this with (request, server); server exposes the real peer IP.
   return async (req, server?: BunServerLike) => {
     const url = new URL(req.url);
     const path = url.pathname;
+
+    // ONE client identity per request, shared by every rate-limited route.
+    const clientIp = resolveClientIp(req, server, { hops });
+    if (!sampled && (hops > 0 || req.headers.get('x-forwarded-for') !== null)) {
+      sampled = true;
+      log(formatProxySample(req, clientIp, hops));
+    }
 
     // 1. WebVH host store (wildcard path — not expressible in the exact route
     // map). GET/HEAD read an object by key (adapter.get); PUT writes. Always
     // available (no auth required — Track A runs without secrets).
     if (path.startsWith('/api/host/')) {
       if (req.method === 'GET' || req.method === 'HEAD') return hostStore.read(url);
-      return hostStore.handlePut(req, url, resolveClientIp(req, server));
+      return hostStore.handlePut(req, url, clientIp);
     }
 
     // 1b. Durable per-user Originals hosting (auth-gated). Same wildcard shape,
     // but persisted and namespaced by the JWT sub.
     if (originals && path.startsWith('/api/originals/host/')) {
       if (req.method === 'GET' || req.method === 'HEAD') return originals.hostGet(req, url);
-      return originals.hostPut(req, url, resolveClientIp(req, server));
+      return originals.hostPut(req, url, clientIp);
     }
 
     // 2. All other /api/* — dispatch when configured, else a clear JSON 404
     // (matches main's behavior; never SPA-fallback /api/* to index.html).
     if (path === '/api' || path.startsWith('/api/')) {
-      if (apiRoutes) return route(req, apiRoutes);
+      if (apiRoutes) return route(req, apiRoutes, clientIp);
       return json(
         { error: 'Auth API not configured — set TURNKEY_* + JWT_SECRET on this service to enable Sign-in.' },
         404

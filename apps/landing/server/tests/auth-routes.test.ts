@@ -90,3 +90,60 @@ describe('auth-routes', () => {
     expect(res.status).toBe(400);
   });
 });
+
+// U7: the routes key on the client identity the server layer resolved (third
+// handler argument), never on a header they read themselves.
+describe('auth-routes client-identity keying', () => {
+  const url = (p: string) => new URL(`http://x${p}`);
+
+  test('send-otp buckets are per resolved client identity, not per header', async () => {
+    const { sendOtp } = createAuthRoutes({ turnkey: mockTurnkey(), sessions, jwtSecret: JWT_SECRET });
+    // Same client identity, a DIFFERENT spoofed header each time → one bucket.
+    let last: Response | undefined;
+    for (let i = 0; i < 6; i++) {
+      last = await sendOtp(
+        post('/api/auth/send-otp', { email: `a${i}@b.com` }, { 'x-forwarded-for': `9.9.9.${i}` }),
+        url('/api/auth/send-otp'),
+        '203.0.113.7'
+      );
+    }
+    expect(last!.status).toBe(429);
+    // A different client identity is unaffected.
+    const other = await sendOtp(
+      post('/api/auth/send-otp', { email: 'z@b.com' }, { 'x-forwarded-for': '9.9.9.0' }),
+      url('/api/auth/send-otp'),
+      '203.0.113.8'
+    );
+    expect(other.status).toBe(200);
+  });
+
+  test('the per-email limit still applies independently of the per-client limit', async () => {
+    const { sendOtp } = createAuthRoutes({ turnkey: mockTurnkey(), sessions, jwtSecret: JWT_SECRET });
+    // Five different client identities, one shared email → the email bucket trips.
+    let last: Response | undefined;
+    for (let i = 0; i < 6; i++) {
+      last = await sendOtp(
+        post('/api/auth/send-otp', { email: 'shared@b.com' }),
+        url('/api/auth/send-otp'),
+        `198.51.100.${i}`
+      );
+    }
+    expect(last!.status).toBe(429);
+  });
+
+  test('verify-otp is rate limited per client identity', async () => {
+    const { verifyOtp } = createAuthRoutes({ turnkey: mockTurnkey(), sessions, jwtSecret: JWT_SECRET });
+    const attempt = (ip: string) =>
+      verifyOtp(
+        post('/api/auth/verify-otp', { sessionId: 'nope', code: '123456' }),
+        url('/api/auth/verify-otp'),
+        ip
+      );
+    let last: Response | undefined;
+    for (let i = 0; i < 11; i++) last = await attempt('203.0.113.7');
+    expect(last!.status).toBe(429);
+    expect(last!.headers.get('Retry-After')).toBeTruthy();
+    // A different client still gets through.
+    expect((await attempt('203.0.113.9')).status).not.toBe(429);
+  });
+});

@@ -88,6 +88,10 @@ export function createOriginalsRoutes(deps: {
 }): OriginalsRoutes {
   const { store } = deps;
   const now = deps.now ?? (() => Date.now());
+  // 120 writes/min per resolved client identity (client-ip.ts) — never a raw
+  // X-Forwarded-For. A publish issues a handful of writes, so this is ~20
+  // publishes/min for one signed-in creator; the auth gate and the per-user
+  // namespace are the real bounds.
   const putLimiter = createRateLimiter({ limit: 120, windowMs: 60_000 });
 
   /** Authenticated subOrgId, or null (→ 401). */

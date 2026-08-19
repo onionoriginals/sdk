@@ -222,7 +222,13 @@ export function createBitcoinRoutes(deps: {
 } {
   const faucetSats = deps.faucetSats ?? 20_000;
   const now = deps.now ?? (() => Date.now());
-  const ipLimiter = createRateLimiter({ limit: 30, windowMs: 60_000 });
+  // Per-client burst cap. Sized against the real traffic shape, not a round
+  // number: the deposit screen polls every 15s (4/min) for as long as a creator
+  // is funding, and a NAT/office egress address is ONE client identity — at
+  // 30/min about seven concurrent creators would throttle each other off the
+  // money path. The cost bounds are the auth gate and the per-user quota cap
+  // below, so this only has to stop a single-address flood.
+  const ipLimiter = createRateLimiter({ limit: 120, windowMs: 60_000 });
   const userLimiter = createRateLimiter({ limit: 5, windowMs: 60 * 60_000 }); // 5 fundings / user / hour
   // Real-spend + QuickNode-quota routes get their own per-user caps: the cost
   // vector on mainnet is the user's BTC and our API quota, not the faucet.
@@ -320,13 +326,6 @@ export function createBitcoinRoutes(deps: {
     return null;
   }
 
-  // Best-effort IP key (behind the auth gate + per-user cap, which are the real
-  // protection). X-Forwarded-For is spoofable, so the per-user limiter keyed on
-  // the JWT `sub` — not this — is what bounds faucet abuse.
-  function clientIp(req: Request): string {
-    return req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'local';
-  }
-
   /** Returns the authenticated subOrgId, or null (→ 401). */
   function authSub(req: Request): string | null {
     const token = extractToken(req);
@@ -338,8 +337,11 @@ export function createBitcoinRoutes(deps: {
     }
   }
 
-  function rateLimited(req: Request): Response | null {
-    const rl = ipLimiter.check(clientIp(req));
+  // Keys on the identity the server layer resolved (client-ip.ts), NEVER on a
+  // header read here — that is what made this limit bypassable by rotating
+  // X-Forwarded-For. The per-user cap keyed on the JWT `sub` still bounds abuse.
+  function rateLimited(clientIp: string | undefined): Response | null {
+    const rl = ipLimiter.check(clientIp ?? 'local');
     if (!rl.allowed) {
       return json({ error: 'rate_limited' }, 429, {
         'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)),
@@ -348,10 +350,10 @@ export function createBitcoinRoutes(deps: {
     return null;
   }
 
-  const sat: Handler = async (req) => {
+  const sat: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req) ?? quotaCapped(sub);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
     const { txid, vout } = (await req.json().catch(() => ({}))) as { txid?: string; vout?: number };
     if (typeof txid !== 'string' || typeof vout !== 'number') return json({ error: 'bad_request' }, 400);
@@ -364,10 +366,10 @@ export function createBitcoinRoutes(deps: {
     }
   };
 
-  const fee: Handler = async (req) => {
+  const fee: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req) ?? quotaCapped(sub);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
     const { blocks } = (await req.json().catch(() => ({}))) as { blocks?: number };
     try {
@@ -381,10 +383,10 @@ export function createBitcoinRoutes(deps: {
     }
   };
 
-  const broadcast: Handler = async (req) => {
+  const broadcast: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req) ?? quotaCapped(sub);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
     const { txHex } = (await req.json().catch(() => ({}))) as { txHex?: string };
     if (typeof txHex !== 'string' || !/^(?:[0-9a-fA-F]{2})+$/.test(txHex)) return json({ error: 'bad_tx_hex' }, 400);
@@ -396,14 +398,14 @@ export function createBitcoinRoutes(deps: {
     }
   };
 
-  const funding: Handler = async (req) => {
+  const funding: Handler = async (req, _url, clientIp) => {
     // Creator-pays deploys (mainnet) have no faucet at all — the route is not
     // mounted there, and this guard keeps a miswired mount fail-closed.
     const faucet = deps.faucet;
     if (!faucet) return json({ error: 'faucet_unavailable' }, 404);
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req);
+    const limited = rateLimited(clientIp);
     if (limited) return limited;
 
     // Validate the address BEFORE consuming a per-user faucet slot — otherwise
@@ -509,10 +511,10 @@ export function createBitcoinRoutes(deps: {
    * QuickNode provider. Nothing is custodied: the address is derived from the
    * user's own Turnkey key.
    */
-  const deposit: Handler = async (req, url) => {
+  const deposit: Handler = async (req, url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req);
+    const limited = rateLimited(clientIp);
     if (limited) return limited;
     if (!deps.depositApi) return json({ error: 'deposit_unavailable' }, 503);
     const network = deps.network ?? 'testnet';
@@ -674,10 +676,10 @@ export function createBitcoinRoutes(deps: {
    * A reveal failure is still a 200 with status 'commit_broadcast': the reveal
    * is persisted and completes via rebroadcast — nothing is stranded.
    */
-  const inscribe: Handler = async (req) => {
+  const inscribe: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req);
+    const limited = rateLimited(clientIp);
     if (limited) return limited;
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
@@ -871,10 +873,10 @@ export function createBitcoinRoutes(deps: {
    *    after REVEAL_REBROADCAST_AFTER_MS is re-pushed from the persisted
    *    copy — a reveal evicted from the mempool has no other way back.
    */
-  const inscribeList: Handler = async (req) => {
+  const inscribeList: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req) ?? quotaCapped(sub);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
@@ -1024,10 +1026,10 @@ export function createBitcoinRoutes(deps: {
    * inscription from server state. Idempotent: an already-seen tx counts as
    * broadcast, and the reveal is checked against the chain first.
    */
-  const inscribeRebroadcast: Handler = async (req) => {
+  const inscribeRebroadcast: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(req) ?? quotaCapped(sub);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;

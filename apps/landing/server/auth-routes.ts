@@ -14,25 +14,30 @@ import { createRateLimiter } from './rate-limit';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function clientIp(req: Request): string {
-  return req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'local';
-}
-
 export function createAuthRoutes(deps: {
   turnkey: Turnkey;
   sessions: SessionStorage;
   jwtSecret: string;
 }): { sendOtp: Handler; verifyOtp: Handler; me: Handler; logout: Handler } {
-  // Per-IP and per-email limiters (README: throttle both).
+  // Per-client and per-email limiters (README: throttle both). `clientIp` is
+  // the identity the server layer resolved (client-ip.ts) — these routes never
+  // read X-Forwarded-For themselves, which is how the limit used to be
+  // bypassable by rotating it. Sending an OTP costs email reputation, so 5/min
+  // per client stands; the per-email bucket is what bounds one address being
+  // mailed from many clients.
   const ipLimiter = createRateLimiter({ limit: 5, windowMs: 60_000 });
   const emailLimiter = createRateLimiter({ limit: 5, windowMs: 60_000 });
+  // Hardening, not a hole: five failed codes destroy the pending session and
+  // minting one goes through the limiter above. 10/min leaves room for a
+  // fat-fingered retry while capping the automated grind.
+  const verifyLimiter = createRateLimiter({ limit: 10, windowMs: 60_000 });
 
-  const sendOtp: Handler = async (req) => {
+  const sendOtp: Handler = async (req, _url, clientIp) => {
     const { email } = (await req.json().catch(() => ({}))) as { email?: string };
     if (!email || !EMAIL_RE.test(email)) return json({ message: 'Invalid email format' }, 400);
 
     const normalized = email.trim().toLowerCase();
-    const ip = ipLimiter.check(clientIp(req));
+    const ip = ipLimiter.check(clientIp ?? 'local');
     const em = emailLimiter.check(normalized);
     if (!ip.allowed || !em.allowed) {
       const retryAfterMs = Math.max(ip.retryAfterMs, em.retryAfterMs);
@@ -50,7 +55,13 @@ export function createAuthRoutes(deps: {
     }
   };
 
-  const verifyOtp: Handler = async (req) => {
+  const verifyOtp: Handler = async (req, _url, clientIp) => {
+    const rl = verifyLimiter.check(clientIp ?? 'local');
+    if (!rl.allowed) {
+      return json({ message: 'Too many requests. Please try again later.' }, 429, {
+        'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)),
+      });
+    }
     const { sessionId, code, publicKey } = (await req.json().catch(() => ({}))) as {
       sessionId?: string;
       code?: string;

@@ -612,3 +612,40 @@ describe('one fee source for deposit estimate and inscribe (R3)', () => {
     for (const res of results) expect(res.status).toBe(200);
   });
 });
+
+// U7: the /api/btc/* burst limiter keys on the client identity the server layer
+// resolved, not on a header these routes read themselves (which was bypassable
+// by rotating X-Forwarded-For). Driven through `deposit` — the route the 15s
+// poll hits, and the only money-path route bounded by this limiter alone (no
+// per-user quota cap). It has no depositApi here, so 503 means "passed the
+// limiter" and 429 means "throttled".
+describe('bitcoin routes client-identity rate limiting', () => {
+  const poll = (r: ReturnType<typeof createBitcoinRoutes>, clientIp: string, xff: string) => {
+    const token = signToken('sub-1', 'a@b.com', undefined, { secret: JWT });
+    const url = new URL('http://host/api/btc/deposit?address=tb1qexample');
+    const req = new Request(url, {
+      headers: { cookie: serializeCookie(getAuthCookieConfig(token)), 'x-forwarded-for': xff },
+    });
+    return r.deposit(req, url, clientIp);
+  };
+
+  test('one client is throttled at the burst cap; a rotating header does not help', async () => {
+    const r = createBitcoinRoutes(deps());
+    let last: Response | undefined;
+    // 120/min per client — the 121st from the same identity is refused even
+    // though every request carries a different X-Forwarded-For.
+    for (let i = 0; i < 121; i++) last = await poll(r, '203.0.113.7', `9.9.9.${i % 256}`);
+    expect(last!.status).toBe(429);
+    expect((await last!.json()).error).toBe('rate_limited');
+    // A different client identity still has its own bucket.
+    expect((await poll(r, '203.0.113.8', '9.9.9.9')).status).toBe(503);
+  });
+
+  test('the cap leaves room for the 15s deposit poll from several NATed creators', async () => {
+    const r = createBitcoinRoutes(deps());
+    // 4 polls/min each, one shared egress address: ten creators must all pass.
+    let last: Response | undefined;
+    for (let i = 0; i < 40; i++) last = await poll(r, '198.51.100.1', '1.1.1.1');
+    expect(last!.status).toBe(503);
+  });
+});

@@ -36,7 +36,8 @@ beforeAll(() => {
 afterAll(() => rmSync(distDir, { recursive: true, force: true }));
 
 function makeFetch(apiRoutes: Record<string, Handler> | null) {
-  return buildFetch({ apiRoutes, hostStore: noopHostStore, distDir });
+  // hops pinned so these cases never depend on an ambient TRUSTED_PROXY_HOPS.
+  return buildFetch({ apiRoutes, hostStore: noopHostStore, distDir, trustedProxyHops: 0 });
 }
 
 describe('unified server buildFetch', () => {
@@ -78,7 +79,7 @@ describe('unified server buildFetch', () => {
     expect(res.status).toBe(501); // noopHostStore.handlePut
   });
 
-  test('host writes get the real socket IP (server.requestIP), not a client header', async () => {
+  test('with no trusted proxy, host writes key on the socket IP and ignore the header', async () => {
     let seenIp: string | undefined;
     const recordingStore = {
       async handlePut(_req: Request, _url: URL, clientIp: string) {
@@ -88,7 +89,7 @@ describe('unified server buildFetch', () => {
       read: () => json({ error: 'not_found' }, 404),
       serve: () => null as Response | null,
     };
-    const fetchFn = buildFetch({ apiRoutes: null, hostStore: recordingStore, distDir });
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: recordingStore, distDir, trustedProxyHops: 0 });
     const fakeServer = { requestIP: () => ({ address: '203.0.113.7' }) };
     await fetchFn(
       new Request('http://x/api/host/k', {

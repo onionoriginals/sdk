@@ -30,6 +30,12 @@ export function createWebvhHostStore(opts?: {
   const maxEntries = opts?.maxEntries ?? 500;
   const ttlMs = opts?.ttlMs ?? 30 * 60 * 1000; // 30 minutes
   const now = opts?.now ?? Date.now;
+  // 120 writes/min PER CLIENT (was per socket peer, i.e. one site-wide bucket
+  // behind the proxy — roughly twenty publishes/min for the whole site). One
+  // publish issues a handful of writes (DID log + CEL + resources), so this is
+  // ~20 publishes/min for a single visitor: generous for a human, still a cap
+  // on an unauthenticated flood, and the per-object size and entry caps below
+  // bound what those writes can cost.
   const limiter = createRateLimiter({
     limit: opts?.limit ?? 120,
     windowMs: opts?.windowMs ?? 60_000,
@@ -42,9 +48,11 @@ export function createWebvhHostStore(opts?: {
     for (const [k, e] of map) if (e.expiresAt <= t) map.delete(k);
   }
 
-  // `clientIp` is the resolved socket peer IP supplied by the server layer
-  // (app.ts `resolveClientIp`), NOT a client-supplied header — an X-Forwarded-For
-  // value is spoofable and would let one client mint unlimited rate-limit buckets.
+  // `clientIp` is the client identity the server layer resolved (client-ip.ts):
+  // the socket peer, or the address the trusted proxy hop appended. NEVER a raw
+  // X-Forwarded-For — that is spoofable and would let one client mint unlimited
+  // rate-limit buckets. Defaults to a single shared bucket if the server layer
+  // did not supply one, which fails closed rather than open.
   async function handlePut(req: Request, url: URL, clientIp = 'local'): Promise<Response> {
     if (req.method !== 'PUT') return json({ error: 'method_not_allowed' }, 405);
 
