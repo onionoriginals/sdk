@@ -185,28 +185,23 @@ export function createInscriptionsStore(opts: {
     }
     renameSync(tmp, path);
     // Persist the rename: fsync the directory (the POSIX idiom — open it
-    // read-only and fsync the fd). Failures split two ways and MUST be
-    // treated differently:
-    //  - "This platform cannot fsync a directory" (Windows and some
-    //    filesystems reject the open or the fsync with EPERM/EACCES/EISDIR/
-    //    ENOTSUP/EINVAL/EBADF): degrade to the rename-only guarantee — there
-    //    is nothing better available there.
-    //  - A REAL I/O failure (EIO, ENOSPC, …) on a platform that does support
-    //    it: the rename may never reach stable storage. That must PROPAGATE —
-    //    store.create throws, the route 500s, and the commit is never
-    //    broadcast against a recovery record that might evaporate on a crash.
-    try {
+    // read-only and fsync the fd). Gate on the PLATFORM, not on error codes:
+    // an error-code allowlist cannot distinguish "this platform cannot fsync
+    // a directory" from a genuine permission or I/O failure on a filesystem
+    // that supports it (EACCES/EPERM occur as both), and this write precedes
+    // a real-BTC broadcast — ambiguity must resolve to failing closed. POSIX
+    // platforms (the deployment target) support directory fsync, so EVERY
+    // failure there propagates: store.create throws, the route 500s, and the
+    // commit is never broadcast against a recovery record that might not
+    // survive a crash. Only Windows — where a directory genuinely cannot be
+    // opened for fsync — skips this and keeps the rename-only guarantee.
+    if (process.platform !== 'win32') {
       const dirFd = openSync(dirname(path), 'r');
       try {
         fsyncSync(dirFd);
       } finally {
         closeSync(dirFd);
       }
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code;
-      const unsupported = ['EPERM', 'EACCES', 'EISDIR', 'ENOTSUP', 'EOPNOTSUPP', 'EINVAL', 'EBADF'];
-      if (!code || !unsupported.includes(code)) throw e;
-      // Directory fsync unsupported here — best-effort platform degradation.
     }
   }
 
