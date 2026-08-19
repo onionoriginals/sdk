@@ -663,6 +663,55 @@ describe('GET /api/btc/inscribe', () => {
     expect(lookups).toBe(0); // dead rival skipped; confirmed record needs no check
   });
 
+  test('cursors are PER USER: interleaved polls from another user cannot re-starve a worklist', async () => {
+    const winnerCommit = '9a'.repeat(32);
+    const h = harness({ txStatus: (txid) => ({ confirmed: txid === winnerCommit }) });
+    const rec = (over: Partial<InscriptionRecord>): InscriptionRecord => ({
+      commitTxId: 'c'.repeat(64),
+      revealTxId: 'r'.repeat(64),
+      inscriptionId: `${'r'.repeat(64)}i0`,
+      signedCommitHex: '02aa',
+      revealTxHex: '02bb',
+      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      changeAddress: USER_ADDRESS,
+      status: 'signed',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      ...over,
+    });
+    // User A: 7 superseded pairs, only the OLDEST one's commit confirmed.
+    h.store.create('sub-1', rec({ commitTxId: winnerCommit, revealTxHex: '02ee', fundingOutpoint: 'win:0' }));
+    h.store.supersede('sub-1', winnerCommit);
+    for (let i = 0; i < 6; i++) {
+      const id = String(i).repeat(64).slice(0, 64);
+      h.store.create('sub-1', rec({ commitTxId: id, fundingOutpoint: `a${i}:0` }));
+      h.store.supersede('sub-1', id);
+    }
+    // User B: 2 superseded pairs, unconfirmed. With a SHARED cursor, B's
+    // interleaved poll would advance it by 2 — A's cursor residue would land
+    // back at 0 mod 7 (5 + 2 = 7) and A's winner would be starved forever.
+    for (let i = 0; i < 2; i++) {
+      const id = `b${i}`.repeat(32);
+      h.store.create('sub-2', rec({ commitTxId: id, fundingOutpoint: `b${i}:0` }));
+      h.store.supersede('sub-2', id);
+    }
+
+    const poll = async (sub: string) => {
+      const req = authedReq('/api/btc/inscribe', undefined, 'GET', sub);
+      const res = await h.routes.inscribeList(req, new URL(req.url));
+      return ((await res.json()) as { inscriptions: Array<{ commitTxId: string; status: string; superseded?: boolean }> }).inscriptions;
+    };
+
+    let rows = await poll('sub-1'); // A: budget on the 5 newest — winner untouched
+    expect(rows.find((r) => r.commitTxId === winnerCommit)!.superseded).toBe(true);
+    await poll('sub-2'); // B interleaves — must not perturb A's rotation
+    rows = await poll('sub-1'); // A again: starts where ITS OWN cursor left off
+    const winner = rows.find((r) => r.commitTxId === winnerCommit)!;
+    expect(winner.superseded).toBeUndefined();
+    expect(winner.status).toBe('reveal_broadcast');
+    expect(h.broadcasts).toEqual(['02ee']);
+  });
+
   test('a LIVE pair stuck at commit_broadcast is auto-completed once its commit confirms', async () => {
     const pair = buildPair();
     let failReveal = true;

@@ -212,14 +212,26 @@ export function createBitcoinRoutes(deps: {
   // 60s fee-estimate cache for the deposit poll (see the deposit handler).
   let feeCache: { at: number; rate: number } | null = null;
 
-  // Rotating scan-start cursors for the list poll's two reconciliation
-  // passes. Each processed item advances its cursor, so successive polls
-  // start further along the (stably ordered) worklist — a backlog larger
-  // than the per-poll lookup budget is still fully covered over a few polls
-  // instead of the same head items consuming the budget forever.
-  let supersededCursor = 0;
-  let stuckCursor = 0;
-  let confirmCursor = 0;
+  // Rotating scan-start cursors for the list poll's reconciliation passes.
+  // Each processed item advances the cursor, so successive polls start
+  // further along the (stably ordered) worklist — a backlog larger than the
+  // per-poll lookup budget is still fully covered over a few polls instead of
+  // the same head items consuming the budget forever. Cursors are PER USER:
+  // a shared cursor advanced by every user's differently sized worklist can
+  // hit a residue that lands the same subset for one user forever (e.g. user
+  // A consumes 5, an interleaved user B consumes 2, A's list length is 7 —
+  // A restarts at index 0 on every poll). In-process bookkeeping only, not
+  // durable state: losing it on restart merely restarts the rotation.
+  const reconcileCursors = new Map<string, { superseded: number; stuck: number; confirm: number }>();
+  function cursorsFor(sub: string): { superseded: number; stuck: number; confirm: number } {
+    let c = reconcileCursors.get(sub);
+    if (!c) {
+      if (reconcileCursors.size >= 10_000) reconcileCursors.clear(); // bound the map
+      c = { superseded: 0, stuck: 0, confirm: 0 };
+      reconcileCursors.set(sub, c);
+    }
+    return c;
+  }
   function rotate<T>(arr: T[], cursor: number): T[] {
     if (arr.length === 0) return arr;
     const start = cursor % arr.length;
@@ -699,6 +711,7 @@ export function createBitcoinRoutes(deps: {
     const confirmedOutpoints = new Set(
       newestFirst.filter((r) => r.status === 'confirmed').map((r) => r.fundingOutpoint)
     );
+    const cursors = cursorsFor(sub);
     const supersededPending = rotate(
       newestFirst.filter(
         (r) =>
@@ -706,7 +719,7 @@ export function createBitcoinRoutes(deps: {
           r.status !== 'confirmed' &&
           !confirmedOutpoints.has(r.fundingOutpoint)
       ),
-      supersededCursor
+      cursors.superseded
     );
     // Live pairs stuck at commit_broadcast (their reveal broadcast failed —
     // whether in the original submission, a rebroadcast, or after a reclaim):
@@ -714,18 +727,18 @@ export function createBitcoinRoutes(deps: {
     // automatically, so no state depends on the manual Finish button.
     const liveStuck = rotate(
       newestFirst.filter((r) => !r.superseded && r.status === 'commit_broadcast'),
-      stuckCursor
+      cursors.stuck
     );
     const liveUnconfirmed = rotate(
       newestFirst.filter((r) => !r.superseded && r.status === 'reveal_broadcast'),
-      confirmCursor
+      cursors.confirm
     );
     let lookups = 0;
     let changed = false;
     for (const r of supersededPending) {
       if (lookups >= 5) break;
       lookups++;
-      supersededCursor++;
+      cursors.superseded++;
       try {
         // ONE question decides a contested outpoint, whatever the pair's
         // stored status: did THIS pair's commit confirm? (A reveal can only
@@ -748,7 +761,7 @@ export function createBitcoinRoutes(deps: {
     for (const r of liveStuck) {
       if (lookups >= 5) break;
       lookups++;
-      stuckCursor++;
+      cursors.stuck++;
       try {
         const st = await provider.getTransactionStatus(r.commitTxId);
         if (!st?.confirmed) continue;
@@ -764,7 +777,7 @@ export function createBitcoinRoutes(deps: {
     for (const r of liveUnconfirmed) {
       if (lookups >= 5) break;
       lookups++;
-      confirmCursor++;
+      cursors.confirm++;
       try {
         const st = await provider.getTransactionStatus(r.revealTxId);
         if (st?.confirmed) {
