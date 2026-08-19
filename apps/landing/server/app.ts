@@ -25,6 +25,47 @@ function resolveClientIp(req: Request, server?: BunServerLike): string {
   return server?.requestIP?.(req)?.address || 'local';
 }
 
+// The application document is the one response that will hold a live signing
+// credential (and, on the browser-readable fallback, a plaintext authorship
+// seed), so it pins every executable origin to this one. The app already
+// commits to zero external runtime dependencies — self-hosted fonts, no CDNs,
+// no trackers — so 'self' IS the allowlist; the single third-party exception is
+// Turnkey's API, which the browser SDK calls directly. Deliberately unlike
+// untrustedHeaders() in webvh-host.ts: that policy (`default-src 'none';
+// sandbox`) is for bytes a stranger uploaded, and would blank this page.
+const DOCUMENT_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  // No 'unsafe-inline': the bundle ships no inline <style> and React applies
+  // style props through CSSOM, which CSP does not gate. Adding one would
+  // silently need this back — dev (vite) serves without a policy, so check a
+  // built page through this server, not `bun run dev`.
+  "style-src 'self'",
+  // data: for the two things the bundle genuinely inlines — the runtime-
+  // generated artwork <img> and vite's inlined woff faces. Never for script.
+  "img-src 'self' data:",
+  "font-src 'self' data:",
+  // Turnkey's API is the ONLY cross-origin destination: the browser SDK signs
+  // against it directly. did:webvh resolution is same-origin (the log lives on
+  // this host), and 'self' covers its https:// form on an http origin.
+  "connect-src 'self' https://api.turnkey.com",
+  "object-src 'none'",
+  "frame-src 'none'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+].join('; ');
+
+// nosniff alongside it: the policy is only worth what the content-type is, and
+// a sniffed response can execute under the wrong type.
+function documentHeaders(): Record<string, string> {
+  return {
+    'content-type': 'text/html; charset=utf-8',
+    'content-security-policy': DOCUMENT_CSP,
+    'x-content-type-options': 'nosniff',
+  };
+}
+
 async function serveStatic(url: URL, distDir: string): Promise<Response> {
   // Reject traversal on the DECODED path before normalize collapses `..`
   // segments (e.g. `%2f..%2f` → `/../` would otherwise normalize past root and
@@ -39,11 +80,14 @@ async function serveStatic(url: URL, distDir: string): Promise<Response> {
   if (rel.includes('..')) return new Response('Bad request', { status: 400 });
   const target = rel === '' ? 'index.html' : rel;
   const f = file(distDir + target);
-  if (await f.exists()) return new Response(f);
+  // Both branches can return the document (`/` and `/index.html` hit the first,
+  // every client-side route the second), so both must carry its headers. Other
+  // static assets keep the plain file response.
+  if (await f.exists()) {
+    return target === 'index.html' ? new Response(f, { headers: documentHeaders() }) : new Response(f);
+  }
   // SPA fallback: client-side routes have no file on disk.
-  return new Response(file(distDir + 'index.html'), {
-    headers: { 'content-type': 'text/html; charset=utf-8' },
-  });
+  return new Response(file(distDir + 'index.html'), { headers: documentHeaders() });
 }
 
 export function buildFetch(deps: {

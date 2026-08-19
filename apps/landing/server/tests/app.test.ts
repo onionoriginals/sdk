@@ -109,3 +109,71 @@ describe('unified server buildFetch', () => {
     expect(seenIp).toBe('local');
   });
 });
+
+// U6/8: the app document is the response that will hold a live signing
+// credential, so it must arrive with a policy — and both serveStatic branches
+// (real file, SPA fallback) must carry it, not just one.
+describe('SPA document security headers', () => {
+  const documentPaths = ['/', '/index.html', '/some/client/route'];
+
+  for (const path of documentPaths) {
+    test(`${path} carries a CSP that forbids third-party script origins`, async () => {
+      const res = await makeFetch(null)(new Request('http://x' + path));
+      expect(res.status).toBe(200);
+      const csp = res.headers.get('content-security-policy');
+      expect(csp).toBeTruthy();
+
+      // Parse into directives so the assertions are about policy, not string order.
+      const directives = new Map<string, string[]>(
+        csp!.split(';').map((d) => {
+          const [name, ...values] = d.trim().split(/\s+/);
+          return [name.toLowerCase(), values];
+        })
+      );
+
+      // Script may only come from this origin — no CDN, no 'unsafe-inline',
+      // no 'unsafe-eval', no wildcard, and no fallback to a loose default-src.
+      const script = directives.get('script-src');
+      expect(script).toEqual(["'self'"]);
+      expect(directives.get('default-src')).toEqual(["'self'"]);
+      expect(directives.get('object-src')).toEqual(["'none'"]);
+      expect(directives.get('base-uri')).toEqual(["'none'"]);
+      expect(directives.get('frame-ancestors')).toEqual(["'none'"]);
+
+      // The only permitted third-party network destination is Turnkey's API.
+      const connect = directives.get('connect-src')!;
+      expect(connect).toContain("'self'");
+      expect(connect.filter((s) => s !== "'self'")).toEqual(['https://api.turnkey.com']);
+
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(res.headers.get('content-type')).toContain('text/html');
+    });
+  }
+
+  test('no directive opens a blanket third-party origin', async () => {
+    const res = await makeFetch(null)(new Request('http://x/'));
+    const csp = res.headers.get('content-security-policy')!;
+    const sources = csp
+      .split(';')
+      .flatMap((d) => d.trim().split(/\s+/).slice(1))
+      .map((s) => s.toLowerCase());
+    // Wildcards and bare schemes would readmit every CDN in one token.
+    for (const wildcard of ['*', 'http:', 'https:', "'unsafe-eval'", "'unsafe-inline'"]) {
+      expect(sources).not.toContain(wildcard);
+    }
+    // data: is allowed only where the bundle needs it (inline woff/svg), never
+    // as a script source.
+    expect(csp).toContain("script-src 'self'");
+    for (const directive of csp.split(';').map((d) => d.trim())) {
+      if (directive.includes('data:')) {
+        expect(['img-src', 'font-src']).toContain(directive.split(/\s+/)[0]);
+      }
+    }
+  });
+
+  test('non-document static assets are not given the document policy', async () => {
+    const res = await makeFetch(null)(new Request('http://x/app.js'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toBeNull();
+  });
+});
