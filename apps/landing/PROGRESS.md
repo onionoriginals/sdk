@@ -16,7 +16,11 @@ blocked on the Bitcoin build plan and creator-app v1:
   “See one that already exists” link to `#example`; pipeline caption
   rewritten. Subhead unchanged: the critique’s replacement promises
   upload + publicly-checkable links that don’t exist yet.
-- **Nav**: “Live demo” → “Try it”; `nav.cta` → “Start” targeting `#demo`.
+- **Nav**: “Live demo” → “Try it”; `nav.cta` → “Start” targeting `#demo` —
+  and now actually rendered (it was dead config before): signed-out
+  visitors get Start as the primary nav button with Sign in demoted to a
+  quiet text button, plus Start atop the mobile menu; signed-in stays
+  identity-only per the existing design note (the CTA lives in the hero).
 - **Developers slimmed**: headline/subhead/bullets/install kept; the
   60-line quickstart + events snippet replaced by one line + a GitHub
   README link (snippets live there). `highlight.tsx` and the quickstart

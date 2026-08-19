@@ -126,6 +126,18 @@
   border-bottom: none;
 }
 
+/* Signed-out: quiet sign-in beside the primary Start CTA. */
+.nav-signin {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.nav-signin:hover {
+  color: var(--text-primary);
+}
+
 /* Signed-in: lightweight identity status only — the creation CTA lives in the hero. */
 .nav-auth {
   display: flex;
