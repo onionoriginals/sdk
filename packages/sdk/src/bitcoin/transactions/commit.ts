@@ -99,6 +99,14 @@ export interface CommitTransactionParams {
   metadata?: Record<string, unknown>;
   /** Optional pointer to target specific satoshi */
   pointer?: number;
+  /**
+   * Spend EXACTLY `utxos`, in the given order, instead of running selection.
+   * The sat-selected inscribe path needs this: ordinary selection sorts
+   * value-descending and stops at the target, so it can reorder or drop the
+   * caller's first UTXO — the one whose first sat becomes the did:btco
+   * identity. Fails closed (throws) if the set is unspendable or short.
+   */
+  exactUtxos?: boolean;
 }
 
 /**
@@ -363,7 +371,8 @@ export async function createCommitTransaction(
     network,
     minimumCommitAmount = MIN_DUST_LIMIT,
     metadata,
-    pointer
+    pointer,
+    exactUtxos = false
   } = params;
 
   // Validate inputs
@@ -432,6 +441,18 @@ export async function createCommitTransaction(
   // unsignable by @scure/btc-signer without nonWitnessUtxo.
   const validUtxos = unprotectedUtxos.filter(utxo => isSegwitScriptPubKey(utxo.scriptPubKey!));
   const legacyCount = unprotectedUtxos.length - validUtxos.length;
+
+  // Exact mode: silently narrowing the set is the failure this mode exists to
+  // prevent (a dropped first UTXO moves the DID sat), so refuse instead.
+  if (exactUtxos && validUtxos.length !== utxos.length) {
+    const kept = new Set(validUtxos.map(u => `${u.txid}:${u.vout}`));
+    const dropped = utxos.filter(u => !kept.has(`${u.txid}:${u.vout}`)).map(u => `${u.txid}:${u.vout}`);
+    throw new Error(
+      `exactUtxos: refusing to narrow the caller's funding set. ` +
+      `${dropped.length} of ${utxos.length} UTXO(s) are unspendable here (structurally invalid, ` +
+      `inscription-bearing/locked, or non-segwit): ${dropped.join(', ')}.`
+    );
+  }
 
   if (validUtxos.length === 0) {
     const invalidReasons: string[] = [];
@@ -590,6 +611,26 @@ export async function createCommitTransaction(
   const widestInputVBytes = Math.max(...validUtxos.map(u => inputVBytesForScriptPubKey(u.scriptPubKey)));
   const initialVBytes = Math.ceil(10.5 + widestInputVBytes + 43 + changeOutputVBytes);
   let targetAmount = commitOutputValue + Number(calculateFee(initialVBytes, feeRate));
+
+  if (exactUtxos) {
+    // No selection: the caller's set IS the input list, in the caller's order.
+    selectedUtxos = validUtxos;
+    totalInputValue = selectedUtxos.reduce((sum, u) => sum + u.value, 0);
+    estimatedFee = Number(calculateFee(estimateCommitTxSize(selectedUtxos, 2, changeOutputVBytes), feeRate));
+    if (totalInputValue - commitOutputValue - estimatedFee < MIN_DUST_LIMIT) {
+      // No change output — re-price at one output.
+      estimatedFee = Number(calculateFee(estimateCommitTxSize(selectedUtxos, 1, changeOutputVBytes), feeRate));
+    }
+    const requiredTotal = commitOutputValue + estimatedFee;
+    if (totalInputValue < requiredTotal) {
+      throw new Error(
+        `Insufficient funds. Need ${requiredTotal} sats for commit output (${commitOutputValue} sats) and fees ` +
+        `(${estimatedFee} sats) from the exact funding set. Available: ${totalInputValue} sats from ` +
+        `${selectedUtxos.length} UTXO(s).`
+      );
+    }
+    iteration = MAX_SELECTION_ITERATIONS; // skip the selection loop below
+  }
 
   while (iteration < MAX_SELECTION_ITERATIONS) {
     iteration++;

@@ -158,11 +158,21 @@ export interface InscribeOnBitcoinOptions {
   onAppendFailure?: AppendFailurePolicy;
   /** Fee rate for the inscription (sat/vB). */
   feeRate?: number;
-  /** Caller-selected funding UTXO whose first sat becomes the did:btco identity. */
+  /**
+   * Caller-selected funding UTXO whose first sat becomes the did:btco
+   * identity. Shorthand for a one-element `fundingUtxos`.
+   */
   fundingUtxo?: Utxo;
-  /** Signs the commit PSBT spending fundingUtxo. Required alongside fundingUtxo. */
+  /**
+   * Caller-selected funding UTXOs, in the order they are spent (R26 — a
+   * creator who deposited twice funds one inscription from several outputs).
+   * `fundingUtxos[0]` is the IDENTITY input: its first sat becomes the
+   * did:btco sat. Provide this OR `fundingUtxo`, not both.
+   */
+  fundingUtxos?: Utxo[];
+  /** Signs the commit PSBT spending the funding set. Required alongside it. */
   satSigner?: BitcoinSigner;
-  /** Change/reveal destination address. Required alongside fundingUtxo. */
+  /** Change/reveal destination address. Required alongside the funding set. */
   changeAddress?: string;
   /** Signs the asset's CEL `migrate` event (remote custody, plan 039). */
   signer?: OriginalsSigner;
@@ -2798,7 +2808,10 @@ export class LifecycleManager {
     const feeRate = options.feeRate;
     const stopTimer = this.logger.startTimer('inscribeOnBitcoin');
     const metricsStart = performance.now();
-    this.logger.info('Inscribing asset on Bitcoin', { assetId: asset.id, feeRate, satSelected: !!options.fundingUtxo });
+    // Normalize the funding surface once: `fundingUtxo` is one-element shorthand.
+    const fundingUtxos: Utxo[] | undefined =
+      options.fundingUtxos ?? (options.fundingUtxo ? [options.fundingUtxo] : undefined);
+    this.logger.info('Inscribing asset on Bitcoin', { assetId: asset.id, feeRate, satSelected: !!fundingUtxos });
     // Method-scoped so the outer catch can restore the pre-append log on any
     // failure after the append (in-memory only). Fires pre-broadcast (nothing
     // paid) AND post-broadcast — notably ORD_SATOSHI_UNKNOWN, where the
@@ -2815,10 +2828,17 @@ export class LifecycleManager {
       }
       // Sat-selected path (#369): inscribeOnSat needs both to build/sign the
       // commit spending fundingUtxo — reject early rather than half-validate.
-      if (options.fundingUtxo) {
+      if (options.fundingUtxo && options.fundingUtxos) {
+        throw new StructuredError('INVALID_INPUT',
+          'Provide fundingUtxo OR fundingUtxos, not both.');
+      }
+      if (fundingUtxos) {
+        if (fundingUtxos.length === 0) {
+          throw new StructuredError('INVALID_INPUT', 'fundingUtxos must name at least one funding UTXO.');
+        }
         if (!options.satSigner || !options.changeAddress) {
           throw new StructuredError('INVALID_INPUT',
-            'Sat-selected inscription requires satSigner and changeAddress alongside fundingUtxo.');
+            'Sat-selected inscription requires satSigner and changeAddress alongside the funding UTXO(s).');
         }
       }
       if (feeRate !== undefined) {
@@ -2954,8 +2974,8 @@ export class LifecycleManager {
     // revealTxHex. Rolling the migrate event back instead would desync the log
     // from an inscription that can still land (Greptile finding).
     let revealBroadcastError: StructuredError | undefined;
-    if (options.fundingUtxo) {
-      // Sat-selected path (#369): the caller picks the funding UTXO, the
+    if (fundingUtxos) {
+      // Sat-selected path (#369): the caller picks the funding UTXO(s), the
       // provider's sat index derives the DID sat, and the commit/reveal are
       // deterministically constructed to land on it. Fire-and-forget — no
       // post-broadcast re-check (the caller owns confirmation monitoring).
@@ -2998,7 +3018,7 @@ export class LifecycleManager {
       try {
         const result = await inscribeOnSat({
           buildContent: buildContentForSat,
-          fundingUtxo: options.fundingUtxo,
+          fundingUtxos,
           satSigner: options.satSigner!,
           changeAddress: options.changeAddress!,
           feeRate: effectiveFeeRate,

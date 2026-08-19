@@ -813,3 +813,49 @@ describe('createCommitTransaction', () => {
     });
   });
 });
+
+/**
+ * `exactUtxos` — the multi-input funding mode the sat-selected inscribe path
+ * needs (#R26). Ordinary selection sorts value-descending and stops as soon as
+ * the target is met, so it may REORDER or DROP the caller's first UTXO. On the
+ * inscribe path that UTXO carries the did:btco identity sat, so the caller's
+ * exact set, in the caller's exact order, must be spent or nothing at all.
+ */
+describe('createCommitTransaction — exactUtxos (multi-input funding)', () => {
+  const identity = { ...createUtxo(3_000, 0), txid: `${'1'.repeat(62)}00` };
+  const topUp = { ...createUtxo(80_000, 1), txid: `${'2'.repeat(62)}01` };
+
+  test('spends every provided UTXO, in the provided order, with the identity input pinned first', async () => {
+    const result = await createCommitTransaction(
+      createCommitParams({ utxos: [identity, topUp], exactUtxos: true })
+    );
+    expect(result.selectedUtxos.map((u) => `${u.txid}:${u.vout}`)).toEqual([
+      `${identity.txid}:${identity.vout}`,
+      `${topUp.txid}:${topUp.vout}`
+    ]);
+    expect(result.commitPsbt.inputsLength).toBe(2);
+  });
+
+  test('WITHOUT exactUtxos, selection is free to drop the caller-pinned first UTXO', async () => {
+    // Documents exactly why exactUtxos exists: minimize_inputs picks the big
+    // one and never spends the identity UTXO at all.
+    const result = await createCommitTransaction(
+      createCommitParams({ utxos: [identity, topUp] })
+    );
+    expect(result.selectedUtxos.some((u) => u.txid === identity.txid)).toBe(false);
+  });
+
+  test('fails closed when the exact set cannot cover the commit output plus fee', async () => {
+    const tiny = { ...createUtxo(700, 2), txid: `${'3'.repeat(62)}02` };
+    await expect(
+      createCommitTransaction(createCommitParams({ utxos: [tiny], exactUtxos: true, feeRate: 50 }))
+    ).rejects.toThrow(/Insufficient funds/);
+  });
+
+  test('refuses rather than silently narrowing when a provided UTXO is unspendable', async () => {
+    const inscribed: Utxo = { ...createUtxo(80_000, 3), txid: `${'4'.repeat(62)}03`, inscriptions: ['abc'] as any };
+    await expect(
+      createCommitTransaction(createCommitParams({ utxos: [identity, inscribed], exactUtxos: true }))
+    ).rejects.toThrow(/exact/i);
+  });
+});

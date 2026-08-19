@@ -75,7 +75,15 @@ export interface OrdinalsProvider {
   submitInscription?(params: {
     signedCommitHex: string;
     revealTxHex: string;
-    fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey?: string };
+    /**
+     * Every funding UTXO the commit spends, in input order. `[0]` is the
+     * identity input (its first sat is the did:btco sat). An implementation
+     * that persists for recovery must claim ALL of these, not just the first:
+     * two pairs with overlapping-but-unequal sets both spend the overlap.
+     */
+    fundingUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey?: string }>;
+    /** Legacy singular mirror of `fundingUtxos[0]`, for pre-multi-input implementations. */
+    fundingUtxo?: { txid: string; vout: number; value: number; scriptPubKey?: string };
     changeAddress: string;
   }): Promise<{ commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' }>;
   getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }>;

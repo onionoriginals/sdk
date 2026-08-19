@@ -19,6 +19,7 @@ import { isValidBitcoinAddress } from '@originals/sdk';
 import { json, type Handler } from './router';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
+import { outpointsOf } from './inscriptions-store';
 import type { InscriptionsStore, InscriptionRecord } from './inscriptions-store';
 
 /** The server-side network flag: BTC_NETWORK=mainnet|testnet4 (default testnet4). */
@@ -512,14 +513,36 @@ export function createBitcoinRoutes(deps: {
         feeCache = { at: now(), rate: feeRate };
       } catch { /* floor */ }
     }
-    // Commit ≈ 153 vB (P2WPKH input, P2TR commit output, P2WPKH change) and
-    // reveal ≈ 111 vB + the witness-discounted envelope (content + ~300 bytes
-    // of tags/script overhead) — the same shape commit.ts estimates precisely
-    // once the content exists. 1.5× buffer absorbs a fee move between the
-    // deposit and the broadcast; postage rides on top.
-    const commitVB = 153;
+    // Commit ≈ 85 vB of fixed shape (overhead + P2TR commit output + P2WPKH
+    // change) plus 68 vB PER P2WPKH input, and reveal ≈ 111 vB + the
+    // witness-discounted envelope (content + ~300 bytes of tags/script
+    // overhead) — the same shape commit.ts estimates precisely once the
+    // content exists. 1.5× buffer absorbs a fee move between the deposit and
+    // the broadcast; postage rides on top.
+    const COMMIT_BASE_VB = 85;
+    const COMMIT_INPUT_VB = 68;
     const revealVB = 111 + Math.ceil((contentBytes + 300) / 4);
-    const estimatedCostSats = Math.ceil(feeRate * (commitVB + revealVB) * 1.5) + 546;
+    const costFor = (inputs: number) =>
+      Math.ceil(feeRate * (COMMIT_BASE_VB + COMMIT_INPUT_VB * inputs + revealVB) * 1.5) + 546;
+    // The quote must price the inputs the creator will ACTUALLY spend (R26): a
+    // flat one-input figure under-quotes the moment a second UTXO is needed,
+    // which lands them back in the shortfall this route exists to prevent.
+    // Walk the same largest-first order the client selects in, re-checking the
+    // (rising) target as each input is added.
+    let inputCount = 1;
+    if (confirmedUtxos.length > 0) {
+      const largestFirst = [...confirmedUtxos].sort((a, b) => b.value - a.value);
+      let sum = 0;
+      let used = 0;
+      for (const u of largestFirst) {
+        sum += u.value;
+        used++;
+        if (sum >= costFor(used)) break;
+      }
+      // Still short: the creator tops up, and that top-up is one more input.
+      inputCount = sum >= costFor(used) ? used : used + 1;
+    }
+    const estimatedCostSats = costFor(inputCount);
 
     return json({
       address,
@@ -577,13 +600,12 @@ export function createBitcoinRoutes(deps: {
    * pair is actually the one on the network (confirmed commit, or a
    * successful re-broadcast of its txs).
    */
-  function reclaimOutpoint(
-    store: InscriptionsStore,
-    sub: string,
-    rec: { commitTxId: string; fundingOutpoint: string }
-  ): void {
-    const rival = store.findByOutpoint(sub, rec.fundingOutpoint);
-    if (rival && rival.commitTxId !== rec.commitTxId) store.supersede(sub, rival.commitTxId);
+  function reclaimOutpoint(store: InscriptionsStore, sub: string, rec: InscriptionRecord): void {
+    // Every outpoint this pair spends, not just the identity one: a rival that
+    // overlaps on ANY input conflicts with it on the network.
+    for (const rival of store.findByOutpoints(sub, outpointsOf(rec))) {
+      if (rival.commitTxId !== rec.commitTxId) store.supersede(sub, rival.commitTxId);
+    }
     store.reinstate(sub, rec.commitTxId);
   }
 
@@ -608,10 +630,14 @@ export function createBitcoinRoutes(deps: {
     const bodyText = await readBodyCapped(req, MAX_INSCRIBE_BODY_BYTES);
     if (bodyText === null) return json({ error: 'payload_too_large' }, 413);
 
+    type DeclaredUtxo = { txid?: string; vout?: number; value?: number };
     let body: {
       signedCommitHex?: string;
       revealTxHex?: string;
-      fundingUtxo?: { txid?: string; vout?: number; value?: number };
+      /** Every funding UTXO the commit spends, in input order. */
+      fundingUtxos?: DeclaredUtxo[];
+      /** LEGACY singular shape — still posted by a cached browser bundle. */
+      fundingUtxo?: DeclaredUtxo;
       changeAddress?: string;
     };
     try {
@@ -619,29 +645,44 @@ export function createBitcoinRoutes(deps: {
     } catch {
       return json({ error: 'bad_request' }, 400);
     }
-    const { signedCommitHex, revealTxHex, fundingUtxo, changeAddress } = body;
+    const { signedCommitHex, revealTxHex, changeAddress } = body;
+    const declared: DeclaredUtxo[] = Array.isArray(body.fundingUtxos)
+      ? body.fundingUtxos
+      : body.fundingUtxo
+        ? [body.fundingUtxo]
+        : [];
     const hexRe = /^(?:[0-9a-fA-F]{2})+$/;
     if (
       typeof signedCommitHex !== 'string' || !hexRe.test(signedCommitHex) ||
       typeof revealTxHex !== 'string' || !hexRe.test(revealTxHex) ||
-      !fundingUtxo || typeof fundingUtxo.txid !== 'string' || typeof fundingUtxo.vout !== 'number' ||
+      declared.length === 0 ||
+      declared.some((u) => !u || typeof u.txid !== 'string' || typeof u.vout !== 'number') ||
       typeof changeAddress !== 'string' || !changeAddress
     ) {
       return json({ error: 'bad_request' }, 400);
     }
+    const outpoints = declared.map((u) => `${u.txid!.toLowerCase()}:${u.vout!}`);
+    if (new Set(outpoints).size !== outpoints.length) {
+      return json({ error: 'bad_request', message: 'Duplicate funding outpoint.' }, 400);
+    }
 
     // Re-check the SDK's step-5b invariants: the commit must spend EXACTLY the
-    // declared funding outpoint (one input) with at most two outputs (commit
-    // output + optional change), and the reveal must spend the commit's vout 0.
+    // declared funding set, IN ORDER (the did:btco sat is the first sat of
+    // input 0, so a reordered input moves the identity), with at most two
+    // outputs (commit output + optional change), and the reveal must spend the
+    // commit's vout 0.
     const commit = parseRawTx(signedCommitHex);
     if (!commit) return json({ error: 'bad_commit_tx' }, 400);
-    if (commit.inputsLength !== 1 || commit.outputsLength < 1 || commit.outputsLength > 2) {
-      return json({ error: 'commit_invariant_violation', message: 'Commit must have exactly 1 input and 1-2 outputs.' }, 400);
+    if (commit.inputsLength !== outpoints.length || commit.outputsLength < 1 || commit.outputsLength > 2) {
+      return json({ error: 'commit_invariant_violation', message: 'Commit must spend exactly the declared funding UTXOs and have 1-2 outputs.' }, 400);
     }
-    const commitInput = commit.getInput(0);
-    const commitInputTxid = commitInput.txid ? hex.encode(commitInput.txid).toLowerCase() : '';
-    if (commitInputTxid !== fundingUtxo.txid.toLowerCase() || commitInput.index !== fundingUtxo.vout) {
-      return json({ error: 'commit_invariant_violation', message: 'Commit input does not spend the declared funding UTXO.' }, 400);
+    const inputsMatch = outpoints.every((expected, i) => {
+      const input = commit.getInput(i);
+      const txid = input.txid ? hex.encode(input.txid).toLowerCase() : '';
+      return `${txid}:${input.index}` === expected;
+    });
+    if (!inputsMatch) {
+      return json({ error: 'commit_invariant_violation', message: 'Commit inputs do not match the declared funding UTXOs (in order).' }, 400);
     }
     const commitTxId = commit.id;
 
@@ -683,9 +724,21 @@ export function createBitcoinRoutes(deps: {
     // the old commit is already CONFIRMED on-chain, superseding is refused:
     // the outpoint is genuinely spent, and the old pair's reveal (via
     // rebroadcast) is the one true recovery path.
-    const outpoint = `${fundingUtxo.txid.toLowerCase()}:${fundingUtxo.vout}`;
-    const existing = store.findByOutpoint(sub, outpoint);
-    if (existing && existing.commitTxId !== commitTxId) {
+    // With multi-input funding the claim is a SET: any live record sharing any
+    // declared outpoint conflicts. Only an EXACT set match can be superseded —
+    // an overlapping-but-unequal set has no safe replacement (the rebuilt pair
+    // would not conflict with the old one on every input, so both could land
+    // and one reveal would be stranded).
+    const rivals = store.findByOutpoints(sub, outpoints).filter((r) => r.commitTxId !== commitTxId);
+    const sameSet = (r: InscriptionRecord) => {
+      const theirs = outpointsOf(r);
+      return theirs.length === outpoints.length && theirs.every((o) => outpoints.includes(o));
+    };
+    if (rivals.length > 1 || (rivals.length === 1 && !sameSet(rivals[0]))) {
+      return json({ error: 'outpoint_pending', commitTxId: rivals[0].commitTxId }, 409);
+    }
+    const existing = rivals[0];
+    if (existing) {
       if (existing.status !== 'signed') {
         return json({ error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
       }
@@ -712,7 +765,7 @@ export function createBitcoinRoutes(deps: {
       inscriptionId: `${revealTxId}i0`,
       signedCommitHex,
       revealTxHex,
-      fundingOutpoint: outpoint,
+      fundingOutpoints: outpoints,
       changeAddress,
       status: 'signed',
       createdAt: at,
@@ -784,14 +837,16 @@ export function createBitcoinRoutes(deps: {
     // land — so it is excluded from reconciliation instead of costing a
     // pointless provider lookup on every poll for the rest of time.
     const confirmedOutpoints = new Set(
-      newestFirst.filter((r) => r.status === 'confirmed').map((r) => r.fundingOutpoint)
+      newestFirst.filter((r) => r.status === 'confirmed').flatMap(outpointsOf)
     );
+    // Any single spent input is enough to kill a rival commit for good.
+    const isDead = (r: InscriptionRecord) => outpointsOf(r).some((o) => confirmedOutpoints.has(o));
     const cursors = cursorsFor(sub);
     // Terminally-dead superseded pairs still holding hex: retire them (drop
     // the recovery artifacts, keep the row) so they stop counting against the
     // user's pending cap and stop costing disk. Costs no provider lookup.
     for (const r of newestFirst) {
-      if (r.superseded && !r.retired && r.revealTxHex && confirmedOutpoints.has(r.fundingOutpoint)) {
+      if (r.superseded && !r.retired && r.revealTxHex && isDead(r)) {
         store.retire(sub, r.commitTxId);
         changed = true;
       }
@@ -803,7 +858,7 @@ export function createBitcoinRoutes(deps: {
           r.status !== 'confirmed' &&
           !r.retired &&
           !!r.revealTxHex &&
-          !confirmedOutpoints.has(r.fundingOutpoint)
+          !isDead(r)
       ),
       cursors.superseded
     );
@@ -896,7 +951,9 @@ export function createBitcoinRoutes(deps: {
       commitTxId: r.commitTxId,
       revealTxId: r.revealTxId,
       inscriptionId: r.inscriptionId,
-      fundingOutpoint: r.fundingOutpoint,
+      // Singular stays the IDENTITY outpoint so existing clients keep working.
+      fundingOutpoint: outpointsOf(r)[0],
+      fundingOutpoints: outpointsOf(r),
       status: r.status,
       ...(r.superseded ? { superseded: true } : {}),
       createdAt: r.createdAt,

@@ -40,8 +40,20 @@ export interface InscriptionRecord {
    * the record is retired.
    */
   revealTxHex?: string;
-  /** `${txid}:${vout}` of the funding UTXO the commit spends. */
-  fundingOutpoint: string;
+  /**
+   * Every `${txid}:${vout}` the commit spends, in input order. `[0]` is the
+   * IDENTITY outpoint (its first sat is the did:btco sat). A record CLAIMS all
+   * of them: two pairs with overlapping-but-unequal sets would both spend the
+   * overlap, and the loser's reveal is stranded.
+   */
+  fundingOutpoints: string[];
+  /**
+   * LEGACY single-outpoint shape, still present in records written to the live
+   * volume before multi-input funding. Read-only: normalized into
+   * `fundingOutpoints` on load, and mirrored on write so an older reader (and
+   * the /me response shape) keeps working.
+   */
+  fundingOutpoint?: string;
   changeAddress: string;
   status: InscriptionStatus;
   /**
@@ -107,6 +119,12 @@ export interface InscriptionsStore {
   /** The LIVE (non-superseded) record whose commit spends this `${txid}:${vout}` outpoint. */
   findByOutpoint(subOrgId: string, outpoint: string): InscriptionRecord | null;
   /**
+   * Every LIVE record claiming ANY of these outpoints — the double-spend gate.
+   * A single-outpoint lookup would wave through a second pair whose input set
+   * merely OVERLAPS a live one, and both would spend the shared UTXO.
+   */
+  findByOutpoints(subOrgId: string, outpoints: string[]): InscriptionRecord[];
+  /**
    * ALL users' records that still hold un-landed recovery artifacts and are
    * older than `olderThanMs` — the monitoring sweep, so stranded states can't
    * silently accumulate. Read-only; acting on them stays with the per-user
@@ -139,6 +157,28 @@ function isPending(r: InscriptionRecord): boolean {
   return !r.retired && !!r.revealTxHex;
 }
 
+/**
+ * The outpoints a record claims, reading the legacy single-outpoint shape.
+ * Exported because the routes reason about claims too (reconciliation,
+ * supersede) and must see the same set the store does.
+ */
+export function outpointsOf(r: InscriptionRecord): string[] {
+  if (Array.isArray(r.fundingOutpoints) && r.fundingOutpoints.length > 0) return r.fundingOutpoints;
+  return r.fundingOutpoint ? [r.fundingOutpoint] : [];
+}
+
+/**
+ * Normalize a record read off disk into the current shape. Records written
+ * before multi-input funding carry only `fundingOutpoint`; the live volume
+ * holds real recovery artifacts in that shape, so they are upgraded on read
+ * rather than orphaned.
+ */
+function normalize(r: InscriptionRecord): InscriptionRecord {
+  const outpoints = outpointsOf(r);
+  if (r.fundingOutpoints === outpoints && r.fundingOutpoint === outpoints[0]) return r;
+  return { ...r, fundingOutpoints: outpoints, fundingOutpoint: outpoints[0] };
+}
+
 export function createInscriptionsStore(opts: {
   dataDir: string;
   /** Hard ceiling on rows per user (retired rows are evicted oldest-first to make room). */
@@ -158,7 +198,7 @@ export function createInscriptionsStore(opts: {
   function readAll(subOrgId: string): InscriptionRecord[] {
     const path = subFile(opts.dataDir, 'inscriptions', subOrgId);
     if (!existsSync(path)) return [];
-    return JSON.parse(readFileSync(path, 'utf8')) as InscriptionRecord[];
+    return (JSON.parse(readFileSync(path, 'utf8')) as InscriptionRecord[]).map(normalize);
   }
 
   // Atomic AND durable write (write → fsync → rename → fsync dir): this file
@@ -232,7 +272,7 @@ export function createInscriptionsStore(opts: {
         if (drop.size === 0) throw new Error('STORE_FULL');
         for (let i = recs.length - 1; i >= 0; i--) if (drop.has(recs[i].commitTxId)) recs.splice(i, 1);
       }
-      recs.push(rec);
+      recs.push(normalize(rec));
       writeAll(subOrgId, recs);
     },
     supersede(subOrgId, commitTxId) {
@@ -283,7 +323,11 @@ export function createInscriptionsStore(opts: {
       return readAll(subOrgId);
     },
     findByOutpoint(subOrgId, outpoint) {
-      return readAll(subOrgId).find((r) => r.fundingOutpoint === outpoint && !r.superseded) ?? null;
+      return readAll(subOrgId).find((r) => !r.superseded && outpointsOf(r).includes(outpoint)) ?? null;
+    },
+    findByOutpoints(subOrgId, outpoints) {
+      const wanted = new Set(outpoints);
+      return readAll(subOrgId).filter((r) => !r.superseded && outpointsOf(r).some((o) => wanted.has(o)));
     },
     sweepStale(olderThanMs) {
       const dir = join(opts.dataDir, 'inscriptions');

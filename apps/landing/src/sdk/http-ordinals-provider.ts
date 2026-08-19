@@ -61,7 +61,10 @@ export class HttpOrdinalsProvider implements OrdinalsProvider {
   async submitInscription(params: {
     signedCommitHex: string;
     revealTxHex: string;
-    fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey?: string };
+    /** Every funding UTXO the commit spends, in input order ([0] is the identity input). */
+    fundingUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey?: string }>;
+    /** Legacy singular mirror of fundingUtxos[0] — an older server reads this. */
+    fundingUtxo?: { txid: string; vout: number; value: number; scriptPubKey?: string };
     changeAddress: string;
   }): Promise<{ commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' }> {
     return this.post('/api/btc/inscribe', params);

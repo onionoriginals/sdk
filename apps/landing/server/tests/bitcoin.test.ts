@@ -164,6 +164,47 @@ describe('GET /api/btc/deposit (creator-pays)', () => {
     expect(body.estimatedCostSats).toBeLessThan(100_000);
   });
 
+  /**
+   * R26 — the quote must track the number of inputs the creator will actually
+   * spend. A flat one-input commit vsize under-quotes the moment a second UTXO
+   * is selected, which drops the creator back into the shortfall state.
+   */
+  test('the quoted cost accounts for the number of inputs actually selected', async () => {
+    async function quote(utxos: Array<{ txid: string; vout: number; value: number }>) {
+      const r = createBitcoinRoutes(depositDeps(utxos.map((u) => ({ ...u, status: { confirmed: true } }))));
+      const req = depositReq(MAINNET_ADDRESS);
+      const res = await r.deposit(req, new URL(req.url));
+      return (await res.json()) as { estimatedCostSats: number; confirmedUtxos: Array<{ value: number }> };
+    }
+
+    // One UTXO fat enough to fund the whole thing on its own: a one-input commit.
+    const one = await quote([{ txid: 'a'.repeat(64), vout: 0, value: 400_000 }]);
+    // Two UTXOs, neither sufficient alone: a two-input commit.
+    const two = await quote([
+      { txid: 'b'.repeat(64), vout: 0, value: 6_000 },
+      { txid: 'c'.repeat(64), vout: 0, value: 6_000 },
+    ]);
+
+    // One extra P2WPKH input is 68 vB; at 3 sat/vB (fakeProvider) with the
+    // 1.5x buffer that is exactly 306 sats more.
+    expect(two.estimatedCostSats - one.estimatedCostSats).toBe(306);
+    // And the quote is honest: the two UTXOs really do cover it.
+    expect(two.confirmedUtxos.reduce((n, u) => n + u.value, 0)).toBeGreaterThanOrEqual(two.estimatedCostSats);
+
+    // A third input costs another 306.
+    const three = await quote([
+      { txid: 'd'.repeat(64), vout: 0, value: 4_000 },
+      { txid: 'e'.repeat(64), vout: 0, value: 4_000 },
+      { txid: 'f'.repeat(64), vout: 0, value: 4_000 },
+    ]);
+    expect(three.estimatedCostSats - two.estimatedCostSats).toBe(306);
+
+    // An empty address quotes the single-input cost — the creator has yet to
+    // deposit, and the first deposit is one input.
+    const none = await quote([]);
+    expect(none.estimatedCostSats).toBe(one.estimatedCostSats);
+  });
+
   test('rejects a testnet address on mainnet', async () => {
     const r = createBitcoinRoutes(depositDeps([]));
     const req = depositReq('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx');
@@ -327,7 +368,7 @@ describe('GET /api/btc/deposit — ownership binding and ordinal safety', () => 
       inscriptionId: `${revealTxId}i0`,
       signedCommitHex: '02aa',
       revealTxHex: '02bb',
-      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      fundingOutpoints: [`${'a'.repeat(64)}:0`],
       changeAddress: MAINNET_ADDRESS,
       status: 'reveal_broadcast',
       createdAt: '2026-08-01T00:00:00.000Z',
