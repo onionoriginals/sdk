@@ -481,6 +481,23 @@ export function createBitcoinRoutes(deps: {
   }
 
   /**
+   * Make `rec` the live pair for its funding outpoint: retire the current
+   * rival (its commit conflicts with rec's, so at most one can ever land) and
+   * clear rec's superseded flag. Used whenever evidence shows a superseded
+   * pair is actually the one on the network (confirmed commit, or a
+   * successful re-broadcast of its txs).
+   */
+  function reclaimOutpoint(
+    store: InscriptionsStore,
+    sub: string,
+    rec: { commitTxId: string; fundingOutpoint: string }
+  ): void {
+    const rival = store.findByOutpoint(sub, rec.fundingOutpoint);
+    if (rival && rival.commitTxId !== rec.commitTxId) store.supersede(sub, rival.commitTxId);
+    store.reinstate(sub, rec.commitTxId);
+  }
+
+  /**
    * POST /api/btc/inscribe — the stranded-funds fix. Accepts the SIGNED commit
    * and reveal, re-checks the SDK's step-5b invariants server-side (a client
    * bug must not broadcast a bad tx through our proxy), persists both txs
@@ -650,40 +667,61 @@ export function createBitcoinRoutes(deps: {
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
     let records = store.list(sub);
-    // Bound the per-request provider fan-out (newest first — the records a
-    // user is actually waiting on), on top of the per-user quota cap above.
+    // Bound the per-request provider fan-out on top of the per-user quota cap
+    // above. The worklist is PRIORITIZED, not merely newest-first: superseded
+    // reconciliation goes first — those pairs carry committed funds and have
+    // NO manual recovery surface (the UI hides them by design), so ordinary
+    // confirmation polling for newer records must never starve them. They are
+    // also rare (only ambiguous broadcast failures create them), so in
+    // practice they cost the budget at most one lookup.
+    const newestFirst = [...records].reverse();
+    const supersededPending = newestFirst.filter(
+      (r) => r.superseded && r.status !== 'confirmed'
+    );
+    const liveUnconfirmed = newestFirst.filter(
+      (r) => !r.superseded && r.status === 'reveal_broadcast'
+    );
     let lookups = 0;
     let changed = false;
-    for (const r of [...records].reverse()) {
+    for (const r of supersededPending) {
       if (lookups >= 5) break;
-      if (r.status === 'reveal_broadcast' && !r.superseded) {
-        lookups++;
-        try {
+      lookups++;
+      try {
+        if (r.status === 'reveal_broadcast') {
+          // Both txs of this superseded pair were broadcast at some point
+          // (e.g. a crash between a rebroadcast and its bookkeeping). If the
+          // reveal confirmed, this pair definitively won — swap the roles.
           const st = await provider.getTransactionStatus(r.revealTxId);
-          if (st?.confirmed) {
-            store.setStatus(sub, r.commitTxId, 'confirmed');
-            changed = true;
-          }
-        } catch {
-          // Lookup unsupported/down — report the stored status.
-        }
-      } else if (r.superseded && (r.status === 'signed' || r.status === 'commit_broadcast')) {
-        lookups++;
-        try {
+          if (!st?.confirmed) continue;
+          reclaimOutpoint(store, sub, r);
+          store.setStatus(sub, r.commitTxId, 'confirmed');
+          changed = true;
+        } else {
           const st = await provider.getTransactionStatus(r.commitTxId);
           if (!st?.confirmed) continue;
-          // This pair's commit won the outpoint: retire the rival first (its
-          // commit conflicts with a confirmed tx), then reinstate this pair
-          // and complete it from the persisted reveal.
-          const rival = store.findByOutpoint(sub, r.fundingOutpoint);
-          if (rival && rival.commitTxId !== r.commitTxId) store.supersede(sub, rival.commitTxId);
-          store.reinstate(sub, r.commitTxId);
+          // This pair's commit won the outpoint: retire the rival (its commit
+          // conflicts with a confirmed tx), reinstate this pair, and complete
+          // it from the persisted reveal.
+          reclaimOutpoint(store, sub, r);
           const revealErr = await broadcastIdempotent(r.revealTxHex);
           store.setStatus(sub, r.commitTxId, revealErr ? 'commit_broadcast' : 'reveal_broadcast');
           changed = true;
-        } catch {
-          // Lookup unsupported/down — leave the record as stored.
         }
+      } catch {
+        // Lookup unsupported/down — leave the record as stored.
+      }
+    }
+    for (const r of liveUnconfirmed) {
+      if (lookups >= 5) break;
+      lookups++;
+      try {
+        const st = await provider.getTransactionStatus(r.revealTxId);
+        if (st?.confirmed) {
+          store.setStatus(sub, r.commitTxId, 'confirmed');
+          changed = true;
+        }
+      } catch {
+        // Lookup unsupported/down — report the stored status.
       }
     }
     if (changed) records = store.list(sub);
@@ -721,6 +759,17 @@ export function createBitcoinRoutes(deps: {
       return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
     }
 
+    // Rebroadcasting a SUPERSEDED pair is an explicit choice of this pair for
+    // its funding outpoint: any success below must also swap the roles —
+    // reinstate this record as the live one and retire the rival — or the
+    // store would keep a pair marked superseded+reveal_broadcast that both
+    // reconciliation branches skip, with a conflicting rival still "live".
+    // (If the rival later wins on-chain anyway, the list poll's
+    // confirmation-driven reconciliation swaps the roles back.)
+    const reclaimIfSuperseded = () => {
+      if (rec.superseded) reclaimOutpoint(store, sub, rec);
+    };
+
     // Already CONFIRMED on-chain? Then just record that and succeed. An
     // unknown or merely-unconfirmed reveal falls through to the (idempotent)
     // rebroadcast below — QuickNode reports both as { confirmed: false }, so
@@ -728,6 +777,7 @@ export function createBitcoinRoutes(deps: {
     try {
       const st = await provider.getTransactionStatus(rec.revealTxId);
       if (st?.confirmed) {
+        reclaimIfSuperseded();
         store.setStatus(sub, commitTxId, 'confirmed');
         return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
       }
@@ -738,12 +788,14 @@ export function createBitcoinRoutes(deps: {
     if (rec.status === 'signed') {
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
       if (commitErr) return json({ error: 'commit_broadcast_failed', message: commitErr, commitTxId }, 502);
+      reclaimIfSuperseded();
       store.setStatus(sub, commitTxId, 'commit_broadcast');
     }
     const revealErr = await broadcastIdempotent(rec.revealTxHex);
     if (revealErr) {
       return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'commit_broadcast' });
     }
+    reclaimIfSuperseded();
     store.setStatus(sub, commitTxId, 'reveal_broadcast');
     return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'reveal_broadcast' });
   };

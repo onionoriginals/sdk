@@ -14,7 +14,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../cookies';
 import { createBitcoinRoutes, isAlreadyKnownTxError } from '../bitcoin';
-import { createInscriptionsStore } from '../inscriptions-store';
+import { createInscriptionsStore, type InscriptionRecord } from '../inscriptions-store';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
 
@@ -455,6 +455,98 @@ describe('GET /api/btc/inscribe', () => {
     // broadcast from the persisted copy, no client involved.
     expect(h.broadcasts.filter((x) => x === pairA.revealTxHex)).toHaveLength(1);
     expect(h.store.findByOutpoint('sub-1', `${pairA.fundingUtxo.txid}:0`)!.commitTxId).toBe(pairA.commitTxId);
+  });
+
+  test('superseded reconciliation is PRIORITIZED — newer unconfirmed records cannot starve it out of the lookup budget', async () => {
+    const supersededCommit = '9a'.repeat(32);
+    const supersededReveal = '9b'.repeat(32);
+    const h = harness({
+      txStatus: (txid) => ({ confirmed: txid === supersededCommit }),
+    });
+    const rec = (over: Partial<InscriptionRecord>): InscriptionRecord => ({
+      commitTxId: 'c'.repeat(64),
+      revealTxId: 'r'.repeat(64),
+      inscriptionId: `${'r'.repeat(64)}i0`,
+      signedCommitHex: '02aa',
+      revealTxHex: '02bb',
+      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      changeAddress: USER_ADDRESS,
+      status: 'signed',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      ...over,
+    });
+    // OLDEST record: a superseded pair whose commit has since confirmed.
+    h.store.create('sub-1', rec({
+      commitTxId: supersededCommit,
+      revealTxId: supersededReveal,
+      revealTxHex: '02ee',
+      fundingOutpoint: 'old:0',
+    }));
+    h.store.supersede('sub-1', supersededCommit);
+    // Then SIX newer live records stuck at reveal_broadcast (never confirm) —
+    // more than the whole lookup budget on their own.
+    for (let i = 0; i < 6; i++) {
+      h.store.create('sub-1', rec({
+        commitTxId: String(i).repeat(64).slice(0, 64),
+        revealTxId: `f${i}`.repeat(32),
+        status: 'reveal_broadcast',
+        fundingOutpoint: `live${i}:0`,
+      }));
+    }
+
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const res = await h.routes.inscribeList(req, new URL(req.url));
+    const { inscriptions } = (await res.json()) as {
+      inscriptions: Array<{ commitTxId: string; status: string; superseded?: boolean }>;
+    };
+    const old = inscriptions.find((r) => r.commitTxId === supersededCommit)!;
+    expect(old.superseded).toBeUndefined(); // reconciled despite 6 newer records
+    expect(old.status).toBe('reveal_broadcast');
+    expect(h.broadcasts).toEqual(['02ee']); // its reveal, broadcast exactly once
+  });
+
+  test('manual rebroadcast of a superseded pair reinstates it and retires the rival', async () => {
+    const pair = buildPair();
+    let failCommit = true;
+    const { routes, store } = harness({
+      broadcast: async (txHex) => {
+        if (failCommit && txHex === pair.signedCommitHex) throw new Error('upstream 502');
+        return 'f'.repeat(64);
+      },
+    });
+    // Pair A fails ambiguously, rebuilt pair B supersedes it and completes.
+    expect((await post(routes, pair)).status).toBe(502);
+    const pairB = (() => {
+      const commit = new btc.Transaction();
+      commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
+      commit.addOutputAddress(USER_ADDRESS, 30_000n, btc.TEST_NETWORK);
+      commit.sign(USER_PRIV);
+      commit.finalize();
+      const reveal = new btc.Transaction();
+      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 30_000n } });
+      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
+      reveal.sign(USER_PRIV);
+      reveal.finalize();
+      return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
+    })();
+    expect((await post(routes, pairB)).status).toBe(200);
+    expect(store.get('sub-1', pair.commitTxId)!.superseded).toBe(true);
+
+    // The user explicitly rebroadcasts the superseded pair A and it succeeds:
+    // A must become the live pair (not superseded+reveal_broadcast limbo that
+    // reconciliation would skip), and rival B must be retired.
+    failCommit = false;
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res = await routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe('reveal_broadcast');
+    const a = store.get('sub-1', pair.commitTxId)!;
+    const b = store.get('sub-1', pairB.commitTxId)!;
+    expect(a.superseded).toBeUndefined();
+    expect(a.status).toBe('reveal_broadcast');
+    expect(b.superseded).toBe(true);
+    expect(store.findByOutpoint('sub-1', `${pair.fundingUtxo.txid}:0`)!.commitTxId).toBe(pair.commitTxId);
   });
 
   test('is scoped to the authenticated user', async () => {
