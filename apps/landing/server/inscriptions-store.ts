@@ -11,7 +11,17 @@
  * only ever sees their own records. The deposit-address binding lives beside
  * it under `<dataDir>/deposits/<sub>.json`.
  */
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync } from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  existsSync,
+  readdirSync,
+  renameSync,
+  openSync,
+  writeSync,
+  fsyncSync,
+  closeSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export type InscriptionStatus = 'signed' | 'commit_broadcast' | 'reveal_broadcast' | 'confirmed';
@@ -136,17 +146,43 @@ export function createInscriptionsStore(opts: {
     return JSON.parse(readFileSync(path, 'utf8')) as InscriptionRecord[];
   }
 
-  // Atomic write (temp + rename): this file holds the ONLY copy of a signed
-  // reveal once the client is gone — a torn write here would destroy exactly
-  // the recovery artifact the store exists to protect. rename(2) on the same
-  // filesystem replaces the file atomically, so readers see the old complete
-  // JSON or the new complete JSON, never a truncated one.
+  // Atomic AND durable write (write → fsync → rename → fsync dir): this file
+  // holds the ONLY copy of a signed reveal once the client is gone — losing it
+  // destroys exactly the recovery artifact the store exists to protect, and
+  // the caller broadcasts the commit (spends real BTC) the moment this
+  // returns. rename(2) on the same filesystem is atomic against a PROCESS
+  // crash, but a HOST crash can still lose it: without fsync the data blocks
+  // and the rename can sit in the page cache when power dies, leaving an
+  // empty or vanished file after reboot. So the temp file is fsynced before
+  // the rename (contents reach stable storage first) and the containing
+  // directory is fsynced after (the rename itself reaches stable storage) —
+  // only then is it safe for the caller to broadcast.
   function writeJson(dir: string, subOrgId: string, value: unknown): void {
     const path = subFile(opts.dataDir, dir, subOrgId);
     mkdirSync(dirname(path), { recursive: true });
     const tmp = `${path}.tmp`;
-    writeFileSync(tmp, JSON.stringify(value));
+    const fd = openSync(tmp, 'w');
+    try {
+      writeSync(fd, JSON.stringify(value));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     renameSync(tmp, path);
+    // Persist the rename: fsync the directory. Opening a directory read-only
+    // for fsync is the POSIX idiom; on platforms where it is not supported
+    // (e.g. Windows) this degrades to the pre-fsync behavior rather than
+    // failing the write.
+    try {
+      const dirFd = openSync(dirname(path), 'r');
+      try {
+        fsyncSync(dirFd);
+      } finally {
+        closeSync(dirFd);
+      }
+    } catch {
+      // Directory fsync unavailable — best-effort platform degradation.
+    }
   }
 
   function writeAll(subOrgId: string, recs: InscriptionRecord[]): void {
