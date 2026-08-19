@@ -549,6 +549,120 @@ describe('GET /api/btc/inscribe', () => {
     expect(store.findByOutpoint('sub-1', `${pair.fundingUtxo.txid}:0`)!.commitTxId).toBe(pair.commitTxId);
   });
 
+  test('rotating cursor: a backlog larger than the lookup budget is fully covered across polls', async () => {
+    const winnerCommit = '9a'.repeat(32);
+    const h = harness({ txStatus: (txid) => ({ confirmed: txid === winnerCommit }) });
+    const rec = (over: Partial<InscriptionRecord>): InscriptionRecord => ({
+      commitTxId: 'c'.repeat(64),
+      revealTxId: 'r'.repeat(64),
+      inscriptionId: `${'r'.repeat(64)}i0`,
+      signedCommitHex: '02aa',
+      revealTxHex: '02bb',
+      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      changeAddress: USER_ADDRESS,
+      status: 'signed',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      ...over,
+    });
+    // OLDEST: the winner (its commit confirmed). Then six newer superseded
+    // pairs that never confirm — alone they exceed the whole 5-lookup budget.
+    h.store.create('sub-1', rec({ commitTxId: winnerCommit, revealTxHex: '02ee', fundingOutpoint: 'win:0' }));
+    h.store.supersede('sub-1', winnerCommit);
+    for (let i = 0; i < 6; i++) {
+      const id = String(i).repeat(64).slice(0, 64);
+      h.store.create('sub-1', rec({ commitTxId: id, fundingOutpoint: `lose${i}:0` }));
+      h.store.supersede('sub-1', id);
+    }
+
+    const poll = async () => {
+      const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+      const res = await h.routes.inscribeList(req, new URL(req.url));
+      return ((await res.json()) as { inscriptions: Array<{ commitTxId: string; status: string; superseded?: boolean }> }).inscriptions;
+    };
+    // Poll 1: budget spent on the 5 newest superseded pairs — winner not yet
+    // examined (this is exactly the starvation scenario)…
+    let rows = await poll();
+    expect(rows.find((r) => r.commitTxId === winnerCommit)!.superseded).toBe(true);
+    // …but the cursor advanced, so poll 2 starts where poll 1 stopped and
+    // reaches the winner: reconciled, reveal broadcast.
+    rows = await poll();
+    const winner = rows.find((r) => r.commitTxId === winnerCommit)!;
+    expect(winner.superseded).toBeUndefined();
+    expect(winner.status).toBe('reveal_broadcast');
+    expect(h.broadcasts).toEqual(['02ee']);
+  });
+
+  test('superseded pair at reveal_broadcast with a confirmed commit but unconfirmed reveal is still recovered', async () => {
+    const winnerCommit = '9a'.repeat(32);
+    const winnerReveal = '9b'.repeat(32);
+    const h = harness({
+      // Commit confirmed; the reveal is NOT (dropped from the mempool).
+      txStatus: (txid) => ({ confirmed: txid === winnerCommit }),
+    });
+    const base = {
+      revealTxId: winnerReveal,
+      inscriptionId: `${winnerReveal}i0`,
+      signedCommitHex: '02aa',
+      revealTxHex: '02ee',
+      fundingOutpoint: 'x:0',
+      changeAddress: USER_ADDRESS,
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    };
+    h.store.create('sub-1', { ...base, commitTxId: winnerCommit, status: 'reveal_broadcast' });
+    h.store.supersede('sub-1', winnerCommit);
+    h.store.create('sub-1', {
+      ...base,
+      commitTxId: 'd'.repeat(64),
+      revealTxId: 'e'.repeat(64),
+      inscriptionId: `${'e'.repeat(64)}i0`,
+      status: 'commit_broadcast',
+    });
+
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const res = await h.routes.inscribeList(req, new URL(req.url));
+    const { inscriptions } = (await res.json()) as {
+      inscriptions: Array<{ commitTxId: string; status: string; superseded?: boolean }>;
+    };
+    const winner = inscriptions.find((r) => r.commitTxId === winnerCommit)!;
+    expect(winner.superseded).toBeUndefined(); // recovered despite reveal_broadcast status
+    expect(winner.status).toBe('reveal_broadcast');
+    expect(h.broadcasts).toEqual(['02ee']); // the dropped reveal was retried
+    expect(inscriptions.find((r) => r.commitTxId === 'd'.repeat(64))!.superseded).toBe(true);
+  });
+
+  test('a superseded pair on an outpoint with a CONFIRMED record is terminally dead — no lookups wasted on it', async () => {
+    let lookups = 0;
+    const h = harness({ txStatus: () => { lookups++; return { confirmed: false }; } });
+    const base = {
+      signedCommitHex: '02aa',
+      revealTxHex: '02bb',
+      fundingOutpoint: 'x:0',
+      changeAddress: USER_ADDRESS,
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    };
+    h.store.create('sub-1', {
+      ...base,
+      commitTxId: 'a1'.repeat(32),
+      revealTxId: 'a2'.repeat(32),
+      inscriptionId: `${'a2'.repeat(32)}i0`,
+      status: 'signed',
+    });
+    h.store.supersede('sub-1', 'a1'.repeat(32));
+    h.store.create('sub-1', {
+      ...base,
+      commitTxId: 'b1'.repeat(32),
+      revealTxId: 'b2'.repeat(32),
+      inscriptionId: `${'b2'.repeat(32)}i0`,
+      status: 'confirmed',
+    });
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    await h.routes.inscribeList(req, new URL(req.url));
+    expect(lookups).toBe(0); // dead rival skipped; confirmed record needs no check
+  });
+
   test('is scoped to the authenticated user', async () => {
     const { routes } = harness();
     await post(routes, buildPair());

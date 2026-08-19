@@ -212,6 +212,19 @@ export function createBitcoinRoutes(deps: {
   // 60s fee-estimate cache for the deposit poll (see the deposit handler).
   let feeCache: { at: number; rate: number } | null = null;
 
+  // Rotating scan-start cursors for the list poll's two reconciliation
+  // passes. Each processed item advances its cursor, so successive polls
+  // start further along the (stably ordered) worklist — a backlog larger
+  // than the per-poll lookup budget is still fully covered over a few polls
+  // instead of the same head items consuming the budget forever.
+  let supersededCursor = 0;
+  let confirmCursor = 0;
+  function rotate<T>(arr: T[], cursor: number): T[] {
+    if (arr.length === 0) return arr;
+    const start = cursor % arr.length;
+    return [...arr.slice(start), ...arr.slice(0, start)];
+  }
+
   /** 429 when the per-user QuickNode-quota cap is hit, else null. */
   function quotaCapped(sub: string): Response | null {
     const q = quotaUserLimiter.check(sub);
@@ -668,45 +681,55 @@ export function createBitcoinRoutes(deps: {
     const store = deps.inscriptions;
     let records = store.list(sub);
     // Bound the per-request provider fan-out on top of the per-user quota cap
-    // above. The worklist is PRIORITIZED, not merely newest-first: superseded
-    // reconciliation goes first — those pairs carry committed funds and have
-    // NO manual recovery surface (the UI hides them by design), so ordinary
-    // confirmation polling for newer records must never starve them. They are
-    // also rare (only ambiguous broadcast failures create them), so in
-    // practice they cost the budget at most one lookup.
+    // above. The worklist is PRIORITIZED: superseded reconciliation goes
+    // first — those pairs carry committed funds and have NO manual recovery
+    // surface (the UI hides them by design), so ordinary confirmation polling
+    // for newer records must never starve them. Within each pass a ROTATING
+    // cursor picks where the scan starts, so even a backlog larger than the
+    // whole budget is fully covered across successive polls — no record can
+    // sit permanently behind the budget.
     const newestFirst = [...records].reverse();
-    const supersededPending = newestFirst.filter(
-      (r) => r.superseded && r.status !== 'confirmed'
+    // A superseded pair whose outpoint already carries a CONFIRMED record is
+    // terminally dead — its commit double-spends a confirmed tx and can never
+    // land — so it is excluded from reconciliation instead of costing a
+    // pointless provider lookup on every poll for the rest of time.
+    const confirmedOutpoints = new Set(
+      newestFirst.filter((r) => r.status === 'confirmed').map((r) => r.fundingOutpoint)
     );
-    const liveUnconfirmed = newestFirst.filter(
-      (r) => !r.superseded && r.status === 'reveal_broadcast'
+    const supersededPending = rotate(
+      newestFirst.filter(
+        (r) =>
+          r.superseded &&
+          r.status !== 'confirmed' &&
+          !confirmedOutpoints.has(r.fundingOutpoint)
+      ),
+      supersededCursor
+    );
+    const liveUnconfirmed = rotate(
+      newestFirst.filter((r) => !r.superseded && r.status === 'reveal_broadcast'),
+      confirmCursor
     );
     let lookups = 0;
     let changed = false;
     for (const r of supersededPending) {
       if (lookups >= 5) break;
       lookups++;
+      supersededCursor++;
       try {
-        if (r.status === 'reveal_broadcast') {
-          // Both txs of this superseded pair were broadcast at some point
-          // (e.g. a crash between a rebroadcast and its bookkeeping). If the
-          // reveal confirmed, this pair definitively won — swap the roles.
-          const st = await provider.getTransactionStatus(r.revealTxId);
-          if (!st?.confirmed) continue;
-          reclaimOutpoint(store, sub, r);
-          store.setStatus(sub, r.commitTxId, 'confirmed');
-          changed = true;
-        } else {
-          const st = await provider.getTransactionStatus(r.commitTxId);
-          if (!st?.confirmed) continue;
-          // This pair's commit won the outpoint: retire the rival (its commit
-          // conflicts with a confirmed tx), reinstate this pair, and complete
-          // it from the persisted reveal.
-          reclaimOutpoint(store, sub, r);
-          const revealErr = await broadcastIdempotent(r.revealTxHex);
-          store.setStatus(sub, r.commitTxId, revealErr ? 'commit_broadcast' : 'reveal_broadcast');
-          changed = true;
-        }
+        // ONE question decides a contested outpoint, whatever the pair's
+        // stored status: did THIS pair's commit confirm? (A reveal can only
+        // ever confirm on top of its own commit, so the commit check covers
+        // every superseded state — including reveal_broadcast pairs whose
+        // reveal never actually landed.) If yes: retire the rival (its commit
+        // conflicts with a confirmed tx), reinstate this pair, and complete
+        // it by (re)broadcasting the persisted reveal idempotently; the next
+        // poll's confirmation pass then walks it to 'confirmed'.
+        const st = await provider.getTransactionStatus(r.commitTxId);
+        if (!st?.confirmed) continue;
+        reclaimOutpoint(store, sub, r);
+        const revealErr = await broadcastIdempotent(r.revealTxHex);
+        store.setStatus(sub, r.commitTxId, revealErr ? 'commit_broadcast' : 'reveal_broadcast');
+        changed = true;
       } catch {
         // Lookup unsupported/down — leave the record as stored.
       }
@@ -714,6 +737,7 @@ export function createBitcoinRoutes(deps: {
     for (const r of liveUnconfirmed) {
       if (lookups >= 5) break;
       lookups++;
+      confirmCursor++;
       try {
         const st = await provider.getTransactionStatus(r.revealTxId);
         if (st?.confirmed) {
