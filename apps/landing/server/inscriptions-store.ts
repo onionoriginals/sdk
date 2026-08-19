@@ -27,6 +27,14 @@ export interface InscriptionRecord {
   fundingOutpoint: string;
   changeAddress: string;
   status: InscriptionStatus;
+  /**
+   * Set when a rebuilt pair took over this record's funding outpoint after
+   * its own commit broadcast failed. The record (and its reveal hex) is kept
+   * FOREVER, never deleted: the failed broadcast may have been ambiguous —
+   * the commit could still be on the network — and this reveal is then the
+   * only way to complete that inscription (rebroadcast by commitTxId).
+   */
+  superseded?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -35,15 +43,15 @@ export interface InscriptionsStore {
   /** Insert a new record (no-op if the same commitTxId already exists). */
   create(subOrgId: string, rec: InscriptionRecord): void;
   /**
-   * Remove a record. ONLY safe for status 'signed' (nothing broadcast — the
-   * funding UTXO is unspent, so the pair can be superseded by a rebuilt one);
-   * callers must never remove a record whose commit may be on-chain.
+   * Mark a record superseded so its funding outpoint can be reused by a
+   * rebuilt pair. NEVER deletes: the reveal hex must survive in case the
+   * old commit reached the network despite its broadcast call failing.
    */
-  remove(subOrgId: string, commitTxId: string): void;
+  supersede(subOrgId: string, commitTxId: string): void;
   get(subOrgId: string, commitTxId: string): InscriptionRecord | null;
   setStatus(subOrgId: string, commitTxId: string, status: InscriptionStatus): void;
   list(subOrgId: string): InscriptionRecord[];
-  /** The record (if any) whose commit spends this `${txid}:${vout}` outpoint. */
+  /** The LIVE (non-superseded) record whose commit spends this `${txid}:${vout}` outpoint. */
   findByOutpoint(subOrgId: string, outpoint: string): InscriptionRecord | null;
   /**
    * ALL users' records whose reveal never broadcast (signed/commit_broadcast)
@@ -100,10 +108,13 @@ export function createInscriptionsStore(opts: {
       recs.push(rec);
       writeAll(subOrgId, recs);
     },
-    remove(subOrgId, commitTxId) {
+    supersede(subOrgId, commitTxId) {
       const recs = readAll(subOrgId);
-      const next = recs.filter((r) => r.commitTxId !== commitTxId);
-      if (next.length !== recs.length) writeAll(subOrgId, next);
+      const rec = recs.find((r) => r.commitTxId === commitTxId);
+      if (!rec) throw new Error('NOT_FOUND');
+      rec.superseded = true;
+      rec.updatedAt = new Date(now()).toISOString();
+      writeAll(subOrgId, recs);
     },
     get(subOrgId, commitTxId) {
       return readAll(subOrgId).find((r) => r.commitTxId === commitTxId) ?? null;
@@ -120,7 +131,7 @@ export function createInscriptionsStore(opts: {
       return readAll(subOrgId);
     },
     findByOutpoint(subOrgId, outpoint) {
-      return readAll(subOrgId).find((r) => r.fundingOutpoint === outpoint) ?? null;
+      return readAll(subOrgId).find((r) => r.fundingOutpoint === outpoint && !r.superseded) ?? null;
     },
     sweepStale(olderThanMs) {
       const dir = join(opts.dataDir, 'inscriptions');

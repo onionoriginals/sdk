@@ -249,9 +249,51 @@ describe('POST /api/btc/inscribe', () => {
     })();
     const res = await post(routes, rebuilt);
     expect(res.status).toBe(200);
-    expect(store.get('sub-1', pair.commitTxId)).toBeNull(); // dead pair removed
+    // The dead pair is PRESERVED (its broadcast failure could have been
+    // ambiguous — its reveal must stay recoverable), just flagged so the
+    // outpoint frees up.
+    const old = store.get('sub-1', pair.commitTxId)!;
+    expect(old.superseded).toBe(true);
+    expect(old.revealTxHex).toBe(pair.revealTxHex);
     expect(store.get('sub-1', rebuilt.commitTxId)!.status).toBe('reveal_broadcast');
-    expect(store.list('sub-1')).toHaveLength(1);
+    expect(store.findByOutpoint('sub-1', `${pair.fundingUtxo.txid}:0`)!.commitTxId).toBe(rebuilt.commitTxId);
+  });
+
+  test('superseding is REFUSED when the old commit is already confirmed on-chain (ambiguous broadcast that landed)', async () => {
+    const pair = buildPair();
+    const { routes, store } = harness({
+      // The commit "fails" at broadcast time but actually reached the network…
+      broadcast: async (txHex) => {
+        if (txHex === pair.signedCommitHex) throw new Error('connection reset mid-response');
+        return 'f'.repeat(64);
+      },
+      // …and has since confirmed.
+      txStatus: { confirmed: true },
+    });
+    expect((await post(routes, pair)).status).toBe(502);
+    expect(store.get('sub-1', pair.commitTxId)!.status).toBe('signed');
+
+    const rebuilt = (() => {
+      const commit = new btc.Transaction();
+      commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
+      commit.addOutputAddress(USER_ADDRESS, 30_000n, btc.TEST_NETWORK);
+      commit.sign(USER_PRIV);
+      commit.finalize();
+      const reveal = new btc.Transaction();
+      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 30_000n } });
+      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
+      reveal.sign(USER_PRIV);
+      reveal.finalize();
+      return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()) };
+    })();
+    const res = await post(routes, rebuilt);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
+    // The old pair is promoted to commit_broadcast — its reveal (still
+    // stored, never superseded) is the one true recovery path.
+    const old = store.get('sub-1', pair.commitTxId)!;
+    expect(old.status).toBe('commit_broadcast');
+    expect(old.superseded).toBeUndefined();
   });
 
   test('malformed submissions do not consume the per-user inscribe cap', async () => {

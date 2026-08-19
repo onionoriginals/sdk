@@ -50,6 +50,14 @@ describe('unfinishedInscriptions', () => {
     expect(out.map((r) => r.status)).toEqual(['signed', 'commit_broadcast']);
   });
 
+  test('excludes superseded records — a live rebuilt pair owns their outpoint', () => {
+    const out = unfinishedInscriptions([
+      { ...rec('signed', 1), superseded: true },
+      rec('commit_broadcast', 2),
+    ]);
+    expect(out.map((r) => r.status)).toEqual(['commit_broadcast']);
+  });
+
   test('empty in, empty out', () => {
     expect(unfinishedInscriptions([])).toEqual([]);
   });

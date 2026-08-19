@@ -29,6 +29,20 @@ describe('inscriptions-store', () => {
     expect(store.findByOutpoint('sub-1', `${'a'.repeat(64)}:0`)!.commitTxId).toBe('c'.repeat(64));
   });
 
+  test('supersede preserves the record (and its reveal hex) while freeing the outpoint', () => {
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
+    store.create('sub-1', rec({}));
+    store.supersede('sub-1', 'c'.repeat(64));
+    const r = store.get('sub-1', 'c'.repeat(64))!;
+    expect(r.superseded).toBe(true);
+    expect(r.revealTxHex).toBe('02bb'); // recovery artifact intact
+    // The outpoint is free for a rebuilt pair…
+    expect(store.findByOutpoint('sub-1', `${'a'.repeat(64)}:0`)).toBeNull();
+    // …and a new live record on it wins the lookup.
+    store.create('sub-1', rec({ commitTxId: 'd'.repeat(64) }));
+    expect(store.findByOutpoint('sub-1', `${'a'.repeat(64)}:0`)!.commitTxId).toBe('d'.repeat(64));
+  });
+
   test('sweepStale finds only never-revealed records older than the cutoff, across users', () => {
     const now = Date.parse('2026-08-18T00:00:00.000Z');
     const store = createInscriptionsStore({

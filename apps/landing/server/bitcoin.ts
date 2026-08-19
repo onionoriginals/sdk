@@ -559,17 +559,34 @@ export function createBitcoinRoutes(deps: {
 
     // Outpoint idempotency: one pending inscription per funding UTXO. A retry
     // of the SAME pair continues below (create is a no-op). A DIFFERENT pair
-    // on the same outpoint is allowed to SUPERSEDE a pair whose commit was
-    // never broadcast (status 'signed' — the UTXO is unspent, and rebuilt
-    // commits always have fresh txids, so refusing here would deadlock the
-    // outpoint forever); anything later is a live double-spend attempt → 409.
+    // on the same outpoint may SUPERSEDE a pair whose commit broadcast failed
+    // (status 'signed' — rebuilt commits always have fresh txids, so refusing
+    // outright would deadlock the outpoint forever); anything later is a live
+    // double-spend attempt → 409. Superseding is strictly NON-DESTRUCTIVE: a
+    // failed broadcast call can be ambiguous (the commit may have reached the
+    // network anyway), so the old record — carrying the ONLY copy of its
+    // reveal — is kept forever, just flagged so the outpoint frees up. And if
+    // the old commit is already CONFIRMED on-chain, superseding is refused:
+    // the outpoint is genuinely spent, and the old pair's reveal (via
+    // rebroadcast) is the one true recovery path.
     const outpoint = `${fundingUtxo.txid.toLowerCase()}:${fundingUtxo.vout}`;
     const existing = store.findByOutpoint(sub, outpoint);
     if (existing && existing.commitTxId !== commitTxId) {
       if (existing.status !== 'signed') {
         return json({ error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
       }
-      store.remove(sub, existing.commitTxId);
+      try {
+        const st = await provider.getTransactionStatus(existing.commitTxId);
+        if (st?.confirmed) {
+          store.setStatus(sub, existing.commitTxId, 'commit_broadcast');
+          return json({ error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
+        }
+      } catch {
+        // No lookup — fall through: superseding stays safe because nothing
+        // is deleted (an unconfirmed-but-broadcast old commit conflicts with
+        // the new one on the network; whichever confirms, its reveal is here).
+      }
+      store.supersede(sub, existing.commitTxId);
     }
 
     // Persist BEFORE any broadcast — the whole point: from here on, recovery
@@ -629,7 +646,7 @@ export function createBitcoinRoutes(deps: {
     // actually waiting on), on top of the per-user quota cap above.
     let lookups = 0;
     for (const r of [...records].reverse()) {
-      if (r.status !== 'reveal_broadcast' || lookups >= 5) continue;
+      if (r.status !== 'reveal_broadcast' || r.superseded || lookups >= 5) continue;
       lookups++;
       try {
         const st = await provider.getTransactionStatus(r.revealTxId);
@@ -647,6 +664,7 @@ export function createBitcoinRoutes(deps: {
       inscriptionId: r.inscriptionId,
       fundingOutpoint: r.fundingOutpoint,
       status: r.status,
+      ...(r.superseded ? { superseded: true } : {}),
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     }));

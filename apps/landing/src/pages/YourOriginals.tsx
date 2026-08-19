@@ -35,12 +35,21 @@ export interface PendingInscription {
   inscriptionId: string;
   fundingOutpoint: string;
   status: 'signed' | 'commit_broadcast' | 'reveal_broadcast' | 'confirmed';
+  /** A rebuilt pair took over this record's funding outpoint (kept for recovery, not actionable here). */
+  superseded?: boolean;
   createdAt: string;
 }
 
-/** Records whose reveal is NOT yet broadcast — the "finish inscription" set. */
+/**
+ * Records whose reveal is NOT yet broadcast — the "finish inscription" set.
+ * Superseded records are excluded: a live rebuilt pair owns their outpoint,
+ * so offering "finish" on them would race it (the server keeps them purely
+ * as recovery artifacts in case their commit landed despite the failure).
+ */
 export function unfinishedInscriptions(records: PendingInscription[]): PendingInscription[] {
-  return records.filter((r) => r.status === 'signed' || r.status === 'commit_broadcast');
+  return records.filter(
+    (r) => !r.superseded && (r.status === 'signed' || r.status === 'commit_broadcast')
+  );
 }
 
 /**
