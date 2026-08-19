@@ -175,6 +175,46 @@ describe('inscribeOnSat', () => {
     expect(broadcastTransaction).not.toHaveBeenCalled();
   });
 
+  it('prefers submitInscription over two broadcasts when the provider offers it (stranded-funds seam)', async () => {
+    const broadcastTransaction = mock(async () => 'cc'.repeat(32));
+    let submitted: any = null;
+    const provider = providerDouble({
+      broadcastTransaction,
+      submitInscription: async (params: any) => {
+        submitted = params;
+        return { commitTxId: parse(params.signedCommitHex).id, revealTxId: parse(params.revealTxHex).id, status: 'reveal_broadcast' };
+      }
+    });
+    const res = await inscribeOnSat({ ...baseParams(), provider });
+
+    // The atomic seam carried BOTH signed txs in one call; the sequential
+    // broadcast path never ran.
+    expect(broadcastTransaction).not.toHaveBeenCalled();
+    expect(submitted).not.toBeNull();
+    expect(parse(submitted.signedCommitHex).id).toBe(res.commitTxId);
+    expect(parse(submitted.revealTxHex).id).toBe(res.revealTxId);
+    expect(submitted.fundingUtxo.txid).toBe(sampleUtxo.txid);
+    expect(submitted.changeAddress).toBe(sampleChangeAddress);
+  });
+
+  it('throws INSCRIPTION_SUBMIT_FAILED with full recovery data when submitInscription fails', async () => {
+    const provider = providerDouble({
+      submitInscription: async () => { throw new Error('network died mid-POST'); }
+    });
+    try {
+      await inscribeOnSat({ ...baseParams(), provider });
+      throw new Error('expected INSCRIPTION_SUBMIT_FAILED');
+    } catch (e: any) {
+      expect(e.code).toBe('INSCRIPTION_SUBMIT_FAILED');
+      // Recovery must not depend on this process's memory: both signed txs ride
+      // in the error details.
+      expect(typeof e.details?.signedCommitHex).toBe('string');
+      expect(typeof e.details?.revealTxHex).toBe('string');
+      expect(typeof e.details?.commitTxId).toBe('string');
+      expect(e.details?.satoshi).toBe('1250000000');
+    }
+  });
+
   it('attaches recovery data (revealTxHex + commitTxId) when the reveal broadcast fails', async () => {
     let n = 0;
     const provider = providerDouble({

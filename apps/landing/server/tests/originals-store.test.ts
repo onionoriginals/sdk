@@ -142,6 +142,37 @@ describe('originals-store', () => {
     expect(store.read('sub-2', key).status).toBe(404);
   });
 
+  test('recordOriginal upsert-merges inscription fields onto an existing did (no duplicate row)', () => {
+    const store = createOriginalsStore({ dataDir: tmpDir() });
+    const base = {
+      did: 'did:webvh:S:h:studio:you:abc',
+      title: 'Piece',
+      resourceHash: 'aa'.repeat(32),
+      createdAt: '2026-08-18T00:00:00.000Z',
+    };
+    store.recordOriginal('sub-1', base);
+    // Second post — after the did:btco migrate — enriches the SAME row.
+    store.recordOriginal('sub-1', {
+      ...base,
+      title: 'IGNORED — identity fields are set once',
+      btcoDid: 'did:btco:123',
+      inscriptionId: 'i'.repeat(64) + 'i0',
+      commitTxId: 'c'.repeat(64),
+      revealTxId: 'r'.repeat(64),
+      satoshi: '123',
+      inscriptionStatus: 'pending',
+    });
+    const rows = store.list('sub-1');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].title).toBe('Piece'); // identity untouched
+    expect(rows[0].btcoDid).toBe('did:btco:123');
+    expect(rows[0].inscriptionStatus).toBe('pending');
+    // A later status-only merge flips pending → confirmed, keeping the rest.
+    store.recordOriginal('sub-1', { ...base, inscriptionStatus: 'confirmed' });
+    expect(store.list('sub-1')[0].inscriptionStatus).toBe('confirmed');
+    expect(store.list('sub-1')[0].satoshi).toBe('123');
+  });
+
   test('quota: exceeding total bytes throws STORE_FULL', () => {
     const store = createOriginalsStore({ dataDir: tmpDir(), maxTotalBytes: 8 });
     expect(() =>

@@ -37,6 +37,24 @@ describe('HttpOrdinalsProvider', () => {
     expect(calls[0].body).toEqual({ txHex: '0200000000' });
   });
 
+  test('submitInscription posts both signed txs to /api/btc/inscribe in one call', async () => {
+    const { impl, calls } = mockFetch({
+      '/api/btc/inscribe': { commitTxId: 'c'.repeat(64), revealTxId: 'd'.repeat(64), status: 'reveal_broadcast' },
+    });
+    const p = new HttpOrdinalsProvider({ baseUrl: '', fetchImpl: impl });
+    const params = {
+      signedCommitHex: '02aa',
+      revealTxHex: '02bb',
+      fundingUtxo: { txid: 'a'.repeat(64), vout: 0, value: 50_000 },
+      changeAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
+    };
+    const res = await p.submitInscription(params);
+    expect(res.status).toBe('reveal_broadcast');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('/api/btc/inscribe');
+    expect(calls[0].body).toEqual(params);
+  });
+
   test('createInscription rejects by design (tx built locally)', async () => {
     const { impl } = mockFetch({});
     const p = new HttpOrdinalsProvider({ baseUrl: '', fetchImpl: impl });

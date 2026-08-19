@@ -51,4 +51,40 @@ describe('turnkey-session helpers', () => {
     const addr2 = await ensureBitcoinFundingAccount(client, 'sub-1');
     expect(addr2).toBe(addr);
   });
+
+  test('ensureBitcoinFundingAccount(mainnet) uses the mainnet path/format and expects bc1', async () => {
+    const created: Array<{ path: string; addressFormat: string }> = [];
+    const client: TurnkeyBitcoinClient = {
+      async getWallets() {
+        return { wallets: [{ walletId: 'w1', accounts: [] }] };
+      },
+      async createWalletAccounts(params) {
+        created.push(params.accounts[0]);
+        return { addresses: ['bc1qexampleuseraddr000000000000000000000000'] };
+      },
+      async signTransaction() {
+        throw new Error('not used here');
+      },
+    };
+    const addr = await ensureBitcoinFundingAccount(client, 'sub-1', 'mainnet');
+    expect(addr.startsWith('bc1')).toBe(true);
+    // BIP-84 mainnet coin type 0' — a DIFFERENT account than the testnet path.
+    expect(created[0].path).toBe("m/84'/0'/0'/0/0");
+    expect(created[0].addressFormat).toBe('ADDRESS_FORMAT_BITCOIN_MAINNET_P2WPKH');
+  });
+
+  test('ensureBitcoinFundingAccount(mainnet) rejects a tb1 address from Turnkey', async () => {
+    const client: TurnkeyBitcoinClient = {
+      async getWallets() {
+        return { wallets: [{ walletId: 'w1', accounts: [] }] };
+      },
+      async createWalletAccounts() {
+        return { addresses: ['tb1qwrongnetworkaddr00000000000000000000000'] };
+      },
+      async signTransaction() {
+        throw new Error('not used here');
+      },
+    };
+    await expect(ensureBitcoinFundingAccount(client, 'sub-1', 'mainnet')).rejects.toThrow('unexpected funding address');
+  });
 });

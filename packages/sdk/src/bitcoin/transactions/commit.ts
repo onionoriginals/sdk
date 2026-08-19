@@ -20,6 +20,21 @@ import { scriptPubKeyForAddress } from '../transfer.js';
 // Define minimum dust limit (satoshis)
 const MIN_DUST_LIMIT = 546;
 
+// BIP-125 opt-in replace-by-fee sequence. @scure/btc-signer defaults every
+// input to the final sequence (0xffffffff), which makes the tx non-replaceable;
+// a fee spike would then park a real-BTC commit in the mempool with no bump
+// path. Every input we build signals RBF.
+//
+// Caveat on the REVEAL: signalling is not the same as being bumpable. The
+// reveal is signed with an ephemeral key generated inside
+// createCommitTransaction and never persisted anywhere, so once the signing
+// process is gone nobody — not the creator, not a server holding the signed
+// hex — can produce a replacement. The signal is kept because it costs
+// nothing and keeps the pair uniform, but a wedged reveal is recovered by
+// rebroadcast, or bumped by CPFP on its postage output (which pays to the
+// creator's own address), never by replacement.
+export const RBF_SEQUENCE = 0xfffffffd;
+
 // Maximum iterations for UTXO reselection to prevent infinite loops
 const MAX_SELECTION_ITERATIONS = 5;
 
@@ -238,6 +253,7 @@ export async function createRevealTransaction(
   tx.addInput({
     txid: commitTxId,
     index: commitVout,
+    sequence: RBF_SEQUENCE,
     witnessUtxo: { script: commitP2tr.script, amount: BigInt(commitAmount) },
     tapLeafScript: commitP2tr.tapLeafScript
   });
@@ -663,6 +679,7 @@ export async function createCommitTransaction(
     tx.addInput({
       txid: utxo.txid,
       index: utxo.vout,
+      sequence: RBF_SEQUENCE,
       witnessUtxo: {
         script: Buffer.from(utxo.scriptPubKey, 'hex'),
         amount: BigInt(utxo.value)

@@ -198,6 +198,22 @@ export const demo = {
     faucetEmpty: 'The testnet4 faucet is temporarily out of funds — try again in a bit.',
     mockNote: 'Bitcoin inscription runs against a mock provider in this environment (no wallet, no chain). Deploy with a testnet4 endpoint + faucet to make it real.'
   },
+  deposit: {
+    heading: 'Fund your inscription',
+    signInPrompt: 'Sign in to inscribe on Bitcoin — your own key signs it, your own BTC funds it.',
+    sendPrefix: 'Send at least',
+    sendSuffix: 'of BTC to your deposit address, in a single payment (the inscription spends one confirmed deposit). It’s yours: the change and the inscribed sat come back to it.',
+    addressLabel: 'Your deposit address',
+    waiting: 'Waiting for your deposit…',
+    detected: 'Deposit detected — waiting for one confirmation.',
+    ready: 'Deposit confirmed — ready to inscribe.',
+    needed: 'No confirmed deposit covering the fee yet — send BTC to your deposit address and wait for one confirmation.',
+    nonRefundable: 'Creator pays: the network fee is non-refundable. You own the keys, the change, and the inscribed sat — nothing is custodied.',
+    addressPending: 'Checking your deposit address with the server…',
+    networkMismatch:
+      'This deploy is misconfigured: the app was built for a different Bitcoin network than the server is running. Inscribing is disabled until they match — no deposit address is shown, because funds sent to it could not be spent here.',
+    yourKeyNote: 'Your Turnkey key signs this inscription in your browser; your own deposit pays the fee. The server never sees a private key.'
+  },
   comingSoon: 'Coming soon — inscribing on Bitcoin (did:btco) is not enabled yet. Your Original is already real and resolvable as did:webvh.',
   reset: 'Start over with a new asset'
 };
@@ -216,6 +232,16 @@ export const yourOriginals = {
   openLog: 'Open the signed DID log',
   createdLabel: 'Created',
   viewLabel: 'View provenance',
+  inscribedBadge: 'inscribed ✓',
+  inscriptionPendingBadge: 'inscription pending',
+  finish: {
+    heading: 'Unfinished inscription',
+    body: 'A previous inscription was interrupted before it finished broadcasting. The signed transactions are safely stored — finish it now; nothing needs re-signing and no funds are lost.',
+    cta: 'Finish inscription',
+    busy: 'Finishing…',
+    done: 'Inscription broadcast — it will confirm on-chain shortly.',
+    failed: 'Could not finish the inscription — try again in a moment.',
+  },
 };
 
 export const originalDetail = {
@@ -290,6 +316,18 @@ export const originalDetail = {
       'Nothing hidden: these are the exact files the resolver fetches. Take them anywhere — the signatures travel with the bytes.',
     logLabel: 'did.jsonl — signed version history',
     celLabel: 'cel.json — cryptographic event log'
+  },
+  bitcoin: {
+    heading: 'On Bitcoin',
+    subhead:
+      'This Original is inscribed on a satoshi — ownership is live sat control, transferable on Bitcoin without any platform.',
+    didLabel: 'did:btco',
+    inscriptionLabel: 'Inscription',
+    satoshiLabel: 'Satoshi',
+    txLabel: 'Reveal transaction',
+    pendingBadge: 'awaiting confirmation',
+    confirmedBadge: 'confirmed on-chain',
+    explorerLabel: 'View on mempool.space'
   }
 };
 
