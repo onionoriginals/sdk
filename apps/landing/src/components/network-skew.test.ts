@@ -5,7 +5,7 @@
  * address on a deploy whose server can never spend from it.
  */
 import { describe, test, expect } from 'bun:test';
-import { expectedServerNetwork, fetchServerNetwork } from './Demo';
+import { expectedServerNetwork, fetchServerNetwork, networkSkewDetected } from './Demo';
 
 const respond = (status: number, body: unknown): typeof fetch =>
   (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
@@ -45,5 +45,36 @@ describe('fetchServerNetwork', () => {
     expect(server2 === expectedServerNetwork('testnet4')).toBe(false);
     // Matching config is not flagged.
     expect(server2 === expectedServerNetwork('mainnet')).toBe(true);
+  });
+});
+
+/**
+ * U6 / R11 — the comparison is UNCONDITIONAL. It used to run only when the
+ * browser already believed it was on a real network, which made the
+ * client-off direction (a mainnet deploy serving a mock site) invisible — and
+ * after U2 an anonymous visitor never reached it at all.
+ */
+describe('networkSkewDetected', () => {
+  test('a matching pair is never a skew', () => {
+    expect(networkSkewDetected('mainnet', 'mainnet')).toBe(false);
+    expect(networkSkewDetected('testnet4', 'testnet')).toBe(false);
+    expect(networkSkewDetected('off', 'off')).toBe(false);
+  });
+
+  test('the dangerous direction: a real build against another chain', () => {
+    expect(networkSkewDetected('mainnet', 'testnet')).toBe(true);
+    expect(networkSkewDetected('testnet4', 'mainnet')).toBe(true);
+    // A real build whose server mounted no Bitcoin routes at all.
+    expect(networkSkewDetected('mainnet', 'off')).toBe(true);
+  });
+
+  test('the silent direction: a build with the flag off against a real server', () => {
+    expect(networkSkewDetected('off', 'mainnet')).toBe(true);
+    expect(networkSkewDetected('off', 'testnet')).toBe(true);
+  });
+
+  test('an unresolved server network is not a mismatch', () => {
+    expect(networkSkewDetected('mainnet', null)).toBe(false);
+    expect(networkSkewDetected('off', null)).toBe(false);
   });
 });

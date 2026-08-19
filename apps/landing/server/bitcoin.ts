@@ -22,18 +22,25 @@ import { createRateLimiter } from './rate-limit';
 import { outpointsOf } from './inscriptions-store';
 import type { InscriptionsStore, InscriptionRecord } from './inscriptions-store';
 
-/** The server-side network flag: BTC_NETWORK=mainnet|testnet4 (default testnet4). */
-export function serverBtcNetwork(): 'mainnet' | 'testnet4' {
-  return process.env.BTC_NETWORK === 'mainnet' ? 'mainnet' : 'testnet4';
+/**
+ * The server-side network flag: BTC_NETWORK=mainnet|testnet4 (default testnet4).
+ * Env is a parameter so the boot-time config contract can judge a snapshot.
+ */
+export function serverBtcNetwork(
+  env: Record<string, string | undefined> = process.env
+): 'mainnet' | 'testnet4' {
+  return env.BTC_NETWORK === 'mainnet' ? 'mainnet' : 'testnet4';
 }
 
-export function isBitcoinConfigured(): boolean {
-  if (!process.env.QUICKNODE_ENDPOINT) return false;
+export function isBitcoinConfigured(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  if (!env.QUICKNODE_ENDPOINT) return false;
   // Mainnet is creator-pays: no faucet env needed (and none is mounted).
-  if (serverBtcNetwork() === 'mainnet') return true;
+  if (serverBtcNetwork(env) === 'mainnet') return true;
   return (
-    !!process.env.BTC_FAUCET_ADDRESS &&
-    (!!process.env.BTC_FAUCET_WIF || !!process.env.BTC_FAUCET_WALLET_ID)
+    !!env.BTC_FAUCET_ADDRESS &&
+    (!!env.BTC_FAUCET_WIF || !!env.BTC_FAUCET_WALLET_ID)
   );
 }
 

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { btcNetwork, btcRealEnabled, btcRealFor, demoTier } from './network-flag';
+import { btcNetwork, btcRealEnabled, btcRealFor, demoTier, smokeAutoRunAllowed } from './network-flag';
 
 // import.meta.env is not writable per-test under bun, so these tests assert
 // the UNSET default (this test env sets neither VITE_BTC_NETWORK nor the
@@ -68,5 +68,23 @@ describe('btcRealFor', () => {
   test('nobody gets the real path on a mock deploy', () => {
     expect(btcRealFor(true)).toBe(false);
     expect(btcRealFor(false)).toBe(false);
+  });
+});
+
+/**
+ * U6 / R12 — `?smoke=1` runs unauthenticated on load and drives the full
+ * lifecycle. On a real-network build that means the real provider path from an
+ * anonymous page load, so the auto-run is mock-build only.
+ */
+describe('smokeAutoRunAllowed', () => {
+  test('the auto-run is refused on any real-network build', () => {
+    expect(smokeAutoRunAllowed('mainnet')).toBe(false);
+    expect(smokeAutoRunAllowed('testnet4')).toBe(false);
+  });
+
+  test('a mock build still runs it — the existing smoke harness is preserved', () => {
+    expect(smokeAutoRunAllowed('off')).toBe(true);
+    // This test env sets no VITE_BTC_NETWORK, so the default read is the mock.
+    expect(smokeAutoRunAllowed()).toBe(true);
   });
 });

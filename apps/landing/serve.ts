@@ -32,7 +32,12 @@ import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
-import { isLikelyDeployed } from './server/deploy-env';
+import { checkConfig, isStrictConfig, resolveDataDir } from './server/config';
+
+// The configuration contract (R10/R23), FIRST: a deployed instance missing or
+// malforming a required value says so by name here, before a single request is
+// served. Warn-only until CONFIG_STRICT=1 — see server/config.ts for why.
+const configIssues = checkConfig();
 
 const DIST = new URL('./dist/', import.meta.url).pathname;
 const port = Number(process.env.PORT ?? 3000);
@@ -40,9 +45,8 @@ const hostStore = createWebvhHostStore();
 // Durable Originals persist here. Without an explicit ORIGINALS_DATA_DIR the
 // store falls back to a path INSIDE the container/cwd — fine for dev, but on a
 // deploy that dir is ephemeral and every redeploy silently wipes signed-in
-// users' Originals. buildBanner() below warns loudly when that's the case.
-const originalsDataDir = process.env.ORIGINALS_DATA_DIR ?? './.originals-data';
-const originalsDataDirIsExplicit = !!process.env.ORIGINALS_DATA_DIR;
+// users' Originals (checkConfig() above reports exactly that, by name).
+const { path: originalsDataDir, explicit: originalsDataDirIsExplicit } = resolveDataDir(process.env);
 const originalsStore = createOriginalsStore({ dataDir: originalsDataDir });
 // In-flight commit+reveal pairs persist next to the Originals (same data dir,
 // same JWT-sub namespacing) so a dead tab can never strand committed funds.
@@ -185,19 +189,9 @@ if (api) {
   setInterval(sweep, 60 * 60_000);
 }
 
-// Loud guard against the silent data-loss trap: durable Originals only matter
-// when the auth API is enabled (signed-in users), and only persist across
-// redeploys if ORIGINALS_DATA_DIR points at a mounted volume. Warn — don't
-// throw: the anonymous demo + Track-A hosting must still run without it.
-if (api && !originalsDataDirIsExplicit && isLikelyDeployed()) {
-  console.warn(
-    '\n' +
-      '  ┌──────────────────────────────────────────────────────────────────────┐\n' +
-      '  │  !  ORIGINALS_DATA_DIR is not set on a deployed instance.              │\n' +
-      "  │     Signed-in users' Originals are being written to an EPHEMERAL       │\n" +
-      '  │     container path and will be LOST on the next redeploy.              │\n' +
-      '  │     Fix: attach a persistent volume and set ORIGINALS_DATA_DIR to      │\n' +
-      '  │     its mount path (e.g. ORIGINALS_DATA_DIR=/data).                    │\n' +
-      '  └──────────────────────────────────────────────────────────────────────┘\n'
-  );
-}
+// One-line summary of the contract check that ran at the top of this file.
+// The detail (every offending value, by name) is already in the log above.
+console.log(
+  `[landing] config contract: ${configIssues.length === 0 ? 'clean' : `${configIssues.length} issue(s)`}` +
+    ` (strict=${isStrictConfig() ? 'on' : 'off'})`
+);

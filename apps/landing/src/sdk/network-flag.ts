@@ -28,6 +28,18 @@ export function btcRealEnabled(): boolean {
   return btcNetwork() !== 'off';
 }
 
+/**
+ * May the `?smoke=1` auto-run harness execute on this build (R12)? It runs
+ * unauthenticated on load and drives the full create→publish→inscribe path, so
+ * on a real-network build it would hit the real provider from an anonymous
+ * page load. The money routes are JWT-gated so it cannot move funds, but the
+ * resulting console errors breach the CI floor — and an unauthenticated route
+ * has no business on the real-network path at all. Mock builds only.
+ */
+export function smokeAutoRunAllowed(flag: BtcNetworkFlag = btcNetwork()): boolean {
+  return flag === 'off';
+}
+
 // The block explorer link for a real inscription's reveal txid, on whichever
 // network the deploy enabled. A mock/regtest txid has no public explorer.
 // Lives here (not engine.ts) so light page chunks can link explorers without

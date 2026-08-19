@@ -57,6 +57,20 @@ export function expectedServerNetwork(flag: 'mainnet' | 'testnet4' | 'off'): Ser
 }
 
 /**
+ * Do the built bundle and the running server disagree about the chain (R11)?
+ * Unconditional in both directions: 'off' is a value that can be skewed too —
+ * a bundle built without VITE_BTC_NETWORK against a mainnet server is a
+ * mainnet deploy silently serving a mock site. null = not yet known, which is
+ * never a mismatch.
+ */
+export function networkSkewDetected(
+  flag: BtcNetworkFlag,
+  server: ServerNetwork | null
+): boolean {
+  return server !== null && server !== expectedServerNetwork(flag);
+}
+
+/**
  * Map a failed /api/btc/deposit response onto creator-facing copy (R3). The
  * fee source being down is its OWN state: the route quotes nothing, so the UI
  * must say so rather than sit on "checking…" forever. Any other failure is a
@@ -299,17 +313,27 @@ export function Demo() {
   const publish = () =>
     run('created', 'publishing', 'published', (engine) => engine.publish());
 
-  // Config-skew guard: resolve the server's network once, before any flow
-  // that could show a deposit address. null = not yet known.
+  // Config-skew guard: resolve the server's network once, before any flow that
+  // could show a deposit address. null = not yet known. UNCONDITIONAL (R11):
+  // gating this on `real` made the client-off direction invisible — a build
+  // with VITE_BTC_NETWORK unset against BTC_NETWORK=mainnet is a mainnet deploy
+  // silently serving a mock site, and after U2 an anonymous visitor (never
+  // `real`) would not have fetched at all.
   const [serverNetwork, setServerNetwork] = useState<ServerNetwork | null>(null);
   useEffect(() => {
-    if (!real) return;
     let live = true;
     void fetchServerNetwork().then((n) => { if (live) setServerNetwork(n); });
     return () => { live = false; };
-  }, [real]);
-  const networkMismatch =
-    real && serverNetwork !== null && serverNetwork !== expectedServerNetwork(network);
+  }, []);
+  const networkSkew = networkSkewDetected(network, serverNetwork);
+  // Reported in every direction; only the real path has money to block.
+  useEffect(() => {
+    if (!networkSkew) return;
+    console.warn(
+      `[originals-demo] network skew: this build is ${network}, the server is ${serverNetwork}.`
+    );
+  }, [networkSkew, network, serverNetwork]);
+  const networkMismatch = real && networkSkew;
 
   // Creator-pays deposit state (mainnet): the user's own confirmed UTXOs at
   // their Turnkey-derived address, polled while the inscribe step is live so
