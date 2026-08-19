@@ -41,6 +41,31 @@ describe('engine inscribe wiring', () => {
     expect(state.inscription?.txid).toBeTruthy();
   });
 
+  /**
+   * U2 / R6 — an anonymous visitor on a MAINNET build runs the whole flow to
+   * completion on the mock provider. Before U2 the flag alone chose the
+   * provider, so this run reached a real /api/btc/* call with nothing to sign
+   * it. Console errors are asserted because "completes" is the claim: a run
+   * that throws into the console is not a simulation, it is a broken step.
+   */
+  test('an anonymous mainnet-build run completes create → publish → simulated inscribe, silently', async () => {
+    const errors: unknown[][] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => { errors.push(args); };
+    try {
+      const engine = new DemoEngine({ networkFlag: 'mainnet' });
+      expect(engine.tier.real).toBe(false);
+      await engine.create('T', 'Artwork', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+      await engine.publish();
+      const state = await engine.inscribe();
+      expect(state.layer).toBe('did:btco');
+      expect(state.inscription?.txid).toBeTruthy();
+    } finally {
+      console.error = realError;
+    }
+    expect(errors).toEqual([]);
+  });
+
   test('inscribe() with funding but a broken signer surfaces the failure (real path is attempted)', async () => {
     const engine = new DemoEngine();
     await engine.create('T', 'Artwork', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
@@ -62,5 +87,26 @@ describe('engine inscribe wiring', () => {
         },
       })
     ).rejects.toThrow();
+  });
+});
+
+/**
+ * U2 / R6 — a simulated inscription must not be linkable. btcoExplorerUrl is
+ * flag-based, so on a mainnet build the mock txid would otherwise be dressed
+ * as a real mempool.space transaction the moment the anonymous tier became
+ * completable.
+ */
+describe('simulated inscriptions are not linked to a block explorer', () => {
+  let restore: () => void;
+  beforeEach(() => { restore = installHostFetch(); });
+  afterEach(() => restore());
+
+  test('an anonymous mainnet-build run yields an inscription with no explorer URL', async () => {
+    const engine = new DemoEngine({ networkFlag: 'mainnet' });
+    await engine.create('T', 'Artwork', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    await engine.publish();
+    const state = await engine.inscribe();
+    expect(state.inscription?.txid).toBeTruthy();
+    expect(state.inscription?.explorerUrl).toBeUndefined();
   });
 });

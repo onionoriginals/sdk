@@ -141,6 +141,20 @@ export const demo = {
         'Coming soon: inscribe the published Original onto a satoshi as did:btco — real Bitcoin inscription lands once testnet4 ordinals support ships.'
     }
   ],
+  /**
+   * The simulated tier (R6). An anonymous visitor CAN complete step 3, so the
+   * copy names it a simulation outright rather than promising a real
+   * inscription later — the visual treatment carries the same signal.
+   */
+  simulated: {
+    badge: 'simulated',
+    action: 'Run the simulation',
+    pending: 'Simulating…',
+    description:
+      'The SDK’s built-in mock Ordinals provider runs the commit/reveal flow right here in the tab — the same code path, standing in for the Bitcoin network.',
+    note:
+      'Nothing in this step reaches Bitcoin and no sats move: the satoshi and transaction id it produces come from the mock provider.'
+  },
   revise: {
     heading: 'Edit it — the log keeps every version',
     body:
@@ -228,6 +242,7 @@ export const demo = {
       'This deploy is misconfigured: the app was built for a different Bitcoin network than the server is running. Inscribing is disabled until they match — no deposit address is shown, because funds sent to it could not be spent here.',
     yourKeyNote: 'Your Turnkey key signs this inscription in your browser; your own deposit pays the fee. The server never sees a private key.'
   },
+  /** Dead copy: nothing renders this since step 3 became tier-aware. Kept only until the copy pass removes it together with its test. */
   comingSoon: 'Coming soon — inscribing on Bitcoin (did:btco) is not enabled yet. Your Original is already real and resolvable as did:webvh.',
   reset: 'Start over with a new asset'
 };

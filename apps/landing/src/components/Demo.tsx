@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine } from '../sdk/engine';
 import { engineIdentity, ANON_IDENTITY } from '../sdk/engine';
-import { btcNetwork, type BtcNetworkFlag } from '../sdk/network-flag';
+import { btcNetwork, demoTier, type BtcNetworkFlag } from '../sdk/network-flag';
 import { useAuth } from '../auth/useAuth';
 import type { SigningStatus } from '../auth/turnkey-session';
 import { generateArtwork } from '../sdk/artwork';
@@ -111,6 +111,38 @@ export function identityTransition(
   return 'reset';
 }
 
+/**
+ * How step 3 presents itself. In the simulated tier the step is COMPLETABLE
+ * (R6), so "disabled and greyed out" is gone as the signal that it is not real
+ * Bitcoin: the replacement is a treatment the money button never wears —
+ * `demo-sim-btn` plus `data-sim` on the step itself — and its own label.
+ */
+export interface InscribeStepView {
+  simulated: boolean;
+  label: string;
+  pending: string;
+  description: string;
+  buttonClass: string;
+}
+
+export function inscribeStepView(real: boolean): InscribeStepView {
+  return real
+    ? {
+        simulated: false,
+        label: demo.steps[2].action,
+        pending: demo.steps[2].pending,
+        description: demo.steps[2].description,
+        buttonClass: 'btn btn-primary demo-step-btn'
+      }
+    : {
+        simulated: true,
+        label: demo.simulated.action,
+        pending: demo.simulated.pending,
+        description: demo.simulated.description,
+        buttonClass: 'btn demo-step-btn demo-sim-btn'
+      };
+}
+
 export function depositErrorMessage(body: unknown): string | null {
   const error = (body as { error?: unknown } | null | undefined)?.error;
   return error === 'fee_estimate_unavailable' ? demo.deposit.feeUnavailable : null;
@@ -160,7 +192,11 @@ export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
   const { isAuthenticated, bitcoin, user, signing, reauth, beginReauth } = useAuth();
   const network = btcNetwork();
-  const real = network !== 'off';
+  // R5: the real Bitcoin path follows AUTH, not the build flag alone. The
+  // engine derives its provider from this same value, so an enabled money
+  // button and a mock provider can no longer end up on screen together.
+  const real = demoTier(network, isAuthenticated).real;
+  const inscribeView = inscribeStepView(real);
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [medium, setMedium] = useState(demo.form.mediums[0]);
   const [nonce, setNonce] = useState(() => getArtSeed().nonce);
@@ -519,7 +555,12 @@ export function Demo() {
                             : 'ready'
                           : 'locked';
                     return (
-                      <li key={s.id} className="demo-step" data-state={state}>
+                      <li
+                        key={s.id}
+                        className="demo-step"
+                        data-state={state}
+                        data-sim={i === 2 && inscribeView.simulated ? '' : undefined}
+                      >
                         <span className="demo-step-marker">
                           {state === 'done' ? (
                             <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -536,42 +577,47 @@ export function Demo() {
                               <span className="dot" />
                               {s.layer}
                             </span>
+                            {i === 2 && inscribeView.simulated && (
+                              // Stays put in every state, including 'done' —
+                              // the signal has to outlive the run it labels.
+                              <span className="demo-sim-badge">
+                                <span className="dot" aria-hidden="true" />
+                                {demo.simulated.badge}
+                              </span>
+                            )}
                           </div>
-                          <p>{s.description}</p>
-                          {state !== 'done' &&
-                            (i === 2 && !real ? (
-                              // did:btco inscription is not live on this deploy —
-                              // disabled, never calls engine.inscribe(). The gated
-                              // real paths (testnet4 faucet / mainnet deposit) are
-                              // handled in inscribe().
-                              <button type="button" className="btn demo-step-btn" disabled>
-                                {demo.comingSoon}
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="btn btn-primary demo-step-btn"
-                                disabled={
-                                  (state !== 'ready' && state !== 'busy') ||
-                                  (i === 0 && title.trim().length === 0) ||
-                                  // Publishing an asset while the preview shows
-                                  // bytes nothing signed would publish something
-                                  // other than what's on screen.
-                                  (i === 1 && (pendingRevision || updating))
-                                }
-                                data-busy={state === 'busy' || undefined}
-                                onClick={stepActions[i]}
-                              >
-                                {state === 'busy' ? (
-                                  <>
-                                    <span className="demo-spinner" aria-hidden="true" />
-                                    {s.pending}
-                                  </>
-                                ) : (
-                                  s.action
-                                )}
-                              </button>
-                            ))}
+                          <p>{i === 2 ? inscribeView.description : s.description}</p>
+                          {state !== 'done' && (
+                            // Step 3 in the simulated tier runs the SDK's mock
+                            // provider for real — completable, not disabled —
+                            // so its "this is not Bitcoin" signal is the
+                            // treatment and the label, never a dead button.
+                            <button
+                              type="button"
+                              className={i === 2 ? inscribeView.buttonClass : 'btn btn-primary demo-step-btn'}
+                              disabled={
+                                (state !== 'ready' && state !== 'busy') ||
+                                (i === 0 && title.trim().length === 0) ||
+                                // Publishing an asset while the preview shows
+                                // bytes nothing signed would publish something
+                                // other than what's on screen.
+                                (i === 1 && (pendingRevision || updating))
+                              }
+                              data-busy={state === 'busy' || undefined}
+                              onClick={stepActions[i]}
+                            >
+                              {state === 'busy' ? (
+                                <>
+                                  <span className="demo-spinner" aria-hidden="true" />
+                                  {i === 2 ? inscribeView.pending : s.pending}
+                                </>
+                              ) : i === 2 ? (
+                                inscribeView.label
+                              ) : (
+                                s.action
+                              )}
+                            </button>
+                          )}
                         </div>
                       </li>
                     );
@@ -624,13 +670,15 @@ export function Demo() {
 
                 {error && <p className="demo-error" role="alert">{error}</p>}
 
-                {phase === 'published' && network !== 'mainnet' && (
+                {phase === 'published' && inscribeView.simulated && (
+                  <p className="demo-inscribe-note demo-sim-note">{demo.simulated.note}</p>
+                )}
+
+                {phase === 'published' && real && network !== 'mainnet' && (
                   <p className="demo-inscribe-note">
-                    {real
-                      ? gate === 'ok'
-                        ? demo.inscribeGate.yourKeyNote
-                        : signingGateMessage(gate, network, signing)
-                      : demo.comingSoon}
+                    {gate === 'ok'
+                      ? demo.inscribeGate.yourKeyNote
+                      : signingGateMessage(gate, network, signing)}
                   </p>
                 )}
 
