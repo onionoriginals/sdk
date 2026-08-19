@@ -42,8 +42,11 @@ export type LayerId = 'did:cel' | 'did:webvh' | 'did:btco';
  * otherwise a user who signs in after an anonymous engine was preloaded would
  * keep publishing through the ephemeral (TTL) adapter instead of their account.
  */
+/** The identity an anonymous visitor's engine is keyed by. */
+export const ANON_IDENTITY = 'anon';
+
 export function engineIdentity(authed: boolean, subOrgId?: string): string {
-  return authed ? `authed:${subOrgId ?? ''}` : 'anon';
+  return authed ? `authed:${subOrgId ?? ''}` : ANON_IDENTITY;
 }
 
 export interface DemoEvent {

@@ -197,6 +197,18 @@ export const demo = {
     faucetEmpty: 'The testnet4 faucet is temporarily out of funds — try again in a bit.',
     mockNote: 'Bitcoin inscription runs against a mock provider in this environment (no wallet, no chain). Deploy with a testnet4 endpoint + faucet to make it real.'
   },
+  session: {
+    expiredHeading: 'Your signing session expired',
+    expiredBody:
+      'Your browser’s signing key has expired, so nothing can be signed right now. Sign in again to get a fresh one — your Original, and any BTC already sitting at your deposit address, are untouched and waiting.',
+    missingBody:
+      'You’re signed in, but this browser has no signing key for your account — sign in again to get one. Nothing is lost: your Original is still real and resolvable, and any BTC at your deposit address is still yours.',
+    reauthCta: 'Sign in again to keep going',
+    reauthPending: 'Waiting for you to sign back in…',
+    preserved: 'Your Original is held right where you left it — signing back in picks up from here.',
+    revokeFailed:
+      'Signed out, and this browser’s signing key is erased. We couldn’t reach Turnkey to revoke it as well, so it stays valid there until it expires on its own.'
+  },
   deposit: {
     heading: 'Fund your inscription',
     signInPrompt: 'Sign in to inscribe on Bitcoin — your own key signs it, your own BTC funds it.',

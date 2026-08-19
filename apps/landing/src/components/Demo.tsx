@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine } from '../sdk/engine';
-import { engineIdentity } from '../sdk/engine';
-import { btcNetwork } from '../sdk/network-flag';
+import { engineIdentity, ANON_IDENTITY } from '../sdk/engine';
+import { btcNetwork, type BtcNetworkFlag } from '../sdk/network-flag';
 import { useAuth } from '../auth/useAuth';
+import type { SigningStatus } from '../auth/turnkey-session';
 import { generateArtwork } from '../sdk/artwork';
 import { getArtSeed, setArtSeed } from '../sdk/artwork-sync';
 import { CelChain } from './CelChain';
@@ -61,6 +62,55 @@ export function expectedServerNetwork(flag: 'mainnet' | 'testnet4' | 'off'): Ser
  * must say so rather than sit on "checking…" forever. Any other failure is a
  * transient poll blip and keeps the existing waiting copy.
  */
+/**
+ * Whether this browser may be offered a deposit address / asked to sign. The
+ * expiry check happens HERE — before a creator is told where to send BTC, and
+ * again at the inscribe click — so an expired session is a UI state rather than
+ * a raw Turnkey error arriving after the money moved.
+ */
+export type SigningGate = 'ok' | 'sign-in' | 'reauth';
+
+export function signingGate(opts: {
+  authenticated: boolean;
+  hasSigningClient: boolean;
+  status: SigningStatus;
+}): SigningGate {
+  if (!opts.authenticated) return 'sign-in';
+  return opts.hasSigningClient && opts.status === 'active' ? 'ok' : 'reauth';
+}
+
+/**
+ * Copy for a blocked gate — always from content.ts, never a raw error. A
+ * session that ran out and a browser that never had one need different words:
+ * "expired" is a lie to someone who just reloaded on a new device.
+ */
+export function signingGateMessage(
+  gate: SigningGate,
+  network: BtcNetworkFlag,
+  status: SigningStatus = 'expired'
+): string | null {
+  if (gate === 'ok') return null;
+  if (gate === 'reauth') return status === 'expired' ? demo.session.expiredBody : demo.session.missingBody;
+  return network === 'mainnet' ? demo.deposit.signInPrompt : demo.inscribeGate.signInPrompt;
+}
+
+/**
+ * What an auth-identity change should do to the in-flight Original. A genuine
+ * identity change still resets (a different account must not inherit the
+ * engine), but a re-authentication cycle — including one that dips through
+ * anonymous via a full sign-out — preserves it: the whole point of U1 is that a
+ * creator who has already sent BTC does not lose the asset it was for.
+ */
+export function identityTransition(
+  prev: string,
+  next: string,
+  reauth: { active: boolean; from: string | null }
+): 'none' | 'preserve' | 'reset' {
+  if (prev === next) return 'none';
+  if (reauth.active && (next === ANON_IDENTITY || next === reauth.from)) return 'preserve';
+  return 'reset';
+}
+
 export function depositErrorMessage(body: unknown): string | null {
   const error = (body as { error?: unknown } | null | undefined)?.error;
   return error === 'fee_estimate_unavailable' ? demo.deposit.feeUnavailable : null;
@@ -108,7 +158,7 @@ function useEngine(authed: boolean, subOrgId?: string) {
 
 export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
-  const { isAuthenticated, bitcoin, user } = useAuth();
+  const { isAuthenticated, bitcoin, user, signing, reauth, beginReauth } = useAuth();
   const network = btcNetwork();
   const real = network !== 'off';
   const [title, setTitle] = useState(demo.form.defaultTitle);
@@ -133,6 +183,13 @@ export function Demo() {
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'events' | 'provenance' | 'resource'>('events');
+  // The pre-deposit / pre-sign gate. Recomputed on every render so a session
+  // that dies while the deposit screen is open flips the UI on its own.
+  const gate = signingGate({
+    authenticated: isAuthenticated,
+    hasSigningClient: !!bitcoin,
+    status: signing,
+  });
   const { getEngine, discardEngine } = useEngine(isAuthenticated, user?.subOrgId);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -251,11 +308,11 @@ export function Demo() {
   }, [bitcoin]);
   useEffect(() => {
     if (networkMismatch) return;
-    if (network !== 'mainnet' || phase !== 'published' || !isAuthenticated || !bitcoin) return;
+    if (network !== 'mainnet' || phase !== 'published' || gate !== 'ok' || !bitcoin) return;
     void fetchDeposit();
     const t = setInterval(() => void fetchDeposit(), 15_000);
     return () => clearInterval(t);
-  }, [network, phase, isAuthenticated, bitcoin, fetchDeposit, networkMismatch]);
+  }, [network, phase, gate, bitcoin, fetchDeposit, networkMismatch]);
 
   const inscribe = () =>
     run('published', 'inscribing', 'inscribed', async (engine) => {
@@ -263,10 +320,11 @@ export function Demo() {
       if (!real) return engine.inscribe();
       // Never build a real-BTC transaction against a server on another chain.
       if (networkMismatch) throw new Error(demo.deposit.networkMismatch);
-      // Real path: must be signed in with a provisioned Bitcoin session.
-      if (!isAuthenticated || !bitcoin) {
-        throw new Error(network === 'mainnet' ? demo.deposit.signInPrompt : demo.inscribeGate.signInPrompt);
-      }
+      // Real path: must be signed in AND still able to sign. Checked again
+      // here, not just before the deposit — the session can die during the
+      // confirmation wait, and the user has already sent BTC by then.
+      const blocked = signingGateMessage(gate, network, signing);
+      if (blocked || !bitcoin) throw new Error(blocked ?? demo.session.missingBody);
       if (network === 'mainnet') {
         // Creator-pays: spend the user's OWN confirmed deposit UTXO. Re-fetch
         // at click time — a 15s-old snapshot must not pick a spent outpoint.
@@ -325,13 +383,21 @@ export function Demo() {
   // initial mount (identity unchanged).
   const identity = engineIdentity(isAuthenticated, user?.subOrgId);
   const prevIdentity = useRef(identity);
+  const reauthIdentity = reauth.fromSubOrgId ? engineIdentity(true, reauth.fromSubOrgId) : null;
   useEffect(() => {
-    if (prevIdentity.current === identity) return;
+    const transition = identityTransition(prevIdentity.current, identity, {
+      active: reauth.active,
+      from: reauthIdentity,
+    });
+    if (transition === 'none') return;
     prevIdentity.current = identity;
+    // A re-authentication cycle keeps the engine and the asset: the creator may
+    // already have BTC sitting at a deposit address for THIS Original.
+    if (transition === 'preserve') return;
     reset();
     // reset() is a fresh closure each render; identity is the real trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity]);
+  }, [identity, reauth.active, reauthIdentity]);
 
   const step = phaseToStep[phase];
   const busy =
@@ -561,9 +627,9 @@ export function Demo() {
                 {phase === 'published' && network !== 'mainnet' && (
                   <p className="demo-inscribe-note">
                     {real
-                      ? isAuthenticated && bitcoin
+                      ? gate === 'ok'
                         ? demo.inscribeGate.yourKeyNote
-                        : demo.inscribeGate.signInPrompt
+                        : signingGateMessage(gate, network, signing)
                       : demo.comingSoon}
                   </p>
                 )}
@@ -573,7 +639,7 @@ export function Demo() {
                 )}
 
                 {phase === 'published' && network === 'mainnet' && !networkMismatch && (
-                  isAuthenticated && bitcoin ? (
+                  gate === 'ok' && bitcoin ? (
                     <div className="demo-deposit">
                       <div className="demo-deposit-head">
                         <strong>{demo.deposit.heading}</strong>
@@ -618,8 +684,23 @@ export function Demo() {
                       )}
                       <p className="demo-inscribe-note">{demo.deposit.nonRefundable}</p>
                     </div>
+                  ) : gate === 'reauth' ? (
+                    <div className="demo-deposit">
+                      <div className="demo-deposit-head">
+                        <strong>{demo.session.expiredHeading}</strong>
+                      </div>
+                      <p className="demo-error" role="alert">{signingGateMessage(gate, network, signing)}</p>
+                      <p className="demo-inscribe-note">{demo.session.preserved}</p>
+                      {reauth.active ? (
+                        <p className="demo-inscribe-note">{demo.session.reauthPending}</p>
+                      ) : (
+                        <button type="button" className="demo-reset" onClick={() => void beginReauth()}>
+                          {demo.session.reauthCta}
+                        </button>
+                      )}
+                    </div>
                   ) : (
-                    <p className="demo-inscribe-note">{demo.deposit.signInPrompt}</p>
+                    <p className="demo-inscribe-note">{signingGateMessage(gate, network, signing)}</p>
                   )
                 )}
 

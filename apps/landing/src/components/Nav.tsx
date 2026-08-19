@@ -34,8 +34,14 @@ function Wordmark() {
 export function Nav() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-  const { isAuthenticated, user, signOut } = useAuth();
+  const { isAuthenticated, user, signOut, reauth, cancelReauth, signOutNotice } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
+
+  // A signing-session refresh drives the same modal: beginReauth() has already
+  // sent the code, so the modal opens straight on the OTP step.
+  useEffect(() => {
+    if (reauth.active) setLoginOpen(true);
+  }, [reauth.active]);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -146,7 +152,16 @@ export function Nav() {
           </a>
         </nav>
       )}
-      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
+      {signOutNotice && (
+        <p className="nav-signout-notice" role="status">{signOutNotice}</p>
+      )}
+      <LoginModal
+        open={loginOpen}
+        onClose={() => {
+          setLoginOpen(false);
+          if (reauth.active) cancelReauth();
+        }}
+      />
     </header>
   );
 }
