@@ -86,9 +86,18 @@ export function Nav() {
               <button className="nav-signout" onClick={() => signOut()}>Sign out</button>
             </div>
           ) : (
-            <button className="btn btn-primary nav-cta" onClick={() => setLoginOpen(true)}>
-              Sign in
-            </button>
+            <>
+              <button className="nav-signin" onClick={() => setLoginOpen(true)}>
+                Sign in
+              </button>
+              <a
+                className="btn btn-primary nav-cta"
+                href={nav.cta.href}
+                onClick={(e) => onSectionClick(e, nav.cta.href)}
+              >
+                {nav.cta.label}
+              </a>
+            </>
           )}
           <button
             type="button"
@@ -109,6 +118,17 @@ export function Nav() {
       </div>
       {open && (
         <nav className="nav-mobile" aria-label="Mobile">
+          {!isAuthenticated && (
+            <a
+              href={nav.cta.href}
+              onClick={(e) => {
+                setOpen(false);
+                onSectionClick(e, nav.cta.href);
+              }}
+            >
+              {nav.cta.label}
+            </a>
+          )}
           {nav.links.map((link) => (
             <a
               key={link.href}
