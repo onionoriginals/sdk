@@ -218,6 +218,7 @@ export function createBitcoinRoutes(deps: {
   // than the per-poll lookup budget is still fully covered over a few polls
   // instead of the same head items consuming the budget forever.
   let supersededCursor = 0;
+  let stuckCursor = 0;
   let confirmCursor = 0;
   function rotate<T>(arr: T[], cursor: number): T[] {
     if (arr.length === 0) return arr;
@@ -658,19 +659,21 @@ export function createBitcoinRoutes(deps: {
 
   /**
    * GET /api/btc/inscribe — the user's inscription records (no tx hex; ids +
-   * status only). Two best-effort reconciliation passes ride on this poll,
-   * both bounded by one shared lookup budget:
+   * status only). Three best-effort reconciliation passes ride on this poll,
+   * in priority order under one shared lookup budget, so EVERY stranded state
+   * converges automatically — the manual Finish button is a shortcut, never
+   * the only path:
    *
-   * 1. Broadcast-but-unconfirmed reveals get a confirmation check; a
+   * 1. SUPERSEDED pairs whose commit turns out to have CONFIRMED on-chain
+   *    (the ambiguous broadcast that landed and then WON the outpoint race)
+   *    are auto-recovered: the rival is retired, the winner reinstated, and
+   *    its persisted reveal broadcast.
+   * 2. LIVE pairs stuck at commit_broadcast (reveal broadcast failed at some
+   *    point) get their reveal completed from the persisted copy once their
+   *    commit confirms.
+   * 3. Broadcast-but-unconfirmed reveals get a confirmation check; a
    *    confirmed reveal is persisted as 'confirmed' (sticky), so each record
    *    costs at most a handful of provider lookups over its lifetime.
-   * 2. SUPERSEDED pairs whose commit turns out to have CONFIRMED on-chain
-   *    (the ambiguous broadcast that landed and then WON the outpoint race)
-   *    are auto-recovered: their reveal — the only one that can complete the
-   *    inscription — is broadcast from the persisted copy, the record is
-   *    reinstated as the live pair, and the rival (whose commit now
-   *    double-spends a confirmed tx and can never land) is superseded in its
-   *    place. No UI action needed; the routine /me poll drives it.
    */
   const inscribeList: Handler = async (req) => {
     const sub = authSub(req);
@@ -705,6 +708,14 @@ export function createBitcoinRoutes(deps: {
       ),
       supersededCursor
     );
+    // Live pairs stuck at commit_broadcast (their reveal broadcast failed —
+    // whether in the original submission, a rebroadcast, or after a reclaim):
+    // once THEIR commit confirms, the persisted reveal is completed here
+    // automatically, so no state depends on the manual Finish button.
+    const liveStuck = rotate(
+      newestFirst.filter((r) => !r.superseded && r.status === 'commit_broadcast'),
+      stuckCursor
+    );
     const liveUnconfirmed = rotate(
       newestFirst.filter((r) => !r.superseded && r.status === 'reveal_broadcast'),
       confirmCursor
@@ -732,6 +743,22 @@ export function createBitcoinRoutes(deps: {
         changed = true;
       } catch {
         // Lookup unsupported/down — leave the record as stored.
+      }
+    }
+    for (const r of liveStuck) {
+      if (lookups >= 5) break;
+      lookups++;
+      stuckCursor++;
+      try {
+        const st = await provider.getTransactionStatus(r.commitTxId);
+        if (!st?.confirmed) continue;
+        const revealErr = await broadcastIdempotent(r.revealTxHex);
+        if (!revealErr) {
+          store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
+          changed = true;
+        }
+      } catch {
+        // Lookup unsupported/down — the manual Finish button still covers it.
       }
     }
     for (const r of liveUnconfirmed) {

@@ -663,6 +663,39 @@ describe('GET /api/btc/inscribe', () => {
     expect(lookups).toBe(0); // dead rival skipped; confirmed record needs no check
   });
 
+  test('a LIVE pair stuck at commit_broadcast is auto-completed once its commit confirms', async () => {
+    const pair = buildPair();
+    let failReveal = true;
+    let commitConfirmed = false;
+    const h = harness({
+      broadcast: async (txHex) => {
+        if (failReveal && txHex === pair.revealTxHex) throw new Error('mempool hiccup');
+        return 'f'.repeat(64);
+      },
+      txStatus: (txid) => ({ confirmed: commitConfirmed && txid === pair.commitTxId }),
+    });
+    // Submission: commit lands, reveal fails → live pair at commit_broadcast.
+    const res = await post(h.routes, pair);
+    expect(((await res.json()) as { status: string }).status).toBe('commit_broadcast');
+
+    const poll = async () => {
+      const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+      const r = await h.routes.inscribeList(req, new URL(req.url));
+      return ((await r.json()) as { inscriptions: Array<{ commitTxId: string; status: string }> }).inscriptions;
+    };
+    // Commit not yet confirmed: nothing is retried, state unchanged.
+    failReveal = false;
+    let rows = await poll();
+    expect(rows.find((r) => r.commitTxId === pair.commitTxId)!.status).toBe('commit_broadcast');
+    expect(h.broadcasts.filter((x) => x === pair.revealTxHex)).toHaveLength(0);
+    // Commit confirms → the routine poll completes the reveal automatically,
+    // no Finish button involved.
+    commitConfirmed = true;
+    rows = await poll();
+    expect(rows.find((r) => r.commitTxId === pair.commitTxId)!.status).toBe('reveal_broadcast');
+    expect(h.broadcasts.filter((x) => x === pair.revealTxHex)).toHaveLength(1);
+  });
+
   test('is scoped to the authenticated user', async () => {
     const { routes } = harness();
     await post(routes, buildPair());
