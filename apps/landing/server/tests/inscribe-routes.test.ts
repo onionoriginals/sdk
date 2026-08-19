@@ -77,7 +77,10 @@ function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1')
   });
 }
 
-function harness(opts?: { broadcast?: (txHex: string) => Promise<string>; txStatus?: { confirmed: boolean } }) {
+function harness(opts?: {
+  broadcast?: (txHex: string) => Promise<string>;
+  txStatus?: { confirmed: boolean } | ((txid: string) => { confirmed: boolean });
+}) {
   const broadcasts: string[] = [];
   const provider = {
     async broadcastTransaction(txHex: string) {
@@ -89,7 +92,8 @@ function harness(opts?: { broadcast?: (txHex: string) => Promise<string>; txStat
       broadcasts.push(txHex);
       return 'f'.repeat(64);
     },
-    async getTransactionStatus() {
+    async getTransactionStatus(txid: string) {
+      if (typeof opts?.txStatus === 'function') return opts.txStatus(txid);
       if (opts?.txStatus) return opts.txStatus;
       return { confirmed: false };
     },
@@ -397,6 +401,60 @@ describe('GET /api/btc/inscribe', () => {
     body = (await res.json()) as { inscriptions: Array<{ status: string }> };
     expect(body.inscriptions[0].status).toBe('confirmed');
     expect(lookups).toBe(1); // sticky: no second lookup
+  });
+
+  test('auto-recovers a superseded pair whose commit WON the outpoint: reveal broadcast from server state, roles swapped', async () => {
+    const pairA = buildPair();
+    let aConfirmed = false;
+    let failACommit = true;
+    const h = harness({
+      broadcast: async (txHex) => {
+        // Pair A's commit "fails" ambiguously — it actually reached the network.
+        if (failACommit && txHex === pairA.signedCommitHex) throw new Error('connection reset mid-response');
+        return 'f'.repeat(64);
+      },
+      txStatus: (txid) => ({ confirmed: aConfirmed && txid === pairA.commitTxId }),
+    });
+
+    // 1) Pair A: ambiguous commit failure → persisted as 'signed'.
+    expect((await post(h.routes, pairA)).status).toBe(502);
+
+    // 2) Rebuilt pair B on the same outpoint supersedes A (A's commit not yet
+    //    visible as confirmed) and broadcasts fully.
+    const pairB = (() => {
+      const commit = new btc.Transaction();
+      commit.addInput({ txid: pairA.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
+      commit.addOutputAddress(USER_ADDRESS, 30_000n, btc.TEST_NETWORK);
+      commit.sign(USER_PRIV);
+      commit.finalize();
+      const reveal = new btc.Transaction();
+      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 30_000n } });
+      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
+      reveal.sign(USER_PRIV);
+      reveal.finalize();
+      return { ...pairA, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
+    })();
+    expect((await post(h.routes, pairB)).status).toBe(200);
+    expect(h.store.get('sub-1', pairA.commitTxId)!.superseded).toBe(true);
+
+    // 3) A's commit confirms on-chain — it won the outpoint race; B's commit
+    //    can never land. The routine list poll must recover A by itself.
+    aConfirmed = true;
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const res = await h.routes.inscribeList(req, new URL(req.url));
+    expect(res.status).toBe(200);
+    const { inscriptions } = (await res.json()) as {
+      inscriptions: Array<{ commitTxId: string; status: string; superseded?: boolean }>;
+    };
+    const a = inscriptions.find((r) => r.commitTxId === pairA.commitTxId)!;
+    const b = inscriptions.find((r) => r.commitTxId === pairB.commitTxId)!;
+    expect(a.superseded).toBeUndefined(); // reinstated as the live pair
+    expect(a.status).toBe('reveal_broadcast');
+    expect(b.superseded).toBe(true); // rival retired
+    // A's reveal — the only one that can complete the inscription — was
+    // broadcast from the persisted copy, no client involved.
+    expect(h.broadcasts.filter((x) => x === pairA.revealTxHex)).toHaveLength(1);
+    expect(h.store.findByOutpoint('sub-1', `${pairA.fundingUtxo.txid}:0`)!.commitTxId).toBe(pairA.commitTxId);
   });
 
   test('is scoped to the authenticated user', async () => {

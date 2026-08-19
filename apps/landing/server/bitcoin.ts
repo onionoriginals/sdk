@@ -628,10 +628,19 @@ export function createBitcoinRoutes(deps: {
 
   /**
    * GET /api/btc/inscribe — the user's inscription records (no tx hex; ids +
-   * status only). Broadcast-but-unconfirmed records get a best-effort
-   * confirmation check; a confirmed reveal is persisted as 'confirmed'
-   * (sticky), so each record costs at most a handful of provider lookups over
-   * its lifetime and none once confirmed.
+   * status only). Two best-effort reconciliation passes ride on this poll,
+   * both bounded by one shared lookup budget:
+   *
+   * 1. Broadcast-but-unconfirmed reveals get a confirmation check; a
+   *    confirmed reveal is persisted as 'confirmed' (sticky), so each record
+   *    costs at most a handful of provider lookups over its lifetime.
+   * 2. SUPERSEDED pairs whose commit turns out to have CONFIRMED on-chain
+   *    (the ambiguous broadcast that landed and then WON the outpoint race)
+   *    are auto-recovered: their reveal — the only one that can complete the
+   *    inscription — is broadcast from the persisted copy, the record is
+   *    reinstated as the live pair, and the rival (whose commit now
+   *    double-spends a confirmed tx and can never land) is superseded in its
+   *    place. No UI action needed; the routine /me poll drives it.
    */
   const inscribeList: Handler = async (req) => {
     const sub = authSub(req);
@@ -640,24 +649,44 @@ export function createBitcoinRoutes(deps: {
     if (limited) return limited;
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
-    const records = store.list(sub);
-    // Bound the per-request provider fan-out: at most a handful of
-    // confirmation lookups per call (newest first — the ones a user is
-    // actually waiting on), on top of the per-user quota cap above.
+    let records = store.list(sub);
+    // Bound the per-request provider fan-out (newest first — the records a
+    // user is actually waiting on), on top of the per-user quota cap above.
     let lookups = 0;
+    let changed = false;
     for (const r of [...records].reverse()) {
-      if (r.status !== 'reveal_broadcast' || r.superseded || lookups >= 5) continue;
-      lookups++;
-      try {
-        const st = await provider.getTransactionStatus(r.revealTxId);
-        if (st?.confirmed) {
-          store.setStatus(sub, r.commitTxId, 'confirmed');
-          r.status = 'confirmed';
+      if (lookups >= 5) break;
+      if (r.status === 'reveal_broadcast' && !r.superseded) {
+        lookups++;
+        try {
+          const st = await provider.getTransactionStatus(r.revealTxId);
+          if (st?.confirmed) {
+            store.setStatus(sub, r.commitTxId, 'confirmed');
+            changed = true;
+          }
+        } catch {
+          // Lookup unsupported/down — report the stored status.
         }
-      } catch {
-        // Lookup unsupported/down — report the stored status.
+      } else if (r.superseded && (r.status === 'signed' || r.status === 'commit_broadcast')) {
+        lookups++;
+        try {
+          const st = await provider.getTransactionStatus(r.commitTxId);
+          if (!st?.confirmed) continue;
+          // This pair's commit won the outpoint: retire the rival first (its
+          // commit conflicts with a confirmed tx), then reinstate this pair
+          // and complete it from the persisted reveal.
+          const rival = store.findByOutpoint(sub, r.fundingOutpoint);
+          if (rival && rival.commitTxId !== r.commitTxId) store.supersede(sub, rival.commitTxId);
+          store.reinstate(sub, r.commitTxId);
+          const revealErr = await broadcastIdempotent(r.revealTxHex);
+          store.setStatus(sub, r.commitTxId, revealErr ? 'commit_broadcast' : 'reveal_broadcast');
+          changed = true;
+        } catch {
+          // Lookup unsupported/down — leave the record as stored.
+        }
       }
     }
+    if (changed) records = store.list(sub);
     const inscriptions = records.map((r) => ({
       commitTxId: r.commitTxId,
       revealTxId: r.revealTxId,

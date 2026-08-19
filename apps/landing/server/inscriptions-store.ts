@@ -48,6 +48,12 @@ export interface InscriptionsStore {
    * old commit reached the network despite its broadcast call failing.
    */
   supersede(subOrgId: string, commitTxId: string): void;
+  /**
+   * Clear the superseded flag — used when a superseded pair's commit turns
+   * out to have WON its funding outpoint (confirmed on-chain), making it the
+   * live record again (the rival pair gets superseded in its place).
+   */
+  reinstate(subOrgId: string, commitTxId: string): void;
   get(subOrgId: string, commitTxId: string): InscriptionRecord | null;
   setStatus(subOrgId: string, commitTxId: string, status: InscriptionStatus): void;
   list(subOrgId: string): InscriptionRecord[];
@@ -113,6 +119,14 @@ export function createInscriptionsStore(opts: {
       const rec = recs.find((r) => r.commitTxId === commitTxId);
       if (!rec) throw new Error('NOT_FOUND');
       rec.superseded = true;
+      rec.updatedAt = new Date(now()).toISOString();
+      writeAll(subOrgId, recs);
+    },
+    reinstate(subOrgId, commitTxId) {
+      const recs = readAll(subOrgId);
+      const rec = recs.find((r) => r.commitTxId === commitTxId);
+      if (!rec) throw new Error('NOT_FOUND');
+      delete rec.superseded;
       rec.updatedAt = new Date(now()).toISOString();
       writeAll(subOrgId, recs);
     },
