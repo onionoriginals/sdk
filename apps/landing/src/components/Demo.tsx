@@ -55,6 +55,17 @@ export function expectedServerNetwork(flag: 'mainnet' | 'testnet4' | 'off'): Ser
   return flag === 'mainnet' ? 'mainnet' : flag === 'testnet4' ? 'testnet' : 'off';
 }
 
+/**
+ * Map a failed /api/btc/deposit response onto creator-facing copy (R3). The
+ * fee source being down is its OWN state: the route quotes nothing, so the UI
+ * must say so rather than sit on "checking…" forever. Any other failure is a
+ * transient poll blip and keeps the existing waiting copy.
+ */
+export function depositErrorMessage(body: unknown): string | null {
+  const error = (body as { error?: unknown } | null | undefined)?.error;
+  return error === 'fee_estimate_unavailable' ? demo.deposit.feeUnavailable : null;
+}
+
 // Revising is deliberately NOT a phase: it is authorship AT the current layer,
 // repeatable, and never moves the asset on. Modelling it as one would put it in
 // the pipeline's step math, where every value would be wrong by a layer.
@@ -211,13 +222,29 @@ export function Demo() {
   // their Turnkey-derived address, polled while the inscribe step is live so
   // "deposit detected → confirmed" updates without a reload.
   const [deposit, setDeposit] = useState<DepositInfo | null>(null);
+  const [depositError, setDepositError] = useState<string | null>(null);
+  // Mirror of depositError readable synchronously inside the inscribe click —
+  // state set during that same await would still be stale there, and the
+  // fallback message ("send BTC and wait for a confirmation") is the wrong
+  // advice when the real problem is that we cannot price the fee at all.
+  const depositErrorRef = useRef<string | null>(null);
   const fetchDeposit = useCallback(async (): Promise<DepositInfo | null> => {
     if (!bitcoin) return null;
     const res = await fetch(
       `/api/btc/deposit?address=${encodeURIComponent(bitcoin.fundingAddress)}`,
       { credentials: 'same-origin' }
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const message = depositErrorMessage(await res.json().catch(() => null));
+      depositErrorRef.current = message;
+      setDepositError(message);
+      // Fee source down: drop the last quote too. A stale number is exactly
+      // the "misled about what you can lose" case (R3).
+      if (message) setDeposit(null);
+      return null;
+    }
+    depositErrorRef.current = null;
+    setDepositError(null);
     const info = (await res.json()) as DepositInfo;
     setDeposit(info);
     return info;
@@ -244,6 +271,9 @@ export function Demo() {
         // Creator-pays: spend the user's OWN confirmed deposit UTXO. Re-fetch
         // at click time — a 15s-old snapshot must not pick a spent outpoint.
         const info = await fetchDeposit();
+        // Fee source down: refuse here rather than telling them to deposit
+        // more against a number we no longer have (R3).
+        if (!info && depositErrorRef.current) throw new Error(depositErrorRef.current);
         const utxo = info?.confirmedUtxos.find((u) => u.value >= info.estimatedCostSats);
         if (!utxo) throw new Error(demo.deposit.needed);
         return engine.inscribe({
@@ -556,11 +586,13 @@ export function Demo() {
                               : undefined
                           }
                         >
-                          {!deposit || (deposit.confirmedUtxos.length === 0 && deposit.unconfirmedSats === 0)
-                            ? demo.deposit.waiting
-                            : deposit.confirmedUtxos.some((u) => u.value >= deposit.estimatedCostSats)
-                              ? demo.deposit.ready
-                              : demo.deposit.detected}
+                          {depositError
+                            ? demo.deposit.unavailableBadge
+                            : !deposit || (deposit.confirmedUtxos.length === 0 && deposit.unconfirmedSats === 0)
+                              ? demo.deposit.waiting
+                              : deposit.confirmedUtxos.some((u) => u.value >= deposit.estimatedCostSats)
+                                ? demo.deposit.ready
+                                : demo.deposit.detected}
                         </span>
                       </div>
                       {deposit && (
@@ -574,6 +606,10 @@ export function Demo() {
                         <p className="demo-inscribe-note">
                           {demo.deposit.addressLabel}: <code>{bitcoin.fundingAddress}</code>
                         </p>
+                      ) : depositError ? (
+                        // The one fee source is down, so there is no honest
+                        // amount to quote — say that, and show no address.
+                        <p className="demo-error" role="alert">{depositError}</p>
                       ) : (
                         // No confirmed handshake with the server yet — showing an
                         // address here is how a creator sends real BTC somewhere

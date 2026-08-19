@@ -209,6 +209,9 @@ export const demo = {
     needed: 'No confirmed deposit covering the fee yet — send BTC to your deposit address and wait for one confirmation.',
     nonRefundable: 'Creator pays: the network fee is non-refundable. You own the keys, the change, and the inscribed sat — nothing is custodied.',
     addressPending: 'Checking your deposit address with the server…',
+    unavailableBadge: 'Fee estimate unavailable.',
+    feeUnavailable:
+      'We can’t reach the Bitcoin fee estimator right now, so we can’t tell you an honest amount to deposit — and we won’t guess, because a wrong number would leave your BTC stuck in an inscription that can’t be paid for. No deposit address is shown until the estimate is back. Nothing you’ve made is lost: your Original is already real and resolvable as did:webvh. Try again in a few minutes.',
     networkMismatch:
       'This deploy is misconfigured: the app was built for a different Bitcoin network than the server is running. Inscribing is disabled until they match — no deposit address is shown, because funds sent to it could not be spent here.',
     yourKeyNote: 'Your Turnkey key signs this inscription in your browser; your own deposit pays the fee. The server never sees a private key.'

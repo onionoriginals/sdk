@@ -411,3 +411,204 @@ describe('GET /api/btc/network', () => {
       .toEqual({ network: 'testnet', faucet: false });
   });
 });
+
+/**
+ * R3 / KTD3 — ONE fee source for the money path. The deposit quote and the
+ * /api/btc/fee estimate the inscribe path builds against must be the same
+ * number from the same estimator, and neither may invent a fallback: a
+ * floored 1 sat/vB quote names a deposit the SDK's FEE_RATE_REQUIRED path
+ * would refuse to spend at, stranding a stranger's real BTC.
+ */
+describe('one fee source for deposit estimate and inscribe (R3)', () => {
+  const MAINNET_ADDRESS = btc.p2wpkh(FAUCET_PUB, btc.NETWORK).address!;
+
+  /** A provider whose estimateFee is scripted per call, and counted. */
+  function feeProvider(script: () => number | Promise<number>) {
+    const calls = { n: 0 };
+    const provider = {
+      async getFirstSatOfOutput() { return '5000000000'; },
+      async estimateFee() { calls.n++; return await script(); },
+      async broadcastTransaction() { return 'f'.repeat(64); },
+      async getSpendableUtxos() {
+        return [{ txid: 'a'.repeat(64), vout: 0, value: 100_000, scriptPubKey: FAUCET_SCRIPT }];
+      },
+    } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
+    return { provider, calls };
+  }
+
+  function routesFor(
+    provider: Parameters<typeof createBitcoinRoutes>[0]['provider'],
+    opts?: { now?: () => number }
+  ) {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify([{ txid: 'a'.repeat(64), vout: 0, value: 400_000, status: { confirmed: true } }]),
+        { status: 200 }
+      )) as unknown as typeof fetch;
+    return createBitcoinRoutes({
+      jwtSecret: JWT,
+      provider,
+      network: 'mainnet' as const,
+      depositApi: 'https://mempool.example/api',
+      fetchImpl,
+      now: opts?.now,
+    });
+  }
+
+  function depositReq(address = MAINNET_ADDRESS) {
+    const token = signToken('sub-1', 'a@b.com', undefined, { secret: JWT });
+    const cookie = serializeCookie(getAuthCookieConfig(token));
+    return new Request(`http://host/api/btc/deposit?address=${encodeURIComponent(address)}`, {
+      method: 'GET',
+      headers: { cookie },
+    });
+  }
+
+  test('the deposit quote and the inscribe-path fee estimate read the same rate', async () => {
+    // An estimator that would return a DIFFERENT rate on a second call: if the
+    // two routes each called it, they would disagree.
+    let n = 0;
+    const { provider } = feeProvider(() => (++n === 1 ? 9 : 40));
+    const r = routesFor(provider);
+
+    const dep = depositReq();
+    const depBody = (await (await r.deposit(dep, new URL(dep.url))).json()) as { estimatedCostSats: number };
+
+    const feeReq = authedReq('/api/btc/fee', { blocks: 1 });
+    const feeBody = (await (await r.fee(feeReq, new URL(feeReq.url))).json()) as { feeRate: number };
+
+    expect(feeBody.feeRate).toBe(9);
+    // The quote is that same 9 sat/vB: one input, 8 000-byte default content.
+    const revealVB = 111 + Math.ceil((8_000 + 300) / 4);
+    expect(depBody.estimatedCostSats).toBe(Math.ceil(9 * (85 + 68 + revealVB) * 1.5) + 546);
+  });
+
+  test('estimator down: the deposit route returns a named error, no cost figure, no address', async () => {
+    const { provider } = feeProvider(() => { throw new Error('quicknode down'); });
+    const r = routesFor(provider);
+    const req = depositReq();
+    const res = await r.deposit(req, new URL(req.url));
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe('fee_estimate_unavailable');
+    // Nothing a UI could turn into "send this much here".
+    expect(body.estimatedCostSats).toBeUndefined();
+    expect(body.address).toBeUndefined();
+    expect(body.confirmedUtxos).toBeUndefined();
+  });
+
+  test('estimator down: the fee proxy fails closed rather than returning a floor', async () => {
+    const { provider } = feeProvider(() => { throw new Error('quicknode down'); });
+    const r = routesFor(provider);
+    const req = authedReq('/api/btc/fee', { blocks: 1 });
+    const res = await r.fee(req, new URL(req.url));
+    expect(res.status).toBe(502);
+    expect((await res.json() as { feeRate?: number }).feeRate).toBeUndefined();
+  });
+
+  test('estimator down: the faucet funding route refuses rather than flooring to 1 sat/vB', async () => {
+    const { provider } = feeProvider(() => { throw new Error('quicknode down'); });
+    const r = createBitcoinRoutes({
+      jwtSecret: JWT,
+      provider,
+      faucet: { address: FAUCET_ADDRESS, signFundingTx: faucetSignFundingTx },
+      faucetSats: 20_000,
+    });
+    const req = authedReq('/api/btc/funding', { address: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx' });
+    const res = await r.funding(req, new URL(req.url));
+    expect(res.status).toBe(502);
+    expect((await res.json() as { error: string }).error).toBe('fee_estimate_unavailable');
+  });
+
+  test('an absurd rate above the SDK maximum is rejected, not quoted', async () => {
+    // MAX_REASONABLE_FEE_RATE in the SDK is 10 000 sat/vB.
+    const { provider } = feeProvider(() => 10_001);
+    const r = routesFor(provider);
+    const req = depositReq();
+    const res = await r.deposit(req, new URL(req.url));
+    expect(res.status).toBe(502);
+    expect((await res.json() as { error: string }).error).toBe('fee_estimate_unavailable');
+  });
+
+  test('a non-positive / non-finite rate is rejected, not floored', async () => {
+    for (const bad of [0, -3, Number.NaN]) {
+      const { provider } = feeProvider(() => bad);
+      const r = routesFor(provider);
+      const req = depositReq();
+      const res = await r.deposit(req, new URL(req.url));
+      expect(res.status).toBe(502);
+      expect((await res.json() as { error: string }).error).toBe('fee_estimate_unavailable');
+    }
+  });
+
+  test('the 60s cache keeps a 15s poll off the estimator, and expiry refreshes once', async () => {
+    let clock = 1_000_000;
+    const { provider, calls } = feeProvider(() => 5);
+    const r = routesFor(provider, { now: () => clock });
+
+    // Four polls 15s apart inside one 60s window → exactly one estimator call.
+    for (let i = 0; i < 4; i++) {
+      const req = depositReq();
+      expect((await r.deposit(req, new URL(req.url))).status).toBe(200);
+      clock += 15_000;
+    }
+    expect(calls.n).toBe(1);
+
+    // Past 60s: one more call, shared by the fee proxy on the same tick.
+    clock += 61_000;
+    const dep = depositReq();
+    await r.deposit(dep, new URL(dep.url));
+    const feeReq = authedReq('/api/btc/fee', { blocks: 1 });
+    await r.fee(feeReq, new URL(feeReq.url));
+    expect(calls.n).toBe(2);
+  });
+
+  test('a synchronous estimator throw does not poison the shared slot', async () => {
+    // A provider that validates its config BEFORE returning a promise throws
+    // synchronously. If the single-flight slot keeps that rejected promise,
+    // every later poll re-serves the same failure and the creator can never
+    // recover without a server restart.
+    let first = true;
+    const calls = { n: 0 };
+    const provider = {
+      estimateFee() {
+        calls.n++;
+        if (first) { first = false; throw new Error('no endpoint configured'); }
+        return Promise.resolve(5);
+      },
+      async getFirstSatOfOutput() { return '5000000000'; },
+      async broadcastTransaction() { return 'f'.repeat(64); },
+      async getSpendableUtxos() { return []; },
+    } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
+    const r = routesFor(provider);
+
+    const a = depositReq();
+    expect((await r.deposit(a, new URL(a.url))).status).toBe(502);
+    // The estimator is healthy now — the retry must actually reach it.
+    const b = depositReq();
+    expect((await r.deposit(b, new URL(b.url))).status).toBe(200);
+    expect(calls.n).toBe(2);
+  });
+
+  test('an expired cache triggers exactly one refresh across concurrent requests', async () => {
+    let clock = 1_000_000;
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { provider, calls } = feeProvider(async () => { await gate; return 7; });
+    const r = routesFor(provider, { now: () => clock });
+
+    // Six concurrent cold-cache requests: without single-flight dedup each
+    // one issues its own QuickNode call.
+    const inFlight = Array.from({ length: 6 }, () => {
+      const req = depositReq();
+      return r.deposit(req, new URL(req.url));
+    });
+    await Promise.resolve();
+    release!();
+    const results = await Promise.all(inFlight);
+
+    expect(calls.n).toBe(1);
+    for (const res of results) expect(res.status).toBe(200);
+  });
+});

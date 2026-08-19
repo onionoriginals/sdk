@@ -231,8 +231,50 @@ export function createBitcoinRoutes(deps: {
   // within the hour.
   const REVEAL_REBROADCAST_AFTER_MS = 30 * 60_000;
 
-  // 60s fee-estimate cache for the deposit poll (see the deposit handler).
-  let feeCache: { at: number; rate: number } | null = null;
+  // ONE fee source for the money path (R3/KTD3). The deposit quote, the
+  // /api/btc/fee estimate the browser builds the inscription against, and the
+  // faucet's funding tx all read THIS. It fails closed: a floored 1 sat/vB
+  // would quote a deposit the SDK's FEE_RATE_REQUIRED path then refuses to
+  // spend at, stranding a stranger's real BTC mid-flow.
+  //
+  // Cached 60s per confirmation target so the UI's 15s deposit poll costs
+  // QuickNode quota once a minute, not once a tick, with an in-flight promise
+  // per target so a cold cache under concurrent polls refreshes ONCE.
+  const FEE_CACHE_MS = 60_000;
+  // Mirrors the SDK's MAX_REASONABLE_FEE_RATE (bitcoin/BitcoinManager.ts): a
+  // compromised estimator must not be able to quote an arbitrary number at a
+  // creator. Kept local — the SDK does not export it.
+  const MAX_FEE_RATE_SAT_VB = 10_000;
+  const feeCache = new Map<number, { at: number; rate: number }>();
+  const feeInFlight = new Map<number, Promise<number>>();
+
+  /** Shared estimator. Throws (never floors) when the source is unusable. */
+  async function currentFeeRate(blocks = 1): Promise<number> {
+    const cached = feeCache.get(blocks);
+    if (cached && now() - cached.at < FEE_CACHE_MS) return cached.rate;
+    const pending = feeInFlight.get(blocks);
+    if (pending) return pending;
+    const run = (async () => {
+      const estimated = await provider.estimateFee(blocks);
+      if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
+        throw new Error(`Fee estimator returned an unusable rate (${estimated}).`);
+      }
+      const rate = Math.ceil(estimated);
+      if (rate > MAX_FEE_RATE_SAT_VB) {
+        throw new Error(`Estimated fee rate ${rate} sat/vB exceeds the ${MAX_FEE_RATE_SAT_VB} sat/vB maximum.`);
+      }
+      feeCache.set(blocks, { at: now(), rate });
+      return rate;
+    })();
+    feeInFlight.set(blocks, run);
+    // Clear the slot AFTER it is set — an estimator that throws synchronously
+    // (config validated before any promise) would otherwise leave its rejected
+    // promise parked here and re-serve that failure to every later poll. The
+    // identity check keeps a settled run from evicting a newer one.
+    const clear = () => { if (feeInFlight.get(blocks) === run) feeInFlight.delete(blocks); };
+    run.then(clear, clear);
+    return run;
+  }
 
   // Rotating scan-start cursors for the list poll's reconciliation passes.
   // Each processed item advances the cursor, so successive polls start
@@ -322,10 +364,13 @@ export function createBitcoinRoutes(deps: {
     if (limited) return limited;
     const { blocks } = (await req.json().catch(() => ({}))) as { blocks?: number };
     try {
-      const feeRate = await provider.estimateFee(typeof blocks === 'number' ? blocks : 1);
+      // Same estimator (and same cache) the deposit quote was sized from —
+      // the rate the creator is told to fund and the rate the inscription is
+      // built at cannot drift apart.
+      const feeRate = await currentFeeRate(typeof blocks === 'number' ? blocks : 1);
       return json({ feeRate });
     } catch (e) {
-      return json({ error: 'fee_estimate_failed', message: (e as Error).message }, 502);
+      return json({ error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
     }
   };
 
@@ -383,8 +428,14 @@ export function createBitcoinRoutes(deps: {
 
     // 2) Build the funding tx: faucet UTXOs in, fundingSats to the user, change
     //    back to the faucet. Fee = feeRate * estimated vsize (simple P2WPKH).
-    let feeRate = 1;
-    try { feeRate = Math.max(1, Math.ceil(await provider.estimateFee(1))); } catch { /* floor */ }
+    let feeRate: number;
+    try {
+      feeRate = await currentFeeRate(1);
+    } catch (e) {
+      // No floor: a 1 sat/vB funding tx just sits unconfirmed, and the user
+      // waits on a deposit that never arrives.
+      return json({ error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
+    }
     const selected: typeof faucetUtxos = [];
     let inSats = 0;
     for (const u of faucetUtxos) {
@@ -483,6 +534,17 @@ export function createBitcoinRoutes(deps: {
       ? Math.min(contentBytesRaw, MAX_INSCRIBE_BODY_BYTES / 2)
       : 8_000;
 
+    // Resolve the fee BEFORE anything else, and fail closed (R3/KTD3): with no
+    // rate there is no honest number to fund, so this route returns a named
+    // error and NO address — the response carries nothing a UI could render as
+    // "send this much here".
+    let feeRate: number;
+    try {
+      feeRate = await currentFeeRate(1);
+    } catch (e) {
+      return json({ error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
+    }
+
     let utxos: Awaited<ReturnType<typeof fetchAddressUtxos>>;
     try {
       utxos = await fetchAddressUtxos({ api: deps.depositApi, address, network, fetchImpl: deps.fetchImpl });
@@ -501,18 +563,6 @@ export function createBitcoinRoutes(deps: {
     const confirmedUtxos = utxos.confirmed.filter(
       (u) => !inscriptionOutpoints.has(`${u.txid}:${u.vout}`)
     );
-    // The UI polls this route while waiting for a deposit; cache the fee
-    // estimate briefly so polling costs mempool.space reads (free), not
-    // QuickNode quota on every tick.
-    let feeRate = 1;
-    if (feeCache && now() - feeCache.at < 60_000) {
-      feeRate = feeCache.rate;
-    } else {
-      try {
-        feeRate = Math.max(1, Math.ceil(await provider.estimateFee(1)));
-        feeCache = { at: now(), rate: feeRate };
-      } catch { /* floor */ }
-    }
     // Commit ≈ 85 vB of fixed shape (overhead + P2TR commit output + P2WPKH
     // change) plus 68 vB PER P2WPKH input, and reveal ≈ 111 vB + the
     // witness-discounted envelope (content + ~300 bytes of tags/script
