@@ -877,11 +877,15 @@ export function createBitcoinRoutes(deps: {
         // can reach (the reveal key is ephemeral, so it can never be replaced
         // either). Re-push the persisted copy periodically: idempotent, free,
         // and a no-op for a reveal that is simply waiting for a block.
-        if (r.revealTxHex && now() - Date.parse(r.updatedAt) >= REVEAL_REBROADCAST_AFTER_MS) {
+        // Throttle on rebroadcastAt, NOT updatedAt: updatedAt is how long the
+        // record has been stuck at this status, which is what the UI reads to
+        // decide whether to offer a manual retry. Refreshing it here would
+        // reset that clock every 30 minutes and the manual path would never
+        // surface. The status has not changed, so neither should updatedAt.
+        const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
+        if (r.revealTxHex && now() - lastPush >= REVEAL_REBROADCAST_AFTER_MS) {
           await broadcastIdempotent(r.revealTxHex);
-          // Same status, fresh updatedAt — that timestamp IS the throttle.
-          store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
-          changed = true;
+          store.markRebroadcast(sub, r.commitTxId);
         }
       } catch {
         // Lookup unsupported/down — report the stored status.

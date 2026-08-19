@@ -837,9 +837,26 @@ describe('evicted-reveal recovery', () => {
     parked(h.store, 45 * 60_000);
     await poll(h);
     expect(h.broadcasts).toEqual(['02bb']);
-    // updatedAt is the throttle: an immediate second poll must not re-push.
+    // rebroadcastAt is the throttle: an immediate second poll must not re-push.
     await poll(h);
     expect(h.broadcasts).toEqual(['02bb']);
+  });
+
+  test('a re-push does NOT reset the status clock the manual retry reads', async () => {
+    // updatedAt is how long the record has been stuck at reveal_broadcast, and
+    // /me offers the manual "Finish inscription" retry once that passes 6h. If
+    // the 30-minute re-push refreshed updatedAt, the server would reset that
+    // clock twelve times over before it could ever elapse and the manual
+    // escape hatch would never appear.
+    const h = harness();
+    const before = parked(h.store, 8 * 60 * 60_000);
+    await poll(h);
+    expect(h.broadcasts).toEqual(['02bb']); // it did re-push…
+    const rec = h.store.get('sub-1', 'c'.repeat(64))!;
+    expect(rec.updatedAt).toBe(before.updatedAt); // …without touching the status clock
+    expect(rec.status).toBe('reveal_broadcast');
+    // …and stamped the throttle on its own field instead.
+    expect(Date.now() - Date.parse(rec.rebroadcastAt!)).toBeLessThan(60_000);
   });
 
   test('a reveal simply waiting for the next block is NOT re-pushed', async () => {

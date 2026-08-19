@@ -63,7 +63,16 @@ export interface InscriptionRecord {
    */
   retired?: boolean;
   createdAt: string;
+  /**
+   * When the record's STATUS last changed. Deliberately NOT touched by a
+   * rebroadcast: the UI decides whether to offer a manual retry from how long
+   * a reveal has been stuck at this status, and a server re-push refreshing
+   * this would keep that clock permanently reset — the manual escape hatch
+   * would never appear. Re-push timing lives in `rebroadcastAt`.
+   */
   updatedAt: string;
+  /** When the reveal was last re-pushed; the throttle clock, separate from `updatedAt`. */
+  rebroadcastAt?: string;
 }
 
 export interface InscriptionsStore {
@@ -88,6 +97,12 @@ export interface InscriptionsStore {
   retire(subOrgId: string, commitTxId: string): void;
   get(subOrgId: string, commitTxId: string): InscriptionRecord | null;
   setStatus(subOrgId: string, commitTxId: string, status: InscriptionStatus): void;
+  /**
+   * Stamp a re-push of an already-broadcast reveal. Touches ONLY
+   * `rebroadcastAt` — the status did not change, and `updatedAt` is what the
+   * UI's staleness clock reads.
+   */
+  markRebroadcast(subOrgId: string, commitTxId: string): void;
   list(subOrgId: string): InscriptionRecord[];
   /** The LIVE (non-superseded) record whose commit spends this `${txid}:${vout}` outpoint. */
   findByOutpoint(subOrgId: string, outpoint: string): InscriptionRecord | null;
@@ -250,6 +265,13 @@ export function createInscriptionsStore(opts: {
       rec.updatedAt = new Date(now()).toISOString();
       // Confirmed is terminal: the pair landed, so the hex is dead weight.
       if (status === 'confirmed') retireInPlace(rec);
+      writeAll(subOrgId, recs);
+    },
+    markRebroadcast(subOrgId, commitTxId) {
+      const recs = readAll(subOrgId);
+      const rec = recs.find((r) => r.commitTxId === commitTxId);
+      if (!rec) throw new Error('NOT_FOUND');
+      rec.rebroadcastAt = new Date(now()).toISOString();
       writeAll(subOrgId, recs);
     },
     list(subOrgId) {
