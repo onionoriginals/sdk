@@ -272,6 +272,7 @@ export const yourOriginals = {
   subhead:
     'Every piece you’ve created and published lives here — each a real, resolvable did:webvh with a signed version history hosted at this origin.',
   signedOut: 'Sign in to see the Originals saved to your account.',
+  loading: 'Loading your Originals\u2026',
   emptyTitle: 'No Originals yet.',
   emptyBody: 'Create and publish your first piece in the live demo — signed in, it’s saved right here.',
   emptyCta: 'Create your first Original',

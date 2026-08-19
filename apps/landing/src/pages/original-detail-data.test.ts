@@ -194,16 +194,29 @@ describe('sameOriginUrl', () => {
 
 describe('detailMode', () => {
   const row = { did: DID, title: 'T', resourceHash: 'h', createdAt: '2026-07-21T00:00:00Z' };
-  test('signed-out wins over everything', () => {
-    expect(detailMode({ authenticated: false, loaded: true, row })).toBe('signed-out');
+  // R20: a deep link or hard refresh must not flash the signed-out state at a
+  // signed-in user while `fetchMe()` is still in flight.
+  test('loading while auth itself is still resolving — never signed-out', () => {
+    expect(detailMode({ authLoading: true, authenticated: false, loaded: false, row: null })).toBe(
+      'loading'
+    );
+  });
+  test('signed-out only once auth resolved', () => {
+    expect(detailMode({ authLoading: false, authenticated: false, loaded: true, row })).toBe(
+      'signed-out'
+    );
   });
   test('loading until the fetch settles', () => {
-    expect(detailMode({ authenticated: true, loaded: false, row: null })).toBe('loading');
+    expect(detailMode({ authLoading: false, authenticated: true, loaded: false, row: null })).toBe(
+      'loading'
+    );
   });
-  test('not-found when the DID is not among the user’s Originals', () => {
-    expect(detailMode({ authenticated: true, loaded: true, row: null })).toBe('not-found');
+  test('not-found when the DID is not among the user\u2019s Originals', () => {
+    expect(detailMode({ authLoading: false, authenticated: true, loaded: true, row: null })).toBe(
+      'not-found'
+    );
   });
   test('ready with a row', () => {
-    expect(detailMode({ authenticated: true, loaded: true, row })).toBe('ready');
+    expect(detailMode({ authLoading: false, authenticated: true, loaded: true, row })).toBe('ready');
   });
 });

@@ -173,3 +173,33 @@
   justify-content: space-between;
   gap: var(--sp-3);
 }
+
+/* Loading state (R20). Deliberately one line high, matching the signed-out note
+   it may resolve into, so no reserved block collapses under the footer; it
+   mirrors the detail page's pulse affordance. */
+.your-originals-loading {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin-top: 1.5rem;
+  color: var(--text-secondary);
+}
+
+.your-originals-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-full);
+  background: var(--webvh);
+  animation: your-originals-pulse 1.2s var(--ease) infinite;
+  flex-shrink: 0;
+  /* Centre the dot on the text's first line, not on the flex box. */
+  margin-top: 0.5em;
+}
+
+@keyframes your-originals-pulse {
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .your-originals-pulse { animation: none; }
+}

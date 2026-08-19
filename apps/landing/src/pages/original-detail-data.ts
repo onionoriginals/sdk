@@ -298,10 +298,16 @@ export type DetailMode = 'signed-out' | 'loading' | 'not-found' | 'ready';
 
 /** Pure view selector for the detail page — testable without a DOM. */
 export function detailMode(input: {
+  /** Auth itself is still resolving (session restore) — nothing is known yet. */
+  authLoading: boolean;
   authenticated: boolean;
   loaded: boolean;
   row: OriginalRow | null;
 }): DetailMode {
+  // R20: while auth is in flight `authenticated` is merely not-yet-true, so
+  // reading it as signed-out flashes the sign-in prompt at a signed-in user
+  // deep-linking or hard-refreshing this page.
+  if (input.authLoading) return 'loading';
   if (!input.authenticated) return 'signed-out';
   if (!input.loaded) return 'loading';
   if (!input.row) return 'not-found';

@@ -102,13 +102,25 @@ export async function fetchInscriptions(): Promise<PendingInscription[]> {
 }
 
 // Pure view selector — testable without a DOM.
-export function originalsView(input: { authenticated: boolean; originals: OriginalRow[] }): {
-  mode: 'signed-out' | 'empty' | 'list';
+export function originalsView(input: {
+  /** Auth itself is still resolving (session restore) — nothing is known yet. */
+  authLoading: boolean;
+  authenticated: boolean;
+  /** The Originals fetch has settled (even if it returned nothing). */
+  loaded: boolean;
+  originals: OriginalRow[];
+}): {
+  mode: 'loading' | 'signed-out' | 'empty' | 'list';
   rows: OriginalRow[];
 } {
+  // R20: two distinct wrong states to keep out — a signed-out flash while auth
+  // resolves, then a "No Originals yet" flash while the fetch is still in
+  // flight. Neither `authenticated` nor an empty array means what it says yet.
+  if (input.authLoading) return { mode: 'loading', rows: [] };
   if (!input.authenticated) return { mode: 'signed-out', rows: [] };
-  if (input.originals.length === 0) return { mode: 'empty', rows: [] };
-  return { mode: 'list', rows: input.originals };
+  if (input.originals.length > 0) return { mode: 'list', rows: input.originals };
+  if (!input.loaded) return { mode: 'loading', rows: [] };
+  return { mode: 'empty', rows: [] };
 }
 
 /** The signed-in user's Originals, newest first ([] when signed out / on error). */
@@ -145,8 +157,9 @@ async function resolveLive(did: string): Promise<boolean> {
 }
 
 export function YourOriginals() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [originals, setOriginals] = useState<OriginalRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [resolved, setResolved] = useState<Record<string, boolean>>({});
   const [unfinished, setUnfinished] = useState<PendingInscription[]>([]);
   const [finishing, setFinishing] = useState<string | null>(null);
@@ -155,6 +168,7 @@ export function YourOriginals() {
   useEffect(() => {
     if (!isAuthenticated) return;
     let live = true;
+    setLoaded(false);
     // Fetch rows + inscription records together: the records carry the live
     // (sticky) confirmation state that the durable rows only hold as
     // 'pending', and any record whose reveal never broadcast gets a
@@ -166,7 +180,10 @@ export function YourOriginals() {
       setOriginals(merged);
       setUnfinished(unfinishedInscriptions(recs));
       merged.forEach((r) => resolveLive(r.did).then((ok) => live && setResolved((m) => ({ ...m, [r.did]: ok }))));
-    });
+    })
+      // Settle in `finally` so an unexpected throw ends on "no Originals yet"
+      // rather than stranding the page on the loading state forever.
+      .finally(() => { if (live) setLoaded(true); });
     return () => { live = false; };
   }, [isAuthenticated]);
 
@@ -192,7 +209,7 @@ export function YourOriginals() {
     }
   };
 
-  const view = originalsView({ authenticated: isAuthenticated, originals });
+  const view = originalsView({ authLoading, authenticated: isAuthenticated, loaded, originals });
 
   return (
     <main className="section your-originals">
@@ -200,6 +217,13 @@ export function YourOriginals() {
         <p className="eyebrow">{yourOriginals.navLabel}</p>
         <h1>{yourOriginals.heading}</h1>
         <p className="your-originals-sub">{yourOriginals.subhead}</p>
+
+        {view.mode === 'loading' && (
+          <p className="your-originals-note your-originals-loading" role="status">
+            <span className="your-originals-pulse" aria-hidden="true" />
+            {yourOriginals.loading}
+          </p>
+        )}
 
         {view.mode === 'signed-out' && <p className="your-originals-note">{yourOriginals.signedOut}</p>}
 
