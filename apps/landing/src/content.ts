@@ -209,6 +209,7 @@ export const demo = {
     signingLabel: 'Signing the commit with your key…',
     explorerLabel: 'View the real transaction on mempool.space',
     faucetEmpty: 'The testnet4 faucet is temporarily out of funds — try again in a bit.',
+    fundingFailed: 'The testnet4 funding request didn’t come through. Try the inscribe step again in a moment — nothing has been spent.',
     mockNote: 'Bitcoin inscription runs against a mock provider in this environment (no wallet, no chain). Deploy with a testnet4 endpoint + faucet to make it real.'
   },
   session: {
@@ -243,6 +244,24 @@ export const demo = {
     yourKeyNote: 'Your Turnkey key signs this inscription in your browser; your own deposit pays the fee. The server never sees a private key.'
   },
   /** Dead copy: nothing renders this since step 3 became tier-aware. Kept only until the copy pass removes it together with its test. */
+  /**
+   * The hosting layer, in visitor words. A raw `HttpHostingStorageAdapter.put
+   * failed: 507` was reaching the page before this existed — a transport string
+   * on screen, and a breach of the mechanical floor in GRADING.md.
+   */
+  hosting: {
+    rateLimited:
+      'That’s a lot of publishing at once, so the demo host asked us to slow down. Wait a few seconds and publish again — nothing you’ve made is lost, your Original is still signed and safe in this tab.',
+    unavailable:
+      'We couldn’t host the signed log just now, so your Original is still at did:cel — real, signed, and safe in this tab. Try publishing again in a moment.',
+    quotaFull:
+      'Your account has used up its hosting space, so there’s no room for another version right now. Everything you’ve already published is untouched and still resolvable.',
+    temporaryNote:
+      'Anonymous logs are hosted here in memory and dropped after a couple of hours. Sign in and your Originals are hosted for keeps, with the same signed history.'
+  },
+  /** Last resort: something we did not anticipate, said without a stack trace. */
+  failure:
+    'Something went wrong on our side. Nothing you’ve made is lost — your Original is still in this tab. Try that step again.',
   comingSoon: 'Coming soon — inscribing on Bitcoin (did:btco) is not enabled yet. Your Original is already real and resolvable as did:webvh.',
   reset: 'Start over with a new asset'
 };

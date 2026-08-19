@@ -162,6 +162,37 @@ export function depositErrorMessage(body: unknown): string | null {
   return error === 'fee_estimate_unavailable' ? demo.deposit.feeUnavailable : null;
 }
 
+/**
+ * A failure the demo raises ON PURPOSE, carrying copy that is already
+ * visitor-ready. Everything else reaching the catch is a transport or SDK
+ * string and must be translated — that is what the marker class buys.
+ */
+export class DemoCopyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DemoCopyError';
+  }
+}
+
+/**
+ * The ONLY thing a failed step is allowed to put on screen (R15). A raw
+ * `HttpHostingStorageAdapter.put failed: 507` was reaching visitors, which is
+ * also a breach of GRADING.md's mechanical floor. The raw message still goes to
+ * the console for skeptics — just never to the page.
+ */
+export function demoFailureMessage(err: unknown): string {
+  if (err instanceof DemoCopyError) return err.message;
+  const raw = err instanceof Error ? err.message : '';
+  if (/HostingStorageAdapter\.(?:put|get) failed/.test(raw)) {
+    // 507 from the durable per-user store is a QUOTA, not a blip — "try again
+    // in a moment" would be a lie. The anonymous store no longer 507s at all.
+    if (/failed:\s*429\b/.test(raw)) return demo.hosting.rateLimited;
+    if (/failed:\s*507\b/.test(raw)) return demo.hosting.quotaFull;
+    return demo.hosting.unavailable;
+  }
+  return demo.failure;
+}
+
 // Revising is deliberately NOT a phase: it is authorship AT the current layer,
 // repeatable, and never moves the asset on. Modelling it as one would put it in
 // the pipeline's step math, where every value would be wrong by a layer.
@@ -284,7 +315,7 @@ export function Demo() {
       setPhase(done);
     } catch (err) {
       console.error('[originals-demo]', err);
-      setError((err as Error).message);
+      setError(demoFailureMessage(err));
       setPhase(from);
     }
   };
@@ -305,7 +336,7 @@ export function Demo() {
       setCommitted({ title, medium, nonce });
     } catch (err) {
       console.error('[originals-demo]', err);
-      setError((err as Error).message);
+      setError(demoFailureMessage(err));
     } finally {
       setUpdating(false);
     }
@@ -379,21 +410,21 @@ export function Demo() {
       // Mock path (no real network enabled): unchanged bare inscribe.
       if (!real) return engine.inscribe();
       // Never build a real-BTC transaction against a server on another chain.
-      if (networkMismatch) throw new Error(demo.deposit.networkMismatch);
+      if (networkMismatch) throw new DemoCopyError(demo.deposit.networkMismatch);
       // Real path: must be signed in AND still able to sign. Checked again
       // here, not just before the deposit — the session can die during the
       // confirmation wait, and the user has already sent BTC by then.
       const blocked = signingGateMessage(gate, network, signing);
-      if (blocked || !bitcoin) throw new Error(blocked ?? demo.session.missingBody);
+      if (blocked || !bitcoin) throw new DemoCopyError(blocked ?? demo.session.missingBody);
       if (network === 'mainnet') {
         // Creator-pays: spend the user's OWN confirmed deposit UTXO. Re-fetch
         // at click time — a 15s-old snapshot must not pick a spent outpoint.
         const info = await fetchDeposit();
         // Fee source down: refuse here rather than telling them to deposit
         // more against a number we no longer have (R3).
-        if (!info && depositErrorRef.current) throw new Error(depositErrorRef.current);
+        if (!info && depositErrorRef.current) throw new DemoCopyError(depositErrorRef.current);
         const utxo = info?.confirmedUtxos.find((u) => u.value >= info.estimatedCostSats);
-        if (!utxo) throw new Error(demo.deposit.needed);
+        if (!utxo) throw new DemoCopyError(demo.deposit.needed);
         return engine.inscribe({
           funding: {
             fundingUtxo: utxo,
@@ -410,8 +441,8 @@ export function Demo() {
         credentials: 'same-origin',
         body: JSON.stringify({ address: bitcoin.fundingAddress }),
       });
-      if (res.status === 507) throw new Error(demo.inscribeGate.faucetEmpty);
-      if (!res.ok) throw new Error(`Funding failed (${res.status})`);
+      if (res.status === 507) throw new DemoCopyError(demo.inscribeGate.faucetEmpty);
+      if (!res.ok) throw new DemoCopyError(demo.inscribeGate.fundingFailed);
       const { fundingUtxo, changeAddress } = (await res.json()) as {
         fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey: string };
         changeAddress: string;
@@ -800,6 +831,14 @@ export function Demo() {
                         <code>{asset.webvhLogUrl}</code>
                       </a>
                       <p className="demo-resolved-note">{demo.resolved.note}</p>
+                      {/* Anonymous logs live in the in-memory host store, which
+                          evicts and expires. Say so here rather than let a later
+                          visit hit a bare resolver miss. */}
+                      {!isAuthenticated && (
+                        <p className="demo-resolved-note">
+                          {demo.hosting.temporaryNote}
+                        </p>
+                      )}
                     </div>
                   )}
 
