@@ -8,13 +8,12 @@ export const site = {
   description:
     'Create, publish, and inscribe digital assets with cryptographically verifiable provenance. did:cel → did:webvh → did:btco.',
   /**
-   * PLACEHOLDER — production URL, pending the hosting decision in issue #330.
-   * This is the single constant to swap once the domain is chosen. It is
-   * injected into index.html (canonical, og:url, og:image, twitter:image) at
-   * build time; public/robots.txt and public/sitemap.xml must carry the same
-   * origin — the build fails with a pointed error if they drift.
+   * The production origin. Single source of truth: injected into index.html
+   * (canonical, og:url, og:image, twitter:image) at build time, and
+   * public/robots.txt and public/sitemap.xml must carry the same origin —
+   * the build fails with a pointed error if they drift.
    */
-  url: 'https://originals.example.com',
+  url: 'https://originals.build',
   tagline: 'Provenance that survives the internet.',
   ogImageAlt:
     'Generative orbital artwork beside the Originals wordmark and the tagline “Provenance that survives the internet.”',
