@@ -161,17 +161,19 @@ console.log(
   `[landing] durable Originals dir: ${originalsDataDir}${originalsDataDirIsExplicit ? '' : ' (default — NOT set via ORIGINALS_DATA_DIR)'}`
 );
 
-// Monitoring sweep (stranger-safe checklist): pending inscriptions older than
-// 24h mean a stranded commit — funds waiting on a reveal rebroadcast that
-// nobody clicked. Warn hourly so they can't silently accumulate; the fix is
-// the per-user "Finish inscription" flow (or POST /api/btc/inscribe/rebroadcast).
+// Monitoring sweep (stranger-safe checklist): any inscription still holding
+// un-broadcast recovery artifacts after 24h is stranded money — a commit that
+// never went out, a reveal that never went out, or a reveal that went out and
+// never confirmed. Warn hourly so they can't silently accumulate; the list
+// poll auto-recovers most of them, and the per-user "Finish inscription" flow
+// (POST /api/btc/inscribe/rebroadcast) is the manual shortcut.
 if (api) {
   const sweep = () => {
     try {
       const stale = inscriptionsStore.sweepStale(24 * 60 * 60_000);
       if (stale.length > 0) {
         console.warn(
-          `[landing] ${stale.length} pending inscription(s) older than 24h — stranded commits awaiting reveal rebroadcast:\n` +
+          `[landing] ${stale.length} inscription(s) older than 24h still holding un-landed recovery artifacts:\n` +
             stale.map((s) => `  sub=${s.subOrgId} commit=${s.commitTxId} status=${s.status} createdAt=${s.createdAt}`).join('\n')
         );
       }

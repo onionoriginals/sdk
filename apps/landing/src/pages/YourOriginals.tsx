@@ -38,18 +38,38 @@ export interface PendingInscription {
   /** A rebuilt pair took over this record's funding outpoint (kept for recovery, not actionable here). */
   superseded?: boolean;
   createdAt: string;
+  updatedAt: string;
 }
 
 /**
- * Records whose reveal is NOT yet broadcast — the "finish inscription" set.
+ * How long a broadcast-but-unconfirmed reveal may sit before we offer a manual
+ * retry. Well past the server's own 30-minute auto re-push, so the button only
+ * appears for something genuinely wedged — not for every reveal waiting on the
+ * next block.
+ */
+const STALE_REVEAL_MS = 6 * 60 * 60_000;
+
+/**
+ * Records that still need a push to land — the "finish inscription" set:
+ * a commit or reveal that never broadcast, plus a reveal that DID broadcast
+ * but has been unconfirmed for hours (evicted from the mempool, most likely —
+ * the server re-pushes those on its own, this is the manual escape hatch).
  * Superseded records are excluded: a live rebuilt pair owns their outpoint,
  * so offering "finish" on them would race it (the server keeps them purely
  * as recovery artifacts in case their commit landed despite the failure).
  */
-export function unfinishedInscriptions(records: PendingInscription[]): PendingInscription[] {
-  return records.filter(
-    (r) => !r.superseded && (r.status === 'signed' || r.status === 'commit_broadcast')
-  );
+export function unfinishedInscriptions(
+  records: PendingInscription[],
+  nowMs: number = Date.now()
+): PendingInscription[] {
+  return records.filter((r) => {
+    if (r.superseded) return false;
+    if (r.status === 'signed' || r.status === 'commit_broadcast') return true;
+    return (
+      r.status === 'reveal_broadcast' &&
+      nowMs - Date.parse(r.updatedAt) >= STALE_REVEAL_MS
+    );
+  });
 }
 
 /**

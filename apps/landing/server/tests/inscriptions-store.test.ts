@@ -43,7 +43,7 @@ describe('inscriptions-store', () => {
     expect(store.findByOutpoint('sub-1', `${'a'.repeat(64)}:0`)!.commitTxId).toBe('d'.repeat(64));
   });
 
-  test('sweepStale finds only never-revealed records older than the cutoff, across users', () => {
+  test('sweepStale finds every un-landed record older than the cutoff, across users', () => {
     const now = Date.parse('2026-08-18T00:00:00.000Z');
     const store = createInscriptionsStore({
       dataDir: mkdtempSync(join(tmpdir(), 'is-')),
@@ -58,6 +58,64 @@ describe('inscriptions-store', () => {
 
     const stale = store.sweepStale(24 * 60 * 60_000);
     const keys = stale.map((s) => `${s.subOrgId}:${s.commitTxId[0]}`).sort();
-    expect(keys).toEqual(['sub-1:1', 'sub-2:3']);
+    // Includes the old reveal_broadcast record (2): a reveal that went out and
+    // never confirmed is stranded money too — it may have been evicted from
+    // the mempool, and nothing else in the system would ever notice.
+    expect(keys).toEqual(['sub-1:1', 'sub-1:2', 'sub-2:3']);
+    // …but not the fresh one, and not anything already retired.
+    store.setStatus('sub-1', '2'.repeat(64), 'confirmed');
+    expect(store.sweepStale(24 * 60 * 60_000).map((s) => s.commitTxId[0]).sort()).toEqual(['1', '3']);
+  });
+
+  test('a confirmed record is retired: hex dropped, row kept as a join key', () => {
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
+    store.create('sub-1', rec({}));
+    store.setStatus('sub-1', 'c'.repeat(64), 'confirmed');
+    const r = store.get('sub-1', 'c'.repeat(64))!;
+    expect(r.status).toBe('confirmed');
+    expect(r.retired).toBe(true);
+    expect(r.revealTxHex).toBeUndefined();   // dead weight — the pair landed
+    expect(r.signedCommitHex).toBeUndefined();
+    expect(store.list('sub-1')).toHaveLength(1); // /me still joins on it
+  });
+
+  test('the pending cap counts only records still holding hex — retiring frees the slot', () => {
+    const store = createInscriptionsStore({
+      dataDir: mkdtempSync(join(tmpdir(), 'is-')),
+      maxPending: 2,
+    });
+    store.create('sub-1', rec({ commitTxId: '1'.repeat(64), fundingOutpoint: 'a:1' }));
+    store.create('sub-1', rec({ commitTxId: '2'.repeat(64), fundingOutpoint: 'a:2' }));
+    expect(() => store.create('sub-1', rec({ commitTxId: '3'.repeat(64), fundingOutpoint: 'a:3' })))
+      .toThrow('STORE_FULL');
+    // Terminal records must never lock a creator out of inscribing again.
+    store.setStatus('sub-1', '1'.repeat(64), 'confirmed');
+    store.create('sub-1', rec({ commitTxId: '3'.repeat(64), fundingOutpoint: 'a:3' }));
+    expect(store.list('sub-1')).toHaveLength(3);
+  });
+
+  test('retire drops the recovery artifacts of a terminally-dead superseded pair', () => {
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
+    store.create('sub-1', rec({}));
+    store.supersede('sub-1', 'c'.repeat(64));
+    store.retire('sub-1', 'c'.repeat(64));
+    const r = store.get('sub-1', 'c'.repeat(64))!;
+    expect(r.retired).toBe(true);
+    expect(r.revealTxHex).toBeUndefined();
+    store.retire('sub-1', 'c'.repeat(64)); // idempotent
+  });
+
+  test('bindDepositAddress is first-use-wins, per network, and survives a reread', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'is-'));
+    const store = createInscriptionsStore({ dataDir });
+    expect(store.bindDepositAddress('sub-1', 'mainnet', 'bc1qmine')).toBe('bc1qmine');
+    // A later call naming someone ELSE's address gets the bound one back —
+    // the route compares and 403s, so this is not a UTXO-lookup proxy.
+    expect(store.bindDepositAddress('sub-1', 'mainnet', 'bc1qvictim')).toBe('bc1qmine');
+    // Testnet is a DIFFERENT Turnkey account, so a different binding.
+    expect(store.bindDepositAddress('sub-1', 'testnet', 'tb1qmine')).toBe('tb1qmine');
+    expect(store.bindDepositAddress('sub-2', 'mainnet', 'bc1qtheirs')).toBe('bc1qtheirs');
+    expect(createInscriptionsStore({ dataDir }).bindDepositAddress('sub-1', 'mainnet', 'bc1qother'))
+      .toBe('bc1qmine');
   });
 });

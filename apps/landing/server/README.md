@@ -71,5 +71,26 @@ Bitcoin **mainnet** inscription (creator-pays — real BTC):
    broadcast (`POST /api/btc/inscribe`), so a dying tab can never strand
    committed funds — `POST /api/btc/inscribe/rebroadcast` finishes them.
 
+**The two network flags must match.** `VITE_BTC_NETWORK` is baked into the SPA
+at build time; `BTC_NETWORK` is read by the server at runtime. The browser
+checks them against each other via `GET /api/btc/network` before it will show
+anyone a deposit address — a skew disables inscribing and prints a config
+error instead, because BTC sent to an address the server does not serve is not
+spendable through this app.
+
+Recovery is automatic. The `/me` list poll reconciles every stranded state:
+a commit that never broadcast, a reveal that never broadcast, and a reveal
+that broadcast but never confirmed (evicted from the mempool — re-pushed from
+the persisted copy after 30 minutes). "Finish inscription" on `/me` is the
+manual shortcut, and the server warns hourly about anything still un-landed
+after 24h. Note the reveal cannot be fee-bumped by replacement at all — its
+signing key is ephemeral — so rebroadcast (or CPFP on the postage output) is
+the only path.
+
+A creator is bound to ONE deposit address per network on first use, so the
+deposit route can't be used as a UTXO-lookup proxy for arbitrary addresses.
+Their own inscription outputs are excluded from the spendable set, so an
+existing inscription's sat can never be consumed as funding for a new one.
+
 Everything is gated: with any of the above absent, `/api/btc/*` is unmounted and
 the demo silently falls back to the mock path.

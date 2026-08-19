@@ -503,7 +503,11 @@ describe('GET /api/btc/inscribe', () => {
     const old = inscriptions.find((r) => r.commitTxId === supersededCommit)!;
     expect(old.superseded).toBeUndefined(); // reconciled despite 6 newer records
     expect(old.status).toBe('reveal_broadcast');
-    expect(h.broadcasts).toEqual(['02ee']); // its reveal, broadcast exactly once
+    // Its reveal went out exactly once, and FIRST — before the budget was
+    // spent on the newer records (whose own ancient reveals get re-pushed by
+    // the staleness pass, which is a different concern).
+    expect(h.broadcasts[0]).toBe('02ee');
+    expect(h.broadcasts.filter((b) => b === '02ee')).toEqual(['02ee']);
   });
 
   test('manual rebroadcast of a superseded pair reinstates it and retires the rival', async () => {
@@ -784,8 +788,165 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
 describe('isAlreadyKnownTxError', () => {
   test('matches already-known rejections, not conflicts', () => {
     expect(isAlreadyKnownTxError(new Error('txn-already-in-mempool'))).toBe(true);
+    expect(isAlreadyKnownTxError(new Error('txn-already-known'))).toBe(true);
     expect(isAlreadyKnownTxError(new Error('Transaction already in block chain'))).toBe(true);
     expect(isAlreadyKnownTxError(new Error('txn-mempool-conflict'))).toBe(false);
     expect(isAlreadyKnownTxError(new Error('insufficient fee'))).toBe(false);
+  });
+
+  test('a transport error that merely CONTAINS "already" is not a broadcast', () => {
+    // The whole point of the closed set: counting these as success marks a
+    // record broadcast when nothing went out, parking real funds.
+    expect(isAlreadyKnownTxError(new Error('socket connection already closed'))).toBe(false);
+    expect(isAlreadyKnownTxError(new Error('429: rate limit already exceeded'))).toBe(false);
+    expect(isAlreadyKnownTxError(new Error('request already aborted'))).toBe(false);
+  });
+});
+
+describe('evicted-reveal recovery', () => {
+  /** A record parked at reveal_broadcast, last touched `ageMs` ago. */
+  function parked(store: ReturnType<typeof harness>['store'], ageMs: number, over: Partial<InscriptionRecord> = {}) {
+    const at = new Date(Date.now() - ageMs).toISOString();
+    const rec: InscriptionRecord = {
+      commitTxId: 'c'.repeat(64),
+      revealTxId: 'r'.repeat(64),
+      inscriptionId: `${'r'.repeat(64)}i0`,
+      signedCommitHex: '02aa',
+      revealTxHex: '02bb',
+      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      changeAddress: USER_ADDRESS,
+      status: 'reveal_broadcast',
+      createdAt: at,
+      updatedAt: at,
+      ...over,
+    };
+    store.create('sub-1', rec);
+    return rec;
+  }
+
+  async function poll(h: ReturnType<typeof harness>) {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    return h.routes.inscribeList(req, new URL(req.url));
+  }
+
+  test('a reveal unconfirmed for over 30 minutes is re-pushed from the persisted copy', async () => {
+    // The eviction case: the reveal went out, a fee spike pushed it out of the
+    // mempool, and nothing else in the system would ever push it again — the
+    // commit's funds would sit in a P2TR output whose key no longer exists.
+    const h = harness();
+    parked(h.store, 45 * 60_000);
+    await poll(h);
+    expect(h.broadcasts).toEqual(['02bb']);
+    // updatedAt is the throttle: an immediate second poll must not re-push.
+    await poll(h);
+    expect(h.broadcasts).toEqual(['02bb']);
+  });
+
+  test('a reveal simply waiting for the next block is NOT re-pushed', async () => {
+    const h = harness();
+    parked(h.store, 5 * 60_000);
+    await poll(h);
+    expect(h.broadcasts).toEqual([]);
+  });
+
+  test('a confirmed reveal wins over the re-push and retires the record', async () => {
+    const h = harness({ txStatus: { confirmed: true } });
+    parked(h.store, 45 * 60_000);
+    await poll(h);
+    expect(h.broadcasts).toEqual([]); // confirmation short-circuits
+    const rec = h.store.get('sub-1', 'c'.repeat(64))!;
+    expect(rec.status).toBe('confirmed');
+    expect(rec.retired).toBe(true);
+    expect(rec.revealTxHex).toBeUndefined(); // artifacts dropped once terminal
+  });
+
+  test('a stale reveal is surfaced to the monitoring sweep', () => {
+    const h = harness();
+    parked(h.store, 48 * 60 * 60_000);
+    expect(h.store.sweepStale(24 * 60 * 60_000).map((x) => x.status)).toEqual(['reveal_broadcast']);
+  });
+});
+
+describe('terminal records', () => {
+  test('a terminally-dead superseded pair is retired on the next poll, freeing its pending slot', async () => {
+    const h = harness();
+    const dead = buildPair('1'.repeat(64), 0);
+    const winner = buildPair('2'.repeat(64), 0);
+    const base = (p: ReturnType<typeof buildPair>, over: Partial<InscriptionRecord>): InscriptionRecord => ({
+      commitTxId: p.commitTxId,
+      revealTxId: p.revealTxId,
+      inscriptionId: `${p.revealTxId}i0`,
+      signedCommitHex: p.signedCommitHex,
+      revealTxHex: p.revealTxHex,
+      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      changeAddress: USER_ADDRESS,
+      status: 'signed',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      ...over,
+    });
+    h.store.create('sub-1', base(dead, {}));
+    h.store.supersede('sub-1', dead.commitTxId);
+    h.store.create('sub-1', base(winner, { status: 'confirmed' }));
+
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    await h.routes.inscribeList(req, new URL(req.url));
+
+    const rec = h.store.get('sub-1', dead.commitTxId)!;
+    // Its commit double-spends a confirmed tx: it can never land, so holding
+    // ~100 KB of un-broadcastable hex against the user's cap forever is waste.
+    expect(rec.retired).toBe(true);
+    expect(rec.revealTxHex).toBeUndefined();
+    expect(h.broadcasts).toEqual([]); // and it costs no provider lookup
+  });
+
+  test('rebroadcasting a retired record is 410, not a silent no-op', async () => {
+    const h = harness();
+    const pair = buildPair();
+    await post(h.routes, pair);
+    h.store.setStatus('sub-1', pair.commitTxId, 'confirmed'); // terminal → retired
+    h.store.setStatus('sub-1', pair.commitTxId, 'commit_broadcast'); // status only; hex is gone
+
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res.status).toBe(410);
+    expect((await res.json() as { error: string }).error).toBe('not_recoverable');
+  });
+});
+
+describe('malformed reveal shapes', () => {
+  test('an input-less reveal is rejected before anything is indexed or broadcast', async () => {
+    const h = harness();
+    const pair = buildPair();
+    // fromRaw can't parse a 0-input tx at all (the 0x00 input count reads as
+    // the segwit marker), so this lands on bad_reveal_tx rather than the
+    // inputsLength guard — both are 400, and neither indexes getInput(0).
+    const empty = new btc.Transaction({ allowUnknownOutputs: true });
+    empty.addOutputAddress(USER_ADDRESS, 1_000n, btc.TEST_NETWORK);
+    const res = await post(h.routes, { ...pair, revealTxHex: hex.encode(empty.toBytes(true)) });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toBe('bad_reveal_tx');
+    expect(h.broadcasts).toEqual([]);
+  });
+
+  test('a reveal with two inputs is rejected (shape checked before indexing)', async () => {
+    const h = harness();
+    const pair = buildPair();
+    const two = new btc.Transaction();
+    for (const txid of ['1'.repeat(64), '2'.repeat(64)]) {
+      two.addInput({
+        txid,
+        index: 0,
+        sequence: 0xfffffffd,
+        witnessUtxo: { script: USER_P2WPKH.script, amount: 20_000n },
+      });
+    }
+    two.addOutputAddress(USER_ADDRESS, 30_000n, btc.TEST_NETWORK);
+    two.sign(USER_PRIV);
+    two.finalize();
+    const res = await post(h.routes, { ...pair, revealTxHex: hex.encode(two.extract()) });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toBe('reveal_invariant_violation');
+    expect(h.broadcasts).toEqual([]);
   });
 });

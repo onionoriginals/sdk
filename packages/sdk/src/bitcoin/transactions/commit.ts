@@ -24,6 +24,15 @@ const MIN_DUST_LIMIT = 546;
 // input to the final sequence (0xffffffff), which makes the tx non-replaceable;
 // a fee spike would then park a real-BTC commit in the mempool with no bump
 // path. Every input we build signals RBF.
+//
+// Caveat on the REVEAL: signalling is not the same as being bumpable. The
+// reveal is signed with an ephemeral key generated inside
+// createCommitTransaction and never persisted anywhere, so once the signing
+// process is gone nobody — not the creator, not a server holding the signed
+// hex — can produce a replacement. The signal is kept because it costs
+// nothing and keeps the pair uniform, but a wedged reveal is recovered by
+// rebroadcast, or bumped by CPFP on its postage output (which pays to the
+// creator's own address), never by replacement.
 export const RBF_SEQUENCE = 0xfffffffd;
 
 // Maximum iterations for UTXO reselection to prevent infinite loops

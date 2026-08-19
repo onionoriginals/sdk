@@ -126,14 +126,28 @@ export type FaucetTxSigner = (tx: btc.Transaction) => Promise<string>;
 const MAX_INSCRIBE_BODY_BYTES = 100 * 1024;
 
 /**
+ * The exact rejections Bitcoin Core raises when the transaction is ALREADY on
+ * the network. Matched as a closed set rather than a bare /already/: a
+ * transport or provider error that merely CONTAINS the word ("connection
+ * already closed") would otherwise count as a successful broadcast, and a
+ * falsely-advanced record can park real funds — a reveal marked broadcast
+ * that never went out is only rescued by the much slower staleness sweep.
+ */
+const ALREADY_KNOWN_TX_ERRORS = [
+  'txn-already-in-mempool',
+  'txn-already-known',
+  'transaction already in block chain', // RPC -27
+  'transaction already in mempool',
+];
+
+/**
  * True when a broadcast rejection means the transaction is ALREADY on the
- * network — success for our idempotent retry purposes. Bitcoin Core surfaces
- * these as "txn-already-in-mempool", "txn-already-known", and "Transaction
- * already in block chain" (a conflicting-spend rejection says "conflict",
- * never "already", so it is not matched).
+ * network — success for our idempotent retry purposes. A conflicting-spend
+ * rejection ("txn-mempool-conflict") is NOT a match.
  */
 export function isAlreadyKnownTxError(e: unknown): boolean {
-  return /already/i.test((e as Error)?.message ?? '');
+  const msg = ((e as Error)?.message ?? '').toLowerCase();
+  return ALREADY_KNOWN_TX_ERRORS.some((known) => msg.includes(known));
 }
 
 /**
@@ -193,6 +207,7 @@ export function createBitcoinRoutes(deps: {
   fee: Handler;
   broadcast: Handler;
   deposit: Handler;
+  networkInfo: Handler;
   inscribe: Handler;
   inscribeList: Handler;
   inscribeRebroadcast: Handler;
@@ -208,6 +223,12 @@ export function createBitcoinRoutes(deps: {
   // quota (sat lookup, fee estimate, raw broadcast, deposit polls).
   const quotaUserLimiter = createRateLimiter({ limit: 120, windowMs: 60 * 60_000 });
   const provider = deps.provider as FaucetProvider;
+
+  // How long an unconfirmed reveal may sit before the list poll re-pushes it.
+  // Long enough that a reveal simply waiting for a block is not re-broadcast
+  // on every poll; short enough that an evicted one is back in the mempool
+  // within the hour.
+  const REVEAL_REBROADCAST_AFTER_MS = 30 * 60_000;
 
   // 60s fee-estimate cache for the deposit poll (see the deposit handler).
   let feeCache: { at: number; rate: number } | null = null;
@@ -441,12 +462,25 @@ export function createBitcoinRoutes(deps: {
     if (!address || !isValidBitcoinAddress(address, network)) {
       return json({ error: 'bad_address', message: `A ${network} P2WPKH address is required.` }, 400);
     }
+    // One deposit address per user per network, bound on first use. The
+    // funding address is deterministic (a Turnkey BIP-84 path), so this costs
+    // an honest client nothing — and it stops the route being a general
+    // UTXO-lookup proxy for any address a signed-in caller cares to name.
+    if (deps.inscriptions) {
+      const bound = deps.inscriptions.bindDepositAddress(sub, network, address);
+      if (bound !== address) {
+        return json({ error: 'address_not_bound', message: 'This account is bound to a different deposit address.' }, 403);
+      }
+    }
     // Optional content-size hint tightens the estimate; clamped to the same
-    // ceiling the inscribe route enforces.
+    // ceiling the inscribe route enforces. The default is deliberately
+    // GENEROUS: over-estimating only asks the creator to deposit more than
+    // needed (the excess returns as change), while under-estimating strands
+    // them mid-flow with a deposit that cannot fund the inscription.
     const contentBytesRaw = Number(url.searchParams.get('contentBytes'));
     const contentBytes = Number.isFinite(contentBytesRaw) && contentBytesRaw > 0
       ? Math.min(contentBytesRaw, MAX_INSCRIBE_BODY_BYTES / 2)
-      : 5_000;
+      : 8_000;
 
     let utxos: Awaited<ReturnType<typeof fetchAddressUtxos>>;
     try {
@@ -454,6 +488,18 @@ export function createBitcoinRoutes(deps: {
     } catch (e) {
       return json({ error: 'utxo_lookup_failed', message: (e as Error).message }, 502);
     }
+    // Ordinal safety: the reveal sends the inscribed sat BACK to this same
+    // address, so the user's inscription outputs sit among their funding
+    // UTXOs. Spending one as the funding input would make an existing
+    // inscription's sat the DID sat of a new one. Postage (546) is always
+    // below estimatedCostSats so the UI would not pick one today — but that
+    // is arithmetic, not a rule, so exclude them explicitly.
+    const inscriptionOutpoints = new Set(
+      deps.inscriptions?.list(sub).map((r) => `${r.revealTxId}:0`) ?? []
+    );
+    const confirmedUtxos = utxos.confirmed.filter(
+      (u) => !inscriptionOutpoints.has(`${u.txid}:${u.vout}`)
+    );
     // The UI polls this route while waiting for a deposit; cache the fee
     // estimate briefly so polling costs mempool.space reads (free), not
     // QuickNode quota on every tick.
@@ -477,11 +523,24 @@ export function createBitcoinRoutes(deps: {
 
     return json({
       address,
-      confirmedUtxos: utxos.confirmed,
+      network,
+      confirmedUtxos,
       unconfirmedSats: utxos.unconfirmedSats,
       estimatedCostSats,
     });
   };
+
+  /**
+   * GET /api/btc/network — the network these routes actually speak, so the
+   * browser can refuse to show a deposit address when its build-time
+   * VITE_BTC_NETWORK disagrees with the server's runtime BTC_NETWORK. The two
+   * flags are set in different places at different times; a skew silently
+   * points a real-BTC deposit at an address this deploy can never spend.
+   * Unauthenticated: it is public deploy config, and the client needs it
+   * before any of the gated flows run.
+   */
+  const networkInfo: Handler = async () =>
+    json({ network: deps.network ?? 'testnet', faucet: !!deps.faucet });
 
   /** Parse broadcast-ready raw tx hex, or null. */
   function parseRawTx(txHex: string): btc.Transaction | null {
@@ -495,8 +554,13 @@ export function createBitcoinRoutes(deps: {
     }
   }
 
-  /** Broadcast, treating an already-known tx as success. Returns an error message or null. */
-  async function broadcastIdempotent(txHex: string): Promise<string | null> {
+  /**
+   * Broadcast, treating an already-known tx as success. Returns an error
+   * message or null. Accepts undefined so callers can pass a retired record's
+   * (absent) hex without a narrowing dance — there is simply nothing to push.
+   */
+  async function broadcastIdempotent(txHex: string | undefined): Promise<string | null> {
+    if (!txHex) return 'no recovery artifact for this record';
     try {
       await provider.broadcastTransaction(txHex);
       return null;
@@ -583,9 +647,16 @@ export function createBitcoinRoutes(deps: {
 
     const reveal = parseRawTx(revealTxHex);
     if (!reveal) return json({ error: 'bad_reveal_tx' }, 400);
+    // Shape before indexing: getInput(0) throws on an input-less tx. No raw
+    // hex can currently reach here with zero inputs (fromRaw rejects it — the
+    // 0x00 input count is read as the segwit marker), so this is defensive
+    // only, kept symmetric with the commit path above.
+    if (reveal.inputsLength !== 1) {
+      return json({ error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
+    }
     const revealInput = reveal.getInput(0);
     const revealInputTxid = revealInput?.txid ? hex.encode(revealInput.txid).toLowerCase() : '';
-    if (reveal.inputsLength !== 1 || revealInputTxid !== commitTxId.toLowerCase() || revealInput.index !== 0) {
+    if (revealInputTxid !== commitTxId.toLowerCase() || revealInput.index !== 0) {
       return json({ error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
     }
     const revealTxId = reveal.id;
@@ -684,8 +755,11 @@ export function createBitcoinRoutes(deps: {
    *    point) get their reveal completed from the persisted copy once their
    *    commit confirms.
    * 3. Broadcast-but-unconfirmed reveals get a confirmation check; a
-   *    confirmed reveal is persisted as 'confirmed' (sticky), so each record
-   *    costs at most a handful of provider lookups over its lifetime.
+   *    confirmed reveal is persisted as 'confirmed' (sticky, and its recovery
+   *    artifacts are dropped), so each record costs at most a handful of
+   *    provider lookups over its lifetime. One that is STILL unconfirmed
+   *    after REVEAL_REBROADCAST_AFTER_MS is re-pushed from the persisted
+   *    copy — a reveal evicted from the mempool has no other way back.
    */
   const inscribeList: Handler = async (req) => {
     const sub = authSub(req);
@@ -703,6 +777,7 @@ export function createBitcoinRoutes(deps: {
     // cursor picks where the scan starts, so even a backlog larger than the
     // whole budget is fully covered across successive polls — no record can
     // sit permanently behind the budget.
+    let changed = false;
     const newestFirst = [...records].reverse();
     // A superseded pair whose outpoint already carries a CONFIRMED record is
     // terminally dead — its commit double-spends a confirmed tx and can never
@@ -712,11 +787,22 @@ export function createBitcoinRoutes(deps: {
       newestFirst.filter((r) => r.status === 'confirmed').map((r) => r.fundingOutpoint)
     );
     const cursors = cursorsFor(sub);
+    // Terminally-dead superseded pairs still holding hex: retire them (drop
+    // the recovery artifacts, keep the row) so they stop counting against the
+    // user's pending cap and stop costing disk. Costs no provider lookup.
+    for (const r of newestFirst) {
+      if (r.superseded && !r.retired && r.revealTxHex && confirmedOutpoints.has(r.fundingOutpoint)) {
+        store.retire(sub, r.commitTxId);
+        changed = true;
+      }
+    }
     const supersededPending = rotate(
       newestFirst.filter(
         (r) =>
           r.superseded &&
           r.status !== 'confirmed' &&
+          !r.retired &&
+          !!r.revealTxHex &&
           !confirmedOutpoints.has(r.fundingOutpoint)
       ),
       cursors.superseded
@@ -726,7 +812,7 @@ export function createBitcoinRoutes(deps: {
     // once THEIR commit confirms, the persisted reveal is completed here
     // automatically, so no state depends on the manual Finish button.
     const liveStuck = rotate(
-      newestFirst.filter((r) => !r.superseded && r.status === 'commit_broadcast'),
+      newestFirst.filter((r) => !r.superseded && r.status === 'commit_broadcast' && !!r.revealTxHex),
       cursors.stuck
     );
     const liveUnconfirmed = rotate(
@@ -734,7 +820,6 @@ export function createBitcoinRoutes(deps: {
       cursors.confirm
     );
     let lookups = 0;
-    let changed = false;
     for (const r of supersededPending) {
       if (lookups >= 5) break;
       lookups++;
@@ -783,6 +868,20 @@ export function createBitcoinRoutes(deps: {
         if (st?.confirmed) {
           store.setStatus(sub, r.commitTxId, 'confirmed');
           changed = true;
+          continue;
+        }
+        // Not confirmed, and nothing else in the system ever re-pushes a
+        // reveal once it is marked broadcast. A reveal built at a rate that a
+        // fee spike leaves behind gets EVICTED from the mempool and would
+        // then never land — the commit's funds sit in a P2TR output nobody
+        // can reach (the reveal key is ephemeral, so it can never be replaced
+        // either). Re-push the persisted copy periodically: idempotent, free,
+        // and a no-op for a reveal that is simply waiting for a block.
+        if (r.revealTxHex && now() - Date.parse(r.updatedAt) >= REVEAL_REBROADCAST_AFTER_MS) {
+          await broadcastIdempotent(r.revealTxHex);
+          // Same status, fresh updatedAt — that timestamp IS the throttle.
+          store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
+          changed = true;
         }
       } catch {
         // Lookup unsupported/down — report the stored status.
@@ -822,6 +921,11 @@ export function createBitcoinRoutes(deps: {
     if (rec.status === 'confirmed') {
       return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
     }
+    // Retired: the record is terminal (its outpoint was won by a pair that
+    // confirmed), so the recovery artifacts were dropped. Nothing to push.
+    if (!rec.revealTxHex) {
+      return json({ error: 'not_recoverable', message: 'This pair is terminal — its funding outpoint was spent by an inscription that confirmed.' }, 410);
+    }
 
     // Rebroadcasting a SUPERSEDED pair is an explicit choice of this pair for
     // its funding outpoint: any success below must also swap the roles —
@@ -849,7 +953,7 @@ export function createBitcoinRoutes(deps: {
       // No lookup support / transport failure — fall through to rebroadcast.
     }
 
-    if (rec.status === 'signed') {
+    if (rec.status === 'signed' && rec.signedCommitHex) {
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
       if (commitErr) return json({ error: 'commit_broadcast_failed', message: commitErr, commitTxId }, 502);
       reclaimIfSuperseded();
@@ -864,7 +968,7 @@ export function createBitcoinRoutes(deps: {
     return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'reveal_broadcast' });
   };
 
-  return { funding, sat, fee, broadcast, deposit, inscribe, inscribeList, inscribeRebroadcast };
+  return { funding, sat, fee, broadcast, deposit, networkInfo, inscribe, inscribeList, inscribeRebroadcast };
 }
 
 export type BitcoinRoutes = ReturnType<typeof createBitcoinRoutes>;

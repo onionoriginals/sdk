@@ -6,6 +6,10 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../cookies';
 import { createBitcoinRoutes, rawKeyFaucetSigner, fetchFaucetUtxos, fetchAddressUtxos, p2wpkhScriptHex } from '../bitcoin';
+import { createInscriptionsStore, type InscriptionRecord } from '../inscriptions-store';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
 
@@ -258,5 +262,111 @@ describe('fetchFaucetUtxos (mempool.space)', () => {
     await expect(
       fetchFaucetUtxos({ api: 'https://x/api', address: FAUCET_ADDRESS, fetchImpl, timeoutMs: 20 })
     ).rejects.toThrow();
+  });
+});
+
+
+describe('GET /api/btc/deposit — ownership binding and ordinal safety', () => {
+  const MAINNET_ADDRESS = btc.p2wpkh(FAUCET_PUB, btc.NETWORK).address!;
+  // A second, unrelated mainnet address — stands in for "someone else's".
+  const OTHER_ADDRESS = btc.p2wpkh(
+    secp256k1.getPublicKey(hex.decode('7'.repeat(64)), true),
+    btc.NETWORK
+  ).address!;
+
+  function harness(utxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }>) {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify(utxos), { status: 200 })) as unknown as typeof fetch;
+    const inscriptions = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'dep-')) });
+    const routes = createBitcoinRoutes({
+      jwtSecret: JWT,
+      provider: fakeProvider(),
+      network: 'mainnet' as const,
+      depositApi: 'https://mempool.example/api',
+      fetchImpl,
+      inscriptions,
+    });
+    return { routes, inscriptions };
+  }
+
+  function req(address: string, sub = 'sub-1') {
+    const token = signToken(sub, 'a@b.com', undefined, { secret: JWT });
+    const cookie = serializeCookie(getAuthCookieConfig(token));
+    return new Request(`http://host/api/btc/deposit?address=${encodeURIComponent(address)}`, {
+      method: 'GET',
+      headers: { cookie },
+    });
+  }
+
+  test('binds one address per user: a later lookup of a DIFFERENT address is 403', async () => {
+    const { routes } = harness([{ txid: 'a'.repeat(64), vout: 0, value: 40_000, status: { confirmed: true } }]);
+    const first = req(MAINNET_ADDRESS);
+    expect((await routes.deposit(first, new URL(first.url))).status).toBe(200);
+
+    // Not a general UTXO-lookup proxy for arbitrary third-party addresses.
+    const second = req(OTHER_ADDRESS);
+    const res = await routes.deposit(second, new URL(second.url));
+    expect(res.status).toBe(403);
+    expect((await res.json() as { error: string }).error).toBe('address_not_bound');
+
+    // A different user binds their own address independently.
+    const other = req(OTHER_ADDRESS, 'sub-2');
+    expect((await routes.deposit(other, new URL(other.url))).status).toBe(200);
+  });
+
+  test('excludes the user\'s own inscription outputs from the spendable set', async () => {
+    const revealTxId = 'e'.repeat(64);
+    const { routes, inscriptions } = harness([
+      // The inscribed sat came back to this address as the reveal's vout 0.
+      { txid: revealTxId, vout: 0, value: 60_000, status: { confirmed: true } },
+      { txid: 'd'.repeat(64), vout: 0, value: 40_000, status: { confirmed: true } },
+    ]);
+    const rec: InscriptionRecord = {
+      commitTxId: 'c'.repeat(64),
+      revealTxId,
+      inscriptionId: `${revealTxId}i0`,
+      signedCommitHex: '02aa',
+      revealTxHex: '02bb',
+      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      changeAddress: MAINNET_ADDRESS,
+      status: 'reveal_broadcast',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    };
+    inscriptions.create('sub-1', rec);
+
+    const r = req(MAINNET_ADDRESS);
+    const body = (await (await routes.deposit(r, new URL(r.url))).json()) as {
+      confirmedUtxos: Array<{ txid: string }>;
+      network: string;
+    };
+    // Spending it would make an existing inscription's sat the DID sat of a
+    // new one — even though it is the fattest UTXO at the address.
+    expect(body.confirmedUtxos.map((u) => u.txid)).toEqual(['d'.repeat(64)]);
+    expect(body.network).toBe('mainnet');
+  });
+});
+
+describe('GET /api/btc/network', () => {
+  test('reports the network these routes speak, unauthenticated', async () => {
+    const routes = createBitcoinRoutes({
+      jwtSecret: JWT,
+      provider: fakeProvider(),
+      network: 'mainnet',
+      faucet: { address: FAUCET_ADDRESS, signFundingTx: faucetSignFundingTx },
+    });
+    // No cookie: the browser needs this BEFORE any gated flow, to detect a
+    // build-time/runtime skew before it shows anyone a deposit address.
+    const anon = new Request('http://host/api/btc/network');
+    const res = await routes.networkInfo(anon, new URL(anon.url));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ network: 'mainnet', faucet: true });
+  });
+
+  test('defaults to testnet and reports an absent faucet', async () => {
+    const routes = createBitcoinRoutes({ jwtSecret: JWT, provider: fakeProvider() });
+    const anon = new Request('http://host/api/btc/network');
+    expect(await (await routes.networkInfo(anon, new URL(anon.url))).json())
+      .toEqual({ network: 'testnet', faucet: false });
   });
 });

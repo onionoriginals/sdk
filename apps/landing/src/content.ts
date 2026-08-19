@@ -206,6 +206,9 @@ export const demo = {
     ready: 'Deposit confirmed — ready to inscribe.',
     needed: 'No confirmed deposit covering the fee yet — send BTC to your deposit address and wait for one confirmation.',
     nonRefundable: 'Creator pays: the network fee is non-refundable. You own the keys, the change, and the inscribed sat — nothing is custodied.',
+    addressPending: 'Checking your deposit address with the server…',
+    networkMismatch:
+      'This deploy is misconfigured: the app was built for a different Bitcoin network than the server is running. Inscribing is disabled until they match — no deposit address is shown, because funds sent to it could not be spent here.',
     yourKeyNote: 'Your Turnkey key signs this inscription in your browser; your own deposit pays the fee. The server never sees a private key.'
   },
   comingSoon: 'Coming soon — inscribing on Bitcoin (did:btco) is not enabled yet. Your Original is already real and resolvable as did:webvh.',
