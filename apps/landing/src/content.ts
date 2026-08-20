@@ -19,7 +19,14 @@ export const site = {
     'Generative orbital artwork beside the Originals wordmark and the tagline “Provenance that survives the internet.”',
   wordmark: 'Originals',
   github: 'https://github.com/onionoriginals/sdk',
-  install: 'npm install @originals/sdk'
+  /**
+   * Pinned to the `next` tag on purpose. npm's `latest` is still 2.1.0, a major
+   * behind everything this page describes — did:cel, the CEL event log, the
+   * curated exports, custody-required signers are all 3.x — so a bare
+   * `npm install @originals/sdk` hands a developer a different SDK than the one
+   * they just watched run. Drop the tag only when 3.0.0 is on `latest`.
+   */
+  install: 'npm install @originals/sdk@next'
 };
 
 export const nav = {
@@ -677,6 +684,8 @@ export const developers = {
   installLabel: 'Install',
   sdkNote:
     'Everything on this page — sealing, publishing, inscription, verification — is @originals/sdk, MIT licensed.',
+  versionNote:
+    'The 3.x line is what this page runs; it ships under the `next` tag until 3.0.0 is released.',
   docsLink: {
     label: 'Quickstart and docs on GitHub',
     href: 'https://github.com/onionoriginals/sdk#readme'

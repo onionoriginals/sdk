@@ -31,6 +31,7 @@ export function Developers() {
               {developers.docsLink.label}
             </a>
           </p>
+          <p className="dev-note dev-note-version">{developers.versionNote}</p>
         </Reveal>
       </div>
     </section>
