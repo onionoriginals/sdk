@@ -5,9 +5,19 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../cookies';
-import { createBitcoinRoutes, rawKeyFaucetSigner, fetchFaucetUtxos, fetchAddressUtxos, p2wpkhScriptHex } from '../bitcoin';
-import { createInscriptionsStore, type InscriptionRecord } from '../inscriptions-store';
-import { mkdtempSync } from 'node:fs';
+import {
+  createBitcoinRoutes,
+  rawKeyFaucetSigner,
+  fetchFaucetUtxos,
+  fetchAddressUtxos,
+  p2wpkhScriptHex,
+  estimateInscriptionCostSats,
+  P2TR_OUTPUT_VB,
+  P2WPKH_OUTPUT_VB,
+  type OrdinalLookup,
+} from '../bitcoin';
+import { createInscriptionsStore } from '../inscriptions-store';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -48,6 +58,27 @@ function fakeProvider() {
     },
   } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
 }
+
+/**
+ * An ordinal classifier that answers for every outpoint (U15). The deposit
+ * route fails CLOSED without one — an unclassified output is never spendable —
+ * so every deposit test states what the index says about its UTXOs.
+ */
+function ordinalsSaying(inscribed: string[] = []): OrdinalLookup {
+  const set = new Set(inscribed.map((o) => o.toLowerCase()));
+  return {
+    async outpointInscriptions({ txid, vout }) {
+      return set.has(`${txid.toLowerCase()}:${vout}`) ? [`${txid}i0`] : [];
+    },
+  };
+}
+
+/** A classifier that cannot answer — the fail-closed case. */
+const ordinalsDown: OrdinalLookup = {
+  async outpointInscriptions() {
+    throw new Error('ord_getOutput failed (503)');
+  },
+};
 
 const deps = () => ({
   jwtSecret: JWT,
@@ -117,7 +148,10 @@ describe('GET /api/btc/deposit (creator-pays)', () => {
   const MAINNET_P2WPKH = btc.p2wpkh(FAUCET_PUB, btc.NETWORK);
   const MAINNET_ADDRESS = MAINNET_P2WPKH.address!;
 
-  function depositDeps(utxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }>) {
+  function depositDeps(
+    utxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }>,
+    ordinals: OrdinalLookup = ordinalsSaying()
+  ) {
     const fetchImpl = (async () =>
       new Response(JSON.stringify(utxos), { status: 200 })) as unknown as typeof fetch;
     return {
@@ -125,6 +159,7 @@ describe('GET /api/btc/deposit (creator-pays)', () => {
       provider: fakeProvider(),
       network: 'mainnet' as const,
       depositApi: 'https://mempool.example/api',
+      ordinals,
       fetchImpl,
     };
   }
@@ -315,7 +350,10 @@ describe('GET /api/btc/deposit — ownership binding and ordinal safety', () => 
     btc.NETWORK
   ).address!;
 
-  function harness(utxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }>) {
+  function harness(
+    utxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }>,
+    ordinals: OrdinalLookup = ordinalsSaying()
+  ) {
     const fetchImpl = (async () =>
       new Response(JSON.stringify(utxos), { status: 200 })) as unknown as typeof fetch;
     const inscriptions = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'dep-')) });
@@ -325,6 +363,7 @@ describe('GET /api/btc/deposit — ownership binding and ordinal safety', () => 
       network: 'mainnet' as const,
       depositApi: 'https://mempool.example/api',
       fetchImpl,
+      ordinals,
       inscriptions,
     });
     return { routes, inscriptions };
@@ -337,6 +376,20 @@ describe('GET /api/btc/deposit — ownership binding and ordinal safety', () => 
       method: 'GET',
       headers: { cookie },
     });
+  }
+
+  async function depositBody(routes: ReturnType<typeof harness>['routes'], address = MAINNET_ADDRESS) {
+    const r = req(address);
+    const res = await routes.deposit(r, new URL(r.url));
+    return {
+      status: res.status,
+      body: (await res.json()) as {
+        confirmedUtxos: Array<{ txid: string; value: number }>;
+        confirmedSats: number;
+        ordinalCheck: 'ok' | 'unavailable';
+        network: string;
+      },
+    };
   }
 
   test('binds one address per user: a later lookup of a DIFFERENT address is 403', async () => {
@@ -355,36 +408,168 @@ describe('GET /api/btc/deposit — ownership binding and ordinal safety', () => 
     expect((await routes.deposit(other, new URL(other.url))).status).toBe(200);
   });
 
-  test('excludes the user\'s own inscription outputs from the spendable set', async () => {
+  /**
+   * U15 — the guard that summing made load-bearing. Until funding was summed,
+   * postage (546) sat below any single-UTXO threshold and arithmetic kept an
+   * inscription output out of the selection. A sum has no such property.
+   */
+  test("a UTXO carrying the user's own existing inscription is excluded", async () => {
     const revealTxId = 'e'.repeat(64);
-    const { routes, inscriptions } = harness([
-      // The inscribed sat came back to this address as the reveal's vout 0.
-      { txid: revealTxId, vout: 0, value: 60_000, status: { confirmed: true } },
-      { txid: 'd'.repeat(64), vout: 0, value: 40_000, status: { confirmed: true } },
-    ]);
-    const rec: InscriptionRecord = {
-      commitTxId: 'c'.repeat(64),
-      revealTxId,
-      inscriptionId: `${revealTxId}i0`,
-      signedCommitHex: '02aa',
-      revealTxHex: '02bb',
-      fundingOutpoints: [`${'a'.repeat(64)}:0`],
-      changeAddress: MAINNET_ADDRESS,
-      status: 'reveal_broadcast',
-      createdAt: '2026-08-01T00:00:00.000Z',
-      updatedAt: '2026-08-01T00:00:00.000Z',
-    };
-    inscriptions.create('sub-1', rec);
-
-    const r = req(MAINNET_ADDRESS);
-    const body = (await (await routes.deposit(r, new URL(r.url))).json()) as {
-      confirmedUtxos: Array<{ txid: string }>;
-      network: string;
-    };
+    const { routes } = harness(
+      [
+        // The inscribed sat came back to this address as the reveal's vout 0.
+        { txid: revealTxId, vout: 0, value: 60_000, status: { confirmed: true } },
+        { txid: 'd'.repeat(64), vout: 0, value: 40_000, status: { confirmed: true } },
+      ],
+      ordinalsSaying([`${revealTxId}:0`])
+    );
+    const { body } = await depositBody(routes);
     // Spending it would make an existing inscription's sat the DID sat of a
     // new one — even though it is the fattest UTXO at the address.
     expect(body.confirmedUtxos.map((u) => u.txid)).toEqual(['d'.repeat(64)]);
+    expect(body.ordinalCheck).toBe('ok');
+    // The BALANCE still reports it: what a block explorer shows and what we
+    // will spend are different numbers, and saying so beats being disbelieved.
+    expect(body.confirmedSats).toBe(100_000);
     expect(body.network).toBe('mainnet');
+  });
+
+  /**
+   * The case the old exclusion list could not see: the list was built from
+   * inscriptions THIS app made for THIS user, so an ordinal received at the
+   * address (or inscribed elsewhere, or aged out of the per-user row cap) read
+   * as ordinary change — and at 546 sats it is exactly the size that gets
+   * pulled in as a top-up and burned as fees.
+   */
+  test('a dust-sized output carrying an inscription this app did not create is also excluded', async () => {
+    const strayOrdinal = '9'.repeat(64);
+    const { routes, inscriptions } = harness(
+      [
+        { txid: strayOrdinal, vout: 0, value: 546, status: { confirmed: true } },
+        { txid: 'd'.repeat(64), vout: 0, value: 40_000, status: { confirmed: true } },
+      ],
+      ordinalsSaying([`${strayOrdinal}:0`])
+    );
+    // No record of it anywhere in this app's store — that is the point.
+    expect(inscriptions.list('sub-1')).toEqual([]);
+    const { body } = await depositBody(routes);
+    expect(body.confirmedUtxos.map((u) => u.txid)).toEqual(['d'.repeat(64)]);
+    expect(body.confirmedSats).toBe(40_546);
+  });
+
+  test('with the ordinal lookup unavailable, selection refuses rather than guessing', async () => {
+    const { routes } = harness(
+      [{ txid: 'd'.repeat(64), vout: 0, value: 40_000, status: { confirmed: true } }],
+      ordinalsDown
+    );
+    const { status, body } = await depositBody(routes);
+    // The address and the quote are still honest; only the SPEND is withheld.
+    expect(status).toBe(200);
+    expect(body.ordinalCheck).toBe('unavailable');
+    expect(body.confirmedUtxos).toEqual([]);
+    expect(body.confirmedSats).toBe(40_000);
+  });
+
+  test('with no classifier configured at all, nothing is offered as spendable', async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify([{ txid: 'd'.repeat(64), vout: 0, value: 40_000, status: { confirmed: true } }]),
+        { status: 200 }
+      )) as unknown as typeof fetch;
+    const routes = createBitcoinRoutes({
+      jwtSecret: JWT,
+      provider: fakeProvider(),
+      network: 'mainnet',
+      depositApi: 'https://mempool.example/api',
+      fetchImpl,
+    });
+    const { body } = await depositBody(routes);
+    expect(body.ordinalCheck).toBe('unavailable');
+    expect(body.confirmedUtxos).toEqual([]);
+  });
+
+  test('unconfirmed deposits are never offered as funding', async () => {
+    const { routes } = harness([
+      { txid: 'd'.repeat(64), vout: 0, value: 40_000, status: { confirmed: false } },
+    ]);
+    const { body } = await depositBody(routes);
+    expect(body.confirmedUtxos).toEqual([]);
+    expect(body.confirmedSats).toBe(0);
+  });
+
+  /**
+   * The bindings file is the WHOLE of "this deposit address belongs to this
+   * account" — nothing re-derives it from Turnkey. Reading a corrupt one as
+   * `{}` would silently permit a rebind, which is a stranger's mainnet BTC
+   * pointed at an address that is not theirs.
+   */
+  test('an unreadable bindings file fails closed instead of permitting a rebind', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'dep-corrupt-'));
+    const inscriptions = createInscriptionsStore({ dataDir });
+    inscriptions.bindDepositAddress('sub-1', 'mainnet', MAINNET_ADDRESS);
+    mkdirSync(join(dataDir, 'deposits'), { recursive: true });
+    writeFileSync(join(dataDir, 'deposits', 'sub-1.json'), '{ this is not json');
+
+    const fetchImpl = (async () => new Response('[]', { status: 200 })) as unknown as typeof fetch;
+    const routes = createBitcoinRoutes({
+      jwtSecret: JWT,
+      provider: fakeProvider(),
+      network: 'mainnet',
+      depositApi: 'https://mempool.example/api',
+      ordinals: ordinalsSaying(),
+      fetchImpl,
+      inscriptions,
+    });
+    // Not a rebind to whatever the caller now claims — a named refusal.
+    const r = req(OTHER_ADDRESS);
+    const res = await routes.deposit(r, new URL(r.url));
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe('deposit_binding_unreadable');
+    expect(body.address).toBeUndefined();
+  });
+});
+
+/**
+ * R25 — no service fee ships at launch, but the deposit and estimate shapes
+ * must not foreclose one. The quote is derived from a LIST of commit outputs,
+ * so a platform fee output is an added entry, not a re-derived constant.
+ */
+describe('the cost estimate does not assume a single spend output (R25)', () => {
+  const base = { feeRate: 3, inputs: 1, contentBytes: 8_000 };
+
+  test('a third commit output can be priced without changing anything else', () => {
+    const today = estimateInscriptionCostSats({
+      ...base,
+      commitOutputsVB: [P2TR_OUTPUT_VB, P2WPKH_OUTPUT_VB],
+    });
+    const withPlatformFee = estimateInscriptionCostSats({
+      ...base,
+      commitOutputsVB: [P2TR_OUTPUT_VB, P2WPKH_OUTPUT_VB, P2WPKH_OUTPUT_VB],
+    });
+    // One more P2WPKH output is 31 vB: at 3 sat/vB with the 1.5x buffer that
+    // is 139.5 sats, and the ceil applies to the WHOLE quote — so the delta is
+    // that figure rounded either way, and nothing else moves.
+    const delta = withPlatformFee - today;
+    expect(delta).toBeGreaterThanOrEqual(Math.floor(3 * P2WPKH_OUTPUT_VB * 1.5));
+    expect(delta).toBeLessThanOrEqual(Math.ceil(3 * P2WPKH_OUTPUT_VB * 1.5));
+  });
+
+  test('inputs and outputs are independent terms', () => {
+    const outputs = [P2TR_OUTPUT_VB, P2WPKH_OUTPUT_VB];
+    const one = estimateInscriptionCostSats({ ...base, inputs: 1, commitOutputsVB: outputs });
+    const two = estimateInscriptionCostSats({ ...base, inputs: 2, commitOutputsVB: outputs });
+    expect(two - one).toBe(Math.ceil(3 * 68 * 1.5));
+  });
+
+  test('postage is added on top of the buffer, never multiplied through it', () => {
+    const withPostage = estimateInscriptionCostSats({ ...base, commitOutputsVB: [P2TR_OUTPUT_VB] });
+    const withoutPostage = estimateInscriptionCostSats({
+      ...base,
+      commitOutputsVB: [P2TR_OUTPUT_VB],
+      postageSats: 0,
+    });
+    expect(withPostage - withoutPostage).toBe(546);
   });
 });
 

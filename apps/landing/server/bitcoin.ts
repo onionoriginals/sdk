@@ -21,6 +21,7 @@ import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
 import { outpointsOf } from './inscriptions-store';
 import type { InscriptionsStore, InscriptionRecord } from './inscriptions-store';
+import { createMoneyLogger, type MoneyLogger } from './money-log';
 
 /**
  * The server-side network flag: BTC_NETWORK=mainnet|testnet4 (default testnet4).
@@ -222,6 +223,181 @@ export async function fetchFaucetUtxos(
   return (await fetchAddressUtxos(opts)).confirmed;
 }
 
+/**
+ * Per-candidate ordinal classification — the guard that summing made
+ * load-bearing (R26/U15).
+ *
+ * Until deposits were funded from a SET, an inscription-bearing output could
+ * never be selected by arithmetic alone: postage is 546 sats and the client
+ * only ever picked ONE output large enough to cover the whole cost. Summing
+ * destroys that property — a 546-sat ordinal output can be pulled in as a
+ * top-up and burned as fees, destroying the sat that carries an inscription.
+ *
+ * The old guard was an exclusion list built from inscriptions THIS app made
+ * for THIS user, so it missed an ordinal received at the address, one
+ * inscribed elsewhere, and any row aged out of the per-user cap. This is the
+ * positive replacement: ask the index what is on the outpoint.
+ *
+ * `outpointInscriptions` THROWS when it cannot answer. That is the contract:
+ * an unclassified output is never spendable.
+ */
+export interface OrdinalLookup {
+  outpointInscriptions(outpoint: { txid: string; vout: number }): Promise<string[]>;
+}
+
+/**
+ * `ord_getOutput` on the QuickNode Ordinals & Runes add-on (confirmed enabled
+ * on the production mainnet endpoint; it is what already backs the sat lookup
+ * this app depends on). The result carries the outpoint's `inscriptions`.
+ *
+ * Fail-closed twice over: any transport/RPC failure throws, AND a 200 whose
+ * body has no `inscriptions` array throws — a response we cannot read is not
+ * evidence that an output is clean.
+ */
+export function quickNodeOrdinalLookup(opts: {
+  endpoint: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): OrdinalLookup {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  return {
+    async outpointInscriptions(outpoint) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 10_000);
+      let res: Response;
+      try {
+        res = await fetchImpl(opts.endpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'ord_getOutput',
+            params: [`${outpoint.txid}:${outpoint.vout}`],
+          }),
+        });
+      } catch (e) {
+        throw new Error(`ord_getOutput failed: ${(e as Error).message}`);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!res.ok) throw new Error(`ord_getOutput failed (${res.status})`);
+      const body = (await res.json().catch(() => null)) as
+        | { result?: { inscriptions?: unknown } | null; error?: { message?: string } }
+        | null;
+      if (!body || body.error) throw new Error(`ord_getOutput error: ${body?.error?.message ?? 'unusable body'}`);
+      const list = body.result?.inscriptions;
+      if (!Array.isArray(list)) {
+        throw new Error('ord_getOutput returned no inscriptions field — the output is unclassified');
+      }
+      return list.map((i) => String(i));
+    },
+  };
+}
+
+/**
+ * Memoize classification per outpoint. An unspent output's inscription set
+ * does not change (it can only change by being spent, which removes it from
+ * the UTXO set), so a hit is permanently valid — and without this the 15s
+ * deposit poll would pay an add-on call per UTXO per tick. Failures are NOT
+ * cached: an outage must not pin a creator's coins as unspendable for the
+ * lifetime of the process.
+ */
+export function cachedOrdinalLookup(inner: OrdinalLookup, maxEntries = 5_000): OrdinalLookup {
+  const cache = new Map<string, string[]>();
+  return {
+    async outpointInscriptions(outpoint) {
+      const key = `${outpoint.txid.toLowerCase()}:${outpoint.vout}`;
+      const hit = cache.get(key);
+      if (hit) return hit;
+      const answer = await inner.outpointInscriptions(outpoint);
+      if (cache.size >= maxEntries) cache.clear();
+      cache.set(key, answer);
+      return answer;
+    },
+  };
+}
+
+/**
+ * Split confirmed outputs into what may fund an inscription and what may not.
+ * `ok: false` means the classification itself failed — the caller must refuse
+ * to spend anything rather than fall back to "probably clean".
+ *
+ * `maxLookups` bounds the add-on calls one poll can make. Anything past the
+ * bound is treated as UNCLASSIFIED and therefore unspendable, never as clean.
+ */
+export async function classifySpendableUtxos<T extends { txid: string; vout: number; value: number }>(
+  utxos: T[],
+  lookup: OrdinalLookup | undefined,
+  maxLookups = 25
+): Promise<{ ok: boolean; spendable: T[]; ordinalBearing: number; reason?: string }> {
+  if (utxos.length === 0) return { ok: true, spendable: [], ordinalBearing: 0 };
+  if (!lookup) {
+    return { ok: false, spendable: [], ordinalBearing: 0, reason: 'no ordinal lookup configured' };
+  }
+  // Largest first: the same order selection walks, so the bounded budget is
+  // spent on the outputs a commit would actually reach for.
+  const largestFirst = [...utxos].sort((a, b) => b.value - a.value);
+  const spendable: T[] = [];
+  let ordinalBearing = 0;
+  for (const u of largestFirst.slice(0, maxLookups)) {
+    let inscriptions: string[];
+    try {
+      inscriptions = await lookup.outpointInscriptions(u);
+    } catch (e) {
+      // One unanswerable candidate poisons the whole selection: a partial
+      // classification is exactly the state where a top-up silently burns an
+      // inscribed sat.
+      return { ok: false, spendable: [], ordinalBearing: 0, reason: (e as Error).message };
+    }
+    if (inscriptions.length > 0) ordinalBearing++;
+    else spendable.push(u);
+  }
+  return { ok: true, spendable, ordinalBearing };
+}
+
+/**
+ * Transaction-size terms for the deposit quote, named individually so the
+ * shape stays open (R25). A commit is overhead + one vB term PER OUTPUT + 68
+ * vB per P2WPKH input; a reveal is a fixed base plus the witness-discounted
+ * envelope (content + ~300 bytes of tags/script overhead) — the same shape
+ * commit.ts estimates precisely once the content exists.
+ */
+export const COMMIT_OVERHEAD_VB = 11;
+export const COMMIT_INPUT_VB = 68;
+export const P2TR_OUTPUT_VB = 43;
+export const P2WPKH_OUTPUT_VB = 31;
+export const REVEAL_BASE_VB = 111;
+/** The sat value the inscription itself rides on. */
+export const POSTAGE_SATS = 546;
+
+/**
+ * What a creator must have at their deposit address to complete an
+ * inscription. `commitOutputsVB` is a LIST, not a count: the commit output and
+ * the creator's change are two entries today, and a platform fee output would
+ * be a third — the quote, the deposit target and the shortfall message all
+ * follow from here, so adding one is an entry rather than a rewrite. Nothing
+ * in this app builds a fee output; this only keeps the door open.
+ *
+ * The 1.5× buffer absorbs a fee move between the quote and the broadcast;
+ * postage rides on top of it, not through it.
+ */
+export function estimateInscriptionCostSats(opts: {
+  feeRate: number;
+  inputs: number;
+  contentBytes: number;
+  commitOutputsVB: number[];
+  bufferMultiplier?: number;
+  postageSats?: number;
+}): number {
+  const outputsVB = opts.commitOutputsVB.reduce((n, vb) => n + vb, 0);
+  const commitVB = COMMIT_OVERHEAD_VB + outputsVB + COMMIT_INPUT_VB * opts.inputs;
+  const revealVB = REVEAL_BASE_VB + Math.ceil((opts.contentBytes + 300) / 4);
+  const buffer = opts.bufferMultiplier ?? 1.5;
+  return Math.ceil(opts.feeRate * (commitVB + revealVB) * buffer) + (opts.postageSats ?? POSTAGE_SATS);
+}
+
 /** Signs a built funding tx and returns broadcast-ready raw tx hex. */
 export type FaucetTxSigner = (tx: btc.Transaction) => Promise<string>;
 
@@ -307,6 +483,15 @@ export function createBitcoinRoutes(deps: {
   indexer?: IndexerConfig;
   /** @deprecated A bare base URL, folded into `indexer`. Kept for older callers. */
   depositApi?: string;
+  /**
+   * Per-candidate ordinal classification (R26). ABSENT means every confirmed
+   * output is unclassified, so NOTHING is offered as spendable — the deposit
+   * route degrades to a disclosed, fail-closed state rather than risking an
+   * inscribed sat being burned as a fee.
+   */
+  ordinals?: OrdinalLookup;
+  /** Structured money-path log sink (R29). Defaults to stdout. */
+  moneyLog?: MoneyLogger;
   fetchImpl?: typeof fetch;
   now?: () => number;
 }): {
@@ -322,6 +507,7 @@ export function createBitcoinRoutes(deps: {
 } {
   const faucetSats = deps.faucetSats ?? 20_000;
   const now = deps.now ?? (() => Date.now());
+  const money = deps.moneyLog ?? createMoneyLogger(undefined, () => now());
   // Per-client burst cap. Sized against the real traffic shape, not a round
   // number: the deposit screen polls every 15s (4/min) for as long as a creator
   // is funding, and a NAT/office egress address is ONE client identity — at
@@ -654,8 +840,26 @@ export function createBitcoinRoutes(deps: {
     // funding address is deterministic (a Turnkey BIP-84 path), so this costs
     // an honest client nothing — and it stops the route being a general
     // UTXO-lookup proxy for any address a signed-in caller cares to name.
+    //
+    // Trust-on-first-use, and the copy says exactly that: nothing here
+    // re-derives the address from the user's Turnkey wallet. The bindings file
+    // is therefore the whole enforcement, so an unreadable one is a NAMED
+    // refusal, never a silent rebind.
     if (deps.inscriptions) {
-      const bound = deps.inscriptions.bindDepositAddress(sub, network, address);
+      let bound: string;
+      try {
+        const already = deps.inscriptions.depositBinding(sub, network);
+        bound = deps.inscriptions.bindDepositAddress(sub, network, address);
+        if (!already && bound === address) {
+          money('deposit_address_issued', { sub, network, address });
+        }
+      } catch {
+        money('deposit_read_failed', { sub, network, reason: 'binding_unreadable' });
+        return json(
+          { error: 'deposit_binding_unreadable', message: 'This account’s deposit address could not be confirmed.' },
+          503
+        );
+      }
       if (bound !== address) {
         return json({ error: 'address_not_bound', message: 'This account is bound to a different deposit address.' }, 403);
       }
@@ -699,6 +903,7 @@ export function createBitcoinRoutes(deps: {
       // sent BTC and closed the tab.
       const err = e instanceof IndexerError ? e : new IndexerError((e as Error).message, 'unavailable');
       const kind = err.kind === 'rate_limited' ? 'indexer_rate_limited' : 'indexer_unavailable';
+      money('deposit_read_failed', { sub, network, address, reason: kind, status: err.status });
       const alert = deps.inscriptions?.recordDepositAlert(sub, { kind, network, address });
       const headers = err.retryAfterSec ? { 'Retry-After': String(err.retryAfterSec) } : undefined;
       return json(
@@ -712,34 +917,44 @@ export function createBitcoinRoutes(deps: {
       );
     }
     // A read we could trust: remember what they hold and end any outage state.
-    deps.inscriptions?.recordDepositRead(sub, {
-      network,
-      address,
-      confirmedSats: utxos.confirmed.reduce((n, u) => n + u.value, 0),
-    });
-    // Ordinal safety: the reveal sends the inscribed sat BACK to this same
-    // address, so the user's inscription outputs sit among their funding
-    // UTXOs. Spending one as the funding input would make an existing
-    // inscription's sat the DID sat of a new one. Postage (546) is always
-    // below estimatedCostSats so the UI would not pick one today — but that
-    // is arithmetic, not a rule, so exclude them explicitly.
-    const inscriptionOutpoints = new Set(
-      deps.inscriptions?.list(sub).map((r) => `${r.revealTxId}:0`) ?? []
-    );
-    const confirmedUtxos = utxos.confirmed.filter(
-      (u) => !inscriptionOutpoints.has(`${u.txid}:${u.vout}`)
-    );
-    // Commit ≈ 85 vB of fixed shape (overhead + P2TR commit output + P2WPKH
-    // change) plus 68 vB PER P2WPKH input, and reveal ≈ 111 vB + the
-    // witness-discounted envelope (content + ~300 bytes of tags/script
-    // overhead) — the same shape commit.ts estimates precisely once the
-    // content exists. 1.5× buffer absorbs a fee move between the deposit and
-    // the broadcast; postage rides on top.
-    const COMMIT_BASE_VB = 85;
-    const COMMIT_INPUT_VB = 68;
-    const revealVB = 111 + Math.ceil((contentBytes + 300) / 4);
+    const confirmedSats = utxos.confirmed.reduce((n, u) => n + u.value, 0);
+    const previous = deps.inscriptions?.lastDepositRead(sub) ?? null;
+    const previousSats = previous && previous.address === address ? previous.confirmedSats : null;
+    deps.inscriptions?.recordDepositRead(sub, { network, address, confirmedSats });
+    if (confirmedSats > 0 && (previousSats === null || previousSats === 0)) {
+      money('deposit_seen', { sub, network, address, confirmedSats, outputs: utxos.confirmed.length });
+    }
+
+    // Ordinal safety, positively established (R26). The reveal sends the
+    // inscribed sat BACK to this same address, so the user's own inscription
+    // outputs sit among their funding UTXOs — and an ordinal can also arrive
+    // here from anywhere else. Spending one would make an existing
+    // inscription's sat the DID sat of a new one, or burn it as fees. Until
+    // funding was summed, postage (546) sat below any single-UTXO threshold
+    // and arithmetic did the work; a sum has no such property, so each
+    // candidate is classified and an unclassifiable one is NOT spendable.
+    const classified = await classifySpendableUtxos(utxos.confirmed, deps.ordinals);
+    if (!classified.ok) {
+      money('deposit_ordinal_check_unavailable', {
+        sub,
+        network,
+        address,
+        candidates: utxos.confirmed.length,
+        reason: classified.reason,
+      });
+    }
+    const confirmedUtxos = classified.spendable;
+    // The commit's outputs are priced INDIVIDUALLY (R25): this deploy builds
+    // one spend output plus change, and a later platform fee output is one
+    // more entry in the array rather than a re-derived constant. No fee output
+    // is built today.
     const costFor = (inputs: number) =>
-      Math.ceil(feeRate * (COMMIT_BASE_VB + COMMIT_INPUT_VB * inputs + revealVB) * 1.5) + 546;
+      estimateInscriptionCostSats({
+        feeRate,
+        inputs,
+        contentBytes,
+        commitOutputsVB: [P2TR_OUTPUT_VB, P2WPKH_OUTPUT_VB],
+      });
     // The quote must price the inputs the creator will ACTUALLY spend (R26): a
     // flat one-input figure under-quotes the moment a second UTXO is needed,
     // which lands them back in the shortfall this route exists to prevent.
@@ -760,10 +975,38 @@ export function createBitcoinRoutes(deps: {
     }
     const estimatedCostSats = costFor(inputCount);
 
+    // A shortfall is a money-path state, not a UI detail: it is the state a
+    // stranger sits in with real BTC already sent. Logged on the TRANSITION
+    // (the confirmed balance changed) so a 15s poll does not flood the sink.
+    const spendableSats = confirmedUtxos.reduce((n, u) => n + u.value, 0);
+    if (spendableSats > 0 && spendableSats < estimatedCostSats && previousSats !== confirmedSats) {
+      money('deposit_shortfall', {
+        sub,
+        network,
+        address,
+        spendableSats,
+        estimatedCostSats,
+        shortfallSats: estimatedCostSats - spendableSats,
+      });
+    }
+
     return json({
       address,
       network,
+      // The ORDINAL-CHECKED set: what an inscription may actually spend.
       confirmedUtxos,
+      // Everything confirmed at the address, ordinal-bearing outputs included.
+      // The balance a creator can see in a block explorer is not always the
+      // balance we will spend, and saying so is cheaper than being disbelieved.
+      confirmedSats,
+      /**
+       * Whether classification succeeded. 'unavailable' means we could not
+       * establish that these outputs are free of inscriptions, so none are
+       * offered as spendable — the address and the quote are still honest,
+       * only the spend is withheld (R25 keeps the shape open: the quote does
+       * not assume a single spend output).
+       */
+      ordinalCheck: classified.ok ? ('ok' as const) : ('unavailable' as const),
       unconfirmedSats: utxos.unconfirmedSats,
       estimatedCostSats,
     });
@@ -887,10 +1130,16 @@ export function createBitcoinRoutes(deps: {
     // input 0, so a reordered input moves the identity), with at most two
     // outputs (commit output + optional change), and the reveal must spend the
     // commit's vout 0.
+    /** A refusal on the money path is logged with its reason before it is served. */
+    const refuse = (reason: string, body: Record<string, unknown>, status: number): Response => {
+      money('inscribe_failed', { sub, reason, inputs: outpoints.length });
+      return json(body, status);
+    };
+
     const commit = parseRawTx(signedCommitHex);
-    if (!commit) return json({ error: 'bad_commit_tx' }, 400);
+    if (!commit) return refuse('bad_commit_tx', { error: 'bad_commit_tx' }, 400);
     if (commit.inputsLength !== outpoints.length || commit.outputsLength < 1 || commit.outputsLength > 2) {
-      return json({ error: 'commit_invariant_violation', message: 'Commit must spend exactly the declared funding UTXOs and have 1-2 outputs.' }, 400);
+      return refuse('commit_invariant_violation', { error: 'commit_invariant_violation', message: 'Commit must spend exactly the declared funding UTXOs and have 1-2 outputs.' }, 400);
     }
     const inputsMatch = outpoints.every((expected, i) => {
       const input = commit.getInput(i);
@@ -898,23 +1147,23 @@ export function createBitcoinRoutes(deps: {
       return `${txid}:${input.index}` === expected;
     });
     if (!inputsMatch) {
-      return json({ error: 'commit_invariant_violation', message: 'Commit inputs do not match the declared funding UTXOs (in order).' }, 400);
+      return refuse('commit_inputs_mismatch', { error: 'commit_invariant_violation', message: 'Commit inputs do not match the declared funding UTXOs (in order).' }, 400);
     }
     const commitTxId = commit.id;
 
     const reveal = parseRawTx(revealTxHex);
-    if (!reveal) return json({ error: 'bad_reveal_tx' }, 400);
+    if (!reveal) return refuse('bad_reveal_tx', { error: 'bad_reveal_tx' }, 400);
     // Shape before indexing: getInput(0) throws on an input-less tx. No raw
     // hex can currently reach here with zero inputs (fromRaw rejects it — the
     // 0x00 input count is read as the segwit marker), so this is defensive
     // only, kept symmetric with the commit path above.
     if (reveal.inputsLength !== 1) {
-      return json({ error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
+      return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
     }
     const revealInput = reveal.getInput(0);
     const revealInputTxid = revealInput?.txid ? hex.encode(revealInput.txid).toLowerCase() : '';
     if (revealInputTxid !== commitTxId.toLowerCase() || revealInput.index !== 0) {
-      return json({ error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
+      return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
     }
     const revealTxId = reveal.id;
 
@@ -951,18 +1200,18 @@ export function createBitcoinRoutes(deps: {
       return theirs.length === outpoints.length && theirs.every((o) => outpoints.includes(o));
     };
     if (rivals.length > 1 || (rivals.length === 1 && !sameSet(rivals[0]))) {
-      return json({ error: 'outpoint_pending', commitTxId: rivals[0].commitTxId }, 409);
+      return refuse('outpoint_pending', { error: 'outpoint_pending', commitTxId: rivals[0].commitTxId }, 409);
     }
     const existing = rivals[0];
     if (existing) {
       if (existing.status !== 'signed') {
-        return json({ error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
+        return refuse('outpoint_pending', { error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
       }
       try {
         const st = await provider.getTransactionStatus(existing.commitTxId);
         if (st?.confirmed) {
           store.setStatus(sub, existing.commitTxId, 'commit_broadcast');
-          return json({ error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
+          return refuse('outpoint_already_confirmed', { error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
         }
       } catch {
         // No lookup — fall through: superseding stays safe because nothing
@@ -971,6 +1220,16 @@ export function createBitcoinRoutes(deps: {
       }
       store.supersede(sub, existing.commitTxId);
     }
+
+    // Every invariant held: this pair is about to spend a stranger's real
+    // BTC, so it is on the record before it goes anywhere (R29).
+    money('inscribe_attempted', {
+      sub,
+      commitTxId,
+      revealTxId,
+      inputs: outpoints.length,
+      fundingSats: declared.reduce((n, u) => n + (typeof u.value === 'number' ? u.value : 0), 0),
+    });
 
     // Persist BEFORE any broadcast — the whole point: from here on, recovery
     // never depends on the client (or this request) surviving.
@@ -990,22 +1249,28 @@ export function createBitcoinRoutes(deps: {
     try {
       store.create(sub, record);
     } catch (e) {
-      return json({ error: 'store_error', message: (e as Error).message }, 500);
+      return refuse('store_error', { error: 'store_error', message: (e as Error).message }, 500);
     }
 
     const commitErr = await broadcastIdempotent(signedCommitHex);
     if (commitErr) {
       // Nothing on-chain (or already there — that path returns null): the pair
       // stays persisted as 'signed' and a rebroadcast can retry safely.
+      money('inscribe_failed', { sub, commitTxId, reason: 'commit_broadcast_failed', detail: commitErr });
       return json({ error: 'commit_broadcast_failed', message: commitErr, commitTxId }, 502);
     }
     store.setStatus(sub, commitTxId, 'commit_broadcast');
 
     const revealErr = await broadcastIdempotent(revealTxHex);
     if (revealErr) {
+      // Not stranded — the reveal is persisted and the sweep completes it —
+      // but it IS an incomplete money-path transition, so it is on the record.
+      money('inscribe_failed', { sub, commitTxId, revealTxId, reason: 'reveal_broadcast_failed', detail: revealErr });
+      money('inscribe_broadcast', { sub, commitTxId, revealTxId, status: 'commit_broadcast' });
       return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: 'commit_broadcast' });
     }
     store.setStatus(sub, commitTxId, 'reveal_broadcast');
+    money('inscribe_broadcast', { sub, commitTxId, revealTxId, status: 'reveal_broadcast' });
     return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: 'reveal_broadcast' });
   };
 
@@ -1254,6 +1519,114 @@ export function createBitcoinRoutes(deps: {
 }
 
 export type BitcoinRoutes = ReturnType<typeof createBitcoinRoutes>;
+
+/**
+ * The deposit-balance sweep (R29) — the only instrument that would ever tell
+ * the operator a stranger's funds are sitting unspent at an address this app
+ * issued. Nothing else in the system looks at a deposit address that no tab is
+ * polling.
+ *
+ * READ BUDGET, stated because it spends the same indexer budget every
+ * creator's poll does:
+ *  - Cadence: once an hour, riding the EXISTING stale-inscription sweep in
+ *    serve.ts. No second timer.
+ *  - Ceiling: `maxPerPass` (50) indexer reads per pass — ~1,200/day — taken
+ *    from a rotating cursor over a stably ordered candidate list, so a backlog
+ *    larger than one pass is still covered across successive passes instead of
+ *    the same head addresses forever.
+ *  - Drop-out: an address leaves the scan once it has nothing in flight, its
+ *    last trusted read was ZERO confirmed sats, and that read is older than
+ *    `idleAfterMs` (24h). Without that the instrument would grow linearly with
+ *    all-time signups. A freshly issued address therefore stays in scope for a
+ *    full day even if its creator closed the tab, and an address holding a
+ *    balance NEVER drops out — every pass re-reads it and the sweep records
+ *    that read, which is what keeps it in scope.
+ *  - Known gap: a deposit that first arrives more than 24h after the address
+ *    went quiet is not seen by the sweep. The creator's own poll still sees it.
+ */
+export function createDepositBalanceSweep(deps: {
+  store: Pick<InscriptionsStore, 'listBoundDeposits' | 'recordDepositRead'>;
+  indexer: IndexerConfig;
+  network: BtcNet;
+  moneyLog?: MoneyLogger;
+  fetchImpl?: typeof fetch;
+  maxPerPass?: number;
+  idleAfterMs?: number;
+  now?: () => number;
+}): () => Promise<{
+  candidates: number;
+  scanned: number;
+  withBalance: number;
+  heldSats: number;
+  unreadable: number;
+}> {
+  const maxPerPass = deps.maxPerPass ?? 50;
+  const idleAfterMs = deps.idleAfterMs ?? 24 * 60 * 60_000;
+  const now = deps.now ?? (() => Date.now());
+  const money = deps.moneyLog ?? createMoneyLogger(undefined, now);
+  let cursor = 0;
+
+  return async () => {
+    const all = deps.store.listBoundDeposits().filter((d) => d.network === deps.network);
+    const candidates = all.filter((d) => {
+      if (d.hasPendingInscription) return true;
+      if (d.lastConfirmedSats === null || d.lastReadAt === null) return true; // never read = never cleared
+      if (d.lastConfirmedSats > 0) return true;
+      return now() - Date.parse(d.lastReadAt) < idleAfterMs;
+    });
+    // Stable order + rotating cursor: every candidate gets its turn.
+    candidates.sort((a, b) => (a.subOrgId + a.address).localeCompare(b.subOrgId + b.address));
+    const start = candidates.length > 0 ? cursor % candidates.length : 0;
+    const pass = [...candidates.slice(start), ...candidates.slice(0, start)].slice(0, maxPerPass);
+    cursor += pass.length;
+
+    let withBalance = 0;
+    let heldSats = 0;
+    let unreadable = 0;
+    for (const d of pass) {
+      try {
+        const { confirmed } = await fetchAddressUtxos({
+          ...deps.indexer,
+          address: d.address,
+          network: deps.network,
+          fetchImpl: deps.fetchImpl,
+        });
+        const sats = confirmed.reduce((n, u) => n + u.value, 0);
+        // A trusted read: recording it keeps a funded address in scope and
+        // lets an idle empty one age out.
+        deps.store.recordDepositRead(d.subOrgId, {
+          network: d.network,
+          address: d.address,
+          confirmedSats: sats,
+        });
+        if (sats > 0) {
+          withBalance++;
+          heldSats += sats;
+          money('deposit_balance_held', {
+            sub: d.subOrgId,
+            network: d.network,
+            address: d.address,
+            confirmedSats: sats,
+            outputs: confirmed.length,
+            pendingInscription: d.hasPendingInscription,
+          });
+        }
+      } catch (e) {
+        unreadable++;
+        money('deposit_read_failed', {
+          sub: d.subOrgId,
+          network: d.network,
+          address: d.address,
+          reason: 'sweep_read_failed',
+          detail: (e as Error).message,
+        });
+      }
+    }
+    const summary = { candidates: candidates.length, scanned: pass.length, withBalance, heldSats, unreadable };
+    money('deposit_balance_sweep', { ...summary, bound: all.length, maxPerPass });
+    return summary;
+  };
+}
 
 /**
  * Raw-key faucet signer: decode a testnet WIF, derive its tb1q address, and

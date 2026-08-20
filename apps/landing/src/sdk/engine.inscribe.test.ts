@@ -88,6 +88,50 @@ describe('engine inscribe wiring', () => {
       })
     ).rejects.toThrow();
   });
+
+  /**
+   * U15 / R26 — the engine takes a SET. A creator who deposited twice funds
+   * from both outputs, and the layers below pin the identity sat to the first.
+   * Same proof as above: a broken signer means the real sat-selected path was
+   * entered rather than the mock.
+   */
+  test('inscribe() accepts several funding UTXOs, not just one', async () => {
+    const engine = new DemoEngine();
+    await engine.create('T', 'Artwork', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    await engine.publish();
+    const brokenClient = {
+      async signTransaction() { throw new Error('turnkey down'); },
+      async createWalletAccounts() { throw new Error('x'); },
+      async getWallets() { throw new Error('x'); },
+    };
+    await expect(
+      engine.inscribe({
+        funding: {
+          fundingUtxos: [
+            { txid: 'a'.repeat(64), vout: 0, value: 6_000 },
+            { txid: 'b'.repeat(64), vout: 1, value: 6_000 },
+          ],
+          changeAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
+          signingClient: brokenClient as never,
+        },
+      })
+    ).rejects.toThrow();
+  });
+
+  test('inscribe() with an empty funding set refuses rather than falling back to the mock', async () => {
+    const engine = new DemoEngine();
+    await engine.create('T', 'Artwork', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    await engine.publish();
+    await expect(
+      engine.inscribe({
+        funding: {
+          fundingUtxos: [],
+          changeAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
+          signingClient: {} as never,
+        },
+      })
+    ).rejects.toThrow(/at least one UTXO/);
+  });
 });
 
 /**

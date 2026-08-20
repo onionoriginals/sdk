@@ -26,9 +26,14 @@ import {
   turnkeyFaucetSigner,
   fetchFaucetUtxos,
   resolveIndexer,
+  quickNodeOrdinalLookup,
+  cachedOrdinalLookup,
+  createDepositBalanceSweep,
   type FaucetProvider,
   type FaucetTxSigner,
+  type OrdinalLookup,
 } from './server/bitcoin';
+import { createMoneyLogger } from './server/money-log';
 import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
@@ -65,6 +70,18 @@ const providerNetwork = btcNet === 'mainnet' ? 'mainnet' : 'testnet';
 // the free public API per network; BTC_INDEXER_API/BTC_INDEXER_TOKEN move it
 // to a paid tier or a private index without a code change.
 const indexer = resolveIndexer(process.env, providerNetwork);
+// Every money-path transition lands here (R29). Identity is the Turnkey
+// sub-org id only — these lines link an account to on-chain activity and go to
+// a third-party log sink.
+const money = createMoneyLogger();
+// Per-candidate ordinal classification via the Ordinals & Runes add-on
+// (`ord_getOutput`), memoized per outpoint so the 15s deposit poll does not
+// pay a call per UTXO per tick. ABSENT without a QuickNode endpoint, which
+// makes the deposit route offer NOTHING as spendable — fail closed, because a
+// 546-sat ordinal pulled in as a top-up is an inscription burned as fees.
+const ordinals: OrdinalLookup | undefined = process.env.QUICKNODE_ENDPOINT
+  ? cachedOrdinalLookup(quickNodeOrdinalLookup({ endpoint: process.env.QUICKNODE_ENDPOINT }))
+  : undefined;
 
 // QuickNode gives the ordinals-aware sat lookup + fee + broadcast. Address
 // reads are NOT QuickNode: its Ordinals add-on has no address surface and Core
@@ -102,6 +119,8 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
         provider: createFaucetProviderFromEnv(),
         network: 'mainnet',
         indexer,
+        ordinals,
+        moneyLog: money,
         inscriptions: inscriptionsStore,
       });
       bitcoin = { ...routes, funding: undefined };
@@ -135,6 +154,8 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
         faucetSats: Number(process.env.BTC_FAUCET_SATS ?? 20_000),
         network: 'testnet',
         indexer,
+        ordinals,
+        moneyLog: money,
         inscriptions: inscriptionsStore,
       });
     }
@@ -177,6 +198,18 @@ console.log(
 // poll auto-recovers most of them, and the per-user "Finish inscription" flow
 // (POST /api/btc/inscribe/rebroadcast) is the manual shortcut.
 if (api) {
+  // Rides the SAME hourly timer as the stale-inscription sweep — a second
+  // timer would be a second, undeclared draw on the indexer budget. Read
+  // budget (see createDepositBalanceSweep): hourly, at most 50 addresses per
+  // pass from a rotating cursor, and an address drops out once it has nothing
+  // in flight, last read zero, and has been quiet for 24h.
+  const depositSweep = createDepositBalanceSweep({
+    store: inscriptionsStore,
+    indexer,
+    network: providerNetwork,
+    moneyLog: money,
+    maxPerPass: Number(process.env.DEPOSIT_SWEEP_MAX_PER_PASS ?? 50),
+  });
   const sweep = () => {
     try {
       const stale = inscriptionsStore.sweepStale(24 * 60 * 60_000);
@@ -189,6 +222,9 @@ if (api) {
     } catch (err) {
       console.warn('[landing] stale-inscription sweep failed', err);
     }
+    // The only instrument that sees a stranger's funds sitting unspent at a
+    // deposit address nobody is polling.
+    void depositSweep().catch((err) => console.warn('[landing] deposit balance sweep failed', err));
   };
   sweep();
   setInterval(sweep, 60 * 60_000);

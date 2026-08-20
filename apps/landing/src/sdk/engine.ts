@@ -460,7 +460,15 @@ export class DemoEngine {
   async inscribe(opts?: {
     feeRate?: number;
     funding?: {
-      fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey?: string; address?: string };
+      /**
+       * Every funding UTXO the commit spends, in input order. `[0]` is the
+       * IDENTITY input — its first sat becomes the did:btco sat — and the SDK
+       * asserts that pinning end to end (U16). A creator who deposited twice,
+       * or topped up after a fee rise, funds from a SET.
+       */
+      fundingUtxos?: Array<{ txid: string; vout: number; value: number; scriptPubKey?: string; address?: string }>;
+      /** One-element shorthand. Provide this OR `fundingUtxos`, not both. */
+      fundingUtxo?: { txid: string; vout: number; value: number; scriptPubKey?: string; address?: string };
       changeAddress: string;
       signingClient: TurnkeyBitcoinClient;
     };
@@ -472,8 +480,11 @@ export class DemoEngine {
         client: opts.funding.signingClient,
         signWith: opts.funding.changeAddress, // the user's funding address IS signWith
       });
+      const fundingUtxos =
+        opts.funding.fundingUtxos ?? (opts.funding.fundingUtxo ? [opts.funding.fundingUtxo] : []);
+      if (fundingUtxos.length === 0) throw new Error('inscribe: funding needs at least one UTXO');
       await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, {
-        fundingUtxo: opts.funding.fundingUtxo,
+        fundingUtxos,
         satSigner,
         changeAddress: opts.funding.changeAddress,
         // No default here: real BTC must be built at the LIVE rate. Left

@@ -228,13 +228,27 @@ export const demo = {
     heading: 'Fund your inscription',
     signInPrompt: 'Sign in to inscribe on Bitcoin — your own key signs it, your own BTC funds it.',
     sendPrefix: 'Send at least',
-    sendSuffix: 'of BTC to your deposit address, in a single payment (the inscription spends one confirmed deposit). It’s yours: the change and the inscribed sat come back to it.',
+    sendSuffix: 'of BTC to your deposit address. One payment or several — the inscription spends every confirmed deposit sitting there, so a top-up after a fee rise works too. The change and the inscribed sat come back to the same address.',
     addressLabel: 'Your deposit address',
     waiting: 'Waiting for your deposit…',
     detected: 'Deposit detected — waiting for one confirmation.',
     ready: 'Deposit confirmed — ready to inscribe.',
     needed: 'No confirmed deposit covering the fee yet — send BTC to your deposit address and wait for one confirmation.',
-    nonRefundable: 'Creator pays: the network fee is non-refundable. You own the keys, the change, and the inscribed sat — nothing is custodied.',
+    // U15 — the pre-deposit disclosure, rendered above the address in every
+    // state (first visit, top-up, and a return visit where the address was
+    // already issued). Mechanics only: who signs, where the key lives, what
+    // happens to a balance that is never spent. The previous line here
+    // ("You own the keys, the change, and the inscribed sat — nothing is
+    // custodied") was a legal characterisation of a contested arrangement,
+    // printed directly above the address a stranger sends mainnet BTC to.
+    purpose:
+      'This deposit funds one inscription: the Bitcoin network fees for its two transactions, plus the 546-sat output the inscription rides on. Whatever is left over comes back to the same address as change.',
+    addressOrigin:
+      'The address is derived in this browser from your Turnkey wallet, and your account is bound to the first address it sends us — we don’t re-check it against Turnkey after that. Your browser signs the spend with that wallet’s key; the key is never sent to the server.',
+    nonRefundable:
+      'The network fee is spent the moment the transactions are broadcast, and Bitcoin transactions cannot be reversed. Nobody — us included — can undo or refund one.',
+    unspentBalance:
+      'Anything you send that is never spent on an inscription stays sitting at that address. There is no withdraw or refund flow here: the only way to move it is to inscribe again through this site, for as long as this service and its Turnkey organization are running. Send the amount above rather than a round number you would want back.',
     // R31 — said BEFORE they deposit, because that is the only moment we are
     // sure they are reading. It names the exact place the state will be, so
     // "close the tab" is a safe thing to do rather than a gamble.
@@ -250,6 +264,20 @@ export const demo = {
       'We can’t read your deposit address on the Bitcoin network right now, so we can’t tell you what’s arrived — and we won’t show you a stale balance and call it current. No address is shown while that’s true. Anything you’ve already sent is untouched: it’s at your own address, under your own key, and it will still be there when the read comes back. Your Original is already real and resolvable as did:webvh in the meantime.',
     indexerBusy:
       'Our Bitcoin address lookups are being rate-limited at the moment, so we can’t confirm what’s at your deposit address just yet. Nothing is lost or stuck on your side — any BTC you’ve sent is at your own address, under your own key. Give it a few minutes and reload; we’ll pick up exactly where this left off.',
+    // A shortfall names the number: "deposit more" without an amount is what
+    // leaves someone topping up blind. Composed by depositShortfallMessage.
+    shortfallPrefix: 'Your confirmed deposits come to',
+    shortfallMiddle: ', which is',
+    shortfallSuffix:
+      'short of the amount above. Send the difference to the same deposit address and wait for one confirmation — the inscription will spend both payments together.',
+    // The ordinal classification is unavailable, so nothing is spendable.
+    ordinalCheckUnavailable:
+      'We can’t currently check whether the coins at your deposit address carry an inscription of their own, and we won’t spend a coin we can’t check — an inscribed sat spent as a fee is destroyed. Your BTC is untouched at your own address. Try again in a few minutes.',
+    ordinalCheckBadge: 'Can’t check your coins for inscriptions.',
+    // The bindings file — the whole of "this address belongs to this account".
+    bindingUnreadable:
+      'We can’t confirm which deposit address belongs to your account right now, so we’re not showing one: a wrong address here means BTC sent somewhere this site can never spend from. Anything you’ve already sent is untouched. Try again in a few minutes.',
+    bindingBadge: 'Deposit address unconfirmed.',
     networkMismatch:
       'This deploy is misconfigured: the app was built for a different Bitcoin network than the server is running. Inscribing is disabled until they match — no deposit address is shown, because funds sent to it could not be spent here.',
     yourKeyNote: 'Your Turnkey key signs this inscription in your browser; your own deposit pays the fee. The server never sees a private key.'

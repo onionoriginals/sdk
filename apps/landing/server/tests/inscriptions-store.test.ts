@@ -175,3 +175,81 @@ describe('inscriptions-store', () => {
     expect(store.sweepStale(0)).toEqual([]); // retired on confirm, as for a new-shape record
   });
 });
+
+/**
+ * U15 — the deposit half of the store: the binding that is the ONLY thing
+ * enforcing "this address belongs to this account", and the cross-user reader
+ * the balance sweep needs (the store's only other cross-user scan walks
+ * inscriptions, which says nothing about a deposit nobody inscribed with).
+ */
+describe('deposit bindings and the cross-user reader', () => {
+  test('depositBinding reports what is bound without binding anything', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
+    const store = createInscriptionsStore({ dataDir });
+    expect(store.depositBinding('sub-1', 'mainnet')).toBeNull();
+    store.bindDepositAddress('sub-1', 'mainnet', 'bc1qmine');
+    expect(store.depositBinding('sub-1', 'mainnet')).toBe('bc1qmine');
+    expect(store.depositBinding('sub-1', 'testnet')).toBeNull();
+    // Reading is not writing: a bare read must not create a binding.
+    expect(createInscriptionsStore({ dataDir }).depositBinding('sub-2', 'mainnet')).toBeNull();
+  });
+
+  /**
+   * Nothing re-derives the deposit address from the user's Turnkey wallet, so
+   * this file IS the enforcement. Reading a corrupt one as `{}` would silently
+   * permit a rebind — a stranger's mainnet BTC pointed at an address that is
+   * not theirs.
+   */
+  test('a corrupt bindings file fails closed rather than permitting a rebind', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
+    const store = createInscriptionsStore({ dataDir });
+    store.bindDepositAddress('sub-1', 'mainnet', 'bc1qmine');
+    writeFileSync(join(dataDir, 'deposits', 'sub-1.json'), '{"mainnet": ');
+
+    expect(() => store.bindDepositAddress('sub-1', 'mainnet', 'bc1qattacker')).toThrow('BINDINGS_UNREADABLE');
+    expect(() => store.depositBinding('sub-1', 'mainnet')).toThrow('BINDINGS_UNREADABLE');
+    // A shape that parses but is not a string map is equally unusable.
+    writeFileSync(join(dataDir, 'deposits', 'sub-1.json'), '["bc1qattacker"]');
+    expect(() => store.depositBinding('sub-1', 'mainnet')).toThrow('BINDINGS_UNREADABLE');
+    // An ABSENT file is a genuine "not bound yet" — that is not the same thing.
+    expect(store.depositBinding('sub-9', 'mainnet')).toBeNull();
+  });
+
+  test('listBoundDeposits reports every bound address with what the sweep decides on', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
+    const store = createInscriptionsStore({ dataDir });
+    expect(store.listBoundDeposits()).toEqual([]);
+
+    store.bindDepositAddress('sub-1', 'mainnet', 'bc1qone');
+    store.bindDepositAddress('sub-2', 'mainnet', 'bc1qtwo');
+    store.bindDepositAddress('sub-2', 'testnet', 'tb1qtwo');
+    store.recordDepositRead('sub-1', { network: 'mainnet', address: 'bc1qone', confirmedSats: 40_000 });
+    store.create('sub-2', rec({ commitTxId: 'd'.repeat(64) }));
+
+    const all = store.listBoundDeposits();
+    expect(all).toHaveLength(3);
+    const one = all.find((d) => d.address === 'bc1qone')!;
+    expect(one.subOrgId).toBe('sub-1');
+    expect(one.lastConfirmedSats).toBe(40_000);
+    expect(one.lastReadAt).toBeTruthy();
+    expect(one.hasPendingInscription).toBe(false);
+
+    const two = all.find((d) => d.address === 'bc1qtwo')!;
+    expect(two.lastConfirmedSats).toBeNull(); // never read
+    expect(two.hasPendingInscription).toBe(true); // a pair still holding hex
+
+    // Networks are separate rows, so a sweep can scan only the one it serves.
+    expect(all.filter((d) => d.network === 'mainnet')).toHaveLength(2);
+  });
+
+  test('one unreadable user does not blind the sweep to every other stranger', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
+    const store = createInscriptionsStore({ dataDir });
+    store.bindDepositAddress('sub-1', 'mainnet', 'bc1qone');
+    store.bindDepositAddress('sub-2', 'mainnet', 'bc1qtwo');
+    writeFileSync(join(dataDir, 'deposits', 'sub-1.json'), 'not json');
+    // The corrupt user's own request still fails closed (above); the scan just
+    // skips them rather than reporting nothing at all.
+    expect(store.listBoundDeposits().map((d) => d.address)).toEqual(['bc1qtwo']);
+  });
+});

@@ -124,6 +124,45 @@ An hourly sweep logs any inscription older than 24 hours still holding
 un-landed recovery artifacts. That log line is the alert; there is no alerting
 stack by design.
 
+## Money-path logging and the deposit-balance sweep
+
+Every state transition where a stranger's BTC moves or gets stuck emits one
+line, prefixed `[landing][money] ` and followed by JSON. Grep that prefix.
+
+| `event` | Emitted when |
+| --- | --- |
+| `deposit_address_issued` | An address is bound to an account for the first time |
+| `deposit_seen` | A confirmed balance appears at a bound address |
+| `deposit_shortfall` | The balance changed and still does not cover the quote |
+| `deposit_read_failed` | An address read, or the address binding, could not be trusted |
+| `deposit_ordinal_check_unavailable` | Outputs could not be classified, so none were offered as spendable |
+| `inscribe_attempted` | A signed pair passed validation and is about to broadcast |
+| `inscribe_failed` | A pair was refused or failed to broadcast (`reason` says which) |
+| `inscribe_broadcast` | A pair reached the network |
+| `deposit_balance_held` | A bound address still holds confirmed sats (per address) |
+| `deposit_balance_sweep` | The hourly roll-up, including `withBalance` and `heldSats` |
+
+**Users are identified by Turnkey sub-org id only.** These lines link an
+account to on-chain activity and land in a third-party log sink, so an email
+address is redacted by the formatter even if a call site passes one.
+
+**`deposit_balance_sweep` is the only instrument that sees a stranger's funds
+sitting unspent at an address nobody is polling.** `withBalance` going up and
+staying up is the signal to look. Its read budget:
+
+- **Cadence:** hourly, on the same timer as the stale-inscription sweep above.
+  There is no second timer.
+- **Ceiling:** 50 indexer reads per pass (`DEPOSIT_SWEEP_MAX_PER_PASS`), taken
+  from a rotating cursor over a stably ordered list, so a backlog larger than
+  one pass is covered across successive passes rather than starving behind the
+  same head addresses.
+- **Drop-out:** an address leaves the scan once it has nothing in flight, its
+  last trusted read was zero confirmed sats, and that read is over 24h old.
+  Without that the scan would grow with all-time signups. An address holding a
+  balance never drops out — each pass re-reads it and records the read.
+- **Known gap:** a deposit that first arrives more than 24h after its address
+  went quiet is not seen by the sweep. The creator's own poll still sees it.
+
 ## Runbook: turning the money path off
 
 Conditions that should trigger it:

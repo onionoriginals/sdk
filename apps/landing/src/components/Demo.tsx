@@ -24,7 +24,12 @@ type Phase =
 /** GET /api/btc/deposit — the creator's own UTXOs + the estimated fee target. */
 interface DepositInfo {
   address: string;
+  /** The ORDINAL-CHECKED spendable set — what an inscription may fund from. */
   confirmedUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
+  /** Everything confirmed at the address, ordinal-bearing outputs included. */
+  confirmedSats?: number;
+  /** 'unavailable' = we could not classify the outputs, so none are spendable. */
+  ordinalCheck?: 'ok' | 'unavailable';
   unconfirmedSats: number;
   estimatedCostSats: number;
 }
@@ -151,6 +156,98 @@ export function inscribeStepView(real: boolean): InscribeStepView {
       };
 }
 
+/** A confirmed output at the creator's own deposit address. */
+export interface FundingUtxo {
+  txid: string;
+  vout: number;
+  value: number;
+  scriptPubKey: string;
+}
+
+/** What the creator's confirmed deposits can pay for right now. */
+export interface FundingSelection {
+  /** The inputs the commit will spend, in order. `[0]` carries the did:btco sat. */
+  selected: FundingUtxo[];
+  /** Their sum. */
+  totalSats: number;
+  /** How far the WHOLE spendable balance falls short of the target (0 when funded). */
+  shortfallSats: number;
+}
+
+/**
+ * Fund from the confirmed SET, not from one fat UTXO (R26). Picking a single
+ * output large enough to cover the whole cost is what left a creator who
+ * deposited twice — or topped up after a fee rise — permanently told to
+ * deposit more with their coins sitting unspent at their own address.
+ *
+ * Largest-first, and the SAME order the deposit route walks when it sizes
+ * `estimatedCostSats`: that quote is priced for the number of inputs this
+ * walk selects, so the two cannot disagree about how many inputs the commit
+ * pays for. `selected[0]` is the identity input — its first sat becomes the
+ * did:btco sat — and every layer below asserts that pinning (U16).
+ *
+ * `utxos` must already be the ORDINAL-CHECKED spendable set: summing removed
+ * the arithmetic that used to keep a 546-sat inscription output out (postage
+ * is always below a single-UTXO threshold, never below a sum), so the guard
+ * now lives in the server's per-candidate classification.
+ */
+export function selectFundingUtxos(utxos: FundingUtxo[], targetSats: number): FundingSelection {
+  const largestFirst = [...utxos].sort((a, b) => b.value - a.value);
+  const selected: FundingUtxo[] = [];
+  let totalSats = 0;
+  for (const u of largestFirst) {
+    if (totalSats >= targetSats) break;
+    selected.push(u);
+    totalSats += u.value;
+  }
+  if (totalSats >= targetSats) return { selected, totalSats, shortfallSats: 0 };
+  // Short: select NOTHING. A partial set cannot pay for the inscription, and
+  // broadcasting a commit it cannot fund is how a reveal gets stranded.
+  return { selected: [], totalSats, shortfallSats: targetSats - totalSats };
+}
+
+/**
+ * The pre-deposit disclosure (R27), in render order. Returned as a list rather
+ * than assembled in JSX so it can be asserted directly: it takes no arguments,
+ * which IS the requirement — the same lines are shown on a first visit, on a
+ * top-up, and on a return visit where the address was already issued, and they
+ * do not wait on the address (or on anything else the server has yet to say).
+ */
+export function depositDisclosure(): string[] {
+  return [
+    demo.deposit.purpose,
+    demo.deposit.addressOrigin,
+    demo.deposit.unspentBalance,
+    demo.deposit.nonRefundable,
+    demo.deposit.ifSomethingGoesWrong,
+  ];
+}
+
+/** What the deposit badge should say — read off the SUM, never one output. */
+export type DepositReadiness = 'waiting' | 'detected' | 'ready' | 'unspendable';
+
+export function depositReadiness(info: DepositInfo | null): DepositReadiness {
+  if (!info) return 'waiting';
+  if (info.ordinalCheck === 'unavailable') return 'unspendable';
+  const spendable = info.confirmedUtxos.reduce((n, u) => n + u.value, 0);
+  if (spendable >= info.estimatedCostSats) return 'ready';
+  const seen = spendable + info.unconfirmedSats + (info.confirmedSats ?? 0);
+  return seen > 0 ? 'detected' : 'waiting';
+}
+
+/**
+ * A shortfall with the number in it. "Deposit more" without an amount is how
+ * someone tops up blind and lands short a second time.
+ */
+export function depositShortfallMessage(heldSats: number, shortfallSats: number): string {
+  if (heldSats <= 0) return demo.deposit.needed;
+  return (
+    `${demo.deposit.shortfallPrefix} ${heldSats.toLocaleString()} sats` +
+    `${demo.deposit.shortfallMiddle} ${shortfallSats.toLocaleString()} sats ` +
+    demo.deposit.shortfallSuffix
+  );
+}
+
 /**
  * Map a failed /api/btc/deposit response onto creator-facing copy (R3/R28).
  * Each named server error is its OWN state, because the route serves nothing
@@ -169,6 +266,10 @@ export function depositErrorMessage(body: unknown): string | null {
     case 'indexer_rate_limited':
     case 'deposit_user_cap':
       return demo.deposit.indexerBusy;
+    // The bindings file is the whole of "this address is yours" — an
+    // unreadable one shows no address rather than silently rebinding.
+    case 'deposit_binding_unreadable':
+      return demo.deposit.bindingUnreadable;
     default:
       return null;
   }
@@ -190,6 +291,8 @@ export function depositErrorBadge(body: unknown): string | null {
     case 'indexer_rate_limited':
     case 'deposit_user_cap':
       return demo.deposit.readBusyBadge;
+    case 'deposit_binding_unreadable':
+      return demo.deposit.bindingBadge;
     default:
       return null;
   }
@@ -461,11 +564,23 @@ export function Demo() {
         // Fee source down: refuse here rather than telling them to deposit
         // more against a number we no longer have (R3).
         if (!info && depositErrorRef.current) throw new DemoCopyError(depositErrorRef.current);
-        const utxo = info?.confirmedUtxos.find((u) => u.value >= info.estimatedCostSats);
-        if (!utxo) throw new DemoCopyError(demo.deposit.needed);
+        if (!info) throw new DemoCopyError(demo.deposit.needed);
+        // Unclassified coins are not spendable coins: an inscribed sat burned
+        // as a fee is destroyed, and we would be the ones who burned it.
+        if (info.ordinalCheck === 'unavailable') {
+          throw new DemoCopyError(demo.deposit.ordinalCheckUnavailable);
+        }
+        // Fund from the SET (R26): two smaller payments, or a top-up after a
+        // fee rise, are exactly as spendable as one fat deposit.
+        const selection = selectFundingUtxos(info.confirmedUtxos, info.estimatedCostSats);
+        if (selection.selected.length === 0) {
+          throw new DemoCopyError(
+            depositShortfallMessage(selection.totalSats, selection.shortfallSats)
+          );
+        }
         return engine.inscribe({
           funding: {
-            fundingUtxo: utxo,
+            fundingUtxos: selection.selected,
             changeAddress: bitcoin.fundingAddress,
             signingClient: bitcoin.signingClient,
           },
@@ -485,8 +600,9 @@ export function Demo() {
         fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey: string };
         changeAddress: string;
       };
+      // The faucet funds exactly one output, so this stays a one-element set.
       return engine.inscribe({
-        funding: { fundingUtxo, changeAddress, signingClient: bitcoin.signingClient },
+        funding: { fundingUtxos: [fundingUtxo], changeAddress, signingClient: bitcoin.signingClient },
       });
     });
 
@@ -786,20 +902,17 @@ export function Demo() {
                         <strong>{demo.deposit.heading}</strong>
                         <span
                           className="demo-resolved-badge"
-                          data-ok={
-                            !!deposit &&
-                            deposit.confirmedUtxos.some((u) => u.value >= deposit.estimatedCostSats)
-                              ? true
-                              : undefined
-                          }
+                          data-ok={depositReadiness(deposit) === 'ready' || undefined}
                         >
                           {depositError
                             ? depositBadge ?? demo.deposit.unavailableBadge
-                            : !deposit || (deposit.confirmedUtxos.length === 0 && deposit.unconfirmedSats === 0)
-                              ? demo.deposit.waiting
-                              : deposit.confirmedUtxos.some((u) => u.value >= deposit.estimatedCostSats)
+                            : depositReadiness(deposit) === 'unspendable'
+                              ? demo.deposit.ordinalCheckBadge
+                              : depositReadiness(deposit) === 'ready'
                                 ? demo.deposit.ready
-                                : demo.deposit.detected}
+                                : depositReadiness(deposit) === 'detected'
+                                  ? demo.deposit.detected
+                                  : demo.deposit.waiting}
                         </span>
                       </div>
                       {deposit && (
@@ -809,6 +922,13 @@ export function Demo() {
                           {demo.deposit.sendSuffix}
                         </p>
                       )}
+                      {/* R27: what the deposit is for, where the address came
+                          from, and what happens to a balance that is never
+                          spent — ABOVE the address, and in every state, so a
+                          top-up and a return visit read it too. */}
+                      {depositDisclosure().map((line) => (
+                        <p className="demo-inscribe-note" key={line}>{line}</p>
+                      ))}
                       {deposit ? (
                         <p className="demo-inscribe-note">
                           {demo.deposit.addressLabel}: <code>{bitcoin.fundingAddress}</code>
@@ -823,9 +943,9 @@ export function Demo() {
                         // this deploy cannot spend from.
                         <p className="demo-inscribe-note">{demo.deposit.addressPending}</p>
                       )}
-                      <p className="demo-inscribe-note">{demo.deposit.nonRefundable}</p>
-                      {/* R31: said before they deposit — the one moment we know they are reading. */}
-                      <p className="demo-inscribe-note">{demo.deposit.ifSomethingGoesWrong}</p>
+                      {deposit?.ordinalCheck === 'unavailable' && (
+                        <p className="demo-error" role="alert">{demo.deposit.ordinalCheckUnavailable}</p>
+                      )}
                     </div>
                   ) : gate === 'reauth' ? (
                     <div className="demo-deposit">

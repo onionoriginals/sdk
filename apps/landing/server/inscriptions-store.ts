@@ -142,8 +142,31 @@ export interface InscriptionsStore {
    * (sub, network) — a Turnkey BIP-84 path — so binding costs an honest
    * client nothing and stops the deposit route from being a general
    * UTXO-lookup proxy for arbitrary third-party addresses.
+   *
+   * Trust-on-first-use, and NOT re-derived from Turnkey: whatever address the
+   * client first presents is what gets bound. That makes the bindings file the
+   * whole of the enforcement, so an UNREADABLE one throws
+   * `BINDINGS_UNREADABLE` rather than resetting to `{}` — silently permitting
+   * a rebind is how a corrupt (or tampered) file turns into a deposit address
+   * that is not the user's.
    */
   bindDepositAddress(subOrgId: string, network: string, address: string): string;
+  /** The already-bound address for (sub, network), or null. Throws on an unreadable file. */
+  depositBinding(subOrgId: string, network: string): string | null;
+  /** The last deposit read we could trust for this user, or null. */
+  lastDepositRead(
+    subOrgId: string
+  ): { network: string; address: string; confirmedSats: number; at: string } | null;
+  /**
+   * Every bound deposit address across ALL users — the cross-user reader the
+   * balance sweep needs (the only other cross-user scan walks inscriptions).
+   * Read-only and network-free: it reports what is on disk, and the caller
+   * decides which addresses are worth an indexer read. Each row carries what
+   * the drop-out rule is decided from — the last trusted balance and whether
+   * anything is still in flight — so the sweep never has to open these files
+   * twice.
+   */
+  listBoundDeposits(): BoundDeposit[];
   /**
    * Remember a read of the deposit address we could TRUST, and clear any
    * standing alert. The confirmed balance is kept so a later outage can still
@@ -169,6 +192,19 @@ export interface InscriptionsStore {
    * still be polling when the outage started.
    */
   getDepositAlert(subOrgId: string): DepositAlert | null;
+}
+
+/** One bound deposit address, as the balance sweep sees it. */
+export interface BoundDeposit {
+  subOrgId: string;
+  network: string;
+  address: string;
+  /** Confirmed sats at the last read we could trust; null when never read. */
+  lastConfirmedSats: number | null;
+  /** When that read happened; null when never read. */
+  lastReadAt: string | null;
+  /** Anything still holding recovery artifacts — an inscription in flight. */
+  hasPendingInscription: boolean;
 }
 
 export type DepositAlertKind = 'indexer_unavailable' | 'indexer_rate_limited';
@@ -293,6 +329,35 @@ export function createInscriptionsStore(opts: {
     writeJson('inscriptions', subOrgId, recs);
   }
 
+  /**
+   * The deposit-address bindings for one user. FAIL CLOSED on an unreadable
+   * file: these bindings are the entire enforcement behind "this address
+   * belongs to this account" (nothing re-derives it from Turnkey), so reading
+   * a torn or tampered file as `{}` would silently permit a rebind — a
+   * stranger's mainnet BTC pointed at an address that is not theirs. An empty
+   * or absent file is a genuine "not bound yet"; unparseable is not.
+   */
+  function readBindings(path: string): Record<string, string> {
+    if (!existsSync(path)) return {};
+    const raw = readFileSync(path, 'utf8');
+    if (raw.trim() === '') return {};
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error('BINDINGS_UNREADABLE');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('BINDINGS_UNREADABLE');
+    }
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v !== 'string' || !v) throw new Error('BINDINGS_UNREADABLE');
+      out[k] = v;
+    }
+    return out;
+  }
+
   /** Per-user deposit bookkeeping; a torn/absent file reads as "nothing known". */
   function readDepositState(subOrgId: string): DepositState {
     const path = subFile(opts.dataDir, 'deposit-state', subOrgId);
@@ -411,20 +476,60 @@ export function createInscriptionsStore(opts: {
       return stale;
     },
     bindDepositAddress(subOrgId, network, address) {
-      const path = subFile(opts.dataDir, 'deposits', subOrgId);
-      let bindings: Record<string, string> = {};
-      if (existsSync(path)) {
-        try {
-          bindings = JSON.parse(readFileSync(path, 'utf8')) as Record<string, string>;
-        } catch {
-          bindings = {}; // a torn write costs a rebind, never an outage
-        }
-      }
+      const bindings = readBindings(subFile(opts.dataDir, 'deposits', subOrgId));
       const existing = bindings[network];
       if (existing) return existing;
       bindings[network] = address;
       writeJson('deposits', subOrgId, bindings);
       return address;
+    },
+    depositBinding(subOrgId, network) {
+      return readBindings(subFile(opts.dataDir, 'deposits', subOrgId))[network] ?? null;
+    },
+    lastDepositRead(subOrgId) {
+      return readDepositState(subOrgId).lastRead ?? null;
+    },
+    listBoundDeposits() {
+      const dir = join(opts.dataDir, 'deposits');
+      if (!existsSync(dir)) return [];
+      const out: BoundDeposit[] = [];
+      for (const file of readdirSync(dir).sort()) {
+        if (!file.endsWith('.json')) continue;
+        const subOrgId = file.slice(0, -'.json'.length);
+        let bindings: Record<string, string>;
+        try {
+          bindings = readBindings(join(dir, file));
+        } catch {
+          // An unreadable bindings file fails the USER's request closed, but
+          // must not blind the sweep to every other stranger's funds.
+          continue;
+        }
+        const state = (() => {
+          try {
+            return readDepositState(subOrgId);
+          } catch {
+            return {} as DepositState;
+          }
+        })();
+        let pending = false;
+        try {
+          pending = readAll(subOrgId).some(isPending);
+        } catch {
+          pending = false; // a torn inscriptions file must not kill the scan
+        }
+        for (const [network, address] of Object.entries(bindings)) {
+          const read = state.lastRead?.address === address ? state.lastRead : undefined;
+          out.push({
+            subOrgId,
+            network,
+            address,
+            lastConfirmedSats: read ? read.confirmedSats : null,
+            lastReadAt: read ? read.at : null,
+            hasPendingInscription: pending,
+          });
+        }
+      }
+      return out;
     },
     recordDepositRead(subOrgId, read) {
       const state = readDepositState(subOrgId);
