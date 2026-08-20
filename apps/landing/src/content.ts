@@ -713,6 +713,176 @@ export const footer = {
         { label: 'Verifiable Credentials', href: 'https://www.w3.org/TR/vc-data-model-2.0/' },
         { label: 'did:webvh method', href: 'https://identity.foundation/didwebvh/' }
       ]
+    },
+    /**
+     * R19. These two are the only in-app footer links — root-relative hrefs the
+     * Footer routes through navigate() instead of opening in a new tab. See
+     * `legal` below for the copy they lead to.
+     */
+    {
+      title: 'Legal',
+      links: [
+        { label: 'Privacy', href: '/privacy' },
+        { label: 'Terms', href: '/terms' }
+      ]
     }
   ]
+};
+
+/**
+ * R19 — the privacy and terms pages, served at '/privacy' and '/terms'.
+ *
+ * Every claim below is checked against the code it describes by
+ * `src/pages/legal.test.ts`: the cookie config, the browser storage keys, the
+ * durable server trees, and the money-event union. A category the app stores
+ * and this page omits is the failure mode these pages exist to avoid.
+ *
+ * The one thing deliberately ABSENT is a custody characterisation. "Never
+ * holds user funds or keys" is a legal conclusion about an arrangement whose
+ * status is contested and which we have not had read; publishing it would be a
+ * written representation to every visitor. `terms.sections` names the gap and
+ * describes the mechanism instead — where each key lives, who signs, and what
+ * can and cannot move a balance.
+ */
+export const legal = {
+  updatedLabel: 'Last updated',
+  updated: '19 August 2026',
+  privacy: {
+    navLabel: 'Legal',
+    heading: 'Privacy',
+    subhead:
+      'What this site collects, where it goes, and how long it stays. No analytics script, no advertising, and no third-party tracker runs on this page — everything below is something the app needs in order to work.',
+    sections: [
+      {
+        heading: 'Your email address',
+        body: [
+          'Signing in means giving an email address to Turnkey, the key-management service this site is built on. Turnkey mints the six-digit code and sends that mail; the message does not come from us.',
+          'While a code is outstanding, the server keeps your address in memory beside the pending sign-in and drops it after fifteen minutes or once the code is used. It is not written to disk.',
+          'Your address is also a claim inside the signed token in your session cookie, so it travels with each request your browser makes while you are signed in.',
+          'Nothing we publish contains it. The path your did:webvh lives under is derived from your Turnkey sub-organization id, not from your address.',
+          'We do not send you email ourselves — not for a stuck deposit, not for anything else, and there is no mailing list. Your Originals is the page a problem shows up on.'
+        ]
+      },
+      {
+        heading: 'Cookies',
+        body: [
+          'One cookie, auth_token. It holds a signed token naming your Turnkey sub-organization id and your email address. It is HttpOnly, so page scripts cannot read it; SameSite=Strict, so it is not sent on requests coming from other sites; and it expires seven days after it is issued. Signing out clears it.',
+          'That is the only cookie this site sets. There is no analytics cookie, no advertising cookie, and no third-party script here that could set one.'
+        ]
+      },
+      {
+        heading: 'Keys held in your browser',
+        body: [
+          'The Ed25519 key that signs everything you author lives in this browser’s localStorage, together with the DID log it created. Neither is ever sent to the server, and nothing on our side can reissue them: clearing site data, switching browsers, or the browser evicting storage destroys them for good.',
+          'The backup file you can download is wrapped with your passphrase inside the browser before it is written to disk. No copy of the file, and no copy of the passphrase, reaches the server.',
+          'The key authorising your Turnkey session is a non-extractable WebCrypto key in this browser’s IndexedDB — it can be asked to sign, but its private half cannot be read back out, by our code or anyone else’s. localStorage holds only the sub-organization id, the matching public key, and the expiry time.'
+        ]
+      },
+      {
+        heading: 'What the server stores',
+        body: [
+          'The Originals you publish while signed in are written to a mounted volume: the did:webvh log, the CEL event log, and the bytes of the artwork itself, indexed under your Turnkey sub-organization id. Publishing is what makes them public — they are served at the exact URLs a DID resolver fetches, so anyone holding the DID can read them.',
+          'When you inscribe, the signed commit and reveal transactions are stored before anything is broadcast. That copy is what lets the server finish an inscription for a browser tab that died between the two, and it stays on the volume afterwards — only a superseded pair that can no longer land has its signed transactions dropped. A per-account ceiling bounds how many of these records are kept, oldest spent ones first.',
+          'The deposit address your account is bound to is stored too, along with the last balance read we could trust and any unresolved problem reading it, in a file named after your sub-organization id. That is what puts a warning on Your Originals after you have closed the tab.',
+          'The anonymous demo stores nothing durable. What it publishes goes to an in-memory store with a size budget and a time limit, and it is gone by the next deploy.'
+        ]
+      },
+      {
+        heading: 'Server logs',
+        body: [
+          'Every point at which real Bitcoin moves or gets stuck writes one line to the server’s standard output, prefixed [landing][money], which the hosting platform’s log drain collects. Those lines are the only instrument we have for noticing that someone’s funds are stranded.',
+          'A line carries the event name and a timestamp, your Turnkey sub-organization id, the Bitcoin network, the deposit address, sat amounts, transaction ids, and a reason where something failed. The events are:'
+        ],
+        list: [
+          'deposit_address_issued — an address is bound to your account for the first time',
+          'deposit_seen — a confirmed balance appears at that address',
+          'deposit_shortfall — the balance changed and still does not cover the quote',
+          'deposit_read_failed — an address read, or the address binding, could not be trusted',
+          'deposit_ordinal_check_unavailable — coins could not be checked for inscriptions, so none were offered as spendable',
+          'inscribe_attempted — a signed pair passed validation and is about to broadcast',
+          'inscribe_failed — a pair was refused or failed to broadcast',
+          'inscribe_broadcast — a pair reached the network',
+          'deposit_balance_held — the hourly sweep found a bound address still holding confirmed sats',
+          'deposit_balance_sweep — the roll-up of that sweep, including how many addresses hold a balance'
+        ],
+        footer: [
+          'You are identified by your Turnkey sub-organization id, never by your email address. The formatter enforces that rather than trusting the code calling it: a field named like an email, or any value shaped like an email address, is replaced with [redacted] before the line is written.',
+          'Retention is the hosting platform’s rather than ours. The lines sit in its log drain for as long as it keeps them; we set no separate window and copy them nowhere else.',
+          'Separately, requests are rate-limited against a client identity derived from your network address. Those counters live in memory, are bounded in size, are never written to disk, and are lost on every restart.'
+        ]
+      },
+      {
+        heading: 'Who else sees anything',
+        body: [
+          'Turnkey, which holds your account and mails your sign-in code, and which your browser talks to directly when it opens a signing session.',
+          'A Bitcoin index (mempool.space unless configured otherwise) and a QuickNode Bitcoin endpoint, which the server queries to read your deposit address and to broadcast your transactions. Those requests leave the server carrying a Bitcoin address, never your email address.',
+          'The hosting platform, which runs the server and collects its logs.',
+          'Nobody else. Nothing here is sold, and there is no analytics or advertising vendor to share it with.'
+        ]
+      },
+      {
+        heading: 'Asking about your data',
+        body: [
+          'There is no self-serve delete. An Original you have published is meant to be fetched by strangers, and one you have inscribed is on Bitcoin, where nothing can remove it. What we can do is stop serving our copies and delete the account files described above — a manual step on our side rather than a button.',
+          'The project’s GitHub repository is where to reach us. It is a public issue tracker, so keep anything private out of the issue itself.'
+        ]
+      }
+    ]
+  },
+  terms: {
+    navLabel: 'Legal',
+    heading: 'Terms',
+    subhead:
+      'What this site does, what it cannot do, and what happens to Bitcoin you send it.',
+    sections: [
+      {
+        heading: 'What this is',
+        body: [
+          'Originals is a demonstration of the Originals protocol, and also the protocol’s first real user-facing surface. You create an Original, publish it as a did:webvh anyone can resolve, and — signed in — inscribe it on Bitcoin mainnet with your own coins.',
+          'The SDK underneath is open source under the MIT licence. The hosted site is run as-is, by one person, with no uptime guarantee and no support commitment. It may change, and it may stop.'
+        ]
+      },
+      {
+        heading: 'Your account and your keys',
+        body: [
+          'You need an email address you can receive mail at; the code Turnkey sends to it is the whole of signing in.',
+          'The key that signs your work is generated in your browser and stays there. If you lose it we cannot reissue it and cannot re-sign anything as you. Download the backup before you rely on anything you have made here.'
+        ]
+      },
+      {
+        heading: 'What you publish is public, and an inscription is permanent',
+        body: [
+          'Publishing an Original serves its log, its event history and its bytes at public URLs, because being fetchable by a stranger is the point of a did:webvh. Do not publish anything you would need to take back.',
+          'Inscribing writes those bytes onto a satoshi on Bitcoin. We can stop serving our copy; nobody can remove the inscription.',
+          'Publish work you hold the rights to, and not content it would be unlawful to distribute. When we learn otherwise we will take our copy down and stop serving the account, and that is the only remedy that exists on our side.'
+        ]
+      },
+      {
+        heading: 'Bitcoin: who signs, and what can move',
+        body: [
+          'The address you deposit to is derived in your browser from your Turnkey wallet. Your account is bound to the first address your browser presents, and the server does not re-derive or re-check it afterwards.',
+          'Your browser signs both transactions of an inscription with that wallet’s key, through your Turnkey session. The server never receives a private key.',
+          'The signed pair is stored on the server before it is broadcast, so a tab closing mid-flow cannot strand the coins the first transaction already committed. The server rebroadcasts the second transaction to finish the inscription.',
+          'Bitcoin transactions cannot be reversed. Once a pair is broadcast the network fee is spent, and nobody — us included — can undo or refund one.',
+          'There is no withdraw and no refund path on this site. Bitcoin you send that is never spent on an inscription stays sitting at that address, and the only way to move it is to inscribe again here, for as long as this service and its Turnkey organization are running. Send the amount the deposit screen quotes rather than a round number you would want back.',
+          'That quote is an estimate with a buffer on it. The change, and the satoshi carrying the inscription, come back to the same address.',
+          'We can switch the Bitcoin path off — for an outage, a misconfiguration, or an inscription we cannot clear. While it is off, a confirmed deposit stays exactly where it is and cannot be spent through this site.'
+        ]
+      },
+      {
+        heading: 'What this page does not say',
+        body: [
+          'You will not find a statement here about the custody status of the arrangement above. That is a legal characterisation; we have not obtained one, and publishing a guess would be a written representation to everyone who reads it.',
+          'What is written above is the mechanism instead: where each key lives, who signs, what the server holds and when, and what can and cannot move a balance. If you need the legal characterisation before you send Bitcoin, do not send it yet.'
+        ]
+      },
+      {
+        heading: 'Status of this page',
+        body: [
+          'These pages describe how the software actually works, checked against the code they describe. They have not been through a legal review and they are not legal advice. Where a question needs a lawyer rather than an engineer, this page names the gap instead of filling it.',
+          'This page changes as the site does, and the site’s history is public in the project’s repository.'
+        ]
+      }
+    ]
+  }
 };

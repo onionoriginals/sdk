@@ -10,6 +10,7 @@ import { Footer } from './components/Footer';
 import { useLocationPath, routeForPath, didFromPath } from './router';
 import { YourOriginals } from './pages/YourOriginals';
 import { OriginalDetail } from './pages/OriginalDetail';
+import { LegalPage, legalRouteDoc } from './pages/Legal';
 import { smokeAutoRunAllowed } from './sdk/network-flag';
 
 export function App() {
@@ -22,10 +23,13 @@ export function App() {
 function RoutedApp() {
   const path = useLocationPath();
   const route = routeForPath(path);
+  const legalDoc = legalRouteDoc(route);
   return (
     <>
       <Nav />
-      {route === 'original-detail' ? (
+      {legalDoc ? (
+        <LegalPage doc={legalDoc} />
+      ) : route === 'original-detail' ? (
         <OriginalDetail did={didFromPath(path)!} />
       ) : route === 'your-originals' ? (
         <YourOriginals />

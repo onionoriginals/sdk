@@ -19,6 +19,16 @@ describe('routeForPath', () => {
   test('unknown path → landing (SPA fallback)', () => {
     expect(routeForPath('/anything/else')).toBe('landing');
   });
+  // R19. Exact paths only — the SPA fallback still owns every near miss, and
+  // there is no not-found state for one to land in.
+  test('/privacy and /terms → their own routes', () => {
+    expect(routeForPath('/privacy')).toBe('privacy');
+    expect(routeForPath('/terms')).toBe('terms');
+  });
+  test('a near-miss legal path → landing', () => {
+    expect(routeForPath('/privacy/')).toBe('landing');
+    expect(routeForPath('/terms/of-service')).toBe('landing');
+  });
 });
 
 describe('originalPath / didFromPath', () => {

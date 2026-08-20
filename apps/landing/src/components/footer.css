@@ -34,6 +34,13 @@
   gap: var(--sp-10);
 }
 
+/* Three columns once there is room; below it the third wraps under the pair. */
+@media (min-width: 760px) {
+  .footer-columns {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+}
+
 .footer-column h4 {
   font-size: var(--text-sm);
   font-weight: 590;
