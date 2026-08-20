@@ -85,7 +85,64 @@ export const identityPanel = {
   copy: 'Copy',
   copied: 'Copied',
   copyAria: 'Copy DID',
-  copiedAria: 'DID copied'
+  copiedAria: 'DID copied',
+  /**
+   * U10 / R17 — shown BEFORE the key exists. Creating used to be one click, so
+   * any warning beside the finished state arrived after the irreversible step.
+   * `warning.reminder` is the same fact restated for a returning user.
+   */
+  warning: {
+    title: 'First, the part nobody can undo for you',
+    body:
+      'Creating your DID generates a signing key that only this browser will hold. It signs everything you make with Originals, and we never get a copy — so if this browser’s storage is cleared, or you move to another browser or device, the key is gone and no one can reissue it.',
+    remedy:
+      'Save an encrypted backup as soon as it exists. That file, plus the passphrase you pick for it, is what carries your work to another browser.',
+    acknowledge: 'I understand this key will exist only in this browser',
+    confirm: 'Create my DID',
+    cancel: 'Go back',
+    reminder:
+      'Your signing key is still only in this browser. Clearing site data, moving to another browser, or a browser evicting storage all take it with them — and it cannot be reissued.',
+    notAcknowledged: 'Confirm you understand before your key is created.'
+  },
+  /** U10 / R18 — the export half. Passphrase-wrapped; nothing is uploaded. */
+  backup: {
+    open: 'Save a backup',
+    title: 'Save an encrypted backup',
+    body:
+      'Wraps your signing key and your DID into one file, encrypted with a passphrase you choose. Keep both — the file is useless without the passphrase, and no one can reset it for you.',
+    passphraseLabel: 'Backup passphrase',
+    passphrasePlaceholder: 'At least 10 characters',
+    confirmLabel: 'Repeat passphrase',
+    action: 'Download backup',
+    working: 'Encrypting…',
+    done: 'Backup downloaded. Store it somewhere you will still have next year.',
+    mismatch: 'The two passphrases don’t match.',
+    weak: 'Use a passphrase of at least 10 characters.',
+    failed: 'Couldn’t create the backup — try again.',
+    cancel: 'Cancel'
+  },
+  /** U10 / R18 — the import half, including the replace warning. */
+  restore: {
+    open: 'Restore from a backup',
+    title: 'Restore from a backup',
+    body:
+      'Choose the backup file you saved and enter its passphrase. It is unwrapped here in your browser and never sent anywhere.',
+    fileLabel: 'Backup file',
+    passphraseLabel: 'Backup passphrase',
+    action: 'Restore',
+    working: 'Restoring…',
+    done: 'Restored. This browser can sign as you again.',
+    replaceTitle: 'This browser already holds a different key',
+    replaceBody:
+      'Restoring replaces it. Anything signed by the key that is here now can no longer be added to from this browser unless you also kept a backup of that one.',
+    replaceAcknowledge: 'I understand the key in this browser will be replaced',
+    replaceBlocked: 'Confirm the replacement before restoring.',
+    noFile: 'Choose your backup file first.',
+    wrongPassphrase: 'That passphrase doesn’t match this file.',
+    malformed: 'That file isn’t an Originals backup.',
+    failed: 'Couldn’t restore that backup — try again.',
+    cancel: 'Cancel'
+  }
 };
 
 export const hero = {

@@ -14,11 +14,16 @@
 import * as ed from '@noble/ed25519';
 import { OriginalsSDK, encoding } from '@originals/sdk';
 import type { ExternalSigner, ExternalVerifier } from '@originals/sdk';
+import {
+  AuthorshipKeyError,
+  KEY_STORAGE_PREFIX,
+  DID_LOG_STORAGE_PREFIX,
+  didFromLog,
+  hasAcknowledgedKeyLoss,
+} from './authorship-key';
 
 // Multicodec prefix for Ed25519 public keys (0xed 0x01), per the Multikey spec.
 const ED25519_MULTICODEC = new Uint8Array([0xed, 0x01]);
-const KEY_STORAGE_PREFIX = 'originals-webvh-ed25519';
-const DID_LOG_STORAGE_PREFIX = 'originals-webvh-did-log';
 
 // did:webvh domain. These DIDs are created + displayed, not hosted/resolved, so
 // the domain is cosmetic here; default to the dev network.
@@ -112,17 +117,30 @@ export async function buildUserWebVHDid(
   return { did: result.did, didDocument: result.doc, didLog: result.log };
 }
 
-/** Get or create the per-sub-org browser Ed25519 key (persisted in localStorage). */
+/**
+ * Get or create the per-sub-org browser Ed25519 key (persisted in localStorage).
+ *
+ * U10 / R17: minting a NEW key is gated on the loss warning being acknowledged
+ * first. The gate lives here rather than in the panel because this is the line
+ * the irreversible step is actually on — one click used to cross it.
+ */
 async function getOrCreateBrowserKeyPair(
+  storage: Storage,
   subOrgId: string
 ): Promise<{ privateKey: Uint8Array; publicKeyMultibase: string }> {
   const storageKey = `${KEY_STORAGE_PREFIX}:${subOrgId}`;
-  const existing = localStorage.getItem(storageKey);
+  const existing = storage.getItem(storageKey);
+  if (!existing && !hasAcknowledgedKeyLoss(storage, subOrgId)) {
+    throw new AuthorshipKeyError(
+      'not-acknowledged',
+      'Acknowledge the browser-only key warning before creating an authorship key'
+    );
+  }
   // 32 random bytes = an Ed25519 seed. Use WebCrypto rather than
   // ed.utils.randomPrivateKey (renamed randomSecretKey in @noble/ed25519 v3),
   // so this works whichever noble version the bundle resolves.
   const privateKey = existing ? hexToBytes(existing) : crypto.getRandomValues(new Uint8Array(32));
-  if (!existing) localStorage.setItem(storageKey, bytesToHex(privateKey));
+  if (!existing) storage.setItem(storageKey, bytesToHex(privateKey));
   const publicKey = await ed.getPublicKeyAsync(privateKey);
   return { privateKey, publicKeyMultibase: ed25519PublicKeyMultibase(publicKey) };
 }
@@ -142,21 +160,48 @@ export function userWebvhSlug(subOrgId: string): string {
 }
 
 /**
- * Create (or re-create, deterministically from the persisted key) the user's
- * did:webvh in the browser. The sub-org id supplies a stable, PII-free slug.
+ * Create the user's did:webvh in the browser, or return the one this browser
+ * already holds. The sub-org id supplies a stable, PII-free slug.
+ *
+ * The persisted log is the source of the DID, not the seed: the first entry's
+ * `versionTime` feeds the SCID, so re-deriving from the seed alone produces a
+ * DIFFERENT DID than the user's Originals were authored under. Reading the log
+ * back is what makes the DID stable across reloads — and what makes a restored
+ * backup land on the same DID (U10 / R18).
  */
 export async function createUserWebVHDid(params: {
   subOrgId: string;
   email: string;
   domain?: string;
+  /** Defaults to this browser's localStorage; injectable so the gate is testable. */
+  storage?: Storage;
 }): Promise<WebVHDidResult> {
-  const { privateKey, publicKeyMultibase } = await getOrCreateBrowserKeyPair(params.subOrgId);
+  const storage = params.storage ?? localStorage;
+  const logStorageKey = `${DID_LOG_STORAGE_PREFIX}:${params.subOrgId}`;
+  const persisted = readPersistedDid(storage, logStorageKey);
+  if (persisted) return persisted;
+
+  const { privateKey, publicKeyMultibase } = await getOrCreateBrowserKeyPair(storage, params.subOrgId);
   const signer = new BrowserWebVHSigner(privateKey, publicKeyMultibase);
   const slug = userWebvhSlug(params.subOrgId);
   const result = await buildUserWebVHDid(signer, {
     domain: params.domain ?? DEFAULT_WEBVH_DOMAIN,
     slug,
   });
-  localStorage.setItem(`${DID_LOG_STORAGE_PREFIX}:${params.subOrgId}`, JSON.stringify(result.didLog));
+  storage.setItem(logStorageKey, JSON.stringify(result.didLog));
   return result;
+}
+
+/** The DID this browser already holds, from its stored log. Null if unusable. */
+function readPersistedDid(storage: Storage, logStorageKey: string): WebVHDidResult | null {
+  const raw = storage.getItem(logStorageKey);
+  if (!raw) return null;
+  try {
+    const didLog = JSON.parse(raw) as Array<{ state?: unknown }>;
+    const did = didFromLog(didLog);
+    if (!did) return null;
+    return { did, didDocument: didLog[didLog.length - 1]?.state, didLog };
+  } catch {
+    return null;
+  }
 }
