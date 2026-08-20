@@ -16,8 +16,9 @@ import {
   type TurnkeySessionApi,
 } from './turnkey-session';
 import type { SessionKeyHandle } from './turnkey-browser-client';
+import { browserKeyStorage } from './browser-storage';
+import { endSigningSession, signOutIntent } from './sign-out';
 import { btcNetwork } from '../sdk/network-flag';
-import { demo } from '../content';
 
 export interface BitcoinSession {
   fundingAddress: string;
@@ -45,7 +46,7 @@ interface AuthContextValue {
   /** Whether this browser can sign right now. Checked BEFORE funds are asked for. */
   signing: SigningStatus;
   reauth: ReauthState;
-  /** Set when sign-out erased the key locally but could not revoke it at Turnkey. */
+  /** Set when sign-out could not revoke the key at Turnkey — or could not erase it here. */
   signOutNotice: string | null;
   startOtp: (email: string) => Promise<void>;
   verify: (code: string) => Promise<void>;
@@ -57,15 +58,6 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-/** localStorage, or a no-op when the browser denies it (private mode, etc.). */
-function browserStorage(): Storage | null {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
-  } catch {
-    return null;
-  }
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -83,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * sign, with no way back because the verification token is single-use.
    */
   const restoreSigning = useCallback(async (restored: AuthUser) => {
-    const storage = browserStorage();
+    const storage = browserKeyStorage();
     const meta = storage ? readSessionMeta(storage, restored.subOrgId) : null;
     const network = btcNetwork();
     if (!meta || network === 'off') {
@@ -123,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // screen is open flips the UI instead of waiting for a click to fail.
   useEffect(() => {
     if (signing !== 'active') return;
-    const storage = browserStorage();
+    const storage = browserKeyStorage();
     const subOrgId = user?.subOrgId;
     if (!storage || !subOrgId) return;
     const t = setInterval(() => {
@@ -181,7 +173,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         verificationToken: result.verificationToken,
         signer: bound.signer,
       });
-      const storage = browserStorage();
+      const storage = browserKeyStorage();
       if (storage) writeSessionMeta(storage, meta);
       const fundingAddress = await ensureBitcoinFundingAccount(signingClient, result.subOrgId, network);
       setBitcoin({ fundingAddress, signingClient });
@@ -211,34 +203,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) throw new Error('Sign in before creating an identity');
     // Signed in the browser with a real Ed25519 key (see auth/webvh.ts): the
     // parent Turnkey key can't sign for the credential-less sub-org.
-    const { did } = await createUserWebVHDid({ subOrgId: user.subOrgId, email: user.email });
+    // The same null-safe guard every other key-material call site uses: a
+    // browser that denies storage refuses by name instead of throwing raw.
+    const { did } = await createUserWebVHDid({
+      subOrgId: user.subOrgId,
+      email: user.email,
+      storage: browserKeyStorage(),
+    });
     return did;
   }, [user]);
 
   const signOut = useCallback(async () => {
-    const storage = browserStorage();
-    const meta = storage && user ? readSessionMeta(storage, user.subOrgId) : null;
-    let notice: string | null = null;
-    if (meta) {
-      const { openSessionKey, asRevocationApi } = await import('./turnkey-browser-client');
-      let handle: SessionKeyHandle | null = null;
-      try {
-        handle = await openSessionKey(meta.subOrgId);
-        if ((await revokeSessionKey(asRevocationApi(handle.client), meta)) === 'revoke-failed') {
-          notice = demo.session.revokeFailed;
-        }
-      } catch {
-        notice = demo.session.revokeFailed;
-      } finally {
-        // A failed revocation still erases locally — never leave a live mainnet
-        // signing key behind on a shared browser while the UI says signed out.
-        try {
-          await (handle ?? (await openSessionKey(meta.subOrgId))).clear();
-        } catch {
-          notice = demo.session.revokeFailed;
-        }
-      }
+    // A refresh in flight is not a sign-out: abandon the refresh and stop.
+    // The creator may have BTC at a deposit address for the in-flight Original,
+    // and signing out here would reset the demo out from under it (FR1).
+    if (signOutIntent(reauth.active) === 'cancel-reauth') {
+      cancelReauth();
+      return;
     }
+    const storage = browserKeyStorage();
+    const meta = storage && user ? readSessionMeta(storage, user.subOrgId) : null;
+    // Unconditional erase, whatever we could read — see endSigningSession.
+    // The chunk import goes INSIDE the injected opener so a failure to load it
+    // lands in that function's own catch (a named notice) instead of throwing
+    // out of signOut and leaving the user signed in.
+    const notice = await endSigningSession({
+      meta,
+      fallbackSubOrgId: user?.subOrgId ?? null,
+      openSessionKey: async (subOrgId) =>
+        (await import('./turnkey-browser-client')).openSessionKey(subOrgId),
+      revokeSessionKey,
+    });
     if (storage) clearSessionMeta(storage);
     await api.logout();
     setUser(null);
@@ -246,7 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSigning('none');
     setReauth({ active: false, fromSubOrgId: null });
     setSignOutNotice(notice);
-  }, [user]);
+  }, [user, reauth.active, cancelReauth]);
 
   return (
     <AuthContext.Provider

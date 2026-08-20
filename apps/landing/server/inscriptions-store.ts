@@ -87,6 +87,14 @@ export interface InscriptionRecord {
   rebroadcastAt?: string;
 }
 
+/** A deposit read the server was able to trust, as persisted. */
+export interface TrustedDepositRead {
+  network: string;
+  address: string;
+  confirmedSats: number;
+  at: string;
+}
+
 export interface InscriptionsStore {
   /** Insert a new record (no-op if the same commitTxId already exists). */
   create(subOrgId: string, rec: InscriptionRecord): void;
@@ -130,12 +138,20 @@ export interface InscriptionsStore {
    * silently accumulate. Read-only; acting on them stays with the per-user
    * rebroadcast route.
    */
-  sweepStale(olderThanMs: number): Array<{
-    subOrgId: string;
-    commitTxId: string;
-    status: InscriptionStatus;
-    createdAt: string;
-  }>;
+  sweepStale(olderThanMs: number): {
+    stale: Array<{
+      subOrgId: string;
+      commitTxId: string;
+      status: InscriptionStatus;
+      createdAt: string;
+    }>;
+    /**
+     * Subs whose file could not be parsed. Reported, never swallowed: that
+     * file holds the ONLY copy of a signed reveal, so it is a strictly LOUDER
+     * event than a stale record — not a quieter one.
+     */
+    unreadable: string[];
+  };
   /**
    * Bind this user to ONE deposit address per network (first use wins) and
    * return the bound address. The funding address is deterministic per
@@ -150,13 +166,19 @@ export interface InscriptionsStore {
    * a rebind is how a corrupt (or tampered) file turns into a deposit address
    * that is not the user's.
    */
-  bindDepositAddress(subOrgId: string, network: string, address: string): string;
+  /**
+   * Bind on first use and report whether this call is what bound it, so a
+   * caller wanting both facts pays one file read rather than two.
+   */
+  bindDepositAddress(
+    subOrgId: string,
+    network: string,
+    address: string
+  ): { address: string; isNew: boolean };
   /** The already-bound address for (sub, network), or null. Throws on an unreadable file. */
   depositBinding(subOrgId: string, network: string): string | null;
   /** The last deposit read we could trust for this user, or null. */
-  lastDepositRead(
-    subOrgId: string
-  ): { network: string; address: string; confirmedSats: number; at: string } | null;
+  lastDepositRead(subOrgId: string): TrustedDepositRead | null;
   /**
    * Every bound deposit address across ALL users — the cross-user reader the
    * balance sweep needs (the only other cross-user scan walks inscriptions).
@@ -165,18 +187,27 @@ export interface InscriptionsStore {
    * the drop-out rule is decided from — the last trusted balance and whether
    * anything is still in flight — so the sweep never has to open these files
    * twice.
+   *
+   * `unreadable` names the subs whose files could not be parsed. Skipping them
+   * keeps the scan alive for everyone else; REPORTING them is what stops a
+   * corrupt file from silently removing one user's deposit address from the
+   * only cross-user scan there is, permanently and with nothing said.
    */
-  listBoundDeposits(): BoundDeposit[];
+  listBoundDeposits(): { deposits: BoundDeposit[]; unreadable: string[] };
   /**
    * Remember a read of the deposit address we could TRUST, and clear any
    * standing alert. The confirmed balance is kept so a later outage can still
    * tell the creator what they hold — the number they need to hear is the one
    * from before the indexer went away.
    */
+  /**
+   * Record a trusted read and return the PREVIOUS one, so a caller wanting both
+   * pays a single file read on the poll path.
+   */
   recordDepositRead(
     subOrgId: string,
     read: { network: string; address: string; confirmedSats: number }
-  ): void;
+  ): TrustedDepositRead | null;
   /**
    * Record that the read behind this user's deposit address could not be
    * trusted (R28). Idempotent per outage: `firstSeenAt` survives repeated
@@ -275,10 +306,26 @@ export function createInscriptionsStore(opts: {
   const maxPending = opts.maxPending ?? 25;
   const now = opts.now ?? (() => Date.now());
 
+  /**
+   * FAIL CLOSED on a torn file, exactly as the bindings read does. Returning
+   * `[]` would silently discard a recovery artifact AND free a still-claimed
+   * outpoint for a new pair to spend, so an unparseable file throws a NAMED
+   * error the routes can turn into a 503 with a money-log line. An absent or
+   * empty file is a genuine "no records"; unparseable is not.
+   */
   function readAll(subOrgId: string): InscriptionRecord[] {
     const path = subFile(opts.dataDir, 'inscriptions', subOrgId);
     if (!existsSync(path)) return [];
-    return (JSON.parse(readFileSync(path, 'utf8')) as InscriptionRecord[]).map(normalize);
+    const raw = readFileSync(path, 'utf8');
+    if (raw.trim() === '') return [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error('RECORDS_UNREADABLE');
+    }
+    if (!Array.isArray(parsed)) throw new Error('RECORDS_UNREADABLE');
+    return (parsed as InscriptionRecord[]).map(normalize);
   }
 
   // Atomic AND durable write (write → fsync → rename → fsync dir): this file
@@ -451,7 +498,8 @@ export function createInscriptionsStore(opts: {
     },
     sweepStale(olderThanMs) {
       const dir = join(opts.dataDir, 'inscriptions');
-      if (!existsSync(dir)) return [];
+      const unreadable: string[] = [];
+      if (!existsSync(dir)) return { stale: [], unreadable };
       const cutoff = now() - olderThanMs;
       const stale: Array<{ subOrgId: string; commitTxId: string; status: InscriptionStatus; createdAt: string }> = [];
       for (const file of readdirSync(dir)) {
@@ -459,9 +507,14 @@ export function createInscriptionsStore(opts: {
         const subOrgId = file.slice(0, -'.json'.length);
         let recs: InscriptionRecord[];
         try {
-          recs = JSON.parse(readFileSync(join(dir, file), 'utf8')) as InscriptionRecord[];
+          const parsed = JSON.parse(readFileSync(join(dir, file), 'utf8')) as unknown;
+          if (!Array.isArray(parsed)) throw new Error('RECORDS_UNREADABLE');
+          recs = parsed as InscriptionRecord[];
         } catch {
-          continue; // a torn write must not kill the sweep
+          // A torn write must not kill the sweep — but it must not drop this
+          // user in silence either: their file is where a signed reveal lives.
+          unreadable.push(subOrgId);
+          continue;
         }
         for (const r of recs) {
           // Anything still holding hex is un-landed money: a never-broadcast
@@ -473,15 +526,18 @@ export function createInscriptionsStore(opts: {
           stale.push({ subOrgId, commitTxId: r.commitTxId, status: r.status, createdAt: r.createdAt });
         }
       }
-      return stale;
+      return { stale, unreadable };
     },
     bindDepositAddress(subOrgId, network, address) {
+      // Returns `isNew` so the caller can log a first issuance without a second
+      // readBindings of the same file -- this runs on every deposit poll tick,
+      // and readFileSync blocks the whole event loop on a single-instance server.
       const bindings = readBindings(subFile(opts.dataDir, 'deposits', subOrgId));
       const existing = bindings[network];
-      if (existing) return existing;
+      if (existing) return { address: existing, isNew: false };
       bindings[network] = address;
       writeJson('deposits', subOrgId, bindings);
-      return address;
+      return { address, isNew: true };
     },
     depositBinding(subOrgId, network) {
       return readBindings(subFile(opts.dataDir, 'deposits', subOrgId))[network] ?? null;
@@ -491,7 +547,8 @@ export function createInscriptionsStore(opts: {
     },
     listBoundDeposits() {
       const dir = join(opts.dataDir, 'deposits');
-      if (!existsSync(dir)) return [];
+      const unreadable: string[] = [];
+      if (!existsSync(dir)) return { deposits: [], unreadable };
       const out: BoundDeposit[] = [];
       for (const file of readdirSync(dir).sort()) {
         if (!file.endsWith('.json')) continue;
@@ -500,8 +557,11 @@ export function createInscriptionsStore(opts: {
         try {
           bindings = readBindings(join(dir, file));
         } catch {
-          // An unreadable bindings file fails the USER's request closed, but
-          // must not blind the sweep to every other stranger's funds.
+          // An unreadable bindings file fails the USER's request closed, and
+          // must not blind the sweep to every other stranger's funds — but the
+          // caller is told WHO was dropped, because this user has just left
+          // the only scan that would ever see their money.
+          unreadable.push(subOrgId);
           continue;
         }
         const state = (() => {
@@ -515,7 +575,11 @@ export function createInscriptionsStore(opts: {
         try {
           pending = readAll(subOrgId).some(isPending);
         } catch {
-          pending = false; // a torn inscriptions file must not kill the scan
+          // A torn inscriptions file must not kill the scan. Assume something
+          // IS in flight: that keeps the address in scope (the fail-safe
+          // direction) and the sub is reported alongside it.
+          pending = true;
+          unreadable.push(subOrgId);
         }
         for (const [network, address] of Object.entries(bindings)) {
           const read = state.lastRead?.address === address ? state.lastRead : undefined;
@@ -529,10 +593,14 @@ export function createInscriptionsStore(opts: {
           });
         }
       }
-      return out;
+      return { deposits: out, unreadable };
     },
     recordDepositRead(subOrgId, read) {
+      // Returns the PREVIOUS trusted read so a caller needing both facts pays
+      // one file read, not two. This is the 15s-poll path on a single-instance
+      // server, where readFileSync blocks the event loop for everyone.
       const state = readDepositState(subOrgId);
+      const previous = state.lastRead ?? null;
       // A trusted read ENDS the outage — the alert is dropped, not merged.
       // Skip the write when nothing changed: this is the 15s-poll path, and
       // an fsync per poll per creator is real cost for no information.
@@ -544,11 +612,12 @@ export function createInscriptionsStore(opts: {
         last.address === read.address &&
         last.network === read.network
       ) {
-        return;
+        return previous;
       }
       writeJson('deposit-state', subOrgId, {
         lastRead: { ...read, at: new Date(now()).toISOString() },
       } satisfies DepositState);
+      return previous;
     },
     recordDepositAlert(subOrgId, alert) {
       const state = readDepositState(subOrgId);

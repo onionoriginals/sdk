@@ -158,6 +158,31 @@ describe('validateConfig — deployed environment', () => {
     expect(validateConfig({ env: { ...GOOD, TRUSTED_PROXY_HOPS: '0' }, dataDir: mounted })).toEqual([]);
   });
 
+  /**
+   * R1 — `Number('fifty')` is NaN, and NaN is not nullish, so a `?? default`
+   * at the call site never fires. The sweep cap then silently disables the
+   * only instrument that ever sees stranded funds. The call sites now guard
+   * the parse; boot says so by name rather than leaving a value that reads
+   * fine in the dashboard and does nothing.
+   */
+  test('a set-but-malformed numeric value is reported by name', () => {
+    for (const key of ['DEPOSIT_SWEEP_MAX_PER_PASS', 'BTC_FAUCET_SATS', 'PORT']) {
+      expect(
+        keys(errors(validateConfig({ env: { ...GOOD, [key]: 'fifty' }, dataDir: mounted })))
+      ).toEqual([key]);
+      // Zero and negatives are equally unusable as a count/port/amount.
+      expect(
+        keys(errors(validateConfig({ env: { ...GOOD, [key]: '0' }, dataDir: mounted })))
+      ).toEqual([key]);
+      expect(
+        keys(errors(validateConfig({ env: { ...GOOD, [key]: '-3' }, dataDir: mounted })))
+      ).toEqual([key]);
+      // A good value, and an ABSENT one (the default fires), are both clean.
+      expect(validateConfig({ env: { ...GOOD, [key]: '50' }, dataDir: mounted })).toEqual([]);
+    }
+    expect(validateConfig({ env: GOOD, dataDir: mounted })).toEqual([]);
+  });
+
   test('NODE_ENV must be production on a deployed instance', () => {
     const issues = errors(
       validateConfig({ env: { ...without(GOOD, 'NODE_ENV') }, dataDir: mounted })

@@ -25,7 +25,7 @@ export function createAuthRoutes(deps: {
   // bypassable by rotating it. Sending an OTP costs email reputation, so 5/min
   // per client stands; the per-email bucket is what bounds one address being
   // mailed from many clients.
-  const ipLimiter = createRateLimiter({ limit: 5, windowMs: 60_000 });
+  const clientLimiter = createRateLimiter({ limit: 5, windowMs: 60_000 });
   const emailLimiter = createRateLimiter({ limit: 5, windowMs: 60_000 });
   // Hardening, not a hole: five failed codes destroy the pending session and
   // minting one goes through the limiter above. 10/min leaves room for a
@@ -37,10 +37,10 @@ export function createAuthRoutes(deps: {
     if (!email || !EMAIL_RE.test(email)) return json({ message: 'Invalid email format' }, 400);
 
     const normalized = email.trim().toLowerCase();
-    const ip = ipLimiter.check(clientIp ?? 'local');
+    const rl = clientLimiter.check(clientIp ?? 'local');
     const em = emailLimiter.check(normalized);
-    if (!ip.allowed || !em.allowed) {
-      const retryAfterMs = Math.max(ip.retryAfterMs, em.retryAfterMs);
+    if (!rl.allowed || !em.allowed) {
+      const retryAfterMs = Math.max(rl.retryAfterMs, em.retryAfterMs);
       return json({ message: 'Too many requests. Please try again later.' }, 429, {
         'Retry-After': String(Math.ceil(retryAfterMs / 1000)),
       });
@@ -75,7 +75,12 @@ export function createAuthRoutes(deps: {
         return json({ message: 'Verification failed' }, 400);
       }
       const token = signToken(result.subOrgId, result.email, undefined, { secret: deps.jwtSecret });
-      const cookie = serializeCookie(getAuthCookieConfig(token));
+      // `secure` is stated, not inferred (SEC-1). getAuthCookieConfig otherwise
+      // derives it from NODE_ENV === 'production', and the platform this
+      // deploys to does not set NODE_ENV — which silently drops Secure from the
+      // 7-day JWT that gates every money route. This site is HTTPS-only
+      // regardless of what an env var says, so it says so here.
+      const cookie = serializeCookie(getAuthCookieConfig(token, { secure: true }));
       // Surface the Turnkey verificationToken + the P-256 pubkey it is bound to
       // so the browser can run OTP_LOGIN and install its own session credential
       // (Track B, testnet4 signing). The token is client-bound — useless without
@@ -110,7 +115,9 @@ export function createAuthRoutes(deps: {
   };
 
   const logout: Handler = async () => {
-    const cookie = serializeCookie(getClearAuthCookieConfig());
+    // Matches the set above: a clear that drops Secure would be sent over a
+    // channel the original cookie never used.
+    const cookie = serializeCookie(getClearAuthCookieConfig(undefined, { secure: true }));
     return json({ success: true }, 200, { 'Set-Cookie': cookie });
   };
 

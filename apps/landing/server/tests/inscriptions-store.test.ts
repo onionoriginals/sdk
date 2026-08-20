@@ -56,7 +56,7 @@ describe('inscriptions-store', () => {
     store.create('sub-2', rec({ commitTxId: '3'.repeat(64), status: 'commit_broadcast', createdAt: old }));
     store.create('sub-2', rec({ commitTxId: '4'.repeat(64), status: 'signed', createdAt: fresh, fundingOutpoints: ['b:2'] }));
 
-    const stale = store.sweepStale(24 * 60 * 60_000);
+    const { stale } = store.sweepStale(24 * 60 * 60_000);
     const keys = stale.map((s) => `${s.subOrgId}:${s.commitTxId[0]}`).sort();
     // Includes the old reveal_broadcast record (2): a reveal that went out and
     // never confirmed is stranded money too — it may have been evicted from
@@ -64,7 +64,44 @@ describe('inscriptions-store', () => {
     expect(keys).toEqual(['sub-1:1', 'sub-1:2', 'sub-2:3']);
     // …but not the fresh one, and not anything already retired.
     store.setStatus('sub-1', '2'.repeat(64), 'confirmed');
-    expect(store.sweepStale(24 * 60 * 60_000).map((s) => s.commitTxId[0]).sort()).toEqual(['1', '3']);
+    expect(store.sweepStale(24 * 60 * 60_000).stale.map((s) => s.commitTxId[0]).sort()).toEqual(['1', '3']);
+  });
+
+  /**
+   * R2 — an unreadable inscriptions file holds the only copy of a signed
+   * reveal. Keeping the sweep alive is right; dropping that user in silence is
+   * not. An unparseable file is a LOUDER event than a stale record.
+   */
+  test('sweepStale reports the subs it could not read instead of silently skipping them', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'is-'));
+    const store = createInscriptionsStore({ dataDir });
+    store.create('sub-ok', rec({ createdAt: '2020-01-01T00:00:00.000Z' }));
+    mkdirSync(join(dataDir, 'inscriptions'), { recursive: true });
+    writeFileSync(join(dataDir, 'inscriptions', 'sub-torn.json'), '[{"commitTxId":');
+
+    const out = store.sweepStale(0);
+    expect(out.stale.map((s) => s.subOrgId)).toEqual(['sub-ok']); // the pass survives…
+    expect(out.unreadable).toEqual(['sub-torn']); // …and names who it lost
+  });
+
+  /**
+   * R3 — a truncated file must never read as "this user has no records":
+   * that would silently discard a recovery artifact AND let a new pair reuse a
+   * still-claimed outpoint.
+   */
+  test('a torn records file throws RECORDS_UNREADABLE rather than reading as empty', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'is-'));
+    const store = createInscriptionsStore({ dataDir });
+    store.create('sub-1', rec({}));
+    writeFileSync(join(dataDir, 'inscriptions', 'sub-1.json'), '[{"commitTxId":');
+    expect(() => store.list('sub-1')).toThrow('RECORDS_UNREADABLE');
+    expect(() => store.get('sub-1', 'c'.repeat(64))).toThrow('RECORDS_UNREADABLE');
+    expect(() => store.findByOutpoints('sub-1', [`${'a'.repeat(64)}:0`])).toThrow('RECORDS_UNREADABLE');
+    // A shape that parses but is not an array is equally unusable.
+    writeFileSync(join(dataDir, 'inscriptions', 'sub-1.json'), '{"commitTxId":"x"}');
+    expect(() => store.list('sub-1')).toThrow('RECORDS_UNREADABLE');
+    // An absent file is a genuine "nothing here".
+    expect(store.list('sub-9')).toEqual([]);
   });
 
   test('a confirmed record is retired: hex dropped, row kept as a join key', () => {
@@ -108,15 +145,15 @@ describe('inscriptions-store', () => {
   test('bindDepositAddress is first-use-wins, per network, and survives a reread', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'is-'));
     const store = createInscriptionsStore({ dataDir });
-    expect(store.bindDepositAddress('sub-1', 'mainnet', 'bc1qmine')).toBe('bc1qmine');
+    expect(store.bindDepositAddress('sub-1', 'mainnet', 'bc1qmine')).toEqual({ address: 'bc1qmine', isNew: true });
     // A later call naming someone ELSE's address gets the bound one back —
     // the route compares and 403s, so this is not a UTXO-lookup proxy.
-    expect(store.bindDepositAddress('sub-1', 'mainnet', 'bc1qvictim')).toBe('bc1qmine');
+    expect(store.bindDepositAddress('sub-1', 'mainnet', 'bc1qvictim')).toEqual({ address: 'bc1qmine', isNew: false });
     // Testnet is a DIFFERENT Turnkey account, so a different binding.
-    expect(store.bindDepositAddress('sub-1', 'testnet', 'tb1qmine')).toBe('tb1qmine');
-    expect(store.bindDepositAddress('sub-2', 'mainnet', 'bc1qtheirs')).toBe('bc1qtheirs');
+    expect(store.bindDepositAddress('sub-1', 'testnet', 'tb1qmine')).toEqual({ address: 'tb1qmine', isNew: true });
+    expect(store.bindDepositAddress('sub-2', 'mainnet', 'bc1qtheirs')).toEqual({ address: 'bc1qtheirs', isNew: true });
     expect(createInscriptionsStore({ dataDir }).bindDepositAddress('sub-1', 'mainnet', 'bc1qother'))
-      .toBe('bc1qmine');
+      .toEqual({ address: 'bc1qmine', isNew: false });
   });
   test('findByOutpoints returns every LIVE record claiming any of the given outpoints', () => {
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
@@ -172,7 +209,7 @@ describe('inscriptions-store', () => {
     // …and it can still be driven to completion.
     store.setStatus('sub-1', 'c'.repeat(64), 'confirmed');
     expect(store.get('sub-1', 'c'.repeat(64))!.status).toBe('confirmed');
-    expect(store.sweepStale(0)).toEqual([]); // retired on confirm, as for a new-shape record
+    expect(store.sweepStale(0).stale).toEqual([]); // retired on confirm, as for a new-shape record
   });
 });
 
@@ -218,7 +255,7 @@ describe('deposit bindings and the cross-user reader', () => {
   test('listBoundDeposits reports every bound address with what the sweep decides on', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
     const store = createInscriptionsStore({ dataDir });
-    expect(store.listBoundDeposits()).toEqual([]);
+    expect(store.listBoundDeposits().deposits).toEqual([]);
 
     store.bindDepositAddress('sub-1', 'mainnet', 'bc1qone');
     store.bindDepositAddress('sub-2', 'mainnet', 'bc1qtwo');
@@ -226,7 +263,7 @@ describe('deposit bindings and the cross-user reader', () => {
     store.recordDepositRead('sub-1', { network: 'mainnet', address: 'bc1qone', confirmedSats: 40_000 });
     store.create('sub-2', rec({ commitTxId: 'd'.repeat(64) }));
 
-    const all = store.listBoundDeposits();
+    const all = store.listBoundDeposits().deposits;
     expect(all).toHaveLength(3);
     const one = all.find((d) => d.address === 'bc1qone')!;
     expect(one.subOrgId).toBe('sub-1');
@@ -250,6 +287,11 @@ describe('deposit bindings and the cross-user reader', () => {
     writeFileSync(join(dataDir, 'deposits', 'sub-1.json'), 'not json');
     // The corrupt user's own request still fails closed (above); the scan just
     // skips them rather than reporting nothing at all.
-    expect(store.listBoundDeposits().map((d) => d.address)).toEqual(['bc1qtwo']);
+    const out = store.listBoundDeposits();
+    expect(out.deposits.map((d) => d.address)).toEqual(['bc1qtwo']);
+    // R4 — but that user has just been removed from the only cross-user scan
+    // that would ever see their funds. Skipping is right; skipping SILENTLY
+    // is not: the caller gets who was lost so it can say so out loud.
+    expect(out.unreadable).toEqual(['sub-1']);
   });
 });

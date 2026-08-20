@@ -96,12 +96,14 @@ export function IdentityPanel() {
       setHoldsKey(true);
       setStage('idle');
     } catch (e) {
+      // Code-aware: only the acknowledgement failure gets the acknowledgement
+      // copy. A storage-denied browser now refuses with 'no-key' from the same
+      // error class, and telling that person to tick a box they already ticked
+      // would point them at the wrong thing.
       setError(
-        e instanceof AuthorshipKeyError
+        e instanceof AuthorshipKeyError && e.code === 'not-acknowledged'
           ? identityPanel.warning.notAcknowledged
-          : e instanceof Error
-            ? e.message
-            : identityPanel.createFailed
+          : identityPanel.createFailed
       );
     } finally {
       setCreating(false);

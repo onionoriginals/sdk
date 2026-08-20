@@ -39,14 +39,18 @@ describe('deposit fee-source-unavailable copy', () => {
     expect(demo.deposit.unavailableBadge.length).toBeGreaterThan(0);
   });
 
-  test('the named server error maps onto that copy, and unnamed failures do not', () => {
+  test('the named server error maps onto that copy, and unnamed failures get their own', () => {
     expect(depositErrorMessage({ error: 'fee_estimate_unavailable' })).toBe(demo.deposit.feeUnavailable);
     // U4/R28: a failed UTXO read is its OWN disclosed state, not the fee one.
     // It used to map to null — a "transient blip" that left the last quote on
     // screen as though it were current. See deposit-indexer-copy.test.ts.
     expect(depositErrorMessage({ error: 'utxo_lookup_failed' })).not.toBe(demo.deposit.feeUnavailable);
-    expect(depositErrorMessage({ error: 'utxo_lookup_failed' })).not.toBeNull();
-    expect(depositErrorMessage(null)).toBeNull();
-    expect(depositErrorMessage({})).toBeNull();
+    // C1/F3: an unnamed failure is no longer null either. Null was what the
+    // caller keyed its stale-quote purge on, so the codes nobody had thought
+    // to name kept the last address and quote on screen. See
+    // deposit-error-table.test.ts for the whole default arm.
+    expect(depositErrorMessage(null)).toBe(demo.deposit.unknownError);
+    expect(depositErrorMessage({})).toBe(demo.deposit.unknownError);
+    expect(depositErrorMessage({})).not.toBe(demo.deposit.feeUnavailable);
   });
 });

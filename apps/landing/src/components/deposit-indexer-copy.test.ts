@@ -28,8 +28,11 @@ describe('indexer-unavailable copy (R28)', () => {
     expect(depositErrorMessage({ error: 'indexer_rate_limited' })).toBe(demo.deposit.indexerBusy);
     expect(depositErrorMessage({ error: 'deposit_user_cap' })).toBe(demo.deposit.indexerBusy);
     expect(depositErrorMessage({ error: 'fee_estimate_unavailable' })).toBe(demo.deposit.feeUnavailable);
-    expect(depositErrorMessage(null)).toBeNull();
-    expect(depositErrorMessage({})).toBeNull();
+    // C1/F3: the unnamed default is now copy of its own, not null — see
+    // deposit-error-table.test.ts. It must stay distinct from the named ones,
+    // so a generic failure never borrows a specific system's name.
+    expect(depositErrorMessage(null)).toBe(demo.deposit.unknownError);
+    expect(depositErrorMessage({})).toBe(demo.deposit.unknownError);
   });
 
   test('the badge names the system that is actually down', () => {
@@ -39,7 +42,7 @@ describe('indexer-unavailable copy (R28)', () => {
     expect(depositErrorBadge({ error: 'utxo_lookup_failed' })).toBe(demo.deposit.readUnavailableBadge);
     expect(depositErrorBadge({ error: 'indexer_rate_limited' })).toBe(demo.deposit.readBusyBadge);
     expect(depositErrorBadge({ error: 'deposit_user_cap' })).toBe(demo.deposit.readBusyBadge);
-    expect(depositErrorBadge({})).toBeNull();
+    expect(depositErrorBadge({})).toBe(demo.deposit.unknownBadge);
     // Every error with copy also has a badge, and vice versa.
     for (const e of ['fee_estimate_unavailable', 'utxo_lookup_failed', 'indexer_rate_limited', 'deposit_user_cap']) {
       expect(depositErrorMessage({ error: e })).not.toBeNull();

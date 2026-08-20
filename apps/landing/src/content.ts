@@ -46,7 +46,9 @@ export const nav = {
   openMenu: 'Open menu',
   closeMenu: 'Close menu',
   signIn: 'Sign in',
-  signOut: 'Sign out'
+  signOut: 'Sign out',
+  /** Why Sign out is unavailable mid signing-session refresh (FR1). */
+  signOutBlocked: 'Finish signing in again first — your Original and any BTC at your deposit address are still waiting.'
 };
 
 /** The email + OTP sign-in modal, and the code input inside it. */
@@ -378,7 +380,12 @@ export const demo = {
     reauthPending: 'Waiting for you to sign back in…',
     preserved: 'Your Original is held right where you left it — signing back in picks up from here.',
     revokeFailed:
-      'Signed out, and this browser’s signing key is erased. We couldn’t reach Turnkey to revoke it as well, so it stays valid there until it expires on its own.'
+      'Signed out, and this browser’s signing key is erased. We couldn’t reach Turnkey to revoke it as well, so it stays valid there until it expires on its own.',
+    // The erase itself failed — a stronger statement than revokeFailed, which
+    // promises the local key is gone. On a shared machine this is the one the
+    // person needs to read, so it must never be swapped for the softer line.
+    eraseFailed:
+      'Signed out — but we could not erase this browser’s signing key. It can still sign for up to 12 hours. If this machine is shared, clear this site’s data in your browser before you walk away.'
   },
   deposit: {
     heading: 'Fund your inscription',
@@ -434,6 +441,21 @@ export const demo = {
     bindingUnreadable:
       'We can’t confirm which deposit address belongs to your account right now, so we’re not showing one: a wrong address here means BTC sent somewhere this site can never spend from. Anything you’ve already sent is untouched. Try again in a few minutes.',
     bindingBadge: 'Deposit address unconfirmed.',
+    // The account is bound to a DIFFERENT address than this browser derived.
+    // Never show either one: one of them cannot be spent from here.
+    addressNotBound:
+      'Your account is already bound to a different deposit address than this browser derived, so we’re not showing one — BTC sent to the wrong one could never be spent here. Anything you’ve already sent is untouched at your own address. Sign in again on the browser you first used, or come back in a few minutes.',
+    // 401 from the deposit route: the 7-day session ended under the tab.
+    signedOut:
+      'Your sign-in has expired, so we can’t look up your deposit address any more. Sign in again to pick this up — nothing is lost: any BTC you’ve sent is at your own address, under your own key.',
+    signedOutBadge: 'Sign in again to continue.',
+    // The DEFAULT arm. Every unrecognised failure lands here rather than
+    // clearing the banner and leaving the last address and quote on screen —
+    // a stale "ready to inscribe" is how someone is told to send more money
+    // against a number nothing checked.
+    unknownError:
+      'We couldn’t confirm your deposit just now, so we’re not showing an address or an amount — showing a stale one is how BTC ends up somewhere we can’t spend from, or priced against a fee that has moved. Nothing is lost: anything you’ve already sent is at your own address, under your own key. Give it a minute and reload.',
+    unknownBadge: 'Deposit check failed.',
     networkMismatch:
       'This deploy is misconfigured: the app was built for a different Bitcoin network than the server is running. Inscribing is disabled until they match — no deposit address is shown, because funds sent to it could not be spent here.',
     yourKeyNote: 'Your Turnkey key signs this inscription in your browser; your own deposit pays the fee. The server never sees a private key.'

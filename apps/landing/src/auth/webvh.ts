@@ -173,10 +173,22 @@ export async function createUserWebVHDid(params: {
   subOrgId: string;
   email: string;
   domain?: string;
-  /** Defaults to this browser's localStorage; injectable so the gate is testable. */
-  storage?: Storage;
+  /**
+   * REQUIRED, and never defaulted to raw `localStorage`: this is the call that
+   * MINTS the authorship seed, and every other key-material site reaches it
+   * through `browserKeyStorage()`. Callers pass that guard's result straight
+   * through, so a browser that denies storage refuses here by name rather than
+   * throwing an uncaught TypeError out of the mint.
+   */
+  storage: Storage | null;
 }): Promise<WebVHDidResult> {
-  const storage = params.storage ?? localStorage;
+  const storage = params.storage;
+  if (!storage) {
+    throw new AuthorshipKeyError(
+      'no-key',
+      'This browser has no storage available to hold an authorship key'
+    );
+  }
   const logStorageKey = `${DID_LOG_STORAGE_PREFIX}:${params.subOrgId}`;
   const persisted = readPersistedDid(storage, logStorageKey);
   if (persisted) return persisted;

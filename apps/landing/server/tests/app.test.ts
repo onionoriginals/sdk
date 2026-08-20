@@ -172,6 +172,26 @@ describe('SPA document security headers', () => {
     }
   });
 
+  /**
+   * SEC-1 — HSTS is the backstop under the auth cookie. The 7-day JWT gates
+   * every money route, and one plaintext request (a typed http:// URL, a stale
+   * bookmark) is all an interception needs; a browser that has seen this header
+   * never makes that request.
+   */
+  for (const path of documentPaths) {
+    test(`${path} carries HSTS for a year, including subdomains`, async () => {
+      const res = await makeFetch(null)(new Request('http://x' + path));
+      const hsts = res.headers.get('strict-transport-security');
+      expect(hsts).toBeTruthy();
+      const maxAge = Number(/max-age=(\d+)/.exec(hsts!)?.[1]);
+      expect(maxAge).toBeGreaterThanOrEqual(31536000);
+      expect(hsts!.toLowerCase()).toContain('includesubdomains');
+      // `preload` is a submission an operator makes deliberately — and is
+      // effectively irreversible — so it is not a header default here.
+      expect(hsts!.toLowerCase()).not.toContain('preload');
+    });
+  }
+
   test('non-document static assets are not given the document policy', async () => {
     const res = await makeFetch(null)(new Request('http://x/app.js'));
     expect(res.status).toBe(200);

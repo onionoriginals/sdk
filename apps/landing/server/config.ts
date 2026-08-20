@@ -290,6 +290,22 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
     }
   }
 
+  // Numeric values whose bad parse is SILENT. `Number('fifty')` is NaN, and
+  // NaN is not nullish, so a `?? default` at the call site never fires: the
+  // sweep cap becomes `slice(0, NaN)` (zero addresses scanned, forever, while
+  // the roll-up still logs a healthy heartbeat), the faucet amount becomes a
+  // NaN-sat funding tx, and the port becomes a NaN listen. The call sites now
+  // guard the parse and fall back; this names the value so the fallback is not
+  // itself the silent part. Absent is fine — that is what a default is for.
+  for (const key of ['DEPOSIT_SWEEP_MAX_PER_PASS', 'BTC_FAUCET_SATS', 'PORT'] as const) {
+    const raw = env[key];
+    if (raw === undefined || raw === '') continue;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0) {
+      report(key, `${key}="${raw}" is not a positive integer — the built-in default is used instead.`);
+    }
+  }
+
   // Trusted proxy hops: every rate limit's correctness rests on it, and unset
   // degrades silently to one site-wide bucket (U7 reads this value).
   const hops = env.TRUSTED_PROXY_HOPS;

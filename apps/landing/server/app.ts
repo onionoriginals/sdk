@@ -54,11 +54,19 @@ const DOCUMENT_CSP = [
 
 // nosniff alongside it: the policy is only worth what the content-type is, and
 // a sniffed response can execute under the wrong type.
+//
+// HSTS is the backstop under the auth cookie (SEC-1): the 7-day JWT gates every
+// money route, and one plaintext request — a typed http:// URL, a stale
+// bookmark — is all an interception needs. A browser that has seen this header
+// will not make that request at all. One year with subdomains; not `preload`,
+// which is a submission an operator makes deliberately, not a header default.
+// Ignored by browsers over plain http, so local dev is unaffected.
 function documentHeaders(): Record<string, string> {
   return {
     'content-type': 'text/html; charset=utf-8',
     'content-security-policy': DOCUMENT_CSP,
     'x-content-type-options': 'nosniff',
+    'strict-transport-security': 'max-age=31536000; includeSubDomains',
   };
 }
 

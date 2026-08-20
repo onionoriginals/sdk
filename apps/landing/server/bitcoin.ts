@@ -170,34 +170,40 @@ export async function fetchAddressUtxos(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 10_000);
   const url = `${stripTrailingSlash(opts.api)}/address/${opts.address}/utxo`;
-  let res: Response;
-  try {
-    res = await fetchImpl(url, { signal: controller.signal, headers: indexerAuthHeaders(opts) });
-  } catch (e) {
-    throw new IndexerError(`Indexer read failed for ${opts.address}: ${(e as Error).message}`, 'unavailable');
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!res.ok) {
-    // 429 is the quota signal every Esplora-shaped host uses; 402 is what a
-    // paid tier returns once the plan is spent. Both are "budget", not "down".
-    const rateLimited = res.status === 429 || res.status === 402;
-    const retryAfter = Number(res.headers.get('Retry-After'));
-    throw new IndexerError(
-      `Indexer UTXO fetch failed (${res.status}) for ${opts.address}`,
-      rateLimited ? 'rate_limited' : 'unavailable',
-      res.status,
-      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined
-    );
-  }
+  // The timer stays armed across the BODY read, not just the headers:
+  // disarming it once headers arrive means a 200 whose body stalls hangs the
+  // handler forever — and the balance sweep's pass is a sequential loop, so
+  // one such address stalls every remaining address behind it.
   let utxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }>;
   try {
-    utxos = (await res.json()) as typeof utxos;
-    if (!Array.isArray(utxos)) throw new Error('not an array');
-  } catch (e) {
-    // A 200 we cannot parse is NOT an empty address — treating it as one would
-    // present "no deposit yet" to someone whose BTC has already landed.
-    throw new IndexerError(`Indexer returned an unusable body for ${opts.address}: ${(e as Error).message}`, 'unavailable');
+    let res: Response;
+    try {
+      res = await fetchImpl(url, { signal: controller.signal, headers: indexerAuthHeaders(opts) });
+    } catch (e) {
+      throw new IndexerError(`Indexer read failed for ${opts.address}: ${(e as Error).message}`, 'unavailable');
+    }
+    if (!res.ok) {
+      // 429 is the quota signal every Esplora-shaped host uses; 402 is what a
+      // paid tier returns once the plan is spent. Both are "budget", not "down".
+      const rateLimited = res.status === 429 || res.status === 402;
+      const retryAfter = Number(res.headers.get('Retry-After'));
+      throw new IndexerError(
+        `Indexer UTXO fetch failed (${res.status}) for ${opts.address}`,
+        rateLimited ? 'rate_limited' : 'unavailable',
+        res.status,
+        Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined
+      );
+    }
+    try {
+      utxos = (await res.json()) as typeof utxos;
+      if (!Array.isArray(utxos)) throw new Error('not an array');
+    } catch (e) {
+      // A 200 we cannot parse is NOT an empty address — treating it as one would
+      // present "no deposit yet" to someone whose BTC has already landed.
+      throw new IndexerError(`Indexer returned an unusable body for ${opts.address}: ${(e as Error).message}`, 'unavailable');
+    }
+  } finally {
+    clearTimeout(timer);
   }
   return {
     confirmed: utxos
@@ -264,28 +270,32 @@ export function quickNodeOrdinalLookup(opts: {
     async outpointInscriptions(outpoint) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 10_000);
-      let res: Response;
+      // Armed across the body read too: a 200 whose body stalls would
+      // otherwise hang classification forever, and classification is what the
+      // deposit route fails closed on.
+      let body: { result?: { inscriptions?: unknown } | null; error?: { message?: string } } | null;
       try {
-        res = await fetchImpl(opts.endpoint, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'ord_getOutput',
-            params: [`${outpoint.txid}:${outpoint.vout}`],
-          }),
-        });
-      } catch (e) {
-        throw new Error(`ord_getOutput failed: ${(e as Error).message}`);
+        let res: Response;
+        try {
+          res = await fetchImpl(opts.endpoint, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              method: 'ord_getOutput',
+              params: [`${outpoint.txid}:${outpoint.vout}`],
+            }),
+          });
+        } catch (e) {
+          throw new Error(`ord_getOutput failed: ${(e as Error).message}`);
+        }
+        if (!res.ok) throw new Error(`ord_getOutput failed (${res.status})`);
+        body = (await res.json().catch(() => null)) as typeof body;
       } finally {
         clearTimeout(timer);
       }
-      if (!res.ok) throw new Error(`ord_getOutput failed (${res.status})`);
-      const body = (await res.json().catch(() => null)) as
-        | { result?: { inscriptions?: unknown } | null; error?: { message?: string } }
-        | null;
       if (!body || body.error) throw new Error(`ord_getOutput error: ${body?.error?.message ?? 'unusable body'}`);
       const list = body.result?.inscriptions;
       if (!Array.isArray(list)) {
@@ -430,6 +440,28 @@ const ALREADY_KNOWN_TX_ERRORS = [
 export function isAlreadyKnownTxError(e: unknown): boolean {
   const msg = ((e as Error)?.message ?? '').toLowerCase();
   return ALREADY_KNOWN_TX_ERRORS.some((known) => msg.includes(known));
+}
+
+/**
+ * Rejections meaning "the input this transaction spends is not in the UTXO set
+ * or the mempool" — i.e. its parent is not on the network right now. For a
+ * reveal that means its commit was EVICTED (a fee spike, no CPFP child because
+ * the reveal never went out), which is the one case where re-pushing the
+ * persisted commit is the fix. Deliberately a closed set of Core's own
+ * rejection strings: a transport failure that merely mentions "input" must not
+ * trigger a re-push.
+ */
+const MISSING_INPUT_TX_ERRORS = [
+  'bad-txns-inputs-missingorspent',
+  'missing inputs',
+  'missing-inputs',
+  'unknown input',
+  'unknown-input',
+];
+
+export function isMissingInputsError(e: unknown): boolean {
+  const msg = (typeof e === 'string' ? e : ((e as Error)?.message ?? '')).toLowerCase();
+  return MISSING_INPUT_TX_ERRORS.some((known) => msg.includes(known));
 }
 
 /**
@@ -848,9 +880,9 @@ export function createBitcoinRoutes(deps: {
     if (deps.inscriptions) {
       let bound: string;
       try {
-        const already = deps.inscriptions.depositBinding(sub, network);
-        bound = deps.inscriptions.bindDepositAddress(sub, network, address);
-        if (!already && bound === address) {
+        const binding = deps.inscriptions.bindDepositAddress(sub, network, address);
+        bound = binding.address;
+        if (binding.isNew) {
           money('deposit_address_issued', { sub, network, address });
         }
       } catch {
@@ -918,9 +950,8 @@ export function createBitcoinRoutes(deps: {
     }
     // A read we could trust: remember what they hold and end any outage state.
     const confirmedSats = utxos.confirmed.reduce((n, u) => n + u.value, 0);
-    const previous = deps.inscriptions?.lastDepositRead(sub) ?? null;
+    const previous = deps.inscriptions?.recordDepositRead(sub, { network, address, confirmedSats }) ?? null;
     const previousSats = previous && previous.address === address ? previous.confirmedSats : null;
-    deps.inscriptions?.recordDepositRead(sub, { network, address, confirmedSats });
     if (confirmedSats > 0 && (previousSats === null || previousSats === 0)) {
       money('deposit_seen', { sub, network, address, confirmedSats, outputs: utxos.confirmed.length });
     }
@@ -1059,6 +1090,49 @@ export function createBitcoinRoutes(deps: {
    * pair is actually the one on the network (confirmed commit, or a
    * successful re-broadcast of its txs).
    */
+  /**
+   * Serialize the double-spend guard per user (C5/F2). The rival set is read,
+   * then AWAITED on (the confirmed-on-chain check), then acted on: without
+   * this, two concurrent submissions both supersede the same rival off a stale
+   * snapshot and both go live on one outpoint set. Money stays safe (the
+   * commits conflict, so at most one lands) but every later submission then
+   * sees two rivals and 409s with no supersede path, forever, while the loser
+   * holds a maxPending slot. This store is single-process and single-instance,
+   * so an in-process mutex is the whole of the coordination needed.
+   */
+  const subLocks = new Map<string, Promise<unknown>>();
+  function withSubLock<T>(sub: string, fn: () => Promise<T>): Promise<T> {
+    const chain = subLocks.get(sub) ?? Promise.resolve();
+    const run = chain.then(fn, fn); // a failed predecessor must not wedge the queue
+    const tail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    subLocks.set(sub, tail);
+    void tail.then(() => {
+      if (subLocks.get(sub) === tail) subLocks.delete(sub);
+    });
+    return run;
+  }
+
+  /**
+   * A store read that failed because the user's records file is unreadable
+   * (R3). Named 503 + a money line, never a bare 500: this user's automatic
+   * reconciliation is dead until an operator looks, and nothing else would say
+   * so. Returns null for any other error, which the caller rethrows.
+   */
+  function unreadableRecords(sub: string, e: unknown): Response | null {
+    if (!String((e as Error)?.message ?? '').includes('RECORDS_UNREADABLE')) return null;
+    money('inscribe_failed', { sub, reason: 'records_unreadable' });
+    return json(
+      {
+        error: 'records_unreadable',
+        message: 'Your inscription records could not be read. Nothing has been lost — this needs an operator.',
+      },
+      503
+    );
+  }
+
   function reclaimOutpoint(store: InscriptionsStore, sub: string, rec: InscriptionRecord): void {
     // Every outpoint this pair spends, not just the identity one: a rival that
     // overlaps on ANY input conflicts with it on the network.
@@ -1190,49 +1264,12 @@ export function createBitcoinRoutes(deps: {
     // the outpoint is genuinely spent, and the old pair's reveal (via
     // rebroadcast) is the one true recovery path.
     // With multi-input funding the claim is a SET: any live record sharing any
-    // declared outpoint conflicts. Only an EXACT set match can be superseded —
-    // an overlapping-but-unequal set has no safe replacement (the rebuilt pair
-    // would not conflict with the old one on every input, so both could land
-    // and one reveal would be stranded).
-    const rivals = store.findByOutpoints(sub, outpoints).filter((r) => r.commitTxId !== commitTxId);
-    const sameSet = (r: InscriptionRecord) => {
-      const theirs = outpointsOf(r);
-      return theirs.length === outpoints.length && theirs.every((o) => outpoints.includes(o));
-    };
-    if (rivals.length > 1 || (rivals.length === 1 && !sameSet(rivals[0]))) {
-      return refuse('outpoint_pending', { error: 'outpoint_pending', commitTxId: rivals[0].commitTxId }, 409);
-    }
-    const existing = rivals[0];
-    if (existing) {
-      if (existing.status !== 'signed') {
-        return refuse('outpoint_pending', { error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
-      }
-      try {
-        const st = await provider.getTransactionStatus(existing.commitTxId);
-        if (st?.confirmed) {
-          store.setStatus(sub, existing.commitTxId, 'commit_broadcast');
-          return refuse('outpoint_already_confirmed', { error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
-        }
-      } catch {
-        // No lookup — fall through: superseding stays safe because nothing
-        // is deleted (an unconfirmed-but-broadcast old commit conflicts with
-        // the new one on the network; whichever confirms, its reveal is here).
-      }
-      store.supersede(sub, existing.commitTxId);
-    }
-
-    // Every invariant held: this pair is about to spend a stranger's real
-    // BTC, so it is on the record before it goes anywhere (R29).
-    money('inscribe_attempted', {
-      sub,
-      commitTxId,
-      revealTxId,
-      inputs: outpoints.length,
-      fundingSats: declared.reduce((n, u) => n + (typeof u.value === 'number' ? u.value : 0), 0),
-    });
-
-    // Persist BEFORE any broadcast — the whole point: from here on, recovery
-    // never depends on the client (or this request) surviving.
+    // declared outpoint conflicts. The safety property a supersede rests on is
+    // "the new commit conflicts with the old on EVERY input the old spends, so
+    // at most one can land" — which holds when the declared set CONTAINS the
+    // rival's (equal, or a strict superset after a fee-driven top-up), and not
+    // otherwise. A merely overlapping set would leave both able to land, with
+    // one reveal stranded, so it is still refused.
     const at = new Date(now()).toISOString();
     const record: InscriptionRecord = {
       commitTxId,
@@ -1246,11 +1283,80 @@ export function createBitcoinRoutes(deps: {
       createdAt: at,
       updatedAt: at,
     };
-    try {
-      store.create(sub, record);
-    } catch (e) {
-      return refuse('store_error', { error: 'store_error', message: (e as Error).message }, 500);
-    }
+    const declaredSet = new Set(outpoints);
+    const covers = (r: InscriptionRecord) => outpointsOf(r).every((o) => declaredSet.has(o));
+
+    // Read the rivals, judge them, supersede and persist WITHOUT yielding to
+    // another submission from this user in between (C5): the guard reads state
+    // that a concurrent request would otherwise invalidate mid-flight.
+    const refusal = await withSubLock(sub, async (): Promise<Response | null> => {
+      let rivals: InscriptionRecord[];
+      try {
+        rivals = store.findByOutpoints(sub, outpoints).filter((r) => r.commitTxId !== commitTxId);
+      } catch (e) {
+        const unreadable = unreadableRecords(sub, e);
+        if (unreadable) return unreadable;
+        throw e;
+      }
+      if (rivals.length > 1 || (rivals.length === 1 && !covers(rivals[0]))) {
+        return refuse('outpoint_pending', { error: 'outpoint_pending', commitTxId: rivals[0].commitTxId }, 409);
+      }
+      const existing = rivals[0];
+      if (existing) {
+        if (existing.status !== 'signed') {
+          return refuse('outpoint_pending', { error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
+        }
+        try {
+          const st = await provider.getTransactionStatus(existing.commitTxId);
+          if (st?.confirmed) {
+            store.setStatus(sub, existing.commitTxId, 'commit_broadcast');
+            return refuse('outpoint_already_confirmed', { error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
+          }
+        } catch {
+          // No lookup — fall through: superseding stays safe because nothing
+          // is deleted (an unconfirmed-but-broadcast old commit conflicts with
+          // the new one on the network; whichever confirms, its reveal is here).
+        }
+        // Re-read inside the same synchronous tick as the supersede+create:
+        // the await above is exactly the window a concurrent submission uses
+        // to act on the snapshot taken before it.
+        let current: InscriptionRecord[];
+        try {
+          current = store.findByOutpoints(sub, outpoints).filter((r) => r.commitTxId !== commitTxId);
+        } catch (e) {
+          const unreadable = unreadableRecords(sub, e);
+          if (unreadable) return unreadable;
+          throw e;
+        }
+        if (current.length > 1 || (current.length === 1 && !covers(current[0])) ||
+            (current.length === 1 && current[0].status !== 'signed')) {
+          return refuse('outpoint_pending', { error: 'outpoint_pending', commitTxId: current[0].commitTxId }, 409);
+        }
+        if (current.length === 1) store.supersede(sub, current[0].commitTxId);
+      }
+
+      // Every invariant held: this pair is about to spend a stranger's real
+      // BTC, so it is on the record before it goes anywhere (R29).
+      money('inscribe_attempted', {
+        sub,
+        commitTxId,
+        revealTxId,
+        inputs: outpoints.length,
+        fundingSats: declared.reduce((n, u) => n + (typeof u.value === 'number' ? u.value : 0), 0),
+      });
+
+      // Persist BEFORE any broadcast — the whole point: from here on, recovery
+      // never depends on the client (or this request) surviving.
+      try {
+        store.create(sub, record);
+      } catch (e) {
+        const unreadable = unreadableRecords(sub, e);
+        if (unreadable) return unreadable;
+        return refuse('store_error', { error: 'store_error', message: (e as Error).message }, 500);
+      }
+      return null;
+    });
+    if (refusal) return refusal;
 
     const commitErr = await broadcastIdempotent(signedCommitHex);
     if (commitErr) {
@@ -1302,7 +1408,17 @@ export function createBitcoinRoutes(deps: {
     if (limited) return limited;
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
-    let records = store.list(sub);
+    // A torn file must not surface as a bare, unnamed 500: this route IS the
+    // automatic reconciliation, so the user whose file cannot be read is
+    // exactly the one who needs an operator to know (R3).
+    let records: InscriptionRecord[];
+    try {
+      records = store.list(sub);
+    } catch (e) {
+      const unreadable = unreadableRecords(sub, e);
+      if (unreadable) return unreadable;
+      throw e;
+    }
     // Bound the per-request provider fan-out on top of the per-user quota cap
     // above. The worklist is PRIORITIZED: superseded reconciliation goes
     // first — those pairs carry committed funds and have NO manual recovery
@@ -1427,19 +1543,30 @@ export function createBitcoinRoutes(deps: {
         // Lookup unsupported/down — report the stored status.
       }
     }
-    if (changed) records = store.list(sub);
-    const inscriptions = records.map((r) => ({
+    if (changed) {
+      try {
+        records = store.list(sub);
+      } catch (e) {
+        const unreadable = unreadableRecords(sub, e);
+        if (unreadable) return unreadable;
+        throw e;
+      }
+    }
+    const inscriptions = records.map((r) => {
+      const outpoints = outpointsOf(r);
+      return {
       commitTxId: r.commitTxId,
       revealTxId: r.revealTxId,
       inscriptionId: r.inscriptionId,
       // Singular stays the IDENTITY outpoint so existing clients keep working.
-      fundingOutpoint: outpointsOf(r)[0],
-      fundingOutpoints: outpointsOf(r),
+      fundingOutpoint: outpoints[0],
+      fundingOutpoints: outpoints,
       status: r.status,
       ...(r.superseded ? { superseded: true } : {}),
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
-    }));
+      };
+    });
     // R31: the deposit-read outage reaches someone who already left. This
     // route is what the Your Originals page loads on every visit, so a stuck
     // state raised while nobody was looking is on screen when they come back —
@@ -1463,7 +1590,14 @@ export function createBitcoinRoutes(deps: {
 
     const { commitTxId } = (await req.json().catch(() => ({}))) as { commitTxId?: string };
     if (typeof commitTxId !== 'string' || !commitTxId) return json({ error: 'bad_request' }, 400);
-    const rec = store.get(sub, commitTxId);
+    let rec: InscriptionRecord | null;
+    try {
+      rec = store.get(sub, commitTxId);
+    } catch (e) {
+      const unreadable = unreadableRecords(sub, e);
+      if (unreadable) return unreadable;
+      throw e;
+    }
     if (!rec) return json({ error: 'not_found' }, 404);
     if (rec.status === 'confirmed') {
       return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
@@ -1506,7 +1640,20 @@ export function createBitcoinRoutes(deps: {
       reclaimIfSuperseded();
       store.setStatus(sub, commitTxId, 'commit_broadcast');
     }
-    const revealErr = await broadcastIdempotent(rec.revealTxHex);
+    let revealErr = await broadcastIdempotent(rec.revealTxHex);
+    // F1 — the terminal deadlock. A commit that broadcast fine can still be
+    // EVICTED from every mempool by a fee spike, and with no reveal child
+    // there is no CPFP to pull it back: it never confirms, so the list poll's
+    // confirmed-commit gate never fires, and the reveal is rejected for
+    // missing inputs forever while the creator's rebuild 409s on a live
+    // record. Re-push the persisted commit, then retry. Re-pushing a commit
+    // that is still in the mempool is a harmless no-op — which is why this is
+    // the safe direction.
+    if (revealErr && rec.status === 'commit_broadcast' && rec.signedCommitHex && isMissingInputsError(revealErr)) {
+      money('inscribe_failed', { sub, commitTxId, reason: 'commit_missing_repushed', detail: revealErr });
+      const commitErr = await broadcastIdempotent(rec.signedCommitHex);
+      if (!commitErr) revealErr = await broadcastIdempotent(rec.revealTxHex);
+    }
     if (revealErr) {
       return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'commit_broadcast' });
     }
@@ -1519,6 +1666,17 @@ export function createBitcoinRoutes(deps: {
 }
 
 export type BitcoinRoutes = ReturnType<typeof createBitcoinRoutes>;
+
+/**
+ * A count/amount read from configuration. Anything that is not a positive
+ * integer — `NaN` from a non-numeric env var, zero, a negative — falls back to
+ * the default, because `?? default` does NOT catch `NaN` and the silent result
+ * is an instrument that runs but does nothing.
+ */
+export function positiveInt(value: unknown, fallback: number): number {
+  const n = typeof value === 'string' ? Number(value) : (value as number);
+  return Number.isInteger(n) && (n as number) > 0 ? (n as number) : fallback;
+}
 
 /**
  * The deposit-balance sweep (R29) — the only instrument that would ever tell
@@ -1560,14 +1718,32 @@ export function createDepositBalanceSweep(deps: {
   heldSats: number;
   unreadable: number;
 }> {
-  const maxPerPass = deps.maxPerPass ?? 50;
-  const idleAfterMs = deps.idleAfterMs ?? 24 * 60 * 60_000;
+  // Guarded, not `?? 50`: `Number('fifty')` is NaN, NaN is not nullish so the
+  // default never fires, and `slice(0, NaN)` is `[]` — every pass would scan
+  // ZERO addresses forever while the roll-up kept logging a healthy-looking
+  // heartbeat. This is the only instrument that ever sees a stranger's funds
+  // sitting at an address nobody polls, so it refuses to be disabled by a typo
+  // (the boot config contract names the offending value too).
+  const maxPerPass = positiveInt(deps.maxPerPass, 50);
+  const idleAfterMs = positiveInt(deps.idleAfterMs, 24 * 60 * 60_000);
   const now = deps.now ?? (() => Date.now());
   const money = deps.moneyLog ?? createMoneyLogger(undefined, now);
   let cursor = 0;
 
   return async () => {
-    const all = deps.store.listBoundDeposits().filter((d) => d.network === deps.network);
+    const bound = deps.store.listBoundDeposits();
+    // A file the scan could not read has just removed that user's deposit
+    // address from the ONLY cross-user scan there is. Skipping keeps the pass
+    // alive; naming them is what stops it being silent (R4).
+    for (const subOrgId of bound.unreadable) {
+      money('deposit_read_failed', {
+        sub: subOrgId,
+        network: deps.network,
+        reason: 'bindings_unreadable',
+        detail: 'deposit bindings file could not be parsed — this address is not being watched',
+      });
+    }
+    const all = bound.deposits.filter((d) => d.network === deps.network);
     const candidates = all.filter((d) => {
       if (d.hasPendingInscription) return true;
       if (d.lastConfirmedSats === null || d.lastReadAt === null) return true; // never read = never cleared
@@ -1623,7 +1799,12 @@ export function createDepositBalanceSweep(deps: {
       }
     }
     const summary = { candidates: candidates.length, scanned: pass.length, withBalance, heldSats, unreadable };
-    money('deposit_balance_sweep', { ...summary, bound: all.length, maxPerPass });
+    money('deposit_balance_sweep', {
+      ...summary,
+      bound: all.length,
+      maxPerPass,
+      unreadableBindings: bound.unreadable.length,
+    });
     return summary;
   };
 }

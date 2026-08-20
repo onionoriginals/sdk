@@ -21,6 +21,7 @@ import {
   indexerAuthHeaders,
   IndexerError,
   DEFAULT_INDEXER_API,
+  quickNodeOrdinalLookup,
 } from '../bitcoin';
 import { createInscriptionsStore } from '../inscriptions-store';
 import { mkdtempSync } from 'node:fs';
@@ -201,6 +202,76 @@ describe('fetchAddressUtxos through the seam', () => {
     expect(calls[0].headers.authorization).toBe('Bearer tok');
     expect(utxos).toHaveLength(1); // confirmed only
     expect(utxos[0].value).toBe(50_000);
+  });
+
+  /**
+   * R7 — the timeout must cover the BODY read, not just the headers. Once
+   * headers arrive, disarming the abort leaves a 200 whose body stalls hanging
+   * the handler forever; the balance sweep's pass is a sequential loop, so one
+   * such address stalls every remaining address in that pass too.
+   */
+  test('a 200 whose body never arrives is aborted by the SAME timeout', async () => {
+    // A stub that honours the signal exactly as a real fetch body would.
+    const hangingBody = (async (_url: string, init?: RequestInit) => {
+      const signal = init!.signal!;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: () =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('The operation was aborted.')));
+          }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const outcome = await Promise.race([
+      fetchAddressUtxos({
+        api: 'https://idx.example/api',
+        address: MAINNET_ADDRESS,
+        network: 'mainnet',
+        fetchImpl: hangingBody,
+        timeoutMs: 50,
+      }).then(
+        () => 'resolved' as const,
+        (e) => e as Error
+      ),
+      new Promise<'hung'>((r) => setTimeout(() => r('hung'), 1_000)),
+    ]);
+    expect(outcome).toBeInstanceOf(IndexerError);
+    expect((outcome as IndexerError).kind).toBe('unavailable');
+  });
+
+  test('the ordinal lookup aborts a stalled body on the same timer', async () => {
+    const hangingBody = (async (_url: string, init?: RequestInit) => {
+      const signal = init!.signal!;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: () =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('The operation was aborted.')));
+          }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const lookup = quickNodeOrdinalLookup({
+      endpoint: 'https://qn.example',
+      fetchImpl: hangingBody,
+      timeoutMs: 50,
+    });
+    const outcome = await Promise.race([
+      lookup.outpointInscriptions({ txid: 'a'.repeat(64), vout: 0 }).then(
+        () => 'resolved' as const,
+        (e) => e as Error
+      ),
+      new Promise<'hung'>((r) => setTimeout(() => r('hung'), 1_000)),
+    ]);
+    // Fail CLOSED: an unclassifiable output is never offered as spendable.
+    expect(outcome).toBeInstanceOf(Error);
+    expect(outcome).not.toBe('hung');
+    expect((outcome as Error).message).toContain('ord_getOutput');
   });
 });
 

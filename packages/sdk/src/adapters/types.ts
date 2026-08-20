@@ -82,8 +82,14 @@ export interface OrdinalsProvider {
      * two pairs with overlapping-but-unequal sets both spend the overlap.
      */
     fundingUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey?: string }>;
-    /** Legacy singular mirror of `fundingUtxos[0]`, for pre-multi-input implementations. */
-    fundingUtxo?: { txid: string; vout: number; value: number; scriptPubKey?: string };
+    /**
+     * Singular mirror of `fundingUtxos[0]`, for pre-multi-input implementations.
+     * Stays REQUIRED: relaxing a method parameter's property to optional is a
+     * source-breaking change for any external `implements OrdinalsProvider`
+     * (`Property 'fundingUtxo' is optional in ... but required in ...`), which
+     * method bivariance does not forgive. The SDK always populates it.
+     */
+    fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey?: string };
     changeAddress: string;
   }): Promise<{ commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' }>;
   getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }>;
@@ -183,4 +189,17 @@ export interface OrdinalsProvider {
     satoshi?: string;
   }>;
 }
+
+/**
+ * Compile-time guard: `submitInscription`'s `fundingUtxo` must stay REQUIRED.
+ * Making it optional is source-breaking for any external
+ * `implements OrdinalsProvider` written against the earlier shape, and nothing
+ * in this repo implements the method, so only a consumer's `tsc` would notice.
+ * Kept in src/ so `bun run build` fails on the regression.
+ */
+type _AssertTrue<T extends true> = T;
+type _SubmitInscriptionParams = Parameters<NonNullable<OrdinalsProvider['submitInscription']>>[0];
+export type _FundingUtxoStaysRequired = _AssertTrue<
+  undefined extends _SubmitInscriptionParams['fundingUtxo'] ? false : true
+>;
 

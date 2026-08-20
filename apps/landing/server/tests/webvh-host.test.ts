@@ -282,3 +282,93 @@ describe('webvh-host eviction', () => {
     expect(store.stats().bytes).toBeLessThanOrEqual(40);
   });
 });
+
+// ---------------------------------------------------------------------------
+// R5: the group is the unit of OWNERSHIP, not just of eviction. A publish whose
+// members were written from two client identities — a visitor on mobile or IPv6
+// whose egress address rotates between the initial publish and a revision, which
+// is exactly what the retitle→commit edit loop does — must still evict whole.
+// ---------------------------------------------------------------------------
+
+/**
+ * The read-time invariant the whole-group rule exists to enforce: if a DID log
+ * survived any eviction sequence, every resource of the same publish survived
+ * too. Returns the resource keys that a surviving log now points at in vain.
+ */
+function orphanedResources(
+  store: ReturnType<typeof createWebvhHostStore>,
+  written: string[]
+): string[] {
+  const alive = new Set(written.filter((k) => hit(store, k)));
+  const orphans = new Set<string>();
+  for (const log of written) {
+    if (!log.endsWith('/did.jsonl') || !alive.has(log)) continue;
+    const group = publishGroupOf(log);
+    for (const k of written) {
+      if (k.includes('/resources/') && publishGroupOf(k) === group && !alive.has(k)) {
+        orphans.add(k);
+      }
+    }
+  }
+  return [...orphans];
+}
+
+describe('webvh-host cross-identity publish groups', () => {
+  const alice = ['d/u/alice/did.jsonl', 'd/u/alice/resources/r1'];
+
+  test('a revision from a second IP does not split the publish across two budgets', async () => {
+    const store = createWebvhHostStore({ maxEntriesPerClient: 2 });
+    await put(store, 'd/u/alice/did.jsonl', 'A');
+    await put(store, 'd/u/alice/resources/r1', 'A');
+    // Same visitor, rotated egress address, revising her own log.
+    await put(store, 'd/u/alice/did.jsonl', 'B');
+
+    // …then the ORIGINAL identity fills its budget.
+    const written = [...alice, 'd/u/other/did.jsonl', 'd/u/other/cel.json'];
+    await put(store, 'd/u/other/did.jsonl', 'A');
+    await put(store, 'd/u/other/cel.json', 'A');
+
+    expect(orphanedResources(store, written)).toEqual([]);
+    // Whichever way it went, the publish shared one fate.
+    expect(hit(store, 'd/u/alice/resources/r1')).toBe(hit(store, 'd/u/alice/did.jsonl'));
+  });
+
+  test('…and the same holds when the SECOND identity is the one that floods', async () => {
+    const store = createWebvhHostStore({ maxEntriesPerClient: 2 });
+    await put(store, 'd/u/alice/did.jsonl', 'A');
+    await put(store, 'd/u/alice/resources/r1', 'A');
+    await put(store, 'd/u/alice/did.jsonl', 'B');
+
+    const written = [...alice, 'd/u/bob/did.jsonl', 'd/u/bob/cel.json'];
+    await put(store, 'd/u/bob/did.jsonl', 'B');
+    await put(store, 'd/u/bob/cel.json', 'B');
+
+    expect(orphanedResources(store, written)).toEqual([]);
+    expect(hit(store, 'd/u/alice/resources/r1')).toBe(hit(store, 'd/u/alice/did.jsonl'));
+  });
+
+  test('no eviction sequence leaves a resolvable log pointing at gone bytes', async () => {
+    const store = createWebvhHostStore({ maxEntriesPerClient: 6 });
+    const written: string[] = [];
+    const ips = ['A', 'B', 'C'];
+    for (const [p, ip] of ips.entries()) {
+      const members = [
+        `d/u/p${p}/did.jsonl`,
+        `d/u/p${p}/cel.json`,
+        `d/u/p${p}/resources/r${p}a`,
+        `d/u/p${p}/resources/r${p}b`,
+      ];
+      written.push(...members);
+      for (const k of members) await put(store, k, ip);
+      // The log alone is revised after an address rotation — the shape that used
+      // to leave the log on one budget and its resources on another.
+      await put(store, `d/u/p${p}/did.jsonl`, 'R');
+    }
+    // Every original identity then keeps working until its own budget evicts.
+    for (const ip of ips) {
+      for (let j = 0; j < 5; j++) await put(store, `d/u/${ip}extra${j}/did.jsonl`, ip);
+    }
+
+    expect(orphanedResources(store, written)).toEqual([]);
+  });
+});

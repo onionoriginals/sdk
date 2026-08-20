@@ -298,6 +298,14 @@
   border-radius: 8px;
 }
 
+/* A step in flight is disabled (FR2 — one run at a time, so a double-click
+   cannot broadcast twice), but it is working rather than refusing: keep the
+   spinner and its label legible, and cue waiting instead of rejection. */
+.demo-step-btn[data-busy][disabled] {
+  opacity: 0.72;
+  cursor: progress;
+}
+
 /* ── Simulated tier (R6) ──────────────────────────────────────────────────
    The anonymous inscribe step is completable, so "disabled + greyed out" is
    no longer available as the at-a-glance signal that it is not real Bitcoin.

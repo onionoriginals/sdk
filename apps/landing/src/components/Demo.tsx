@@ -291,6 +291,31 @@ export function depositDisclosure(): string[] {
 /** What the deposit badge should say — read off the SUM, never one output. */
 export type DepositReadiness = 'waiting' | 'detected' | 'ready' | 'unspendable';
 
+/**
+ * The badge for a deposit block. Split out so the readiness is computed once
+ * per render and the four states read as a table rather than a nested ternary.
+ */
+export function depositBadgeLabel(
+  readiness: ReturnType<typeof depositReadiness>,
+  copy: {
+    ordinalCheckBadge: string;
+    ready: string;
+    detected: string;
+    waiting: string;
+  }
+): string {
+  switch (readiness) {
+    case 'unspendable':
+      return copy.ordinalCheckBadge;
+    case 'ready':
+      return copy.ready;
+    case 'detected':
+      return copy.detected;
+    default:
+      return copy.waiting;
+  }
+}
+
 export function depositReadiness(info: DepositInfo | null): DepositReadiness {
   if (!info) return 'waiting';
   if (info.ordinalCheck === 'unavailable') return 'unspendable';
@@ -313,54 +338,87 @@ export function depositShortfallMessage(heldSats: number, shortfallSats: number)
   );
 }
 
-/**
- * Map a failed /api/btc/deposit response onto creator-facing copy (R3/R28).
- * Each named server error is its OWN state, because the route serves nothing
- * derived from a read it could not trust: no address, no UTXOs, no quote. The
- * UI must say which of those it is rather than sit on "checking…" forever, or
- * — worse — keep the last quote on screen as though it were current.
- */
-export function depositErrorMessage(body: unknown): string | null {
-  const error = (body as { error?: unknown } | null | undefined)?.error;
-  switch (error) {
-    case 'fee_estimate_unavailable':
-      return demo.deposit.feeUnavailable;
-    case 'utxo_lookup_failed':
-      return demo.deposit.indexerUnavailable;
-    // A budget, not an outage — ours or theirs, it reads the same to a creator.
-    case 'indexer_rate_limited':
-    case 'deposit_user_cap':
-      return demo.deposit.indexerBusy;
-    // The bindings file is the whole of "this address is yours" — an
-    // unreadable one shows no address rather than silently rebinding.
-    case 'deposit_binding_unreadable':
-      return demo.deposit.bindingUnreadable;
-    default:
-      return null;
-  }
+/** What a failed /api/btc/deposit response says, in the two places it says it. */
+export interface DepositErrorCopy {
+  /** The body copy under the heading. */
+  message: string;
+  /**
+   * The one-line badge beside it. Separate from the body because the badge is
+   * what a creator reads at a glance — labelling an indexer outage "Fee
+   * estimate unavailable" names the wrong system, and which system is down is
+   * exactly what decides whether they wait or act.
+   */
+  badge: string;
 }
 
 /**
- * The one-line badge beside the deposit heading. Separate from the body copy
- * because the badge is the thing a creator reads at a glance — labelling an
- * indexer outage "Fee estimate unavailable" would name the wrong system, and
- * "which system is down" is exactly what decides whether they wait or act.
+ * Every failed /api/btc/deposit response, message and badge together (R3/R28).
+ *
+ * ONE table rather than two parallel switches: the badge switch and the message
+ * switch were hand-maintained over the same code set, so a default arm existed
+ * in two places and the two could — and did — disagree about which codes were
+ * covered. Each named error is its own state, because the route serves nothing
+ * derived from a read it could not trust: no address, no UTXOs, no quote.
  */
-export function depositErrorBadge(body: unknown): string | null {
+const DEPOSIT_ERROR_COPY: Record<string, DepositErrorCopy> = {
+  fee_estimate_unavailable: {
+    message: demo.deposit.feeUnavailable,
+    badge: demo.deposit.unavailableBadge,
+  },
+  utxo_lookup_failed: {
+    message: demo.deposit.indexerUnavailable,
+    badge: demo.deposit.readUnavailableBadge,
+  },
+  // The deposit reader is not mounted / not answering: same creator-facing
+  // truth as a failed lookup — we cannot read the address right now.
+  deposit_unavailable: {
+    message: demo.deposit.indexerUnavailable,
+    badge: demo.deposit.readUnavailableBadge,
+  },
+  // A budget, not an outage — ours or theirs, it reads the same to a creator.
+  // `rate_limited` is the SHARED client bucket and by far the most reachable of
+  // the three; it was the one the old switch left unmapped.
+  indexer_rate_limited: { message: demo.deposit.indexerBusy, badge: demo.deposit.readBusyBadge },
+  deposit_user_cap: { message: demo.deposit.indexerBusy, badge: demo.deposit.readBusyBadge },
+  rate_limited: { message: demo.deposit.indexerBusy, badge: demo.deposit.readBusyBadge },
+  user_quota_cap: { message: demo.deposit.indexerBusy, badge: demo.deposit.readBusyBadge },
+  // The bindings file is the whole of "this address is yours" — an unreadable
+  // one, or one naming a different address, shows NO address either way.
+  deposit_binding_unreadable: {
+    message: demo.deposit.bindingUnreadable,
+    badge: demo.deposit.bindingBadge,
+  },
+  address_not_bound: { message: demo.deposit.addressNotBound, badge: demo.deposit.bindingBadge },
+  // The 7-day cookie ran out under an open tab.
+  unauthorized: { message: demo.deposit.signedOut, badge: demo.deposit.signedOutBadge },
+};
+
+/**
+ * The default arm, in exactly one place. It is a MESSAGE, not null: the caller
+ * purges the last address and quote on the strength of this being set, so a
+ * silent default is what kept a stale "ready to inscribe" on screen through a
+ * 429, a 401, or a proxy 502 whose HTML body parsed to null.
+ */
+const UNKNOWN_DEPOSIT_ERROR: DepositErrorCopy = {
+  message: demo.deposit.unknownError,
+  badge: demo.deposit.unknownBadge,
+};
+
+export function depositErrorCopy(body: unknown): DepositErrorCopy {
   const error = (body as { error?: unknown } | null | undefined)?.error;
-  switch (error) {
-    case 'fee_estimate_unavailable':
-      return demo.deposit.unavailableBadge;
-    case 'utxo_lookup_failed':
-      return demo.deposit.readUnavailableBadge;
-    case 'indexer_rate_limited':
-    case 'deposit_user_cap':
-      return demo.deposit.readBusyBadge;
-    case 'deposit_binding_unreadable':
-      return demo.deposit.bindingBadge;
-    default:
-      return null;
-  }
+  // hasOwn, not a bare index: `{"error":"constructor"}` would otherwise hit
+  // Object.prototype and return a "copy" whose message is undefined.
+  return typeof error === 'string' && Object.hasOwn(DEPOSIT_ERROR_COPY, error)
+    ? DEPOSIT_ERROR_COPY[error]
+    : UNKNOWN_DEPOSIT_ERROR;
+}
+
+export function depositErrorMessage(body: unknown): string {
+  return depositErrorCopy(body).message;
+}
+
+export function depositErrorBadge(body: unknown): string {
+  return depositErrorCopy(body).badge;
 }
 
 /**
@@ -392,6 +450,61 @@ export function demoFailureMessage(err: unknown): string {
     return demo.hosting.unavailable;
   }
   return demo.failure;
+}
+
+/**
+ * One demo run at a time (FR2).
+ *
+ * The inscribe step spends real BTC and takes seconds, during which the button
+ * stayed clickable. Two concurrent runs each fetch deposit state and select
+ * funding from the same still-unspent UTXOs, so both can pick the SAME
+ * outpoints and broadcast conflicting commits — and whichever settles last
+ * wins the rendered state, so a failing second attempt can overwrite a
+ * successful first. A ref (not state) because the second click arrives in the
+ * same tick, before any re-render could disable anything.
+ *
+ * The gate reopens in `finally`, including on failure: a stuck gate would
+ * strand the step with no way to retry.
+ */
+export async function runExclusive(
+  gate: { current: boolean },
+  action: () => Promise<void>
+): Promise<'ran' | 'skipped'> {
+  if (gate.current) return 'skipped';
+  gate.current = true;
+  try {
+    await action();
+    return 'ran';
+  } finally {
+    gate.current = false;
+  }
+}
+
+/** Rendered state of one pipeline step. 'done' renders no button at all. */
+export type StepState = 'done' | 'busy' | 'ready' | 'locked';
+
+/**
+ * Whether a step's button is dead. `busy` is disabled — the previous
+ * expression (`state !== 'ready' && state !== 'busy'`) deliberately left it
+ * live, which is half of the double-click above; `runExclusive` is the other
+ * half, for every surface a run can start from.
+ */
+export function stepButtonDisabled(opts: {
+  index: number;
+  state: StepState;
+  titleEmpty: boolean;
+  pendingRevision: boolean;
+  updating: boolean;
+  /** Any run in flight anywhere — a revision blocks the pipeline too. */
+  anyRunning?: boolean;
+}): boolean {
+  if (opts.state !== 'ready') return true;
+  if (opts.anyRunning) return true;
+  if (opts.index === 0) return opts.titleEmpty;
+  // Publishing while the preview shows bytes nothing signed would publish
+  // something other than what is on screen.
+  if (opts.index === 1) return opts.pendingRevision || opts.updating;
+  return false;
 }
 
 // Revising is deliberately NOT a phase: it is authorship AT the current layer,
@@ -507,24 +620,29 @@ export function Demo() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [celLog.length]);
 
+  // FR2: a second invocation is a no-op regardless of which surface fired it —
+  // the money button, the revise button, or a double-click on either.
+  const runningRef = useRef(false);
   const run = async (
     from: Phase,
     working: Phase,
     done: Phase,
     action: (engine: DemoEngine) => Promise<DemoAssetState>
   ) => {
-    setError(null);
-    setPhase(working);
-    try {
-      const engine = await getEngine();
-      const state = await action(engine);
-      setAsset(state);
-      setPhase(done);
-    } catch (err) {
-      console.error('[originals-demo]', err);
-      setError(demoFailureMessage(err));
-      setPhase(from);
-    }
+    await runExclusive(runningRef, async () => {
+      setError(null);
+      setPhase(working);
+      try {
+        const engine = await getEngine();
+        const state = await action(engine);
+        setAsset(state);
+        setPhase(done);
+      } catch (err) {
+        console.error('[originals-demo]', err);
+        setError(demoFailureMessage(err));
+        setPhase(from);
+      }
+    });
   };
 
   const create = () =>
@@ -535,18 +653,22 @@ export function Demo() {
     });
   // Revising leaves `phase` alone — the asset stays exactly where it was.
   const update = async () => {
-    setError(null);
-    setUpdating(true);
-    try {
-      const engine = await getEngine();
-      setAsset(await engine.update(title.trim() || demo.form.defaultTitle, medium, artwork.svg));
-      setCommitted({ title, medium, nonce });
-    } catch (err) {
-      console.error('[originals-demo]', err);
-      setError(demoFailureMessage(err));
-    } finally {
-      setUpdating(false);
-    }
+    // Same gate as the pipeline steps: a revision and a publish must not both
+    // be appending to the log at once.
+    await runExclusive(runningRef, async () => {
+      setError(null);
+      setUpdating(true);
+      try {
+        const engine = await getEngine();
+        setAsset(await engine.update(title.trim() || demo.form.defaultTitle, medium, artwork.svg));
+        setCommitted({ title, medium, nonce });
+      } catch (err) {
+        console.error('[originals-demo]', err);
+        setError(demoFailureMessage(err));
+      } finally {
+        setUpdating(false);
+      }
+    });
   };
   const publish = () =>
     run('created', 'publishing', 'published', (engine) => engine.publish());
@@ -583,8 +705,10 @@ export function Demo() {
   // fallback message ("send BTC and wait for a confirmation") is the wrong
   // advice when the real problem is that we cannot price the fee at all.
   const depositErrorRef = useRef<string | null>(null);
-  // Which system is down, in badge form — see depositErrorBadge.
+  // Which system is down, in badge form — see depositErrorCopy.
   const [depositBadge, setDepositBadge] = useState<string | null>(null);
+  // Computed once per render: the badge below reads it four times.
+  const readiness = depositReadiness(deposit);
   const fetchDeposit = useCallback(async (): Promise<DepositInfo | null> => {
     if (!bitcoin) return null;
     const res = await fetch(
@@ -593,13 +717,15 @@ export function Demo() {
     );
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      const message = depositErrorMessage(body);
-      depositErrorRef.current = message;
-      setDepositError(message);
-      setDepositBadge(depositErrorBadge(body));
-      // Fee source down: drop the last quote too. A stale number is exactly
-      // the "misled about what you can lose" case (R3).
-      if (message) setDeposit(null);
+      const copy = depositErrorCopy(body);
+      depositErrorRef.current = copy.message;
+      setDepositError(copy.message);
+      setDepositBadge(copy.badge);
+      // UNCONDITIONAL: whatever went wrong, the last address and quote are no
+      // longer things we can stand behind. Keeping them is exactly the "misled
+      // about what you can lose" case (R3), and gating the purge on a mapped
+      // message is what let an unmapped 429 leave a green badge on screen.
+      setDeposit(null);
       return null;
     }
     depositErrorRef.current = null;
@@ -882,14 +1008,14 @@ export function Demo() {
                             <button
                               type="button"
                               className={i === 2 ? inscribeView.buttonClass : 'btn btn-primary demo-step-btn'}
-                              disabled={
-                                (state !== 'ready' && state !== 'busy') ||
-                                (i === 0 && title.trim().length === 0) ||
-                                // Publishing an asset while the preview shows
-                                // bytes nothing signed would publish something
-                                // other than what's on screen.
-                                (i === 1 && (pendingRevision || updating))
-                              }
+                              disabled={stepButtonDisabled({
+                                index: i,
+                                state,
+                                titleEmpty: title.trim().length === 0,
+                                pendingRevision,
+                                updating,
+                                anyRunning: busy,
+                              })}
                               data-busy={state === 'busy' || undefined}
                               onClick={stepActions[i]}
                             >
@@ -980,17 +1106,11 @@ export function Demo() {
                         <strong>{demo.deposit.heading}</strong>
                         <span
                           className="demo-resolved-badge"
-                          data-ok={depositReadiness(deposit) === 'ready' || undefined}
+                          data-ok={readiness === 'ready' || undefined}
                         >
                           {depositError
-                            ? depositBadge ?? demo.deposit.unavailableBadge
-                            : depositReadiness(deposit) === 'unspendable'
-                              ? demo.deposit.ordinalCheckBadge
-                              : depositReadiness(deposit) === 'ready'
-                                ? demo.deposit.ready
-                                : depositReadiness(deposit) === 'detected'
-                                  ? demo.deposit.detected
-                                  : demo.deposit.waiting}
+                            ? depositBadge ?? demo.deposit.unknownBadge
+                            : depositBadgeLabel(readiness, demo.deposit)}
                         </span>
                       </div>
                       {deposit && (

@@ -89,7 +89,18 @@ export function Nav() {
                 <span className="nav-email-dot" aria-hidden="true" />
                 {user!.email}
               </span>
-              <button className="nav-signout" onClick={() => signOut()}>{nav.signOut}</button>
+              {/* Gated on a refresh in flight: the creator may have BTC at a
+                  deposit address for the in-flight Original, and signing out
+                  resets the demo out from under it. signOut() guards this too,
+                  for every other surface. */}
+              <button
+                className="nav-signout"
+                disabled={reauth.active}
+                title={reauth.active ? nav.signOutBlocked : undefined}
+                onClick={() => signOut()}
+              >
+                {nav.signOut}
+              </button>
             </div>
           ) : (
             <>

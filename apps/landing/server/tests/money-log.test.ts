@@ -333,8 +333,9 @@ describe('the periodic balance sweep (R29)', () => {
     // The store shares the sweep's clock: `lastReadAt` is what the drop-out
     // rule is measured against, so a store stamping real time would make the
     // aging test meaningless.
+    const dataDir = mkdtempSync(join(tmpdir(), 'sweep-'));
     const store = createInscriptionsStore({
-      dataDir: mkdtempSync(join(tmpdir(), 'sweep-')),
+      dataDir,
       ...(opts.now ? { now: opts.now } : {}),
     });
     const fetchImpl = (async (url: string) => {
@@ -356,7 +357,7 @@ describe('the periodic balance sweep (R29)', () => {
       maxPerPass: opts.maxPerPass,
       now: opts.now,
     });
-    return { sweep, store, cap };
+    return { sweep, store, cap, dataDir };
   }
 
   test('reports a nonzero count when a bound address still holds a confirmed balance', async () => {
@@ -454,5 +455,45 @@ describe('the periodic balance sweep (R29)', () => {
     const out = await sweep();
     expect(out.unreadable).toBe(1);
     expect(out.withBalance).toBe(1);
+  });
+
+  /**
+   * R1 — `Number('fifty')` is NaN, NaN is not nullish so `?? 50` never fires,
+   * and `slice(0, NaN)` is `[]`: every pass scans ZERO addresses forever while
+   * the roll-up still logs a healthy-looking heartbeat. This is the only
+   * instrument that ever sees a stranger's funds sitting at an address nobody
+   * polls, so it must refuse a malformed cap rather than silently disable.
+   */
+  test('a non-numeric per-pass cap falls back to the default instead of disabling the sweep', async () => {
+    const { sweep, store, cap } = sweepHarness({
+      balances: { [ADDRESS]: 40_000 },
+      maxPerPass: Number('fifty'),
+    });
+    store.bindDepositAddress('sub-1', 'mainnet', ADDRESS);
+    const out = await sweep();
+    expect(out.scanned).toBe(1);
+    expect(out.withBalance).toBe(1);
+    expect(cap.of('deposit_balance_sweep')[0].maxPerPass).toBe(50);
+  });
+
+  /**
+   * R4 — an unreadable bindings file removes that user's deposit address from
+   * the only cross-user scan there is. Keeping the pass alive is right;
+   * dropping the user silently is not.
+   */
+  test('a bindings file the scan could not read is named in the money log', async () => {
+    const { sweep, store, cap, dataDir } = sweepHarness({ balances: { [ADDRESS]: 40_000 } });
+    store.bindDepositAddress('sub-1', 'mainnet', ADDRESS);
+    store.bindDepositAddress('sub-torn', 'mainnet', OTHER_ADDRESS);
+    writeFileSync(join(dataDir, 'deposits', 'sub-torn.json'), 'not json');
+
+    const out = await sweep();
+    expect(out.scanned).toBe(1); // the readable user is still swept
+    const failed = cap.of('deposit_read_failed');
+    expect(failed).toHaveLength(1);
+    expect(failed[0].sub).toBe('sub-torn');
+    expect(failed[0].reason).toBe('bindings_unreadable');
+    // And the roll-up counts it, so the heartbeat cannot look healthy.
+    expect(cap.of('deposit_balance_sweep')[0].unreadableBindings).toBe(1);
   });
 });

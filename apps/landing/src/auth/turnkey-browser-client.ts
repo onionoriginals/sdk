@@ -45,8 +45,23 @@ function indexedDbClient(subOrgId: string): Promise<TurnkeyIndexedDbClient> {
  * key regardless of which client instance issues it.
  */
 export async function openSessionKey(subOrgId = ''): Promise<SessionKeyHandle> {
+  return handleFor(subOrgId, { reset: false });
+}
+
+/** Mint a FRESH non-extractable key, discarding any key this browser held. */
+export async function resetSessionKey(subOrgId = ''): Promise<SessionKeyHandle> {
+  return handleFor(subOrgId, { reset: true });
+}
+
+/**
+ * Open the IndexedDB client and wrap it as a handle. The two exported entry
+ * points differ only in whether the existing key is discarded first; keeping
+ * one body means the signer shape cannot drift between them.
+ */
+async function handleFor(subOrgId: string, opts: { reset: boolean }): Promise<SessionKeyHandle> {
   const client = await indexedDbClient(subOrgId);
   await client.init();
+  if (opts.reset) await client.resetKeyPair();
   const publicKeyHex = await client.getPublicKey();
   if (!publicKeyHex) throw new Error('Could not open a browser signing key.');
   return {
@@ -57,20 +72,6 @@ export async function openSessionKey(subOrgId = ''): Promise<SessionKeyHandle> {
       // re-encodes IEEE-P1363 → DER; the private key is never materialised.
       sign: (message: string) => client.sign(message),
     },
-    clear: () => client.clear(),
-  };
-}
-
-/** Mint a FRESH non-extractable key, discarding any key this browser held. */
-export async function resetSessionKey(subOrgId = ''): Promise<SessionKeyHandle> {
-  const client = await indexedDbClient(subOrgId);
-  await client.init();
-  await client.resetKeyPair();
-  const publicKeyHex = await client.getPublicKey();
-  if (!publicKeyHex) throw new Error('Could not open a browser signing key.');
-  return {
-    client,
-    signer: { publicKeyHex, sign: (message: string) => client.sign(message) },
     clear: () => client.clear(),
   };
 }

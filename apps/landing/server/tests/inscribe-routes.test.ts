@@ -5,7 +5,7 @@
  * completes from server state via rebroadcast.
  */
 import { describe, test, expect } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as btc from '@scure/btc-signer';
@@ -125,6 +125,8 @@ function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1')
 function harness(opts?: {
   broadcast?: (txHex: string) => Promise<string>;
   txStatus?: { confirmed: boolean } | ((txid: string) => { confirmed: boolean });
+  /** Resolve the status lookup on a LATER macrotask — the concurrency window. */
+  txStatusDelayMs?: number;
 }) {
   const broadcasts: string[] = [];
   const provider = {
@@ -138,20 +140,24 @@ function harness(opts?: {
       return 'f'.repeat(64);
     },
     async getTransactionStatus(txid: string) {
+      if (opts?.txStatusDelayMs !== undefined) {
+        await new Promise((r) => setTimeout(r, opts.txStatusDelayMs));
+      }
       if (typeof opts?.txStatus === 'function') return opts.txStatus(txid);
       if (opts?.txStatus) return opts.txStatus;
       return { confirmed: false };
     },
     async estimateFee() { return 3; },
   } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
-  const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'insc-')) });
+  const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
+  const store = createInscriptionsStore({ dataDir });
   const routes = createBitcoinRoutes({
     jwtSecret: JWT,
     provider,
     faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
     inscriptions: store,
   });
-  return { routes, store, broadcasts };
+  return { routes, store, broadcasts, dataDir };
 }
 
 async function post(routes: ReturnType<typeof harness>['routes'], body: unknown) {
@@ -828,6 +834,105 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
     expect(((await res.json()) as { status: string }).status).toBe('confirmed');
     expect(h.broadcasts.length).toBe(before); // nothing rebroadcast
   });
+
+  /**
+   * F1 — the terminal deadlock. A commit that broadcast fine can still be
+   * EVICTED from every mempool by a fee spike, and with no reveal child there
+   * is no CPFP to pull it back. It will never confirm, so the list poll's
+   * liveStuck pass (gated on a confirmed commit) never fires, and the reveal
+   * is rejected for missing inputs forever. Without re-pushing the commit the
+   * creator's confirmed UTXO is unusable through the app for good.
+   */
+  test('a commit evicted from the mempool is RE-PUSHED before the reveal retry', async () => {
+    const pair = buildPair();
+    let commitInMempool = false;
+    let failReveal = true;
+    const h = harness({
+      broadcast: async (txHex) => {
+        if (txHex === pair.signedCommitHex) {
+          commitInMempool = true;
+          return 'f'.repeat(64);
+        }
+        if (txHex === pair.revealTxHex) {
+          if (failReveal) throw new Error('connection reset');
+          if (!commitInMempool) throw new Error('bad-txns-inputs-missingorspent');
+        }
+        return 'f'.repeat(64);
+      },
+    });
+    // Commit lands; the reveal push fails on a provider hiccup.
+    const res = await post(h.routes, pair);
+    expect(((await res.json()) as { status: string }).status).toBe('commit_broadcast');
+    // A fee spike evicts the lone, childless commit.
+    commitInMempool = false;
+    failReveal = false;
+
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res2 = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res2.status).toBe(200);
+    expect(((await res2.json()) as { status: string }).status).toBe('reveal_broadcast');
+    expect(h.store.get('sub-1', pair.commitTxId)!.status).toBe('reveal_broadcast');
+    // The commit went out a SECOND time — that is what un-bricks the UTXO.
+    expect(h.broadcasts.filter((x) => x === pair.signedCommitHex)).toHaveLength(2);
+  });
+
+  test('a reveal rejected for an unrelated reason does NOT re-push the commit', async () => {
+    const pair = buildPair();
+    let failReveal = true;
+    const h = harness({
+      broadcast: async (txHex) => {
+        if (failReveal && txHex === pair.revealTxHex) throw new Error('connection reset');
+        return 'f'.repeat(64);
+      },
+    });
+    await post(h.routes, pair);
+    const before = h.broadcasts.filter((x) => x === pair.signedCommitHex).length;
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(((await res.json()) as { status: string }).status).toBe('commit_broadcast');
+    expect(h.broadcasts.filter((x) => x === pair.signedCommitHex)).toHaveLength(before);
+  });
+});
+
+/**
+ * R3 — one torn file must not turn every recovery endpoint into a bare,
+ * unnamed 500. The routes read the store outside any try/catch, and a 500 with
+ * no code and no money line is exactly the state where the automatic
+ * reconciliation that would complete a stranded reveal is dead for that user
+ * with nothing to tell the operator so.
+ */
+describe('an unreadable records file', () => {
+  function corrupt(h: ReturnType<typeof harness>) {
+    mkdirSync(join(h.dataDir, 'inscriptions'), { recursive: true });
+    writeFileSync(join(h.dataDir, 'inscriptions', 'sub-1.json'), '[{"commitTxId":');
+  }
+
+  test('the list route answers a NAMED 503, not an untyped 500', async () => {
+    const h = harness();
+    await post(h.routes, buildPair());
+    corrupt(h);
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const res = await h.routes.inscribeList(req, new URL(req.url));
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe('records_unreadable');
+  });
+
+  test('the rebroadcast route answers a NAMED 503, not an untyped 500', async () => {
+    const h = harness();
+    const pair = buildPair();
+    await post(h.routes, pair);
+    corrupt(h);
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe('records_unreadable');
+  });
+
+  test('the store REFUSES rather than reading a torn file as an empty list', () => {
+    const h = harness();
+    corrupt(h);
+    expect(() => h.store.list('sub-1')).toThrow(/RECORDS_UNREADABLE/);
+  });
 });
 
 describe('persist-before-broadcast is load-bearing', () => {
@@ -960,7 +1065,7 @@ describe('evicted-reveal recovery', () => {
   test('a stale reveal is surfaced to the monitoring sweep', () => {
     const h = harness();
     parked(h.store, 48 * 60 * 60_000);
-    expect(h.store.sweepStale(24 * 60 * 60_000).map((x) => x.status)).toEqual(['reveal_broadcast']);
+    expect(h.store.sweepStale(24 * 60 * 60_000).stale.map((x) => x.status)).toEqual(['reveal_broadcast']);
   });
 });
 
@@ -1127,6 +1232,78 @@ describe('POST /api/btc/inscribe — multi-input funding', () => {
     expect(store.get('sub-1', first.commitTxId)!.superseded).toBe(true);
     expect(store.get('sub-1', first.commitTxId)!.revealTxHex).toBe(first.revealTxHex);
     expect(store.findByOutpoint('sub-1', `${B.txid}:1`)!.commitTxId).toBe(rebuilt.commitTxId);
+  });
+
+  /**
+   * C4 — the safety property the supersede gate rests on is "the new commit
+   * conflicts with the old on EVERY input the old spends, so at most one can
+   * land". That holds for a strict superset too. Refusing it 409s a creator
+   * who must top up after a fee rise, permanently: nothing else ever frees a
+   * live `signed` record.
+   */
+  test('a rebuilt pair funding from a SUPERSET of a stuck record supersedes it', async () => {
+    const first = buildMultiPair([A]);
+    let failCommit = true;
+    const { routes, store } = harness({
+      broadcast: async (txHex) => {
+        if (failCommit && txHex === first.signedCommitHex) throw new Error('min relay fee not met');
+        return 'f'.repeat(64);
+      },
+    });
+    expect((await post(routes, first)).status).toBe(502);
+    expect(store.get('sub-1', first.commitTxId)!.status).toBe('signed');
+
+    // The fee rose: the rebuild has to pull in B as well.
+    const rebuilt = buildMultiPair([A, B]);
+    expect((await post(routes, rebuilt)).status).toBe(200);
+    const old = store.get('sub-1', first.commitTxId)!;
+    expect(old.superseded).toBe(true);
+    expect(old.revealTxHex).toBe(first.revealTxHex); // both reveals retained
+    expect(store.get('sub-1', rebuilt.commitTxId)!.revealTxHex).toBe(rebuilt.revealTxHex);
+    expect(store.findByOutpoint('sub-1', `${A.txid}:0`)!.commitTxId).toBe(rebuilt.commitTxId);
+  });
+
+  test('a rebuilt pair whose set merely OVERLAPS (neither superset nor equal) is still refused', async () => {
+    const first = buildMultiPair([A, B]);
+    const { routes } = harness({
+      broadcast: async (txHex) => {
+        if (txHex === first.signedCommitHex) throw new Error('min relay fee not met');
+        return 'f'.repeat(64);
+      },
+    });
+    expect((await post(routes, first)).status).toBe(502);
+    // {B, C} does not contain A — the two commits would not conflict on A, so
+    // both could land and one reveal would be stranded.
+    const res = await post(routes, buildMultiPair([B, C]));
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
+  });
+
+  /**
+   * C5/F2 — the rival set is read, then awaited on, then acted on. Two
+   * concurrent submissions both supersede the same rival off a STALE snapshot
+   * and both go live on one outpoint set. Money stays safe (the commits
+   * conflict) but every later submission then sees rivals.length > 1 and 409s
+   * with no supersede path, forever.
+   */
+  test('two concurrent rebuilds cannot both go live on one outpoint set', async () => {
+    const stuck = buildMultiPair([A], 21_000);
+    const one = buildMultiPair([A], 22_000);
+    const two = buildMultiPair([A], 23_000);
+    const { routes, store } = harness({
+      broadcast: async (txHex) => {
+        if (txHex === stuck.signedCommitHex) throw new Error('min relay fee not met');
+        return 'f'.repeat(64);
+      },
+      txStatusDelayMs: 5, // the window the stale read straddles
+    });
+    expect((await post(routes, stuck)).status).toBe(502);
+
+    const results = await Promise.all([post(routes, one), post(routes, two)]);
+    expect(results.some((r) => r.status === 200)).toBe(true);
+    // Exactly ONE live record claims the set — whichever lost either
+    // superseded the other or was refused; neither leaves two live rivals.
+    expect(store.findByOutpoints('sub-1', [`${A.txid}:0`])).toHaveLength(1);
   });
 
   test('a rebuilt pair over the same set does NOT supersede once the first pair is broadcast', async () => {

@@ -13,14 +13,25 @@
  * everyone until the TTL drained it. Two properties make eviction safe on a
  * route that is unauthenticated with client-chosen keys:
  *
- *   1. The budget is PER WRITER. Plain global LRU would hand an attacker an
- *      eviction primitive — flood, and other visitors' published logs are the
- *      ones deleted. A flooding client only ever evicts its own entries.
- *   2. The unit is a PUBLISH GROUP, not an object. One publish writes several
- *      objects that only mean anything together (did.jsonl + cel.json + the
- *      resource bytes the resolver fetches). Evicting one member would turn an
- *      honest write-time refusal into a silently unresolvable DID at read time.
- *      Groups go whole, so a surviving log never points at bytes that are gone.
+ *   1. The budget is PER WRITER. Plain global LRU as the FIRST line would hand
+ *      an attacker a cheap eviction primitive — flood, and other visitors'
+ *      published logs are the ones deleted. A flooding client spends its own
+ *      budget and evicts its own entries. Above that budget there is still a
+ *      process-wide entry/byte ceiling, and reaching it DOES evict the
+ *      least-recently-active other client's group (dropGlobalLru): a real
+ *      memory bound on a single-instance server, and one that takes many
+ *      distinct client identities to reach, not one flooding socket.
+ *   2. The unit is a PUBLISH GROUP, not an object — for OWNERSHIP as well as
+ *      for eviction. One publish writes several objects that only mean anything
+ *      together (did.jsonl + cel.json + the resource bytes the resolver
+ *      fetches). Evicting one member would turn an honest write-time refusal
+ *      into a silently unresolvable DID at read time. So a group is charged to
+ *      one budget for its whole life (R5): a revision arriving from a second
+ *      identity — a visitor on mobile or IPv6 whose egress address rotated
+ *      between publish and revision — joins the group's existing owner instead
+ *      of re-parenting that one key, which used to split a publish across two
+ *      budgets whose halves then evicted independently. Groups go whole, so a
+ *      surviving log never points at bytes that are gone.
  *
  * Recency is tracked on READS as well as writes, which makes read() and serve()
  * mutate the bookkeeping maps — deliberate, so a log someone is actively
@@ -33,9 +44,9 @@ interface Entry {
   body: Uint8Array;
   contentType: string;
   expiresAt: number;
-  /** The client identity that last wrote this key — whose budget it charges. */
+  /** The owner of this object's group — whose budget it charges. See groupOwners. */
   client: string;
-  /** The publish this object belongs to; the unit eviction operates on. */
+  /** The publish this object belongs to; the unit ownership and eviction operate on. */
   group: string;
 }
 
@@ -119,6 +130,10 @@ export function createWebvhHostStore(opts?: {
   // are held in ACCESS order (re-insert on touch), so iteration order is
   // least-recently-used first and `.keys().next()` is the eviction victim.
   const clients = new Map<string, Map<string, Set<string>>>();
+  // group → the client identity that budget-owns it, for the group's whole life.
+  // Ownership is per GROUP, not per key: charging an overwrite to whoever sent it
+  // would split one publish across two budgets (R5).
+  const groupOwners = new Map<string, string>();
   let totalBytes = 0;
 
   function groupsOf(client: string): Map<string, Set<string>> {
@@ -158,7 +173,10 @@ export function createWebvhHostStore(opts?: {
     const keys = groups?.get(entry.group);
     if (!keys) return;
     keys.delete(key);
-    if (keys.size === 0) groups!.delete(entry.group);
+    if (keys.size === 0) {
+      groups!.delete(entry.group);
+      groupOwners.delete(entry.group);
+    }
     if (groups!.size === 0) clients.delete(entry.client);
   }
 
@@ -212,24 +230,28 @@ export function createWebvhHostStore(opts?: {
 
     sweep();
 
-    // An overwrite re-parents the key onto the new writer, so the budget always
-    // matches who is actually holding the bytes. Not a new exposure: the route
-    // is unauthenticated with client-chosen keys, so anyone could already
+    const group = publishGroupOf(key);
+    // The write is charged to the GROUP's owner, not to whoever sent it, so a
+    // publish revised from a rotated address stays on one budget and evicts
+    // whole. A first writer claims the group. Not a new exposure either way: the
+    // route is unauthenticated with client-chosen keys, so anyone could already
     // replace anyone's bytes — did:webvh logs are self-certifying and fail
     // verification if they do.
+    const owner = groupOwners.get(group) ?? clientIp;
+
     forget(key);
 
-    const group = publishGroupOf(key);
     // Claim the slot and mark it most-recently-used, so the group being written
-    // is only ever its own victim when it is this client's ONLY group.
+    // is only ever its own victim when it is the owner's ONLY group.
     const claim = (): Map<string, Set<string>> => {
-      const groups = groupsOf(clientIp);
+      const groups = groupsOf(owner);
       if (!groups.has(group)) groups.set(group, new Set());
-      touch(clientIp, group);
+      groupOwners.set(group, owner);
+      touch(owner, group);
       return groups;
     };
 
-    // Per-writer budget: evict this client's own LRU groups until the write
+    // Per-writer budget: evict the owner's own LRU groups until the write
     // fits. A single publish larger than the cap ends up as the only group and
     // restarts itself whole — mangling the flooder's own publish, never a
     // neighbour's, and never leaving a half-publish behind.
@@ -237,7 +259,7 @@ export function createWebvhHostStore(opts?: {
     while (entryCount(groups) + 1 > perClientCap) {
       const victim = groups.keys().next().value as string | undefined;
       if (victim === undefined) break;
-      const dropped = dropGroup(clientIp, victim);
+      const dropped = dropGroup(owner, victim);
       groups = claim();
       if (dropped === 0) break;
     }
@@ -247,22 +269,22 @@ export function createWebvhHostStore(opts?: {
       body,
       contentType: req.headers.get('content-type') ?? 'application/octet-stream',
       expiresAt: now() + ttlMs,
-      client: clientIp,
+      client: owner,
       group,
     });
     totalBytes += body.byteLength;
-    touch(clientIp, group);
+    touch(owner, group);
 
     // Process-wide ceilings. Reaching these takes many distinct client
     // identities (the per-writer budget stops a single one), and the victim is
     // the least-recently-active client's oldest publish — never the write that
     // just arrived.
     while (map.size > maxEntries || totalBytes > maxTotalBytes) {
-      if (!dropGlobalLru({ client: clientIp, group })) break;
+      if (!dropGlobalLru({ client: owner, group })) break;
     }
     while (clients.size > maxClients) {
       const victim = clients.keys().next().value;
-      if (victim === undefined || victim === clientIp) break;
+      if (victim === undefined || victim === owner) break;
       for (const g of [...clients.get(victim)!.keys()]) dropGroup(victim, g);
       clients.delete(victim);
     }

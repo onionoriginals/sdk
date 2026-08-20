@@ -13,6 +13,7 @@ import {
   AuthorshipKeyError,
   BACKUP_FORMAT,
   PBKDF2_ITERATIONS,
+  PBKDF2_MAX_ITERATIONS,
   acknowledgeKeyLoss,
   backupFileName,
   classifyRestore,
@@ -304,3 +305,62 @@ function safeParse(text: string): unknown {
     return text;
   }
 }
+
+/**
+ * SEC-6 — the KDF cost is attacker-controlled input on the restore path, and
+ * the restore path is reached by someone who has already lost a key. A floor
+ * without a ceiling turns a hostile backup file into a hung tab.
+ */
+describe('SEC-6 — PBKDF2 iterations are bounded on both sides', () => {
+  const wellFormed = () => ({
+    format: BACKUP_FORMAT,
+    version: 1,
+    kdf: { name: 'PBKDF2' as const, hash: 'SHA-256' as const, iterations: PBKDF2_ITERATIONS, salt: 'AAAA' },
+    cipher: { name: 'AES-GCM' as const, iv: 'AAAA' },
+    ciphertext: 'AAAA',
+  });
+
+  test('a hostile iteration count is rejected as a malformed backup, never fed to deriveKey', async () => {
+    const file = { ...wellFormed(), kdf: { ...wellFormed().kdf, iterations: 2_000_000_000 } };
+    await expect(decryptAuthorshipKey(file, PASSPHRASE)).rejects.toMatchObject({
+      code: 'malformed-backup',
+    });
+  });
+
+  test('the ceiling sits well above what this code writes, so our own backups still restore', () => {
+    expect(PBKDF2_MAX_ITERATIONS).toBeGreaterThan(PBKDF2_ITERATIONS);
+  });
+
+  test('the floor is unchanged — a cheapened KDF is still refused', async () => {
+    const file = { ...wellFormed(), kdf: { ...wellFormed().kdf, iterations: 1_000 } };
+    await expect(decryptAuthorshipKey(file, PASSPHRASE)).rejects.toMatchObject({
+      code: 'malformed-backup',
+    });
+  });
+});
+
+/**
+ * Maintainability-3 — the function that MINTS the authorship seed used to
+ * default to raw `localStorage`, bypassing the null-safe guard every other
+ * key-material call site goes through. Where localStorage throws (Safari
+ * private mode, sandboxed iframe) that threw uncaught instead of degrading.
+ */
+describe('Maintainability-3 — the minting path takes storage explicitly', () => {
+  test('a browser with no usable storage gets a named refusal, not a raw TypeError', async () => {
+    // `browserKeyStorage()` returns null there; the caller passes it straight
+    // through, so this IS the hostile-storage path.
+    await expect(
+      createUserWebVHDid({
+        subOrgId: SUB_ORG,
+        email: 'creator@example.com',
+        storage: null as unknown as Storage,
+      })
+    ).rejects.toBeInstanceOf(AuthorshipKeyError);
+  });
+
+  test('webvh.ts reaches for no ambient localStorage of its own', async () => {
+    const source = await Bun.file(new URL('./webvh.ts', import.meta.url)).text();
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code).not.toContain('localStorage');
+  });
+});

@@ -29,6 +29,7 @@ import {
   quickNodeOrdinalLookup,
   cachedOrdinalLookup,
   createDepositBalanceSweep,
+  positiveInt,
   type FaucetProvider,
   type FaucetTxSigner,
   type OrdinalLookup,
@@ -46,7 +47,10 @@ import { checkConfig, isStrictConfig, resolveDataDir } from './server/config';
 const configIssues = checkConfig();
 
 const DIST = new URL('./dist/', import.meta.url).pathname;
-const port = Number(process.env.PORT ?? 3000);
+// Guarded parse, not `Number(x ?? default)`: NaN is not nullish, so a
+// malformed value would sail past the default and silently break the thing it
+// configures. checkConfig() above names any such value at boot.
+const port = positiveInt(process.env.PORT, 3000);
 const hostStore = createWebvhHostStore();
 // Durable Originals persist here. Without an explicit ORIGINALS_DATA_DIR the
 // store falls back to a path INSIDE the container/cwd — fine for dev, but on a
@@ -151,7 +155,7 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
         jwtSecret,
         provider: createFaucetProviderFromEnv(),
         faucet: { address: faucetAddress, signFundingTx },
-        faucetSats: Number(process.env.BTC_FAUCET_SATS ?? 20_000),
+        faucetSats: positiveInt(process.env.BTC_FAUCET_SATS, 20_000),
         network: 'testnet',
         indexer,
         ordinals,
@@ -182,6 +186,17 @@ const server = Bun.serve({
     distDir: DIST,
     originals: api?.originals ?? null,
   }),
+  // Last line of defence (R3): a handler that throws must not reach a client
+  // as an untyped 500 with nothing in the log. One named JSON body, one
+  // grep-able line — the operator has a single instrument, so anything that
+  // escapes a handler has to land in it.
+  error(err) {
+    console.error('[landing] unhandled request error', err);
+    return new Response(JSON.stringify({ error: 'internal_error' }), {
+      status: 500,
+      headers: { 'content-type': 'application/json' },
+    });
+  },
 });
 
 console.log(
@@ -208,15 +223,23 @@ if (api) {
     indexer,
     network: providerNetwork,
     moneyLog: money,
-    maxPerPass: Number(process.env.DEPOSIT_SWEEP_MAX_PER_PASS ?? 50),
+    maxPerPass: positiveInt(process.env.DEPOSIT_SWEEP_MAX_PER_PASS, 50),
   });
   const sweep = () => {
     try {
-      const stale = inscriptionsStore.sweepStale(24 * 60 * 60_000);
+      const { stale, unreadable } = inscriptionsStore.sweepStale(24 * 60 * 60_000);
       if (stale.length > 0) {
         console.warn(
           `[landing] ${stale.length} inscription(s) older than 24h still holding un-landed recovery artifacts:\n` +
             stale.map((s) => `  sub=${s.subOrgId} commit=${s.commitTxId} status=${s.status} createdAt=${s.createdAt}`).join('\n')
+        );
+      }
+      // LOUDER than a stale record, not quieter: that file holds the only copy
+      // of a signed reveal, and the sweep can no longer see this user at all.
+      if (unreadable.length > 0) {
+        console.warn(
+          `[landing] ${unreadable.length} inscription file(s) could NOT be parsed — those users are invisible to this sweep and their signed reveals may be unrecoverable:\n` +
+            unreadable.map((sub) => `  sub=${sub}`).join('\n')
         );
       }
     } catch (err) {

@@ -6,6 +6,7 @@
  */
 import { describe, test, expect } from 'bun:test';
 import { signingGate, signingGateMessage, identityTransition } from './Demo';
+import { signOutIntent } from '../auth/sign-out';
 import { demo } from '../content';
 
 describe('signingGate', () => {
@@ -64,16 +65,52 @@ describe('identityTransition — re-authentication must not destroy the in-fligh
     expect(identityTransition('authed:sub-1', 'anon', idle)).toBe('reset');
   });
 
-  test('a full sign-out-and-relogin re-auth cycle preserves the asset through both hops', () => {
+  /**
+   * FR1 — this used to claim a "full sign-out-and-relogin cycle preserves the
+   * asset", built from a hand-made input where `reauth.active` is still true at
+   * the moment the identity drops to anonymous. The real `signOut()` never
+   * produces that state: React batches its `setUser(null)` with
+   * `setReauth({active:false})`, so the identity effect sees anonymous AND an
+   * inactive re-auth in ONE render and takes the 'reset' branch. The suite was
+   * green on a path that could not happen.
+   *
+   * The remedy is the guard below, not a rewritten fold: sign-out no longer
+   * fires while a refresh is in flight. These two stay as defence in depth for
+   * any future path that does drop identity mid-refresh.
+   */
+  test('mid-refresh identity hops preserve the asset (defence in depth — signOut cannot reach them)', () => {
     const reauth = { active: true, from: 'authed:sub-1' };
-    // hop 1: signOut() drops the identity to anonymous.
     expect(identityTransition('authed:sub-1', 'anon', reauth)).toBe('preserve');
-    // hop 2: the same user comes back.
     expect(identityTransition('anon', 'authed:sub-1', reauth)).toBe('preserve');
+  });
+
+  test('the state React actually produces on sign-out — anonymous AND re-auth already cleared — resets', () => {
+    // Which is exactly why signOut() must not start from here mid-refresh.
+    expect(identityTransition('authed:sub-1', 'anon', idle)).toBe('reset');
   });
 
   test('coming back as a DIFFERENT account during re-auth resets — the Original is not theirs', () => {
     const reauth = { active: true, from: 'authed:sub-1' };
     expect(identityTransition('anon', 'authed:sub-2', reauth)).toBe('reset');
+  });
+});
+
+/**
+ * FR1 — the guard itself, at both the source and the surface. `signOutIntent`
+ * is unit-tested in auth/sign-out.test.ts; what this pins is that the nav's
+ * Sign out button — the familiar one a stalled creator reaches for instead of
+ * finishing the OTP — is gated on the same state.
+ */
+describe('the Sign out button cannot fire mid signing-session refresh', () => {
+  test('the intent at the source is to abandon the refresh, not the Original', () => {
+    expect(signOutIntent(true)).toBe('cancel-reauth');
+    expect(signOutIntent(false)).toBe('sign-out');
+  });
+
+  test('the nav button is disabled while a refresh is in flight, and says why', async () => {
+    const source = await Bun.file(new URL('./Nav.tsx', import.meta.url)).text();
+    const button = source.slice(source.indexOf('nav-signout'), source.indexOf('nav-signout') + 400);
+    expect(button).toContain('disabled={reauth.active}');
+    expect(button).toContain('nav.signOutBlocked');
   });
 });

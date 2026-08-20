@@ -34,6 +34,12 @@ export const BACKUP_VERSION = 1;
  * it is sized against an offline attacker with the file in hand.
  */
 export const PBKDF2_ITERATIONS = 600_000;
+/**
+ * And a CEILING. `iterations` is attacker-controlled input on the restore
+ * path — the one a user reaches when they have already lost a key — so an
+ * unbounded count is a file that hangs the tab. Far above what we write.
+ */
+export const PBKDF2_MAX_ITERATIONS = 5_000_000;
 /** A wrong-passphrase failure must be indistinguishable from a mangled file. */
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
@@ -164,6 +170,7 @@ function isEncryptedFile(value: unknown): value is EncryptedAuthorshipKeyFile {
     file.kdf.hash === 'SHA-256' &&
     Number.isInteger(file.kdf.iterations) &&
     file.kdf.iterations >= 100_000 &&
+    file.kdf.iterations <= PBKDF2_MAX_ITERATIONS &&
     typeof file.kdf.salt === 'string' &&
     !!file.cipher &&
     file.cipher.name === 'AES-GCM' &&
@@ -363,11 +370,4 @@ export function acknowledgeKeyLoss(storage: Storage, subOrgId: string): void {
   storage.setItem(ackStorageKey(subOrgId), new Date().toISOString());
 }
 
-/** localStorage, or null when the browser denies it (private mode, etc.). */
-export function browserKeyStorage(): Storage | null {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
-  } catch {
-    return null;
-  }
-}
+export { browserKeyStorage } from './browser-storage';
