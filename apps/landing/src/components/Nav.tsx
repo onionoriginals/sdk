@@ -19,7 +19,7 @@ function Wordmark() {
     <a
       className="nav-wordmark"
       href="#top"
-      aria-label={`${site.wordmark} — home`}
+      aria-label={`${site.wordmark} ${nav.homeAriaSuffix}`}
       onClick={(e) => onSectionClick(e, '#top')}
     >
       <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -54,7 +54,7 @@ export function Nav() {
     <header className="nav" data-scrolled={scrolled || undefined}>
       <div className="container nav-inner">
         <Wordmark />
-        <nav className="nav-links" aria-label="Primary">
+        <nav className="nav-links" aria-label={nav.primaryAria}>
           {nav.links.map((link) => (
             <a key={link.href} href={link.href} onClick={(e) => onSectionClick(e, link.href)}>
               {link.label}
@@ -89,12 +89,12 @@ export function Nav() {
                 <span className="nav-email-dot" aria-hidden="true" />
                 {user!.email}
               </span>
-              <button className="nav-signout" onClick={() => signOut()}>Sign out</button>
+              <button className="nav-signout" onClick={() => signOut()}>{nav.signOut}</button>
             </div>
           ) : (
             <>
               <button className="nav-signin" onClick={() => setLoginOpen(true)}>
-                Sign in
+                {nav.signIn}
               </button>
               <a
                 className="btn btn-primary nav-cta"
@@ -109,7 +109,7 @@ export function Nav() {
             type="button"
             className="nav-menu-btn"
             aria-expanded={open}
-            aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-label={open ? nav.closeMenu : nav.openMenu}
             onClick={() => setOpen((v) => !v)}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -123,7 +123,7 @@ export function Nav() {
         </div>
       </div>
       {open && (
-        <nav className="nav-mobile" aria-label="Mobile">
+        <nav className="nav-mobile" aria-label={nav.mobileAria}>
           {!isAuthenticated && (
             <a
               href={nav.cta.href}

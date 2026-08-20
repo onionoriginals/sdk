@@ -31,7 +31,61 @@ export const nav = {
   ],
   /** Interim target: points at the demo until the creator-app upload flow ships. */
   cta: { label: 'Start', href: '#demo' },
-  github: { label: 'GitHub', href: 'https://github.com/onionoriginals/sdk' }
+  github: { label: 'GitHub', href: 'https://github.com/onionoriginals/sdk' },
+  /** Composed with `site.wordmark` for the home link's accessible name. */
+  homeAriaSuffix: '— home',
+  primaryAria: 'Primary',
+  mobileAria: 'Mobile',
+  openMenu: 'Open menu',
+  closeMenu: 'Close menu',
+  signIn: 'Sign in',
+  signOut: 'Sign out'
+};
+
+/** The email + OTP sign-in modal, and the code input inside it. */
+export const login = {
+  heading: 'Sign in',
+  sub: 'We’ll email you a 6-digit code.',
+  emailPlaceholder: 'you@example.com',
+  close: 'Close',
+  send: 'Send code',
+  sending: 'Sending…',
+  invalidEmail: 'Please enter a valid email address',
+  sendFailed: 'Failed to send code',
+  codeHeading: 'Enter your code',
+  sentToPrefix: 'Sent to',
+  verifyFailed: 'Verification failed',
+  otp: {
+    label: 'Verification code',
+    /** Composed with the 1-based index: "Digit 3". */
+    digitAriaPrefix: 'Digit',
+    verifying: 'Verifying…',
+    resend: 'Resend code',
+    resendCooldownPrefix: 'Resend code in',
+    resendCooldownSuffix: 's'
+  }
+};
+
+/**
+ * The signed-in hero panel. The DID it makes is signed by a browser-local
+ * Ed25519 key and stored in localStorage (auth/webvh.ts) — created and shown,
+ * never hosted. Nothing here may call it live, hosted or resolvable (R9).
+ */
+export const identityPanel = {
+  layerLabel: 'did:webvh',
+  idleTitle: 'Your own DID, signed in this browser',
+  idleBody:
+    'Mint a did:webvh signed by a key only this browser holds — yours to keep, and yours to sign your work with.',
+  createAction: 'Create your did:webvh',
+  creating: 'Creating…',
+  createFailed: 'DID creation failed — try again.',
+  doneTitle: 'Your DID is signed',
+  doneNote:
+    'Signed by a key this browser holds, and stored here beside it. It isn’t published anywhere yet, so nothing else can look it up — and clearing this browser’s storage takes the key with it.',
+  copy: 'Copy',
+  copied: 'Copied',
+  copyAria: 'Copy DID',
+  copiedAria: 'DID copied'
 };
 
 export const hero = {
@@ -99,8 +153,20 @@ export const demo = {
   id: 'demo',
   eyebrow: 'Live demo',
   headline: 'Watch an original come to life.',
+  /**
+   * Tier-aware (R8). The old single subhead told everyone "Bitcoin steps use
+   * the SDK's built-in mock Ordinals provider" — printed directly above what
+   * is, for a signed-in visitor, a live mainnet money button. The lead is true
+   * for both tiers; the tail states which of the two is reading it.
+   */
   subhead:
-    'Name a piece and your browser generates a one-of-a-kind artwork — a real SVG file. The real @originals/sdk then hashes its actual bytes, mints its identity, signs its credentials, and inscribes it. Bitcoin steps use the SDK’s built-in mock Ordinals provider, so there’s nothing to install and no wallet to connect.',
+    'Name a piece and your browser generates a one-of-a-kind artwork — a real SVG file. The real @originals/sdk then hashes its actual bytes, mints its identity, signs its credentials, and publishes it.',
+  subheadReal:
+    'The last step inscribes it on Bitcoin for real: your key signs the transactions in this browser, and your own BTC pays the network fee.',
+  subheadSimulated:
+    'The last step is a labelled simulation — the SDK’s built-in mock Ordinals provider stands in for the Bitcoin network, so there’s nothing to install and no wallet to connect.',
+  /** Only appended where signing in genuinely buys a real inscription. */
+  subheadSignIn: 'Sign in to inscribe for real, with your own key and your own BTC.',
   consoleHint:
     'Skeptical? Open your devtools console — every SDK event is logged live.',
   form: {
@@ -110,7 +176,7 @@ export const demo = {
     mediumLabel: 'Medium',
     mediums: ['Artwork', 'Music', 'Writing', 'Photograph', 'Dataset'],
     regenerate: 'Regenerate',
-    artHint: 'Generated in your browser from the title — its exact bytes are what get hashed and inscribed.'
+    artHint: 'Generated in your browser from the title — its exact bytes are what get hashed, signed and published.'
   },
   steps: [
     {
@@ -137,8 +203,12 @@ export const demo = {
       pending: 'Inscribing…',
       title: 'Inscribe',
       layer: 'did:btco',
+      // The signed-in mainnet tier. This step is LIVE: it spends the creator's
+      // own confirmed deposit. The string it replaced ("Coming soon … once
+      // testnet4 ordinals support ships") was wrong about the status and the
+      // network, and rendered to every visitor regardless of tier.
       description:
-        'Coming soon: inscribe the published Original onto a satoshi as did:btco — real Bitcoin inscription lands once testnet4 ordinals support ships.'
+        'Inscribes the published Original onto a satoshi as did:btco — real Bitcoin transactions, signed by your key in this browser and paid for out of your own deposit.'
     }
   ],
   /**
@@ -189,28 +259,50 @@ export const demo = {
     resourceTab: 'Resource',
     emptyState: 'Create an asset to inspect its DID, hashes, and provenance chain.'
   },
+  /**
+   * The completion screen, per tier (R8). Both halves used to be one block, so
+   * a simulated run ended on "Anchored. Inscribed on satoshi <n> in tx <id>"
+   * beside a mempool.space link — a specific fabricated claim about a specific
+   * satoshi and a specific transaction, neither of which exists.
+   */
   done: {
-    lead: 'Anchored.',
-    beforeSatoshi: 'Inscribed on satoshi',
-    beforeTx: 'in tx',
-    after: 'The full history is in the Provenance tab.'
+    real: {
+      lead: 'Anchored on Bitcoin.',
+      beforeSatoshi: 'Inscribed on satoshi',
+      beforeTx: 'in transaction',
+      after: 'The full history is in the Provenance tab.',
+      explorerLabel: 'View the real transaction on mempool.space'
+    },
+    simulated: {
+      lead: 'Simulation finished.',
+      beforeSatoshi: 'The mock provider handed back satoshi',
+      beforeTx: 'and transaction id',
+      after:
+        'Neither exists: nothing was broadcast and no sats moved. Everything before this step was real — the signed event log beside it is genuine, and only its Bitcoin anchor is make-believe.'
+    }
   },
   resolved: {
     heading: 'did:webvh log — live at this origin',
+    /** Anonymous logs live in the shared in-memory host store; see `hosting.temporaryNote`. */
+    temporaryHeading: 'did:webvh log — served at this origin, for now',
     resolvedBadge: 'resolved ✓',
     pendingBadge: 'resolves in production',
     linkLabel: 'Open the signed DID log',
-    note: 'The SDK’s real resolver fetched this over HTTP(S) — no mock. Open it: it’s the signed version history.'
+    note: 'The SDK’s real resolver fetched this back over HTTP(S). Open it: it’s the signed version history.'
   },
-  inscribeGate: {
+  /**
+   * Reachable ONLY on a `VITE_BTC_NETWORK=testnet4` build (`real && network
+   * !== 'mainnet'`): faucet-funded, worthless tBTC. Named for the network so
+   * no mainnet surface can borrow a string from here by accident — the mainnet
+   * copy lives in `steps[2]` and `deposit`.
+   */
+  testnet4: {
     signInPrompt: 'Sign in to inscribe on Bitcoin testnet4 — your own key signs it.',
+    stepDescription:
+      'Inscribes the published Original onto a satoshi as did:btco — a real inscription on Bitcoin testnet4, signed by your key and funded by a faucet with worthless tBTC.',
     yourKeyNote: 'Your Turnkey key signs this inscription in your browser. The server never sees a private key; funding comes from a testnet4 faucet (worthless tBTC).',
-    fundingLabel: 'Requesting testnet4 funding…',
-    signingLabel: 'Signing the commit with your key…',
-    explorerLabel: 'View the real transaction on mempool.space',
     faucetEmpty: 'The testnet4 faucet is temporarily out of funds — try again in a bit.',
-    fundingFailed: 'The testnet4 funding request didn’t come through. Try the inscribe step again in a moment — nothing has been spent.',
-    mockNote: 'Bitcoin inscription runs against a mock provider in this environment (no wallet, no chain). Deploy with a testnet4 endpoint + faucet to make it real.'
+    fundingFailed: 'The testnet4 funding request didn’t come through. Try the inscribe step again in a moment — nothing has been spent.'
   },
   session: {
     expiredHeading: 'Your signing session expired',
@@ -282,7 +374,6 @@ export const demo = {
       'This deploy is misconfigured: the app was built for a different Bitcoin network than the server is running. Inscribing is disabled until they match — no deposit address is shown, because funds sent to it could not be spent here.',
     yourKeyNote: 'Your Turnkey key signs this inscription in your browser; your own deposit pays the fee. The server never sees a private key.'
   },
-  /** Dead copy: nothing renders this since step 3 became tier-aware. Kept only until the copy pass removes it together with its test. */
   /**
    * The hosting layer, in visitor words. A raw `HttpHostingStorageAdapter.put
    * failed: 507` was reaching the page before this existed — a transport string
@@ -295,13 +386,15 @@ export const demo = {
       'We couldn’t host the signed log just now, so your Original is still at did:cel — real, signed, and safe in this tab. Try publishing again in a moment.',
     quotaFull:
       'Your account has used up its hosting space, so there’s no room for another version right now. Everything you’ve already published is untouched and still resolvable.',
+    // R7 — rendered in the PUBLISH step, before the button that publishes, not
+    // only on the log that comes back afterwards. It is the one thing an
+    // anonymous visitor cannot find out later.
     temporaryNote:
-      'Anonymous logs are hosted here in memory and dropped after a couple of hours. Sign in and your Originals are hosted for keeps, with the same signed history.'
+      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. Sign in first and your Originals get their own path and are hosted for keeps, with the same signed history.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
     'Something went wrong on our side. Nothing you’ve made is lost — your Original is still in this tab. Try that step again.',
-  comingSoon: 'Coming soon — inscribing on Bitcoin (did:btco) is not enabled yet. Your Original is already real and resolvable as did:webvh.',
   reset: 'Start over with a new asset'
 };
 
@@ -338,8 +431,10 @@ export const yourOriginals = {
    */
   depositAlert: {
     heading: 'About your Bitcoin deposit',
+    // Mechanics, not a custody characterisation — the same rule U15 applied to
+    // the deposit screen itself.
     unavailable:
-      'While you were away, we lost our read of the Bitcoin network, so we can’t currently confirm what’s sitting at your deposit address. Your funds are not in our custody and never were — they’re at your own address, under your own key, and nothing here can move them. Inscribing resumes on its own once the read is back.',
+      'While you were away, we lost our read of the Bitcoin network, so we can’t currently confirm what’s sitting at your deposit address. Your BTC is where you sent it: at your own address, under your own key, and nothing here can move it without your browser signing. Inscribing resumes on its own once the read is back.',
     busy:
       'Our Bitcoin address lookups are being rate-limited, so we can’t confirm your deposit right now. Nothing is lost: any BTC you sent is at your own address, under your own key. Try again in a few minutes.',
     heldPrefix: 'Last time we could see it, your deposit address held',
@@ -529,6 +624,15 @@ export const developers = {
     label: 'Quickstart and docs on GitHub',
     href: 'https://github.com/onionoriginals/sdk#readme'
   }
+};
+
+/** The copyable install chip. `prompt` is the decorative shell sigil. */
+export const installCommand = {
+  prompt: '$',
+  copy: 'Copy',
+  copied: 'Copied',
+  /** Composed with `site.install` for the button's accessible name. */
+  copyAriaPrefix: 'Copy'
 };
 
 export const footer = {

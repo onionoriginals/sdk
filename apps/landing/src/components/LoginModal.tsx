@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { useAuth } from '../auth/useAuth';
-import { demo } from '../content';
+import { demo, login } from '../content';
 import { OtpInput } from './OtpInput';
 import './login-modal.css';
 
@@ -40,13 +40,13 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
     e.preventDefault();
     setError(null);
     const value = email.trim().toLowerCase();
-    if (!EMAIL_RE.test(value)) return setError('Please enter a valid email address');
+    if (!EMAIL_RE.test(value)) return setError(login.invalidEmail);
     setBusy(true);
     try {
       await startOtp(value);
       setStep('otp');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send code');
+      setError(err instanceof Error ? err.message : login.sendFailed);
     } finally {
       setBusy(false);
     }
@@ -61,7 +61,7 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
       setStep('email');
       setEmail('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Verification failed');
+      setError(err instanceof Error ? err.message : login.verifyFailed);
     } finally {
       setBusy(false);
     }
@@ -70,29 +70,31 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
   return (
     <div className="login-overlay" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="login-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="login-close" aria-label="Close" onClick={onClose}>×</button>
+        <button className="login-close" aria-label={login.close} onClick={onClose}>×</button>
         {step === 'email' ? (
           <form onSubmit={submitEmail} className="login-form">
-            <h2>Sign in</h2>
-            <p className="login-sub">We'll email you a 6-digit code.</p>
+            <h2>{login.heading}</h2>
+            <p className="login-sub">{login.sub}</p>
             <input
               type="email"
               autoFocus
-              placeholder="you@example.com"
+              placeholder={login.emailPlaceholder}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="login-email"
             />
             {error && <p className="login-error">{error}</p>}
             <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? 'Sending…' : 'Send code'}
+              {busy ? login.sending : login.send}
             </button>
           </form>
         ) : (
           <div className="login-form">
-            <h2>{reauth.active ? demo.session.expiredHeading : 'Enter your code'}</h2>
+            <h2>{reauth.active ? demo.session.expiredHeading : login.codeHeading}</h2>
             <p className="login-sub">
-              {reauth.active ? `${demo.session.preserved} Sent to ${email}` : `Sent to ${email}`}
+              {reauth.active
+                ? `${demo.session.preserved} ${login.sentToPrefix} ${email}`
+                : `${login.sentToPrefix} ${email}`}
             </p>
             <OtpInput onComplete={submitCode} isLoading={busy} error={error} onResend={() => submitEmail(new Event('submit') as unknown as FormEvent)} />
           </div>

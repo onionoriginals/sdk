@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useAuth } from '../auth/useAuth';
+import { identityPanel } from '../content';
 import './identity-panel.css';
 
 /**
@@ -22,7 +23,7 @@ export function IdentityPanel() {
     try {
       setDid(await createIdentity());
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'DID creation failed — try again.');
+      setError(e instanceof Error ? e.message : identityPanel.createFailed);
     } finally {
       setCreating(false);
     }
@@ -57,10 +58,10 @@ export function IdentityPanel() {
                 />
               </svg>
             </span>
-            <span className="idp-done-title">Your identity is live</span>
+            <span className="idp-done-title">{identityPanel.doneTitle}</span>
             <span className="layer-pill" data-layer="did:webvh">
               <span className="dot" />
-              did:webvh
+              {identityPanel.layerLabel}
             </span>
           </div>
           <div className="idp-did">
@@ -70,7 +71,7 @@ export function IdentityPanel() {
               className="idp-copy-btn"
               data-copied={copied || undefined}
               onClick={copy}
-              aria-label={copied ? 'DID copied' : 'Copy DID'}
+              aria-label={copied ? identityPanel.copiedAria : identityPanel.copyAria}
             >
               {copied ? (
                 <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -94,10 +95,13 @@ export function IdentityPanel() {
                   />
                 </svg>
               )}
-              <span>{copied ? 'Copied' : 'Copy'}</span>
+              <span>{copied ? identityPanel.copied : identityPanel.copy}</span>
             </button>
           </div>
-          <p className="idp-done-note">Anchored to your keys. Resolvable anywhere DIDs are.</p>
+          {/* R9: this DID is signed and stored in this browser (auth/webvh.ts)
+              and hosted nowhere, so the note says that instead of the old
+              "Anchored to your keys. Resolvable anywhere DIDs are." */}
+          <p className="idp-done-note">{identityPanel.doneNote}</p>
         </div>
       ) : (
         <>
@@ -105,12 +109,10 @@ export function IdentityPanel() {
             <div className="idp-lede">
               <span className="layer-pill" data-layer="did:webvh">
                 <span className="dot" />
-                did:webvh
+                {identityPanel.layerLabel}
               </span>
-              <h2 className="idp-title">Your identity, on the open web</h2>
-              <p className="idp-sub">
-                Mint a resolvable DID signed by your own keys — yours to keep, verify, and build on.
-              </p>
+              <h2 className="idp-title">{identityPanel.idleTitle}</h2>
+              <p className="idp-sub">{identityPanel.idleBody}</p>
             </div>
             <button type="button" className="idp-cta" disabled={creating} aria-busy={creating} onClick={create}>
               {creating ? (
@@ -133,7 +135,7 @@ export function IdentityPanel() {
                   <path d="M1.75 8h12.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
                 </svg>
               )}
-              {creating ? 'Creating…' : 'Create your did:webvh'}
+              {creating ? identityPanel.creating : identityPanel.createAction}
             </button>
           </div>
           {error && (

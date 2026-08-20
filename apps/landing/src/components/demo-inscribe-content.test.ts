@@ -2,15 +2,27 @@ import { describe, test, expect } from 'bun:test';
 import { demo } from '../content';
 import { depositErrorMessage } from './Demo';
 
-describe('demo inscribe-gate copy', () => {
-  test('has an inscribeGate copy block', () => {
-    expect(demo.inscribeGate).toBeDefined();
-    expect(typeof demo.inscribeGate.signInPrompt).toBe('string');
-    expect(demo.inscribeGate.signInPrompt.length).toBeGreaterThan(0);
-    expect(typeof demo.inscribeGate.yourKeyNote).toBe('string');
-    expect(typeof demo.inscribeGate.explorerLabel).toBe('string');
-    expect(typeof demo.inscribeGate.faucetEmpty).toBe('string');
-    expect(typeof demo.inscribeGate.mockNote).toBe('string');
+/**
+ * U5 — the old `inscribeGate` block mixed testnet4 copy with strings the
+ * mainnet path renders, which is how "inscribe on Bitcoin testnet4" ended up
+ * one flag away from a mainnet screen. It is now `demo.testnet4`, reachable
+ * only on a testnet4 build, and the explorer label moved to `demo.done.real`
+ * where the tier that may show a link owns it.
+ */
+describe('testnet4-only copy', () => {
+  test('the block exists and names its network in the strings that need it', () => {
+    for (const key of ['signInPrompt', 'stepDescription', 'yourKeyNote', 'faucetEmpty', 'fundingFailed'] as const) {
+      expect(typeof demo.testnet4[key]).toBe('string');
+      expect(demo.testnet4[key].length).toBeGreaterThan(0);
+    }
+    expect(demo.testnet4.signInPrompt).toContain('testnet4');
+    expect(demo.testnet4.yourKeyNote).toContain('faucet');
+  });
+
+  test('the explorer label belongs to the real completion state', () => {
+    expect(typeof demo.done.real.explorerLabel).toBe('string');
+    expect(demo.done.real.explorerLabel).toContain('mempool.space');
+    expect('explorerLabel' in demo.done.simulated).toBe(false);
   });
 });
 

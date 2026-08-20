@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { site } from '../content';
+import { installCommand, site } from '../content';
 import './install-command.css';
 
 /** Copyable `npm install @originals/sdk` chip. */
@@ -24,10 +24,10 @@ export function InstallCommand({ size = 'md' }: { size?: 'md' | 'lg' }) {
       className="install-cmd"
       data-size={size}
       onClick={copy}
-      aria-label={`Copy ${site.install}`}
+      aria-label={`${installCommand.copyAriaPrefix} ${site.install}`}
     >
       <span className="install-prompt" aria-hidden="true">
-        $
+        {installCommand.prompt}
       </span>
       <code>{site.install}</code>
       <span className="install-copy" data-copied={copied || undefined}>
@@ -48,7 +48,9 @@ export function InstallCommand({ size = 'md' }: { size?: 'md' | 'lg' }) {
             <path d="M10.5 5.5v-1a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h1" fill="none" stroke="currentColor" strokeWidth="1.3" />
           </svg>
         )}
-        <span className="install-copy-label">{copied ? 'Copied' : 'Copy'}</span>
+        <span className="install-copy-label">
+          {copied ? installCommand.copied : installCommand.copy}
+        </span>
       </span>
     </button>
   );

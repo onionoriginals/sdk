@@ -43,7 +43,7 @@ describe('signingGateMessage', () => {
 
   test('sign-in keeps the existing per-network prompt', () => {
     expect(signingGateMessage('sign-in', 'mainnet')).toBe(demo.deposit.signInPrompt);
-    expect(signingGateMessage('sign-in', 'testnet4')).toBe(demo.inscribeGate.signInPrompt);
+    expect(signingGateMessage('sign-in', 'testnet4')).toBe(demo.testnet4.signInPrompt);
   });
 
   test('an ok gate has nothing to say', () => {

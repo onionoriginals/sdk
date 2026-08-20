@@ -483,6 +483,22 @@
   line-height: 1.6;
 }
 
+/* A simulated run must not finish in success green wearing the same chrome a
+   real inscription earns — it finishes in the drafting paper step 3 wore. */
+.demo-done[data-sim] {
+  border: 1px dashed var(--border-strong);
+  background-color: rgba(255, 255, 255, 0.012);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.05) 0 1px,
+    rgba(255, 255, 255, 0) 1px 7px
+  );
+}
+
+.demo-done[data-sim] strong {
+  color: var(--text-secondary);
+}
+
 .demo-done strong {
   color: var(--ok);
   font-weight: 600;

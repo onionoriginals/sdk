@@ -30,7 +30,6 @@ export function Developers() {
             <a href={developers.docsLink.href} target="_blank" rel="noreferrer">
               {developers.docsLink.label}
             </a>
-            .
           </p>
         </Reveal>
       </div>

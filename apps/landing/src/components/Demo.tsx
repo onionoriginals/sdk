@@ -104,7 +104,7 @@ export function signingGateMessage(
 ): string | null {
   if (gate === 'ok') return null;
   if (gate === 'reauth') return status === 'expired' ? demo.session.expiredBody : demo.session.missingBody;
-  return network === 'mainnet' ? demo.deposit.signInPrompt : demo.inscribeGate.signInPrompt;
+  return network === 'mainnet' ? demo.deposit.signInPrompt : demo.testnet4.signInPrompt;
 }
 
 /**
@@ -138,13 +138,23 @@ export interface InscribeStepView {
   buttonClass: string;
 }
 
-export function inscribeStepView(real: boolean): InscribeStepView {
+export function inscribeStepView(
+  real: boolean,
+  /**
+   * Only consulted when the tier IS real, and a real tier only exists on a
+   * real-network build — so the mainnet default never describes an 'off' one.
+   */
+  network: BtcNetworkFlag = 'mainnet'
+): InscribeStepView {
   return real
     ? {
         simulated: false,
         label: demo.steps[2].action,
         pending: demo.steps[2].pending,
-        description: demo.steps[2].description,
+        // steps[2] states the mainnet truth (own key, own deposit); a
+        // testnet4 build is faucet-funded and must say so instead.
+        description:
+          network === 'mainnet' ? demo.steps[2].description : demo.testnet4.stepDescription,
         buttonClass: 'btn btn-primary demo-step-btn'
       }
     : {
@@ -154,6 +164,61 @@ export function inscribeStepView(real: boolean): InscribeStepView {
         description: demo.simulated.description,
         buttonClass: 'btn demo-step-btn demo-sim-btn'
       };
+}
+
+/**
+ * The section subhead, per tier (R8). It sits directly above step 3's button,
+ * so the one thing it must never do is describe the OTHER tier's Bitcoin step.
+ */
+export function demoSubhead(real: boolean, network: BtcNetworkFlag = 'off'): string {
+  if (real) return `${demo.subhead} ${demo.subheadReal}`;
+  // "Sign in to inscribe for real" is only true on a build that HAS a real
+  // path. On a mock build signing in changes nothing, so it stays unsaid.
+  return network === 'off'
+    ? `${demo.subhead} ${demo.subheadSimulated}`
+    : `${demo.subhead} ${demo.subheadSimulated} ${demo.subheadSignIn}`;
+}
+
+/**
+ * What the completion screen may assert (R8). A simulated run ends holding a
+ * satoshi number and a txid from the mock provider: the copy around them has
+ * to name them for what they are, and there is no transaction to link to.
+ */
+export interface CompletionCopy {
+  lead: string;
+  beforeSatoshi: string;
+  beforeTx: string;
+  after: string;
+  /** null in the simulated tier — nothing exists at any explorer. */
+  explorerLabel: string | null;
+}
+
+export function completionCopy(simulated: boolean): CompletionCopy {
+  return simulated
+    ? { ...demo.done.simulated, explorerLabel: null }
+    : demo.done.real;
+}
+
+/** The published-log block. An anonymous log is served here only for a while. */
+export function resolvedCopy(authenticated: boolean): {
+  heading: string;
+  resolvedBadge: string;
+  pendingBadge: string;
+  linkLabel: string;
+  note: string;
+} {
+  const { heading, temporaryHeading, ...rest } = demo.resolved;
+  return { heading: authenticated ? heading : temporaryHeading, ...rest };
+}
+
+/**
+ * R7 — the durability caveat for an anonymous publish, returned for the
+ * PUBLISH STEP rather than for the log that comes back from it. U8 introduced
+ * the string but rendered it only after the fact, which is the one moment it
+ * cannot change anyone's mind.
+ */
+export function publishDurabilityNote(authenticated: boolean): string | null {
+  return authenticated ? null : demo.hosting.temporaryNote;
 }
 
 /** A confirmed output at the creator's own deposit address. */
@@ -377,7 +442,13 @@ export function Demo() {
   // engine derives its provider from this same value, so an enabled money
   // button and a mock provider can no longer end up on screen together.
   const real = demoTier(network, isAuthenticated).real;
-  const inscribeView = inscribeStepView(real);
+  const inscribeView = inscribeStepView(real, network);
+  // Every tier-dependent string, resolved once from the same `real` /
+  // `isAuthenticated` values the behavior is driven by, so copy and behavior
+  // cannot drift apart (KTD9).
+  const done = completionCopy(inscribeView.simulated);
+  const resolved = resolvedCopy(isAuthenticated);
+  const durabilityNote = publishDurabilityNote(isAuthenticated);
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [medium, setMedium] = useState(demo.form.mediums[0]);
   const [nonce, setNonce] = useState(() => getArtSeed().nonce);
@@ -594,8 +665,8 @@ export function Demo() {
         credentials: 'same-origin',
         body: JSON.stringify({ address: bitcoin.fundingAddress }),
       });
-      if (res.status === 507) throw new DemoCopyError(demo.inscribeGate.faucetEmpty);
-      if (!res.ok) throw new DemoCopyError(demo.inscribeGate.fundingFailed);
+      if (res.status === 507) throw new DemoCopyError(demo.testnet4.faucetEmpty);
+      if (!res.ok) throw new DemoCopyError(demo.testnet4.fundingFailed);
       const { fundingUtxo, changeAddress } = (await res.json()) as {
         fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey: string };
         changeAddress: string;
@@ -677,7 +748,7 @@ export function Demo() {
         <Reveal className="section-head">
           <p className="eyebrow">{demo.eyebrow}</p>
           <h2>{demo.headline}</h2>
-          <p>{demo.subhead}</p>
+          <p>{demoSubhead(real, network)}</p>
           <p className="demo-console-hint">
             <svg viewBox="0 0 16 16" aria-hidden="true" width="14" height="14">
               <path d="m3 4 4 4-4 4M8.5 12H13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -796,6 +867,13 @@ export function Demo() {
                             )}
                           </div>
                           <p>{i === 2 ? inscribeView.description : s.description}</p>
+                          {/* R7: an anonymous publish is temporary and shares a
+                              demo path. Said HERE — in the publish step, from
+                              first paint — because after the log exists is too
+                              late to decide to sign in first. */}
+                          {i === 1 && durabilityNote && (
+                            <p className="demo-step-note">{durabilityNote}</p>
+                          )}
                           {state !== 'done' && (
                             // Step 3 in the simulated tier runs the SDK's mock
                             // provider for real — completable, not disabled —
@@ -886,7 +964,7 @@ export function Demo() {
                 {phase === 'published' && real && network !== 'mainnet' && (
                   <p className="demo-inscribe-note">
                     {gate === 'ok'
-                      ? demo.inscribeGate.yourKeyNote
+                      ? demo.testnet4.yourKeyNote
                       : signingGateMessage(gate, network, signing)}
                   </p>
                 )}
@@ -971,14 +1049,18 @@ export function Demo() {
                   asset?.webvhLogUrl && (
                     <div className="demo-resolved">
                       <div className="demo-resolved-head">
-                        <span>{demo.resolved.heading}</span>
+                        {/* An anonymous log is served from the shared in-memory
+                            host store, so the heading stops short of calling it
+                            a permanent home. The caveat itself is up in the
+                            publish step, where it can still change a mind. */}
+                        <span>{resolved.heading}</span>
                         <span
                           className="demo-resolved-badge"
                           data-ok={asset.webvhResolved || undefined}
                         >
                           {asset.webvhResolved
-                            ? demo.resolved.resolvedBadge
-                            : demo.resolved.pendingBadge}
+                            ? resolved.resolvedBadge
+                            : resolved.pendingBadge}
                         </span>
                       </div>
                       <a
@@ -987,36 +1069,31 @@ export function Demo() {
                         target="_blank"
                         rel="noreferrer"
                       >
-                        {demo.resolved.linkLabel}
+                        {resolved.linkLabel}
                         <code>{asset.webvhLogUrl}</code>
                       </a>
-                      <p className="demo-resolved-note">{demo.resolved.note}</p>
-                      {/* Anonymous logs live in the in-memory host store, which
-                          evicts and expires. Say so here rather than let a later
-                          visit hit a bare resolver miss. */}
-                      {!isAuthenticated && (
-                        <p className="demo-resolved-note">
-                          {demo.hosting.temporaryNote}
-                        </p>
-                      )}
+                      <p className="demo-resolved-note">{resolved.note}</p>
                     </div>
                   )}
 
                 {phase === 'inscribed' && asset && (
-                  <div className="demo-done">
+                  <div className="demo-done" data-sim={inscribeView.simulated ? '' : undefined}>
                     <p>
-                      <strong>{demo.done.lead}</strong> {demo.done.beforeSatoshi}{' '}
-                      <code>{asset.inscription?.satoshi}</code> {demo.done.beforeTx}{' '}
-                      <code>{asset.inscription?.txid}</code>. {demo.done.after}
+                      <strong>{done.lead}</strong> {done.beforeSatoshi}{' '}
+                      <code>{asset.inscription?.satoshi}</code> {done.beforeTx}{' '}
+                      <code>{asset.inscription?.txid}</code>. {done.after}
                     </p>
-                    {asset.inscription?.explorerUrl && (
+                    {/* The engine withholds the explorer URL in the simulated
+                        tier (U2); the label goes with it, so no completion
+                        screen can offer a link to a transaction that isn't. */}
+                    {asset.inscription?.explorerUrl && done.explorerLabel && (
                       <a
                         className="demo-explorer-link"
                         href={asset.inscription.explorerUrl}
                         target="_blank"
                         rel="noreferrer"
                       >
-                        {demo.inscribeGate.explorerLabel}
+                        {done.explorerLabel}
                       </a>
                     )}
                     <button type="button" className="demo-reset" onClick={reset}>
