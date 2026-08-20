@@ -71,12 +71,6 @@ export function networkSkewDetected(
 }
 
 /**
- * Map a failed /api/btc/deposit response onto creator-facing copy (R3). The
- * fee source being down is its OWN state: the route quotes nothing, so the UI
- * must say so rather than sit on "checking…" forever. Any other failure is a
- * transient poll blip and keeps the existing waiting copy.
- */
-/**
  * Whether this browser may be offered a deposit address / asked to sign. The
  * expiry check happens HERE — before a creator is told where to send BTC, and
  * again at the inscribe click — so an expired session is a UI state rather than
@@ -157,9 +151,48 @@ export function inscribeStepView(real: boolean): InscribeStepView {
       };
 }
 
+/**
+ * Map a failed /api/btc/deposit response onto creator-facing copy (R3/R28).
+ * Each named server error is its OWN state, because the route serves nothing
+ * derived from a read it could not trust: no address, no UTXOs, no quote. The
+ * UI must say which of those it is rather than sit on "checking…" forever, or
+ * — worse — keep the last quote on screen as though it were current.
+ */
 export function depositErrorMessage(body: unknown): string | null {
   const error = (body as { error?: unknown } | null | undefined)?.error;
-  return error === 'fee_estimate_unavailable' ? demo.deposit.feeUnavailable : null;
+  switch (error) {
+    case 'fee_estimate_unavailable':
+      return demo.deposit.feeUnavailable;
+    case 'utxo_lookup_failed':
+      return demo.deposit.indexerUnavailable;
+    // A budget, not an outage — ours or theirs, it reads the same to a creator.
+    case 'indexer_rate_limited':
+    case 'deposit_user_cap':
+      return demo.deposit.indexerBusy;
+    default:
+      return null;
+  }
+}
+
+/**
+ * The one-line badge beside the deposit heading. Separate from the body copy
+ * because the badge is the thing a creator reads at a glance — labelling an
+ * indexer outage "Fee estimate unavailable" would name the wrong system, and
+ * "which system is down" is exactly what decides whether they wait or act.
+ */
+export function depositErrorBadge(body: unknown): string | null {
+  const error = (body as { error?: unknown } | null | undefined)?.error;
+  switch (error) {
+    case 'fee_estimate_unavailable':
+      return demo.deposit.unavailableBadge;
+    case 'utxo_lookup_failed':
+      return demo.deposit.readUnavailableBadge;
+    case 'indexer_rate_limited':
+    case 'deposit_user_cap':
+      return demo.deposit.readBusyBadge;
+    default:
+      return null;
+  }
 }
 
 /**
@@ -376,6 +409,8 @@ export function Demo() {
   // fallback message ("send BTC and wait for a confirmation") is the wrong
   // advice when the real problem is that we cannot price the fee at all.
   const depositErrorRef = useRef<string | null>(null);
+  // Which system is down, in badge form — see depositErrorBadge.
+  const [depositBadge, setDepositBadge] = useState<string | null>(null);
   const fetchDeposit = useCallback(async (): Promise<DepositInfo | null> => {
     if (!bitcoin) return null;
     const res = await fetch(
@@ -383,9 +418,11 @@ export function Demo() {
       { credentials: 'same-origin' }
     );
     if (!res.ok) {
-      const message = depositErrorMessage(await res.json().catch(() => null));
+      const body = await res.json().catch(() => null);
+      const message = depositErrorMessage(body);
       depositErrorRef.current = message;
       setDepositError(message);
+      setDepositBadge(depositErrorBadge(body));
       // Fee source down: drop the last quote too. A stale number is exactly
       // the "misled about what you can lose" case (R3).
       if (message) setDeposit(null);
@@ -393,6 +430,7 @@ export function Demo() {
     }
     depositErrorRef.current = null;
     setDepositError(null);
+    setDepositBadge(null);
     const info = (await res.json()) as DepositInfo;
     setDeposit(info);
     return info;
@@ -756,7 +794,7 @@ export function Demo() {
                           }
                         >
                           {depositError
-                            ? demo.deposit.unavailableBadge
+                            ? depositBadge ?? demo.deposit.unavailableBadge
                             : !deposit || (deposit.confirmedUtxos.length === 0 && deposit.unconfirmedSats === 0)
                               ? demo.deposit.waiting
                               : deposit.confirmedUtxos.some((u) => u.value >= deposit.estimatedCostSats)
@@ -786,6 +824,8 @@ export function Demo() {
                         <p className="demo-inscribe-note">{demo.deposit.addressPending}</p>
                       )}
                       <p className="demo-inscribe-note">{demo.deposit.nonRefundable}</p>
+                      {/* R31: said before they deposit — the one moment we know they are reading. */}
+                      <p className="demo-inscribe-note">{demo.deposit.ifSomethingGoesWrong}</p>
                     </div>
                   ) : gate === 'reauth' ? (
                     <div className="demo-deposit">

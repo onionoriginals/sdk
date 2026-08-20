@@ -144,6 +144,50 @@ export interface InscriptionsStore {
    * UTXO-lookup proxy for arbitrary third-party addresses.
    */
   bindDepositAddress(subOrgId: string, network: string, address: string): string;
+  /**
+   * Remember a read of the deposit address we could TRUST, and clear any
+   * standing alert. The confirmed balance is kept so a later outage can still
+   * tell the creator what they hold — the number they need to hear is the one
+   * from before the indexer went away.
+   */
+  recordDepositRead(
+    subOrgId: string,
+    read: { network: string; address: string; confirmedSats: number }
+  ): void;
+  /**
+   * Record that the read behind this user's deposit address could not be
+   * trusted (R28). Idempotent per outage: `firstSeenAt` survives repeated
+   * polls so the UI can say how long it has been going on.
+   */
+  recordDepositAlert(
+    subOrgId: string,
+    alert: { kind: DepositAlertKind; network: string; address: string }
+  ): DepositAlert;
+  /**
+   * The standing alert, or null. This is the R31 delivery path: it is read on
+   * the NEXT VISIT (GET /api/btc/inscribe), not only by a tab that happened to
+   * still be polling when the outage started.
+   */
+  getDepositAlert(subOrgId: string): DepositAlert | null;
+}
+
+export type DepositAlertKind = 'indexer_unavailable' | 'indexer_rate_limited';
+
+/** A persisted "your deposit read cannot be trusted" state (R28/R31). */
+export interface DepositAlert {
+  kind: DepositAlertKind;
+  network: string;
+  address: string;
+  /** Confirmed sats at the address on the last read we could trust (0 if none). */
+  heldSats: number;
+  firstSeenAt: string;
+  updatedAt: string;
+}
+
+/** Per-user deposit bookkeeping. Kept in its own file so the address bindings keep their shape. */
+interface DepositState {
+  lastRead?: { network: string; address: string; confirmedSats: number; at: string };
+  alert?: DepositAlert;
 }
 
 /** A subOrgId used as a filename — Turnkey sub-orgs are UUID-safe; reject anything else. */
@@ -247,6 +291,17 @@ export function createInscriptionsStore(opts: {
 
   function writeAll(subOrgId: string, recs: InscriptionRecord[]): void {
     writeJson('inscriptions', subOrgId, recs);
+  }
+
+  /** Per-user deposit bookkeeping; a torn/absent file reads as "nothing known". */
+  function readDepositState(subOrgId: string): DepositState {
+    const path = subFile(opts.dataDir, 'deposit-state', subOrgId);
+    if (!existsSync(path)) return {};
+    try {
+      return JSON.parse(readFileSync(path, 'utf8')) as DepositState;
+    } catch {
+      return {};
+    }
   }
 
   /** Drop the hex payloads in place. Caller writes. */
@@ -370,6 +425,55 @@ export function createInscriptionsStore(opts: {
       bindings[network] = address;
       writeJson('deposits', subOrgId, bindings);
       return address;
+    },
+    recordDepositRead(subOrgId, read) {
+      const state = readDepositState(subOrgId);
+      // A trusted read ENDS the outage — the alert is dropped, not merged.
+      // Skip the write when nothing changed: this is the 15s-poll path, and
+      // an fsync per poll per creator is real cost for no information.
+      const last = state.lastRead;
+      if (
+        !state.alert &&
+        last &&
+        last.confirmedSats === read.confirmedSats &&
+        last.address === read.address &&
+        last.network === read.network
+      ) {
+        return;
+      }
+      writeJson('deposit-state', subOrgId, {
+        lastRead: { ...read, at: new Date(now()).toISOString() },
+      } satisfies DepositState);
+    },
+    recordDepositAlert(subOrgId, alert) {
+      const state = readDepositState(subOrgId);
+      const at = new Date(now()).toISOString();
+      const existing = state.alert;
+      // An ongoing outage is polled every 15s per stuck creator. Re-stamping
+      // `updatedAt` on each one costs an fsync for no new information, so an
+      // unchanged alert is refreshed at most once a minute.
+      if (
+        existing &&
+        existing.kind === alert.kind &&
+        existing.address === alert.address &&
+        now() - Date.parse(existing.updatedAt) < 60_000
+      ) {
+        return existing;
+      }
+      const next: DepositAlert = {
+        kind: alert.kind,
+        network: alert.network,
+        address: alert.address,
+        heldSats: state.lastRead?.address === alert.address ? state.lastRead.confirmedSats : 0,
+        // One outage, one clock: repeated polls must not keep resetting it.
+        firstSeenAt: existing && existing.address === alert.address ? existing.firstSeenAt : at,
+        updatedAt: at,
+      };
+      writeJson('deposit-state', subOrgId, { ...state, alert: next });
+      return next;
+    },
+    getDepositAlert(subOrgId) {
+      return readDepositState(subOrgId).alert ?? null;
     },
   };
 }

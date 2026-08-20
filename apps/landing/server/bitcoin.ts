@@ -67,41 +67,137 @@ export function p2wpkhScriptHex(address: string, network: BtcNet = 'testnet'): s
 }
 
 /**
- * An address's UTXOs from mempool.space's address API — free, no QuickNode
- * add-on needed, mainnet and testnet4 alike. Every UTXO pays to the address,
- * so its scriptPubKey is derived from it. Confirmed and unconfirmed are
- * returned separately: only confirmed ones are ever spent, but the deposit UI
- * shows "deposit detected" from the unconfirmed sum.
+ * The deposit indexer: a NAMED, swappable configuration seam (KTD4).
+ *
+ * Every address→UTXO read in this app goes through here. The shape is Esplora
+ * REST (`GET {api}/address/{addr}/utxo`) — what mempool.space, Blockstream and
+ * a self-hosted mempool/electrs instance all speak — so moving from the free
+ * public API to a paid tier or a private index is an environment variable, not
+ * a rewrite. QuickNode is deliberately NOT this seam: measured against the
+ * live mainnet endpoint, Bitcoin Core there has no address index,
+ * `scantxoutset` is blocked at the edge, and the Ordinals & Runes add-on
+ * (which IS enabled, and is what gates inscription) has no address surface in
+ * either direction. So deposit reads do not consume QuickNode quota.
  */
-export async function fetchAddressUtxos(opts: {
+export interface IndexerConfig {
+  /** Esplora-shaped REST base, no trailing slash (e.g. https://mempool.space/api). */
   api: string;
-  address: string;
-  network?: BtcNet;
-  fetchImpl?: typeof fetch;
-  timeoutMs?: number;
-}): Promise<{
+  /** Optional bearer/API token for a paid or private index. */
+  authToken?: string;
+  /** Header the token rides in. Default `Authorization` (sent as `Bearer <token>`). */
+  authHeader?: string;
+}
+
+/** The free public default, per network. A default — not a hard dependency. */
+export const DEFAULT_INDEXER_API = {
+  mainnet: 'https://mempool.space/api',
+  testnet: 'https://mempool.space/testnet4/api',
+} as const;
+
+const stripTrailingSlash = (u: string) => u.replace(/\/+$/, '');
+
+/**
+ * Resolve the seam from the environment. `BTC_INDEXER_API` is the contract;
+ * the older `MEMPOOL_API` / `MEMPOOL_TESTNET4_API` remain readable so an
+ * existing testnet4 deploy (whose faucet reads through this same seam) is not
+ * silently repointed by an upgrade.
+ */
+export function resolveIndexer(
+  env: Record<string, string | undefined> = process.env,
+  network: BtcNet = serverBtcNetwork(env) === 'mainnet' ? 'mainnet' : 'testnet'
+): IndexerConfig {
+  const legacy = network === 'mainnet' ? env.MEMPOOL_API : env.MEMPOOL_TESTNET4_API ?? env.MEMPOOL_API;
+  const api = stripTrailingSlash(env.BTC_INDEXER_API || legacy || DEFAULT_INDEXER_API[network]);
+  const cfg: IndexerConfig = { api };
+  if (env.BTC_INDEXER_TOKEN) cfg.authToken = env.BTC_INDEXER_TOKEN;
+  if (env.BTC_INDEXER_AUTH_HEADER) cfg.authHeader = env.BTC_INDEXER_AUTH_HEADER;
+  return cfg;
+}
+
+/**
+ * The auth headers for a read — `{}` when no token is configured, so the free
+ * default keeps working unchanged. A token under the default `Authorization`
+ * header is sent as `Bearer <token>` unless it already names a scheme; under
+ * any other header name it is sent raw (the `X-Api-Key` convention).
+ */
+export function indexerAuthHeaders(cfg: IndexerConfig): Record<string, string> {
+  if (!cfg.authToken) return {};
+  const header = cfg.authHeader ?? 'Authorization';
+  if (header.toLowerCase() !== 'authorization') return { [header]: cfg.authToken };
+  return { [header]: /^\S+\s+\S/.test(cfg.authToken) ? cfg.authToken : `Bearer ${cfg.authToken}` };
+}
+
+/**
+ * A read that could not be trusted. `kind` is load-bearing: a rate-limit is a
+ * budget the operator can raise (and a "come back shortly" for the creator),
+ * while `unavailable` is an outage. Collapsing them would tell a stranger
+ * whose deposit is stuck the wrong thing about what happens next.
+ */
+export class IndexerError extends Error {
+  constructor(
+    message: string,
+    readonly kind: 'rate_limited' | 'unavailable',
+    readonly status?: number,
+    readonly retryAfterSec?: number
+  ) {
+    super(message);
+    this.name = 'IndexerError';
+  }
+}
+
+/**
+ * An address's UTXOs through the configured indexer. Every UTXO pays to the
+ * address, so its scriptPubKey is derived from it. Confirmed and unconfirmed
+ * are returned separately: only confirmed ones are ever spent, but the deposit
+ * UI shows "deposit detected" from the unconfirmed sum.
+ */
+export async function fetchAddressUtxos(
+  opts: IndexerConfig & {
+    address: string;
+    network?: BtcNet;
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+  }
+): Promise<{
   confirmed: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
   unconfirmedSats: number;
 }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const scriptPubKey = p2wpkhScriptHex(opts.address, opts.network ?? 'testnet');
-  // Bound the call so a hung mempool.space response can't hold the handler
-  // (and the user's rate-limit slot) open indefinitely.
+  // Bound the call so a hung indexer can't hold the handler (and the user's
+  // rate-limit slot) open indefinitely.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 10_000);
+  const url = `${stripTrailingSlash(opts.api)}/address/${opts.address}/utxo`;
   let res: Response;
   try {
-    res = await fetchImpl(`${opts.api}/address/${opts.address}/utxo`, { signal: controller.signal });
+    res = await fetchImpl(url, { signal: controller.signal, headers: indexerAuthHeaders(opts) });
+  } catch (e) {
+    throw new IndexerError(`Indexer read failed for ${opts.address}: ${(e as Error).message}`, 'unavailable');
   } finally {
     clearTimeout(timer);
   }
-  if (!res.ok) throw new Error(`mempool.space UTXO fetch failed (${res.status}) for ${opts.address}`);
-  const utxos = (await res.json()) as Array<{
-    txid: string;
-    vout: number;
-    value: number;
-    status?: { confirmed?: boolean };
-  }>;
+  if (!res.ok) {
+    // 429 is the quota signal every Esplora-shaped host uses; 402 is what a
+    // paid tier returns once the plan is spent. Both are "budget", not "down".
+    const rateLimited = res.status === 429 || res.status === 402;
+    const retryAfter = Number(res.headers.get('Retry-After'));
+    throw new IndexerError(
+      `Indexer UTXO fetch failed (${res.status}) for ${opts.address}`,
+      rateLimited ? 'rate_limited' : 'unavailable',
+      res.status,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined
+    );
+  }
+  let utxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }>;
+  try {
+    utxos = (await res.json()) as typeof utxos;
+    if (!Array.isArray(utxos)) throw new Error('not an array');
+  } catch (e) {
+    // A 200 we cannot parse is NOT an empty address — treating it as one would
+    // present "no deposit yet" to someone whose BTC has already landed.
+    throw new IndexerError(`Indexer returned an unusable body for ${opts.address}: ${(e as Error).message}`, 'unavailable');
+  }
   return {
     confirmed: utxos
       .filter((u) => u.status?.confirmed)
@@ -112,15 +208,17 @@ export async function fetchAddressUtxos(opts: {
 
 /**
  * The faucet's spendable UTXOs — CONFIRMED only (never spend our own
- * unconfirmed change). Kept as the faucet-facing wrapper over fetchAddressUtxos.
+ * unconfirmed change). Kept as the faucet-facing wrapper over fetchAddressUtxos
+ * so the faucet and the deposit route read through the SAME seam.
  */
-export async function fetchFaucetUtxos(opts: {
-  api: string;
-  address: string;
-  network?: BtcNet;
-  fetchImpl?: typeof fetch;
-  timeoutMs?: number;
-}): Promise<Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>> {
+export async function fetchFaucetUtxos(
+  opts: IndexerConfig & {
+    address: string;
+    network?: BtcNet;
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+  }
+): Promise<Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>> {
   return (await fetchAddressUtxos(opts)).confirmed;
 }
 
@@ -203,9 +301,11 @@ export function createBitcoinRoutes(deps: {
   // a commit whose reveal is not persisted first.
   inscriptions?: InscriptionsStore;
   // Which Bitcoin network these routes serve; drives address validation and
-  // which mempool.space API the deposit route reads.
+  // which indexer default the deposit route reads.
   network?: BtcNet;
-  // mempool.space REST base for the deposit route (e.g. https://mempool.space/api).
+  // The deposit indexer seam: base URL + optional auth. See resolveIndexer.
+  indexer?: IndexerConfig;
+  /** @deprecated A bare base URL, folded into `indexer`. Kept for older callers. */
   depositApi?: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
@@ -234,9 +334,20 @@ export function createBitcoinRoutes(deps: {
   // vector on mainnet is the user's BTC and our API quota, not the faucet.
   const inscribeUserLimiter = createRateLimiter({ limit: 10, windowMs: 60 * 60_000 });
   // Shared per-user cap for the proxy reads/broadcasts that burn QuickNode
-  // quota (sat lookup, fee estimate, raw broadcast, deposit polls).
+  // quota (sat lookup, fee estimate, raw broadcast).
   const quotaUserLimiter = createRateLimiter({ limit: 120, windowMs: 60 * 60_000 });
+  // The deposit poll gets its OWN per-user bound and is deliberately NOT under
+  // the QuickNode cap: it reads the indexer seam, not QuickNode (its fee
+  // estimate is served from the 60s cache). But it is the highest-volume call
+  // in the app — one poll per 15s per creator awaiting a deposit — so it must
+  // still be bounded, against our indexer budget rather than QuickNode's.
+  // 480/hour is exactly 2x the honest 15s poll rate: room for a reload and the
+  // click-time re-fetch, no room for an unattended loop.
+  const depositUserLimiter = createRateLimiter({ limit: 480, windowMs: 60 * 60_000 });
   const provider = deps.provider as FaucetProvider;
+  // One seam, resolved once. `depositApi` is the older bare-URL spelling.
+  const indexer: IndexerConfig | undefined =
+    deps.indexer ?? (deps.depositApi ? { api: deps.depositApi } : undefined);
 
   // How long an unconfirmed reveal may sit before the list poll re-pushes it.
   // Long enough that a reveal simply waiting for a block is not re-broadcast
@@ -321,6 +432,17 @@ export function createBitcoinRoutes(deps: {
     if (!q.allowed) {
       return json({ error: 'user_quota_cap' }, 429, {
         'Retry-After': String(Math.ceil(q.retryAfterMs / 1000)),
+      });
+    }
+    return null;
+  }
+
+  /** 429 when the per-user deposit-poll bound is hit, else null. */
+  function depositCapped(sub: string): Response | null {
+    const q = depositUserLimiter.check(sub);
+    if (!q.allowed) {
+      return json({ error: 'deposit_user_cap' }, 429, {
+        'Retry-After': String(Math.max(1, Math.ceil(q.retryAfterMs / 1000))),
       });
     }
     return null;
@@ -507,16 +629,21 @@ export function createBitcoinRoutes(deps: {
    * creator-pays core. Returns the address's confirmed UTXOs (spendable as
    * inscription funding), the unconfirmed sum (the "deposit detected" state),
    * and a buffered cost estimate so the UI can show a deposit target. UTXOs
-   * come from mempool.space's free address API; the fee estimate from the
+   * come from the configured indexer seam (KTD4); the fee estimate from the
    * QuickNode provider. Nothing is custodied: the address is derived from the
    * user's own Turnkey key.
+   *
+   * Fail-closed (R28): when the read behind the address cannot be trusted, this
+   * returns a NAMED error and nothing a UI could render as "send this much
+   * here" — and it persists that state so it reaches the creator on their next
+   * visit rather than only a tab that happens to still be polling (R31).
    */
   const deposit: Handler = async (req, url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
     const limited = rateLimited(clientIp);
     if (limited) return limited;
-    if (!deps.depositApi) return json({ error: 'deposit_unavailable' }, 503);
+    if (!indexer) return json({ error: 'deposit_unavailable' }, 503);
     const network = deps.network ?? 'testnet';
 
     const address = url.searchParams.get('address') ?? '';
@@ -554,12 +681,42 @@ export function createBitcoinRoutes(deps: {
       return json({ error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
     }
 
+    // The per-user poll bound sits HERE, not at the top: it exists to bound
+    // reads against the indexer budget, and a request that never reaches the
+    // indexer (bad address, unbound address, no fee) must not spend it — that
+    // is how a buggy or hostile client burns an honest creator's poll budget.
+    const capped = depositCapped(sub);
+    if (capped) return capped;
+
     let utxos: Awaited<ReturnType<typeof fetchAddressUtxos>>;
     try {
-      utxos = await fetchAddressUtxos({ api: deps.depositApi, address, network, fetchImpl: deps.fetchImpl });
+      utxos = await fetchAddressUtxos({ ...indexer, address, network, fetchImpl: deps.fetchImpl });
     } catch (e) {
-      return json({ error: 'utxo_lookup_failed', message: (e as Error).message }, 502);
+      // The read cannot be trusted, so nothing derived from it is served: no
+      // address, no UTXO set, no quote. A rate-limit is kept distinct from an
+      // outage — one is a budget the operator can raise, the other is down —
+      // and both are PERSISTED, because this can land after the creator has
+      // sent BTC and closed the tab.
+      const err = e instanceof IndexerError ? e : new IndexerError((e as Error).message, 'unavailable');
+      const kind = err.kind === 'rate_limited' ? 'indexer_rate_limited' : 'indexer_unavailable';
+      const alert = deps.inscriptions?.recordDepositAlert(sub, { kind, network, address });
+      const headers = err.retryAfterSec ? { 'Retry-After': String(err.retryAfterSec) } : undefined;
+      return json(
+        {
+          error: err.kind === 'rate_limited' ? 'indexer_rate_limited' : 'utxo_lookup_failed',
+          message: err.message,
+          ...(alert ? { depositAlert: alert } : {}),
+        },
+        err.kind === 'rate_limited' ? 503 : 502,
+        headers
+      );
     }
+    // A read we could trust: remember what they hold and end any outage state.
+    deps.inscriptions?.recordDepositRead(sub, {
+      network,
+      address,
+      confirmedSats: utxos.confirmed.reduce((n, u) => n + u.value, 0),
+    });
     // Ordinal safety: the reveal sends the inscribed sat BACK to this same
     // address, so the user's inscription outputs sit among their funding
     // UTXOs. Spending one as the funding input would make an existing
@@ -1018,7 +1175,12 @@ export function createBitcoinRoutes(deps: {
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     }));
-    return json({ inscriptions });
+    // R31: the deposit-read outage reaches someone who already left. This
+    // route is what the Your Originals page loads on every visit, so a stuck
+    // state raised while nobody was looking is on screen when they come back —
+    // rather than only in a 15s poll on a tab that is long closed.
+    const depositAlert = store.getDepositAlert(sub);
+    return json({ inscriptions, ...(depositAlert ? { depositAlert } : {}) });
   };
 
   /**

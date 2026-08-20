@@ -205,6 +205,42 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
     report('QUICKNODE_ENDPOINT', 'QUICKNODE_ENDPOINT is not an https:// URL.');
   }
 
+  // The deposit indexer seam (R4/KTD4). Every address→UTXO read a creator's
+  // money depends on goes through one base URL; this makes WHICH one, and
+  // whether it is authenticated, legible at boot.
+  const indexerApi = env.BTC_INDEXER_API;
+  if (indexerApi && !/^https:\/\/\S+$/.test(indexerApi)) {
+    // Not gated on `deployed`: a token over http leaks wherever it runs.
+    issues.push({
+      key: 'BTC_INDEXER_API',
+      severity: 'error',
+      message: `BTC_INDEXER_API ("${indexerApi}") is not an https:// URL — the deposit read (and any token with it) would travel in cleartext.`,
+    });
+  } else if (!indexerApi && btcNetwork === 'mainnet' && deployed) {
+    // WARN, never error: shipping on the free public API is the sanctioned
+    // choice (KTD4), so CONFIG_STRICT=1 must not refuse to start the very
+    // deploy that decision describes. It is still worth naming — it is an
+    // unauthenticated third-party dependency on the money path.
+    issues.push({
+      key: 'BTC_INDEXER_API',
+      severity: 'warn',
+      message:
+        'BTC_INDEXER_API is not set — mainnet deposit reads run against the free public mempool.space API: unauthenticated, unsanctioned, and rate-limited at their discretion. Point this at a paid tier or a self-hosted Esplora-shaped index (with BTC_INDEXER_TOKEN) when that matters.',
+    });
+  }
+  if (env.BTC_INDEXER_TOKEN && !indexerApi) {
+    report(
+      'BTC_INDEXER_TOKEN',
+      'BTC_INDEXER_TOKEN is set but BTC_INDEXER_API is not — the token is being sent to the free public API, which ignores it. Set the endpoint the token belongs to.'
+    );
+  }
+  if (env.BTC_INDEXER_AUTH_HEADER && !env.BTC_INDEXER_TOKEN) {
+    report(
+      'BTC_INDEXER_AUTH_HEADER',
+      'BTC_INDEXER_AUTH_HEADER names a header with no BTC_INDEXER_TOKEN behind it — the deposit read goes out unauthenticated.'
+    );
+  }
+
   // Network skew, server side (R11). VITE_BTC_NETWORK is baked into the bundle
   // at BUILD time and BTC_NETWORK is read at RUNTIME; the browser's own check
   // only ever sees its half. Both directions are reported here:

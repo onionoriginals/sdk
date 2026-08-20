@@ -28,6 +28,42 @@ export interface OriginalRow {
   inscriptionStatus?: 'pending' | 'confirmed';
 }
 
+/**
+ * A persisted "we cannot trust the read behind your deposit address" state,
+ * raised server-side and carried on GET /api/btc/inscribe (R28/R31).
+ *
+ * This exists because the outage is ASYNCHRONOUS: it can begin after a creator
+ * has sent BTC and closed the tab, at which point the deposit screen's copy
+ * and its 15s poll reach nobody. The state is durable on the server, so it is
+ * on screen the next time they open this page.
+ */
+export interface DepositAlert {
+  kind: 'indexer_unavailable' | 'indexer_rate_limited';
+  network: string;
+  address: string;
+  /** Confirmed sats at the address on the last read we could trust (0 if none). */
+  heldSats: number;
+  firstSeenAt: string;
+  updatedAt: string;
+}
+
+/**
+ * The alert as one line of copy, or null when there is nothing to say. The
+ * held balance is appended only when there IS one — telling someone who never
+ * deposited that they hold 0 sats is noise, and the outage itself is the whole
+ * message for them.
+ */
+export function depositAlertMessage(alert: DepositAlert | null | undefined): string | null {
+  if (!alert) return null;
+  const base =
+    alert.kind === 'indexer_rate_limited'
+      ? yourOriginals.depositAlert.busy
+      : yourOriginals.depositAlert.unavailable;
+  if (!alert.heldSats) return base;
+  const { heldPrefix, heldSuffix } = yourOriginals.depositAlert;
+  return `${base} ${heldPrefix} ${alert.heldSats.toLocaleString()} sats ${heldSuffix} ${alert.address}.`;
+}
+
 /** One in-flight inscription record from GET /api/btc/inscribe. */
 export interface PendingInscription {
   commitTxId: string;
@@ -89,15 +125,26 @@ export function withLiveInscriptionStatus(
   });
 }
 
-/** The user's inscription records ([] when signed out / unavailable). */
-export async function fetchInscriptions(): Promise<PendingInscription[]> {
+/**
+ * The user's inscription records plus any standing deposit alert ([] / null
+ * when signed out or unavailable). One request: the alert rides the fetch this
+ * page already makes on every visit, which is what makes R31's
+ * "reachable after they close the tab" hold without a second poll.
+ */
+export async function fetchInscriptions(): Promise<{
+  records: PendingInscription[];
+  depositAlert: DepositAlert | null;
+}> {
   try {
     const res = await fetch('/api/btc/inscribe', { credentials: 'same-origin' });
-    if (!res.ok) return [];
-    const body = (await res.json()) as { inscriptions?: PendingInscription[] };
-    return body.inscriptions ?? [];
+    if (!res.ok) return { records: [], depositAlert: null };
+    const body = (await res.json()) as {
+      inscriptions?: PendingInscription[];
+      depositAlert?: DepositAlert;
+    };
+    return { records: body.inscriptions ?? [], depositAlert: body.depositAlert ?? null };
   } catch {
-    return [];
+    return { records: [], depositAlert: null };
   }
 }
 
@@ -164,6 +211,7 @@ export function YourOriginals() {
   const [unfinished, setUnfinished] = useState<PendingInscription[]>([]);
   const [finishing, setFinishing] = useState<string | null>(null);
   const [finishNote, setFinishNote] = useState<string | null>(null);
+  const [depositAlert, setDepositAlert] = useState<DepositAlert | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -174,11 +222,13 @@ export function YourOriginals() {
     // 'pending', and any record whose reveal never broadcast gets a
     // "finish inscription" offer — the signed txs are on the server, nothing
     // needs re-signing (step-1 recovery surface).
-    Promise.all([fetchOriginals(), fetchInscriptions()]).then(([rows, recs]) => {
+    Promise.all([fetchOriginals(), fetchInscriptions()]).then(([rows, inscriptions]) => {
       if (!live) return;
+      const recs = inscriptions.records;
       const merged = withLiveInscriptionStatus(rows, recs);
       setOriginals(merged);
       setUnfinished(unfinishedInscriptions(recs));
+      setDepositAlert(inscriptions.depositAlert);
       merged.forEach((r) => resolveLive(r.did).then((ok) => live && setResolved((m) => ({ ...m, [r.did]: ok }))));
     })
       // Settle in `finally` so an unexpected throw ends on "no Originals yet"
@@ -226,6 +276,14 @@ export function YourOriginals() {
         )}
 
         {view.mode === 'signed-out' && <p className="your-originals-note">{yourOriginals.signedOut}</p>}
+
+        {/* R31: raised while nobody was looking, shown the moment they return. */}
+        {isAuthenticated && depositAlert && (
+          <div className="card your-originals-finish" role="alert">
+            <p className="your-originals-finish-title">{yourOriginals.depositAlert.heading}</p>
+            <p>{depositAlertMessage(depositAlert)}</p>
+          </div>
+        )}
 
         {isAuthenticated && unfinished.length > 0 && (
           <div className="card your-originals-finish" role="alert">

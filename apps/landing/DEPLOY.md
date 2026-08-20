@@ -39,6 +39,9 @@ violation by name. It is **warn-only** unless `CONFIG_STRICT=1`. See
 | `TURNKEY_ORGANIZATION_ID` | always | ” |
 | `BTC_NETWORK` | always | silently inherits the `testnet4` default |
 | `QUICKNODE_ENDPOINT` | `BTC_NETWORK=mainnet` | real inscription silently stays mock |
+| `BTC_INDEXER_API` | never (has a default) | deposit reads run against the **free public** mempool.space API — unauthenticated, rate-limited at their discretion. Warned at boot on a mainnet deploy; never an error, because shipping on the free tier is the sanctioned choice (KTD4) |
+| `BTC_INDEXER_TOKEN` | with a paid/private `BTC_INDEXER_API` | the read goes out unauthenticated and the paid tier rejects or throttles it |
+| `BTC_INDEXER_AUTH_HEADER` | when the index wants something other than `Authorization: Bearer` | token is sent as a bearer token |
 | `ORIGINALS_DATA_DIR` | always | users' Originals **and signed reveal transactions** land on an ephemeral path and are wiped on the next redeploy |
 | `TRUSTED_PROXY_HOPS` | behind a proxy | every visitor collapses into one shared rate-limit bucket |
 | `CONFIG_STRICT` | opt-in | see below |
@@ -69,8 +72,16 @@ any of these is outstanding.
    the resolved identity must be your address, not the proxy's.
 4. **`QUICKNODE_ENDPOINT` reaches a mainnet node with the Ordinals & Runes
    add-on.** Without the add-on, sat lookup returns `SAT_INDEX_UNAVAILABLE`
-   and inscription is impossible. `bun scripts/check-quicknode-ordinals.ts`
-   is the pre-deploy probe.
+   and inscription is impossible. `bun scripts/check:ordinals` — i.e.
+   `bun scripts/check-quicknode-ordinals.ts` — is the pre-deploy probe; it
+   also exercises the deposit indexer seam when given an address
+   (`BTC_CHECK_ADDRESS`) and can probe the add-on alone from any confirmed
+   mainnet outpoint (`BTC_CHECK_OUTPOINT=txid:vout`).
+   Note the two reads are **separate vendors on purpose**: QuickNode has no
+   address→UTXO surface (Core there has no address index, `scantxoutset` is
+   blocked at the edge, and the Ordinals add-on maps outpoint→address and
+   sat→address only), so deposit polling costs no QuickNode quota and lives
+   behind `BTC_INDEXER_API` instead.
 5. **One live Turnkey OTP verification.** Still outstanding from PR #356, and
    now more important: the OTP login client signature was corrected in this
    branch after being found unacceptable to Turnkey's API, so the login path

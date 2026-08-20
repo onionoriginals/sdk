@@ -235,10 +235,21 @@ export const demo = {
     ready: 'Deposit confirmed — ready to inscribe.',
     needed: 'No confirmed deposit covering the fee yet — send BTC to your deposit address and wait for one confirmation.',
     nonRefundable: 'Creator pays: the network fee is non-refundable. You own the keys, the change, and the inscribed sat — nothing is custodied.',
+    // R31 — said BEFORE they deposit, because that is the only moment we are
+    // sure they are reading. It names the exact place the state will be, so
+    // "close the tab" is a safe thing to do rather than a gamble.
+    ifSomethingGoesWrong:
+      'You can close this tab. If anything goes wrong on our side while you’re away — we lose our read of the network, or your inscription stalls — it’ll be waiting for you on your Your Originals page the next time you sign in. We don’t send email about it, so that page is where to look.',
     addressPending: 'Checking your deposit address with the server…',
     unavailableBadge: 'Fee estimate unavailable.',
+    readUnavailableBadge: 'Can’t read your deposit address.',
+    readBusyBadge: 'Deposit lookups rate-limited.',
     feeUnavailable:
       'We can’t reach the Bitcoin fee estimator right now, so we can’t tell you an honest amount to deposit — and we won’t guess, because a wrong number would leave your BTC stuck in an inscription that can’t be paid for. No deposit address is shown until the estimate is back. Nothing you’ve made is lost: your Original is already real and resolvable as did:webvh. Try again in a few minutes.',
+    indexerUnavailable:
+      'We can’t read your deposit address on the Bitcoin network right now, so we can’t tell you what’s arrived — and we won’t show you a stale balance and call it current. No address is shown while that’s true. Anything you’ve already sent is untouched: it’s at your own address, under your own key, and it will still be there when the read comes back. Your Original is already real and resolvable as did:webvh in the meantime.',
+    indexerBusy:
+      'Our Bitcoin address lookups are being rate-limited at the moment, so we can’t confirm what’s at your deposit address just yet. Nothing is lost or stuck on your side — any BTC you’ve sent is at your own address, under your own key. Give it a few minutes and reload; we’ll pick up exactly where this left off.',
     networkMismatch:
       'This deploy is misconfigured: the app was built for a different Bitcoin network than the server is running. Inscribing is disabled until they match — no deposit address is shown, because funds sent to it could not be spent here.',
     yourKeyNote: 'Your Turnkey key signs this inscription in your browser; your own deposit pays the fee. The server never sees a private key.'
@@ -290,6 +301,21 @@ export const yourOriginals = {
     busy: 'Finishing…',
     done: 'Inscription broadcast — it will confirm on-chain shortly.',
     failed: 'Could not finish the inscription — try again in a moment.',
+  },
+  /**
+   * R31 — a deposit-read outage is asynchronous: it can start after a creator
+   * sends BTC and closes the tab, so the deposit screen's own copy reaches
+   * nobody. This block is the version that greets them on their NEXT VISIT,
+   * from the server's persisted alert.
+   */
+  depositAlert: {
+    heading: 'About your Bitcoin deposit',
+    unavailable:
+      'While you were away, we lost our read of the Bitcoin network, so we can’t currently confirm what’s sitting at your deposit address. Your funds are not in our custody and never were — they’re at your own address, under your own key, and nothing here can move them. Inscribing resumes on its own once the read is back.',
+    busy:
+      'Our Bitcoin address lookups are being rate-limited, so we can’t confirm your deposit right now. Nothing is lost: any BTC you sent is at your own address, under your own key. Try again in a few minutes.',
+    heldPrefix: 'Last time we could see it, your deposit address held',
+    heldSuffix: 'at',
   },
 };
 

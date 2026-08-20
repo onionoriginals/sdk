@@ -25,6 +25,7 @@ import {
   rawKeyFaucetSigner,
   turnkeyFaucetSigner,
   fetchFaucetUtxos,
+  resolveIndexer,
   type FaucetProvider,
   type FaucetTxSigner,
 } from './server/bitcoin';
@@ -58,16 +59,16 @@ const inscriptionsStore = createInscriptionsStore({ dataDir: originalsDataDir })
 // loudly on a mismatch — the seatbelt against a wrong-network endpoint.
 const btcNet = serverBtcNetwork();
 const providerNetwork = btcNet === 'mainnet' ? 'mainnet' : 'testnet';
-// mempool.space REST base: free address/UTXO reads on both networks.
-const mempoolApi =
-  process.env.MEMPOOL_API ??
-  (btcNet === 'mainnet'
-    ? 'https://mempool.space/api'
-    : process.env.MEMPOOL_TESTNET4_API ?? 'https://mempool.space/testnet4/api');
+// The deposit indexer seam (KTD4): ONE configurable, optionally authenticated
+// Esplora-shaped base URL behind every address->UTXO read in this process —
+// the creator-pays deposit route AND the testnet4 faucet alike. Defaults to
+// the free public API per network; BTC_INDEXER_API/BTC_INDEXER_TOKEN move it
+// to a paid tier or a private index without a code change.
+const indexer = resolveIndexer(process.env, providerNetwork);
 
-// QuickNode gives the ordinals-aware sat lookup + fee + broadcast. The faucet's
-// own confirmed UTXOs come from mempool.space's testnet4 address API (free, no
-// add-on needed) — see fetchFaucetUtxos in server/bitcoin.ts.
+// QuickNode gives the ordinals-aware sat lookup + fee + broadcast. Address
+// reads are NOT QuickNode: its Ordinals add-on has no address surface and Core
+// there has no address index — see resolveIndexer in server/bitcoin.ts.
 function createFaucetProviderFromEnv(): FaucetProvider {
   const provider = new QuickNodeProvider({
     endpoint: process.env.QUICKNODE_ENDPOINT!,
@@ -77,7 +78,7 @@ function createFaucetProviderFromEnv(): FaucetProvider {
   // address prefix (bc1q on mainnet, tb1q on testnet4) — only the faucet
   // calls this today, but a mainnet caller must not hit the tb1q-only path.
   provider.getSpendableUtxos = (address: string) =>
-    fetchFaucetUtxos({ api: mempoolApi, address, network: providerNetwork });
+    fetchFaucetUtxos({ ...indexer, address, network: providerNetwork });
   return provider;
 }
 
@@ -100,11 +101,15 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
         jwtSecret,
         provider: createFaucetProviderFromEnv(),
         network: 'mainnet',
-        depositApi: mempoolApi,
+        indexer,
         inscriptions: inscriptionsStore,
       });
       bitcoin = { ...routes, funding: undefined };
       console.log('[landing] MAINNET inscription configured — /api/btc/* live (creator-pays, no faucet)');
+      // Which index a stranger's deposit is actually read from, on one line.
+      console.log(
+        `[landing] deposit indexer: ${indexer.api}${indexer.authToken ? ' (authenticated)' : ' (no token — free public tier)'}`
+      );
     } else {
       // Pick the faucet signer: a raw testnet WIF (simplest) or a Turnkey-org wallet.
       let faucetAddress = process.env.BTC_FAUCET_ADDRESS!;
@@ -129,7 +134,7 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
         faucet: { address: faucetAddress, signFundingTx },
         faucetSats: Number(process.env.BTC_FAUCET_SATS ?? 20_000),
         network: 'testnet',
-        depositApi: mempoolApi,
+        indexer,
         inscriptions: inscriptionsStore,
       });
     }

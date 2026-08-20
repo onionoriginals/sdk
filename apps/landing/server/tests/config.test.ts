@@ -96,9 +96,10 @@ describe('validateConfig — deployed environment', () => {
   test('a missing QUICKNODE_ENDPOINT with BTC_NETWORK=mainnet is reported', () => {
     const env = { ...GOOD, BTC_NETWORK: 'mainnet', VITE_BTC_NETWORK: 'mainnet' };
     expect(keys(errors(validateConfig({ env, dataDir: mounted })))).toContain('QUICKNODE_ENDPOINT');
-    // …and is satisfied by setting it.
+    // …and is satisfied by setting it. (Errors only: a mainnet deploy on the
+    // free deposit indexer still carries U4's standing BTC_INDEXER_API warn.)
     expect(
-      validateConfig({ env: { ...env, QUICKNODE_ENDPOINT: 'https://x.quiknode.pro/k/' }, dataDir: mounted })
+      errors(validateConfig({ env: { ...env, QUICKNODE_ENDPOINT: 'https://x.quiknode.pro/k/' }, dataDir: mounted }))
     ).toEqual([]);
   });
 
@@ -211,7 +212,9 @@ describe('validateConfig — network skew, both directions', () => {
   };
 
   test('the matching pair is not flagged', () => {
-    expect(validateConfig({ env: { ...REAL, VITE_BTC_NETWORK: 'mainnet' }, dataDir: mounted })).toEqual([]);
+    // Errors only — U4's BTC_INDEXER_API warn stands on any mainnet deploy
+    // reading deposits from the free public API.
+    expect(errors(validateConfig({ env: { ...REAL, VITE_BTC_NETWORK: 'mainnet' }, dataDir: mounted }))).toEqual([]);
   });
 
   test('browser on a real network, server on another chain (the dangerous direction)', () => {
@@ -317,5 +320,50 @@ describe('strict mode', () => {
     enforceConfig([], { strict: true, log });
     enforceConfig([], { strict: false, log });
     expect(lines).toEqual([]);
+  });
+});
+
+/**
+ * U4 / KTD4 — the deposit indexer is a configuration seam. The contract's job
+ * is to make the seam's state legible at boot: which index a mainnet deploy is
+ * actually reading strangers' deposits from, and whether that read is
+ * authenticated. Shipping on the free public default is a SANCTIONED choice
+ * (KTD4), so it warns rather than erroring — CONFIG_STRICT=1 must not refuse
+ * to start the very deploy this decision describes.
+ */
+describe('validateConfig — the deposit indexer seam', () => {
+  const MAINNET = { ...GOOD, BTC_NETWORK: 'mainnet', QUICKNODE_ENDPOINT: 'https://q.example', VITE_BTC_NETWORK: 'mainnet' };
+
+  test('a mainnet deploy on the free default is warned about, never errored', () => {
+    const issues = validateConfig({ env: MAINNET, dataDir: mounted });
+    const indexer = issues.filter((i) => i.key === 'BTC_INDEXER_API');
+    expect(indexer).toHaveLength(1);
+    expect(indexer[0].severity).toBe('warn');
+    expect(errors(issues)).toEqual([]);
+  });
+
+  test('a configured indexer silences the warning', () => {
+    const env = { ...MAINNET, BTC_INDEXER_API: 'https://idx.example/api', BTC_INDEXER_TOKEN: 'tok' };
+    expect(keys(validateConfig({ env, dataDir: mounted }))).not.toContain('BTC_INDEXER_API');
+  });
+
+  test('a non-https indexer base URL is an error — the token would ride in cleartext', () => {
+    const env = { ...MAINNET, BTC_INDEXER_API: 'http://idx.example/api' };
+    const issues = errors(validateConfig({ env, dataDir: mounted }));
+    expect(keys(issues)).toContain('BTC_INDEXER_API');
+  });
+
+  test('a token without a custom endpoint is reported — mempool.space ignores it', () => {
+    const env = { ...MAINNET, BTC_INDEXER_TOKEN: 'tok' };
+    expect(keys(validateConfig({ env, dataDir: mounted }))).toContain('BTC_INDEXER_TOKEN');
+  });
+
+  test('an auth header named with no token behind it is reported', () => {
+    const env = { ...MAINNET, BTC_INDEXER_API: 'https://idx.example/api', BTC_INDEXER_AUTH_HEADER: 'X-Api-Key' };
+    expect(keys(validateConfig({ env, dataDir: mounted }))).toContain('BTC_INDEXER_AUTH_HEADER');
+  });
+
+  test('a testnet4 deploy is not nagged about the free API', () => {
+    expect(keys(validateConfig({ env: GOOD, dataDir: mounted }))).not.toContain('BTC_INDEXER_API');
   });
 });

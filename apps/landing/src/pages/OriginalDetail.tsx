@@ -94,7 +94,7 @@ export function OriginalDetail({ did }: { did: string }) {
         arts ? fetchText(arts.celUrl) : null
       ]);
       // Overlay live confirmation state (the stored row stays 'pending').
-      const row = withLiveInscriptionStatus(rows, inscriptionRecs).find((r) => r.did === did) ?? null;
+      const row = withLiveInscriptionStatus(rows, inscriptionRecs.records).find((r) => r.did === did) ?? null;
 
       let logEntries: ReturnType<typeof parseDidLog> | null = null;
       try {
