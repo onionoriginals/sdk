@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { demo } from '../content';
-import { depositDisclosure, quoteForAddress, depositReadiness, depositBadgeLabel } from './Demo';
+import { depositDisclosure, quoteForAddress, depositReadiness, depositBadgeLabel, inscribeIsComplete } from './Demo';
 import { bitcoinPaymentUri } from '../sdk/bitcoin-uri';
 
 /**
@@ -193,5 +193,33 @@ describe('a funded deposit stops asking for money', () => {
 
   test('the balance copy explains that a surplus is reusable, not stranded', () => {
     expect(demo.deposit.balanceReuse).toMatch(/next inscription/i);
+  });
+});
+
+describe('a commit-only broadcast is not an inscription', () => {
+  /**
+   * Hit live: the site said "inscribed" and the reveal txid 404'd. The server
+   * had returned status 'commit_broadcast' — the commit was on the network,
+   * the reveal had not propagated, and the recovery sweep still owed the
+   * creator an inscription. The SDK discards submitInscription's return, so
+   * every 200 read as done.
+   */
+  test('only a broadcast reveal counts as complete', () => {
+    expect(inscribeIsComplete('reveal_broadcast')).toBe(true);
+    expect(inscribeIsComplete('commit_broadcast')).toBe(false);
+  });
+
+  test('an absent or unknown status is not treated as complete', () => {
+    expect(inscribeIsComplete(null)).toBe(false);
+    expect(inscribeIsComplete(undefined)).toBe(false);
+    expect(inscribeIsComplete('signed')).toBe(false);
+    expect(inscribeIsComplete('')).toBe(false);
+  });
+
+  test('the commit-only copy does not claim the inscription exists', () => {
+    expect(demo.deposit.commitOnlyHeading).not.toMatch(/inscribed/i);
+    expect(demo.deposit.commitOnlyBody).toMatch(/not propagated|has not propagated/i);
+    // And it must not imply the creator owes another action.
+    expect(demo.deposit.commitOnlyBody).toMatch(/automatically/i);
   });
 });

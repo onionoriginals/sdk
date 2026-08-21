@@ -67,8 +67,23 @@ export class HttpOrdinalsProvider implements OrdinalsProvider {
     fundingUtxo?: { txid: string; vout: number; value: number; scriptPubKey?: string };
     changeAddress: string;
   }): Promise<{ commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' }> {
-    return this.post('/api/btc/inscribe', params);
+    const result = await this.post<{
+      commitTxId: string;
+      revealTxId: string;
+      status: 'commit_broadcast' | 'reveal_broadcast';
+    }>('/api/btc/inscribe', params);
+    // The SDK discards this return value, so the status would otherwise never
+    // reach the UI and every 200 would read as "inscribed" — including the
+    // commit-only outcome, where the reveal has NOT landed and the recovery
+    // sweep still owes the creator an inscription. Kept here so the caller can
+    // read what actually happened.
+    this.lastSubmit = result;
+    return result;
   }
+
+  /** What the last submitInscription actually achieved. Null before any. */
+  lastSubmit: { commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' } | null =
+    null;
 
   // --- Not implemented (the sat-selected inscribe path never calls these). ---
   getInscriptionById(): Promise<never> {
