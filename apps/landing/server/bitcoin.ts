@@ -217,6 +217,28 @@ export async function fetchAddressUtxos(
 }
 
 /**
+ * How many pending payments we will price per deposit poll. One is the normal
+ * case; a payment plus a top-up is the realistic worst case.
+ */
+export const MAX_PENDING_FEE_LOOKUPS = 3;
+
+/**
+ * Of the pending payments, the one holding the deposit up — lowest fee rate.
+ * Advising on a faster sibling would tell a creator to bump a payment that is
+ * already fine while the slow one still sits there.
+ */
+export function slowestPending<T extends { feeSats: number; vsize: number }>(
+  pending: T[]
+): T | null {
+  let worst: T | null = null;
+  for (const p of pending) {
+    if (p.vsize <= 0) continue;
+    if (!worst || p.feeSats / p.vsize < worst.feeSats / worst.vsize) worst = p;
+  }
+  return worst;
+}
+
+/**
  * Fee facts for a pending deposit, so the creator can be told when theirs is
  * underpriced. Facts only — what to DO about it is the browser's copy, and the
  * app cannot act on it either way: replacing that transaction needs the keys
@@ -247,7 +269,10 @@ export async function fetchPendingDepositFee(
     return {
       txid: opts.txid,
       feeSats: tx.fee,
-      vsize: Math.round(tx.weight / 4),
+      // vsize is ceil(weight/4) BY DEFINITION (BIP-141). Rounding understates
+      // it whenever weight % 4 == 1, which overstates the rate we display and
+      // leaves the replacement minimum a satoshi short — i.e. unrelayable.
+      vsize: Math.ceil(tx.weight / 4),
       // BIP-125 opt-in: any input with sequence < 0xfffffffe signals it.
       rbf: (tx.vin ?? []).some((i) => typeof i.sequence === 'number' && i.sequence < 0xfffffffe),
     };
@@ -1051,21 +1076,38 @@ export function createBitcoinRoutes(deps: {
     }
     const estimatedCostSats = costFor(inputCount);
 
-    // One extra indexer read, and only while a deposit is actually pending.
+    // Only while a deposit is actually pending. A creator may have several in
+    // flight — a payment plus a top-up — and taking whichever the indexer
+    // happened to list first would describe an unrelated one. Advise on the
+    // SLOWEST, since that is the payment holding the deposit up.
+    //
+    // Capped at MAX_PENDING_FEE_LOOKUPS reads: this route is polled every 15s
+    // against a rate-limited indexer, and an unbounded fan-out here would
+    // spend a creator's poll budget on an advisory. Beyond the cap the advice
+    // is drawn from the ones we did read, which can only understate the
+    // problem, never invent one.
     let pendingDeposit:
       | { feeSats: number; vsize: number; rbf: boolean; networkSatVb: number }
       | null = null;
     if (utxos.unconfirmedTxids.length > 0) {
       try {
-        const [fee, networkSatVb] = await Promise.all([
-          fetchPendingDepositFee({
-            ...indexer,
-            txid: utxos.unconfirmedTxids[0],
-            fetchImpl: deps.fetchImpl,
-          }),
+        const [fees, networkSatVb] = await Promise.all([
+          Promise.all(
+            utxos.unconfirmedTxids
+              .slice(0, MAX_PENDING_FEE_LOOKUPS)
+              .map((txid) => fetchPendingDepositFee({ ...indexer, txid, fetchImpl: deps.fetchImpl }))
+          ),
           currentFeeRate(1),
         ]);
-        if (fee) pendingDeposit = { feeSats: fee.feeSats, vsize: fee.vsize, rbf: fee.rbf, networkSatVb };
+        const slowest = slowestPending(fees.filter((f) => f !== null));
+        if (slowest) {
+          pendingDeposit = {
+            feeSats: slowest.feeSats,
+            vsize: slowest.vsize,
+            rbf: slowest.rbf,
+            networkSatVb,
+          };
+        }
       } catch {
         // Advisory only. A fee estimator or /tx read that is down changes
         // nothing about the deposit itself.
