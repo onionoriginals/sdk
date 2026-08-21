@@ -23,7 +23,7 @@ type Phase =
   | 'inscribed';
 
 /** GET /api/btc/deposit — the creator's own UTXOs + the estimated fee target. */
-interface DepositInfo {
+export interface DepositInfo {
   address: string;
   /** The ORDINAL-CHECKED spendable set — what an inscription may fund from. */
   confirmedUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
@@ -291,6 +291,28 @@ export function depositDisclosure(): string[] {
     demo.deposit.nonRefundable,
     demo.deposit.ifSomethingGoesWrong,
   ];
+}
+
+/**
+ * The quote to render, or nothing.
+ *
+ * A DepositInfo names the address it was fetched for, and a quote is only ever
+ * true of that address. `reset()` on an identity change clears the engine and
+ * the asset but not this, so a stale quote could pair the PREVIOUS account's
+ * balance with the NEW account's address — showing "ready to inscribe" to
+ * someone who has sent nothing, and, now that the two are fused into one
+ * BIP-21 URI, putting the old amount behind the new address in the wallet
+ * link and the QR.
+ *
+ * Matching on the address rather than clearing on identity also covers the
+ * window before the first fetch for a new address returns.
+ */
+export function quoteForAddress(
+  info: DepositInfo | null,
+  address: string | null | undefined
+): DepositInfo | null {
+  if (!info || !address) return null;
+  return info.address === address ? info : null;
 }
 
 /** What the deposit badge should say — read off the SUM, never one output. */
@@ -703,7 +725,7 @@ export function Demo() {
   // Creator-pays deposit state (mainnet): the user's own confirmed UTXOs at
   // their Turnkey-derived address, polled while the inscribe step is live so
   // "deposit detected → confirmed" updates without a reload.
-  const [deposit, setDeposit] = useState<DepositInfo | null>(null);
+  const [depositRaw, setDeposit] = useState<DepositInfo | null>(null);
   const [depositError, setDepositError] = useState<string | null>(null);
   // Mirror of depositError readable synchronously inside the inscribe click —
   // state set during that same await would still be stale there, and the
@@ -713,6 +735,8 @@ export function Demo() {
   // Which system is down, in badge form — see depositErrorCopy.
   const [depositBadge, setDepositBadge] = useState<string | null>(null);
   // Computed once per render: the badge below reads it four times.
+  // Never render a quote belonging to another address (see quoteForAddress).
+  const deposit = quoteForAddress(depositRaw, bitcoin?.fundingAddress);
   const readiness = depositReadiness(deposit);
   const fetchDeposit = useCallback(async (): Promise<DepositInfo | null> => {
     if (!bitcoin) return null;
@@ -815,6 +839,11 @@ export function Demo() {
     setTab('events');
     setCommitted(null);
     setUpdating(false);
+    // The previous identity's money view is not the new one's.
+    setDeposit(null);
+    setDepositError(null);
+    setDepositBadge(null);
+    depositErrorRef.current = null;
     setNonce(Math.floor(Math.random() * 1e9)); // fresh artwork for the next run
     // Next run gets a fresh engine — fresh keys, fresh DIDs, fresh publisher.
     // window.__originalsDemo keeps pointing at the old engine until the new

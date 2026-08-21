@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { demo } from '../content';
-import { depositDisclosure } from './Demo';
+import { depositDisclosure, quoteForAddress, depositReadiness } from './Demo';
 import { bitcoinPaymentUri } from '../sdk/bitcoin-uri';
 
 /**
@@ -67,5 +67,44 @@ describe('paying takes no transcription', () => {
   test('the QR encodes that same URI, not the bare address', () => {
     // Same helper feeds the link and the code, so they cannot drift apart.
     expect(bitcoinPaymentUri(address, 14_580)).toContain('amount=');
+  });
+});
+
+describe('a quote never crosses to another address', () => {
+  const A = 'bc1qwx77y7n2dvcfy2aejnrxcapevmssfezc4ly4rl';
+  const B = 'bc1qaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const quote = (address: string) => ({
+    address,
+    confirmedUtxos: [],
+    confirmedSats: 50_000,
+    unconfirmedSats: 0,
+    estimatedCostSats: 14_580,
+  });
+
+  test('a quote for the current address is used', () => {
+    expect(quoteForAddress(quote(A), A)).not.toBeNull();
+  });
+
+  /**
+   * The bug: reset() on an identity change clears the engine and the asset but
+   * not the quote, so the previous account's balance could be shown against
+   * the new account's address — "ready to inscribe" for someone who has sent
+   * nothing, and the old amount behind the new address in the wallet link.
+   */
+  test('a quote left over from another identity is not', () => {
+    expect(quoteForAddress(quote(A), B)).toBeNull();
+  });
+
+  test('nothing is rendered before an address is known', () => {
+    expect(quoteForAddress(quote(A), null)).toBeNull();
+    expect(quoteForAddress(quote(A), undefined)).toBeNull();
+    expect(quoteForAddress(null, A)).toBeNull();
+  });
+
+  // The readiness badge reads off the quote, so the guard has to sit upstream
+  // of it — otherwise the stale balance still turns the badge green.
+  test('a mismatched quote cannot drive the readiness badge', () => {
+    expect(depositReadiness(quoteForAddress(quote(A), B))).toBe('waiting');
+    expect(depositReadiness(quoteForAddress(quote(A), A))).not.toBe('waiting');
   });
 });
