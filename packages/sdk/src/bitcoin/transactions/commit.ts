@@ -297,6 +297,44 @@ export async function createRevealTransaction(
  * @param changeOutputVBytes - Size of one change output, per the change address's script class
  * @returns Estimated transaction size in virtual bytes
  */
+/**
+ * The bytes of `utxo.prevTxHex`, once proved to be the transaction this UTXO
+ * says it is.
+ *
+ * A `nonWitnessUtxo` is what a signer reads to learn an input's true value, so
+ * an unverified one is precisely what the fee-inflation attack substitutes:
+ * hand a signer a transaction claiming a larger input and it approves a fee
+ * far bigger than the user agreed to. Returns bytes rather than a boolean so a
+ * caller cannot forget to check the result.
+ */
+function verifiedPrevTx(utxo: Utxo): Uint8Array {
+  const raw = utxo.prevTxHex as string;
+  if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length % 2 !== 0) {
+    throw new Error(`prevTxHex for ${utxo.txid}:${utxo.vout} is not raw transaction hex.`);
+  }
+  const bytes = Uint8Array.from(Buffer.from(raw, 'hex'));
+  const prev = btc.Transaction.fromRaw(bytes, { allowUnknownInputs: true, allowUnknownOutputs: true });
+  if (prev.id !== utxo.txid) {
+    throw new Error(`prevTxHex hashes to ${prev.id}, not ${utxo.txid}.`);
+  }
+  if (utxo.vout < 0 || utxo.vout >= prev.outputsLength) {
+    throw new Error(`prevTxHex for ${utxo.txid} has no output ${utxo.vout}.`);
+  }
+  const out = prev.getOutput(utxo.vout);
+  if (!out?.script || typeof out.amount !== 'bigint') {
+    throw new Error(`prevTxHex output ${utxo.txid}:${utxo.vout} is unreadable.`);
+  }
+  if (out.amount !== BigInt(utxo.value)) {
+    throw new Error(
+      `prevTxHex says ${utxo.txid}:${utxo.vout} is ${out.amount} sats, but the UTXO says ${utxo.value}.`
+    );
+  }
+  if (Buffer.from(out.script).toString('hex') !== String(utxo.scriptPubKey).toLowerCase()) {
+    throw new Error(`prevTxHex output ${utxo.txid}:${utxo.vout} pays a different script than the UTXO.`);
+  }
+  return bytes;
+}
+
 function estimateCommitTxSize(inputs: Utxo[], outputCount: number, changeOutputVBytes: number): number {
   // Transaction overhead
   const overhead = 10.5;
@@ -729,7 +767,12 @@ export async function createCommitTransaction(
       witnessUtxo: {
         script: Buffer.from(utxo.scriptPubKey, 'hex'),
         amount: BigInt(utxo.value)
-      }
+      },
+      // Optional, and only when the caller supplied it (see Utxo.prevTxHex).
+      // Some signers refuse a SegWit v0 input carrying witnessUtxo alone —
+      // Turnkey answers "code 3: input N is missing non_witness_utxo". It is
+      // VERIFIED before being attached; see verifiedPrevTx.
+      ...(utxo.prevTxHex ? { nonWitnessUtxo: verifiedPrevTx(utxo) } : {})
     });
   }
 
