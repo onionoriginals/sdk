@@ -11,8 +11,9 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
+    "types": ["bun-types"],
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  "include": ["src", "server", "serve.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "server/**/*.test.ts"]
 }

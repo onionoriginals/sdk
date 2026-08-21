@@ -415,6 +415,20 @@ export const demo = {
     openInWallet: 'Open in wallet',
     openInWalletHint: 'Opens your Bitcoin wallet with the address and amount already filled in.',
     scanHint: 'Or scan to pay from your phone',
+    // A pending deposit paying under the going rate. We cannot fix this: the
+    // inputs belong to the wallet the creator sent from, so only that wallet
+    // can replace the transaction. Saying so beats a button that cannot work.
+    feeLowHeading: 'Your deposit is paying below the going rate',
+    feeLowBody:
+      'It will still confirm — it is queued behind higher-paying transactions, not stuck — and nothing is at risk while it waits.',
+    feeLowBumpable:
+      'If your wallet has a “bump fee” or “speed up” option, this payment can be replaced. Two things to get right: take the increase from your change, never from the deposit amount, and aim for the rate below — Bitcoin makes a replacement pay for its own bandwidth on top of the original fee, so a small nudge is rejected outright.',
+    feeLowUnbumpable:
+      'Your wallet did not mark this payment replaceable, so its fee cannot be raised. Waiting is the only option, and it will get there.',
+    feeLowYours: 'Yours',
+    feeLowNetwork: 'Clearing now',
+    feeLowSuggest: 'Replace at',
+    feeLowMinimum: 'Minimum the network will accept',
     // sendSuffix continues the "Send at least <n> sats" sentence, so it cannot
     // stand alone now that the amount lives in its own block. This is the same
     // point as a whole sentence.

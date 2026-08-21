@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DepositPanel } from './DepositPanel';
+import { DepositFeeNotice } from './DepositFeeNotice';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine } from '../sdk/engine';
 import { engineIdentity, ANON_IDENTITY } from '../sdk/engine';
@@ -33,6 +34,8 @@ export interface DepositInfo {
   ordinalCheck?: 'ok' | 'unavailable';
   unconfirmedSats: number;
   estimatedCostSats: number;
+  /** Fee facts for a pending deposit, when the server could read them. */
+  pendingDeposit?: { feeSats: number; vsize: number; rbf: boolean; networkSatVb: number } | null;
 }
 
 /**
@@ -1157,6 +1160,9 @@ export function Demo() {
                             address={bitcoin.fundingAddress}
                             sats={deposit.estimatedCostSats}
                           />
+                          {deposit.pendingDeposit && (
+                            <DepositFeeNotice pending={deposit.pendingDeposit} />
+                          )}
                           <p className="demo-inscribe-note deposit-topup">
                             {demo.deposit.topUpNote}
                           </p>

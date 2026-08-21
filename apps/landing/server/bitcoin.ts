@@ -162,6 +162,8 @@ export async function fetchAddressUtxos(
 ): Promise<{
   confirmed: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
   unconfirmedSats: number;
+  /** Txids of the unconfirmed deposits, so their fee rate can be looked up. */
+  unconfirmedTxids: string[];
 }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const scriptPubKey = p2wpkhScriptHex(opts.address, opts.network ?? 'testnet');
@@ -210,7 +212,50 @@ export async function fetchAddressUtxos(
       .filter((u) => u.status?.confirmed)
       .map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, scriptPubKey })),
     unconfirmedSats: utxos.filter((u) => !u.status?.confirmed).reduce((n, u) => n + u.value, 0),
+    unconfirmedTxids: [...new Set(utxos.filter((u) => !u.status?.confirmed).map((u) => u.txid))],
   };
+}
+
+/**
+ * Fee facts for a pending deposit, so the creator can be told when theirs is
+ * underpriced. Facts only — what to DO about it is the browser's copy, and the
+ * app cannot act on it either way: replacing that transaction needs the keys
+ * of the wallet it was sent from, which are not ours.
+ *
+ * BEST EFFORT BY CONSTRUCTION. This is a nicety on top of the deposit read, so
+ * every failure returns null rather than throwing: an indexer that will not
+ * serve /tx must not take down the screen that shows someone their money.
+ */
+export async function fetchPendingDepositFee(
+  opts: IndexerConfig & { txid: string; timeoutMs?: number; fetchImpl?: typeof fetch }
+): Promise<{ txid: string; feeSats: number; vsize: number; rbf: boolean } | null> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5_000);
+  try {
+    const res = await fetchImpl(`${stripTrailingSlash(opts.api)}/tx/${opts.txid}`, {
+      signal: controller.signal,
+      headers: indexerAuthHeaders(opts),
+    });
+    if (!res.ok) return null;
+    const tx = (await res.json()) as {
+      fee?: number;
+      weight?: number;
+      vin?: Array<{ sequence?: number }>;
+    };
+    if (typeof tx.fee !== 'number' || typeof tx.weight !== 'number' || tx.weight <= 0) return null;
+    return {
+      txid: opts.txid,
+      feeSats: tx.fee,
+      vsize: Math.round(tx.weight / 4),
+      // BIP-125 opt-in: any input with sequence < 0xfffffffe signals it.
+      rbf: (tx.vin ?? []).some((i) => typeof i.sequence === 'number' && i.sequence < 0xfffffffe),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -1006,6 +1051,27 @@ export function createBitcoinRoutes(deps: {
     }
     const estimatedCostSats = costFor(inputCount);
 
+    // One extra indexer read, and only while a deposit is actually pending.
+    let pendingDeposit:
+      | { feeSats: number; vsize: number; rbf: boolean; networkSatVb: number }
+      | null = null;
+    if (utxos.unconfirmedTxids.length > 0) {
+      try {
+        const [fee, networkSatVb] = await Promise.all([
+          fetchPendingDepositFee({
+            ...indexer,
+            txid: utxos.unconfirmedTxids[0],
+            fetchImpl: deps.fetchImpl,
+          }),
+          currentFeeRate(1),
+        ]);
+        if (fee) pendingDeposit = { feeSats: fee.feeSats, vsize: fee.vsize, rbf: fee.rbf, networkSatVb };
+      } catch {
+        // Advisory only. A fee estimator or /tx read that is down changes
+        // nothing about the deposit itself.
+      }
+    }
+
     // A shortfall is a money-path state, not a UI detail: it is the state a
     // stranger sits in with real BTC already sent. Logged on the TRANSITION
     // (the confirmed balance changed) so a 15s poll does not flood the sink.
@@ -1040,6 +1106,14 @@ export function createBitcoinRoutes(deps: {
       ordinalCheck: classified.ok ? ('ok' as const) : ('unavailable' as const),
       unconfirmedSats: utxos.unconfirmedSats,
       estimatedCostSats,
+      /**
+       * Fee facts for a pending deposit, when there is one. Lets the browser
+       * say "yours is paying 1 sat/vB while the network clears 3" instead of
+       * leaving a creator to work that out in a block explorer. Null whenever
+       * anything about the lookup is uncertain — best effort, never a reason
+       * to fail the deposit read.
+       */
+      pendingDeposit,
     });
   };
 
