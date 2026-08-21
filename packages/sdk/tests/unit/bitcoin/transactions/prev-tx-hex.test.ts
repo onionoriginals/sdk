@@ -104,6 +104,22 @@ describe('a supplied prevTxHex is verified, never trusted', () => {
     ).rejects.toThrow(/not raw transaction hex/);
   });
 
+  /**
+   * Even-length hex that is not a transaction. The parser throws a
+   * dependency-specific error with no code; unguarded, it would escape and
+   * defeat the stable code this function promises.
+   */
+  it('refuses undecodable hex with the same stable code, not a parser error', async () => {
+    const p = prevTx();
+    try {
+      await build({ txid: p.txid, vout: 0, value: VALUE, scriptPubKey: SCRIPT_HEX, prevTxHex: 'deadbeef' });
+      throw new Error('expected a rejection');
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe('INVALID_PREV_TX');
+      expect((e as Error).message).toMatch(/not a decodable Bitcoin transaction/);
+    }
+  });
+
   /** Consumers classify by code, not by parsing message text (CLAUDE.md). */
   it('reports a stable error code, not a bare Error', async () => {
     const p = prevTx();

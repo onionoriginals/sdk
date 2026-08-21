@@ -315,7 +315,20 @@ function verifiedPrevTx(utxo: Utxo): Uint8Array {
     throw new StructuredError('INVALID_PREV_TX', `prevTxHex for ${at} is not raw transaction hex.`, { outpoint: at });
   }
   const bytes = Uint8Array.from(Buffer.from(raw, 'hex'));
-  const prev = btc.Transaction.fromRaw(bytes, { allowUnknownInputs: true, allowUnknownOutputs: true });
+  // Even-length hex can still be anything. Left unguarded, @scure's parser
+  // error ("Reader(inputs/arrayLen): readByte: Unexpected end of buffer")
+  // escapes with no code, so a consumer cannot classify the very failure this
+  // function exists to report.
+  let prev: btc.Transaction;
+  try {
+    prev = btc.Transaction.fromRaw(bytes, { allowUnknownInputs: true, allowUnknownOutputs: true });
+  } catch (e) {
+    throw new StructuredError(
+      'INVALID_PREV_TX',
+      `prevTxHex for ${at} is not a decodable Bitcoin transaction: ${e instanceof Error ? e.message : String(e)}`,
+      { outpoint: at }
+    );
+  }
   if (prev.id !== utxo.txid) {
     throw new StructuredError('INVALID_PREV_TX', `prevTxHex hashes to ${prev.id}, not ${utxo.txid}.`, {
       outpoint: at, hashedTo: prev.id
