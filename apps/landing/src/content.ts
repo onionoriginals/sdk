@@ -376,6 +376,12 @@ export const demo = {
       'Your browser’s signing key has expired, so nothing can be signed right now. Sign in again to get a fresh one — your Original, and any BTC already sitting at your deposit address, are untouched and waiting.',
     missingBody:
       'You’re signed in, but this browser has no signing key for your account — sign in again to get one. Nothing is lost: your Original is still real and resolvable, and any BTC at your deposit address is still yours.',
+    // Deliberately does NOT offer "sign in again": this state is reached
+    // because signing in is what failed. Promising a retry that cannot work is
+    // the failure mode this string exists to avoid.
+    unavailableHeading: 'Signing is unavailable right now',
+    unavailableBody:
+      'Signing isn’t working on this site right now, so inscribing is paused — this is on our end, not something you can fix by signing in again. Nothing is lost: your Original is still real and resolvable, and any BTC at your deposit address stays yours, at your own address, under your own key.',
     reauthCta: 'Sign in again to keep going',
     reauthPending: 'Waiting for you to sign back in…',
     preserved: 'Your Original is held right where you left it — signing back in picks up from here.',

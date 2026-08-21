@@ -48,7 +48,14 @@ export interface SigningSessionMeta {
   expiresAt: number;
 }
 
-export type SigningStatus = 'none' | 'active' | 'expired';
+/**
+ * 'none' — this browser holds no session key yet; signing in mints one.
+ * 'expired' — it had one and the window closed; signing in refreshes it.
+ * 'unavailable' — the bootstrap itself FAILED. Signing in again is what just
+ *   failed, so telling the user to repeat it sends them round a loop that
+ *   cannot terminate. Kept distinct for that reason alone.
+ */
+export type SigningStatus = 'none' | 'active' | 'expired' | 'unavailable';
 
 /**
  * A handle to the session key. `sign` takes the message and returns a hex
