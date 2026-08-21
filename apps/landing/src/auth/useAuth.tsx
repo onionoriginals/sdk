@@ -97,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.warn('[originals-demo] could not restore the signing session', err);
       setBitcoin(null);
-      setSigning('none');
+      setSigning('unavailable');
     }
   }, []);
 
@@ -179,10 +179,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setBitcoin({ fundingAddress, signingClient });
       setSigning('active');
     } catch (err) {
-      // Non-fatal: log for the console-visible demo narrative; UI stays on mock.
-      console.warn('[originals-demo] bitcoin session bootstrap failed; inscribe stays on mock', err);
+      // Non-fatal for sign-in itself, but on a real-network build the demo does
+      // NOT fall back to mock — the inscribe step is gated. Mark it unavailable
+      // so the UI says so instead of telling the user to sign in again.
+      console.warn('[originals-demo] bitcoin session bootstrap failed', err);
       setBitcoin(null);
-      setSigning('none');
+      setSigning('unavailable');
     } finally {
       setReauth({ active: false, fromSubOrgId: null });
     }

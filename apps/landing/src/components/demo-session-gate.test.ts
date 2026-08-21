@@ -114,3 +114,35 @@ describe('the Sign out button cannot fire mid signing-session refresh', () => {
     expect(button).toContain('nav.signOutBlocked');
   });
 });
+
+/**
+ * A signing bootstrap that FAILED is not the same state as a browser that
+ * simply has no key yet. Telling someone to "sign in again to get one" when
+ * the last sign-in is exactly what failed sends them round a loop that cannot
+ * terminate — and does it on the surface where their money is.
+ */
+describe('signingGate: a failed bootstrap is its own state', () => {
+  const base = { authenticated: true, hasSigningClient: false as boolean };
+
+  test('a bootstrap that failed does not read as "no key yet"', () => {
+    expect(signingGate({ ...base, status: 'unavailable' })).toBe('unavailable');
+    expect(signingGate({ ...base, status: 'none' })).toBe('reauth');
+  });
+
+  test('its copy does not tell the user to sign in again', () => {
+    const msg = signingGateMessage('unavailable', 'mainnet', 'unavailable');
+    expect(msg).toBeTruthy();
+    expect(msg!.toLowerCase()).not.toContain('sign in again');
+    expect(msg).not.toBe(demo.session.missingBody);
+    expect(msg).not.toBe(demo.session.expiredBody);
+  });
+
+  test('it still says the money is safe, like every other blocked state', () => {
+    const msg = signingGateMessage('unavailable', 'mainnet', 'unavailable')!;
+    expect(msg.toLowerCase()).toMatch(/deposit|btc|bitcoin/);
+  });
+
+  test('an anonymous visitor is still asked to sign in, whatever the status', () => {
+    expect(signingGate({ ...base, authenticated: false, status: 'unavailable' })).toBe('sign-in');
+  });
+});

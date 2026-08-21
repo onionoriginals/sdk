@@ -81,7 +81,7 @@ export function networkSkewDetected(
  * again at the inscribe click — so an expired session is a UI state rather than
  * a raw Turnkey error arriving after the money moved.
  */
-export type SigningGate = 'ok' | 'sign-in' | 'reauth';
+export type SigningGate = 'ok' | 'sign-in' | 'reauth' | 'unavailable';
 
 export function signingGate(opts: {
   authenticated: boolean;
@@ -89,7 +89,10 @@ export function signingGate(opts: {
   status: SigningStatus;
 }): SigningGate {
   if (!opts.authenticated) return 'sign-in';
-  return opts.hasSigningClient && opts.status === 'active' ? 'ok' : 'reauth';
+  if (opts.hasSigningClient && opts.status === 'active') return 'ok';
+  // A failed bootstrap is NOT "no key yet" — see SigningStatus. Re-signing-in
+  // is the thing that failed, so it gets its own gate and its own copy.
+  return opts.status === 'unavailable' ? 'unavailable' : 'reauth';
 }
 
 /**
@@ -103,6 +106,7 @@ export function signingGateMessage(
   status: SigningStatus = 'expired'
 ): string | null {
   if (gate === 'ok') return null;
+  if (gate === 'unavailable') return demo.session.unavailableBody;
   if (gate === 'reauth') return status === 'expired' ? demo.session.expiredBody : demo.session.missingBody;
   return network === 'mainnet' ? demo.deposit.signInPrompt : demo.testnet4.signInPrompt;
 }
@@ -1144,6 +1148,16 @@ export function Demo() {
                       {deposit?.ordinalCheck === 'unavailable' && (
                         <p className="demo-error" role="alert">{demo.deposit.ordinalCheckUnavailable}</p>
                       )}
+                    </div>
+                  ) : gate === 'unavailable' ? (
+                    // No re-auth CTA here on purpose: signing in is what
+                    // failed, so offering it again is a loop, not a remedy.
+                    <div className="demo-deposit">
+                      <div className="demo-deposit-head">
+                        <strong>{demo.session.unavailableHeading}</strong>
+                      </div>
+                      <p className="demo-error" role="alert">{signingGateMessage(gate, network, signing)}</p>
+                      <p className="demo-inscribe-note">{demo.session.preserved}</p>
                     </div>
                   ) : gate === 'reauth' ? (
                     <div className="demo-deposit">
