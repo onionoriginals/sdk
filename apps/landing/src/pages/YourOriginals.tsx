@@ -28,6 +28,42 @@ export interface OriginalRow {
   inscriptionStatus?: 'pending' | 'confirmed';
 }
 
+/**
+ * A persisted "we cannot trust the read behind your deposit address" state,
+ * raised server-side and carried on GET /api/btc/inscribe (R28/R31).
+ *
+ * This exists because the outage is ASYNCHRONOUS: it can begin after a creator
+ * has sent BTC and closed the tab, at which point the deposit screen's copy
+ * and its 15s poll reach nobody. The state is durable on the server, so it is
+ * on screen the next time they open this page.
+ */
+export interface DepositAlert {
+  kind: 'indexer_unavailable' | 'indexer_rate_limited';
+  network: string;
+  address: string;
+  /** Confirmed sats at the address on the last read we could trust (0 if none). */
+  heldSats: number;
+  firstSeenAt: string;
+  updatedAt: string;
+}
+
+/**
+ * The alert as one line of copy, or null when there is nothing to say. The
+ * held balance is appended only when there IS one — telling someone who never
+ * deposited that they hold 0 sats is noise, and the outage itself is the whole
+ * message for them.
+ */
+export function depositAlertMessage(alert: DepositAlert | null | undefined): string | null {
+  if (!alert) return null;
+  const base =
+    alert.kind === 'indexer_rate_limited'
+      ? yourOriginals.depositAlert.busy
+      : yourOriginals.depositAlert.unavailable;
+  if (!alert.heldSats) return base;
+  const { heldPrefix, heldSuffix } = yourOriginals.depositAlert;
+  return `${base} ${heldPrefix} ${alert.heldSats.toLocaleString()} sats ${heldSuffix} ${alert.address}.`;
+}
+
 /** One in-flight inscription record from GET /api/btc/inscribe. */
 export interface PendingInscription {
   commitTxId: string;
@@ -89,26 +125,49 @@ export function withLiveInscriptionStatus(
   });
 }
 
-/** The user's inscription records ([] when signed out / unavailable). */
-export async function fetchInscriptions(): Promise<PendingInscription[]> {
+/**
+ * The user's inscription records plus any standing deposit alert ([] / null
+ * when signed out or unavailable). One request: the alert rides the fetch this
+ * page already makes on every visit, which is what makes R31's
+ * "reachable after they close the tab" hold without a second poll.
+ */
+export async function fetchInscriptions(): Promise<{
+  records: PendingInscription[];
+  depositAlert: DepositAlert | null;
+}> {
   try {
     const res = await fetch('/api/btc/inscribe', { credentials: 'same-origin' });
-    if (!res.ok) return [];
-    const body = (await res.json()) as { inscriptions?: PendingInscription[] };
-    return body.inscriptions ?? [];
+    if (!res.ok) return { records: [], depositAlert: null };
+    const body = (await res.json()) as {
+      inscriptions?: PendingInscription[];
+      depositAlert?: DepositAlert;
+    };
+    return { records: body.inscriptions ?? [], depositAlert: body.depositAlert ?? null };
   } catch {
-    return [];
+    return { records: [], depositAlert: null };
   }
 }
 
 // Pure view selector — testable without a DOM.
-export function originalsView(input: { authenticated: boolean; originals: OriginalRow[] }): {
-  mode: 'signed-out' | 'empty' | 'list';
+export function originalsView(input: {
+  /** Auth itself is still resolving (session restore) — nothing is known yet. */
+  authLoading: boolean;
+  authenticated: boolean;
+  /** The Originals fetch has settled (even if it returned nothing). */
+  loaded: boolean;
+  originals: OriginalRow[];
+}): {
+  mode: 'loading' | 'signed-out' | 'empty' | 'list';
   rows: OriginalRow[];
 } {
+  // R20: two distinct wrong states to keep out — a signed-out flash while auth
+  // resolves, then a "No Originals yet" flash while the fetch is still in
+  // flight. Neither `authenticated` nor an empty array means what it says yet.
+  if (input.authLoading) return { mode: 'loading', rows: [] };
   if (!input.authenticated) return { mode: 'signed-out', rows: [] };
-  if (input.originals.length === 0) return { mode: 'empty', rows: [] };
-  return { mode: 'list', rows: input.originals };
+  if (input.originals.length > 0) return { mode: 'list', rows: input.originals };
+  if (!input.loaded) return { mode: 'loading', rows: [] };
+  return { mode: 'empty', rows: [] };
 }
 
 /** The signed-in user's Originals, newest first ([] when signed out / on error). */
@@ -145,28 +204,36 @@ async function resolveLive(did: string): Promise<boolean> {
 }
 
 export function YourOriginals() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [originals, setOriginals] = useState<OriginalRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [resolved, setResolved] = useState<Record<string, boolean>>({});
   const [unfinished, setUnfinished] = useState<PendingInscription[]>([]);
   const [finishing, setFinishing] = useState<string | null>(null);
   const [finishNote, setFinishNote] = useState<string | null>(null);
+  const [depositAlert, setDepositAlert] = useState<DepositAlert | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) return;
     let live = true;
+    setLoaded(false);
     // Fetch rows + inscription records together: the records carry the live
     // (sticky) confirmation state that the durable rows only hold as
     // 'pending', and any record whose reveal never broadcast gets a
     // "finish inscription" offer — the signed txs are on the server, nothing
     // needs re-signing (step-1 recovery surface).
-    Promise.all([fetchOriginals(), fetchInscriptions()]).then(([rows, recs]) => {
+    Promise.all([fetchOriginals(), fetchInscriptions()]).then(([rows, inscriptions]) => {
       if (!live) return;
+      const recs = inscriptions.records;
       const merged = withLiveInscriptionStatus(rows, recs);
       setOriginals(merged);
       setUnfinished(unfinishedInscriptions(recs));
+      setDepositAlert(inscriptions.depositAlert);
       merged.forEach((r) => resolveLive(r.did).then((ok) => live && setResolved((m) => ({ ...m, [r.did]: ok }))));
-    });
+    })
+      // Settle in `finally` so an unexpected throw ends on "no Originals yet"
+      // rather than stranding the page on the loading state forever.
+      .finally(() => { if (live) setLoaded(true); });
     return () => { live = false; };
   }, [isAuthenticated]);
 
@@ -192,7 +259,7 @@ export function YourOriginals() {
     }
   };
 
-  const view = originalsView({ authenticated: isAuthenticated, originals });
+  const view = originalsView({ authLoading, authenticated: isAuthenticated, loaded, originals });
 
   return (
     <main className="section your-originals">
@@ -201,7 +268,22 @@ export function YourOriginals() {
         <h1>{yourOriginals.heading}</h1>
         <p className="your-originals-sub">{yourOriginals.subhead}</p>
 
+        {view.mode === 'loading' && (
+          <p className="your-originals-note your-originals-loading" role="status">
+            <span className="your-originals-pulse" aria-hidden="true" />
+            {yourOriginals.loading}
+          </p>
+        )}
+
         {view.mode === 'signed-out' && <p className="your-originals-note">{yourOriginals.signedOut}</p>}
+
+        {/* R31: raised while nobody was looking, shown the moment they return. */}
+        {isAuthenticated && depositAlert && (
+          <div className="card your-originals-finish" role="alert">
+            <p className="your-originals-finish-title">{yourOriginals.depositAlert.heading}</p>
+            <p>{depositAlertMessage(depositAlert)}</p>
+          </div>
+        )}
 
         {isAuthenticated && unfinished.length > 0 && (
           <div className="card your-originals-finish" role="alert">

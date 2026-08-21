@@ -45,6 +45,7 @@ describe('HttpOrdinalsProvider', () => {
     const params = {
       signedCommitHex: '02aa',
       revealTxHex: '02bb',
+      fundingUtxos: [{ txid: 'a'.repeat(64), vout: 0, value: 50_000 }],
       fundingUtxo: { txid: 'a'.repeat(64), vout: 0, value: 50_000 },
       changeAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx',
     };

@@ -71,7 +71,7 @@ const isText = (r: CelResourceRef) =>
   /^(application\/json|text\/)/.test(r.mediaType ?? '');
 
 export function OriginalDetail({ did }: { did: string }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [loaded, setLoaded] = useState(false);
   const [data, setData] = useState<DetailData | null>(null);
   const [checks, setChecks] = useState<OriginalCheck[] | null>(null);
@@ -94,7 +94,7 @@ export function OriginalDetail({ did }: { did: string }) {
         arts ? fetchText(arts.celUrl) : null
       ]);
       // Overlay live confirmation state (the stored row stays 'pending').
-      const row = withLiveInscriptionStatus(rows, inscriptionRecs).find((r) => r.did === did) ?? null;
+      const row = withLiveInscriptionStatus(rows, inscriptionRecs.records).find((r) => r.did === did) ?? null;
 
       let logEntries: ReturnType<typeof parseDidLog> | null = null;
       try {
@@ -173,7 +173,7 @@ export function OriginalDetail({ did }: { did: string }) {
     };
   }, [isAuthenticated, did]);
 
-  const mode = detailMode({ authenticated: isAuthenticated, loaded, row: data?.row ?? null });
+  const mode = detailMode({ authLoading, authenticated: isAuthenticated, loaded, row: data?.row ?? null });
 
   const copyDid = async () => {
     try {

@@ -10,6 +10,7 @@
  */
 
 import { useState, useRef, useEffect, type KeyboardEvent, type ClipboardEvent, type ChangeEvent } from 'react';
+import { login } from '../content';
 import './otp-input.css';
 
 interface OtpInputProps {
@@ -139,7 +140,7 @@ export function OtpInput({ onComplete, isLoading = false, error, onResend }: Otp
 
   return (
     <div className="otp-input">
-      <label>Verification code</label>
+      <label>{login.otp.label}</label>
 
       <div className="otp-row">
         {digits.map((digit, index) => (
@@ -157,19 +158,22 @@ export function OtpInput({ onComplete, isLoading = false, error, onResend }: Otp
             onPaste={handlePaste}
             disabled={isLoading}
             className="otp-digit"
-            aria-label={`Digit ${index + 1}`}
+            aria-label={`${login.otp.digitAriaPrefix} ${index + 1}`}
           />
         ))}
       </div>
 
       {error && <p className="otp-error">{error}</p>}
 
-      {isLoading && <p>Verifying...</p>}
+      {isLoading && <p>{login.otp.verifying}</p>}
 
       {onResend && (
         <div>
           {resendCooldown > 0 ? (
-            <p>Resend code in {resendCooldown}s</p>
+            <p>
+              {login.otp.resendCooldownPrefix} {resendCooldown}
+              {login.otp.resendCooldownSuffix}
+            </p>
           ) : (
             <button
               type="button"
@@ -177,7 +181,7 @@ export function OtpInput({ onComplete, isLoading = false, error, onResend }: Otp
               disabled={isLoading}
               className="otp-resend"
             >
-              Resend code
+              {login.otp.resend}
             </button>
           )}
         </div>

@@ -5,7 +5,7 @@
  * completes from server state via rebroadcast.
  */
 import { describe, test, expect } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as btc from '@scure/btc-signer';
@@ -67,6 +67,51 @@ function buildPair(fundingTxid = 'a'.repeat(64), fundingVout = 0) {
   };
 }
 
+/**
+ * A signed commit spending SEVERAL funding UTXOs, in the declared order. The
+ * first declared input is the identity input (its first sat becomes the
+ * did:btco sat), which is why order — not just membership — is checked.
+ */
+function buildMultiPair(
+  utxos: Array<{ txid: string; vout: number; value: number }>,
+  commitValue = 20_000
+) {
+  const commit = new btc.Transaction();
+  for (const u of utxos) {
+    commit.addInput({
+      txid: u.txid,
+      index: u.vout,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(u.value) },
+    });
+  }
+  const total = utxos.reduce((n, u) => n + u.value, 0);
+  commit.addOutputAddress(USER_ADDRESS, BigInt(commitValue), btc.TEST_NETWORK);
+  commit.addOutputAddress(USER_ADDRESS, BigInt(total - commitValue - 1_000), btc.TEST_NETWORK);
+  commit.sign(USER_PRIV);
+  commit.finalize();
+
+  const reveal = new btc.Transaction();
+  reveal.addInput({
+    txid: commit.id,
+    index: 0,
+    sequence: 0xfffffffd,
+    witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(commitValue) },
+  });
+  reveal.addOutputAddress(USER_ADDRESS, BigInt(commitValue - 1_000), btc.TEST_NETWORK);
+  reveal.sign(USER_PRIV);
+  reveal.finalize();
+
+  return {
+    signedCommitHex: hex.encode(commit.extract()),
+    commitTxId: commit.id,
+    revealTxHex: hex.encode(reveal.extract()),
+    revealTxId: reveal.id,
+    fundingUtxos: utxos.map((u) => ({ ...u, scriptPubKey: USER_SCRIPT })),
+    changeAddress: USER_ADDRESS,
+  };
+}
+
 function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1') {
   const token = signToken(sub, 'a@b.com', undefined, { secret: JWT });
   const cookie = serializeCookie(getAuthCookieConfig(token));
@@ -80,6 +125,8 @@ function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1')
 function harness(opts?: {
   broadcast?: (txHex: string) => Promise<string>;
   txStatus?: { confirmed: boolean } | ((txid: string) => { confirmed: boolean });
+  /** Resolve the status lookup on a LATER macrotask — the concurrency window. */
+  txStatusDelayMs?: number;
 }) {
   const broadcasts: string[] = [];
   const provider = {
@@ -93,20 +140,24 @@ function harness(opts?: {
       return 'f'.repeat(64);
     },
     async getTransactionStatus(txid: string) {
+      if (opts?.txStatusDelayMs !== undefined) {
+        await new Promise((r) => setTimeout(r, opts.txStatusDelayMs));
+      }
       if (typeof opts?.txStatus === 'function') return opts.txStatus(txid);
       if (opts?.txStatus) return opts.txStatus;
       return { confirmed: false };
     },
     async estimateFee() { return 3; },
   } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
-  const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'insc-')) });
+  const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
+  const store = createInscriptionsStore({ dataDir });
   const routes = createBitcoinRoutes({
     jwtSecret: JWT,
     provider,
     faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
     inscriptions: store,
   });
-  return { routes, store, broadcasts };
+  return { routes, store, broadcasts, dataDir };
 }
 
 async function post(routes: ReturnType<typeof harness>['routes'], body: unknown) {
@@ -469,7 +520,7 @@ describe('GET /api/btc/inscribe', () => {
       inscriptionId: `${'r'.repeat(64)}i0`,
       signedCommitHex: '02aa',
       revealTxHex: '02bb',
-      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      fundingOutpoints: [`${'a'.repeat(64)}:0`],
       changeAddress: USER_ADDRESS,
       status: 'signed',
       createdAt: '2026-08-01T00:00:00.000Z',
@@ -481,7 +532,7 @@ describe('GET /api/btc/inscribe', () => {
       commitTxId: supersededCommit,
       revealTxId: supersededReveal,
       revealTxHex: '02ee',
-      fundingOutpoint: 'old:0',
+      fundingOutpoints: ['old:0'],
     }));
     h.store.supersede('sub-1', supersededCommit);
     // Then SIX newer live records stuck at reveal_broadcast (never confirm) —
@@ -491,7 +542,7 @@ describe('GET /api/btc/inscribe', () => {
         commitTxId: String(i).repeat(64).slice(0, 64),
         revealTxId: `f${i}`.repeat(32),
         status: 'reveal_broadcast',
-        fundingOutpoint: `live${i}:0`,
+        fundingOutpoints: [`live${i}:0`],
       }));
     }
 
@@ -562,7 +613,7 @@ describe('GET /api/btc/inscribe', () => {
       inscriptionId: `${'r'.repeat(64)}i0`,
       signedCommitHex: '02aa',
       revealTxHex: '02bb',
-      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      fundingOutpoints: [`${'a'.repeat(64)}:0`],
       changeAddress: USER_ADDRESS,
       status: 'signed',
       createdAt: '2026-08-01T00:00:00.000Z',
@@ -571,11 +622,11 @@ describe('GET /api/btc/inscribe', () => {
     });
     // OLDEST: the winner (its commit confirmed). Then six newer superseded
     // pairs that never confirm — alone they exceed the whole 5-lookup budget.
-    h.store.create('sub-1', rec({ commitTxId: winnerCommit, revealTxHex: '02ee', fundingOutpoint: 'win:0' }));
+    h.store.create('sub-1', rec({ commitTxId: winnerCommit, revealTxHex: '02ee', fundingOutpoints: ['win:0'] }));
     h.store.supersede('sub-1', winnerCommit);
     for (let i = 0; i < 6; i++) {
       const id = String(i).repeat(64).slice(0, 64);
-      h.store.create('sub-1', rec({ commitTxId: id, fundingOutpoint: `lose${i}:0` }));
+      h.store.create('sub-1', rec({ commitTxId: id, fundingOutpoints: [`lose${i}:0`] }));
       h.store.supersede('sub-1', id);
     }
 
@@ -609,7 +660,7 @@ describe('GET /api/btc/inscribe', () => {
       inscriptionId: `${winnerReveal}i0`,
       signedCommitHex: '02aa',
       revealTxHex: '02ee',
-      fundingOutpoint: 'x:0',
+      fundingOutpoints: ['x:0'],
       changeAddress: USER_ADDRESS,
       createdAt: '2026-08-01T00:00:00.000Z',
       updatedAt: '2026-08-01T00:00:00.000Z',
@@ -642,7 +693,7 @@ describe('GET /api/btc/inscribe', () => {
     const base = {
       signedCommitHex: '02aa',
       revealTxHex: '02bb',
-      fundingOutpoint: 'x:0',
+      fundingOutpoints: ['x:0'],
       changeAddress: USER_ADDRESS,
       createdAt: '2026-08-01T00:00:00.000Z',
       updatedAt: '2026-08-01T00:00:00.000Z',
@@ -676,7 +727,7 @@ describe('GET /api/btc/inscribe', () => {
       inscriptionId: `${'r'.repeat(64)}i0`,
       signedCommitHex: '02aa',
       revealTxHex: '02bb',
-      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      fundingOutpoints: [`${'a'.repeat(64)}:0`],
       changeAddress: USER_ADDRESS,
       status: 'signed',
       createdAt: '2026-08-01T00:00:00.000Z',
@@ -684,11 +735,11 @@ describe('GET /api/btc/inscribe', () => {
       ...over,
     });
     // User A: 7 superseded pairs, only the OLDEST one's commit confirmed.
-    h.store.create('sub-1', rec({ commitTxId: winnerCommit, revealTxHex: '02ee', fundingOutpoint: 'win:0' }));
+    h.store.create('sub-1', rec({ commitTxId: winnerCommit, revealTxHex: '02ee', fundingOutpoints: ['win:0'] }));
     h.store.supersede('sub-1', winnerCommit);
     for (let i = 0; i < 6; i++) {
       const id = String(i).repeat(64).slice(0, 64);
-      h.store.create('sub-1', rec({ commitTxId: id, fundingOutpoint: `a${i}:0` }));
+      h.store.create('sub-1', rec({ commitTxId: id, fundingOutpoints: [`a${i}:0`] }));
       h.store.supersede('sub-1', id);
     }
     // User B: 2 superseded pairs, unconfirmed. With a SHARED cursor, B's
@@ -696,7 +747,7 @@ describe('GET /api/btc/inscribe', () => {
     // back at 0 mod 7 (5 + 2 = 7) and A's winner would be starved forever.
     for (let i = 0; i < 2; i++) {
       const id = `b${i}`.repeat(32);
-      h.store.create('sub-2', rec({ commitTxId: id, fundingOutpoint: `b${i}:0` }));
+      h.store.create('sub-2', rec({ commitTxId: id, fundingOutpoints: [`b${i}:0`] }));
       h.store.supersede('sub-2', id);
     }
 
@@ -783,6 +834,105 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
     expect(((await res.json()) as { status: string }).status).toBe('confirmed');
     expect(h.broadcasts.length).toBe(before); // nothing rebroadcast
   });
+
+  /**
+   * F1 — the terminal deadlock. A commit that broadcast fine can still be
+   * EVICTED from every mempool by a fee spike, and with no reveal child there
+   * is no CPFP to pull it back. It will never confirm, so the list poll's
+   * liveStuck pass (gated on a confirmed commit) never fires, and the reveal
+   * is rejected for missing inputs forever. Without re-pushing the commit the
+   * creator's confirmed UTXO is unusable through the app for good.
+   */
+  test('a commit evicted from the mempool is RE-PUSHED before the reveal retry', async () => {
+    const pair = buildPair();
+    let commitInMempool = false;
+    let failReveal = true;
+    const h = harness({
+      broadcast: async (txHex) => {
+        if (txHex === pair.signedCommitHex) {
+          commitInMempool = true;
+          return 'f'.repeat(64);
+        }
+        if (txHex === pair.revealTxHex) {
+          if (failReveal) throw new Error('connection reset');
+          if (!commitInMempool) throw new Error('bad-txns-inputs-missingorspent');
+        }
+        return 'f'.repeat(64);
+      },
+    });
+    // Commit lands; the reveal push fails on a provider hiccup.
+    const res = await post(h.routes, pair);
+    expect(((await res.json()) as { status: string }).status).toBe('commit_broadcast');
+    // A fee spike evicts the lone, childless commit.
+    commitInMempool = false;
+    failReveal = false;
+
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res2 = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res2.status).toBe(200);
+    expect(((await res2.json()) as { status: string }).status).toBe('reveal_broadcast');
+    expect(h.store.get('sub-1', pair.commitTxId)!.status).toBe('reveal_broadcast');
+    // The commit went out a SECOND time — that is what un-bricks the UTXO.
+    expect(h.broadcasts.filter((x) => x === pair.signedCommitHex)).toHaveLength(2);
+  });
+
+  test('a reveal rejected for an unrelated reason does NOT re-push the commit', async () => {
+    const pair = buildPair();
+    let failReveal = true;
+    const h = harness({
+      broadcast: async (txHex) => {
+        if (failReveal && txHex === pair.revealTxHex) throw new Error('connection reset');
+        return 'f'.repeat(64);
+      },
+    });
+    await post(h.routes, pair);
+    const before = h.broadcasts.filter((x) => x === pair.signedCommitHex).length;
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(((await res.json()) as { status: string }).status).toBe('commit_broadcast');
+    expect(h.broadcasts.filter((x) => x === pair.signedCommitHex)).toHaveLength(before);
+  });
+});
+
+/**
+ * R3 — one torn file must not turn every recovery endpoint into a bare,
+ * unnamed 500. The routes read the store outside any try/catch, and a 500 with
+ * no code and no money line is exactly the state where the automatic
+ * reconciliation that would complete a stranded reveal is dead for that user
+ * with nothing to tell the operator so.
+ */
+describe('an unreadable records file', () => {
+  function corrupt(h: ReturnType<typeof harness>) {
+    mkdirSync(join(h.dataDir, 'inscriptions'), { recursive: true });
+    writeFileSync(join(h.dataDir, 'inscriptions', 'sub-1.json'), '[{"commitTxId":');
+  }
+
+  test('the list route answers a NAMED 503, not an untyped 500', async () => {
+    const h = harness();
+    await post(h.routes, buildPair());
+    corrupt(h);
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const res = await h.routes.inscribeList(req, new URL(req.url));
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe('records_unreadable');
+  });
+
+  test('the rebroadcast route answers a NAMED 503, not an untyped 500', async () => {
+    const h = harness();
+    const pair = buildPair();
+    await post(h.routes, pair);
+    corrupt(h);
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe('records_unreadable');
+  });
+
+  test('the store REFUSES rather than reading a torn file as an empty list', () => {
+    const h = harness();
+    corrupt(h);
+    expect(() => h.store.list('sub-1')).toThrow(/RECORDS_UNREADABLE/);
+  });
 });
 
 describe('persist-before-broadcast is load-bearing', () => {
@@ -848,7 +998,7 @@ describe('evicted-reveal recovery', () => {
       inscriptionId: `${'r'.repeat(64)}i0`,
       signedCommitHex: '02aa',
       revealTxHex: '02bb',
-      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      fundingOutpoints: [`${'a'.repeat(64)}:0`],
       changeAddress: USER_ADDRESS,
       status: 'reveal_broadcast',
       createdAt: at,
@@ -915,7 +1065,7 @@ describe('evicted-reveal recovery', () => {
   test('a stale reveal is surfaced to the monitoring sweep', () => {
     const h = harness();
     parked(h.store, 48 * 60 * 60_000);
-    expect(h.store.sweepStale(24 * 60 * 60_000).map((x) => x.status)).toEqual(['reveal_broadcast']);
+    expect(h.store.sweepStale(24 * 60 * 60_000).stale.map((x) => x.status)).toEqual(['reveal_broadcast']);
   });
 });
 
@@ -930,7 +1080,7 @@ describe('terminal records', () => {
       inscriptionId: `${p.revealTxId}i0`,
       signedCommitHex: p.signedCommitHex,
       revealTxHex: p.revealTxHex,
-      fundingOutpoint: `${'a'.repeat(64)}:0`,
+      fundingOutpoints: [`${'a'.repeat(64)}:0`],
       changeAddress: USER_ADDRESS,
       status: 'signed',
       createdAt: '2026-08-01T00:00:00.000Z',
@@ -1000,5 +1150,225 @@ describe('malformed reveal shapes', () => {
     expect(res.status).toBe(400);
     expect((await res.json() as { error: string }).error).toBe('reveal_invariant_violation');
     expect(h.broadcasts).toEqual([]);
+  });
+});
+
+/**
+ * R26 — a creator who deposited twice, or topped up after a fee rise, funds
+ * one inscription from several UTXOs. Relaxing the input-count invariant must
+ * not weaken the guard that stops a stranded reveal: the declared set is what
+ * the commit must spend, and ANY overlap with a live record is a double-spend.
+ */
+describe('POST /api/btc/inscribe — multi-input funding', () => {
+  const A = { txid: 'a'.repeat(64), vout: 0, value: 30_000 };
+  const B = { txid: 'b'.repeat(64), vout: 1, value: 25_000 };
+  const C = { txid: 'c'.repeat(64), vout: 0, value: 40_000 };
+
+  test('accepts a two-input commit matching its declared funding set', async () => {
+    const { routes, store, broadcasts } = harness();
+    const pair = buildMultiPair([A, B]);
+    const res = await post(routes, pair);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe('reveal_broadcast');
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+    const rec = store.get('sub-1', pair.commitTxId)!;
+    expect(rec.fundingOutpoints).toEqual([`${A.txid}:0`, `${B.txid}:1`]);
+    // Both outpoints are claimed by the live record.
+    expect(store.findByOutpoint('sub-1', `${B.txid}:1`)!.commitTxId).toBe(pair.commitTxId);
+  });
+
+  test('rejects a commit whose inputs do not match the declared funding set', async () => {
+    const { routes, broadcasts } = harness();
+    const pair = buildMultiPair([A, B]);
+    // Declares a THIRD outpoint the commit does not spend.
+    const res = await post(routes, { ...pair, fundingUtxos: [...pair.fundingUtxos, { ...C, scriptPubKey: USER_SCRIPT }] });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toHaveLength(0);
+  });
+
+  test('rejects a commit whose inputs are the declared set in a DIFFERENT order (the identity sat would move)', async () => {
+    const { routes, broadcasts } = harness();
+    const pair = buildMultiPair([A, B]);
+    const res = await post(routes, { ...pair, fundingUtxos: [pair.fundingUtxos[1], pair.fundingUtxos[0]] });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toHaveLength(0);
+  });
+
+  test('refuses a second pair that claims one ALREADY-CLAIMED outpoint plus a fresh one', async () => {
+    const { routes, store } = harness();
+    expect((await post(routes, buildMultiPair([A, B]))).status).toBe(200);
+    // Overlapping but UNEQUAL set: a single-outpoint lookup on the identity
+    // input alone would miss this and let both pairs spend B.
+    const overlapping = buildMultiPair([C, B]);
+    const res = await post(routes, overlapping);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
+    expect(store.get('sub-1', overlapping.commitTxId)).toBeNull();
+  });
+
+  test('refuses a second pair whose only overlap is a NON-identity input of the live record', async () => {
+    const { routes } = harness();
+    expect((await post(routes, buildMultiPair([A, B]))).status).toBe(200);
+    const res = await post(routes, buildMultiPair([B, C]));
+    expect(res.status).toBe(409);
+  });
+
+  test('a rebuilt pair over the SAME outpoint set supersedes an unbroadcast record', async () => {
+    const first = buildMultiPair([A, B]);
+    let failCommit = true;
+    const { routes, store } = harness({
+      broadcast: async (txHex) => {
+        if (failCommit && txHex === first.signedCommitHex) throw new Error('min relay fee not met');
+        return 'f'.repeat(64);
+      },
+    });
+    expect((await post(routes, first)).status).toBe(502);
+    expect(store.get('sub-1', first.commitTxId)!.status).toBe('signed');
+
+    const rebuilt = buildMultiPair([A, B], 22_000); // different split → different txid
+    expect((await post(routes, rebuilt)).status).toBe(200);
+    expect(store.get('sub-1', first.commitTxId)!.superseded).toBe(true);
+    expect(store.get('sub-1', first.commitTxId)!.revealTxHex).toBe(first.revealTxHex);
+    expect(store.findByOutpoint('sub-1', `${B.txid}:1`)!.commitTxId).toBe(rebuilt.commitTxId);
+  });
+
+  /**
+   * C4 — the safety property the supersede gate rests on is "the new commit
+   * conflicts with the old on EVERY input the old spends, so at most one can
+   * land". That holds for a strict superset too. Refusing it 409s a creator
+   * who must top up after a fee rise, permanently: nothing else ever frees a
+   * live `signed` record.
+   */
+  test('a rebuilt pair funding from a SUPERSET of a stuck record supersedes it', async () => {
+    const first = buildMultiPair([A]);
+    let failCommit = true;
+    const { routes, store } = harness({
+      broadcast: async (txHex) => {
+        if (failCommit && txHex === first.signedCommitHex) throw new Error('min relay fee not met');
+        return 'f'.repeat(64);
+      },
+    });
+    expect((await post(routes, first)).status).toBe(502);
+    expect(store.get('sub-1', first.commitTxId)!.status).toBe('signed');
+
+    // The fee rose: the rebuild has to pull in B as well.
+    const rebuilt = buildMultiPair([A, B]);
+    expect((await post(routes, rebuilt)).status).toBe(200);
+    const old = store.get('sub-1', first.commitTxId)!;
+    expect(old.superseded).toBe(true);
+    expect(old.revealTxHex).toBe(first.revealTxHex); // both reveals retained
+    expect(store.get('sub-1', rebuilt.commitTxId)!.revealTxHex).toBe(rebuilt.revealTxHex);
+    expect(store.findByOutpoint('sub-1', `${A.txid}:0`)!.commitTxId).toBe(rebuilt.commitTxId);
+  });
+
+  test('a rebuilt pair whose set merely OVERLAPS (neither superset nor equal) is still refused', async () => {
+    const first = buildMultiPair([A, B]);
+    const { routes } = harness({
+      broadcast: async (txHex) => {
+        if (txHex === first.signedCommitHex) throw new Error('min relay fee not met');
+        return 'f'.repeat(64);
+      },
+    });
+    expect((await post(routes, first)).status).toBe(502);
+    // {B, C} does not contain A — the two commits would not conflict on A, so
+    // both could land and one reveal would be stranded.
+    const res = await post(routes, buildMultiPair([B, C]));
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
+  });
+
+  /**
+   * C5/F2 — the rival set is read, then awaited on, then acted on. Two
+   * concurrent submissions both supersede the same rival off a STALE snapshot
+   * and both go live on one outpoint set. Money stays safe (the commits
+   * conflict) but every later submission then sees rivals.length > 1 and 409s
+   * with no supersede path, forever.
+   */
+  test('two concurrent rebuilds cannot both go live on one outpoint set', async () => {
+    const stuck = buildMultiPair([A], 21_000);
+    const one = buildMultiPair([A], 22_000);
+    const two = buildMultiPair([A], 23_000);
+    const { routes, store } = harness({
+      broadcast: async (txHex) => {
+        if (txHex === stuck.signedCommitHex) throw new Error('min relay fee not met');
+        return 'f'.repeat(64);
+      },
+      txStatusDelayMs: 5, // the window the stale read straddles
+    });
+    expect((await post(routes, stuck)).status).toBe(502);
+
+    const results = await Promise.all([post(routes, one), post(routes, two)]);
+    expect(results.some((r) => r.status === 200)).toBe(true);
+    // Exactly ONE live record claims the set — whichever lost either
+    // superseded the other or was refused; neither leaves two live rivals.
+    expect(store.findByOutpoints('sub-1', [`${A.txid}:0`])).toHaveLength(1);
+  });
+
+  test('a rebuilt pair over the same set does NOT supersede once the first pair is broadcast', async () => {
+    const { routes } = harness();
+    expect((await post(routes, buildMultiPair([A, B]))).status).toBe(200);
+    const res = await post(routes, buildMultiPair([A, B], 22_000));
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
+  });
+
+  test('a LEGACY single-outpoint record still blocks a multi-input pair that overlaps it', async () => {
+    const { routes, store } = harness();
+    // Written in the pre-multi-input shape, as records on the live volume are.
+    store.create('sub-1', {
+      commitTxId: '9'.repeat(64),
+      revealTxId: '8'.repeat(64),
+      inscriptionId: `${'8'.repeat(64)}i0`,
+      signedCommitHex: '02aa',
+      revealTxHex: '02bb',
+      fundingOutpoint: `${A.txid}:0`,
+      changeAddress: USER_ADDRESS,
+      status: 'commit_broadcast',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    } as unknown as InscriptionRecord);
+    const res = await post(routes, buildMultiPair([A, B]));
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { commitTxId: string }).commitTxId).toBe('9'.repeat(64));
+  });
+
+  test('a LEGACY single-outpoint record is still completable via rebroadcast', async () => {
+    const { routes, store, broadcasts } = harness();
+    store.create('sub-1', {
+      commitTxId: '7'.repeat(64),
+      revealTxId: '6'.repeat(64),
+      inscriptionId: `${'6'.repeat(64)}i0`,
+      signedCommitHex: '02aa',
+      revealTxHex: '02bb',
+      fundingOutpoint: `${C.txid}:0`,
+      changeAddress: USER_ADDRESS,
+      status: 'commit_broadcast',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    } as unknown as InscriptionRecord);
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: '7'.repeat(64) });
+    const res = await routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res.status).toBe(200);
+    expect(broadcasts).toContain('02bb');
+    expect(store.get('sub-1', '7'.repeat(64))!.status).toBe('reveal_broadcast');
+  });
+
+  test('resubmitting the SAME multi-input pair is idempotent (its own claim is not a rival)', async () => {
+    const { routes, store } = harness();
+    const pair = buildMultiPair([A, B]);
+    expect((await post(routes, pair)).status).toBe(200);
+    expect((await post(routes, pair)).status).toBe(200);
+    expect(store.list('sub-1')).toHaveLength(1);
+  });
+
+  test('the LEGACY singular fundingUtxo body shape is still accepted (cached browser bundle)', async () => {
+    const { routes, store } = harness();
+    const pair = buildPair();
+    const { fundingUtxo, ...rest } = pair;
+    const res = await post(routes, { ...rest, fundingUtxo });
+    expect(res.status).toBe(200);
+    expect(store.get('sub-1', pair.commitTxId)!.fundingOutpoints).toEqual([`${pair.fundingUtxo.txid}:0`]);
   });
 });

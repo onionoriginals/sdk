@@ -21,7 +21,26 @@ Two audit runs so far:
 
 ## Execution order & status
 
-### Run 3 (current) — first-implementer feedback
+### Run 4 (current) — landing MVP launch
+
+Driven by the maintainer's "ready for mass usage" goal, not a repo sweep. Scope is
+landing-first: the hosted site at `originals.build` is the MVP, Bitcoin goes live on
+mainnet (creator-pays, per PR #491), and SDK work happens only where the site's path
+is broken. Headline finding: the app is **already deployed and serving users**, the
+signed-in mainnet inscription flow **cannot complete** (the Turnkey signing session is
+15 minutes and is never re-established across the Bitcoin confirmation wait), and the
+page's own copy misdescribes the money path.
+
+| Plan | Title | Priority | Effort | Risk | Depends on | Status |
+|------|-------|----------|--------|------|------------|--------|
+| 047 | Landing MVP launch — completable mainnet flow, honest tiers, production config (16 units) | P0 | XL | HIGH | PR #491 merged | TODO (not started) |
+
+> Unit gate: 047's Phase A (U1–U7, U10, U15, U16) must land, its volume-mount check pass,
+> and its abort contract be written, before `BTC_NETWORK=mainnet` is enabled in the
+> deployed environment. Phase A is derived from irreversible harm to a stranger, not
+> from flow completion.
+
+### Run 3 — first-implementer feedback
 
 Driven by the `boop` team's review, not a repo sweep. Headline finding: the SDK's
 recommended authorship path is unusable for any custody that never exports a key,

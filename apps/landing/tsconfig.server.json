@@ -3,6 +3,6 @@
   "compilerOptions": {
     "types": ["bun-types"]
   },
-  "include": ["server"],
+  "include": ["server", "serve.ts"],
   "exclude": ["server/**/*.test.ts"]
 }

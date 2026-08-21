@@ -40,8 +40,20 @@ export interface InscriptionRecord {
    * the record is retired.
    */
   revealTxHex?: string;
-  /** `${txid}:${vout}` of the funding UTXO the commit spends. */
-  fundingOutpoint: string;
+  /**
+   * Every `${txid}:${vout}` the commit spends, in input order. `[0]` is the
+   * IDENTITY outpoint (its first sat is the did:btco sat). A record CLAIMS all
+   * of them: two pairs with overlapping-but-unequal sets would both spend the
+   * overlap, and the loser's reveal is stranded.
+   */
+  fundingOutpoints: string[];
+  /**
+   * LEGACY single-outpoint shape, still present in records written to the live
+   * volume before multi-input funding. Read-only: normalized into
+   * `fundingOutpoints` on load, and mirrored on write so an older reader (and
+   * the /me response shape) keeps working.
+   */
+  fundingOutpoint?: string;
   changeAddress: string;
   status: InscriptionStatus;
   /**
@@ -73,6 +85,14 @@ export interface InscriptionRecord {
   updatedAt: string;
   /** When the reveal was last re-pushed; the throttle clock, separate from `updatedAt`. */
   rebroadcastAt?: string;
+}
+
+/** A deposit read the server was able to trust, as persisted. */
+export interface TrustedDepositRead {
+  network: string;
+  address: string;
+  confirmedSats: number;
+  at: string;
 }
 
 export interface InscriptionsStore {
@@ -107,25 +127,134 @@ export interface InscriptionsStore {
   /** The LIVE (non-superseded) record whose commit spends this `${txid}:${vout}` outpoint. */
   findByOutpoint(subOrgId: string, outpoint: string): InscriptionRecord | null;
   /**
+   * Every LIVE record claiming ANY of these outpoints — the double-spend gate.
+   * A single-outpoint lookup would wave through a second pair whose input set
+   * merely OVERLAPS a live one, and both would spend the shared UTXO.
+   */
+  findByOutpoints(subOrgId: string, outpoints: string[]): InscriptionRecord[];
+  /**
    * ALL users' records that still hold un-landed recovery artifacts and are
    * older than `olderThanMs` — the monitoring sweep, so stranded states can't
    * silently accumulate. Read-only; acting on them stays with the per-user
    * rebroadcast route.
    */
-  sweepStale(olderThanMs: number): Array<{
-    subOrgId: string;
-    commitTxId: string;
-    status: InscriptionStatus;
-    createdAt: string;
-  }>;
+  sweepStale(olderThanMs: number): {
+    stale: Array<{
+      subOrgId: string;
+      commitTxId: string;
+      status: InscriptionStatus;
+      createdAt: string;
+    }>;
+    /**
+     * Subs whose file could not be parsed. Reported, never swallowed: that
+     * file holds the ONLY copy of a signed reveal, so it is a strictly LOUDER
+     * event than a stale record — not a quieter one.
+     */
+    unreadable: string[];
+  };
   /**
    * Bind this user to ONE deposit address per network (first use wins) and
    * return the bound address. The funding address is deterministic per
    * (sub, network) — a Turnkey BIP-84 path — so binding costs an honest
    * client nothing and stops the deposit route from being a general
    * UTXO-lookup proxy for arbitrary third-party addresses.
+   *
+   * Trust-on-first-use, and NOT re-derived from Turnkey: whatever address the
+   * client first presents is what gets bound. That makes the bindings file the
+   * whole of the enforcement, so an UNREADABLE one throws
+   * `BINDINGS_UNREADABLE` rather than resetting to `{}` — silently permitting
+   * a rebind is how a corrupt (or tampered) file turns into a deposit address
+   * that is not the user's.
    */
-  bindDepositAddress(subOrgId: string, network: string, address: string): string;
+  /**
+   * Bind on first use and report whether this call is what bound it, so a
+   * caller wanting both facts pays one file read rather than two.
+   */
+  bindDepositAddress(
+    subOrgId: string,
+    network: string,
+    address: string
+  ): { address: string; isNew: boolean };
+  /** The already-bound address for (sub, network), or null. Throws on an unreadable file. */
+  depositBinding(subOrgId: string, network: string): string | null;
+  /** The last deposit read we could trust for this user, or null. */
+  lastDepositRead(subOrgId: string): TrustedDepositRead | null;
+  /**
+   * Every bound deposit address across ALL users — the cross-user reader the
+   * balance sweep needs (the only other cross-user scan walks inscriptions).
+   * Read-only and network-free: it reports what is on disk, and the caller
+   * decides which addresses are worth an indexer read. Each row carries what
+   * the drop-out rule is decided from — the last trusted balance and whether
+   * anything is still in flight — so the sweep never has to open these files
+   * twice.
+   *
+   * `unreadable` names the subs whose files could not be parsed. Skipping them
+   * keeps the scan alive for everyone else; REPORTING them is what stops a
+   * corrupt file from silently removing one user's deposit address from the
+   * only cross-user scan there is, permanently and with nothing said.
+   */
+  listBoundDeposits(): { deposits: BoundDeposit[]; unreadable: string[] };
+  /**
+   * Remember a read of the deposit address we could TRUST, and clear any
+   * standing alert. The confirmed balance is kept so a later outage can still
+   * tell the creator what they hold — the number they need to hear is the one
+   * from before the indexer went away.
+   */
+  /**
+   * Record a trusted read and return the PREVIOUS one, so a caller wanting both
+   * pays a single file read on the poll path.
+   */
+  recordDepositRead(
+    subOrgId: string,
+    read: { network: string; address: string; confirmedSats: number }
+  ): TrustedDepositRead | null;
+  /**
+   * Record that the read behind this user's deposit address could not be
+   * trusted (R28). Idempotent per outage: `firstSeenAt` survives repeated
+   * polls so the UI can say how long it has been going on.
+   */
+  recordDepositAlert(
+    subOrgId: string,
+    alert: { kind: DepositAlertKind; network: string; address: string }
+  ): DepositAlert;
+  /**
+   * The standing alert, or null. This is the R31 delivery path: it is read on
+   * the NEXT VISIT (GET /api/btc/inscribe), not only by a tab that happened to
+   * still be polling when the outage started.
+   */
+  getDepositAlert(subOrgId: string): DepositAlert | null;
+}
+
+/** One bound deposit address, as the balance sweep sees it. */
+export interface BoundDeposit {
+  subOrgId: string;
+  network: string;
+  address: string;
+  /** Confirmed sats at the last read we could trust; null when never read. */
+  lastConfirmedSats: number | null;
+  /** When that read happened; null when never read. */
+  lastReadAt: string | null;
+  /** Anything still holding recovery artifacts — an inscription in flight. */
+  hasPendingInscription: boolean;
+}
+
+export type DepositAlertKind = 'indexer_unavailable' | 'indexer_rate_limited';
+
+/** A persisted "your deposit read cannot be trusted" state (R28/R31). */
+export interface DepositAlert {
+  kind: DepositAlertKind;
+  network: string;
+  address: string;
+  /** Confirmed sats at the address on the last read we could trust (0 if none). */
+  heldSats: number;
+  firstSeenAt: string;
+  updatedAt: string;
+}
+
+/** Per-user deposit bookkeeping. Kept in its own file so the address bindings keep their shape. */
+interface DepositState {
+  lastRead?: { network: string; address: string; confirmedSats: number; at: string };
+  alert?: DepositAlert;
 }
 
 /** A subOrgId used as a filename — Turnkey sub-orgs are UUID-safe; reject anything else. */
@@ -137,6 +266,28 @@ function subFile(dataDir: string, dir: string, subOrgId: string): string {
 /** A record still carries a broadcastable pair (i.e. it is not terminal). */
 function isPending(r: InscriptionRecord): boolean {
   return !r.retired && !!r.revealTxHex;
+}
+
+/**
+ * The outpoints a record claims, reading the legacy single-outpoint shape.
+ * Exported because the routes reason about claims too (reconciliation,
+ * supersede) and must see the same set the store does.
+ */
+export function outpointsOf(r: InscriptionRecord): string[] {
+  if (Array.isArray(r.fundingOutpoints) && r.fundingOutpoints.length > 0) return r.fundingOutpoints;
+  return r.fundingOutpoint ? [r.fundingOutpoint] : [];
+}
+
+/**
+ * Normalize a record read off disk into the current shape. Records written
+ * before multi-input funding carry only `fundingOutpoint`; the live volume
+ * holds real recovery artifacts in that shape, so they are upgraded on read
+ * rather than orphaned.
+ */
+function normalize(r: InscriptionRecord): InscriptionRecord {
+  const outpoints = outpointsOf(r);
+  if (r.fundingOutpoints === outpoints && r.fundingOutpoint === outpoints[0]) return r;
+  return { ...r, fundingOutpoints: outpoints, fundingOutpoint: outpoints[0] };
 }
 
 export function createInscriptionsStore(opts: {
@@ -155,10 +306,26 @@ export function createInscriptionsStore(opts: {
   const maxPending = opts.maxPending ?? 25;
   const now = opts.now ?? (() => Date.now());
 
+  /**
+   * FAIL CLOSED on a torn file, exactly as the bindings read does. Returning
+   * `[]` would silently discard a recovery artifact AND free a still-claimed
+   * outpoint for a new pair to spend, so an unparseable file throws a NAMED
+   * error the routes can turn into a 503 with a money-log line. An absent or
+   * empty file is a genuine "no records"; unparseable is not.
+   */
   function readAll(subOrgId: string): InscriptionRecord[] {
     const path = subFile(opts.dataDir, 'inscriptions', subOrgId);
     if (!existsSync(path)) return [];
-    return JSON.parse(readFileSync(path, 'utf8')) as InscriptionRecord[];
+    const raw = readFileSync(path, 'utf8');
+    if (raw.trim() === '') return [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error('RECORDS_UNREADABLE');
+    }
+    if (!Array.isArray(parsed)) throw new Error('RECORDS_UNREADABLE');
+    return (parsed as InscriptionRecord[]).map(normalize);
   }
 
   // Atomic AND durable write (write → fsync → rename → fsync dir): this file
@@ -209,6 +376,46 @@ export function createInscriptionsStore(opts: {
     writeJson('inscriptions', subOrgId, recs);
   }
 
+  /**
+   * The deposit-address bindings for one user. FAIL CLOSED on an unreadable
+   * file: these bindings are the entire enforcement behind "this address
+   * belongs to this account" (nothing re-derives it from Turnkey), so reading
+   * a torn or tampered file as `{}` would silently permit a rebind — a
+   * stranger's mainnet BTC pointed at an address that is not theirs. An empty
+   * or absent file is a genuine "not bound yet"; unparseable is not.
+   */
+  function readBindings(path: string): Record<string, string> {
+    if (!existsSync(path)) return {};
+    const raw = readFileSync(path, 'utf8');
+    if (raw.trim() === '') return {};
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error('BINDINGS_UNREADABLE');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('BINDINGS_UNREADABLE');
+    }
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v !== 'string' || !v) throw new Error('BINDINGS_UNREADABLE');
+      out[k] = v;
+    }
+    return out;
+  }
+
+  /** Per-user deposit bookkeeping; a torn/absent file reads as "nothing known". */
+  function readDepositState(subOrgId: string): DepositState {
+    const path = subFile(opts.dataDir, 'deposit-state', subOrgId);
+    if (!existsSync(path)) return {};
+    try {
+      return JSON.parse(readFileSync(path, 'utf8')) as DepositState;
+    } catch {
+      return {};
+    }
+  }
+
   /** Drop the hex payloads in place. Caller writes. */
   function retireInPlace(rec: InscriptionRecord): void {
     delete rec.signedCommitHex;
@@ -232,7 +439,7 @@ export function createInscriptionsStore(opts: {
         if (drop.size === 0) throw new Error('STORE_FULL');
         for (let i = recs.length - 1; i >= 0; i--) if (drop.has(recs[i].commitTxId)) recs.splice(i, 1);
       }
-      recs.push(rec);
+      recs.push(normalize(rec));
       writeAll(subOrgId, recs);
     },
     supersede(subOrgId, commitTxId) {
@@ -283,11 +490,16 @@ export function createInscriptionsStore(opts: {
       return readAll(subOrgId);
     },
     findByOutpoint(subOrgId, outpoint) {
-      return readAll(subOrgId).find((r) => r.fundingOutpoint === outpoint && !r.superseded) ?? null;
+      return readAll(subOrgId).find((r) => !r.superseded && outpointsOf(r).includes(outpoint)) ?? null;
+    },
+    findByOutpoints(subOrgId, outpoints) {
+      const wanted = new Set(outpoints);
+      return readAll(subOrgId).filter((r) => !r.superseded && outpointsOf(r).some((o) => wanted.has(o)));
     },
     sweepStale(olderThanMs) {
       const dir = join(opts.dataDir, 'inscriptions');
-      if (!existsSync(dir)) return [];
+      const unreadable: string[] = [];
+      if (!existsSync(dir)) return { stale: [], unreadable };
       const cutoff = now() - olderThanMs;
       const stale: Array<{ subOrgId: string; commitTxId: string; status: InscriptionStatus; createdAt: string }> = [];
       for (const file of readdirSync(dir)) {
@@ -295,9 +507,14 @@ export function createInscriptionsStore(opts: {
         const subOrgId = file.slice(0, -'.json'.length);
         let recs: InscriptionRecord[];
         try {
-          recs = JSON.parse(readFileSync(join(dir, file), 'utf8')) as InscriptionRecord[];
+          const parsed = JSON.parse(readFileSync(join(dir, file), 'utf8')) as unknown;
+          if (!Array.isArray(parsed)) throw new Error('RECORDS_UNREADABLE');
+          recs = parsed as InscriptionRecord[];
         } catch {
-          continue; // a torn write must not kill the sweep
+          // A torn write must not kill the sweep — but it must not drop this
+          // user in silence either: their file is where a signed reveal lives.
+          unreadable.push(subOrgId);
+          continue;
         }
         for (const r of recs) {
           // Anything still holding hex is un-landed money: a never-broadcast
@@ -309,23 +526,128 @@ export function createInscriptionsStore(opts: {
           stale.push({ subOrgId, commitTxId: r.commitTxId, status: r.status, createdAt: r.createdAt });
         }
       }
-      return stale;
+      return { stale, unreadable };
     },
     bindDepositAddress(subOrgId, network, address) {
-      const path = subFile(opts.dataDir, 'deposits', subOrgId);
-      let bindings: Record<string, string> = {};
-      if (existsSync(path)) {
-        try {
-          bindings = JSON.parse(readFileSync(path, 'utf8')) as Record<string, string>;
-        } catch {
-          bindings = {}; // a torn write costs a rebind, never an outage
-        }
-      }
+      // Returns `isNew` so the caller can log a first issuance without a second
+      // readBindings of the same file -- this runs on every deposit poll tick,
+      // and readFileSync blocks the whole event loop on a single-instance server.
+      const bindings = readBindings(subFile(opts.dataDir, 'deposits', subOrgId));
       const existing = bindings[network];
-      if (existing) return existing;
+      if (existing) return { address: existing, isNew: false };
       bindings[network] = address;
       writeJson('deposits', subOrgId, bindings);
-      return address;
+      return { address, isNew: true };
+    },
+    depositBinding(subOrgId, network) {
+      return readBindings(subFile(opts.dataDir, 'deposits', subOrgId))[network] ?? null;
+    },
+    lastDepositRead(subOrgId) {
+      return readDepositState(subOrgId).lastRead ?? null;
+    },
+    listBoundDeposits() {
+      const dir = join(opts.dataDir, 'deposits');
+      const unreadable: string[] = [];
+      if (!existsSync(dir)) return { deposits: [], unreadable };
+      const out: BoundDeposit[] = [];
+      for (const file of readdirSync(dir).sort()) {
+        if (!file.endsWith('.json')) continue;
+        const subOrgId = file.slice(0, -'.json'.length);
+        let bindings: Record<string, string>;
+        try {
+          bindings = readBindings(join(dir, file));
+        } catch {
+          // An unreadable bindings file fails the USER's request closed, and
+          // must not blind the sweep to every other stranger's funds — but the
+          // caller is told WHO was dropped, because this user has just left
+          // the only scan that would ever see their money.
+          unreadable.push(subOrgId);
+          continue;
+        }
+        const state = (() => {
+          try {
+            return readDepositState(subOrgId);
+          } catch {
+            return {} as DepositState;
+          }
+        })();
+        let pending = false;
+        try {
+          pending = readAll(subOrgId).some(isPending);
+        } catch {
+          // A torn inscriptions file must not kill the scan. Assume something
+          // IS in flight: that keeps the address in scope (the fail-safe
+          // direction) and the sub is reported alongside it.
+          pending = true;
+          unreadable.push(subOrgId);
+        }
+        for (const [network, address] of Object.entries(bindings)) {
+          const read = state.lastRead?.address === address ? state.lastRead : undefined;
+          out.push({
+            subOrgId,
+            network,
+            address,
+            lastConfirmedSats: read ? read.confirmedSats : null,
+            lastReadAt: read ? read.at : null,
+            hasPendingInscription: pending,
+          });
+        }
+      }
+      return { deposits: out, unreadable };
+    },
+    recordDepositRead(subOrgId, read) {
+      // Returns the PREVIOUS trusted read so a caller needing both facts pays
+      // one file read, not two. This is the 15s-poll path on a single-instance
+      // server, where readFileSync blocks the event loop for everyone.
+      const state = readDepositState(subOrgId);
+      const previous = state.lastRead ?? null;
+      // A trusted read ENDS the outage — the alert is dropped, not merged.
+      // Skip the write when nothing changed: this is the 15s-poll path, and
+      // an fsync per poll per creator is real cost for no information.
+      const last = state.lastRead;
+      if (
+        !state.alert &&
+        last &&
+        last.confirmedSats === read.confirmedSats &&
+        last.address === read.address &&
+        last.network === read.network
+      ) {
+        return previous;
+      }
+      writeJson('deposit-state', subOrgId, {
+        lastRead: { ...read, at: new Date(now()).toISOString() },
+      } satisfies DepositState);
+      return previous;
+    },
+    recordDepositAlert(subOrgId, alert) {
+      const state = readDepositState(subOrgId);
+      const at = new Date(now()).toISOString();
+      const existing = state.alert;
+      // An ongoing outage is polled every 15s per stuck creator. Re-stamping
+      // `updatedAt` on each one costs an fsync for no new information, so an
+      // unchanged alert is refreshed at most once a minute.
+      if (
+        existing &&
+        existing.kind === alert.kind &&
+        existing.address === alert.address &&
+        now() - Date.parse(existing.updatedAt) < 60_000
+      ) {
+        return existing;
+      }
+      const next: DepositAlert = {
+        kind: alert.kind,
+        network: alert.network,
+        address: alert.address,
+        heldSats: state.lastRead?.address === alert.address ? state.lastRead.confirmedSats : 0,
+        // One outage, one clock: repeated polls must not keep resetting it.
+        firstSeenAt: existing && existing.address === alert.address ? existing.firstSeenAt : at,
+        updatedAt: at,
+      };
+      writeJson('deposit-state', subOrgId, { ...state, alert: next });
+      return next;
+    },
+    getDepositAlert(subOrgId) {
+      return readDepositState(subOrgId).alert ?? null;
     },
   };
 }

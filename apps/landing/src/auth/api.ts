@@ -1,5 +1,4 @@
 import { sendOtp, verifyOtp } from '@originals/auth/client';
-import { generateP256KeyPair } from '@turnkey/crypto';
 
 export interface AuthUser {
   subOrgId: string;
@@ -16,24 +15,28 @@ export interface CompleteOtpResult {
   subOrgId: string;
   /** Turnkey verificationToken (bound to the P-256 pubkey below), for OTP_LOGIN. */
   verificationToken?: string;
-  /** The browser P-256 keypair (hex). Private key NEVER leaves the browser. */
-  p256PublicKey: string;
-  p256PrivateKey: string;
+  /** The browser session key's public half (hex). There is no private half to return. */
+  p256PublicKey?: string;
 }
 
-export async function completeOtp(sessionId: string, code: string): Promise<CompleteOtpResult> {
-  // Generate the P-256 keypair in the browser so the verification-token
-  // private key never transits HTTP (2.0 token binding). Track B (testnet4
-  // signing) reuses this exact keypair as the Turnkey session credential.
-  const keyPair = generateP256KeyPair();
-  const result = await verifyOtp(sessionId, code, undefined, { publicKey: keyPair.publicKey });
+/**
+ * Verify the OTP, binding the token to `p256PublicKey`. That key is the
+ * browser's NON-EXTRACTABLE session key (see ./turnkey-browser-client), minted
+ * before this call because verify-otp is what binds it — and it has no
+ * readable private half to hand back, here or anywhere.
+ */
+export async function completeOtp(
+  sessionId: string,
+  code: string,
+  p256PublicKey?: string
+): Promise<CompleteOtpResult> {
+  const result = await verifyOtp(sessionId, code, undefined, { publicKey: p256PublicKey });
   return {
     verified: result.verified,
     email: result.email!,
     subOrgId: result.subOrgId!,
     verificationToken: result.verificationToken,
-    p256PublicKey: keyPair.publicKey,
-    p256PrivateKey: keyPair.privateKey,
+    p256PublicKey,
   };
 }
 

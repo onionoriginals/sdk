@@ -10,6 +10,8 @@ import { Footer } from './components/Footer';
 import { useLocationPath, routeForPath, didFromPath } from './router';
 import { YourOriginals } from './pages/YourOriginals';
 import { OriginalDetail } from './pages/OriginalDetail';
+import { LegalPage, legalRouteDoc } from './pages/Legal';
+import { smokeAutoRunAllowed } from './sdk/network-flag';
 
 export function App() {
   if (new URLSearchParams(location.search).has('smoke')) {
@@ -21,10 +23,13 @@ export function App() {
 function RoutedApp() {
   const path = useLocationPath();
   const route = routeForPath(path);
+  const legalDoc = legalRouteDoc(route);
   return (
     <>
       <Nav />
-      {route === 'original-detail' ? (
+      {legalDoc ? (
+        <LegalPage doc={legalDoc} />
+      ) : route === 'original-detail' ? (
         <OriginalDetail did={didFromPath(path)!} />
       ) : route === 'your-originals' ? (
         <YourOriginals />
@@ -46,10 +51,24 @@ function RoutedApp() {
 /**
  * Headless CI harness (?smoke=1): runs the full real-SDK lifecycle and dumps
  * the result for scripts/smoke.mjs to assert on. Not linked from the page.
+ *
+ * R12: the auto-run is MOCK-BUILD ONLY. It executes unauthenticated on load,
+ * so on a real-network build it would drive the real provider path from an
+ * anonymous page load. It stays a harness marker (not product copy in
+ * content.ts) — and it deliberately reads as an ERROR so a smoke run pointed
+ * at a real-network build fails loudly instead of passing vacuously.
  */
+const SMOKE_DISABLED_OUTPUT =
+  'ERROR: ?smoke=1 auto-run is disabled on a real-network build (VITE_BTC_NETWORK is not off). ' +
+  'Run the smoke harness against a mock build.';
+
 function SmokeTest() {
   const [out, setOut] = useState('booting');
   useEffect(() => {
+    if (!smokeAutoRunAllowed()) {
+      setOut(SMOKE_DISABLED_OUTPUT);
+      return;
+    }
     (async () => {
       const [{ DemoEngine }, { generateArtwork }] = await Promise.all([
         import('./sdk/engine'),

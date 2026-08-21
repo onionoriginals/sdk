@@ -813,3 +813,108 @@ describe('createCommitTransaction', () => {
     });
   });
 });
+
+/**
+ * `exactUtxos` — the multi-input funding mode the sat-selected inscribe path
+ * needs (#R26). Ordinary selection sorts value-descending and stops as soon as
+ * the target is met, so it may REORDER or DROP the caller's first UTXO. On the
+ * inscribe path that UTXO carries the did:btco identity sat, so the caller's
+ * exact set, in the caller's exact order, must be spent or nothing at all.
+ */
+describe('createCommitTransaction — exactUtxos (multi-input funding)', () => {
+  const MIN_DUST = 546; // mirrors MIN_DUST_LIMIT in commit.ts (module-private)
+  const identity = { ...createUtxo(3_000, 0), txid: `${'1'.repeat(62)}00` };
+  const topUp = { ...createUtxo(80_000, 1), txid: `${'2'.repeat(62)}01` };
+
+  test('spends every provided UTXO, in the provided order, with the identity input pinned first', async () => {
+    const result = await createCommitTransaction(
+      createCommitParams({ utxos: [identity, topUp], exactUtxos: true })
+    );
+    expect(result.selectedUtxos.map((u) => `${u.txid}:${u.vout}`)).toEqual([
+      `${identity.txid}:${identity.vout}`,
+      `${topUp.txid}:${topUp.vout}`
+    ]);
+    expect(result.commitPsbt.inputsLength).toBe(2);
+  });
+
+  test('WITHOUT exactUtxos, selection is free to drop the caller-pinned first UTXO', async () => {
+    // Documents exactly why exactUtxos exists: minimize_inputs picks the big
+    // one and never spends the identity UTXO at all.
+    const result = await createCommitTransaction(
+      createCommitParams({ utxos: [identity, topUp] })
+    );
+    expect(result.selectedUtxos.some((u) => u.txid === identity.txid)).toBe(false);
+  });
+
+  test('fails closed when the exact set cannot cover the commit output plus fee', async () => {
+    const tiny = { ...createUtxo(700, 2), txid: `${'3'.repeat(62)}02` };
+    await expect(
+      createCommitTransaction(createCommitParams({ utxos: [tiny], exactUtxos: true, feeRate: 50 }))
+    ).rejects.toThrow(/Insufficient funds/);
+  });
+
+  test('refuses rather than silently narrowing when a provided UTXO is unspendable', async () => {
+    const inscribed: Utxo = { ...createUtxo(80_000, 3), txid: `${'4'.repeat(62)}03`, inscriptions: ['abc'] as any };
+    await expect(
+      createCommitTransaction(createCommitParams({ utxos: [identity, inscribed], exactUtxos: true }))
+    ).rejects.toThrow(/exact/i);
+  });
+
+  /**
+   * Regression (#C2): a fundable exact set must never be rejected as a builder
+   * bug. The funding check re-prices at ONE output when two-output change would
+   * be sub-dust; the final fee calculation must then use that SAME output count
+   * rather than re-deriving it from the one-output fee. Whenever
+   * `changeOutputVBytes * feeRate > 546` (P2WPKH change above ~17.6 sat/vB)
+   * re-deriving flips to two outputs, prices the two-output fee against inputs
+   * that only ever covered the one-output fee, and throws `Please report this
+   * bug` — an unescapable dead end, since an exact set cannot grow an input.
+   */
+  const window = {
+    // Reviewer's reproduction: 3,000-byte content at 30 sat/vB on regtest with
+    // P2WPKH change gives commitOutputValue 27,696 and a one-output fee of
+    // 3,660. Anything in [+546, +929] over that lands in the failing window.
+    content: Buffer.alloc(3000, 0x41),
+    commitAmount: 27_696,
+    oneOutputFee: 3_660,
+    feeRate: 30,
+    network: 'regtest' as const
+  };
+  const windowUtxo = (value: number): Utxo => ({ ...createUtxo(value, 0, window.network), value });
+  const windowParams = (value: number) =>
+    createCommitParams({
+      content: window.content,
+      utxos: [windowUtxo(value)],
+      exactUtxos: true,
+      feeRate: window.feeRate,
+      network: window.network
+    });
+
+  test('builds a one-output transaction when the surplus over the one-output fee is exactly dust', async () => {
+    const total = window.commitAmount + window.oneOutputFee + MIN_DUST;
+    const result = await createCommitTransaction(windowParams(total));
+
+    expect(result.commitAmount).toBe(window.commitAmount);
+    // Two-output change would be sub-dust, so the surplus is absorbed as fee
+    // and the transaction carries the commit output alone.
+    expect(result.commitPsbt.outputsLength).toBe(1);
+    expect(result.fees.commit).toBe(total - window.commitAmount);
+  });
+
+  test('never reports an outputs-exceed-inputs bug across the dust/fee boundary', async () => {
+    for (let surplus = 0; surplus <= 1500; surplus += 13) {
+      const total = window.commitAmount + window.oneOutputFee + surplus;
+      const result = await createCommitTransaction(windowParams(total));
+      // Value conservation: every input sat is either an output or the fee.
+      let outputTotal = 0;
+      for (let i = 0; i < result.commitPsbt.outputsLength; i++) {
+        outputTotal += Number(result.commitPsbt.getOutput(i).amount ?? 0n);
+      }
+      expect(outputTotal + result.fees.commit).toBe(total);
+      // A change output is only ever added when it clears dust.
+      if (result.commitPsbt.outputsLength === 2) {
+        expect(Number(result.commitPsbt.getOutput(1).amount ?? 0n)).toBeGreaterThanOrEqual(MIN_DUST);
+      }
+    }
+  });
+});

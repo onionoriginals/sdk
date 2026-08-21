@@ -36,7 +36,8 @@ beforeAll(() => {
 afterAll(() => rmSync(distDir, { recursive: true, force: true }));
 
 function makeFetch(apiRoutes: Record<string, Handler> | null) {
-  return buildFetch({ apiRoutes, hostStore: noopHostStore, distDir });
+  // hops pinned so these cases never depend on an ambient TRUSTED_PROXY_HOPS.
+  return buildFetch({ apiRoutes, hostStore: noopHostStore, distDir, trustedProxyHops: 0 });
 }
 
 describe('unified server buildFetch', () => {
@@ -78,7 +79,7 @@ describe('unified server buildFetch', () => {
     expect(res.status).toBe(501); // noopHostStore.handlePut
   });
 
-  test('host writes get the real socket IP (server.requestIP), not a client header', async () => {
+  test('with no trusted proxy, host writes key on the socket IP and ignore the header', async () => {
     let seenIp: string | undefined;
     const recordingStore = {
       async handlePut(_req: Request, _url: URL, clientIp: string) {
@@ -88,7 +89,7 @@ describe('unified server buildFetch', () => {
       read: () => json({ error: 'not_found' }, 404),
       serve: () => null as Response | null,
     };
-    const fetchFn = buildFetch({ apiRoutes: null, hostStore: recordingStore, distDir });
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: recordingStore, distDir, trustedProxyHops: 0 });
     const fakeServer = { requestIP: () => ({ address: '203.0.113.7' }) };
     await fetchFn(
       new Request('http://x/api/host/k', {
@@ -107,5 +108,93 @@ describe('unified server buildFetch', () => {
       })
     );
     expect(seenIp).toBe('local');
+  });
+});
+
+// U6/8: the app document is the response that will hold a live signing
+// credential, so it must arrive with a policy — and both serveStatic branches
+// (real file, SPA fallback) must carry it, not just one.
+describe('SPA document security headers', () => {
+  const documentPaths = ['/', '/index.html', '/some/client/route'];
+
+  for (const path of documentPaths) {
+    test(`${path} carries a CSP that forbids third-party script origins`, async () => {
+      const res = await makeFetch(null)(new Request('http://x' + path));
+      expect(res.status).toBe(200);
+      const csp = res.headers.get('content-security-policy');
+      expect(csp).toBeTruthy();
+
+      // Parse into directives so the assertions are about policy, not string order.
+      const directives = new Map<string, string[]>(
+        csp!.split(';').map((d) => {
+          const [name, ...values] = d.trim().split(/\s+/);
+          return [name.toLowerCase(), values];
+        })
+      );
+
+      // Script may only come from this origin — no CDN, no 'unsafe-inline',
+      // no 'unsafe-eval', no wildcard, and no fallback to a loose default-src.
+      const script = directives.get('script-src');
+      expect(script).toEqual(["'self'"]);
+      expect(directives.get('default-src')).toEqual(["'self'"]);
+      expect(directives.get('object-src')).toEqual(["'none'"]);
+      expect(directives.get('base-uri')).toEqual(["'none'"]);
+      expect(directives.get('frame-ancestors')).toEqual(["'none'"]);
+
+      // The only permitted third-party network destination is Turnkey's API.
+      const connect = directives.get('connect-src')!;
+      expect(connect).toContain("'self'");
+      expect(connect.filter((s) => s !== "'self'")).toEqual(['https://api.turnkey.com']);
+
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(res.headers.get('content-type')).toContain('text/html');
+    });
+  }
+
+  test('no directive opens a blanket third-party origin', async () => {
+    const res = await makeFetch(null)(new Request('http://x/'));
+    const csp = res.headers.get('content-security-policy')!;
+    const sources = csp
+      .split(';')
+      .flatMap((d) => d.trim().split(/\s+/).slice(1))
+      .map((s) => s.toLowerCase());
+    // Wildcards and bare schemes would readmit every CDN in one token.
+    for (const wildcard of ['*', 'http:', 'https:', "'unsafe-eval'", "'unsafe-inline'"]) {
+      expect(sources).not.toContain(wildcard);
+    }
+    // data: is allowed only where the bundle needs it (inline woff/svg), never
+    // as a script source.
+    expect(csp).toContain("script-src 'self'");
+    for (const directive of csp.split(';').map((d) => d.trim())) {
+      if (directive.includes('data:')) {
+        expect(['img-src', 'font-src']).toContain(directive.split(/\s+/)[0]);
+      }
+    }
+  });
+
+  /**
+   * SEC-1 — HSTS is the backstop under the auth cookie. The 7-day JWT gates
+   * every money route, and one plaintext request (a typed http:// URL, a stale
+   * bookmark) is all an interception needs; a browser that has seen this header
+   * never makes that request.
+   */
+  for (const path of documentPaths) {
+    test(`${path} carries HSTS for a year, including subdomains`, async () => {
+      const res = await makeFetch(null)(new Request('http://x' + path));
+      const hsts = res.headers.get('strict-transport-security');
+      expect(hsts).toBeTruthy();
+      const maxAge = Number(/max-age=(\d+)/.exec(hsts!)?.[1]);
+      expect(maxAge).toBeGreaterThanOrEqual(31536000);
+      expect(hsts!.toLowerCase()).toContain('includesubdomains');
+      // `preload` is a submission an operator makes deliberately — and is
+      // effectively irreversible — so it is not a header default here.
+      expect(hsts!.toLowerCase()).not.toContain('preload');
+    });
+  }
+
+  test('non-document static assets are not given the document policy', async () => {
+    const res = await makeFetch(null)(new Request('http://x/app.js'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toBeNull();
   });
 });

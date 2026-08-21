@@ -1,5 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { useAuth } from '../auth/useAuth';
+import { demo, login } from '../content';
 import { OtpInput } from './OtpInput';
 import './login-modal.css';
 
@@ -7,7 +8,7 @@ type Step = 'email' | 'otp';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function LoginModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { startOtp, verify } = useAuth();
+  const { startOtp, verify, reauth, user } = useAuth();
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -23,19 +24,29 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
     }
   }, [open]);
 
+  // Re-authentication is a signing-session refresh for a user who is already
+  // signed in: the email is known and beginReauth() already sent the code, so
+  // asking for the address again would be a step that does nothing.
+  useEffect(() => {
+    if (open && reauth.active && user) {
+      setEmail(user.email);
+      setStep('otp');
+    }
+  }, [open, reauth.active, user]);
+
   if (!open) return null;
 
   const submitEmail = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     const value = email.trim().toLowerCase();
-    if (!EMAIL_RE.test(value)) return setError('Please enter a valid email address');
+    if (!EMAIL_RE.test(value)) return setError(login.invalidEmail);
     setBusy(true);
     try {
       await startOtp(value);
       setStep('otp');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send code');
+      setError(err instanceof Error ? err.message : login.sendFailed);
     } finally {
       setBusy(false);
     }
@@ -50,7 +61,7 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
       setStep('email');
       setEmail('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Verification failed');
+      setError(err instanceof Error ? err.message : login.verifyFailed);
     } finally {
       setBusy(false);
     }
@@ -59,28 +70,32 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
   return (
     <div className="login-overlay" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="login-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="login-close" aria-label="Close" onClick={onClose}>×</button>
+        <button className="login-close" aria-label={login.close} onClick={onClose}>×</button>
         {step === 'email' ? (
           <form onSubmit={submitEmail} className="login-form">
-            <h2>Sign in</h2>
-            <p className="login-sub">We'll email you a 6-digit code.</p>
+            <h2>{login.heading}</h2>
+            <p className="login-sub">{login.sub}</p>
             <input
               type="email"
               autoFocus
-              placeholder="you@example.com"
+              placeholder={login.emailPlaceholder}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="login-email"
             />
             {error && <p className="login-error">{error}</p>}
             <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? 'Sending…' : 'Send code'}
+              {busy ? login.sending : login.send}
             </button>
           </form>
         ) : (
           <div className="login-form">
-            <h2>Enter your code</h2>
-            <p className="login-sub">Sent to {email}</p>
+            <h2>{reauth.active ? demo.session.expiredHeading : login.codeHeading}</h2>
+            <p className="login-sub">
+              {reauth.active
+                ? `${demo.session.preserved} ${login.sentToPrefix} ${email}`
+                : `${login.sentToPrefix} ${email}`}
+            </p>
             <OtpInput onComplete={submitCode} isLoading={busy} error={error} onResend={() => submitEmail(new Event('submit') as unknown as FormEvent)} />
           </div>
         )}

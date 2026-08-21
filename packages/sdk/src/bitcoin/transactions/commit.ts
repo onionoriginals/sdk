@@ -99,6 +99,14 @@ export interface CommitTransactionParams {
   metadata?: Record<string, unknown>;
   /** Optional pointer to target specific satoshi */
   pointer?: number;
+  /**
+   * Spend EXACTLY `utxos`, in the given order, instead of running selection.
+   * The sat-selected inscribe path needs this: ordinary selection sorts
+   * value-descending and stops at the target, so it can reorder or drop the
+   * caller's first UTXO — the one whose first sat becomes the did:btco
+   * identity. Fails closed (throws) if the set is unspendable or short.
+   */
+  exactUtxos?: boolean;
 }
 
 /**
@@ -363,7 +371,8 @@ export async function createCommitTransaction(
     network,
     minimumCommitAmount = MIN_DUST_LIMIT,
     metadata,
-    pointer
+    pointer,
+    exactUtxos = false
   } = params;
 
   // Validate inputs
@@ -432,6 +441,18 @@ export async function createCommitTransaction(
   // unsignable by @scure/btc-signer without nonWitnessUtxo.
   const validUtxos = unprotectedUtxos.filter(utxo => isSegwitScriptPubKey(utxo.scriptPubKey!));
   const legacyCount = unprotectedUtxos.length - validUtxos.length;
+
+  // Exact mode: silently narrowing the set is the failure this mode exists to
+  // prevent (a dropped first UTXO moves the DID sat), so refuse instead.
+  if (exactUtxos && validUtxos.length !== utxos.length) {
+    const kept = new Set(validUtxos.map(u => `${u.txid}:${u.vout}`));
+    const dropped = utxos.filter(u => !kept.has(`${u.txid}:${u.vout}`)).map(u => `${u.txid}:${u.vout}`);
+    throw new Error(
+      `exactUtxos: refusing to narrow the caller's funding set. ` +
+      `${dropped.length} of ${utxos.length} UTXO(s) are unspendable here (structurally invalid, ` +
+      `inscription-bearing/locked, or non-segwit): ${dropped.join(', ')}.`
+    );
+  }
 
   if (validUtxos.length === 0) {
     const invalidReasons: string[] = [];
@@ -578,6 +599,10 @@ export async function createCommitTransaction(
   let totalInputValue = 0;
   let estimatedFee = 0;
   let iteration = 0;
+  // The output count the funding decision was made against. Step 8 must reuse
+  // it, not re-derive it: re-deriving from a one-output fee can flip back to
+  // two outputs and price a fee the inputs never covered (issue #C2).
+  let plannedOutputCount = 2;
 
   // Change output sized by the change address's script class (P2WPKH 31 vB,
   // P2TR/P2WSH 43 vB) instead of a flat P2WPKH assumption.
@@ -590,6 +615,27 @@ export async function createCommitTransaction(
   const widestInputVBytes = Math.max(...validUtxos.map(u => inputVBytesForScriptPubKey(u.scriptPubKey)));
   const initialVBytes = Math.ceil(10.5 + widestInputVBytes + 43 + changeOutputVBytes);
   let targetAmount = commitOutputValue + Number(calculateFee(initialVBytes, feeRate));
+
+  if (exactUtxos) {
+    // No selection: the caller's set IS the input list, in the caller's order.
+    selectedUtxos = validUtxos;
+    totalInputValue = selectedUtxos.reduce((sum, u) => sum + u.value, 0);
+    estimatedFee = Number(calculateFee(estimateCommitTxSize(selectedUtxos, 2, changeOutputVBytes), feeRate));
+    if (totalInputValue - commitOutputValue - estimatedFee < MIN_DUST_LIMIT) {
+      // No change output — re-price at one output.
+      plannedOutputCount = 1;
+      estimatedFee = Number(calculateFee(estimateCommitTxSize(selectedUtxos, 1, changeOutputVBytes), feeRate));
+    }
+    const requiredTotal = commitOutputValue + estimatedFee;
+    if (totalInputValue < requiredTotal) {
+      throw new Error(
+        `Insufficient funds. Need ${requiredTotal} sats for commit output (${commitOutputValue} sats) and fees ` +
+        `(${estimatedFee} sats) from the exact funding set. Available: ${totalInputValue} sats from ` +
+        `${selectedUtxos.length} UTXO(s).`
+      );
+    }
+    iteration = MAX_SELECTION_ITERATIONS; // skip the selection loop below
+  }
 
   while (iteration < MAX_SELECTION_ITERATIONS) {
     iteration++;
@@ -619,12 +665,12 @@ export async function createCommitTransaction(
 
     // Check if we need to account for no change output
     const potentialChange = totalInputValue - commitOutputValue - estimatedFee;
-    let finalOutputCount = 2;
+    plannedOutputCount = 2;
 
     if (potentialChange < MIN_DUST_LIMIT) {
       // No change output, recalculate fee with 1 output
-      finalOutputCount = 1;
-      const adjustedVBytes = estimateCommitTxSize(selectedUtxos, finalOutputCount, changeOutputVBytes);
+      plannedOutputCount = 1;
+      const adjustedVBytes = estimateCommitTxSize(selectedUtxos, plannedOutputCount, changeOutputVBytes);
       estimatedFee = Number(calculateFee(adjustedVBytes, feeRate));
     }
 
@@ -697,10 +743,12 @@ export async function createCommitTransaction(
 
   // Step 8: Calculate final fee based on actual transaction structure
 
-  // Determine if we'll have a change output
-  const preliminaryChange = totalInputValue - commitOutputValue - estimatedFee;
-  const willHaveChange = preliminaryChange >= MIN_DUST_LIMIT;
-  const finalOutputCount = willHaveChange ? 2 : 1;
+  // Reuse the output count the funding decision above was made against. Re-deriving
+  // it here from `estimatedFee` was the #C2 dead end: when that fee was the
+  // one-output price, the leftover can clear dust and flip this to two outputs,
+  // whose fee the inputs were never checked against.
+  const willHaveChange = plannedOutputCount === 2;
+  const finalOutputCount = plannedOutputCount;
 
   // Calculate final fee with correct output count
   const finalVBytes = estimateCommitTxSize(selectedUtxos, finalOutputCount, changeOutputVBytes);
@@ -734,7 +782,10 @@ export async function createCommitTransaction(
   // the keygen/selection/fee work the early validation exists to protect
   // (issue #351). scriptPubKeyForAddress carries the same regtest→testnet
   // decode fallback transfer.ts already uses.
-  if (finalChange >= MIN_DUST_LIMIT) {
+  // Keyed off willHaveChange, not `finalChange >= MIN_DUST_LIMIT`: at a
+  // one-output price the leftover can clear dust, and adding a change output
+  // the fee was not sized for would underpay it.
+  if (willHaveChange) {
     tx.addOutput({
       script: Buffer.from(scriptPubKeyForAddress(changeAddress, network), 'hex'),
       amount: BigInt(finalChange)
@@ -759,7 +810,7 @@ export async function createCommitTransaction(
     selectedUtxos,
     fees: {
       // Include dust in final fee if no change output
-      commit: finalChange >= MIN_DUST_LIMIT ? finalFee : finalFee + finalChange
+      commit: willHaveChange ? finalFee : finalFee + finalChange
     },
     revealPrivateKey: Buffer.from(revealPrivateKey).toString('hex'),
     revealPublicKey: Buffer.from(revealPublicKey).toString('hex'),

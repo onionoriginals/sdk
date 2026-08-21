@@ -27,11 +27,12 @@ import { DurableHostingStorageAdapter } from './durable-hosting-adapter';
 import { HttpOrdinalsProvider } from './http-ordinals-provider';
 import { TurnkeySatSigner } from './turnkey-sat-signer';
 import { userWebvhSlug } from '../auth/webvh';
-import { btcNetwork, btcoExplorerUrl } from './network-flag';
+import { btcNetwork, btcoExplorerUrl, demoTier, type BtcNetworkFlag, type DemoTier } from './network-flag';
 import type { TurnkeyBitcoinClient } from '../auth/turnkey-session';
 import { sha256 } from '@noble/hashes/sha2.js';
 
-export { btcNetwork, btcRealEnabled, btcoExplorerUrl } from './network-flag';
+export { btcNetwork, btcRealEnabled, btcRealFor, btcoExplorerUrl, demoTier } from './network-flag';
+export type { DemoTier } from './network-flag';
 
 export type LayerId = 'did:cel' | 'did:webvh' | 'did:btco';
 
@@ -42,8 +43,11 @@ export type LayerId = 'did:cel' | 'did:webvh' | 'did:btco';
  * otherwise a user who signs in after an anonymous engine was preloaded would
  * keep publishing through the ephemeral (TTL) adapter instead of their account.
  */
+/** The identity an anonymous visitor's engine is keyed by. */
+export const ANON_IDENTITY = 'anon';
+
 export function engineIdentity(authed: boolean, subOrgId?: string): string {
-  return authed ? `authed:${subOrgId ?? ''}` : 'anon';
+  return authed ? `authed:${subOrgId ?? ''}` : ANON_IDENTITY;
 }
 
 export interface DemoEvent {
@@ -133,8 +137,16 @@ export class DemoEngine {
   private assetTitle = '';
   private assetResourceHash = '';
   asset: OriginalsAsset | null = null;
+  /**
+   * The tier this engine runs at (R5) — real Bitcoin only when the deploy
+   * enables it AND the visitor is signed in. Public so the UI, devtools and
+   * tests read the same resolved value the SDK was constructed from.
+   */
+  readonly tier: DemoTier;
+  /** The provider the tier chose: mock in the simulated tier, the /api/btc/* proxy in the real one. */
+  readonly ordinalsProvider: OrdMockProvider | HttpOrdinalsProvider;
 
-  constructor(opts?: { authed?: boolean; subOrgId?: string }) {
+  constructor(opts?: { authed?: boolean; subOrgId?: string; networkFlag?: BtcNetworkFlag }) {
     this.authed = opts?.authed ?? false;
     this.subOrgId = opts?.subOrgId;
     // Deliberately public and permanent: lets anyone (including skeptics)
@@ -142,16 +154,20 @@ export class DemoEngine {
     // construction so it always points at the engine currently driving the UI.
     (globalThis as Record<string, unknown>).__originalsDemo = this;
     const keys = this.keys;
-    // Track B: when the deploy enables real signing (VITE_BTC_NETWORK=testnet4
-    // or mainnet), inscribe for real over the /api/btc/* QuickNode proxies;
-    // otherwise keep the self-contained OrdMockProvider mock (regtest).
-    const netFlag = btcNetwork();
-    const real = netFlag !== 'off';
+    // Real signing over the /api/btc/* QuickNode proxies needs BOTH: a deploy
+    // that enables it (VITE_BTC_NETWORK=testnet4|mainnet) AND a signed-in
+    // visitor with a key to sign with. Anonymous visitors keep the
+    // self-contained OrdMockProvider on every network — the flag alone used to
+    // hand them an enabled money button that errored (R5/KTD2). The flag is
+    // injectable so the tier is testable; production always reads the env.
+    const tier = demoTier(opts?.networkFlag ?? btcNetwork(), this.authed);
+    this.tier = tier;
+    this.ordinalsProvider = tier.real ? new HttpOrdinalsProvider() : new OrdMockProvider();
     this.sdk = OriginalsSDK.create({
-      network: netFlag === 'mainnet' ? 'mainnet' : netFlag === 'testnet4' ? 'testnet' : 'regtest',
-      webvhNetwork: 'magby',
+      network: tier.network,
+      webvhNetwork: tier.webvhNetwork,
       defaultKeyType: 'Ed25519',
-      ordinalsProvider: real ? new HttpOrdinalsProvider() : new OrdMockProvider(),
+      ordinalsProvider: this.ordinalsProvider,
       // Signed-in users host DURABLY (persisted under their account, PUT
       // /api/originals/host/*); anonymous users keep the ephemeral TTL host
       // (PUT /api/host/*). Both make the did:webvh log resolvable over HTTP(S).
@@ -444,7 +460,15 @@ export class DemoEngine {
   async inscribe(opts?: {
     feeRate?: number;
     funding?: {
-      fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey?: string; address?: string };
+      /**
+       * Every funding UTXO the commit spends, in input order. `[0]` is the
+       * IDENTITY input — its first sat becomes the did:btco sat — and the SDK
+       * asserts that pinning end to end (U16). A creator who deposited twice,
+       * or topped up after a fee rise, funds from a SET.
+       */
+      fundingUtxos?: Array<{ txid: string; vout: number; value: number; scriptPubKey?: string; address?: string }>;
+      /** One-element shorthand. Provide this OR `fundingUtxos`, not both. */
+      fundingUtxo?: { txid: string; vout: number; value: number; scriptPubKey?: string; address?: string };
       changeAddress: string;
       signingClient: TurnkeyBitcoinClient;
     };
@@ -456,8 +480,11 @@ export class DemoEngine {
         client: opts.funding.signingClient,
         signWith: opts.funding.changeAddress, // the user's funding address IS signWith
       });
+      const fundingUtxos =
+        opts.funding.fundingUtxos ?? (opts.funding.fundingUtxo ? [opts.funding.fundingUtxo] : []);
+      if (fundingUtxos.length === 0) throw new Error('inscribe: funding needs at least one UTXO');
       await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, {
-        fundingUtxo: opts.funding.fundingUtxo,
+        fundingUtxos,
         satSigner,
         changeAddress: opts.funding.changeAddress,
         // No default here: real BTC must be built at the LIVE rate. Left
@@ -557,7 +584,9 @@ export class DemoEngine {
               satoshi: last.satoshi ?? '',
               commitTxId: last.commitTxId,
               feeRate: last.feeRate,
-              explorerUrl: btcoExplorerUrl(last.transactionId)
+              // A simulated inscription has a mock txid — never hand the UI a
+              // mempool.space link to a transaction that does not exist (R6).
+              explorerUrl: this.tier.real ? btcoExplorerUrl(last.transactionId) : undefined
             }
           : undefined,
       provenance

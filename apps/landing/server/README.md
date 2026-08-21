@@ -32,7 +32,17 @@ Requires live `TURNKEY_*` creds, `JWT_SECRET`, and access to the target inbox.
 
 ## Notes
 - Session storage is in-memory (lost on restart; single process). Not for production.
-- Rate limiting is in-memory (per IP + per email); also single-process.
+- Rate limiting is in-memory (per client identity + per email); also
+  single-process, with a bounded key map.
+- **Client identity** comes from one helper (`server/client-ip.ts`) that every
+  rate-limited route uses. It reads `x-forwarded-for` from the RIGHT-hand end at
+  a depth of `TRUSTED_PROXY_HOPS` (Railway: `1`), falling back to the socket
+  peer when the header is absent or shorter than that. Unset means 0 — trust
+  nothing, which behind a proxy collapses every visitor into one bucket; the
+  boot contract reports that as an error on a deployed instance.
+  To verify the hop count against the live proxy, read the one-line
+  `[landing] proxy sample: …` the server logs on its first forwarded request and
+  check that the resolved identity is the real client address, not the proxy's.
 
 ## Enabling real testnet4 inscription (Track B)
 

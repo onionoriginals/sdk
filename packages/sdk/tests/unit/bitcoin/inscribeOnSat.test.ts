@@ -30,7 +30,7 @@ function providerDouble(overrides: any = {}) {
 const buildContent = async (sat: string) => ({ content: Buffer.from(`doc for ${sat}`), contentType: 'application/did+json' });
 
 const baseParams = () => ({
-  buildContent, fundingUtxo: sampleUtxo, satSigner: signer,
+  buildContent, fundingUtxos: [sampleUtxo], satSigner: signer,
   changeAddress: sampleChangeAddress, feeRate: 2, network: 'regtest' as const
 });
 
@@ -193,7 +193,7 @@ describe('inscribeOnSat', () => {
     expect(submitted).not.toBeNull();
     expect(parse(submitted.signedCommitHex).id).toBe(res.commitTxId);
     expect(parse(submitted.revealTxHex).id).toBe(res.revealTxId);
-    expect(submitted.fundingUtxo.txid).toBe(sampleUtxo.txid);
+    expect(submitted.fundingUtxos.map((u: any) => u.txid)).toEqual([sampleUtxo.txid]);
     expect(submitted.changeAddress).toBe(sampleChangeAddress);
   });
 
@@ -231,5 +231,107 @@ describe('inscribeOnSat', () => {
       expect(e.details?.revealTxId).toBeDefined();
       expect(e.details?.satoshi).toBe('1250000000');
     }
+  });
+});
+
+/**
+ * Multi-input funding (R26): a creator who deposited twice, or topped up after
+ * a fee rise, funds ONE inscription from several UTXOs. The identity rule is
+ * pinned rather than inferred: the did:btco sat is the first sat of the FIRST
+ * declared input (ordinal FIFO), so the whole declared set — in order — must
+ * be what the signer returns.
+ */
+describe('inscribeOnSat — multi-input funding', () => {
+  // The identity UTXO is deliberately the SMALLER one: ordinary value-descending
+  // selection would reorder (or drop) it, which would silently move the DID sat.
+  const identityUtxo = { ...sampleUtxo, txid: `${'1'.repeat(62)}00`, vout: 0, value: 3_000 };
+  const topUpUtxo = { ...sampleUtxo, txid: `${'2'.repeat(62)}01`, vout: 1, value: 90_000 };
+  const twoInputParams = () => ({ ...baseParams(), fundingUtxos: [identityUtxo, topUpUtxo] });
+
+  it('accepts a two-input commit and spends the declared set in the declared order', async () => {
+    const broadcasts: string[] = [];
+    const provider = providerDouble({
+      broadcastTransaction: async (hex: string) => { broadcasts.push(hex); return 'cc'.repeat(32); }
+    });
+    const res = await inscribeOnSat({ ...twoInputParams(), provider });
+    expect(res.satoshi).toBe('1250000000');
+
+    const commit = parse(broadcasts[0]);
+    expect(commit.inputsLength).toBe(2);
+    const outpoints = [0, 1].map((i) => {
+      const inp = commit.getInput(i)!;
+      return `${Buffer.from(inp.txid!).toString('hex')}:${inp.index}`;
+    });
+    expect(outpoints).toEqual([`${identityUtxo.txid}:0`, `${topUpUtxo.txid}:1`]);
+  });
+
+  it('derives the DID sat from the PINNED FIRST input, not from whichever input is largest', async () => {
+    const queried: Array<{ txid: string; vout: number }> = [];
+    const provider = providerDouble({
+      getFirstSatOfOutput: async (o: { txid: string; vout: number }) => { queried.push(o); return '1250000000'; }
+    });
+    await inscribeOnSat({ ...twoInputParams(), provider });
+    expect(queried).toEqual([{ txid: identityUtxo.txid, vout: 0 }]);
+  });
+
+  it('throws COMMIT_TX_MISMATCH when the signed commit drops one of the declared inputs', async () => {
+    const droppingSigner = {
+      signAndFinalizeCommitPsbt: async (psbtBase64: string) => {
+        const tx = btc.Transaction.fromPSBT(Buffer.from(psbtBase64, 'base64'), { allowUnknownOutputs: true });
+        const rebuilt = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true });
+        rebuilt.addInput(tx.getInput(0)!);
+        for (let i = 0; i < tx.outputsLength; i++) rebuilt.addOutput(tx.getOutput(i)!);
+        return Buffer.from(rebuilt.toBytes(true, false)).toString('hex');
+      }
+    };
+    const broadcastTransaction = mock(async () => 'cc'.repeat(32));
+    await expect(inscribeOnSat({ ...twoInputParams(), satSigner: droppingSigner, provider: providerDouble({ broadcastTransaction }) }))
+      .rejects.toMatchObject({ code: 'COMMIT_TX_MISMATCH' });
+    expect(broadcastTransaction).not.toHaveBeenCalled();
+  });
+
+  it('throws COMMIT_TX_MISMATCH when the signed commit REORDERS the declared inputs (the DID sat would move)', async () => {
+    const reorderingSigner = {
+      signAndFinalizeCommitPsbt: async (psbtBase64: string) => {
+        const tx = btc.Transaction.fromPSBT(Buffer.from(psbtBase64, 'base64'), { allowUnknownOutputs: true });
+        const rebuilt = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true });
+        rebuilt.addInput(tx.getInput(1)!);
+        rebuilt.addInput(tx.getInput(0)!);
+        for (let i = 0; i < tx.outputsLength; i++) rebuilt.addOutput(tx.getOutput(i)!);
+        return Buffer.from(rebuilt.toBytes(true, false)).toString('hex');
+      }
+    };
+    const broadcastTransaction = mock(async () => 'cc'.repeat(32));
+    await expect(inscribeOnSat({ ...twoInputParams(), satSigner: reorderingSigner, provider: providerDouble({ broadcastTransaction }) }))
+      .rejects.toMatchObject({ code: 'COMMIT_TX_MISMATCH' });
+    expect(broadcastTransaction).not.toHaveBeenCalled();
+  });
+
+  it('hands the WHOLE declared funding set to submitInscription (the server re-checks it)', async () => {
+    let submitted: any = null;
+    const provider = providerDouble({
+      submitInscription: async (params: any) => {
+        submitted = params;
+        return { commitTxId: parse(params.signedCommitHex).id, revealTxId: parse(params.revealTxHex).id, status: 'reveal_broadcast' };
+      }
+    });
+    await inscribeOnSat({ ...twoInputParams(), provider });
+    expect(submitted.fundingUtxos.map((u: any) => `${u.txid}:${u.vout}`))
+      .toEqual([`${identityUtxo.txid}:0`, `${topUpUtxo.txid}:1`]);
+    // Legacy singular field still carries the IDENTITY input, so an older
+    // server that only reads `fundingUtxo` reads the identity outpoint.
+    expect(submitted.fundingUtxo.txid).toBe(identityUtxo.txid);
+  });
+
+  it('rejects an empty funding set before touching the provider', async () => {
+    const getFirstSatOfOutput = mock(async () => '1250000000');
+    await expect(inscribeOnSat({ ...baseParams(), fundingUtxos: [], provider: providerDouble({ getFirstSatOfOutput }) }))
+      .rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    expect(getFirstSatOfOutput).not.toHaveBeenCalled();
+  });
+
+  it('rejects a funding set that names the same outpoint twice', async () => {
+    await expect(inscribeOnSat({ ...baseParams(), fundingUtxos: [identityUtxo, { ...identityUtxo }], provider: providerDouble() }))
+      .rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 });

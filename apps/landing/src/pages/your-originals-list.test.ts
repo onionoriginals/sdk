@@ -17,16 +17,42 @@ const rows: OriginalRow[] = [
 ];
 
 describe('originalsView', () => {
-  test('signed-out mode when not authenticated', () => {
-    expect(originalsView({ authenticated: false, originals: [] }).mode).toBe('signed-out');
+  // R20: a signed-in user must never be shown a signed-out or empty state
+  // while their own data is still loading. Two distinct wrong states.
+  test('loading while auth itself is still resolving — never signed-out', () => {
+    expect(
+      originalsView({ authLoading: true, authenticated: false, loaded: false, originals: [] }).mode
+    ).toBe('loading');
   });
-  test('empty mode when authenticated with no originals', () => {
-    expect(originalsView({ authenticated: true, originals: [] }).mode).toBe('empty');
+  test('loading while the Originals fetch is in flight — never empty', () => {
+    expect(
+      originalsView({ authLoading: false, authenticated: true, loaded: false, originals: [] }).mode
+    ).toBe('loading');
+  });
+  test('signed-out mode once auth resolved and nobody is signed in', () => {
+    expect(
+      originalsView({ authLoading: false, authenticated: false, loaded: false, originals: [] }).mode
+    ).toBe('signed-out');
+  });
+  test('empty mode when authenticated, loaded, and no originals', () => {
+    expect(
+      originalsView({ authLoading: false, authenticated: true, loaded: true, originals: [] }).mode
+    ).toBe('empty');
   });
   test('list mode returns the rows when authenticated with originals', () => {
-    const view = originalsView({ authenticated: true, originals: rows });
+    const view = originalsView({
+      authLoading: false,
+      authenticated: true,
+      loaded: true,
+      originals: rows,
+    });
     expect(view.mode).toBe('list');
     expect(view.rows).toEqual(rows);
+  });
+  test('rows that arrive before `loaded` flips still render — no flash back to loading', () => {
+    expect(
+      originalsView({ authLoading: false, authenticated: true, loaded: false, originals: rows }).mode
+    ).toBe('list');
   });
 });
 
