@@ -325,6 +325,52 @@ export function quoteForAddress(
   return info.address === address ? info : null;
 }
 
+/**
+ * Whether the pair actually reached the network, or only the commit did.
+ *
+ * The server distinguishes these; the SDK discards the distinction (it does
+ * not capture submitInscription's return), so the browser reads it back off
+ * the provider. Calling a commit-only outcome "inscribed" tells a creator
+ * their inscription exists when it does not yet.
+ */
+export function inscribeIsComplete(status: string | null | undefined): boolean {
+  return status === 'reveal_broadcast';
+}
+
+/**
+ * What actually reached the network, as far as the browser can know.
+ *
+ * `not-observed` is NOT the same as "we do not know whether it worked": the
+ * mock tier and the testnet4 faucet path do not go through the submit seam at
+ * all, so a successful inscribe there IS complete and there is no status to
+ * read. Collapsing the two into a single nullable status told mock users that
+ * a nonexistent funding transaction was on the network.
+ */
+export type SubmitOutcome =
+  | { kind: 'not-observed' }
+  | { kind: 'submitted'; status: string | null };
+
+/**
+ * What the completion panel may show.
+ *
+ * A decision rather than a JSX condition, because the first attempt at this
+ * fix added a pending notice and left the completion sentence and the reveal
+ * explorer link rendering underneath it — so the page both denied and claimed
+ * completion, and still linked to a transaction that 404s.
+ *
+ * Fail-closed applies only where the status is observable: on the submit path
+ * a missing or unrecognised status means the reveal is not known to have
+ * landed, so nothing is claimed.
+ */
+export function inscribeDoneView(outcome: SubmitOutcome): {
+  claimComplete: boolean;
+  showExplorerLink: boolean;
+} {
+  const complete =
+    outcome.kind === 'not-observed' ? true : inscribeIsComplete(outcome.status);
+  return { claimComplete: complete, showExplorerLink: complete };
+}
+
 /** What the deposit badge should say — read off the SUM, never one output. */
 export type DepositReadiness = 'waiting' | 'detected' | 'short' | 'ready' | 'unspendable';
 
@@ -744,6 +790,8 @@ export function Demo() {
   // their Turnkey-derived address, polled while the inscribe step is live so
   // "deposit detected → confirmed" updates without a reload.
   const [depositRaw, setDeposit] = useState<DepositInfo | null>(null);
+  // True when the submit reached the server but only the COMMIT propagated.
+  const [submitOutcome, setSubmitOutcome] = useState<SubmitOutcome>({ kind: 'not-observed' });
   const [depositError, setDepositError] = useState<string | null>(null);
   // Mirror of depositError readable synchronously inside the inscribe click —
   // state set during that same await would still be stale there, and the
@@ -792,6 +840,7 @@ export function Demo() {
 
   const inscribe = () =>
     run('published', 'inscribing', 'inscribed', async (engine) => {
+      setSubmitOutcome({ kind: 'not-observed' });
       // Mock path (no real network enabled): unchanged bare inscribe.
       if (!real) return engine.inscribe();
       // Never build a real-BTC transaction against a server on another chain.
@@ -822,13 +871,18 @@ export function Demo() {
             depositShortfallMessage(selection.totalSats, selection.shortfallSats)
           );
         }
-        return engine.inscribe({
+        const state = await engine.inscribe({
           funding: {
             fundingUtxos: selection.selected,
             changeAddress: bitcoin.fundingAddress,
             signingClient: bitcoin.signingClient,
           },
         });
+        // The server distinguishes commit-only from a complete pair; the SDK
+        // discards submitInscription's return, so read it off the provider.
+        const submitted = (engine.ordinalsProvider as { lastSubmit?: { status?: string } }).lastSubmit;
+        setSubmitOutcome({ kind: 'submitted', status: submitted?.status ?? null });
+        return state;
       }
       // testnet4: ask the server faucet to fund the user's address, then
       // inscribe with the user's Turnkey key. 507 surfaces a friendly message.
@@ -893,6 +947,8 @@ export function Demo() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, reauth.active, reauthIdentity]);
 
+  // One decision, used by all three parts of the completion panel.
+  const doneView = inscribeDoneView(submitOutcome);
   const step = phaseToStep[phase];
   const busy =
     phase === 'creating' || phase === 'publishing' || phase === 'inscribing' || updating;
@@ -1277,23 +1333,46 @@ export function Demo() {
 
                 {phase === 'inscribed' && asset && (
                   <div className="demo-done" data-sim={inscribeView.simulated ? '' : undefined}>
-                    <p>
-                      <strong>{done.lead}</strong> {done.beforeSatoshi}{' '}
-                      <code>{asset.inscription?.satoshi}</code> {done.beforeTx}{' '}
-                      <code>{asset.inscription?.txid}</code>. {done.after}
-                    </p>
-                    {/* The engine withholds the explorer URL in the simulated
-                        tier (U2); the label goes with it, so no completion
-                        screen can offer a link to a transaction that isn't. */}
-                    {asset.inscription?.explorerUrl && done.explorerLabel && (
-                      <a
-                        className="demo-explorer-link"
-                        href={asset.inscription.explorerUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {done.explorerLabel}
-                      </a>
+                    {/* Commit-only is not "inscribed": the reveal carries
+                        the inscription, and until it propagates there is
+                        nothing on chain to point at. */}
+                    {!doneView.claimComplete && (
+                      <div className="deposit-funded" role="status">
+                        <strong className="deposit-funded-heading">{demo.deposit.commitOnlyHeading}</strong>
+                        <p className="deposit-funded-body">{demo.deposit.commitOnlyBody}</p>
+                      </div>
+                    )}
+                    {/* Both the completion sentence and the explorer link are
+                        withheld while only the commit has landed. Rendering
+                        them under the pending notice is what let the page go
+                        on claiming completion — and link to a reveal txid that
+                        404s — while saying above that it had not finished. */}
+                    {!doneView.claimComplete ? (
+                      <p className="demo-inscribe-note">
+                        {demo.deposit.commitOnlySatPrefix}{' '}
+                        <code>{asset.inscription?.satoshi}</code>.
+                      </p>
+                    ) : (
+                      <>
+                        <p>
+                          <strong>{done.lead}</strong> {done.beforeSatoshi}{' '}
+                          <code>{asset.inscription?.satoshi}</code> {done.beforeTx}{' '}
+                          <code>{asset.inscription?.txid}</code>. {done.after}
+                        </p>
+                        {/* The engine withholds the explorer URL in the simulated
+                            tier (U2); the label goes with it, so no completion
+                            screen can offer a link to a transaction that isn't. */}
+                        {doneView.showExplorerLink && asset.inscription?.explorerUrl && done.explorerLabel && (
+                          <a
+                            className="demo-explorer-link"
+                            href={asset.inscription.explorerUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {done.explorerLabel}
+                          </a>
+                        )}
+                      </>
                     )}
                     <button type="button" className="demo-reset" onClick={reset}>
                       {demo.reset}

@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { demo } from '../content';
-import { depositDisclosure, quoteForAddress, depositReadiness, depositBadgeLabel } from './Demo';
+import { depositDisclosure, quoteForAddress, depositReadiness, depositBadgeLabel, inscribeIsComplete, inscribeDoneView, type SubmitOutcome } from './Demo';
 import { bitcoinPaymentUri } from '../sdk/bitcoin-uri';
 
 /**
@@ -193,5 +193,90 @@ describe('a funded deposit stops asking for money', () => {
 
   test('the balance copy explains that a surplus is reusable, not stranded', () => {
     expect(demo.deposit.balanceReuse).toMatch(/next inscription/i);
+  });
+});
+
+describe('a commit-only broadcast is not an inscription', () => {
+  /**
+   * Hit live: the site said "inscribed" and the reveal txid 404'd. The server
+   * had returned status 'commit_broadcast' — the commit was on the network,
+   * the reveal had not propagated, and the recovery sweep still owed the
+   * creator an inscription. The SDK discards submitInscription's return, so
+   * every 200 read as done.
+   */
+  test('only a broadcast reveal counts as complete', () => {
+    expect(inscribeIsComplete('reveal_broadcast')).toBe(true);
+    expect(inscribeIsComplete('commit_broadcast')).toBe(false);
+  });
+
+  test('an absent or unknown status is not treated as complete', () => {
+    expect(inscribeIsComplete(null)).toBe(false);
+    expect(inscribeIsComplete(undefined)).toBe(false);
+    expect(inscribeIsComplete('signed')).toBe(false);
+    expect(inscribeIsComplete('')).toBe(false);
+  });
+
+  test('the commit-only copy does not claim the inscription exists', () => {
+    expect(demo.deposit.commitOnlyHeading).not.toMatch(/inscribed/i);
+    expect(demo.deposit.commitOnlyBody).toMatch(/not propagated|has not propagated/i);
+    // And it must not imply the creator owes another action.
+    expect(demo.deposit.commitOnlyBody).toMatch(/automatically/i);
+  });
+});
+
+describe('the completion panel shows nothing it cannot back up', () => {
+  /**
+   * The first attempt at the commit-only fix added a pending notice but left
+   * the completion sentence and the reveal explorer link rendering below it.
+   * The page denied and claimed completion at once, and still offered a link
+   * to a transaction that 404s. Caught in review; this is the guard.
+   */
+  const submitted = (status: string | null): SubmitOutcome => ({ kind: 'submitted', status });
+
+  test('a commit-only broadcast claims nothing and links nowhere', () => {
+    const view = inscribeDoneView(submitted('commit_broadcast'));
+    expect(view.claimComplete).toBe(false);
+    expect(view.showExplorerLink).toBe(false);
+  });
+
+  test('a broadcast reveal claims completion and may link to it', () => {
+    const view = inscribeDoneView(submitted('reveal_broadcast'));
+    expect(view.claimComplete).toBe(true);
+    expect(view.showExplorerLink).toBe(true);
+  });
+
+  test('on the submit path an unknown status claims nothing — fail closed', () => {
+    for (const s of [null, '', 'signed', 'confirmed']) {
+      expect(inscribeDoneView(submitted(s)).claimComplete).toBe(false);
+      expect(inscribeDoneView(submitted(s)).showExplorerLink).toBe(false);
+    }
+  });
+
+  /**
+   * The regression the fail-closed default caused: the mock tier and the
+   * testnet4 faucet path never touch the submit seam, so there is no status to
+   * read and a successful inscribe there IS complete. Treating that silence as
+   * "unknown" told mock users a nonexistent transaction was on the network.
+   */
+  test('a path with no submit seam is complete, not pending', () => {
+    const view = inscribeDoneView({ kind: 'not-observed' });
+    expect(view.claimComplete).toBe(true);
+    expect(view.showExplorerLink).toBe(true);
+  });
+
+  // The link and the claim move together: a page that links to a reveal it
+  // will not vouch for is the defect this exists to prevent.
+  test('the claim and the link are never out of step', () => {
+    const cases: SubmitOutcome[] = [
+      { kind: 'not-observed' },
+      submitted('commit_broadcast'),
+      submitted('reveal_broadcast'),
+      submitted(null),
+      submitted('nonsense'),
+    ];
+    for (const c of cases) {
+      const v = inscribeDoneView(c);
+      expect(v.claimComplete).toBe(v.showExplorerLink);
+    }
   });
 });
