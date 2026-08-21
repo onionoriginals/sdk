@@ -4,68 +4,7 @@ import {
   attestedStampValue,
   ensureBitcoinFundingAccount,
   type TurnkeyBitcoinClient,
-  type TurnkeySessionApi,
 } from './turnkey-session';
-
-describe('turnkey-session helpers', () => {
-  test('ensureBitcoinFundingAccount adds a testnet P2WPKH account and returns its tb1 address (idempotent)', async () => {
-    let existing: Array<{ address: string; path: string }> = [];
-    const client: TurnkeyBitcoinClient = {
-      async getWallets() {
-        return { wallets: [{ walletId: 'w1', accounts: existing }] };
-      },
-      async createWalletAccounts(params) {
-        const address = 'tb1qexampleuseraddr000000000000000000000000';
-        existing = [{ address, path: params.accounts[0].path }];
-        return { addresses: [address] };
-      },
-      async signTransaction() {
-        throw new Error('not used here');
-      },
-    };
-    const addr = await ensureBitcoinFundingAccount(client, 'sub-1');
-    expect(addr.startsWith('tb1q')).toBe(true);
-    // Second call must NOT create a duplicate account — returns the cached one.
-    const addr2 = await ensureBitcoinFundingAccount(client, 'sub-1');
-    expect(addr2).toBe(addr);
-  });
-
-  test('ensureBitcoinFundingAccount(mainnet) uses the mainnet path/format and expects bc1', async () => {
-    const created: Array<{ path: string; addressFormat: string }> = [];
-    const client: TurnkeyBitcoinClient = {
-      async getWallets() {
-        return { wallets: [{ walletId: 'w1', accounts: [] }] };
-      },
-      async createWalletAccounts(params) {
-        created.push(params.accounts[0]);
-        return { addresses: ['bc1qexampleuseraddr000000000000000000000000'] };
-      },
-      async signTransaction() {
-        throw new Error('not used here');
-      },
-    };
-    const addr = await ensureBitcoinFundingAccount(client, 'sub-1', 'mainnet');
-    expect(addr.startsWith('bc1')).toBe(true);
-    // BIP-84 mainnet coin type 0' — a DIFFERENT account than the testnet path.
-    expect(created[0].path).toBe("m/84'/0'/0'/0/0");
-    expect(created[0].addressFormat).toBe('ADDRESS_FORMAT_BITCOIN_MAINNET_P2WPKH');
-  });
-
-  test('ensureBitcoinFundingAccount(mainnet) rejects a tb1 address from Turnkey', async () => {
-    const client: TurnkeyBitcoinClient = {
-      async getWallets() {
-        return { wallets: [{ walletId: 'w1', accounts: [] }] };
-      },
-      async createWalletAccounts() {
-        return { addresses: ['tb1qwrongnetworkaddr00000000000000000000000'] };
-      },
-      async signTransaction() {
-        throw new Error('not used here');
-      },
-    };
-    await expect(ensureBitcoinFundingAccount(client, 'sub-1', 'mainnet')).rejects.toThrow('unexpected funding address');
-  });
-});
 
 /**
  * U1 — the two defects the plan calls out, each proved before it is fixed:
@@ -110,6 +49,127 @@ function fakeVerificationToken(payload: { id: string; public_key: string }): str
 }
 
 const MINUTES = 60_000;
+
+describe('the Bitcoin funding account is found, not re-created', () => {
+  /**
+   * Models the REAL Turnkey API: getWallets returns wallet metadata with no
+   * accounts field, and accounts come from getWalletAccounts.
+   *
+   * The previous fake returned `accounts` from getWallets — a field
+   * `v1Wallet` does not have. That one invented field is why the suite showed
+   * this function as idempotent while every live sign-in after the first
+   * failed with "code 6: path already exists in wallet account".
+   */
+  function client(opts: {
+    accounts?: Array<{ address: string; path: string }>;
+    createAddress?: string;
+    createThrows?: Error;
+    onCreate?: (path: string, addressFormat: string) => void;
+  }) {
+    const accounts = [...(opts.accounts ?? [])];
+    let creates = 0;
+    const api: TurnkeyBitcoinClient = {
+      async getWallets() {
+        return { wallets: [{ walletId: 'w1' }] };
+      },
+      async getWalletAccounts() {
+        return { accounts };
+      },
+      async createWalletAccounts(params) {
+        creates += 1;
+        opts.onCreate?.(params.accounts[0].path, params.accounts[0].addressFormat);
+        if (opts.createThrows) throw opts.createThrows;
+        const address = opts.createAddress ?? 'tb1qexampleuseraddr000000000000000000000000';
+        accounts.push({ address, path: params.accounts[0].path });
+        return { addresses: [address] };
+      },
+      async signTransaction() {
+        throw new Error('not used here');
+      },
+    };
+    return { api, creates: () => creates };
+  }
+
+  test('creates the account when the path is absent, and returns its address', async () => {
+    const { api, creates } = client({});
+    expect(await ensureBitcoinFundingAccount(api, 'sub-1')).toStartWith('tb1q');
+    expect(creates()).toBe(1);
+  });
+
+  // The live failure: a second sign-in must find the account, not re-create it.
+  test('a second call finds the existing account and never calls create again', async () => {
+    const { api, creates } = client({});
+    const first = await ensureBitcoinFundingAccount(api, 'sub-1');
+    const second = await ensureBitcoinFundingAccount(api, 'sub-1');
+    expect(second).toBe(first);
+    expect(creates()).toBe(1);
+  });
+
+  test('an account created by an earlier session is reused, so funds stay reachable', async () => {
+    const address = 'tb1qalreadytherefrombefore00000000000000000';
+    const { api, creates } = client({ accounts: [{ address, path: "m/84'/1'/0'/0/0" }] });
+    expect(await ensureBitcoinFundingAccount(api, 'sub-1')).toBe(address);
+    expect(creates()).toBe(0);
+  });
+
+  test('mainnet uses its own path and format, and is not satisfied by the testnet account', async () => {
+    const seen: Array<[string, string]> = [];
+    const { api } = client({
+      accounts: [{ address: 'tb1qtestnetaccount0000000000000000000000000', path: "m/84'/1'/0'/0/0" }],
+      createAddress: 'bc1qexampleuseraddr000000000000000000000000',
+      onCreate: (path, fmt) => seen.push([path, fmt]),
+    });
+    expect(await ensureBitcoinFundingAccount(api, 'sub-1', 'mainnet')).toStartWith('bc1q');
+    expect(seen).toEqual([["m/84'/0'/0'/0/0", 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2WPKH']]);
+  });
+
+  // Turnkey saying the path exists is proof the account is there. Failing the
+  // sign-in over it would block a user out of an account that already works.
+  test('recovers when create reports the path already exists', async () => {
+    const address = 'tb1qracedaccount000000000000000000000000000';
+    const accounts: Array<{ address: string; path: string }> = [];
+    const api: TurnkeyBitcoinClient = {
+      async getWallets() {
+        return { wallets: [{ walletId: 'w1' }] };
+      },
+      async getWalletAccounts() {
+        // Empty on the first read, populated by the time we re-read.
+        const snapshot = [...accounts];
+        accounts.push({ address, path: "m/84'/1'/0'/0/0" });
+        return { accounts: snapshot };
+      },
+      async createWalletAccounts() {
+        throw new Error('path already exists in wallet account 0728c0a2-a504-44f2-ba5c-79d3db14f0c4');
+      },
+      async signTransaction() {
+        throw new Error('not used here');
+      },
+    };
+    expect(await ensureBitcoinFundingAccount(api, 'sub-1')).toBe(address);
+  });
+
+  test('an unrelated create failure is not swallowed', async () => {
+    const { api } = client({ createThrows: new Error('insufficient permissions') });
+    await expect(ensureBitcoinFundingAccount(api, 'sub-1')).rejects.toThrow('insufficient permissions');
+  });
+
+  test('rejects a testnet address returned for the mainnet path', async () => {
+    const { api } = client({ createAddress: 'tb1qwrongnetwork00000000000000000000000000' });
+    await expect(ensureBitcoinFundingAccount(api, 'sub-1', 'mainnet')).rejects.toThrow(
+      'unexpected funding address'
+    );
+  });
+
+  // The prefix check used to run only on a freshly created address.
+  test('rejects a wrong-network address even when it comes from an existing account', async () => {
+    const { api } = client({
+      accounts: [{ address: 'tb1qwrongnetwork00000000000000000000000000', path: "m/84'/0'/0'/0/0" }],
+    });
+    await expect(ensureBitcoinFundingAccount(api, 'sub-1', 'mainnet')).rejects.toThrow(
+      'unexpected funding address'
+    );
+  });
+});
 
 describe('U1: session lifetime survives a Bitcoin confirmation wait', () => {
   test('the configured expiry is far longer than the 15-minute Turnkey default', () => {

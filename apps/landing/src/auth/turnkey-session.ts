@@ -86,8 +86,17 @@ export interface TurnkeyBitcoinClient {
       addressFormat: 'ADDRESS_FORMAT_BITCOIN_TESTNET_P2WPKH' | 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2WPKH';
     }>;
   }): Promise<{ addresses: string[] }>;
+  /**
+   * Wallet METADATA only. Turnkey's `v1Wallet` carries no accounts — listing
+   * them is a separate call, and assuming otherwise is what made the funding
+   * account re-create itself on every sign-in.
+   */
   getWallets(params: { organizationId: string }): Promise<{
-    wallets: Array<{ walletId: string; accounts?: Array<{ address: string; path?: string }> }>;
+    wallets: Array<{ walletId: string }>;
+  }>;
+  /** The accounts themselves. `walletId` is optional; omitted = the whole org. */
+  getWalletAccounts(params: { organizationId: string; walletId?: string }): Promise<{
+    accounts: Array<{ address: string; path: string; addressFormat?: string }>;
   }>;
 }
 
@@ -376,9 +385,18 @@ export async function revokeSessionKey(
 
 /**
  * Ensure the user's wallet has a P2WPKH account for the given network and
- * return its bech32 address (tb1… on testnet4, bc1… on mainnet). Idempotent:
- * if the path already exists, the cached address wins — re-creating would
- * waste an activity and could error on a duplicate path.
+ * return its bech32 address (tb1… on testnet4, bc1… on mainnet).
+ *
+ * Genuinely idempotent, which it previously only claimed to be. The lookup
+ * used to read `wallet.accounts` off `getWallets`, and Turnkey's `v1Wallet`
+ * has no such field — so it was always undefined, the account was never found,
+ * and every sign-in after the first tried to create a path that already
+ * existed and failed with `code 6: path already exists in wallet account`.
+ * Accounts come from `getWalletAccounts`.
+ *
+ * The address is derived from a fixed BIP-32 path, so re-reading an existing
+ * account always yields the same address a previous run created — which
+ * matters, because a creator may already have BTC sitting at it.
  */
 export async function ensureBitcoinFundingAccount(
   client: TurnkeyBitcoinClient,
@@ -386,26 +404,56 @@ export async function ensureBitcoinFundingAccount(
   network: FundingNetwork = 'testnet4'
 ): Promise<string> {
   const account = P2WPKH_ACCOUNTS[network];
+
+  const findExisting = async (): Promise<string | undefined> => {
+    const { accounts } = await client.getWalletAccounts({ organizationId: subOrgId });
+    return accounts?.find((a) => a.path === account.path)?.address;
+  };
+
+  const already = await findExisting();
+  if (already) return verifyFundingAddress(already, account.prefix);
+
   const { wallets } = await client.getWallets({ organizationId: subOrgId });
   const wallet = wallets[0];
   if (!wallet) throw new Error('No Turnkey wallet found for the sub-organization.');
-  const existing = wallet.accounts?.find((a) => a.path === account.path);
-  if (existing?.address) return existing.address;
-  const { addresses } = await client.createWalletAccounts({
-    walletId: wallet.walletId,
-    organizationId: subOrgId,
-    accounts: [
-      {
-        curve: 'CURVE_SECP256K1',
-        pathFormat: 'PATH_FORMAT_BIP32',
-        path: account.path,
-        addressFormat: account.addressFormat,
-      },
-    ],
-  });
-  const address = addresses[0];
-  if (!address || !address.startsWith(account.prefix)) {
+
+  let addresses: string[];
+  try {
+    ({ addresses } = await client.createWalletAccounts({
+      walletId: wallet.walletId,
+      organizationId: subOrgId,
+      accounts: [
+        {
+          curve: 'CURVE_SECP256K1',
+          pathFormat: 'PATH_FORMAT_BIP32',
+          path: account.path,
+          addressFormat: account.addressFormat,
+        },
+      ],
+    }));
+  } catch (err) {
+    // Belt and braces: the read above should have found it, but a paginated
+    // or eventually-consistent listing could miss one. Turnkey telling us the
+    // path exists is itself proof the account is there, so re-read rather than
+    // surfacing a failure for a thing that already succeeded.
+    if (!/already exists/i.test(String((err as Error)?.message ?? err))) throw err;
+    const recovered = await findExisting();
+    if (!recovered) throw err;
+    return verifyFundingAddress(recovered, account.prefix);
+  }
+
+  return verifyFundingAddress(addresses[0], account.prefix);
+}
+
+/**
+ * A mainnet path must not hand back a testnet address, or vice versa. Applied
+ * to a re-read account as well as a freshly created one: this is the last
+ * checkpoint before a stranger is told where to send BTC.
+ */
+function verifyFundingAddress(address: string | undefined, prefix: string): string {
+  if (!address || !address.startsWith(prefix)) {
     throw new Error(`Turnkey returned an unexpected funding address: ${String(address)}`);
   }
   return address;
 }
+
