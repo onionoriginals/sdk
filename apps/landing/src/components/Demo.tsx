@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DepositPanel } from './DepositPanel';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine } from '../sdk/engine';
 import { engineIdentity, ANON_IDENTITY } from '../sdk/engine';
@@ -1117,24 +1118,20 @@ export function Demo() {
                             : depositBadgeLabel(readiness, demo.deposit)}
                         </span>
                       </div>
-                      {deposit && (
-                        <p className="demo-inscribe-note">
-                          {demo.deposit.sendPrefix}{' '}
-                          <code>{deposit.estimatedCostSats.toLocaleString()} sats</code>{' '}
-                          {demo.deposit.sendSuffix}
-                        </p>
-                      )}
-                      {/* R27: what the deposit is for, where the address came
-                          from, and what happens to a balance that is never
-                          spent — ABOVE the address, and in every state, so a
-                          top-up and a return visit read it too. */}
-                      {depositDisclosure().map((line) => (
-                        <p className="demo-inscribe-note" key={line}>{line}</p>
-                      ))}
+                      {/* R27 still renders in full and in every state — it
+                          moved INTO DepositPanel, below the address rather
+                          than between the amount and it. depositDisclosure()
+                          remains the contract for what must be present. */}
                       {deposit ? (
-                        <p className="demo-inscribe-note">
-                          {demo.deposit.addressLabel}: <code>{bitcoin.fundingAddress}</code>
-                        </p>
+                        <>
+                          <DepositPanel
+                            address={bitcoin.fundingAddress}
+                            sats={deposit.estimatedCostSats}
+                          />
+                          <p className="demo-inscribe-note deposit-topup">
+                            {demo.deposit.topUpNote}
+                          </p>
+                        </>
                       ) : depositError ? (
                         // The one fee source is down, so there is no honest
                         // amount to quote — say that, and show no address.

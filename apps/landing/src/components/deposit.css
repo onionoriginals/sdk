@@ -1,0 +1,266 @@
+/*
+ * The fund-your-inscription block.
+ *
+ * Hierarchy is deliberate and runs downward: amount, address, scan, purpose,
+ * risk, then the full terms. The amount and the address are the two things a
+ * person needs in hand, so they get the weight; everything after them is
+ * quieter without being hidden.
+ */
+
+.deposit {
+  margin-top: var(--sp-4);
+}
+
+/* --- amount ------------------------------------------------------------ */
+
+.deposit-amount {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
+
+.deposit-amount-label {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.deposit-amount-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--accent-text);
+  /* Tabular figures: the number changes as fees move, and digits that shift
+     width make a re-render look like a different quote. */
+  font-variant-numeric: tabular-nums;
+}
+
+.deposit-amount-unit {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* --- pay: address + actions, with the code alongside ------------------- */
+
+.deposit-pay {
+  display: flex;
+  gap: var(--sp-5);
+  align-items: flex-start;
+  padding: var(--sp-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-raised);
+}
+
+.deposit-pay-main {
+  flex: 1 1 auto;
+  min-width: 0; /* lets the address wrap instead of forcing the row wider */
+}
+
+.deposit-address-label {
+  display: block;
+  margin-bottom: var(--sp-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.deposit-address {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-primary);
+  /* A bech32 address has no spaces, so it must be allowed to break mid-token
+     or it overflows and becomes unreadable — and an address you cannot read
+     back is one you cannot check. */
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  user-select: all;
+}
+
+.deposit-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.deposit-copy,
+.deposit-wallet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--r-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.deposit-copy {
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+
+.deposit-copy:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text-primary);
+}
+
+.deposit-copy[data-copied] {
+  color: var(--ok);
+  border-color: rgba(63, 221, 157, 0.4);
+}
+
+/* The primary action: it is the one that removes all transcription. */
+.deposit-wallet {
+  border: 1px solid transparent;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.deposit-wallet:hover {
+  background: rgba(247, 147, 26, 0.22);
+}
+
+.deposit-hint {
+  margin-top: var(--sp-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.deposit-hint-center {
+  text-align: center;
+  max-width: 168px;
+}
+
+/* --- scan -------------------------------------------------------------- */
+
+.deposit-scan {
+  flex: 0 0 auto;
+}
+
+.deposit-qr {
+  display: block;
+  border-radius: var(--r-sm);
+  /* The code needs a light field to scan reliably; the ring keeps that white
+     square from reading as a hole punched in a dark panel. */
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+/* --- purpose, risk, terms ---------------------------------------------- */
+
+.deposit-purpose {
+  margin-top: var(--sp-4);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+}
+
+/*
+ * The two money risks. Amber, not red: this is not an error and it is not a
+ * failure — it is a property of Bitcoin and of this service. Red here would
+ * cry wolf on the state that is actually wrong, and the deposit screen shows
+ * genuine errors in red just below.
+ */
+.deposit-risk {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+}
+
+.deposit-details {
+  margin-top: var(--sp-3);
+}
+
+.deposit-details > summary {
+  cursor: pointer;
+  padding: var(--sp-2) 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  list-style: none;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.deposit-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.deposit-details > summary::before {
+  content: '›';
+  display: inline-block;
+  margin-right: var(--sp-2);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.deposit-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.deposit-details > summary:hover {
+  color: var(--text-secondary);
+}
+
+.deposit-details-body {
+  padding: var(--sp-2) 0 0 var(--sp-4);
+  border-left: 1px solid var(--border);
+  margin-left: 3px;
+}
+
+.deposit-details-body p {
+  margin-bottom: var(--sp-3);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+}
+
+.deposit-details-body p:last-child {
+  margin-bottom: 0;
+}
+
+.deposit-topup {
+  margin-top: var(--sp-3);
+}
+
+/* --- narrow ------------------------------------------------------------ */
+
+@media (max-width: 560px) {
+  .deposit-pay {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* The code leads on a phone: the wallet is on the same device, so the
+     bitcoin: link is the likely path and the scan is the fallback. */
+  .deposit-scan {
+    order: -1;
+    align-self: center;
+  }
+
+  .deposit-hint-center {
+    max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deposit-copy,
+  .deposit-wallet,
+  .deposit-details > summary,
+  .deposit-details > summary::before {
+    transition: none;
+  }
+}
