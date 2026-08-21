@@ -3,7 +3,7 @@ import * as api from './api';
 import type { AuthUser } from './api';
 import { createUserWebVHDid } from './webvh';
 import {
-  otpLoginToSession,
+  stampLoginToSession,
   ensureBitcoinFundingAccount,
   readSessionMeta,
   writeSessionMeta,
@@ -13,7 +13,6 @@ import {
   restoreDecision,
   type SigningStatus,
   type TurnkeyBitcoinClient,
-  type TurnkeySessionApi,
 } from './turnkey-session';
 import type { SessionKeyHandle } from './turnkey-browser-client';
 import { browserKeyStorage } from './browser-storage';
@@ -191,8 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const bound = await openSessionKey(result.subOrgId);
       const signingClient = bound.client as unknown as TurnkeyBitcoinClient;
       step = 'otp-login';
-      const { meta } = await otpLoginToSession({
-        turnkey: signingClient as unknown as TurnkeySessionApi,
+      const { meta } = await stampLoginToSession({
         subOrgId: result.subOrgId,
         verificationToken: result.verificationToken,
         signer: bound.signer,
