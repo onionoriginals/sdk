@@ -162,6 +162,8 @@ export async function fetchAddressUtxos(
 ): Promise<{
   confirmed: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
   unconfirmedSats: number;
+  /** Txids of the unconfirmed deposits, so their fee rate can be looked up. */
+  unconfirmedTxids: string[];
 }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const scriptPubKey = p2wpkhScriptHex(opts.address, opts.network ?? 'testnet');
@@ -210,7 +212,111 @@ export async function fetchAddressUtxos(
       .filter((u) => u.status?.confirmed)
       .map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, scriptPubKey })),
     unconfirmedSats: utxos.filter((u) => !u.status?.confirmed).reduce((n, u) => n + u.value, 0),
+    unconfirmedTxids: [...new Set(utxos.filter((u) => !u.status?.confirmed).map((u) => u.txid))],
   };
+}
+
+/**
+ * How many pending payments we will price per deposit poll. One is the normal
+ * case; a payment plus a top-up is the realistic worst case.
+ */
+export const MAX_PENDING_FEE_LOOKUPS = 3;
+
+/**
+ * Of the pending payments, the one holding the deposit up — lowest fee rate.
+ * Advising on a faster sibling would tell a creator to bump a payment that is
+ * already fine while the slow one still sits there.
+ */
+export function slowestPending<T extends { feeSats: number; vsize: number }>(
+  pending: T[]
+): T | null {
+  let worst: T | null = null;
+  for (const p of pending) {
+    if (p.vsize <= 0) continue;
+    if (!worst || p.feeSats / p.vsize < worst.feeSats / worst.vsize) worst = p;
+  }
+  return worst;
+}
+
+/**
+ * A previous transaction's raw bytes, as hex.
+ *
+ * Turnkey refuses a SegWit v0 input that carries only `witness_utxo`, so the
+ * browser has to attach the whole previous transaction before signing. It
+ * comes through us rather than straight from the browser to a public indexer:
+ * that keeps the indexer seam (and its auth, timeout and error handling) in
+ * one place, and keeps a creator's funding txids out of a third party's logs
+ * with the browser's IP attached.
+ *
+ * The browser VERIFIES what it gets back — it must hash to the txid the PSBT
+ * names — so a wrong or hostile answer here is refused rather than signed.
+ */
+export async function fetchRawTxHex(
+  opts: IndexerConfig & { txid: string; timeoutMs?: number; fetchImpl?: typeof fetch }
+): Promise<string | null> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 10_000);
+  try {
+    const res = await fetchImpl(`${stripTrailingSlash(opts.api)}/tx/${opts.txid}/hex`, {
+      signal: controller.signal,
+      headers: indexerAuthHeaders(opts),
+    });
+    if (!res.ok) return null;
+    const body = (await res.text()).trim();
+    // Esplora serves this as a bare hex body; anything else is not a
+    // transaction and must not be handed on as one.
+    return /^[0-9a-f]+$/i.test(body) && body.length % 2 === 0 ? body : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Fee facts for a pending deposit, so the creator can be told when theirs is
+ * underpriced. Facts only — what to DO about it is the browser's copy, and the
+ * app cannot act on it either way: replacing that transaction needs the keys
+ * of the wallet it was sent from, which are not ours.
+ *
+ * BEST EFFORT BY CONSTRUCTION. This is a nicety on top of the deposit read, so
+ * every failure returns null rather than throwing: an indexer that will not
+ * serve /tx must not take down the screen that shows someone their money.
+ */
+export async function fetchPendingDepositFee(
+  opts: IndexerConfig & { txid: string; timeoutMs?: number; fetchImpl?: typeof fetch }
+): Promise<{ txid: string; feeSats: number; vsize: number; rbf: boolean } | null> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5_000);
+  try {
+    const res = await fetchImpl(`${stripTrailingSlash(opts.api)}/tx/${opts.txid}`, {
+      signal: controller.signal,
+      headers: indexerAuthHeaders(opts),
+    });
+    if (!res.ok) return null;
+    const tx = (await res.json()) as {
+      fee?: number;
+      weight?: number;
+      vin?: Array<{ sequence?: number }>;
+    };
+    if (typeof tx.fee !== 'number' || typeof tx.weight !== 'number' || tx.weight <= 0) return null;
+    return {
+      txid: opts.txid,
+      feeSats: tx.fee,
+      // vsize is ceil(weight/4) BY DEFINITION (BIP-141). Rounding understates
+      // it whenever weight % 4 == 1, which overstates the rate we display and
+      // leaves the replacement minimum a satoshi short — i.e. unrelayable.
+      vsize: Math.ceil(tx.weight / 4),
+      // BIP-125 opt-in: any input with sequence < 0xfffffffe signals it.
+      rbf: (tx.vin ?? []).some((i) => typeof i.sequence === 'number' && i.sequence < 0xfffffffe),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -532,6 +638,7 @@ export function createBitcoinRoutes(deps: {
   fee: Handler;
   broadcast: Handler;
   deposit: Handler;
+  prevTx: Handler;
   networkInfo: Handler;
   inscribe: Handler;
   inscribeList: Handler;
@@ -1006,6 +1113,53 @@ export function createBitcoinRoutes(deps: {
     }
     const estimatedCostSats = costFor(inputCount);
 
+    // Only while a deposit is actually pending. A creator may have several in
+    // flight — a payment plus a top-up — and taking whichever the indexer
+    // happened to list first would describe an unrelated one. Advise on the
+    // SLOWEST, since that is the payment holding the deposit up.
+    //
+    // Capped at MAX_PENDING_FEE_LOOKUPS reads: this route is polled every 15s
+    // against a rate-limited indexer, and an unbounded fan-out here would
+    // spend a creator's poll budget on an advisory. Beyond the cap the advice
+    // is drawn from the ones we did read, which can only understate the
+    // problem, never invent one.
+    let pendingDeposit:
+      | { txid: string; feeSats: number; vsize: number; rbf: boolean; networkSatVb: number }
+      | null = null;
+    if (utxos.unconfirmedTxids.length > 0) {
+      try {
+        const [fees, networkSatVb] = await Promise.all([
+          Promise.all(
+            utxos.unconfirmedTxids
+              .slice(0, MAX_PENDING_FEE_LOOKUPS)
+              .map((txid) => fetchPendingDepositFee({ ...indexer, txid, fetchImpl: deps.fetchImpl }))
+          ),
+          currentFeeRate(1),
+        ]);
+        // Advise ONLY when every pending payment was priced. A partial view
+        // can name a faster sibling while the real blocker sits outside it —
+        // pointing the creator's fee bump, and the explorer link, at the wrong
+        // transaction. Saying nothing beats confidently saying the wrong thing.
+        // (An earlier version claimed a partial read could only understate the
+        // problem. It can also misattribute it, which is worse.)
+        const priced = fees.filter((f) => f !== null);
+        const sawThemAll = priced.length === utxos.unconfirmedTxids.length;
+        const slowest = sawThemAll ? slowestPending(priced) : null;
+        if (slowest) {
+          pendingDeposit = {
+            txid: slowest.txid,
+            feeSats: slowest.feeSats,
+            vsize: slowest.vsize,
+            rbf: slowest.rbf,
+            networkSatVb,
+          };
+        }
+      } catch {
+        // Advisory only. A fee estimator or /tx read that is down changes
+        // nothing about the deposit itself.
+      }
+    }
+
     // A shortfall is a money-path state, not a UI detail: it is the state a
     // stranger sits in with real BTC already sent. Logged on the TRANSITION
     // (the confirmed balance changed) so a 15s poll does not flood the sink.
@@ -1040,7 +1194,66 @@ export function createBitcoinRoutes(deps: {
       ordinalCheck: classified.ok ? ('ok' as const) : ('unavailable' as const),
       unconfirmedSats: utxos.unconfirmedSats,
       estimatedCostSats,
+      /**
+       * Fee facts for a pending deposit, when there is one. Lets the browser
+       * say "yours is paying 1 sat/vB while the network clears 3" instead of
+       * leaving a creator to work that out in a block explorer. Null whenever
+       * anything about the lookup is uncertain — best effort, never a reason
+       * to fail the deposit read.
+       */
+      pendingDeposit,
     });
+  };
+
+  /**
+   * GET /api/btc/prevtx?txid=… — one previous transaction, as raw hex.
+   *
+   * Turnkey refuses a SegWit v0 input carrying only `witness_utxo`, so the
+   * browser must attach the whole previous transaction before it can sign the
+   * commit. It comes through us so the indexer seam stays in one place and a
+   * creator's funding txids do not reach a public indexer tied to their IP.
+   *
+   * SCOPED, not a general lookup proxy: the txid must be one that actually
+   * funds THIS caller's bound deposit address. Same reasoning as the deposit
+   * route — a signed-in caller must not be able to use us to fetch arbitrary
+   * transactions. The browser verifies the bytes hash to the txid it asked
+   * for, so this route cannot substitute a different transaction either.
+   */
+  const prevTx: Handler = async (req, url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp);
+    if (limited) return limited;
+    if (!indexer) return json({ error: 'deposit_unavailable' }, 503);
+    const network = deps.network ?? 'testnet';
+
+    const txid = url.searchParams.get('txid') ?? '';
+    if (!/^[0-9a-f]{64}$/i.test(txid)) {
+      return json({ error: 'bad_txid', message: 'A 64-character hex txid is required.' }, 400);
+    }
+
+    const address = deps.inscriptions?.depositBinding(sub, network) ?? null;
+    if (!address) {
+      return json({ error: 'no_deposit_address', message: 'No deposit address is bound to this account.' }, 403);
+    }
+
+    let utxos: Awaited<ReturnType<typeof fetchAddressUtxos>>;
+    try {
+      utxos = await fetchAddressUtxos({ ...indexer, address, network, fetchImpl: deps.fetchImpl });
+    } catch {
+      return json({ error: 'indexer_unavailable' }, 503);
+    }
+    const funds = utxos.confirmed.some((u) => u.txid.toLowerCase() === txid.toLowerCase());
+    if (!funds) {
+      return json(
+        { error: 'txid_not_yours', message: 'That transaction does not fund this account’s deposit address.' },
+        403
+      );
+    }
+
+    const raw = await fetchRawTxHex({ ...indexer, txid, fetchImpl: deps.fetchImpl });
+    if (!raw) return json({ error: 'prevtx_unavailable' }, 503);
+    return json({ txid, hex: raw });
   };
 
   /**
@@ -1662,7 +1875,7 @@ export function createBitcoinRoutes(deps: {
     return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'reveal_broadcast' });
   };
 
-  return { funding, sat, fee, broadcast, deposit, networkInfo, inscribe, inscribeList, inscribeRebroadcast };
+  return { funding, sat, fee, broadcast, deposit, prevTx, networkInfo, inscribe, inscribeList, inscribeRebroadcast };
 }
 
 export type BitcoinRoutes = ReturnType<typeof createBitcoinRoutes>;

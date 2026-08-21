@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { demo } from '../content';
-import { depositDisclosure, quoteForAddress, depositReadiness } from './Demo';
+import { depositDisclosure, quoteForAddress, depositReadiness, depositBadgeLabel } from './Demo';
 import { bitcoinPaymentUri } from '../sdk/bitcoin-uri';
 
 /**
@@ -106,5 +106,92 @@ describe('a quote never crosses to another address', () => {
   test('a mismatched quote cannot drive the readiness badge', () => {
     expect(depositReadiness(quoteForAddress(quote(A), B))).toBe('waiting');
     expect(depositReadiness(quoteForAddress(quote(A), A))).not.toBe('waiting');
+  });
+});
+
+describe('a confirmed deposit that does not cover the cost', () => {
+  const utxo = (value: number) => ({
+    txid: 'a'.repeat(64),
+    vout: 0,
+    value,
+    scriptPubKey: '0014' + '11'.repeat(20),
+  });
+  const info = (confirmed: number, cost: number) => ({
+    address: 'bc1qwx77y7n2dvcfy2aejnrxcapevmssfezc4ly4rl',
+    confirmedUtxos: confirmed > 0 ? [utxo(confirmed)] : [],
+    confirmedSats: confirmed,
+    unconfirmedSats: 0,
+    estimatedCostSats: cost,
+  });
+
+  /**
+   * The live failure. 14,580 confirmed against an 18,599 quote reported
+   * 'detected', whose copy reads "waiting for one confirmation" — so a creator
+   * whose money HAD confirmed watched a poll for an event already past, and was
+   * never told they were 4,019 short.
+   */
+  test('is not reported as waiting for a confirmation that already happened', () => {
+    expect(depositReadiness(info(14_580, 18_599))).toBe('short');
+    expect(depositReadiness(info(14_580, 18_599))).not.toBe('detected');
+  });
+
+  test('its badge does not promise a pending confirmation', () => {
+    const label = depositBadgeLabel('short', demo.deposit);
+    expect(label).not.toMatch(/waiting/i);
+    expect(label).toMatch(/top-up|confirmed/i);
+  });
+
+  test('enough is still ready, and exactly enough counts', () => {
+    expect(depositReadiness(info(18_599, 18_599))).toBe('ready');
+    expect(depositReadiness(info(20_000, 18_599))).toBe('ready');
+  });
+
+  test('nothing confirmed yet is still waiting, not short', () => {
+    expect(depositReadiness(info(0, 18_599))).toBe('waiting');
+  });
+
+  // The quote already prices the top-up's own input (server: used + 1), so the
+  // displayed gap is the whole gap — a creator who sends it is not short again.
+  test('the gap shown is the whole gap', () => {
+    const i = info(14_580, 18_599);
+    const held = i.confirmedUtxos.reduce((n, u) => n + u.value, 0);
+    expect(i.estimatedCostSats - held).toBe(4_019);
+    expect(depositReadiness({ ...i, confirmedUtxos: [utxo(18_599)], confirmedSats: 18_599 })).toBe('ready');
+  });
+});
+
+describe('a funded deposit stops asking for money', () => {
+  /**
+   * The UX failure: the panel rendered "Send at least N sats" regardless of
+   * readiness, so someone whose deposit already covered the cost was still
+   * being told to pay, with no indication the next move was theirs.
+   * depositReadiness is what the panel now switches on.
+   */
+  const utxo = (value: number) => ({ txid: 'a'.repeat(64), vout: 0, value, scriptPubKey: '0014' + '11'.repeat(20) });
+  const info = (confirmed: number, cost: number) => ({
+    address: 'bc1qwx77y7n2dvcfy2aejnrxcapevmssfezc4ly4rl',
+    confirmedUtxos: [utxo(confirmed)],
+    confirmedSats: confirmed,
+    unconfirmedSats: 0,
+    estimatedCostSats: cost,
+  });
+
+  test('leftover sats keep a later inscription funded without a new deposit', () => {
+    // 19,580 held against a 14,580 cost: funded, and the surplus stays put.
+    expect(depositReadiness(info(19_580, 14_580))).toBe('ready');
+  });
+
+  test('the funded and unfunded states are distinguishable by readiness alone', () => {
+    expect(depositReadiness(info(19_580, 14_580))).toBe('ready');
+    expect(depositReadiness(info(14_580, 18_599))).toBe('short');
+  });
+
+  test('the funded copy tells the creator to inscribe, not to send more', () => {
+    expect(demo.deposit.fundedHeading).toMatch(/ready to inscribe/i);
+    expect(demo.deposit.fundedBody).not.toMatch(/send/i);
+  });
+
+  test('the balance copy explains that a surplus is reusable, not stranded', () => {
+    expect(demo.deposit.balanceReuse).toMatch(/next inscription/i);
   });
 });

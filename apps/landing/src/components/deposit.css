@@ -264,3 +264,205 @@
     transition: none;
   }
 }
+
+/* --- underpriced pending deposit ---------------------------------------- */
+
+/*
+ * Informational, not an error: the deposit is queued, not lost. Uses the same
+ * quiet raised surface as the pay block rather than the risk block's amber,
+ * which is reserved for "you could lose money".
+ */
+.deposit-fee-notice {
+  margin-top: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-raised);
+}
+
+.deposit-fee-heading {
+  display: block;
+  margin-bottom: var(--sp-2);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.deposit-fee-body {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+}
+
+.deposit-fee-rates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-5);
+  margin: var(--sp-3) 0;
+}
+
+.deposit-fee-rates dt {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 2px;
+}
+
+.deposit-fee-rates dd {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The number they should act on. */
+.deposit-fee-suggest dd {
+  color: var(--accent-text);
+}
+
+.deposit-fee-min {
+  margin-top: var(--sp-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.deposit-fee-min code {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+/* --- payment seen, not yet confirmed ------------------------------------ */
+
+/*
+ * Green, and stated in sats. "Detected" on a small badge is easy to miss at
+ * the one moment a creator most wants confirmation that their money arrived.
+ */
+.deposit-pending {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 2px solid var(--ok);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: rgba(63, 221, 157, 0.08);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.deposit-pending strong {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.deposit-pending a {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.deposit-pending a:hover {
+  color: var(--text-primary);
+}
+
+.deposit-pending-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--ok);
+  flex: 0 0 auto;
+  align-self: center;
+  animation: deposit-pulse 2s var(--ease) infinite;
+}
+
+@keyframes deposit-pulse {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deposit-pending-dot { animation: none; }
+}
+
+/*
+ * Confirmed, but short. Amber like the risk block: nothing has gone wrong and
+ * no money is at risk, but the creator has to act before anything proceeds.
+ */
+.deposit-short {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+}
+
+.deposit-short strong {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-text);
+}
+
+/* --- funded ------------------------------------------------------------- */
+
+/*
+ * The panel used to say "Send at least N sats" even once the deposit covered
+ * the cost, so someone who had already paid was still being asked to pay. This
+ * state exists to say the opposite, plainly.
+ */
+.deposit-funded {
+  padding: var(--sp-4);
+  border: 1px solid rgba(63, 221, 157, 0.35);
+  border-radius: var(--r-md);
+  background: rgba(63, 221, 157, 0.07);
+}
+
+.deposit-funded-heading {
+  display: block;
+  margin-bottom: var(--sp-2);
+  color: var(--ok);
+  font-size: var(--text-md);
+}
+
+.deposit-funded-body {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.deposit-balance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+  margin: var(--sp-4) 0 0;
+}
+
+.deposit-balance dt {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 2px;
+}
+
+.deposit-balance dd {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.deposit-balance-line {
+  margin-top: calc(var(--sp-2) * -1);
+  margin-bottom: var(--sp-3);
+}
+
+.deposit-balance-line strong {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}

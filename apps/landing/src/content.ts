@@ -415,11 +415,49 @@ export const demo = {
     openInWallet: 'Open in wallet',
     openInWalletHint: 'Opens your Bitcoin wallet with the address and amount already filled in.',
     scanHint: 'Or scan to pay from your phone',
+    // Between sending and confirming, a creator has no way to tell whether we
+    // can see their money — and that is the worst moment to say nothing.
+    pendingSeenSuffix: 'in the mempool — we can see it, waiting for one confirmation.',
+    pendingViewLink: 'View transaction',
+    // The funded state. Previously the panel said "Send at least N sats" even
+    // once the deposit covered the cost, so a creator who had already paid was
+    // still being told to pay and had no idea the next move was theirs.
+    fundedHeading: 'Funded — ready to inscribe',
+    fundedBody: 'Your deposit covers this inscription. Use the button below to inscribe on Bitcoin.',
+    balanceLabel: 'Your deposit balance',
+    balanceNeeded: 'needed for this inscription',
+    addMoreSummary: 'Add more funds, or see the deposit address',
+    balanceReuse:
+      'Anything left over stays at this address and pays for your next inscription here — you will not be asked to deposit again while it covers the cost.',
+    // A CONFIRMED deposit that does not cover the cost. Distinct from
+    // 'detected', whose copy promises a confirmation that already happened.
+    shortBadge: 'Deposit confirmed — a top-up is needed.',
+    shortTopUpPrefix: 'Send',
+    shortTopUpSuffix:
+      'more to the same address. The quote above already includes the cost of spending that second payment, so this amount is the whole gap.',
+    // A pending deposit paying under the going rate. We cannot fix this: the
+    // inputs belong to the wallet the creator sent from, so only that wallet
+    // can replace the transaction. Saying so beats a button that cannot work.
+    feeLowHeading: 'Your deposit is paying below the going rate',
+    feeLowBody:
+      'It will still confirm — it is queued behind higher-paying transactions, not stuck — and nothing is at risk while it waits.',
+    feeLowBumpable:
+      'If your wallet has a “bump fee” or “speed up” option, this payment can be replaced. Two things to get right: take the increase from your change, never from the deposit amount, and aim for the rate below — Bitcoin makes a replacement pay for its own bandwidth on top of the original fee, so a small nudge is rejected outright.',
+    feeLowUnbumpable:
+      'Your wallet did not mark this payment replaceable, so its fee cannot be raised. Waiting is the only option, and it will get there.',
+    feeLowYours: 'Yours',
+    feeLowNetwork: 'Clearing now',
+    feeLowSuggest: 'Replace at',
+    feeLowMinimum: 'At least, if the replacement is the same size',
     // sendSuffix continues the "Send at least <n> sats" sentence, so it cannot
     // stand alone now that the amount lives in its own block. This is the same
     // point as a whole sentence.
+    // Accurate about where money goes: selectFundingUtxos takes largest-first
+    // and STOPS once the target is covered, so a deposit it does not need is
+    // left at the address — and there is no withdrawal path for it. The old
+    // line promised the opposite ("spends every confirmed deposit").
     topUpNote:
-      'One payment or several — the inscription spends every confirmed deposit sitting at the address, so a top-up after a fee rise works too.',
+      'Several payments work too: the inscription spends what it needs, largest first, and leaves the rest at the address.',
     waiting: 'Waiting for your deposit…',
     detected: 'Deposit detected — waiting for one confirmation.',
     ready: 'Deposit confirmed — ready to inscribe.',
