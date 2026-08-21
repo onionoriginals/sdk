@@ -399,6 +399,27 @@ export const demo = {
     sendPrefix: 'Send at least',
     sendSuffix: 'of BTC to your deposit address. One payment or several — the inscription spends every confirmed deposit sitting there, so a top-up after a fee rise works too. The change and the inscribed sat come back to the same address.',
     addressLabel: 'Your deposit address',
+    // The redesign (see DepositPanel): the action comes first and the full
+    // R27 text moves into an always-present <details> below it. These two
+    // lines are what stays visible without interaction — the purpose, and the
+    // SUBSTANCE of the two money risks. The long-form lines below are not
+    // replaced by them; they are still rendered, in full, on the same screen.
+    purposeShort:
+      'Covers the Bitcoin network fees for two transactions, plus the 546-sat output your inscription rides on. Change comes back to this address.',
+    riskSummary:
+      'There is no withdraw or refund. Anything you send that isn’t spent on an inscription stays at this address until you inscribe here again, and a broadcast fee can’t be reversed by anyone, us included. Send the amount above rather than a round number you’d want back.',
+    detailsSummary: 'How this works — the address, your key, and closing the tab',
+    copyAddress: 'Copy',
+    copiedAddress: 'Copied',
+    copyAddressAria: 'Copy your deposit address',
+    openInWallet: 'Open in wallet',
+    openInWalletHint: 'Opens your Bitcoin wallet with the address and amount already filled in.',
+    scanHint: 'Or scan to pay from your phone',
+    // sendSuffix continues the "Send at least <n> sats" sentence, so it cannot
+    // stand alone now that the amount lives in its own block. This is the same
+    // point as a whole sentence.
+    topUpNote:
+      'One payment or several — the inscription spends every confirmed deposit sitting at the address, so a top-up after a fee rise works too.',
     waiting: 'Waiting for your deposit…',
     detected: 'Deposit detected — waiting for one confirmation.',
     ready: 'Deposit confirmed — ready to inscribe.',
