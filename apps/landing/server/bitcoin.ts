@@ -239,6 +239,42 @@ export function slowestPending<T extends { feeSats: number; vsize: number }>(
 }
 
 /**
+ * A previous transaction's raw bytes, as hex.
+ *
+ * Turnkey refuses a SegWit v0 input that carries only `witness_utxo`, so the
+ * browser has to attach the whole previous transaction before signing. It
+ * comes through us rather than straight from the browser to a public indexer:
+ * that keeps the indexer seam (and its auth, timeout and error handling) in
+ * one place, and keeps a creator's funding txids out of a third party's logs
+ * with the browser's IP attached.
+ *
+ * The browser VERIFIES what it gets back — it must hash to the txid the PSBT
+ * names — so a wrong or hostile answer here is refused rather than signed.
+ */
+export async function fetchRawTxHex(
+  opts: IndexerConfig & { txid: string; timeoutMs?: number; fetchImpl?: typeof fetch }
+): Promise<string | null> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 10_000);
+  try {
+    const res = await fetchImpl(`${stripTrailingSlash(opts.api)}/tx/${opts.txid}/hex`, {
+      signal: controller.signal,
+      headers: indexerAuthHeaders(opts),
+    });
+    if (!res.ok) return null;
+    const body = (await res.text()).trim();
+    // Esplora serves this as a bare hex body; anything else is not a
+    // transaction and must not be handed on as one.
+    return /^[0-9a-f]+$/i.test(body) && body.length % 2 === 0 ? body : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Fee facts for a pending deposit, so the creator can be told when theirs is
  * underpriced. Facts only — what to DO about it is the browser's copy, and the
  * app cannot act on it either way: replacing that transaction needs the keys
@@ -602,6 +638,7 @@ export function createBitcoinRoutes(deps: {
   fee: Handler;
   broadcast: Handler;
   deposit: Handler;
+  prevTx: Handler;
   networkInfo: Handler;
   inscribe: Handler;
   inscribeList: Handler;
@@ -1158,6 +1195,57 @@ export function createBitcoinRoutes(deps: {
        */
       pendingDeposit,
     });
+  };
+
+  /**
+   * GET /api/btc/prevtx?txid=… — one previous transaction, as raw hex.
+   *
+   * Turnkey refuses a SegWit v0 input carrying only `witness_utxo`, so the
+   * browser must attach the whole previous transaction before it can sign the
+   * commit. It comes through us so the indexer seam stays in one place and a
+   * creator's funding txids do not reach a public indexer tied to their IP.
+   *
+   * SCOPED, not a general lookup proxy: the txid must be one that actually
+   * funds THIS caller's bound deposit address. Same reasoning as the deposit
+   * route — a signed-in caller must not be able to use us to fetch arbitrary
+   * transactions. The browser verifies the bytes hash to the txid it asked
+   * for, so this route cannot substitute a different transaction either.
+   */
+  const prevTx: Handler = async (req, url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp);
+    if (limited) return limited;
+    if (!indexer) return json({ error: 'deposit_unavailable' }, 503);
+    const network = deps.network ?? 'testnet';
+
+    const txid = url.searchParams.get('txid') ?? '';
+    if (!/^[0-9a-f]{64}$/i.test(txid)) {
+      return json({ error: 'bad_txid', message: 'A 64-character hex txid is required.' }, 400);
+    }
+
+    const address = deps.inscriptions?.depositBinding(sub, network) ?? null;
+    if (!address) {
+      return json({ error: 'no_deposit_address', message: 'No deposit address is bound to this account.' }, 403);
+    }
+
+    let utxos: Awaited<ReturnType<typeof fetchAddressUtxos>>;
+    try {
+      utxos = await fetchAddressUtxos({ ...indexer, address, network, fetchImpl: deps.fetchImpl });
+    } catch {
+      return json({ error: 'indexer_unavailable' }, 503);
+    }
+    const funds = utxos.confirmed.some((u) => u.txid.toLowerCase() === txid.toLowerCase());
+    if (!funds) {
+      return json(
+        { error: 'txid_not_yours', message: 'That transaction does not fund this account’s deposit address.' },
+        403
+      );
+    }
+
+    const raw = await fetchRawTxHex({ ...indexer, txid, fetchImpl: deps.fetchImpl });
+    if (!raw) return json({ error: 'prevtx_unavailable' }, 503);
+    return json({ txid, hex: raw });
   };
 
   /**
@@ -1779,7 +1867,7 @@ export function createBitcoinRoutes(deps: {
     return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'reveal_broadcast' });
   };
 
-  return { funding, sat, fee, broadcast, deposit, networkInfo, inscribe, inscribeList, inscribeRebroadcast };
+  return { funding, sat, fee, broadcast, deposit, prevTx, networkInfo, inscribe, inscribeList, inscribeRebroadcast };
 }
 
 export type BitcoinRoutes = ReturnType<typeof createBitcoinRoutes>;

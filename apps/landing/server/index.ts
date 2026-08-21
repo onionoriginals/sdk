@@ -38,6 +38,7 @@ export function buildRoutes(deps: {
     routes['POST /api/btc/fee'] = deps.bitcoin.fee;
     routes['POST /api/btc/broadcast'] = deps.bitcoin.broadcast;
     routes['GET /api/btc/deposit'] = deps.bitcoin.deposit;
+    routes['GET /api/btc/prevtx'] = deps.bitcoin.prevTx;
     // Unauthenticated on purpose: the browser must be able to detect a
     // build-time/runtime network skew BEFORE it shows anyone a deposit address.
     routes['GET /api/btc/network'] = deps.bitcoin.networkInfo;
