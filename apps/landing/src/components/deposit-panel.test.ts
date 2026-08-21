@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { demo } from '../content';
-import { depositDisclosure, quoteForAddress, depositReadiness, depositBadgeLabel, inscribeIsComplete } from './Demo';
+import { depositDisclosure, quoteForAddress, depositReadiness, depositBadgeLabel, inscribeIsComplete, inscribeDoneView } from './Demo';
 import { bitcoinPaymentUri } from '../sdk/bitcoin-uri';
 
 /**
@@ -221,5 +221,41 @@ describe('a commit-only broadcast is not an inscription', () => {
     expect(demo.deposit.commitOnlyBody).toMatch(/not propagated|has not propagated/i);
     // And it must not imply the creator owes another action.
     expect(demo.deposit.commitOnlyBody).toMatch(/automatically/i);
+  });
+});
+
+describe('the completion panel shows nothing it cannot back up', () => {
+  /**
+   * The first attempt at the commit-only fix added a pending notice but left
+   * the completion sentence and the reveal explorer link rendering below it.
+   * The page denied and claimed completion at once, and still offered a link
+   * to a transaction that 404s. Caught in review; this is the guard.
+   */
+  test('a commit-only broadcast claims nothing and links nowhere', () => {
+    const view = inscribeDoneView('commit_broadcast');
+    expect(view.claimComplete).toBe(false);
+    expect(view.showExplorerLink).toBe(false);
+  });
+
+  test('a broadcast reveal claims completion and may link to it', () => {
+    const view = inscribeDoneView('reveal_broadcast');
+    expect(view.claimComplete).toBe(true);
+    expect(view.showExplorerLink).toBe(true);
+  });
+
+  test('an unknown status claims nothing — fail closed', () => {
+    for (const s of [null, undefined, '', 'signed', 'confirmed']) {
+      expect(inscribeDoneView(s).claimComplete).toBe(false);
+      expect(inscribeDoneView(s).showExplorerLink).toBe(false);
+    }
+  });
+
+  // The link and the claim move together: a page that links to a reveal it
+  // will not vouch for is the defect this exists to prevent.
+  test('the claim and the link are never out of step', () => {
+    for (const s of ['commit_broadcast', 'reveal_broadcast', null, 'nonsense']) {
+      const v = inscribeDoneView(s);
+      expect(v.claimComplete).toBe(v.showExplorerLink);
+    }
   });
 });

@@ -431,6 +431,9 @@ export const demo = {
     // NOT on chain yet, and saying "inscribed" here is the same dishonesty as
     // telling someone to sign in again when signing in is what failed.
     commitOnlyHeading: 'Commit broadcast — the inscription finishes shortly',
+    // The sat is decided by the commit's first input, so it IS known already;
+    // the inscription that will ride on it is not on chain yet.
+    commitOnlySatPrefix: 'It will land on satoshi',
     commitOnlyBody:
       'Your funding transaction is on the network. The second transaction, the one that carries the inscription, has not propagated yet — this is expected while the first is still unconfirmed. It is signed and saved on our side and goes out automatically once the first confirms. Nothing is stuck and nothing more is owed; your Your Originals page shows it through to done.',
     balanceReuse:

@@ -337,6 +337,24 @@ export function inscribeIsComplete(status: string | null | undefined): boolean {
   return status === 'reveal_broadcast';
 }
 
+/**
+ * What the completion panel may show, given what actually reached the network.
+ *
+ * A decision rather than a JSX condition, because the first attempt at this
+ * fix added a pending notice and left the completion sentence and the reveal
+ * explorer link rendering underneath it — so the page both denied and claimed
+ * completion, and still linked to a transaction that 404s. A condition spread
+ * across three places in a large component is one nothing can test; this can
+ * be, and is.
+ */
+export function inscribeDoneView(status: string | null | undefined): {
+  claimComplete: boolean;
+  showExplorerLink: boolean;
+} {
+  const complete = inscribeIsComplete(status);
+  return { claimComplete: complete, showExplorerLink: complete };
+}
+
 /** What the deposit badge should say — read off the SUM, never one output. */
 export type DepositReadiness = 'waiting' | 'detected' | 'short' | 'ready' | 'unspendable';
 
@@ -757,7 +775,7 @@ export function Demo() {
   // "deposit detected → confirmed" updates without a reload.
   const [depositRaw, setDeposit] = useState<DepositInfo | null>(null);
   // True when the submit reached the server but only the COMMIT propagated.
-  const [commitOnly, setCommitOnly] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<string | null>(null);
   const [depositError, setDepositError] = useState<string | null>(null);
   // Mirror of depositError readable synchronously inside the inscribe click —
   // state set during that same await would still be stale there, and the
@@ -806,7 +824,7 @@ export function Demo() {
 
   const inscribe = () =>
     run('published', 'inscribing', 'inscribed', async (engine) => {
-      setCommitOnly(false);
+      setSubmitStatus(null);
       // Mock path (no real network enabled): unchanged bare inscribe.
       if (!real) return engine.inscribe();
       // Never build a real-BTC transaction against a server on another chain.
@@ -847,7 +865,7 @@ export function Demo() {
         // The server distinguishes commit-only from a complete pair; the SDK
         // discards submitInscription's return, so read it off the provider.
         const submitted = (engine.ordinalsProvider as { lastSubmit?: { status?: string } }).lastSubmit;
-        setCommitOnly(!inscribeIsComplete(submitted?.status));
+        setSubmitStatus(submitted?.status ?? null);
         return state;
       }
       // testnet4: ask the server faucet to fund the user's address, then
@@ -913,6 +931,8 @@ export function Demo() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, reauth.active, reauthIdentity]);
 
+  // One decision, used by all three parts of the completion panel.
+  const doneView = inscribeDoneView(submitStatus);
   const step = phaseToStep[phase];
   const busy =
     phase === 'creating' || phase === 'publishing' || phase === 'inscribing' || updating;
@@ -1300,29 +1320,43 @@ export function Demo() {
                     {/* Commit-only is not "inscribed": the reveal carries
                         the inscription, and until it propagates there is
                         nothing on chain to point at. */}
-                    {commitOnly && (
+                    {!doneView.claimComplete && (
                       <div className="deposit-funded" role="status">
                         <strong className="deposit-funded-heading">{demo.deposit.commitOnlyHeading}</strong>
                         <p className="deposit-funded-body">{demo.deposit.commitOnlyBody}</p>
                       </div>
                     )}
-                    <p>
-                      <strong>{done.lead}</strong> {done.beforeSatoshi}{' '}
-                      <code>{asset.inscription?.satoshi}</code> {done.beforeTx}{' '}
-                      <code>{asset.inscription?.txid}</code>. {done.after}
-                    </p>
-                    {/* The engine withholds the explorer URL in the simulated
-                        tier (U2); the label goes with it, so no completion
-                        screen can offer a link to a transaction that isn't. */}
-                    {asset.inscription?.explorerUrl && done.explorerLabel && (
-                      <a
-                        className="demo-explorer-link"
-                        href={asset.inscription.explorerUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {done.explorerLabel}
-                      </a>
+                    {/* Both the completion sentence and the explorer link are
+                        withheld while only the commit has landed. Rendering
+                        them under the pending notice is what let the page go
+                        on claiming completion — and link to a reveal txid that
+                        404s — while saying above that it had not finished. */}
+                    {!doneView.claimComplete ? (
+                      <p className="demo-inscribe-note">
+                        {demo.deposit.commitOnlySatPrefix}{' '}
+                        <code>{asset.inscription?.satoshi}</code>.
+                      </p>
+                    ) : (
+                      <>
+                        <p>
+                          <strong>{done.lead}</strong> {done.beforeSatoshi}{' '}
+                          <code>{asset.inscription?.satoshi}</code> {done.beforeTx}{' '}
+                          <code>{asset.inscription?.txid}</code>. {done.after}
+                        </p>
+                        {/* The engine withholds the explorer URL in the simulated
+                            tier (U2); the label goes with it, so no completion
+                            screen can offer a link to a transaction that isn't. */}
+                        {doneView.showExplorerLink && asset.inscription?.explorerUrl && done.explorerLabel && (
+                          <a
+                            className="demo-explorer-link"
+                            href={asset.inscription.explorerUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {done.explorerLabel}
+                          </a>
+                        )}
+                      </>
                     )}
                     <button type="button" className="demo-reset" onClick={reset}>
                       {demo.reset}
