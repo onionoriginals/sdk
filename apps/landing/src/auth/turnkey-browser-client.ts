@@ -11,9 +11,13 @@
  * generated, stored, or sent anywhere.
  */
 import { Turnkey, type TurnkeyIndexedDbClient } from '@turnkey/sdk-browser';
+import { OTP_LOGIN_SIGNATURE_FORMAT } from './turnkey-session';
 import type { SessionKeySigner, TurnkeyRevocationApi } from './turnkey-session';
 
 const TURNKEY_API_BASE_URL = 'https://api.turnkey.com';
+
+/** The stamper's own format parameter, so a Turnkey rename fails typecheck here. */
+type SignFormat = Parameters<TurnkeyIndexedDbClient['sign']>[1];
 
 /**
  * The session key plus the client that stamps with it. `signer` is the only
@@ -68,9 +72,12 @@ async function handleFor(subOrgId: string, opts: { reset: boolean }): Promise<Se
     client,
     signer: {
       publicKeyHex,
-      // crypto.subtle.sign hashes SHA-256 internally and Turnkey's stamper
-      // re-encodes IEEE-P1363 → DER; the private key is never materialised.
-      sign: (message: string) => client.sign(message),
+      // The format is passed, never defaulted: the stamper's default is DER
+      // and Turnkey verifies OTP_LOGIN's clientSignature as raw IEEE-P1363,
+      // so omitting it produces a signature the API rejects. crypto.subtle
+      // hashes SHA-256 internally; the private key is never materialised.
+      sign: (message: string) =>
+        client.sign(message, OTP_LOGIN_SIGNATURE_FORMAT as SignFormat),
     },
     clear: () => client.clear(),
   };

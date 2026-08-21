@@ -82,10 +82,15 @@ any of these is outstanding.
    blocked at the edge, and the Ordinals add-on maps outpoint→address and
    sat→address only), so deposit polling costs no QuickNode quota and lives
    behind `BTC_INDEXER_API` instead.
-5. **One live Turnkey OTP verification.** Still outstanding from PR #356, and
-   now more important: the OTP login client signature was corrected in this
-   branch after being found unacceptable to Turnkey's API, so the login path
-   has almost certainly never completed end to end against a real org.
+5. **One live Turnkey OTP verification.** Outstanding since PR #356. This
+   check earned its place: the login path was broken the entire time it went
+   unrun. Turnkey verifies OTP_LOGIN's `clientSignature` over a **raw**
+   IEEE-P1363 signature, every Turnkey stamper **defaults to DER**, and both
+   are plain hex strings — so no type, test, or build caught it and every live
+   sign-in ended in a failed signing bootstrap. Now pinned by
+   `OTP_LOGIN_SIGNATURE_FORMAT` and guarded before the network call, but the
+   only thing that proves the whole path works is running it against a real
+   org.
 6. **One complete mainnet inscription by a human**, from a cold browser,
    before anyone else is invited.
 
