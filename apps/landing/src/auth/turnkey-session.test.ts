@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
   otpLoginToSession,
+  OTP_LOGIN_SIGNATURE_FORMAT,
   ensureBitcoinFundingAccount,
   type TurnkeyBitcoinClient,
   type TurnkeySessionApi,
@@ -193,7 +194,14 @@ describe('U1: OTP_LOGIN runs off a non-extractable key', () => {
   const sessionPublicKey = '02'.padEnd(66, 'b');
   const verificationToken = fakeVerificationToken({ id: tokenId, public_key: sessionPublicKey });
 
-  function signer(): SessionKeySigner & { signed: string[] } {
+  // A real raw P-256 signature: r‖s, 32 bytes each, hex — 128 chars. The old
+  // fixture returned 'deadbeef', which is why a DER-encoded signature (the
+  // stamper default, and the thing Turnkey actually rejects) passed this suite.
+  const rawSignature = 'ab'.repeat(64);
+  // What the stamper returns when the format is left to default: DER, 0x30 tag.
+  const derSignature = '3044' + 'cd'.repeat(68);
+
+  function signer(signature: string = rawSignature): SessionKeySigner & { signed: string[] } {
     const signed: string[] = [];
     return {
       publicKeyHex: sessionPublicKey,
@@ -202,7 +210,7 @@ describe('U1: OTP_LOGIN runs off a non-extractable key', () => {
       // it can never hand over the private scalar. That is the whole point.
       async sign(message: string) {
         signed.push(message);
-        return 'deadbeef';
+        return signature;
       },
     };
   }
@@ -241,7 +249,7 @@ describe('U1: OTP_LOGIN runs off a non-extractable key', () => {
       publicKey: sessionPublicKey,
       scheme: 'CLIENT_SIGNATURE_SCHEME_API_P256',
       message: loginClientSignatureMessage(tokenId, sessionPublicKey),
-      signature: 'deadbeef',
+      signature: rawSignature,
     });
     // Defaults to the extended window, and reports back when it dies.
     expect(calls[0].expirationSeconds).toBe(String(SESSION_EXPIRATION_SECONDS));
@@ -250,6 +258,44 @@ describe('U1: OTP_LOGIN runs off a non-extractable key', () => {
       publicKey: sessionPublicKey,
       expiresAt: t0 + SESSION_EXPIRATION_SECONDS * 1000,
     });
+  });
+
+  // The live bug: every Turnkey stamper defaults to DER, Turnkey verifies
+  // OTP_LOGIN's clientSignature as raw IEEE-P1363, and nothing between the two
+  // is typed differently — both are plain hex strings. Only the API said no,
+  // and it said so as an opaque bootstrap failure.
+  test('OTP_LOGIN_SIGNATURE_FORMAT pins the encoding Turnkey verifies, not the stamper default', () => {
+    expect(OTP_LOGIN_SIGNATURE_FORMAT).toBe('raw');
+  });
+
+  test('a DER signature is refused here, naming DER, rather than by Turnkey', async () => {
+    // The fake SUCCEEDS on purpose. If the guard is ever removed, this test
+    // fails instead of passing on the fake's own error text.
+    let called = false;
+    const turnkey: TurnkeySessionApi = {
+      async otpLogin() {
+        called = true;
+        return { session: 'must-not-be-reached' };
+      },
+    };
+    await expect(
+      otpLoginToSession({ turnkey, subOrgId: 'sub-1', verificationToken, signer: signer(derSignature) })
+    ).rejects.toThrow(/that is DER, the stamper default/);
+    expect(called).toBe(false);
+  });
+
+  test('any non-raw signature length is refused before the network call', async () => {
+    let called = false;
+    const turnkey: TurnkeySessionApi = {
+      async otpLogin() {
+        called = true;
+        return { session: 's' };
+      },
+    };
+    await expect(
+      otpLoginToSession({ turnkey, subOrgId: 'sub-1', verificationToken, signer: signer('deadbeef') })
+    ).rejects.toThrow(/raw \(IEEE-P1363\)/);
+    expect(called).toBe(false);
   });
 });
 

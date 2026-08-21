@@ -144,6 +144,23 @@ export function decodeVerificationToken(token: string): { id: string; public_key
 }
 
 /**
+ * The signature encoding Turnkey verifies OTP_LOGIN's clientSignature in: RAW
+ * IEEE-P1363 (r‖s), which `@turnkey/core` passes as `SignatureFormat.Raw`.
+ *
+ * Every Turnkey stamper DEFAULTS to DER instead, and DER is what the API
+ * rejects — so this is passed explicitly at every call site and never left to
+ * the default. Lives in this pure module, not the browser client, so the
+ * contract is stated somewhere `bun test` can actually reach.
+ */
+export const OTP_LOGIN_SIGNATURE_FORMAT = 'raw';
+
+/**
+ * Raw P-256 is r‖s, 32 bytes each — exactly 128 hex chars. DER is
+ * variable-length and starts with the 0x30 SEQUENCE tag.
+ */
+const RAW_P256_SIGNATURE_HEX = /^[0-9a-f]{128}$/i;
+
+/**
  * The exact message Turnkey verifies for OTP_LOGIN's clientSignature — field
  * order included, since the signature is over this JSON string. Mirrors
  * `getClientSignatureMessageForLogin` in @turnkey/core.
@@ -158,9 +175,10 @@ export function loginClientSignatureMessage(tokenId: string, sessionPublicKey: s
  * `expirationSeconds`. Returns the metadata the reload path needs to know the
  * session is still alive — never the key.
  *
- * NOTE: the message construction is taken from Turnkey's own SDK, but has not
- * been exercised against the live API from here; it stays a manual-smoke
- * verification point.
+ * The message construction mirrors `getClientSignatureMessageForLogin` in
+ * @turnkey/core exactly, field order included, and the signature is raw
+ * IEEE-P1363 per OTP_LOGIN_SIGNATURE_FORMAT — the DER default was what made
+ * every live attempt fail before it was pinned.
  */
 export async function otpLoginToSession(deps: {
   turnkey: TurnkeySessionApi;
@@ -174,11 +192,21 @@ export async function otpLoginToSession(deps: {
   const sessionPublicKey = boundPublicKey || deps.signer.publicKeyHex;
   const message = loginClientSignatureMessage(tokenId, sessionPublicKey);
   const expirationSeconds = deps.expirationSeconds ?? SESSION_EXPIRATION_SECONDS;
+  const signature = await deps.signer.sign(message);
+  // Refuse a DER signature HERE, naming it. Every local type accepts one — the
+  // stamper returns a plain hex string either way — and only Turnkey rejects
+  // it, as an opaque bootstrap failure with no clue as to the cause.
+  if (!RAW_P256_SIGNATURE_HEX.test(signature)) {
+    const looksDer = signature.startsWith('30') ? ' — that is DER, the stamper default' : '';
+    throw new Error(
+      `OTP_LOGIN needs a raw (IEEE-P1363) P-256 signature; got ${signature.length} hex chars${looksDer}`
+    );
+  }
   const clientSignature: ClientSignature = {
     publicKey: sessionPublicKey,
     scheme: 'CLIENT_SIGNATURE_SCHEME_API_P256',
     message,
-    signature: await deps.signer.sign(message),
+    signature,
   };
   const requestedAt = (deps.now ?? Date.now)();
   const { session } = await deps.turnkey.otpLogin({
