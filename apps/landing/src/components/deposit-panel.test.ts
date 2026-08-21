@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { demo } from '../content';
-import { depositDisclosure, quoteForAddress, depositReadiness, depositBadgeLabel, inscribeIsComplete, inscribeDoneView } from './Demo';
+import { depositDisclosure, quoteForAddress, depositReadiness, depositBadgeLabel, inscribeIsComplete, inscribeDoneView, type SubmitOutcome } from './Demo';
 import { bitcoinPaymentUri } from '../sdk/bitcoin-uri';
 
 /**
@@ -231,30 +231,51 @@ describe('the completion panel shows nothing it cannot back up', () => {
    * The page denied and claimed completion at once, and still offered a link
    * to a transaction that 404s. Caught in review; this is the guard.
    */
+  const submitted = (status: string | null): SubmitOutcome => ({ kind: 'submitted', status });
+
   test('a commit-only broadcast claims nothing and links nowhere', () => {
-    const view = inscribeDoneView('commit_broadcast');
+    const view = inscribeDoneView(submitted('commit_broadcast'));
     expect(view.claimComplete).toBe(false);
     expect(view.showExplorerLink).toBe(false);
   });
 
   test('a broadcast reveal claims completion and may link to it', () => {
-    const view = inscribeDoneView('reveal_broadcast');
+    const view = inscribeDoneView(submitted('reveal_broadcast'));
     expect(view.claimComplete).toBe(true);
     expect(view.showExplorerLink).toBe(true);
   });
 
-  test('an unknown status claims nothing — fail closed', () => {
-    for (const s of [null, undefined, '', 'signed', 'confirmed']) {
-      expect(inscribeDoneView(s).claimComplete).toBe(false);
-      expect(inscribeDoneView(s).showExplorerLink).toBe(false);
+  test('on the submit path an unknown status claims nothing — fail closed', () => {
+    for (const s of [null, '', 'signed', 'confirmed']) {
+      expect(inscribeDoneView(submitted(s)).claimComplete).toBe(false);
+      expect(inscribeDoneView(submitted(s)).showExplorerLink).toBe(false);
     }
+  });
+
+  /**
+   * The regression the fail-closed default caused: the mock tier and the
+   * testnet4 faucet path never touch the submit seam, so there is no status to
+   * read and a successful inscribe there IS complete. Treating that silence as
+   * "unknown" told mock users a nonexistent transaction was on the network.
+   */
+  test('a path with no submit seam is complete, not pending', () => {
+    const view = inscribeDoneView({ kind: 'not-observed' });
+    expect(view.claimComplete).toBe(true);
+    expect(view.showExplorerLink).toBe(true);
   });
 
   // The link and the claim move together: a page that links to a reveal it
   // will not vouch for is the defect this exists to prevent.
   test('the claim and the link are never out of step', () => {
-    for (const s of ['commit_broadcast', 'reveal_broadcast', null, 'nonsense']) {
-      const v = inscribeDoneView(s);
+    const cases: SubmitOutcome[] = [
+      { kind: 'not-observed' },
+      submitted('commit_broadcast'),
+      submitted('reveal_broadcast'),
+      submitted(null),
+      submitted('nonsense'),
+    ];
+    for (const c of cases) {
+      const v = inscribeDoneView(c);
       expect(v.claimComplete).toBe(v.showExplorerLink);
     }
   });

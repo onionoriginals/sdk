@@ -338,20 +338,36 @@ export function inscribeIsComplete(status: string | null | undefined): boolean {
 }
 
 /**
- * What the completion panel may show, given what actually reached the network.
+ * What actually reached the network, as far as the browser can know.
+ *
+ * `not-observed` is NOT the same as "we do not know whether it worked": the
+ * mock tier and the testnet4 faucet path do not go through the submit seam at
+ * all, so a successful inscribe there IS complete and there is no status to
+ * read. Collapsing the two into a single nullable status told mock users that
+ * a nonexistent funding transaction was on the network.
+ */
+export type SubmitOutcome =
+  | { kind: 'not-observed' }
+  | { kind: 'submitted'; status: string | null };
+
+/**
+ * What the completion panel may show.
  *
  * A decision rather than a JSX condition, because the first attempt at this
  * fix added a pending notice and left the completion sentence and the reveal
  * explorer link rendering underneath it — so the page both denied and claimed
- * completion, and still linked to a transaction that 404s. A condition spread
- * across three places in a large component is one nothing can test; this can
- * be, and is.
+ * completion, and still linked to a transaction that 404s.
+ *
+ * Fail-closed applies only where the status is observable: on the submit path
+ * a missing or unrecognised status means the reveal is not known to have
+ * landed, so nothing is claimed.
  */
-export function inscribeDoneView(status: string | null | undefined): {
+export function inscribeDoneView(outcome: SubmitOutcome): {
   claimComplete: boolean;
   showExplorerLink: boolean;
 } {
-  const complete = inscribeIsComplete(status);
+  const complete =
+    outcome.kind === 'not-observed' ? true : inscribeIsComplete(outcome.status);
   return { claimComplete: complete, showExplorerLink: complete };
 }
 
@@ -775,7 +791,7 @@ export function Demo() {
   // "deposit detected → confirmed" updates without a reload.
   const [depositRaw, setDeposit] = useState<DepositInfo | null>(null);
   // True when the submit reached the server but only the COMMIT propagated.
-  const [submitStatus, setSubmitStatus] = useState<string | null>(null);
+  const [submitOutcome, setSubmitOutcome] = useState<SubmitOutcome>({ kind: 'not-observed' });
   const [depositError, setDepositError] = useState<string | null>(null);
   // Mirror of depositError readable synchronously inside the inscribe click —
   // state set during that same await would still be stale there, and the
@@ -824,7 +840,7 @@ export function Demo() {
 
   const inscribe = () =>
     run('published', 'inscribing', 'inscribed', async (engine) => {
-      setSubmitStatus(null);
+      setSubmitOutcome({ kind: 'not-observed' });
       // Mock path (no real network enabled): unchanged bare inscribe.
       if (!real) return engine.inscribe();
       // Never build a real-BTC transaction against a server on another chain.
@@ -865,7 +881,7 @@ export function Demo() {
         // The server distinguishes commit-only from a complete pair; the SDK
         // discards submitInscription's return, so read it off the provider.
         const submitted = (engine.ordinalsProvider as { lastSubmit?: { status?: string } }).lastSubmit;
-        setSubmitStatus(submitted?.status ?? null);
+        setSubmitOutcome({ kind: 'submitted', status: submitted?.status ?? null });
         return state;
       }
       // testnet4: ask the server faucet to fund the user's address, then
@@ -932,7 +948,7 @@ export function Demo() {
   }, [identity, reauth.active, reauthIdentity]);
 
   // One decision, used by all three parts of the completion panel.
-  const doneView = inscribeDoneView(submitStatus);
+  const doneView = inscribeDoneView(submitOutcome);
   const step = phaseToStep[phase];
   const busy =
     phase === 'creating' || phase === 'publishing' || phase === 'inscribing' || updating;
