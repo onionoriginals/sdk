@@ -30,7 +30,7 @@
     "@scure/btc-signer": "^2.2.0",
     "@turnkey/api-key-stamper": "^0.6.7",
     "@turnkey/crypto": "^2.10.0",
-    "@turnkey/sdk-browser": "^7.0.0",
+    "@turnkey/sdk-browser": "^8.2.1",
     "didwebvh-ts": "^2.8.0",
     "qrcode-generator": "2.0.4",
     "react": "^19.2.7",
