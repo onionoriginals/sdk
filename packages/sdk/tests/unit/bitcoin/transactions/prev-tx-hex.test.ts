@@ -90,4 +90,28 @@ describe('a supplied prevTxHex is verified, never trusted', () => {
       build({ txid: p.txid, vout: 0, value: VALUE, scriptPubKey: SCRIPT_HEX, prevTxHex: 'nothex' })
     ).rejects.toThrow(/not raw transaction hex/);
   });
+
+  /**
+   * An empty string is a SUPPLIED value — a fetch that came back with nothing —
+   * not an absent one. Truthiness treated it as absent, so the input silently
+   * lost its nonWitnessUtxo and the signer failed later with its own, less
+   * useful error.
+   */
+  it('refuses an empty prevTxHex rather than silently skipping it', async () => {
+    const p = prevTx();
+    await expect(
+      build({ txid: p.txid, vout: 0, value: VALUE, scriptPubKey: SCRIPT_HEX, prevTxHex: '' })
+    ).rejects.toThrow(/not raw transaction hex/);
+  });
+
+  /** Consumers classify by code, not by parsing message text (CLAUDE.md). */
+  it('reports a stable error code, not a bare Error', async () => {
+    const p = prevTx();
+    try {
+      await build({ txid: p.txid, vout: 0, value: VALUE + 1, scriptPubKey: SCRIPT_HEX, prevTxHex: p.hex });
+      throw new Error('expected a rejection');
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe('INVALID_PREV_TX');
+    }
+  });
 });

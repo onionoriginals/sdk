@@ -8,6 +8,7 @@
  */
 
 import * as btc from '@scure/btc-signer';
+import { StructuredError } from '@originals/cel';
 import * as ordinals from 'micro-ordinals';
 import { schnorr } from '@noble/curves/secp256k1.js';
 import { Utxo, ResourceUtxo } from '../../types/bitcoin.js';
@@ -308,29 +309,36 @@ export async function createRevealTransaction(
  * caller cannot forget to check the result.
  */
 function verifiedPrevTx(utxo: Utxo): Uint8Array {
+  const at = `${utxo.txid}:${utxo.vout}`;
   const raw = utxo.prevTxHex as string;
   if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length % 2 !== 0) {
-    throw new Error(`prevTxHex for ${utxo.txid}:${utxo.vout} is not raw transaction hex.`);
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex for ${at} is not raw transaction hex.`, { outpoint: at });
   }
   const bytes = Uint8Array.from(Buffer.from(raw, 'hex'));
   const prev = btc.Transaction.fromRaw(bytes, { allowUnknownInputs: true, allowUnknownOutputs: true });
   if (prev.id !== utxo.txid) {
-    throw new Error(`prevTxHex hashes to ${prev.id}, not ${utxo.txid}.`);
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex hashes to ${prev.id}, not ${utxo.txid}.`, {
+      outpoint: at, hashedTo: prev.id
+    });
   }
   if (utxo.vout < 0 || utxo.vout >= prev.outputsLength) {
-    throw new Error(`prevTxHex for ${utxo.txid} has no output ${utxo.vout}.`);
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex for ${utxo.txid} has no output ${utxo.vout}.`, { outpoint: at });
   }
   const out = prev.getOutput(utxo.vout);
   if (!out?.script || typeof out.amount !== 'bigint') {
-    throw new Error(`prevTxHex output ${utxo.txid}:${utxo.vout} is unreadable.`);
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex output ${at} is unreadable.`, { outpoint: at });
   }
   if (out.amount !== BigInt(utxo.value)) {
-    throw new Error(
-      `prevTxHex says ${utxo.txid}:${utxo.vout} is ${out.amount} sats, but the UTXO says ${utxo.value}.`
+    throw new StructuredError(
+      'INVALID_PREV_TX',
+      `prevTxHex says ${at} is ${out.amount} sats, but the UTXO says ${utxo.value}.`,
+      { outpoint: at, prevTxSats: String(out.amount), utxoSats: utxo.value }
     );
   }
   if (Buffer.from(out.script).toString('hex') !== String(utxo.scriptPubKey).toLowerCase()) {
-    throw new Error(`prevTxHex output ${utxo.txid}:${utxo.vout} pays a different script than the UTXO.`);
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex output ${at} pays a different script than the UTXO.`, {
+      outpoint: at
+    });
   }
   return bytes;
 }
@@ -772,7 +780,10 @@ export async function createCommitTransaction(
       // Some signers refuse a SegWit v0 input carrying witnessUtxo alone —
       // Turnkey answers "code 3: input N is missing non_witness_utxo". It is
       // VERIFIED before being attached; see verifiedPrevTx.
-      ...(utxo.prevTxHex ? { nonWitnessUtxo: verifiedPrevTx(utxo) } : {})
+      // `!== undefined`, not truthiness: prevTxHex: '' is a SUPPLIED value —
+      // a fetch that returned nothing — and skipping it silently produces a
+      // misleading signer-side error later instead of a clear one here.
+      ...(utxo.prevTxHex !== undefined ? { nonWitnessUtxo: verifiedPrevTx(utxo) } : {})
     });
   }
 
