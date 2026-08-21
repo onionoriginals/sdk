@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
-  otpLoginToSession,
-  OTP_LOGIN_SIGNATURE_FORMAT,
+  stampLoginToSession,
+  attestedStampValue,
   ensureBitcoinFundingAccount,
   type TurnkeyBitcoinClient,
   type TurnkeySessionApi,
@@ -81,7 +81,6 @@ import {
   clearSessionMeta,
   revokeSessionKey,
   restoreDecision,
-  loginClientSignatureMessage,
   decodeVerificationToken,
   type SigningSessionMeta,
   type SessionKeySigner,
@@ -189,70 +188,103 @@ describe('U1: signing capability survives a reload', () => {
   });
 });
 
-describe('U1: OTP_LOGIN runs off a non-extractable key', () => {
+describe('U1: STAMP_LOGIN authenticates with Turnkey\u2019s attested stamp', () => {
   const tokenId = 'tok-123';
   const sessionPublicKey = '02'.padEnd(66, 'b');
   const verificationToken = fakeVerificationToken({ id: tokenId, public_key: sessionPublicKey });
-
-  // A real raw P-256 signature: r‖s, 32 bytes each, hex — 128 chars. The old
-  // fixture returned 'deadbeef', which is why a DER-encoded signature (the
-  // stamper default, and the thing Turnkey actually rejects) passed this suite.
-  const rawSignature = 'ab'.repeat(64);
-  // What the stamper returns when the format is left to default: DER, 0x30 tag.
+  // The attested stamp carries a DER signature, per Turnkey's AttestedStamper.
   const derSignature = '3044' + 'cd'.repeat(68);
 
-  function signer(signature: string = rawSignature): SessionKeySigner & { signed: string[] } {
+  function signer(signature: string = derSignature): SessionKeySigner & { signed: string[] } {
     const signed: string[] = [];
     return {
       publicKeyHex: sessionPublicKey,
       signed,
-      // A non-extractable WebCrypto key can only be asked to sign a message;
+      // A non-extractable WebCrypto key can only be asked to sign a payload;
       // it can never hand over the private scalar. That is the whole point.
-      async sign(message: string) {
-        signed.push(message);
+      async signDer(payload: string) {
+        signed.push(payload);
         return signature;
       },
     };
+  }
+
+  function completed(session = 'session-jwt-xyz') {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        activity: { status: 'ACTIVITY_STATUS_COMPLETED', result: { stampLoginResult: { session } } },
+      }),
+    } as unknown as Response;
   }
 
   test('decodeVerificationToken reads the bound public key and token id', () => {
     expect(decodeVerificationToken(verificationToken)).toEqual({ id: tokenId, public_key: sessionPublicKey });
   });
 
-  test('the login message is Turnkey’s USAGE_TYPE_LOGIN payload over tokenId + session public key', () => {
-    expect(loginClientSignatureMessage(tokenId, sessionPublicKey)).toBe(
-      JSON.stringify({ login: { publicKey: sessionPublicKey }, tokenId, type: 'USAGE_TYPE_LOGIN' })
+  // Turnkey verifies the stamp byte-for-byte, so base64url has to match
+  // @turnkey/encoding exactly: URL-safe alphabet AND stripped padding.
+  test('the stamp is base64url with padding stripped, and decodes to Turnkey\u2019s shape', () => {
+    const value = attestedStampValue({
+      verificationToken,
+      publicKey: sessionPublicKey,
+      signature: derSignature,
+    });
+    expect(value).not.toContain('=');
+    expect(value).not.toContain('+');
+    expect(value).not.toContain('/');
+    const decoded = JSON.parse(
+      atob(value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '='))
     );
+    expect(decoded).toEqual({
+      publicKeyAttestation: verificationToken,
+      scheme: 'STAMP_ATTESTED_SCHEME_P256_VERIFICATION_TOKEN',
+      publicKey: sessionPublicKey,
+      signature: derSignature,
+    });
   });
 
-  test('otpLoginToSession signs with the injected key and sends the clientSignature object', async () => {
-    const calls: Array<Record<string, unknown>> = [];
-    const turnkey: TurnkeySessionApi = {
-      async otpLogin(params) {
-        calls.push(params as unknown as Record<string, unknown>);
-        return { session: 'session-jwt-xyz' };
-      },
-    };
+  test('the signed payload is byte-identical to the body sent', async () => {
+    let sentBody: string | undefined;
     const key = signer();
-    const t0 = 1_700_000_000_000;
-    const { session, meta } = await otpLoginToSession({
-      turnkey,
+    await stampLoginToSession({
       subOrgId: 'sub-1',
       verificationToken,
       signer: key,
+      now: () => 1_700_000_000_000,
+      fetchFn: (async (_url: string, init: RequestInit) => {
+        sentBody = init.body as string;
+        return completed();
+      }) as unknown as typeof fetch,
+    });
+    // Re-serialising between signing and sending would invalidate the stamp.
+    expect(key.signed).toHaveLength(1);
+    expect(sentBody).toBe(key.signed[0]);
+    expect(JSON.parse(sentBody!)).toEqual({
+      type: 'ACTIVITY_TYPE_STAMP_LOGIN',
+      timestampMs: '1700000000000',
+      organizationId: 'sub-1',
+      parameters: { publicKey: sessionPublicKey, expirationSeconds: String(SESSION_EXPIRATION_SECONDS) },
+    });
+  });
+
+  test('sends the attested stamp header and returns the session plus its expiry', async () => {
+    let headers: Record<string, string> | undefined;
+    const t0 = 1_700_000_000_000;
+    const { session, meta } = await stampLoginToSession({
+      subOrgId: 'sub-1',
+      verificationToken,
+      signer: signer(),
       now: () => t0,
+      fetchFn: (async (url: string, init: RequestInit) => {
+        expect(url).toContain('/public/v1/submit/stamp_login');
+        headers = init.headers as Record<string, string>;
+        return completed();
+      }) as unknown as typeof fetch,
     });
+    expect(headers?.['X-Stamp-Attested']).toBeTruthy();
     expect(session).toBe('session-jwt-xyz');
-    // The key signed the login message itself — no private scalar was read.
-    expect(key.signed).toEqual([loginClientSignatureMessage(tokenId, sessionPublicKey)]);
-    expect(calls[0].clientSignature).toEqual({
-      publicKey: sessionPublicKey,
-      scheme: 'CLIENT_SIGNATURE_SCHEME_API_P256',
-      message: loginClientSignatureMessage(tokenId, sessionPublicKey),
-      signature: rawSignature,
-    });
-    // Defaults to the extended window, and reports back when it dies.
-    expect(calls[0].expirationSeconds).toBe(String(SESSION_EXPIRATION_SECONDS));
     expect(meta).toEqual({
       subOrgId: 'sub-1',
       publicKey: sessionPublicKey,
@@ -260,42 +292,36 @@ describe('U1: OTP_LOGIN runs off a non-extractable key', () => {
     });
   });
 
-  // The live bug: every Turnkey stamper defaults to DER, Turnkey verifies
-  // OTP_LOGIN's clientSignature as raw IEEE-P1363, and nothing between the two
-  // is typed differently — both are plain hex strings. Only the API said no,
-  // and it said so as an opaque bootstrap failure.
-  test('OTP_LOGIN_SIGNATURE_FORMAT pins the encoding Turnkey verifies, not the stamper default', () => {
-    expect(OTP_LOGIN_SIGNATURE_FORMAT).toBe('raw');
+  // The failure that started this: Turnkey answered PUBLIC_KEY_NOT_FOUND and
+  // the only reason it was diagnosable is that its own words survived.
+  test('a rejection carries Turnkey\u2019s own message, not just a status code', async () => {
+    await expect(
+      stampLoginToSession({
+        subOrgId: 'sub-1',
+        verificationToken,
+        signer: signer(),
+        fetchFn: (async () => ({
+          ok: false,
+          status: 401,
+          json: async () => ({ message: 'could not find public key in organization' }),
+        })) as unknown as typeof fetch,
+      })
+    ).rejects.toThrow(/could not find public key/);
   });
 
-  test('a DER signature is refused here, naming DER, rather than by Turnkey', async () => {
-    // The fake SUCCEEDS on purpose. If the guard is ever removed, this test
-    // fails instead of passing on the fake's own error text.
-    let called = false;
-    const turnkey: TurnkeySessionApi = {
-      async otpLogin() {
-        called = true;
-        return { session: 'must-not-be-reached' };
-      },
-    };
+  test('an activity that did not complete is not mistaken for a session', async () => {
     await expect(
-      otpLoginToSession({ turnkey, subOrgId: 'sub-1', verificationToken, signer: signer(derSignature) })
-    ).rejects.toThrow(/that is DER, the stamper default/);
-    expect(called).toBe(false);
-  });
-
-  test('any non-raw signature length is refused before the network call', async () => {
-    let called = false;
-    const turnkey: TurnkeySessionApi = {
-      async otpLogin() {
-        called = true;
-        return { session: 's' };
-      },
-    };
-    await expect(
-      otpLoginToSession({ turnkey, subOrgId: 'sub-1', verificationToken, signer: signer('deadbeef') })
-    ).rejects.toThrow(/raw \(IEEE-P1363\)/);
-    expect(called).toBe(false);
+      stampLoginToSession({
+        subOrgId: 'sub-1',
+        verificationToken,
+        signer: signer(),
+        fetchFn: (async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({ activity: { status: 'ACTIVITY_STATUS_PENDING' } }),
+        })) as unknown as typeof fetch,
+      })
+    ).rejects.toThrow(/did not complete/);
   });
 });
 

@@ -83,14 +83,15 @@ any of these is outstanding.
    sat→address only), so deposit polling costs no QuickNode quota and lives
    behind `BTC_INDEXER_API` instead.
 5. **One live Turnkey OTP verification.** Outstanding since PR #356. This
-   check earned its place: the login path was broken the entire time it went
-   unrun. Turnkey verifies OTP_LOGIN's `clientSignature` over a **raw**
-   IEEE-P1363 signature, every Turnkey stamper **defaults to DER**, and both
-   are plain hex strings — so no type, test, or build caught it and every live
-   sign-in ended in a failed signing bootstrap. Now pinned by
-   `OTP_LOGIN_SIGNATURE_FORMAT` and guarded before the network call, but the
-   only thing that proves the whole path works is running it against a real
-   org.
+   check earned its place twice over: the login path was broken the entire time
+   it went unrun, in two independent ways, and neither was reachable from any
+   test. It first sent a DER signature where OTP_LOGIN wants raw IEEE-P1363
+   (both are plain hex strings, so nothing local could tell them apart), and
+   underneath that it called the wrong activity entirely — an ordinary stamp on
+   `otp_login`, which Turnkey answers with `PUBLIC_KEY_NOT_FOUND` because the
+   credential being installed cannot already exist. It now runs STAMP_LOGIN
+   with the attested stamp, which is what `@turnkey/core` does. The only thing
+   that proves it works is running it against a real org.
 6. **One complete mainnet inscription by a human**, from a cold browser,
    before anyone else is invited.
 

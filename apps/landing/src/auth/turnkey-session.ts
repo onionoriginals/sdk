@@ -58,32 +58,15 @@ export interface SigningSessionMeta {
 export type SigningStatus = 'none' | 'active' | 'expired' | 'unavailable';
 
 /**
- * A handle to the session key. `sign` takes the message and returns a hex
- * signature; the caller can never obtain the private key, because a
+ * A handle to the session key. `signDer` takes the exact request body and
+ * returns a DER-encoded hex signature — the encoding Turnkey's attested stamp
+ * carries. The caller can never obtain the private key, because a
  * non-extractable CryptoKey has none to give.
  */
 export interface SessionKeySigner {
   /** Compressed P-256 public key hex. */
   publicKeyHex: string;
-  sign(message: string): Promise<string>;
-}
-
-export interface ClientSignature {
-  publicKey: string;
-  scheme: 'CLIENT_SIGNATURE_SCHEME_API_P256';
-  message: string;
-  signature: string;
-}
-
-/** The single OTP_LOGIN activity the session bootstrap needs. */
-export interface TurnkeySessionApi {
-  otpLogin(params: {
-    organizationId: string;
-    verificationToken: string;
-    publicKey: string;
-    clientSignature: ClientSignature;
-    expirationSeconds?: string;
-  }): Promise<{ session: string }>;
+  signDer(payload: string): Promise<string>;
 }
 
 /** The Bitcoin-signing + account surface the rest of Track B consumes. */
@@ -144,83 +127,156 @@ export function decodeVerificationToken(token: string): { id: string; public_key
 }
 
 /**
- * The signature encoding Turnkey verifies OTP_LOGIN's clientSignature in: RAW
- * IEEE-P1363 (r‖s), which `@turnkey/core` passes as `SignatureFormat.Raw`.
+ * Turnkey's ATTESTED stamp: how a request is authenticated for an org that
+ * holds no credential yet.
  *
- * Every Turnkey stamper DEFAULTS to DER instead, and DER is what the API
- * rejects — so this is passed explicitly at every call site and never left to
- * the default. Lives in this pure module, not the browser client, so the
- * contract is stated somewhere `bun test` can actually reach.
+ * This is the crux of the whole bootstrap. Straight after verify-otp the
+ * sub-org has NO registered key — the browser's key is exactly what login is
+ * about to install. So the request cannot be stamped the ordinary way: signing
+ * it with the browser key makes Turnkey answer
+ * `PUBLIC_KEY_NOT_FOUND` ("could not find public key in organization"), which
+ * is precisely what it did. The credential does not exist yet; that is the
+ * point of logging in.
+ *
+ * The attested stamp resolves the circularity by presenting the verification
+ * token — which Turnkey itself issued and signed at verify-otp — as the
+ * attestation, alongside a signature proving the caller holds the key that
+ * token was bound to.
+ *
+ * Mirrors `AttestedStamper` in @turnkey/core exactly, which is unpublished as
+ * a standalone package. Reproduced rather than depended on because
+ * @turnkey/core pulls ethers, viem and WalletConnect into a landing bundle.
  */
-export const OTP_LOGIN_SIGNATURE_FORMAT = 'raw';
+export const ATTESTED_STAMP_HEADER = 'X-Stamp-Attested';
+export const ATTESTED_SCHEME_VERIFICATION_TOKEN = 'STAMP_ATTESTED_SCHEME_P256_VERIFICATION_TOKEN';
+
+/** Turnkey's own endpoint and activity for exchanging that stamp for a session. */
+export const TURNKEY_API_BASE_URL = 'https://api.turnkey.com';
+export const STAMP_LOGIN_PATH = '/public/v1/submit/stamp_login';
+export const STAMP_LOGIN_ACTIVITY = 'ACTIVITY_TYPE_STAMP_LOGIN';
 
 /**
- * Raw P-256 is r‖s, 32 bytes each — exactly 128 hex chars. DER is
- * variable-length and starts with the 0x30 SEQUENCE tag.
+ * String → base64url. Mirrors `stringToBase64urlString` in @turnkey/encoding:
+ * `btoa` over the raw string, then URL-safe, then padding STRIPPED. Turnkey
+ * verifies the stamp byte-for-byte, so each of those three steps matters.
+ * `btoa` (not TextEncoder) is deliberate — it is what Turnkey calls, and the
+ * stamp JSON is ASCII, so the two agree.
  */
-const RAW_P256_SIGNATURE_HEX = /^[0-9a-f]{128}$/i;
+export function encodeBase64Url(input: string): string {
+  return btoa(input).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
 
-/**
- * The exact message Turnkey verifies for OTP_LOGIN's clientSignature — field
- * order included, since the signature is over this JSON string. Mirrors
- * `getClientSignatureMessageForLogin` in @turnkey/core.
- */
-export function loginClientSignatureMessage(tokenId: string, sessionPublicKey: string): string {
-  return JSON.stringify({ login: { publicKey: sessionPublicKey }, tokenId, type: 'USAGE_TYPE_LOGIN' });
+/** The `X-Stamp-Attested` header value for a request body. */
+export function attestedStampValue(opts: {
+  verificationToken: string;
+  publicKey: string;
+  signature: string;
+}): string {
+  // Field order is Turnkey's. The value is a JSON blob it parses, not a
+  // signature input, but keeping the order identical keeps the diff against
+  // their implementation readable.
+  return encodeBase64Url(
+    JSON.stringify({
+      publicKeyAttestation: opts.verificationToken,
+      scheme: ATTESTED_SCHEME_VERIFICATION_TOKEN,
+      publicKey: opts.publicKey,
+      signature: opts.signature,
+    })
+  );
 }
 
 /**
- * Run OTP_LOGIN: sign the login message with the browser's non-extractable
- * P-256 key and exchange it for a session credential valid for
- * `expirationSeconds`. Returns the metadata the reload path needs to know the
- * session is still alive — never the key.
- *
- * The message construction mirrors `getClientSignatureMessageForLogin` in
- * @turnkey/core exactly, field order included, and the signature is raw
- * IEEE-P1363 per OTP_LOGIN_SIGNATURE_FORMAT — the DER default was what made
- * every live attempt fail before it was pinned.
+ * The STAMP_LOGIN request body, as the exact string that is BOTH signed and
+ * sent. Re-serialising it after signing would risk a different byte sequence
+ * and an invalid stamp, so callers must send this string verbatim.
  */
-export async function otpLoginToSession(deps: {
-  turnkey: TurnkeySessionApi;
+export function stampLoginBody(opts: {
   subOrgId: string;
+  publicKey: string;
+  expirationSeconds: number;
+  timestampMs: number;
+}): string {
+  return JSON.stringify({
+    type: STAMP_LOGIN_ACTIVITY,
+    timestampMs: String(opts.timestampMs),
+    organizationId: opts.subOrgId,
+    parameters: {
+      publicKey: opts.publicKey,
+      expirationSeconds: String(opts.expirationSeconds),
+    },
+  });
+}
+
+/** What Turnkey answers with. Only the completed shape carries a session. */
+interface StampLoginResponse {
+  activity?: {
+    status?: string;
+    result?: { stampLoginResult?: { session?: string } };
+  };
+  message?: string;
+}
+
+/**
+ * Exchange the verification token for a signing session (STAMP_LOGIN).
+ *
+ * This is the flow @turnkey/core runs for a credential-less sub-org: configure
+ * an attested stamper from the verification token, then call stamp_login. It
+ * does NOT call the otp_login activity, and neither do we — an ordinary stamp
+ * there is unauthenticatable for the reason described above.
+ *
+ * Returns the metadata the reload path needs to know the session is alive —
+ * never the key.
+ */
+export async function stampLoginToSession(deps: {
   verificationToken: string;
+  subOrgId: string;
   signer: SessionKeySigner;
   expirationSeconds?: number;
   now?: () => number;
+  fetchFn?: typeof fetch;
+  apiBaseUrl?: string;
 }): Promise<{ session: string; meta: SigningSessionMeta }> {
-  const { id: tokenId, public_key: boundPublicKey } = decodeVerificationToken(deps.verificationToken);
-  const sessionPublicKey = boundPublicKey || deps.signer.publicKeyHex;
-  const message = loginClientSignatureMessage(tokenId, sessionPublicKey);
+  const { public_key: boundPublicKey } = decodeVerificationToken(deps.verificationToken);
+  // The token's bound key IS the browser's key (verify-otp bound it to exactly
+  // that), and it is the key the stamp attests to. Prefer the token's copy:
+  // Turnkey checks the stamp against the token, not against our belief.
+  const publicKey = boundPublicKey || deps.signer.publicKeyHex;
   const expirationSeconds = deps.expirationSeconds ?? SESSION_EXPIRATION_SECONDS;
-  const signature = await deps.signer.sign(message);
-  // Refuse a DER signature HERE, naming it. Every local type accepts one — the
-  // stamper returns a plain hex string either way — and only Turnkey rejects
-  // it, as an opaque bootstrap failure with no clue as to the cause.
-  if (!RAW_P256_SIGNATURE_HEX.test(signature)) {
-    const looksDer = signature.startsWith('30') ? ' — that is DER, the stamper default' : '';
-    throw new Error(
-      `OTP_LOGIN needs a raw (IEEE-P1363) P-256 signature; got ${signature.length} hex chars${looksDer}`
-    );
-  }
-  const clientSignature: ClientSignature = {
-    publicKey: sessionPublicKey,
-    scheme: 'CLIENT_SIGNATURE_SCHEME_API_P256',
-    message,
-    signature,
-  };
   const requestedAt = (deps.now ?? Date.now)();
-  const { session } = await deps.turnkey.otpLogin({
-    organizationId: deps.subOrgId,
-    verificationToken: deps.verificationToken,
-    publicKey: sessionPublicKey,
-    clientSignature,
-    expirationSeconds: String(expirationSeconds),
+
+  const body = stampLoginBody({
+    subOrgId: deps.subOrgId,
+    publicKey,
+    expirationSeconds,
+    timestampMs: requestedAt,
   });
+  const signature = await deps.signer.signDer(body);
+  const stamp = attestedStampValue({ verificationToken: deps.verificationToken, publicKey, signature });
+
+  const doFetch = deps.fetchFn ?? fetch;
+  const res = await doFetch(`${deps.apiBaseUrl ?? TURNKEY_API_BASE_URL}${STAMP_LOGIN_PATH}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', [ATTESTED_STAMP_HEADER]: stamp },
+    body,
+  });
+  const json = (await res.json().catch(() => ({}))) as StampLoginResponse;
+  if (!res.ok) {
+    // Carry Turnkey's own words. The previous failure was legible only because
+    // its message named the cause; a generic status code would not have been.
+    throw new Error(`STAMP_LOGIN failed (${res.status}): ${json.message ?? 'no message'}`);
+  }
+  const status = json.activity?.status;
+  if (status !== 'ACTIVITY_STATUS_COMPLETED') {
+    throw new Error(`STAMP_LOGIN did not complete: ${status ?? 'no activity status'}`);
+  }
+  const session = json.activity?.result?.stampLoginResult?.session;
+  if (!session) throw new Error('STAMP_LOGIN completed without returning a session');
+
   return {
     session,
     meta: {
       subOrgId: deps.subOrgId,
-      publicKey: sessionPublicKey,
+      publicKey,
       expiresAt: requestedAt + expirationSeconds * 1000,
     },
   };
