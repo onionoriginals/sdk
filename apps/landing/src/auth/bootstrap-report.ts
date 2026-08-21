@@ -38,3 +38,31 @@ export function reportBootstrapFailure(
 ): void {
   sink.error(bootstrapFailureMessage(origin, step), err);
 }
+
+/**
+ * Which prerequisite is missing before OTP_LOGIN can even be attempted.
+ *
+ * The two are checked in order, because the step reported has to be the step
+ * that actually failed: a browser that opened its key fine but got no
+ * verification token failed at OTP_LOGIN's prerequisite, not at the key. This
+ * lives here, rather than as a ternary at the call site, so the mapping is
+ * testable — mislabelling the step defeats the entire point of naming it.
+ */
+export function prerequisiteFailure(have: {
+  sessionKey: boolean;
+  verificationToken: boolean;
+}): { step: BootstrapStep; reason: string } | null {
+  if (!have.sessionKey) {
+    return {
+      step: 'open-session-key',
+      reason: 'this browser could not open a signing key (IndexedDB or WebCrypto unavailable)',
+    };
+  }
+  if (!have.verificationToken) {
+    return {
+      step: 'otp-login',
+      reason: 'verify-otp returned no verificationToken, so OTP_LOGIN cannot run',
+    };
+  }
+  return null;
+}

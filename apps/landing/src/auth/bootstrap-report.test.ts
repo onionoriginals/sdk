@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import {
   bootstrapFailureMessage,
   reportBootstrapFailure,
+  prerequisiteFailure,
   type BootstrapStep,
 } from './bootstrap-report';
 
@@ -33,5 +34,29 @@ describe('the signing bootstrap says which step failed', () => {
     expect(seen[0][0]).toContain('[step=otp-login]');
     // Unflattened — an operator can expand it and read Turnkey's own fields.
     expect(seen[0][1]).toBe(cause);
+  });
+});
+
+describe('a missing prerequisite is attributed to the step that actually failed', () => {
+  // The bug this exists to prevent: reporting a missing verificationToken as
+  // 'open-session-key' sends an operator to IndexedDB/WebCrypto when the
+  // browser key opened perfectly well and the OTP prerequisite is what broke.
+  test('a key that opened + no token is an otp-login failure, not a key failure', () => {
+    const failure = prerequisiteFailure({ sessionKey: true, verificationToken: false });
+    expect(failure?.step).toBe('otp-login');
+    expect(failure?.reason).toContain('verificationToken');
+  });
+
+  test('no browser key is a key failure, and takes precedence', () => {
+    expect(prerequisiteFailure({ sessionKey: false, verificationToken: false })?.step).toBe(
+      'open-session-key'
+    );
+    expect(prerequisiteFailure({ sessionKey: false, verificationToken: true })?.step).toBe(
+      'open-session-key'
+    );
+  });
+
+  test('both present is not a failure', () => {
+    expect(prerequisiteFailure({ sessionKey: true, verificationToken: true })).toBeNull();
   });
 });

@@ -19,7 +19,7 @@ import type { SessionKeyHandle } from './turnkey-browser-client';
 import { browserKeyStorage } from './browser-storage';
 import { endSigningSession, signOutIntent } from './sign-out';
 import { btcNetwork } from '../sdk/network-flag';
-import { reportBootstrapFailure, type BootstrapStep } from './bootstrap-report';
+import { reportBootstrapFailure, prerequisiteFailure, type BootstrapStep } from './bootstrap-report';
 
 export interface BitcoinSession {
   fundingAddress: string;
@@ -168,15 +168,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // the "sign in again to get one" copy for a browser that just did, and
     // reports nothing at all. Same defect as the gate, one layer earlier.
     if (!sessionKey || !result.verificationToken) {
-      reportBootstrapFailure(
-        'sign-in',
-        'open-session-key',
-        new Error(
-          sessionKey
-            ? 'verify-otp returned no verificationToken, so OTP_LOGIN cannot run'
-            : 'this browser could not open a signing key (IndexedDB or WebCrypto unavailable)'
-        )
-      );
+      const failure = prerequisiteFailure({
+        sessionKey: Boolean(sessionKey),
+        verificationToken: Boolean(result.verificationToken),
+      });
+      if (failure) reportBootstrapFailure('sign-in', failure.step, new Error(failure.reason));
       setBitcoin(null);
       setSigning('unavailable');
       setReauth({ active: false, fromSubOrgId: null });
