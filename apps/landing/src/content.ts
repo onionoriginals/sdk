@@ -419,6 +419,16 @@ export const demo = {
     // can see their money — and that is the worst moment to say nothing.
     pendingSeenSuffix: 'in the mempool — we can see it, waiting for one confirmation.',
     pendingViewLink: 'View transaction',
+    // The funded state. Previously the panel said "Send at least N sats" even
+    // once the deposit covered the cost, so a creator who had already paid was
+    // still being told to pay and had no idea the next move was theirs.
+    fundedHeading: 'Funded — ready to inscribe',
+    fundedBody: 'Your deposit covers this inscription. Use the button below to inscribe on Bitcoin.',
+    balanceLabel: 'Your deposit balance',
+    balanceNeeded: 'needed for this inscription',
+    addMoreSummary: 'Add more funds, or see the deposit address',
+    balanceReuse:
+      'Anything left over stays at this address and pays for your next inscription here — you will not be asked to deposit again while it covers the cost.',
     // A CONFIRMED deposit that does not cover the cost. Distinct from
     // 'detected', whose copy promises a confirmation that already happened.
     shortBadge: 'Deposit confirmed — a top-up is needed.',

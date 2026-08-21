@@ -159,3 +159,39 @@ describe('a confirmed deposit that does not cover the cost', () => {
     expect(depositReadiness({ ...i, confirmedUtxos: [utxo(18_599)], confirmedSats: 18_599 })).toBe('ready');
   });
 });
+
+describe('a funded deposit stops asking for money', () => {
+  /**
+   * The UX failure: the panel rendered "Send at least N sats" regardless of
+   * readiness, so someone whose deposit already covered the cost was still
+   * being told to pay, with no indication the next move was theirs.
+   * depositReadiness is what the panel now switches on.
+   */
+  const utxo = (value: number) => ({ txid: 'a'.repeat(64), vout: 0, value, scriptPubKey: '0014' + '11'.repeat(20) });
+  const info = (confirmed: number, cost: number) => ({
+    address: 'bc1qwx77y7n2dvcfy2aejnrxcapevmssfezc4ly4rl',
+    confirmedUtxos: [utxo(confirmed)],
+    confirmedSats: confirmed,
+    unconfirmedSats: 0,
+    estimatedCostSats: cost,
+  });
+
+  test('leftover sats keep a later inscription funded without a new deposit', () => {
+    // 19,580 held against a 14,580 cost: funded, and the surplus stays put.
+    expect(depositReadiness(info(19_580, 14_580))).toBe('ready');
+  });
+
+  test('the funded and unfunded states are distinguishable by readiness alone', () => {
+    expect(depositReadiness(info(19_580, 14_580))).toBe('ready');
+    expect(depositReadiness(info(14_580, 18_599))).toBe('short');
+  });
+
+  test('the funded copy tells the creator to inscribe, not to send more', () => {
+    expect(demo.deposit.fundedHeading).toMatch(/ready to inscribe/i);
+    expect(demo.deposit.fundedBody).not.toMatch(/send/i);
+  });
+
+  test('the balance copy explains that a surplus is reusable, not stranded', () => {
+    expect(demo.deposit.balanceReuse).toMatch(/next inscription/i);
+  });
+});

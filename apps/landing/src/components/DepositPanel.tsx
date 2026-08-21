@@ -26,6 +26,8 @@ export function DepositPanel({
   pendingSats = 0,
   pendingHref,
   shortfall,
+  balanceSats = 0,
+  funded = false,
 }: {
   address: string;
   sats: number;
@@ -43,6 +45,10 @@ export function DepositPanel({
    * the number they need BEFORE they go back to their wallet, not after.
    */
   shortfall?: { heldSats: number; shortfallSats: number } | null;
+  /** Everything confirmed at the address — what the creator actually holds. */
+  balanceSats?: number;
+  /** That balance covers the cost, so nothing needs sending. */
+  funded?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const uri = bitcoinPaymentUri(address, sats);
@@ -58,14 +64,10 @@ export function DepositPanel({
     }
   };
 
-  return (
-    <div className="deposit">
-      <div className="deposit-amount">
-        <span className="deposit-amount-label">{demo.deposit.sendPrefix}</span>
-        <strong className="deposit-amount-value">{sats.toLocaleString()}</strong>
-        <span className="deposit-amount-unit">sats</span>
-      </div>
-
+  // The address, QR and copy button. Front and centre while funding is needed;
+  // tucked into a disclosure once it is not, because a funded creator's next
+  // move is to inscribe, not to send more money.
+  const payBlock = (
       <div className="deposit-pay">
         <div className="deposit-pay-main">
           <span className="deposit-address-label">{demo.deposit.addressLabel}</span>
@@ -95,6 +97,47 @@ export function DepositPanel({
           <p className="deposit-hint deposit-hint-center">{demo.deposit.scanHint}</p>
         </div>
       </div>
+  );
+
+  return (
+    <div className="deposit">
+      {funded ? (
+        <>
+          <div className="deposit-funded" role="status">
+            <strong className="deposit-funded-heading">{demo.deposit.fundedHeading}</strong>
+            <p className="deposit-funded-body">{demo.deposit.fundedBody}</p>
+          </div>
+          <dl className="deposit-balance">
+            <div>
+              <dt>{demo.deposit.balanceLabel}</dt>
+              <dd>{balanceSats.toLocaleString()} sats</dd>
+            </div>
+            <div>
+              <dt>{demo.deposit.balanceNeeded}</dt>
+              <dd>{sats.toLocaleString()} sats</dd>
+            </div>
+          </dl>
+          <p className="deposit-purpose">{demo.deposit.balanceReuse}</p>
+          <details className="deposit-details">
+            <summary>{demo.deposit.addMoreSummary}</summary>
+            <div className="deposit-details-body">{payBlock}</div>
+          </details>
+        </>
+      ) : (
+        <>
+          <div className="deposit-amount">
+            <span className="deposit-amount-label">{demo.deposit.sendPrefix}</span>
+            <strong className="deposit-amount-value">{sats.toLocaleString()}</strong>
+            <span className="deposit-amount-unit">sats</span>
+          </div>
+          {balanceSats > 0 && (
+            <p className="deposit-hint deposit-balance-line">
+              {demo.deposit.balanceLabel}: <strong>{balanceSats.toLocaleString()} sats</strong>
+            </p>
+          )}
+          {payBlock}
+        </>
+      )}
 
       {shortfall && (
         <p className="deposit-short" role="status">

@@ -1174,6 +1174,8 @@ export function Demo() {
                           <DepositPanel
                             address={bitcoin.fundingAddress}
                             sats={deposit.estimatedCostSats}
+                            balanceSats={deposit.confirmedSats ?? 0}
+                            funded={readiness === 'ready'}
                             pendingSats={deposit.unconfirmedSats}
                             shortfall={
                               readiness === 'short'
