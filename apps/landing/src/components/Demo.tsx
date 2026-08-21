@@ -325,6 +325,18 @@ export function quoteForAddress(
   return info.address === address ? info : null;
 }
 
+/**
+ * Whether the pair actually reached the network, or only the commit did.
+ *
+ * The server distinguishes these; the SDK discards the distinction (it does
+ * not capture submitInscription's return), so the browser reads it back off
+ * the provider. Calling a commit-only outcome "inscribed" tells a creator
+ * their inscription exists when it does not yet.
+ */
+export function inscribeIsComplete(status: string | null | undefined): boolean {
+  return status === 'reveal_broadcast';
+}
+
 /** What the deposit badge should say — read off the SUM, never one output. */
 export type DepositReadiness = 'waiting' | 'detected' | 'short' | 'ready' | 'unspendable';
 
@@ -744,6 +756,8 @@ export function Demo() {
   // their Turnkey-derived address, polled while the inscribe step is live so
   // "deposit detected → confirmed" updates without a reload.
   const [depositRaw, setDeposit] = useState<DepositInfo | null>(null);
+  // True when the submit reached the server but only the COMMIT propagated.
+  const [commitOnly, setCommitOnly] = useState(false);
   const [depositError, setDepositError] = useState<string | null>(null);
   // Mirror of depositError readable synchronously inside the inscribe click —
   // state set during that same await would still be stale there, and the
@@ -792,6 +806,7 @@ export function Demo() {
 
   const inscribe = () =>
     run('published', 'inscribing', 'inscribed', async (engine) => {
+      setCommitOnly(false);
       // Mock path (no real network enabled): unchanged bare inscribe.
       if (!real) return engine.inscribe();
       // Never build a real-BTC transaction against a server on another chain.
@@ -822,13 +837,18 @@ export function Demo() {
             depositShortfallMessage(selection.totalSats, selection.shortfallSats)
           );
         }
-        return engine.inscribe({
+        const state = await engine.inscribe({
           funding: {
             fundingUtxos: selection.selected,
             changeAddress: bitcoin.fundingAddress,
             signingClient: bitcoin.signingClient,
           },
         });
+        // The server distinguishes commit-only from a complete pair; the SDK
+        // discards submitInscription's return, so read it off the provider.
+        const submitted = (engine.ordinalsProvider as { lastSubmit?: { status?: string } }).lastSubmit;
+        setCommitOnly(!inscribeIsComplete(submitted?.status));
+        return state;
       }
       // testnet4: ask the server faucet to fund the user's address, then
       // inscribe with the user's Turnkey key. 507 surfaces a friendly message.
@@ -1277,6 +1297,15 @@ export function Demo() {
 
                 {phase === 'inscribed' && asset && (
                   <div className="demo-done" data-sim={inscribeView.simulated ? '' : undefined}>
+                    {/* Commit-only is not "inscribed": the reveal carries
+                        the inscription, and until it propagates there is
+                        nothing on chain to point at. */}
+                    {commitOnly && (
+                      <div className="deposit-funded" role="status">
+                        <strong className="deposit-funded-heading">{demo.deposit.commitOnlyHeading}</strong>
+                        <p className="deposit-funded-body">{demo.deposit.commitOnlyBody}</p>
+                      </div>
+                    )}
                     <p>
                       <strong>{done.lead}</strong> {done.beforeSatoshi}{' '}
                       <code>{asset.inscription?.satoshi}</code> {done.beforeTx}{' '}

@@ -427,6 +427,12 @@ export const demo = {
     balanceLabel: 'Your deposit balance',
     balanceNeeded: 'needed for this inscription',
     addMoreSummary: 'Add more funds, or see the deposit address',
+    // The commit landed but the reveal did not propagate. The inscription is
+    // NOT on chain yet, and saying "inscribed" here is the same dishonesty as
+    // telling someone to sign in again when signing in is what failed.
+    commitOnlyHeading: 'Commit broadcast — the inscription finishes shortly',
+    commitOnlyBody:
+      'Your funding transaction is on the network. The second transaction, the one that carries the inscription, has not propagated yet — this is expected while the first is still unconfirmed. It is signed and saved on our side and goes out automatically once the first confirms. Nothing is stuck and nothing more is owed; your Your Originals page shows it through to done.',
     balanceReuse:
       'Anything left over stays at this address and pays for your next inscription here — you will not be asked to deposit again while it covers the cost.',
     // A CONFIRMED deposit that does not cover the cost. Distinct from
