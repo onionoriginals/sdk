@@ -1,5 +1,39 @@
 # @originals/sdk
 
+## 3.0.0-next.2
+
+### Minor Changes
+
+- 09ce651: Support multi-input funding for inscriptions, and stop the commit builder from silently dropping a caller's UTXO.
+
+  `inscribeOnBitcoin` now accepts `fundingUtxos: Utxo[]` (the singular `fundingUtxo` stays as a one-element shorthand). The identity satoshi is pinned to the first funding UTXO and re-asserted against the built and signed transaction, rather than being implied by there being exactly one input.
+
+  This closes a latent funds-safety bug: `createCommitTransaction` selects value-descending and stops once the target is covered, so passing a caller-ordered set could drop the identity UTXO entirely and inscribe on the wrong satoshi. The new `exactUtxos` mode spends the caller's exact set in the caller's exact order and fails closed rather than narrowing.
+
+  `OrdinalsProvider.submitInscription` gains a `fundingUtxos` array carrying every funding input in order, so an implementation persisting for recovery can claim all of them. The change is additive: the singular `fundingUtxo` stays required and keeps mirroring the identity input, so existing implementations continue to compile.
+
+  Also fixes a commit-builder dead end that a fundable set could hit. The final fee was priced against an output count re-derived from the estimated fee rather than the count the funding check was made against; above roughly 17.6 sat/vB (P2WPKH change) a surplus that clears dust flipped the transaction back to two outputs and threw `Outputs exceed inputs`. The builder now reuses the planned output count, absorbing a surplus too small to make a viable change output into the fee.
+
+- 71c81f3: Real-BTC hardening for the sat-selected inscribe path.
+
+  - **BIP-125 RBF on every built input**: the commit and reveal builders (and
+    the landing faucet's funding tx) now set sequence `0xfffffffd` instead of
+    @scure/btc-signer's final-sequence default, so a fee-spiked commit is
+    replaceable rather than parked. `RBF_SEQUENCE` is exported from the commit
+    builder. Note the reveal signals RBF but is **not** replaceable in practice:
+    its signing key is ephemeral and never persisted, so a wedged reveal is
+    recovered by rebroadcast (automatic — see the landing app's list poll) or
+    bumped by CPFP on its postage output, never by replacement.
+  - **Atomic `submitInscription` seam on `OrdinalsProvider`** (optional): when a
+    provider implements it, `inscribeOnSat` submits the signed commit+reveal
+    pair in ONE call instead of two sequential `broadcastTransaction` calls,
+    letting the implementation persist both transactions durably BEFORE
+    anything is broadcast — the stranded-funds fix: a caller that dies between
+    commit and reveal can no longer orphan the committed funds. A failed submit
+    throws `INSCRIPTION_SUBMIT_FAILED` carrying full recovery data (both signed
+    tx hexes, txids, sat, inscription id). Providers without the seam keep the
+    existing two-broadcast behavior and `REVEAL_BROADCAST_FAILED` semantics.
+
 ## 3.0.0-next.1
 
 ### Minor Changes
