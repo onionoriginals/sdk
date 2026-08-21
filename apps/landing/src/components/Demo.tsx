@@ -326,17 +326,18 @@ export function quoteForAddress(
 }
 
 /** What the deposit badge should say — read off the SUM, never one output. */
-export type DepositReadiness = 'waiting' | 'detected' | 'ready' | 'unspendable';
+export type DepositReadiness = 'waiting' | 'detected' | 'short' | 'ready' | 'unspendable';
 
 /**
  * The badge for a deposit block. Split out so the readiness is computed once
- * per render and the four states read as a table rather than a nested ternary.
+ * per render and the five states read as a table rather than a nested ternary.
  */
 export function depositBadgeLabel(
   readiness: ReturnType<typeof depositReadiness>,
   copy: {
     ordinalCheckBadge: string;
     ready: string;
+    shortBadge: string;
     detected: string;
     waiting: string;
   }
@@ -346,6 +347,8 @@ export function depositBadgeLabel(
       return copy.ordinalCheckBadge;
     case 'ready':
       return copy.ready;
+    case 'short':
+      return copy.shortBadge;
     case 'detected':
       return copy.detected;
     default:
@@ -358,6 +361,11 @@ export function depositReadiness(info: DepositInfo | null): DepositReadiness {
   if (info.ordinalCheck === 'unavailable') return 'unspendable';
   const spendable = info.confirmedUtxos.reduce((n, u) => n + u.value, 0);
   if (spendable >= info.estimatedCostSats) return 'ready';
+  // CONFIRMED but not enough is its own state. It used to fall through to
+  // 'detected', whose copy says "waiting for one confirmation" — so a creator
+  // whose money had already confirmed sat watching a poll for an event that
+  // had happened, never told they were short or by how much.
+  if (spendable > 0) return 'short';
   const seen = spendable + info.unconfirmedSats + (info.confirmedSats ?? 0);
   return seen > 0 ? 'detected' : 'waiting';
 }
@@ -1167,6 +1175,16 @@ export function Demo() {
                             address={bitcoin.fundingAddress}
                             sats={deposit.estimatedCostSats}
                             pendingSats={deposit.unconfirmedSats}
+                            shortfall={
+                              readiness === 'short'
+                                ? {
+                                    heldSats: deposit.confirmedUtxos.reduce((n, u) => n + u.value, 0),
+                                    shortfallSats:
+                                      deposit.estimatedCostSats -
+                                      deposit.confirmedUtxos.reduce((n, u) => n + u.value, 0),
+                                  }
+                                : null
+                            }
                             pendingHref={
                               deposit.pendingDeposit
                                 ? explorerTxUrl(network, deposit.pendingDeposit.txid)

@@ -385,3 +385,24 @@
 @media (prefers-reduced-motion: reduce) {
   .deposit-pending-dot { animation: none; }
 }
+
+/*
+ * Confirmed, but short. Amber like the risk block: nothing has gone wrong and
+ * no money is at risk, but the creator has to act before anything proceeds.
+ */
+.deposit-short {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+}
+
+.deposit-short strong {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-text);
+}

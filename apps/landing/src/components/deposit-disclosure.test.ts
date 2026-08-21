@@ -106,7 +106,11 @@ describe('what the creator is told about their balance', () => {
       ordinalCheck: 'ok' as const,
     };
     expect(depositReadiness(info)).toBe('ready');
-    expect(depositReadiness({ ...info, estimatedCostSats: 20_000 })).toBe('detected');
+    // CONFIRMED but short is 'short', not 'detected'. This assertion used to
+    // expect 'detected', whose copy reads "waiting for one confirmation" —
+    // which told a creator whose deposit had already confirmed to keep waiting
+    // and never named the gap. Changed deliberately.
+    expect(depositReadiness({ ...info, estimatedCostSats: 20_000 })).toBe('short');
     expect(depositReadiness({ ...info, confirmedUtxos: [] })).toBe('waiting');
     // Unconfirmed money is money that has arrived, even if it cannot be spent.
     expect(depositReadiness({ ...info, confirmedUtxos: [], unconfirmedSats: 5_000 })).toBe('detected');

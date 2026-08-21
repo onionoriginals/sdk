@@ -419,6 +419,12 @@ export const demo = {
     // can see their money — and that is the worst moment to say nothing.
     pendingSeenSuffix: 'in the mempool — we can see it, waiting for one confirmation.',
     pendingViewLink: 'View transaction',
+    // A CONFIRMED deposit that does not cover the cost. Distinct from
+    // 'detected', whose copy promises a confirmation that already happened.
+    shortBadge: 'Deposit confirmed — a top-up is needed.',
+    shortTopUpPrefix: 'Send',
+    shortTopUpSuffix:
+      'more to the same address. The quote above already includes the cost of spending that second payment, so this amount is the whole gap.',
     // A pending deposit paying under the going rate. We cannot fix this: the
     // inputs belong to the wallet the creator sent from, so only that wallet
     // can replace the transaction. Saying so beats a button that cannot work.

@@ -25,6 +25,7 @@ export function DepositPanel({
   sats,
   pendingSats = 0,
   pendingHref,
+  shortfall,
 }: {
   address: string;
   sats: number;
@@ -36,6 +37,12 @@ export function DepositPanel({
    * an empty href on screen, which looks like a link and goes nowhere.
    */
   pendingHref?: string | null;
+  /**
+   * A CONFIRMED deposit that does not cover the cost. Shown here rather than
+   * only when the inscribe button is pressed: the number a creator needs is
+   * the number they need BEFORE they go back to their wallet, not after.
+   */
+  shortfall?: { heldSats: number; shortfallSats: number } | null;
 }) {
   const [copied, setCopied] = useState(false);
   const uri = bitcoinPaymentUri(address, sats);
@@ -88,6 +95,15 @@ export function DepositPanel({
           <p className="deposit-hint deposit-hint-center">{demo.deposit.scanHint}</p>
         </div>
       </div>
+
+      {shortfall && (
+        <p className="deposit-short" role="status">
+          <strong>{shortfall.heldSats.toLocaleString()} sats</strong> confirmed.{' '}
+          {demo.deposit.shortTopUpPrefix}{' '}
+          <strong>{shortfall.shortfallSats.toLocaleString()} sats</strong>{' '}
+          {demo.deposit.shortTopUpSuffix}
+        </p>
+      )}
 
       {/* The gap this closes: between sending and confirming, nothing on
           screen told a creator we could see their money. The badge said
