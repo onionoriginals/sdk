@@ -19,6 +19,7 @@ import type { SessionKeyHandle } from './turnkey-browser-client';
 import { browserKeyStorage } from './browser-storage';
 import { endSigningSession, signOutIntent } from './sign-out';
 import { btcNetwork } from '../sdk/network-flag';
+import { reportBootstrapFailure, prerequisiteFailure, type BootstrapStep } from './bootstrap-report';
 
 export interface BitcoinSession {
   fundingAddress: string;
@@ -82,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSigning(signingStatus(meta));
       return;
     }
+    let step: BootstrapStep = 'open-session-key';
     try {
       const { openSessionKey } = await import('./turnkey-browser-client');
       const handle = await openSessionKey(restored.subOrgId);
@@ -91,11 +93,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       const signingClient = handle.client as unknown as TurnkeyBitcoinClient;
+      step = 'funding-account';
       const fundingAddress = await ensureBitcoinFundingAccount(signingClient, restored.subOrgId, network);
       setBitcoin({ fundingAddress, signingClient });
       setSigning('active');
     } catch (err) {
-      console.warn('[originals-demo] could not restore the signing session', err);
+      reportBootstrapFailure('reload', step, err);
       setBitcoin(null);
       setSigning('unavailable');
     }
@@ -154,12 +157,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Track B bootstrap: install the session key on the sub-org (OTP_LOGIN),
     // then build the signing client + ensure the network's funding account.
-    // Best-effort: a failure here must NOT block login — the demo falls back to
-    // the mock inscribe path. Only runs when the deploy enabled a real network.
-    if (network === 'off' || !result.verificationToken || !sessionKey) {
+    // Only runs when the deploy enabled a real network; on an 'off' build there
+    // is nothing to bootstrap and the demo runs the mock inscribe path.
+    if (network === 'off') {
       setReauth({ active: false, fromSubOrgId: null });
       return;
     }
+    // On a real-network build these two are FAILURES, not "no key yet". They
+    // used to return here silently, leaving signing at 'none' — which renders
+    // the "sign in again to get one" copy for a browser that just did, and
+    // reports nothing at all. Same defect as the gate, one layer earlier.
+    if (!sessionKey || !result.verificationToken) {
+      const failure = prerequisiteFailure({
+        sessionKey: Boolean(sessionKey),
+        verificationToken: Boolean(result.verificationToken),
+      });
+      if (failure) reportBootstrapFailure('sign-in', failure.step, new Error(failure.reason));
+      setBitcoin(null);
+      setSigning('unavailable');
+      setReauth({ active: false, fromSubOrgId: null });
+      return;
+    }
+    // Three different subsystems fail into the one catch below — the browser
+    // key, Turnkey's OTP_LOGIN, and the Bitcoin funding account. Without this
+    // label the report names none of them, and the whole surface reads as one
+    // opaque "signing is unavailable".
+    let step: BootstrapStep = 'open-session-key';
     try {
       // Re-open against the real sub-org: same IndexedDB key, but
       // signTransaction carries no organizationId of its own, so the client's
@@ -167,6 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { openSessionKey } = await import('./turnkey-browser-client');
       const bound = await openSessionKey(result.subOrgId);
       const signingClient = bound.client as unknown as TurnkeyBitcoinClient;
+      step = 'otp-login';
       const { meta } = await otpLoginToSession({
         turnkey: signingClient as unknown as TurnkeySessionApi,
         subOrgId: result.subOrgId,
@@ -175,6 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       const storage = browserKeyStorage();
       if (storage) writeSessionMeta(storage, meta);
+      step = 'funding-account';
       const fundingAddress = await ensureBitcoinFundingAccount(signingClient, result.subOrgId, network);
       setBitcoin({ fundingAddress, signingClient });
       setSigning('active');
@@ -182,7 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Non-fatal for sign-in itself, but on a real-network build the demo does
       // NOT fall back to mock — the inscribe step is gated. Mark it unavailable
       // so the UI says so instead of telling the user to sign in again.
-      console.warn('[originals-demo] bitcoin session bootstrap failed', err);
+      reportBootstrapFailure('sign-in', step, err);
       setBitcoin(null);
       setSigning('unavailable');
     } finally {
