@@ -448,7 +448,7 @@ export const demo = {
     feeLowYours: 'Yours',
     feeLowNetwork: 'Clearing now',
     feeLowSuggest: 'Replace at',
-    feeLowMinimum: 'Minimum the network will accept',
+    feeLowMinimum: 'At least, if the replacement is the same size',
     // sendSuffix continues the "Send at least <n> sats" sentence, so it cannot
     // stand alone now that the amount lives in its own block. This is the same
     // point as a whole sentence.

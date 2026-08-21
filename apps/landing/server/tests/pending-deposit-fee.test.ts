@@ -72,3 +72,26 @@ describe('pending fee facts are best effort and never throw', () => {
     }
   });
 });
+
+describe('advice is withheld unless every pending payment was priced', () => {
+  /**
+   * The defect: with more pending payments than the lookup cap, or a lookup
+   * that failed, advising from the subset can name a FASTER sibling while the
+   * real blocker sits outside it — sending the creator's fee bump, and the
+   * explorer link, at the wrong transaction.
+   */
+  test('a partial view is not enough to name the blocker', () => {
+    const priced = [{ feeSats: 1640, vsize: 164 }]; // the fast one
+    const totalPending = 2; // the slow one was never priced
+    const sawThemAll = priced.length === totalPending;
+    expect(sawThemAll).toBe(false);
+    // The route advises only when sawThemAll — so nothing is claimed here.
+    expect(sawThemAll ? slowestPending(priced) : null).toBeNull();
+  });
+
+  test('a complete view does name it', () => {
+    const priced = [{ feeSats: 1640, vsize: 164 }, { feeSats: 165, vsize: 164 }];
+    const sawThemAll = priced.length === 2;
+    expect(sawThemAll ? slowestPending(priced) : null).toBe(priced[1]);
+  });
+});

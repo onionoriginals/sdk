@@ -1136,7 +1136,15 @@ export function createBitcoinRoutes(deps: {
           ),
           currentFeeRate(1),
         ]);
-        const slowest = slowestPending(fees.filter((f) => f !== null));
+        // Advise ONLY when every pending payment was priced. A partial view
+        // can name a faster sibling while the real blocker sits outside it —
+        // pointing the creator's fee bump, and the explorer link, at the wrong
+        // transaction. Saying nothing beats confidently saying the wrong thing.
+        // (An earlier version claimed a partial read could only understate the
+        // problem. It can also misattribute it, which is worse.)
+        const priced = fees.filter((f) => f !== null);
+        const sawThemAll = priced.length === utxos.unconfirmedTxids.length;
+        const slowest = sawThemAll ? slowestPending(priced) : null;
         if (slowest) {
           pendingDeposit = {
             txid: slowest.txid,

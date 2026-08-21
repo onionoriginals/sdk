@@ -24,7 +24,15 @@ export type DepositFeeAdvice =
       kind: 'bumpable';
       feeRateSatVb: number;
       networkSatVb: number;
-      /** Total fee a replacement must pay AT MINIMUM to be relayed at all. */
+      /**
+       * A LOWER BOUND on the fee a replacement must pay to be relayed, and
+       * only exact when the replacement is the same size as the original.
+       * BIP-125 rule 4 charges for the REPLACEMENT's bandwidth, so a wallet
+       * that adds an input to cover the higher fee owes more than this. That
+       * is why `suggestSatVb` is the number the copy leads with: a rate scales
+       * with whatever size the wallet actually builds, an absolute fee does
+       * not.
+       */
       minReplacementFeeSats: number;
       /** The rate to aim for: relayable AND likely to clear. */
       suggestSatVb: number;
