@@ -1087,7 +1087,7 @@ export function createBitcoinRoutes(deps: {
     // is drawn from the ones we did read, which can only understate the
     // problem, never invent one.
     let pendingDeposit:
-      | { feeSats: number; vsize: number; rbf: boolean; networkSatVb: number }
+      | { txid: string; feeSats: number; vsize: number; rbf: boolean; networkSatVb: number }
       | null = null;
     if (utxos.unconfirmedTxids.length > 0) {
       try {
@@ -1102,6 +1102,7 @@ export function createBitcoinRoutes(deps: {
         const slowest = slowestPending(fees.filter((f) => f !== null));
         if (slowest) {
           pendingDeposit = {
+            txid: slowest.txid,
             feeSats: slowest.feeSats,
             vsize: slowest.vsize,
             rbf: slowest.rbf,

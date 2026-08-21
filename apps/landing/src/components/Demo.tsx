@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DepositPanel } from './DepositPanel';
 import { DepositFeeNotice } from './DepositFeeNotice';
+import { explorerTxUrl } from '../sdk/explorer';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine } from '../sdk/engine';
 import { engineIdentity, ANON_IDENTITY } from '../sdk/engine';
@@ -35,7 +36,13 @@ export interface DepositInfo {
   unconfirmedSats: number;
   estimatedCostSats: number;
   /** Fee facts for a pending deposit, when the server could read them. */
-  pendingDeposit?: { feeSats: number; vsize: number; rbf: boolean; networkSatVb: number } | null;
+  pendingDeposit?: {
+    txid: string;
+    feeSats: number;
+    vsize: number;
+    rbf: boolean;
+    networkSatVb: number;
+  } | null;
 }
 
 /**
@@ -1159,6 +1166,12 @@ export function Demo() {
                           <DepositPanel
                             address={bitcoin.fundingAddress}
                             sats={deposit.estimatedCostSats}
+                            pendingSats={deposit.unconfirmedSats}
+                            pendingHref={
+                              deposit.pendingDeposit
+                                ? explorerTxUrl(network, deposit.pendingDeposit.txid)
+                                : null
+                            }
                           />
                           {deposit.pendingDeposit && (
                             <DepositFeeNotice pending={deposit.pendingDeposit} />

@@ -330,3 +330,58 @@
   font-family: var(--font-mono);
   color: var(--text-secondary);
 }
+
+/* --- payment seen, not yet confirmed ------------------------------------ */
+
+/*
+ * Green, and stated in sats. "Detected" on a small badge is easy to miss at
+ * the one moment a creator most wants confirmation that their money arrived.
+ */
+.deposit-pending {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 2px solid var(--ok);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: rgba(63, 221, 157, 0.08);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.deposit-pending strong {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.deposit-pending a {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.deposit-pending a:hover {
+  color: var(--text-primary);
+}
+
+.deposit-pending-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--ok);
+  flex: 0 0 auto;
+  align-self: center;
+  animation: deposit-pulse 2s var(--ease) infinite;
+}
+
+@keyframes deposit-pulse {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deposit-pending-dot { animation: none; }
+}

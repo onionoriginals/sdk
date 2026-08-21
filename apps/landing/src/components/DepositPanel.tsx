@@ -20,7 +20,23 @@ import './deposit.css';
  * that the disclosure no longer stands between a person and the thing they
  * came here to do.
  */
-export function DepositPanel({ address, sats }: { address: string; sats: number }) {
+export function DepositPanel({
+  address,
+  sats,
+  pendingSats = 0,
+  pendingHref,
+}: {
+  address: string;
+  sats: number;
+  /** Sats seen at the address but not yet confirmed. */
+  pendingSats?: number;
+  /**
+   * Where to look the payment up. Resolved by the caller and null when we have
+   * no explorer for this network — passing a function that could return '' put
+   * an empty href on screen, which looks like a link and goes nowhere.
+   */
+  pendingHref?: string | null;
+}) {
   const [copied, setCopied] = useState(false);
   const uri = bitcoinPaymentUri(address, sats);
 
@@ -72,6 +88,25 @@ export function DepositPanel({ address, sats }: { address: string; sats: number 
           <p className="deposit-hint deposit-hint-center">{demo.deposit.scanHint}</p>
         </div>
       </div>
+
+      {/* The gap this closes: between sending and confirming, nothing on
+          screen told a creator we could see their money. The badge said
+          "detected", which is easy to miss and does not name an amount. */}
+      {pendingSats > 0 && (
+        <p className="deposit-pending" role="status">
+          <span className="deposit-pending-dot" aria-hidden="true" />
+          <strong>{pendingSats.toLocaleString()} sats</strong>{' '}
+          {demo.deposit.pendingSeenSuffix}
+          {pendingHref && (
+            <>
+              {' '}
+              <a href={pendingHref} target="_blank" rel="noreferrer">
+                {demo.deposit.pendingViewLink}
+              </a>
+            </>
+          )}
+        </p>
+      )}
 
       <p className="deposit-purpose">{demo.deposit.purposeShort}</p>
 

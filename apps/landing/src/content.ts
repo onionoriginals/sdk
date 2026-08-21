@@ -415,6 +415,10 @@ export const demo = {
     openInWallet: 'Open in wallet',
     openInWalletHint: 'Opens your Bitcoin wallet with the address and amount already filled in.',
     scanHint: 'Or scan to pay from your phone',
+    // Between sending and confirming, a creator has no way to tell whether we
+    // can see their money — and that is the worst moment to say nothing.
+    pendingSeenSuffix: 'in the mempool — we can see it, waiting for one confirmation.',
+    pendingViewLink: 'View transaction',
     // A pending deposit paying under the going rate. We cannot fix this: the
     // inputs belong to the wallet the creator sent from, so only that wallet
     // can replace the transaction. Saying so beats a button that cannot work.
@@ -432,8 +436,12 @@ export const demo = {
     // sendSuffix continues the "Send at least <n> sats" sentence, so it cannot
     // stand alone now that the amount lives in its own block. This is the same
     // point as a whole sentence.
+    // Accurate about where money goes: selectFundingUtxos takes largest-first
+    // and STOPS once the target is covered, so a deposit it does not need is
+    // left at the address — and there is no withdrawal path for it. The old
+    // line promised the opposite ("spends every confirmed deposit").
     topUpNote:
-      'One payment or several — the inscription spends every confirmed deposit sitting at the address, so a top-up after a fee rise works too.',
+      'Several payments work too: the inscription spends what it needs, largest first, and leaves the rest at the address.',
     waiting: 'Waiting for your deposit…',
     detected: 'Deposit detected — waiting for one confirmation.',
     ready: 'Deposit confirmed — ready to inscribe.',
