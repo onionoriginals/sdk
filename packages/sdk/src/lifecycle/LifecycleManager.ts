@@ -496,7 +496,7 @@ export class LifecycleManager {
     } else if (controllerKp && !ephemeral) {
       // No keyStore: the freshly minted controller private key is held nowhere
       // and is dropped here, so the asset cannot author CEL events — publish/
-      // inscribe/authorizeSigner appends will degrade (cel:append-skipped)
+      // inscribe/rotate appends will degrade (cel:append-skipped)
       // until this VM's key is available in a keyStore. Surface it; never
       // hard-fail (keyStore-less SDKs are valid for verification-only use).
       await this.eventEmitter.emit({
@@ -3448,7 +3448,7 @@ export class LifecycleManager {
     }
   }
 
-  // ===== Shared rotation-first core (rotateBtcoKeys + authorizeSigner) =====
+  // ===== Shared rotation-first core (rotateBtcoKeys + the btco append path) =====
 
   /**
    * Ed25519 + derive check for a caller-supplied rotation keypair: the private
@@ -3472,7 +3472,7 @@ export class LifecycleManager {
   /**
    * The `#resources` OriginalsResourceManifest service for a did:btco document:
    * the on-chain declaration of each resource's id/hash/contentType/url. Shared
-   * by the btco migrate (inscribeOnBitcoin) and rotate/authorize reinscription
+   * by the btco migrate (inscribeOnBitcoin) and rotate reinscription
    * paths so the manifest shape stays byte-identical across them (#384). The
    * manifest rides INSIDE the DID document (the inscription must be the DID doc,
    * application/did+json, or BtcoDidResolver rejects it — #375).
@@ -3489,8 +3489,8 @@ export class LifecycleManager {
   }
 
   /**
-   * Builds the rotated did:btco document (shared by rotateBtcoKeys and
-   * authorizeSigner): same id, the NEW verification method, lineage back-links,
+   * Builds the rotated did:btco document (shared by rotateBtcoKeys and the
+   * btco append reinscription): same id, the NEW verification method, lineage back-links,
    * and the re-embedded resource manifest (the resolver serves the newest
    * inscription, so a rotation that dropped the manifest would erase it). The
    * `#cel` anchor is embedded separately, after the rotateKey head is known.
@@ -3618,8 +3618,8 @@ export class LifecycleManager {
   /**
    * Controller-signed witness acknowledgment (map §5.1): records the
    * inscription that witnessed `witnessedEventDigest` as an `update` event via
-   * the STANDARD append path — folds to the CURRENT controller (for
-   * authorizeSigner, the NEW key post-rotation). Non-gating: `replayProvenance`
+   * the STANDARD append path — folds to the CURRENT controller (post-rotation,
+   * the NEW key). Non-gating: `replayProvenance`
    * ignores updates and the verifier never requires it. Best-effort — the
    * inscription is already committed and paid, so a failed acknowledgment
    * must not undo it. As a side
@@ -3652,13 +3652,11 @@ export class LifecycleManager {
   }
 
   /**
-   * Rotation-first optional authoring (#366): reinscribe the did:btco
-   * document — same id, new verification method — on the SAME sat. Only the
-   * current UTXO holder can do this (reinscription spends the output), so a
-   * successful rotation simultaneously proves sat control and announces the
-   * signing key the (already-owning) sat holder will author future
-   * provenance with. The resolver's newest-valid-inscription rule then
-   * serves the rotated document.
+   * Cooperative key rotation: reinscribe the did:btco document — same id, new
+   * verification method — on the SAME sat, with the rotateKey event signed by
+   * the OUTGOING controller. The resolver's newest-valid-inscription rule then
+   * serves the rotated document. This is the ONLY rotation path: holding the
+   * sat grants no control of the key set, so there is no non-cooperative arm.
    *
    * KEY CUSTODY CONTRACT: after rotation the CURRENT controller folds to the
    * new key, so every subsequent CEL append (transfer, further rotation) signs
@@ -3747,10 +3745,9 @@ export class LifecycleManager {
     }
 
     // Append-first (#365): rotateKey signed by the CURRENT controller — the
-    // cooperative-rotation contract (the verifier only accepts rotations
-    // authorized by the outgoing authority). The non-cooperative arm (a sat
-    // holder who cannot obtain the prior controller's signature) is
-    // authorizeSigner.
+    // cooperative-rotation contract (the verifier ONLY accepts rotations
+    // authorized by the outgoing authority; there is no non-cooperative arm —
+    // holding the sat never grants control of the key set).
     // Canonical VM the post-rotation controller will sign appends under.
     const newController = `did:key:${newVerificationMethod.publicKeyMultibase}`;
     const newControllerVm = `${newController}#${newVerificationMethod.publicKeyMultibase}`;
@@ -3758,9 +3755,9 @@ export class LifecycleManager {
     // can sign (key-custody contract). Before the append is fine — the rotateKey
     // event itself is signed by the OUTGOING controller; this key is for what
     // follows.
-    // Assert the pair whenever a privateKey is supplied (mirrors authorizeSigner);
-    // registering it needs a keyStore, but the derive-check must not be skipped
-    // just because none is configured — a mismatched key must fail loudly.
+    // Assert the pair whenever a privateKey is supplied; registering it needs a
+    // keyStore, but the derive-check must not be skipped just because none is
+    // configured — a mismatched key must fail loudly.
     if (newVerificationMethod.privateKey) {
       this.assertRotationKeyPair(newVerificationMethod.publicKeyMultibase, newVerificationMethod.privateKey);
       if (this.keyStore) {
@@ -3827,180 +3824,6 @@ export class LifecycleManager {
         witnessedEventDigest: celHeadDigest
       }, opts?.incomingSigner ?? opts?.signer);
     }
-
-    await this.eventEmitter.emit({
-      type: 'key:rotated',
-      timestamp: new Date().toISOString(),
-      asset: { id: asset.id },
-      did: btcoDid,
-      inscriptionId: inscription.inscriptionId
-    });
-
-    return { inscriptionId: inscription.inscriptionId, did: btcoDid };
-    });
-    } finally {
-      this.inFlightAssets.delete(asset.id);
-    }
-  }
-
-  /**
-   * Optional author-enablement (#366, design §5): the write side of the
-   * verifier rule Task 5 landed. Ownership itself is the sat — this method
-   * does not grant or claim it. It lets the sat holder establish a signing
-   * key in the log so they can author new provenance even when they CANNOT
-   * obtain the prior controller's signature: they reinscribe the did:btco
-   * document — same id, THEIR key — on the same sat, and self-sign the
-   * rotateKey with that new key. Because only the current UTXO holder can
-   * reinscribe, the reinscription is itself proof of sat control; the
-   * verifier accepts the otherwise-unauthorized rotation once the attached
-   * bitcoin witness proof (check (a)), the announced key (b), the signer
-   * (c), and the strictly-later inscription index (d) all line up.
-   *
-   * Differs from {@link rotateBtcoKeys} (the COOPERATIVE arm): the rotateKey is
-   * SELF-SIGNED with the new key (explicitly NOT the standard append path,
-   * which folds to the prior controller the sat holder does not hold),
-   * signing capability for the NEW key is REQUIRED — either `privateKey` or a
-   * remote `opts.signer` holding it (plan 039) — and a bitcoin witness proof is
-   * attached to the rotateKey post-inscription — that is what satisfies the
-   * verifier's check (a).
-   *
-   * @throws INVALID_STATE when the asset is not on did:btco / has no binding.
-   * @throws INVALID_INPUT when neither privateKey nor opts.signer is supplied,
-   *   or opts.signer's key differs from publicKeyMultibase.
-   * @throws INVALID_KEY_PAIR / CEL_ED25519_REQUIRED for a bad keypair.
-   * @throws OPERATION_IN_PROGRESS on a concurrent call for the same asset.
-   */
-  async authorizeSigner(
-    asset: OriginalsAsset,
-    newVerificationMethod: { publicKeyMultibase: string; privateKey?: string },
-    feeRate?: number,
-    opts?: { signer?: OriginalsSigner }
-  ): Promise<{ inscriptionId: string; did: string }> {
-    if (asset.currentLayer !== 'did:btco') {
-      throw new StructuredError('INVALID_STATE', 'Authorizing a signer requires the asset to be on the did:btco layer.');
-    }
-    const btcoDid = asset.bindings?.['did:btco'];
-    if (!btcoDid) {
-      throw new StructuredError('INVALID_STATE', 'Asset has no did:btco binding to authorize a signer for.');
-    }
-    // Signing capability for the NEW key is REQUIRED: the sat holder
-    // self-signs the rotateKey with it (the prior controller is unavailable to
-    // fold onto). Either a raw private key or a remote signer (plan 039).
-    if (!newVerificationMethod?.privateKey && !opts?.signer) {
-      throw new StructuredError('INVALID_INPUT',
-        'authorizeSigner requires signing capability for the new key to self-sign the rotation: pass privateKey or opts.signer.');
-    }
-    if (opts?.signer && opts.signer.publicKeyMultibase !== newVerificationMethod?.publicKeyMultibase) {
-      throw new StructuredError('INVALID_INPUT',
-        'opts.signer must hold the key being authorized: its publicKeyMultibase differs from newVerificationMethod.publicKeyMultibase.');
-    }
-    // Concurrency guard (issue #255, same pattern as rotateBtcoKeys): reserve the
-    // asset synchronously before the first await so two overlapping calls
-    // cannot both broadcast reinscriptions.
-    if (this.inFlightAssets.has(asset.id)) {
-      throw new StructuredError(
-        'OPERATION_IN_PROGRESS',
-        `An operation for asset ${asset.id} is already in progress; concurrent authorizeSigner calls for the same asset would broadcast duplicate reinscriptions.`
-      );
-    }
-    this.inFlightAssets.add(asset.id);
-    try {
-    // Serialize the self-signed rotateKey append + witness-proof attach +
-    // reinscribe-failure rollback against a concurrent addResourceVersion (#400).
-    // After the non-blocking inFlightAssets guard (concurrent calls still throw).
-    return await asset.runExclusive(async () => {
-    const satoshi = btcoDid.split(':').pop()!;
-    const pkm = newVerificationMethod.publicKeyMultibase;
-    // Derive-check a RAW keypair; a remote signer has no exportable key — its
-    // pair check IS the seal-time self-verify of the rotateKey proof below.
-    if (newVerificationMethod.privateKey) {
-      this.assertRotationKeyPair(pkm, newVerificationMethod.privateKey);
-    }
-    const newController = `did:key:${pkm}`;
-    const newControllerVm = `${newController}#${pkm}`;
-
-    // SELF-SIGN the rotateKey with the NEW key — explicitly NOT
-    // appendCelEventOrSkip, which folds to the prior controller the sat
-    // holder cannot hold. The verifier accepts this unauthorized rotation
-    // non-cooperatively once the reinscription witness proves sat control.
-    const celLogBefore = asset.celLog;
-    if (!celLogBefore) {
-      throw new StructuredError('INVALID_STATE', 'Asset has no CEL log to append the rotation to.');
-    }
-    // Guard above must run BEFORE registering the key: a doomed call (no CEL
-    // log) should not leave an unused key sitting in the keyStore. A remote
-    // signer's key never touches the keyStore (nothing to persist).
-    if (this.keyStore && newVerificationMethod.privateKey) {
-      await this.keyStore.setPrivateKey(newControllerVm, newVerificationMethod.privateKey);
-    }
-
-    // Shared rotated-doc build (backLinks + manifest + NETWORK_MISMATCH guard).
-    const rotatedDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, pkm);
-
-    const { signer, verificationMethod } = newVerificationMethod.privateKey
-      ? celSignerFromKeyPair({ publicKey: pkm, privateKey: newVerificationMethod.privateKey })
-      : { signer: toCelSigner(opts!.signer!), verificationMethod: newControllerVm };
-    const rotatedLog = await appendEvent(
-      celLogBefore,
-      'rotateKey',
-      { newController, rotatedAt: new Date().toISOString() },
-      { signer, verificationMethod }
-    );
-    asset._replaceCelLog(rotatedLog);
-    const rotateEntry = rotatedLog.events[rotatedLog.events.length - 1];
-    const celHeadDigest = computeDigestMultibase(canonicalizeEntryForChain(rotateEntry));
-
-    // #cel anchor = the rotateKey event's chain digest (commits the on-chain
-    // doc to the rotation the reinscription witnesses).
-    this.embedCelAnchor(rotatedDoc, celHeadDigest);
-
-    // Reinscribe on the SAME sat; restore the pre-append log on failure.
-    const inscription = await this.reinscribeRotatedDoc(asset, rotatedDoc, satoshi, feeRate, celLogBefore);
-
-    // Fail loudly rather than write an empty txid into the witness proof
-    // (guaranteed verifier failure later): the reinscription already
-    // happened and was paid for, so surface the inscriptionId for recovery.
-    const witnessTxid = inscription.revealTxId ?? inscription.txid;
-    if (!witnessTxid) {
-      throw new StructuredError(
-        'ORD_PROVIDER_INVALID_RESPONSE',
-        'Reinscription succeeded but the provider returned neither revealTxId nor txid; cannot attach a witness proof.',
-        { inscriptionId: inscription.inscriptionId }
-      );
-    }
-
-    // Attach the bitcoin witness proof to the rotateKey event post-inscription
-    // — this is what satisfies the verifier's non-cooperative check (a).
-    this.attachBitcoinWitnessProof(asset, {
-      satoshi,
-      inscriptionId: inscription.inscriptionId,
-      txid: witnessTxid
-    });
-
-    // Reinscription succeeded — the rotated doc is the resolvable btco doc.
-    asset._captureDidDocument('did:btco', rotatedDoc);
-    // #407 phase 3: the rotateKey event is the new on-chain head; a subsequent
-    // btco resource-update inscribes only the delta appended after it.
-    this.lastInscribedHead.set(asset, celHeadDigest);
-
-    // Direct best-effort persist (issue: no-keyStore gap): with no keyStore,
-    // appendWitnessAcknowledgment below degrades to a skip and never reaches
-    // persistCelArtifacts, so the self-signed rotation + witness proof would
-    // otherwise never reach storage. The ack's own persist (when it lands) is
-    // a harmless double write.
-    await this.persistCelArtifacts(asset);
-
-    // Witness acknowledgment (map §5.1): the acknowledging controller IS the
-    // new key (current post-rotation — the fold picks it up). This standard-path
-    // append ALSO re-persists the now-proofed log through the Task-3/4 choke
-    // point, closing the window where the stored copy predates the witness proof
-    // attached above.
-    await this.appendWitnessAcknowledgment(asset, {
-      satoshi,
-      inscriptionId: inscription.inscriptionId,
-      txid: inscription.revealTxId ?? inscription.txid,
-      witnessedEventDigest: celHeadDigest
-    }, opts?.signer);
 
     await this.eventEmitter.emit({
       type: 'key:rotated',

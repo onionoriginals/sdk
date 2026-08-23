@@ -1242,3 +1242,120 @@ describe('issue #240: honest WitnessService attestations verify', () => {
     expect(result.events[0].witnessProofs![0].verified).toBe(true);
   });
 });
+
+/**
+ * Pin: the non-cooperative rotation path (#366) is DELETED. A rotateKey signed
+ * by a key OUTSIDE the authorized set must fail even when it carries a fully
+ * verified reinscription witness on the anchored sat that would have satisfied
+ * every one of the old path's conditions (a)-(d). Holding the sat buys no
+ * control of the key set — without this test, that path gets reintroduced as a
+ * "bug fix" by whoever next reads "the buyer can't rotate".
+ */
+describe('unauthorized rotateKey with a valid on-sat reinscription witness (deleted #366 path)', () => {
+  test('fails with the unauthorized-signer error despite the reinscription', async () => {
+    const { OrdMockProvider } = await import('../../src/testing/OrdMockProvider');
+    const { appendEvent } = await import('../../src/algorithms/appendEvent');
+    const { deriveDidCel } = await import('../../src/celDid');
+    const ed = await import('@noble/ed25519');
+
+    const makeKey = async () => {
+      const priv = crypto.getRandomValues(new Uint8Array(32));
+      const pub = await ed.getPublicKeyAsync(priv);
+      const pubMb = multikey.encodePublicKey(pub, 'Ed25519');
+      const didKey = `did:key:${pubMb}`;
+      const vm = `${didKey}#${pubMb}`;
+      const signer = async (data: unknown): Promise<DataIntegrityProof> => ({
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: '2026-08-23T00:00:00Z',
+        verificationMethod: vm,
+        proofPurpose: 'assertionMethod',
+        proofValue: multikey.encodeMultibase(
+          new Uint8Array(await ed.signAsync(canonicalizeEvent(data), priv))
+        ),
+      });
+      return { signer, didKey, vm, pubMb };
+    };
+
+    const chainDigest = (event: LogEntry) =>
+      computeDigestMultibase(canonicalizeEntryForChain(event));
+
+    const SAT = '4242424242';
+    const provider = new OrdMockProvider();
+
+    const inscribeAnchorDoc = async (headDigest: string, pubMb: string | undefined, didCel: string) => {
+      const id = `did:btco:reg:${SAT}`;
+      const doc = {
+        '@context': ['https://www.w3.org/ns/did/v1'],
+        id,
+        alsoKnownAs: [didCel],
+        ...(pubMb ? { verificationMethod: [{ id: `${id}#key-0`, type: 'Multikey', controller: id, publicKeyMultibase: pubMb }] } : {}),
+        service: [{ id: `${id}#cel`, type: 'OriginalsCelAnchor', serviceEndpoint: { headDigestMultibase: headDigest } }],
+      };
+      const res = await provider.createInscription({
+        data: Buffer.from(JSON.stringify(doc)),
+        contentType: 'application/did+json',
+        targetSatoshi: SAT,
+      });
+      return { inscriptionId: res.inscriptionId, txid: res.txid };
+    };
+
+    const attachWitness = (log: EventLog, insc: { inscriptionId: string; txid: string }): EventLog => {
+      const last = log.events[log.events.length - 1];
+      const witnessedAt = '2026-08-23T00:00:01Z';
+      const witnessProof = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'bitcoin-ordinals-2024',
+        created: witnessedAt,
+        verificationMethod: 'did:btco:witness',
+        proofPurpose: 'assertionMethod',
+        proofValue: `z${insc.inscriptionId}`,
+        witnessedAt,
+        txid: insc.txid,
+        satoshi: SAT,
+        inscriptionId: insc.inscriptionId,
+      } as unknown as DataIntegrityProof;
+      return { events: [...log.events.slice(0, -1), { ...last, proof: [...last.proof, witnessProof] }] };
+    };
+
+    // Genesis by a, btco migrate by a, anchored on SAT.
+    const a = await makeKey();
+    const b = await makeKey();
+    let log = await createEventLog(
+      { name: 'Asset', controller: a.didKey, resources: [], createdAt: '2026-08-23T00:00:00Z', nonce: 'no366-1' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+    log = await appendEvent(
+      log,
+      'migrate',
+      { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', to: `did:btco:reg:${SAT}`, migratedAt: '2026-08-23T00:00:00Z' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+    const didCel = deriveDidCel(log);
+    const migrateInsc = await inscribeAnchorDoc(chainDigest(log.events[1]), undefined, didCel);
+    log = attachWitness(log, migrateInsc);
+
+    // The anchored log verifies (sanity).
+    const sane = await verifyEventLog(log, { ordinalsProvider: provider });
+    expect(sane.verified).toBe(true);
+
+    // b (never authorized) SELF-SIGNS a rotateKey naming themselves, and the
+    // rotated anchor doc — announcing b's key — is genuinely reinscribed on
+    // the anchored sat, strictly after the migrate anchor. Under #366 this
+    // satisfied conditions (a)-(d) and was accepted.
+    const rotated = await appendEvent(
+      log,
+      'rotateKey',
+      { newController: b.didKey, rotatedAt: '2026-08-23T00:00:02Z' },
+      { signer: b.signer, verificationMethod: b.vm }
+    );
+    const rotInsc = await inscribeAnchorDoc(chainDigest(rotated.events[2]), b.pubMb, didCel);
+    const full = attachWitness(rotated, rotInsc);
+
+    const result = await verifyEventLog(full, { ordinalsProvider: provider });
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /is not authorized by the log's create event/.test(e))).toBe(true);
+    // And the removed public field is gone from the result shape.
+    expect('nonCooperativeRotation' in result.events[2]).toBe(false);
+  });
+});

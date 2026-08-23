@@ -8,7 +8,9 @@
  * must commit (via headDigestMultibase) to the chain digest of SOME event
  * PRESENT in the presented log; otherwise the log is STALE_LOG.
  *
- * Reuses the OrdMock-as-chain fixtures from non-cooperative-rotation.test.ts.
+ * Fixtures drive OrdMockProvider as the chain; the newer on-sat anchor is
+ * produced by a COOPERATIVE rotation (signed by the outgoing controller) —
+ * the only rotation the verifier accepts.
  */
 import { describe, test, expect } from 'bun:test';
 import * as ed25519 from '@noble/ed25519';
@@ -104,16 +106,18 @@ async function makeAnchoredLog(provider: OrdMockProvider, a: Key, sat = SAT) {
   return { log, migrateInscriptionId: insc.inscriptionId, migrateDigest };
 }
 
-// Append a non-cooperative rotateKey and reinscribe the rotated anchor doc on SAT.
-async function addNonCoopRotation(log: EventLog, provider: OrdMockProvider, newController: Key) {
+// Append a COOPERATIVE rotateKey (signed by the outgoing controller) and
+// reinscribe the rotated anchor doc on SAT — the newer on-sat anchor the
+// freshness check compares against.
+async function addRotation(log: EventLog, provider: OrdMockProvider, outgoing: Key, incoming: Key) {
   const rotated = await appendEvent(
     log,
     'rotateKey',
-    { newController: newController.didKey, rotatedAt: '2026-07-10T00:00:02Z' },
-    { signer: newController.signer, verificationMethod: newController.vm }
+    { newController: incoming.didKey, rotatedAt: '2026-07-10T00:00:02Z' },
+    { signer: outgoing.signer, verificationMethod: outgoing.vm }
   );
   const rotDigest = chainDigest(rotated.events[rotated.events.length - 1]);
-  const insc = await inscribeDoc(provider, SAT, rotDigest, newController.pubMb, deriveDidCel(log));
+  const insc = await inscribeDoc(provider, SAT, rotDigest, incoming.pubMb, deriveDidCel(log));
   return { log: attachWitness(rotated, insc, SAT), inscriptionId: insc.inscriptionId, rotDigest };
 }
 
@@ -138,7 +142,7 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     // The buyer (b) reinscribes + rotates: the sat's newest anchor now commits
     // to the rotation. `prefix` (create, migrate) is a VALID prefix of the full
     // log — it omits the rotation event.
-    await addNonCoopRotation(prefix, provider, b);
+    await addRotation(prefix, provider, a, b);
 
     // Without the flag the truncated prefix still verifies (pure-algorithm).
     const lenient = await verifyEventLog(prefix, { ordinalsProvider: provider });
@@ -155,7 +159,7 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     const a = await makeKey();
     const b = await makeKey();
     const { log: prefix } = await makeAnchoredLog(provider, a);
-    const { log: full } = await addNonCoopRotation(prefix, provider, b);
+    const { log: full } = await addRotation(prefix, provider, a, b);
 
     const result = await verifyEventLog(full, { ordinalsProvider: provider, checkHeadFreshness: true });
     expect(result.errors).toEqual([]);
@@ -167,7 +171,7 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     const a = await makeKey();
     const b = await makeKey();
     const { log: prefix } = await makeAnchoredLog(provider, a);
-    const { log: full } = await addNonCoopRotation(prefix, provider, b);
+    const { log: full } = await addRotation(prefix, provider, a, b);
     // b appends an update locally that has NOT been re-inscribed on the sat.
     const withLocalAppend = await appendEvent(full, 'update', { note: 'local' }, { signer: b.signer, verificationMethod: b.vm });
 
@@ -271,7 +275,7 @@ describe('checkHeadFreshness — truncated-log detection', () => {
       const a = await makeKey();
       const b = await makeKey();
       const { log: prefix, migrateInscriptionId } = await makeAnchoredLog(provider, a); // I_mig
-      const { inscriptionId: rotInscriptionId } = await addNonCoopRotation(prefix, provider, b); // I_rot, omitted from prefix
+      const { inscriptionId: rotInscriptionId } = await addRotation(prefix, provider, a, b); // I_rot, omitted from prefix
 
       // I_rot genuinely postdates I_mig (block 200 vs 100). Newest-first list is
       // [I_rot, I_mig]: a list-tail walk would pick I_mig (present in prefix) and
@@ -290,7 +294,7 @@ describe('checkHeadFreshness — truncated-log detection', () => {
       const a = await makeKey();
       const b = await makeKey();
       const { log: prefix, migrateInscriptionId } = await makeAnchoredLog(provider, a);
-      const { log: full, inscriptionId: rotInscriptionId } = await addNonCoopRotation(prefix, provider, b);
+      const { log: full, inscriptionId: rotInscriptionId } = await addRotation(prefix, provider, a, b);
 
       const misordered = newestFirstWithHeights(provider, {
         [migrateInscriptionId]: 100,
@@ -318,7 +322,7 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     const a = await makeKey();
     const b = await makeKey();
     const { log: prefix } = await makeAnchoredLog(provider, a);
-    await addNonCoopRotation(prefix, provider, b);
+    await addRotation(prefix, provider, a, b);
 
     const result = await verifyEventLog(prefix, { ordinalsProvider: provider });
     expect(result.verified).toBe(true);

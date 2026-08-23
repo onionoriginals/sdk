@@ -16,20 +16,20 @@
  * envelope, verifies it with NO keys of their own (verification is public-key
  * only).
  *
- * Phase-4 model — OWNERSHIP IS SAT CONTROL, the CEL is authorship only:
+ * Ownership model — OWNERSHIP IS SAT CONTROL:
  *   - transferOwnership moves the sat and writes NOTHING to the log. Ownership
  *     is read from the chain via getCurrentOwner, NOT from any CEL event.
- *   - To AUTHOR new provenance the sat holder first establishes a signing key
- *     with authorizeSigner (a self-signed rotation the verifier accepts
- *     non-cooperatively once the reinscription proves sat control).
+ *   - Holding the sat grants NO control of the key set: the non-cooperative
+ *     rotation path (#366) is deleted, so a buyer cannot take over the
+ *     creator's controller slot. (The buyer's own right to APPEND arrives
+ *     with sat-gated appends; until then a buyer holds the sat but cannot
+ *     author.)
  *
- *   A: create -> publish -> inscribe -> serialize
+ *   A: create -> publish -> inscribe -> rotate (cooperative) -> serialize
  *   B: loadAsset -> verify (no keys)
  *   A: transferOwnership(BUYER)  [sat move, NO log growth]
  *      => getCurrentOwner reads the BUYER (ownership is the sat)
- *   B: authorizeSigner (B's own key) -> becomes the authoring controller
- *   C: verify the whole chain incl. the non-cooperative rotation
- *   B: an authoring append now SUCCEEDS and GROWS the log (not a transfer)
+ *   B: a rotation attempt with B's own key FAILS — the sat is not the key set
  *   B: onward RESALE = a sat move, NO log growth
  *      => getCurrentOwner flips to the next buyer
  *   + truncation guard: a pre-rotation prefix fails STALE_LOG
@@ -47,7 +47,6 @@ import { replayProvenance } from '../../src/lifecycle/replayProvenance';
 import { resolveDidCel } from '@originals/cel';
 import { createDidManagerKeyResolver } from '@originals/cel';
 import type { AssetEnvelope } from '../../src/lifecycle/assetEnvelope';
-import type { CelAppendSkippedEvent } from '../../src/events/types';
 
 const RES = [{ id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }];
 
@@ -56,7 +55,7 @@ const BUYER_ADDR = 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080';
 const ONWARD_ADDR = 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7';
 
 describe('creator→buyer hand-off end-to-end (#Phase3 Task8)', () => {
-  test('serialize → fresh load+verify → sat-move transfer → non-cooperative authorizeSigner → third-party verify', async () => {
+  test('serialize → fresh load+verify → sat-move transfer → buyer cannot rotate → third-party verify', async () => {
     // The ONE provider instance is the shared chain: it is A's inscription
     // backend AND the ordinals lookup every verifier uses for witness proofs.
     const ordinalsProvider = new OrdMockProvider();
@@ -83,6 +82,17 @@ describe('creator→buyer hand-off end-to-end (#Phase3 Task8)', () => {
     const btcoDid = aAsset.bindings!['did:btco']!;
     expect(btcoDid).toMatch(/^did:btco:reg:\d+$/);
 
+    // A rotates their own key COOPERATIVELY (signed by the outgoing
+    // controller) — the only rotation the verifier accepts. The reinscription
+    // this produces is also what arms the truncation guard below.
+    const rotatedKey = await new KeyManager().generateKeyPair('Ed25519');
+    const rotation = await sdkA.lifecycle.rotateBtcoKeys(aAsset, {
+      publicKeyMultibase: rotatedKey.publicKey,
+      privateKey: rotatedKey.privateKey,
+    });
+    expect(rotation.did).toBe(btcoDid);
+    expect(aAsset.celLog!.events.some(e => e.type === 'rotateKey')).toBe(true);
+
     // The creator hands off a self-describing envelope (pre-transfer).
     const envelope: AssetEnvelope = aAsset.serialize();
     expect(envelope.assetDid).toBe(didCel);
@@ -107,7 +117,11 @@ describe('creator→buyer hand-off end-to-end (#Phase3 Task8)', () => {
     const loaded = await sdkB.lifecycle.loadAsset(wire);
     expect(loaded.verification?.verified).toBe(true);
     expect(loaded.verification?.errors ?? []).toEqual([]);
-    expect(loaded.warnings).toEqual([]);
+    // The publication credential was issued by the PRE-rotation did:cel key;
+    // after A's cooperative rotation the resolver only knows the current key,
+    // so it is surfaced (documented behavior) as an advisory warning — the
+    // load itself still verifies. No other warnings are tolerated.
+    expect(loaded.warnings.every(w => /could not be cryptographically verified at load/.test(w))).toBe(true);
     const bAsset = loaded.asset;
     expect(bAsset.id).toBe(didCel);
 
@@ -165,13 +179,10 @@ describe('creator→buyer hand-off end-to-end (#Phase3 Task8)', () => {
     const celDocFromHost = await sdkB.did.resolveDID(didCel, { skipCache: true });
     expect(celDocFromHost?.id).toBe(didCel);
 
-    // A skip listener to later PROVE B's authoring append fires no degrade.
-    const skipped: CelAppendSkippedEvent[] = [];
-    sdkB.lifecycle.on('cel:append-skipped', (e) => skipped.push(e as CelAppendSkippedEvent));
-
     // ---- The hand-off: ownership IS sat control. ----
     // A moves the sat to the buyer's address. This is a PURE sat move — it
-    // writes NOTHING to the CEL (the log is authorship only). Prove it: the
+    // writes NOTHING to the CEL (the move hands over the pen; the log records
+    // it only when the new holder writes). Prove it: the
     // seller's log length is unchanged across transferOwnership.
     const aLogLenBeforeTransfer = aAsset.celLog!.events.length;
     await sdkA.lifecycle.transferOwnership(aAsset, BUYER_ADDR);
@@ -182,34 +193,41 @@ describe('creator→buyer hand-off end-to-end (#Phase3 Task8)', () => {
     const ownerAfterSale = await sdkB.lifecycle.getCurrentOwner(bAsset);
     expect(ownerAfterSale?.address).toBe(BUYER_ADDR);
 
-    // To AUTHOR provenance the buyer establishes a signing key with B's OWN
-    // fresh Ed25519 keypair — self-signing the rotation, reinscribing the anchor
-    // doc on the sat. No seller signature involved. authorizeSigner does not
-    // grant ownership (the sat already does) — it enables B to write.
+    // ---- Holding the sat grants NO control of the key set. ----
+    // B holds the sat but NOT the creator's controller key, so B's rotation
+    // attempt (with B's own fresh key) cannot be signed: the cooperative
+    // rotation folds to the CURRENT controller, whose key B's keyStore does
+    // not hold. There is no non-cooperative arm to fall back to (#366
+    // deleted). The log must not grow.
     const buyerKey = await new KeyManager().generateKeyPair('Ed25519');
-    const claim = await sdkB.lifecycle.authorizeSigner(bAsset, {
-      publicKeyMultibase: buyerKey.publicKey,
-      privateKey: buyerKey.privateKey,
-    });
-    expect(claim.did).toBe(btcoDid);
-    const claimLog = bAsset.celLog!;
-    expect(claimLog.events.some(e => e.type === 'rotateKey')).toBe(true);
+    const lenBeforeAttempt = bAsset.celLog!.events.length;
+    let rotateErr: any;
+    try {
+      await sdkB.lifecycle.rotateBtcoKeys(bAsset, {
+        publicKeyMultibase: buyerKey.publicKey,
+        privateKey: buyerKey.privateKey,
+      });
+    } catch (e) {
+      rotateErr = e;
+    }
+    expect(rotateErr).toBeDefined();
+    expect(bAsset.celLog!.events.length).toBe(lenBeforeAttempt);
 
     // ---- A third, fully independent verifier verifies the WHOLE chain,
-    // including the non-cooperatively-accepted rotation. ----
+    // including the cooperative rotation. ----
     const sdkC = OriginalsSDK.create({ keyStore: new MockKeyStore(),
       network: 'regtest',
       defaultKeyType: 'Ed25519',
       ordinalsProvider,
       storageAdapter: new MemoryStorageAdapter(),
     } as any);
-    const postClaimEnvelope = bAsset.serialize();
+    const postTransferEnvelope = bAsset.serialize();
     // loadAsset with a provider sets checkHeadFreshness — the strongest gate.
-    const thirdParty = await sdkC.lifecycle.loadAsset(postClaimEnvelope);
+    const thirdParty = await sdkC.lifecycle.loadAsset(postTransferEnvelope);
     expect(thirdParty.verification?.verified).toBe(true);
     expect(thirdParty.verification?.errors ?? []).toEqual([]);
     // And directly, with checkHeadFreshness explicitly on.
-    const direct = await verifyEventLog(claimLog, {
+    const direct = await verifyEventLog(bAsset.celLog!, {
       expectedDid: didCel,
       resolveKey: createDidManagerKeyResolver(sdkC.did),
       ordinalsProvider,
@@ -217,40 +235,26 @@ describe('creator→buyer hand-off end-to-end (#Phase3 Task8)', () => {
     });
     expect(direct.verified).toBe(true);
 
-    // ---- B's authoring appends now SUCCEED: B is the current controller. ----
-    // authorizeSigner registered B's key under the canonical VM, so a further
-    // authoring append (here a cooperative rotation to a second B-held key) is
-    // signed by B and GROWS the log — NO skip fires. This is the write side:
-    // authorship needs the key, and B now holds it.
-    const skipsBefore = skipped.length;
-    const lenBeforeAppend = bAsset.celLog!.events.length;
-    const buyerKey2 = await new KeyManager().generateKeyPair('Ed25519');
-    await sdkB.lifecycle.rotateBtcoKeys(bAsset, {
-      publicKeyMultibase: buyerKey2.publicKey,
-      privateKey: buyerKey2.privateKey,
-    });
-    expect(bAsset.celLog!.events.length).toBeGreaterThan(lenBeforeAppend);
-    expect(skipped.length).toBe(skipsBefore); // no new degrade — B signed it
-
     // ---- The sharpest new-model assertion: B's onward RESALE. ----
     // B sells the sat onward. The resale is a PURE sat move: the log does NOT
     // grow, yet ownership flips to the next buyer — read live off the chain,
-    // never from the CEL. Ownership is the sat; the CEL is only authorship.
+    // never from the CEL. Ownership is the sat; the log grows only when a
+    // holder writes.
     const lenBeforeResale = bAsset.celLog!.events.length;
     await sdkB.lifecycle.transferOwnership(bAsset, ONWARD_ADDR);
     expect(bAsset.celLog!.events.length).toBe(lenBeforeResale); // no log growth
     const ownerAfterResale = await sdkB.lifecycle.getCurrentOwner(bAsset);
     expect(ownerAfterResale?.address).toBe(ONWARD_ADDR);
 
-    // ---- Truncation guard (#366): a seller handing a buyer-with-provider the
+    // ---- Truncation guard: a seller handing a buyer-with-provider the
     // pre-rotation prefix fails STALE_LOG — the sat's newest inscription betrays
     // the omitted rotation. (Attack: an honest re-serialization of a PREFIX.) ----
-    const postClaim = bAsset.serialize();
-    const rotateIdx = postClaim.eventLog.events.findIndex(e => e.type === 'rotateKey');
+    const postTransfer = bAsset.serialize();
+    const rotateIdx = postTransfer.eventLog.events.findIndex(e => e.type === 'rotateKey');
     expect(rotateIdx).toBeGreaterThan(0);
     const truncated: AssetEnvelope = {
-      ...postClaim,
-      eventLog: { ...postClaim.eventLog, events: postClaim.eventLog.events.slice(0, rotateIdx) },
+      ...postTransfer,
+      eventLog: { ...postTransfer.eventLog, events: postTransfer.eventLog.events.slice(0, rotateIdx) },
     };
     let err: any;
     try {

@@ -98,14 +98,6 @@ export interface EventVerification {
    * when the event carries no witness proofs.
    */
   witnessProofs?: { verificationMethod: string; verified: boolean }[];
-  /**
-   * Present when this rotateKey event was accepted via the NON-COOPERATIVE
-   * path (#366): its controller proof was not authorized by the current key
-   * set, but a fully verified reinscription on the log's anchored satoshi
-   * attested the authority hand-off. Carries the rotation's inscriptionId
-   * (the new on-sat authority anchor). Absent for cooperative rotations.
-   */
-  nonCooperativeRotation?: { inscriptionId: string };
   /** Any errors encountered during verification */
   errors: string[];
 }
@@ -180,14 +172,12 @@ export interface OrdinalsLookup {
   } | null>;
   /**
    * MUST return inscription ids oldest-first (on-chain inscription order).
-   * The non-cooperative rotation rule orders inscriptions primarily by their
-   * confirmed block heights (via getInscriptionById, provider-order-
-   * independent) and trusts this list order only as a same-block tiebreak —
-   * a provider violating the contract can therefore no longer make that
-   * check accept a pre-anchor inscription from an earlier block, but
-   * same-block tiebreaks and the head-freshness check still rely on it.
-   * Providers whose getInscriptionById results omit `blockHeight` cannot
-   * prove ordering at all: non-cooperative rotations then fail closed.
+   * The on-chain ordering checks (head freshness, the anchoring walk) order
+   * inscriptions primarily by their confirmed block heights (via
+   * getInscriptionById, provider-order-independent) and trust this list order
+   * only as a same-block tiebreak. Providers whose getInscriptionById results
+   * omit `blockHeight` cannot prove ordering at all: those checks then fail
+   * closed.
    */
   getInscriptionsBySatoshi?(satoshi: string): Promise<Array<{ inscriptionId: string }>>;
   /**

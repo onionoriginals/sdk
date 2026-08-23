@@ -56,15 +56,12 @@ const { asset, verification, warnings } = await sdk.lifecycle.loadAsset(wire);
 await sdk.lifecycle.transferOwnership(asset, 'bcrt1q...');
 const owner = await sdk.lifecycle.getCurrentOwner(asset); // { address, outpoint } | null (read live)
 
-// AUTHORING is optional and separate from ownership. To append new provenance the
-// sat holder must establish a signing key:
-//  COOPERATIVE: outgoing controller signs → rotate the new holder's key in.
+// AUTHORING is separate from ownership. Rotation is COOPERATIVE ONLY: the
+// outgoing controller signs the new key in. There is NO non-cooperative path
+// (authorizeSigner is removed — holding the sat grants no control of the key
+// set, so a buyer cannot rotate themselves in).
 await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase, privateKey });
-//  NON-COOPERATIVE: holder can't get the seller's signature. authorizeSigner
-//  reinscribes with THEIR key and self-signs; the witness proves sat control.
-//  It enables authoring, NOT ownership (the sat already is). privateKey REQUIRED.
-await sdk.lifecycle.authorizeSigner(asset, { publicKeyMultibase, privateKey });
-// Before enabling a signer, a holder's appends DEGRADE (cel:append-skipped/
+// A holder without the controller key: appends DEGRADE (cel:append-skipped/
 // NO_SIGNING_KEY) yet they still own and can transfer the sat. Post-genesis
 // resource versions ride unverified.resourceUpdates (advisory) until Phase 4.
 ```

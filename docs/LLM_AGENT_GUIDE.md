@@ -697,16 +697,10 @@ const owner = await sdk.lifecycle.getCurrentOwner(asset);  // { address, outpoin
 // rotating the incoming key in so the new holder can author.
 await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase, privateKey });
 
-// AUTHORING (optional) — NON-COOPERATIVE: the new holder cannot get the seller's
-// signature. authorizeSigner reinscribes the did:btco doc with THEIR key and
-// SELF-SIGNS the rotateKey; the reinscription witness proves sat control, so the
-// verifier accepts the otherwise-unauthorized rotation. privateKey is REQUIRED.
-// It does NOT grant ownership (the sat already does) — it enables authoring.
-const { inscriptionId, did } = await sdk.lifecycle.authorizeSigner(asset, {
-  publicKeyMultibase, privateKey
-});
-// After authorizeSigner the holder is the current controller: their subsequent
-// CEL appends (e.g. update, further rotation) SIGN instead of degrading.
+// There is NO non-cooperative path: the former authorizeSigner (a self-signed
+// rotation accepted once a reinscription proved sat control) is REMOVED.
+// Holding the sat grants no control of the key set — a rotateKey not signed by
+// the current controller never verifies, so a buyer cannot rotate themselves in.
 ```
 
 A holder who owns the sat but has not enabled authoring (holds no controller key)

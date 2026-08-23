@@ -363,19 +363,11 @@ const owner = await sdk.lifecycle.getCurrentOwner(asset);
 Cooperative key rotation: reinscribe the same-id did:btco doc with a new key, signed by
 the outgoing controller (appends a `rotateKey` event). `privateKey` is optional here.
 
-#### `authorizeSigner(asset, newVerificationMethod, feeRate?)`
-
-Author-enablement (renamed from `claimOwnership`, #366). Does **not** grant or claim
-ownership — the sat is ownership. It lets a sat holder who cannot obtain the seller's
-signature establish a signing key so they can author new provenance: they reinscribe the
-did:btco doc with THEIR key and **self-sign** the `rotateKey`. `privateKey` is REQUIRED.
-
-```typescript
-await sdk.lifecycle.authorizeSigner(asset, {
-  publicKeyMultibase: 'z6Mk...',
-  privateKey: 'z...'  // required — self-signs the rotation
-});
-```
+> **Removed:** `authorizeSigner` (formerly `claimOwnership`, #366) — the
+> non-cooperative rotation path. Holding the sat grants no control of the key
+> set, so a `rotateKey` not signed by the current controller never verifies.
+> `rotateBtcoKeys` is the only rotation, and the controller key lineage is
+> frozen once the asset is inscribed.
 
 #### `resolveAssetFromSat(sat)`
 

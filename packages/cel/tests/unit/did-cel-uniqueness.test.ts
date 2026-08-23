@@ -134,7 +134,7 @@ async function branch(base: EventLog, a: Key, p: OrdMockProvider, sat: string, d
 // Wrap a provider to stamp per-inscription block heights onto BOTH
 // getInscriptionById and getAnchoringsForDidCel. An UNMAPPED inscription has its
 // blockHeight STRIPPED (not left at OrdMock's hardcoded 1), matching the sibling
-// wrappers in head-freshness/non-cooperative-rotation: an unmapped mock must not
+// wrapper in head-freshness: an unmapped mock must not
 // silently participate in canonical ordering — it fails uniqueness closed.
 function withHeights(p: OrdMockProvider, heights: Record<string, number>) {
   return {
@@ -189,13 +189,14 @@ describe('did:cel uniqueness — first-anchor-wins', () => {
     const X = '111000111';
     const bx = await branch(base, a, p, X, didCel);
 
-    // A non-cooperative rotation reinscribes the SAME sat X (a second anchoring
-    // for the same did:cel on the same sat — must NOT count as a rival sat).
+    // A cooperative rotation (signed by the outgoing controller) reinscribes
+    // the SAME sat X (a second anchoring for the same did:cel on the same sat
+    // — must NOT count as a rival sat).
     const rotated = await appendEvent(
       bx.log,
       'rotateKey',
       { newController: b.didKey, rotatedAt: '2026-07-13T00:00:02Z' },
-      { signer: b.signer, verificationMethod: b.vm }
+      { signer: a.signer, verificationMethod: a.vm }
     );
     const rotInsc = await inscribeDoc(p, X, chainDigest(rotated.events[rotated.events.length - 1]), didCel, { publicKeyMultibase: b.pubMb, signer: b.signer });
     const full = attachWitness(rotated, rotInsc, X);

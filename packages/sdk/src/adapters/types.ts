@@ -51,9 +51,9 @@ export interface OrdinalsProvider {
   getFirstSatOfOutput?(outpoint: { txid: string; vout: number }): Promise<string>;
   /**
    * MUST return inscription ids oldest-first (on-chain inscription order).
-   * The non-cooperative rotation rule's later-than-anchor check depends on
-   * this ordering; a provider violating it can make that check accept
-   * earlier inscriptions.
+   * The verifier's on-chain ordering checks (head freshness, the anchoring
+   * walk) depend on this ordering as a same-block tiebreak; a provider
+   * violating it can make those checks accept earlier inscriptions.
    */
   getInscriptionsBySatoshi(satoshi: string): Promise<Array<{ inscriptionId: string }>>;
   broadcastTransaction(txHexOrObj: unknown): Promise<string>;

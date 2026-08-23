@@ -254,10 +254,10 @@ A transfer is a pure Bitcoin **sat move** (`sdk.lifecycle.transferOwnership`) th
 accept it in old logs, but the SDK no longer emits it. Ownership is never a credential
 and is never transferred by editing a DID document.
 
-A new sat holder who wants to *author* provenance but can't get the seller's signature
-uses `authorizeSigner` (renamed from `claimOwnership`, #366): they reinscribe the
-did:btco doc with their key and self-sign a `rotateKey`. This establishes a signing key —
-it does not grant ownership, because the sat already is ownership.
+There is no non-cooperative rotation: the former `authorizeSigner` (renamed from
+`claimOwnership`, #366) is removed. Holding the sat grants no control of the key set —
+a `rotateKey` not signed by the current controller never verifies, and the controller
+key lineage is frozen once the asset is inscribed.
 
 ---
 

@@ -100,28 +100,19 @@ const { inscriptionId, did } = await sdk.lifecycle.rotateBtcoKeys(
 - Reinscribes the same did:btco document with the new verification method, re-embedding a fresher `#cel` anchor committing to the log head.
 - Requires the asset to be on the `did:btco` layer.
 
-### `authorizeSigner()` — self-signed enablement (renamed from `claimOwnership`, #366)
+### There is no non-cooperative rotation
 
-Use this when a sat holder **cannot obtain the previous controller's signature** (e.g. after buying the sat from a seller who is unreachable). It does **NOT** grant or claim ownership — the sat is already the ownership, held live on Bitcoin. It lets the new sat holder establish their own signing key so they can author new provenance going forward.
+The former `authorizeSigner()` (renamed from `claimOwnership`, #366) — a self-signed
+rotation the verifier accepted once a reinscription proved sat control — is
+**removed**. Holding the sat grants no control of the key set: a `rotateKey` not
+signed by the current controller never verifies, so a buyer cannot take over the
+creator's controller slot.
 
-```typescript
-const signerKeyPair = await keyManager.generateKeyPair('ES256K');
+Consequence, by design: **the controller key lineage is frozen once the asset is
+inscribed.** A creator who loses the post-migrate controller key cannot rotate it
+away — pre-anchor rotation (before publishing) is unaffected.
 
-const { inscriptionId, did } = await sdk.lifecycle.authorizeSigner(
-  asset,
-  {
-    publicKeyMultibase: signerKeyPair.publicKey, // KeyPair.publicKey is multibase-encoded
-    privateKey: signerKeyPair.privateKey // REQUIRED — self-signs the rotation
-  },
-  feeRate // optional sat/vB
-);
-```
-
-- `privateKey` is **REQUIRED**: the sat holder **self-signs** the `rotateKey` event with the new key (there is no prior controller signature to fold onto).
-- The reinscription witness proves live sat control, so the verifier accepts the otherwise-unauthorized rotation.
-- This is the recovery path for a did:btco asset whose prior signing key is unavailable — the on-chain sat ownership is what authorizes it.
-
-> **Ownership vs. signing authority.** Neither operation changes who owns the asset — ownership is whoever controls the sat, read live via `getCurrentOwner()`. Both only change which key may author future provenance. To move ownership, move the sat (`sdk.lifecycle.transferOwnership()`), which writes nothing to the CEL.
+> **Ownership vs. signing authority.** Rotation does not change who owns the asset — ownership is whoever controls the sat, read live via `getCurrentOwner()`. It only changes which key may author future provenance. To move ownership, move the sat (`sdk.lifecycle.transferOwnership()`), which writes nothing to the CEL.
 
 ## Key Recovery from Compromise
 

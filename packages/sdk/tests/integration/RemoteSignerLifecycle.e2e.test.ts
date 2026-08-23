@@ -48,7 +48,7 @@ describe('remote-custody lifecycle (MockRemoteSigner, no keyStore)', () => {
     await assertSignerConformance(new MockRemoteSigner());
   });
 
-  test('create -> publish -> inscribe -> rotate -> authorizeSigner: every event signed remotely, chain verifies', async () => {
+  test('create -> publish -> inscribe -> rotate: every event signed remotely, chain verifies', async () => {
     const remote = new MockRemoteSigner();
     const { sdk, ordinalsProvider } = makeSdk();
 
@@ -95,21 +95,11 @@ describe('remote-custody lifecycle (MockRemoteSigner, no keyStore)', () => {
     // supplied on THIS call — that single append degrades honestly.
     expect(skipped).toHaveLength(1);
     expect(skipped[0].reason).toBe('NO_SIGNING_KEY');
+    expect(asset.celLog!.events.map(e => e.type))
+      .toEqual(['create', 'migrate', 'migrate', 'update', 'rotateKey']);
 
-    // ---- non-cooperative authorizeSigner with a THIRD remote key: the
-    // rotateKey is SELF-signed by the incoming remote signer (no privateKey
-    // anywhere), and its witness ack signs with it too. ----
-    const remote3 = new MockRemoteSigner();
-    await sdk.lifecycle.authorizeSigner(
-      asset, { publicKeyMultibase: remote3.publicKeyMultibase }, undefined, { signer: remote3 }
-    );
-    const types = asset.celLog!.events.map(e => e.type);
-    expect(types).toEqual(['create', 'migrate', 'migrate', 'update', 'rotateKey', 'rotateKey', 'update']);
-    const rotate2 = asset.celLog!.events[5];
-    expect(rotate2.proof[0].verificationMethod).toBe(remote3.verificationMethodId);
-
-    // ---- the WHOLE chain verifies, including the non-cooperative rotation's
-    // bitcoin witness proof, with zero private keys ever leaving custody. ----
+    // ---- the WHOLE chain verifies, including the rotation's bitcoin witness
+    // proof, with zero private keys ever leaving custody. ----
     const result = await verifyEventLog(asset.celLog!, { expectedDid: asset.id, ordinalsProvider });
     expect(result.verified).toBe(true);
     expect(await asset.verify({ ordinalsProvider })).toBe(true);
