@@ -40,7 +40,7 @@ import { verifyEventLog } from '@originals/cel';
 import { createDidManagerKeyResolver } from '@originals/cel';
 import { PeerCelManager } from '@originals/cel';
 import { appendEvent } from '@originals/cel';
-import { computeDigestMultibase, digestMultibaseEquals, decodeDigestMultibase, resourcePathSegment } from '@originals/cel';
+import { computeDigestMultibase, digestMultibaseEquals, decodeDigestMultibase, resourcePathSegment, selfCertifyingKeyHexes } from '@originals/cel';
 import { mostRecentResourceHead } from '@originals/cel';
 import { canonicalizeEntryForChain } from '@originals/cel';
 import { serializeEventLogJson, parseEventLogJson } from '@originals/cel';
@@ -873,14 +873,15 @@ export class LifecycleManager {
       );
     }
     const loadedController = currentControllerVm(log).split('#')[0];
-    if (!loadedController.startsWith('did:key:')) {
+    const loadedControllerKey = await LifecycleManager.selfCertifyingPublicKeyMultibase(loadedController);
+    if (!loadedControllerKey) {
       throw new StructuredError(
         'ASSET_LOAD_VERIFICATION_FAILED',
-        `Cannot derive did:cel document: current controller is not a did:key (got ${loadedController}).`,
+        `Cannot derive did:cel document: current controller ${loadedController} is not a self-certifying DID with an embedded Ed25519 key (did:key or long-form did:peer:4).`,
         { verification }
       );
     }
-    const celDidDocument = createCelDidDocument(env.assetDid, loadedController.slice('did:key:'.length));
+    const celDidDocument = createCelDidDocument(env.assetDid, loadedControllerKey);
 
     // Important (#377): validate envelope credentials — a verified-reported load
     // must not silently attach forged/malformed ones. Structural validation runs
@@ -1164,10 +1165,11 @@ export class LifecycleManager {
     // is still did:key under every ruling).
     const currentVm = currentControllerVm(reconstructedLog);
     const currentController = currentVm.split('#')[0];
-    if (!currentController.startsWith('did:key:')) {
-      throw new StructuredError('CHAIN_ASSET_INVALID', `Reconstructed current controller is not a did:key (only did:key controllers are supported by resolveAssetFromSat; got: ${currentController}).`);
+    const currentControllerKey = await LifecycleManager.selfCertifyingPublicKeyMultibase(currentController);
+    if (!currentControllerKey) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Reconstructed current controller ${currentController} is not a self-certifying DID with an embedded Ed25519 key (did:key or long-form did:peer:4).`);
     }
-    const celDoc = createCelDidDocument(assetDid, currentController.slice('did:key:'.length));
+    const celDoc = createCelDidDocument(assetDid, currentControllerKey);
 
     const envelope: AssetEnvelope = {
       format: ASSET_ENVELOPE_FORMAT,
@@ -2632,7 +2634,7 @@ export class LifecycleManager {
         if (postAnchor) {
           this.assertHolderShapeIfNotLineage(logBefore, data, vm);
         }
-        const eventData = this.withCommittedAuthor(logBefore, data, vm);
+        const eventData = await this.withCommittedAuthor(logBefore, data, vm);
         const newLog = await appendEvent(logBefore, type, eventData, { signer: celSigner, verificationMethod: vm });
         asset._replaceCelLog(newLog);
         // Keep the hosted CEL copies fresh AFTER the append committed.
@@ -2666,6 +2668,28 @@ export class LifecycleManager {
       reason: skipReason
     });
     return null;
+  }
+
+  /**
+   * The Multikey publicKeyMultibase a SELF-CERTIFYING controller DID embeds:
+   * did:key directly, long-form did:peer:4 via its embedded document (the
+   * verifier accepts BOTH as rotation targets and authors — a did:key-only
+   * read here would reject verifier-valid logs). Undefined when the DID
+   * embeds no Ed25519 key (resolver-backed methods, short-form did:peer:4).
+   */
+  private static async selfCertifyingPublicKeyMultibase(did: string): Promise<string | undefined> {
+    if (did.startsWith('did:key:')) {
+      const mb = did.slice('did:key:'.length).split('#')[0];
+      return mb.length > 0 ? mb : undefined;
+    }
+    const keyHexes = await selfCertifyingKeyHexes(did);
+    const first = keyHexes && keyHexes.size > 0 ? [...keyHexes][0] : undefined;
+    if (!first) return undefined;
+    try {
+      return multikey.encodePublicKey(hexToBytes(first), 'Ed25519');
+    } catch {
+      return undefined;
+    }
   }
 
   /** True when the log carries a btco migrate — the anchor; events after it are post-anchor. */
@@ -2723,20 +2747,22 @@ export class LifecycleManager {
 
   /**
    * Commits the signer's identity into a post-anchor event's SIGNED data as
-   * `data.author` (the signing key's did:key). Pre-anchor events are left
+   * `data.author` (the signing DID). Pre-anchor events are left
    * untouched — there authority is key lineage and the proof already names
    * the signer; post-anchor the chain digest (which excludes proofs) must
    * commit to the author or a reinscription proves content, not authorship.
-   * A caller-supplied `author` is preserved; a non-did:key signing VM (never
-   * produced by the SDK's append paths) adds nothing rather than committing
-   * an unverifiable author.
+   * A caller-supplied `author` is preserved; a non-self-certifying signing VM
+   * (resolver-backed methods — never produced by the SDK's append paths)
+   * adds nothing rather than committing an author the verifier cannot bind.
+   * Both did:key and long-form did:peer:4 signers are committable — the
+   * verifier's author binding accepts exactly those.
    */
-  private withCommittedAuthor(logBefore: EventLog, data: unknown, signingVm: string): unknown {
+  private async withCommittedAuthor(logBefore: EventLog, data: unknown, signingVm: string): Promise<unknown> {
     if (!LifecycleManager.celLogHasBtcoAnchor(logBefore)) return data;
     if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
     if ('author' in (data as Record<string, unknown>)) return data;
     const authorDid = signingVm.split('#')[0];
-    if (!authorDid.startsWith('did:key:')) return data;
+    if (!(await LifecycleManager.selfCertifyingPublicKeyMultibase(authorDid))) return data;
     return { ...(data as Record<string, unknown>), author: authorDid };
   }
 
@@ -2848,10 +2874,20 @@ export class LifecycleManager {
     // fresh #cel head (the just-appended event).
     const headEntry = log.events[log.events.length - 1];
     const headAuthor = (headEntry?.data as { author?: unknown } | null | undefined)?.author;
-    const announcedDid = typeof headAuthor === 'string' && headAuthor.startsWith('did:key:')
+    const announcedDid = typeof headAuthor === 'string'
       ? headAuthor
       : currentControllerVm(log).split('#')[0];
-    const controllerPubMb = announcedDid.slice('did:key:'.length);
+    // Self-certifying extraction (did:key OR long-form did:peer:4) — a bare
+    // prefix slice would corrupt a peer controller's key material. Fail loudly
+    // BEFORE the paid inscription when no key can be derived.
+    const controllerPubMb = await LifecycleManager.selfCertifyingPublicKeyMultibase(announcedDid);
+    if (!controllerPubMb) {
+      throw new StructuredError(
+        'CEL_APPEND_FAILED',
+        `Cannot announce the appending key in the reinscribed did:btco document: ${announcedDid} is not a ` +
+        'self-certifying DID with an embedded Ed25519 key. Nothing was inscribed.'
+      );
+    }
     const btcoDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, controllerPubMb);
     this.embedCelAnchor(btcoDoc, headDigest);
 

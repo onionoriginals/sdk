@@ -151,7 +151,7 @@ async function dispatchVerify(
  *   genesis path falls back to VM-DID equality + resolver vouching, and the
  *   rotateKey path fails closed (no proof-of-possession design yet).
  */
-async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null> {
+export async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null> {
   if (typeof did !== 'string') return null;
 
   // Cap before base58 decode (O(n²), per-event amplifiable via rotateKey): over
