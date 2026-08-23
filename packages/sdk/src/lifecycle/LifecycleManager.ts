@@ -2554,6 +2554,14 @@ export class LifecycleManager {
    * degrade — the `cel:append-skipped` event and a null return — for callers
    * who genuinely want a best-effort append.
    *
+   * Post-anchor appends (the log already contains a btco migrate) commit the
+   * signer's identity INSIDE the signed data as `data.author` (the signing
+   * key's did:key). Chain digests exclude proofs, so without this a
+   * reinscription commits to an entry's content but not to who signed it —
+   * the proof could be stripped and identical data re-signed under another
+   * key. The verifier binds the controller proof to `data.author` whenever it
+   * is present.
+   *
    * @returns the head digest (chain-link expression over the appended entry —
    * stable across later witness-proof attachment, since chain canonicalization
    * excludes proofs), or null when the append was skipped under `'skip'`.
@@ -2579,7 +2587,8 @@ export class LifecycleManager {
         celSigner = createKeyStoreCelSigner(this.keyStore, vm);
       }
       if (celSigner) {
-        const newLog = await appendEvent(logBefore, type, data, { signer: celSigner, verificationMethod: vm });
+        const eventData = this.withCommittedAuthor(logBefore, data, vm);
+        const newLog = await appendEvent(logBefore, type, eventData, { signer: celSigner, verificationMethod: vm });
         asset._replaceCelLog(newLog);
         // Keep the hosted CEL copies fresh AFTER the append committed.
         await this.persistCelArtifacts(asset);
@@ -2612,6 +2621,32 @@ export class LifecycleManager {
       reason: skipReason
     });
     return null;
+  }
+
+  /** True when the log carries a btco migrate — the anchor; events after it are post-anchor. */
+  private static celLogHasBtcoAnchor(log: EventLog): boolean {
+    return log.events.some(
+      (e) => e.type === 'migrate' && (e.data as { layer?: unknown } | null | undefined)?.layer === 'btco'
+    );
+  }
+
+  /**
+   * Commits the signer's identity into a post-anchor event's SIGNED data as
+   * `data.author` (the signing key's did:key). Pre-anchor events are left
+   * untouched — there authority is key lineage and the proof already names
+   * the signer; post-anchor the chain digest (which excludes proofs) must
+   * commit to the author or a reinscription proves content, not authorship.
+   * A caller-supplied `author` is preserved; a non-did:key signing VM (never
+   * produced by the SDK's append paths) adds nothing rather than committing
+   * an unverifiable author.
+   */
+  private withCommittedAuthor(logBefore: EventLog, data: unknown, signingVm: string): unknown {
+    if (!LifecycleManager.celLogHasBtcoAnchor(logBefore)) return data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+    if ('author' in (data as Record<string, unknown>)) return data;
+    const authorDid = signingVm.split('#')[0];
+    if (!authorDid.startsWith('did:key:')) return data;
+    return { ...(data as Record<string, unknown>), author: authorDid };
   }
 
   /**
@@ -2715,10 +2750,17 @@ export class LifecycleManager {
     if (!log || !btcoDid) return; // defensive: btco asset always has both
     const satoshi = btcoDid.split(':').pop()!;
 
-    // Rebuild the btco doc with the CURRENT controller key + refreshed resource
-    // manifest, then embed the fresh #cel head (the just-appended event).
-    const vm = currentControllerVm(log);
-    const controllerPubMb = vm.split('#')[0].slice('did:key:'.length);
+    // Rebuild the btco doc announcing the APPENDING key — the head event's
+    // committed `data.author` (the reinscribed document and the signed entry
+    // must name the same signer), falling back to the controller fold for a
+    // head without one — plus the refreshed resource manifest, then embed the
+    // fresh #cel head (the just-appended event).
+    const headEntry = log.events[log.events.length - 1];
+    const headAuthor = (headEntry?.data as { author?: unknown } | null | undefined)?.author;
+    const announcedDid = typeof headAuthor === 'string' && headAuthor.startsWith('did:key:')
+      ? headAuthor
+      : currentControllerVm(log).split('#')[0];
+    const controllerPubMb = announcedDid.slice('did:key:'.length);
     const btcoDoc = this.buildRotatedBtcoDoc(asset, satoshi, btcoDid, controllerPubMb);
     this.embedCelAnchor(btcoDoc, headDigest);
 

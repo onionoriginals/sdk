@@ -1028,6 +1028,49 @@ async function verifyEvent(
     }
   }
 
+  // Author binding: `data.author` commits the signer's identity INSIDE the
+  // chain digest (proofs are excluded from it, so without this an entry's
+  // proof could be stripped and the identical data re-signed by another key
+  // — the entry would survive with a forged author). Whenever an event
+  // declares an author, it must be a self-certifying DID and the event's
+  // SINGLE controller proof must resolve to one of its keys. Presence is not
+  // (yet) required — the SDK writes `data.author` on every post-anchor
+  // append, and the sat-gated authority model requires it there. A custom
+  // verifier owns proof semantics entirely, so the check is skipped on that
+  // path (documented as unsafe for btco logs).
+  const declaredAuthor = (event.data as { author?: unknown } | null | undefined)?.author;
+  if (!customVerifier && typeof declaredAuthor === 'string') {
+    const fail = (message: string): EventVerification => {
+      errors.push(message);
+      return {
+        index,
+        type: event.type,
+        proofValid: false,
+        chainValid,
+        cryptographicallyVerified: false,
+        errors,
+      };
+    };
+    if (controllerProofs.length !== 1) {
+      return fail(
+        `Event ${index}: an authored event must carry exactly one controller proof (found ${controllerProofs.length})`
+      );
+    }
+    const authorKeys = await selfCertifyingKeyHexes(declaredAuthor);
+    if (!authorKeys || authorKeys.size === 0) {
+      return fail(
+        `Event ${index}: data.author (${declaredAuthor}) is not a self-certifying DID with an Ed25519 key (did:key or long-form did:peer:4)`
+      );
+    }
+    const { proof, originalIndex } = controllerProofs[0];
+    const signerKeyHex = await resolveControllerKeyHex(proof.verificationMethod, resolveKey);
+    if (signerKeyHex === null || !authorKeys.has(signerKeyHex)) {
+      return fail(
+        `Event ${index}, Proof ${originalIndex}: signer ${proof.verificationMethod} is not a key of data.author ${declaredAuthor} — the committed author must be the actual signer`
+      );
+    }
+  }
+
   // Verify controller proofs — these gate `proofValid` and `cryptographicallyVerified`.
   let allControllerProofsValid = true;
   let allCryptographicallyVerified = true;
