@@ -117,4 +117,52 @@ describe('getCurrentState custody fold', () => {
     expect(state.name).toBe('Renamed after anchor');
     expect(state.custody).toBeUndefined();
   });
+
+  test('LEGACY genesis (data.did/creator, no controller): the creator\'s own post-anchor rename folds as a CREATOR claim, not custody', () => {
+    // A controller-only lineage read is empty on a legacy-shape genesis, which
+    // misfolded every post-anchor update — the creator's own included — into
+    // custody (and dropped the rename). Lineage must fall back to
+    // data.creator and the create proof's VM DID, mirroring the verifier
+    // (which seeds creatorKeyHexes from the create proof key and calls the
+    // same entry `creator`).
+    const log: EventLog = {
+      events: [
+        entry('create', {
+          name: 'Original Name',
+          did: 'did:webvh:legacy.example:abc',
+          layer: 'peer',
+          resources: [],
+          creator: 'did:webvh:legacy.example:abc',
+          createdAt: 'x',
+        }, CREATOR),
+        entry('migrate', { sourceDid: 'x', layer: 'btco', network: 'regtest', to: 'did:btco:reg:123', migratedAt: 'x' }, CREATOR, 'uEiFake1'),
+        entry('update', { author: CREATOR, name: 'Renamed after anchor' }, CREATOR, 'uEiFake2'),
+      ],
+    };
+    const state = manager.getCurrentState(log);
+    expect(state.name).toBe('Renamed after anchor');
+    expect(state.custody).toBeUndefined();
+    expect(state.holders).toBeUndefined();
+  });
+
+  test('LEGACY genesis: a stranger\'s post-anchor update still folds to custody', () => {
+    const log: EventLog = {
+      events: [
+        entry('create', {
+          name: 'Original Name',
+          did: 'did:webvh:legacy.example:abc',
+          layer: 'peer',
+          resources: [],
+          creator: 'did:webvh:legacy.example:abc',
+          createdAt: 'x',
+        }, CREATOR),
+        entry('migrate', { sourceDid: 'x', layer: 'btco', network: 'regtest', to: 'did:btco:reg:123', migratedAt: 'x' }, CREATOR, 'uEiFake1'),
+        entry('update', { author: HOLDER, statement: 'mine now' }, HOLDER, 'uEiFake2'),
+      ],
+    };
+    const state = manager.getCurrentState(log);
+    expect(state.name).toBe('Original Name');
+    expect(state.custody).toEqual([{ author: HOLDER, statement: 'mine now', eventIndex: 2 }]);
+    expect(state.holders).toEqual([HOLDER]);
+  });
 });

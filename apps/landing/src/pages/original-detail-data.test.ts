@@ -262,4 +262,37 @@ describe('celCustody (item 5: the custody chain, folded from the CEL)', () => {
   test('a null log folds to no custody', () => {
     expect(celCustody(null)).toEqual([]);
   });
+
+  test('a WITNESS-FIRST proof array is not read as the author — the shared signer read skips witness proofs', () => {
+    // The hand-rolled proof[0] read labeled `did:btco:witness` as the author,
+    // which made a creator entry with a witness-first proof array fold into
+    // custody under the witness's name.
+    const rows = celCustody(log([
+      { type: 'create', data: { controller: CREATOR, resources: [] } },
+      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
+      {
+        type: 'update',
+        data: { name: 'renamed' },
+        proof: [
+          { verificationMethod: 'did:btco:witness', cryptosuite: 'bitcoin-ordinals-2024' },
+          { verificationMethod: `${CREATOR}#k`, cryptosuite: 'eddsa-jcs-2022' },
+        ],
+      },
+    ]));
+    expect(rows).toEqual([]);
+  });
+
+  test('LEGACY genesis (creator, no controller): the creator\'s own post-anchor entry is not custody', () => {
+    const rows = celCustody(log([
+      {
+        type: 'create',
+        data: { did: 'did:webvh:legacy.example:abc', creator: 'did:webvh:legacy.example:abc', layer: 'peer', resources: [] },
+        proof: [{ verificationMethod: `${CREATOR}#k`, cryptosuite: 'eddsa-jcs-2022' }],
+      },
+      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
+      { type: 'update', data: { author: CREATOR, name: 'renamed' } },
+      { type: 'update', data: { author: HOLDER, statement: 'held it' } },
+    ]));
+    expect(rows).toEqual([{ author: HOLDER, statement: 'held it', eventIndex: 3 }]);
+  });
 });

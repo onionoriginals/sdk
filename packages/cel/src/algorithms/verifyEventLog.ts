@@ -1363,6 +1363,19 @@ export async function verifyEventLog(
     };
   }
 
+  // A `create` event is only valid at index 0. appendEvent refuses to write
+  // one, but the wire formats accept the type at any index, so the entry is
+  // hand-buildable — and post-anchor it would otherwise slip past the sat
+  // gate (which covers `update`) AND past key-lineage authorization. A second
+  // genesis is meaningless pre-anchor too. Fail closed at any index > 0.
+  const midLogCreateIndex = log.events.findIndex((e, idx) => idx > 0 && e.type === 'create');
+  const midLogCreateViolated = midLogCreateIndex !== -1;
+  if (midLogCreateViolated) {
+    errors.push(
+      `Invalid event log: a 'create' event is only valid at index 0 (found one at index ${midLogCreateIndex})`
+    );
+  }
+
   // A `deactivate` event seals the log (deactivateEventLog refuses to append
   // to a deactivated log). Enforce the same rule at verification: any event
   // AFTER a deactivate means the sealed log was mutated, so the log must not
@@ -1571,15 +1584,19 @@ export async function verifyEventLog(
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
-    // Post-anchor events (except legacy v0 transfers) are authorized by the
-    // sat gate below, not by key lineage.
+    // Post-anchor `update` events are authorized by the sat gate below, not by
+    // key lineage — that is the ONLY type the gate covers, so the lineage skip
+    // is scoped to exactly it. Every other post-anchor type either falls back
+    // to lineage authorization here or is rejected outright by the policy
+    // block below (both, for a hand-built mid-log `create`): a skip any wider
+    // than the gate that replaces it is an authorization hole.
     const isV1Transfer = event.type === 'transfer' &&
       (event.data as { newController?: unknown } | null | undefined)?.newController !== undefined;
-    const isLegacyV0Transfer = event.type === 'transfer' && !isV1Transfer;
     const postAnchor = !options?.verifier && anchoredSat !== undefined;
+    const satGated = postAnchor && event.type === 'update';
     const eventResult = await verifyEvent(
       event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds,
-      options?.ordinalsProvider, postAnchor && !isLegacyV0Transfer
+      options?.ordinalsProvider, satGated
     );
     // The class this iteration derives for the entry (default path only).
     let entryClass: EntryAuthorClass | undefined;
@@ -1634,6 +1651,18 @@ export async function verifyEventLog(
               entryClass = 'creator';
               anchoredSat = { satoshi: anchoredSat.satoshi, inscriptionId: gate.inscriptionId };
             } else {
+              // RULED (PR #508): a holder entry that breaks the allowlist or
+              // fails the sat gate fails the WHOLE log, not just the entry —
+              // this is deliberate, not an oversight. Entry-level exclusion
+              // would make "verified" mean "verified except the parts that
+              // aren't", and every consumer would need to re-derive which
+              // prefix to trust. The cost is real: a hostile sat holder can
+              // inscribe one junk update and stop the log verifying for
+              // everyone, permanently — but they own the sat, so they are
+              // destroying their own asset's provenance; the genesis
+              // authenticity claim survives in the on-chain prefix, readable
+              // by anyone who truncates at the junk entry. Revisit only with
+              // an explicit partial-verification design.
               const shapeErrors = holderDataShapeErrors(event.data, i);
               if (shapeErrors.length > 0) {
                 eventResult.proofValid = false;
@@ -1648,6 +1677,17 @@ export async function verifyEventLog(
             }
           }
         }
+      } else if (event.type !== 'update' && event.type !== 'transfer') {
+        // DEFAULT-DENY: the arms above enumerate every type this model gives
+        // post-anchor semantics (rotateKey/deactivate/migrate rejected, update
+        // sat-gated, v1 transfer rejected earlier, v0 transfer passed through
+        // on key lineage below). Anything else — a hand-built `create` (also
+        // rejected structurally above) or an unknown type from a foreign
+        // writer — must not slide through as an implicitly trusted entry.
+        eventResult.proofValid = false;
+        eventResult.errors.push(
+          `Event ${i}: '${String(event.type)}' events are not permitted after the btco anchor`
+        );
       }
       // Legacy v0 transfers pass through on the key-lineage path (no sat gate,
       // no author requirement) — the legacy read path.
@@ -1866,7 +1906,7 @@ export async function verifyEventLog(
   }
 
   return {
-    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !expectedDidError && !staleLogError && !uniquenessError && !contentMismatchError,
+    verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !midLogCreateViolated && !expectedDidError && !staleLogError && !uniquenessError && !contentMismatchError,
     errors,
     events: eventVerifications,
     ...(assetDid !== undefined ? { assetDid } : {}),

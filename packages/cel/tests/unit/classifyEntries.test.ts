@@ -125,4 +125,32 @@ describe('classifyLogEntries (pure fold)', () => {
     // The genesis controller's lineage is untouched by the lie.
     expect(verified.creatorKeys).toEqual([a.didKey]);
   });
+
+  test('LEGACY genesis (no controller): lineage falls back to the create proof VM, so the creator\'s post-anchor entry classifies as creator', async () => {
+    // A controller-only lineage read is empty on a legacy-shape genesis, and
+    // an empty lineage labeled EVERY entry unattributed/holder — including the
+    // creator's own post-anchor writes, disagreeing with the verifier.
+    const a = await makeKey();
+    const legacyCreate: LogEntry = {
+      type: 'create',
+      data: { name: 'Asset', did: 'did:webvh:legacy.example:abc', layer: 'peer', resources: [], creator: 'did:webvh:legacy.example:abc', createdAt: 'x' },
+      proof: [await a.signer({ probe: true })],
+    } as LogEntry;
+    const log: EventLog = { events: [legacyCreate] };
+    const withMigrate: EventLog = await appendEvent(
+      log, 'migrate',
+      { sourceDid: 'did:webvh:legacy.example:abc', layer: 'btco', network: 'regtest', to: `did:btco:reg:${SAT}`, migratedAt: 'x' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+    const full: EventLog = await appendEvent(
+      withMigrate, 'update',
+      { author: a.didKey, name: 'Renamed' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+
+    const classified = classifyLogEntries(full);
+    expect(classified[0].authorClass).toBe('creator');
+    expect(classified[2].authorClass).toBe('creator');
+    expect(classified[2].authorKey).toBe(a.didKey);
+  });
 });

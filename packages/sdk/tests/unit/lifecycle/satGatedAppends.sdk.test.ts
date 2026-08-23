@@ -82,6 +82,38 @@ describe('sat-gated appends (SDK write side)', () => {
     expect(provider.inscriptions).toBe(before);
   });
 
+  test('a caller-supplied data.author that is not the signer throws CEL_APPEND_FAILED before ANY inscription', async () => {
+    // withCommittedAuthor preserves a caller's author verbatim, and the
+    // verifier requires signer ≡ author — so a mismatch used to append AND
+    // inscribe (fee paid) an entry that could never verify. The pre-flight
+    // gate refuses it before anything mutates.
+    const provider = new CountingProvider();
+    const sdk = makeSdk(provider);
+    const asset = await sdk.lifecycle.createAsset(RES());
+    await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
+    const before = provider.inscriptions;
+    const lengthBefore = asset.celLog!.events.length;
+
+    const holderKp = await new KeyManager().generateKeyPair('Ed25519');
+    const someoneElse = await new KeyManager().generateKeyPair('Ed25519');
+    // appendStatement strips a caller `author` (allowlist build), so drive the
+    // append path directly — the guard defends the internal seam every caller
+    // shares.
+    const append = (sdk.lifecycle as unknown as {
+      appendCelEventOrSkip: (a: unknown, t: string, d: unknown, s?: unknown) => Promise<string | null>;
+    }).appendCelEventOrSkip.bind(sdk.lifecycle);
+    let err: unknown;
+    try {
+      await append(asset, 'update', { statement: 'held', author: `did:key:${someoneElse.publicKey}` }, signerFromKeyPair(holderKp));
+    } catch (e) {
+      err = e;
+    }
+    expect((err as { code?: string })?.code).toBe('CEL_APPEND_FAILED');
+    expect(String((err as Error).message)).toMatch(/does\s+not match the signing key/);
+    expect(asset.celLog!.events.length).toBe(lengthBefore);
+    expect(provider.inscriptions).toBe(before);
+  });
+
   test('transferOwnership still writes NOTHING to the log', async () => {
     const provider = new OrdMockProvider();
     const sdk = makeSdk(provider);

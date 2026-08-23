@@ -10,6 +10,7 @@ Verifier (`@originals/cel`):
 - Post-anchor `rotateKey`, `deactivate`, and `migrate` are rejected outright; a v1 `transfer` (`data.newController`) is rejected anywhere (the v0 legacy shape stays readable). Off-chain post-anchor appends — including the witness-acknowledgment updates earlier SDK versions wrote — no longer verify.
 - Entries are classified: creator entries (signed by the genesis controller or a pre-anchor rotation — the authenticity claim) vs holder entries (post-anchor writes by the sat holder — chain of custody). Holder entries carry an ALLOWLISTED data shape (`author`/`statement`/`occurredAt`/`links`/`ext`); anything else fails the log. New public surface: `EventVerification.authorKey`/`authorClass`, `VerificationResult.creatorKeys`/`holders`, `AssetState.custody`/`holders`, and the pure display fold `classifyLogEntries`.
 - `options.verifier` is documented as UNSAFE for btco logs: none of the on-chain authority machinery runs on that path.
+- **Fail-closed on a bad holder entry is deliberate**: a post-anchor holder append that breaks the data allowlist or fails the sat gate fails the WHOLE log, permanently — not just that entry. The sat holder owns the sat, so inscribing junk destroys their own asset's provenance; the genesis authenticity claim remains readable in the on-chain prefix before the junk entry. There is no partial-verification mode.
 
 SDK (`@originals/sdk`):
 

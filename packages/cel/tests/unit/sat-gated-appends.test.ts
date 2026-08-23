@@ -366,4 +366,70 @@ describe('sat-gated appends', () => {
     expect(result.verified).toBe(false);
     expect(result.errors.some(e => /is not a key of data\.author/.test(e))).toBe(true);
   });
+
+  /** Hand-built mid-log `create` (appendEvent refuses the type, but the wire
+   *  formats accept it at any index — the entry is buildable by an attacker). */
+  function forgeCreate(log: EventLog, signerKey: Key, data: Record<string, unknown>) {
+    const head = log.events[log.events.length - 1];
+    const eventBase = { type: 'create' as const, data, previousEvent: chainDigest(head) };
+    return signerKey.signer(eventBase).then(proof => ({
+      events: [...log.events, { ...eventBase, proof: [proof] }],
+    }) as EventLog);
+  }
+
+  test('FORGERY: post-anchor create by a STRANGER — no author, no witness — FAILS (was the stage-4 authorization skip)', async () => {
+    const provider = new OrdMockProvider();
+    const a = await makeKey();
+    const attacker = await makeKey();
+    const { log } = await makeAnchoredLog(provider, a);
+    const forged = await forgeCreate(log, attacker, {
+      name: 'Attacker Asset',
+      controller: attacker.didKey,
+      resources: [],
+      createdAt: '2026-08-23T00:00:02Z',
+      nonce: 'forged',
+    });
+
+    const result = await verifyEventLog(forged, { ordinalsProvider: provider });
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /'create' event is only valid at index 0/.test(e))).toBe(true);
+    // The forged entry must never be labeled a creator entry.
+    expect(result.events[2]?.authorClass).not.toBe('creator');
+  });
+
+  test('FORGERY: post-anchor create by the CREATOR fails too — a second genesis is meaningless', async () => {
+    const provider = new OrdMockProvider();
+    const a = await makeKey();
+    const { log } = await makeAnchoredLog(provider, a);
+    const forged = await forgeCreate(log, a, {
+      name: 'Second Genesis',
+      controller: a.didKey,
+      resources: [],
+      createdAt: '2026-08-23T00:00:02Z',
+      nonce: 'second',
+    });
+
+    const result = await verifyEventLog(forged, { ordinalsProvider: provider });
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /'create' event is only valid at index 0/.test(e))).toBe(true);
+  });
+
+  test('a mid-log create is rejected PRE-anchor as well, even signed by the creator', async () => {
+    const a = await makeKey();
+    const log = await createEventLog(
+      { name: 'Asset', controller: a.didKey, resources: [], createdAt: '2026-08-23T00:00:00Z', nonce: 'pre-anchor-create' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+    const forged = await forgeCreate(log, a, {
+      name: 'Second Genesis',
+      controller: a.didKey,
+      resources: [],
+      createdAt: '2026-08-23T00:00:01Z',
+      nonce: 'second',
+    });
+
+    const result = await verifyEventLog(forged);
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /'create' event is only valid at index 0/.test(e))).toBe(true);
+  });
 });

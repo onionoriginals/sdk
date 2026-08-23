@@ -37,16 +37,35 @@ export function claimedSignerDid(entry: { data?: unknown; proof?: unknown }): st
 }
 
 /**
+ * Every genesis identity a create event names: `data.controller` (the did:cel
+ * shape), `data.creator` (the legacy shape), and the create proof's VM DID
+ * (what the verifier seeds `creatorKeyHexes` from). A legacy-shape genesis has
+ * no `controller`, so a controller-only read yields an EMPTY lineage and every
+ * post-anchor entry — the creator's own included — misfolds to custody. These
+ * folds are display/defensive (the verifier is the authority), so seeding all
+ * three is the faithful mirror of the verifier's lineage.
+ */
+export function genesisLineageDids(createEvent: LogEntry | undefined): string[] {
+  if (!createEvent) return [];
+  const out: string[] = [];
+  const data = createEvent.data as { controller?: unknown; creator?: unknown } | null | undefined;
+  if (typeof data?.controller === 'string') out.push(data.controller);
+  if (typeof data?.creator === 'string' && !out.includes(data.creator)) out.push(data.creator);
+  const proofDid = claimedSignerDid({ proof: createEvent.proof });
+  if (proofDid !== undefined && !out.includes(proofDid)) out.push(proofDid);
+  return out;
+}
+
+/**
  * Labels a log's entries as creator / holder / unattributed by reading the
- * lineage OFF THE LOG (genesis `data.controller`, then each pre-anchor
- * rotateKey's `newController`; the lineage freezes at the first btco migrate).
- * Unsigned and unchecked — see the module doc: this is for display.
+ * lineage OFF THE LOG (the genesis identities per {@link genesisLineageDids},
+ * then each pre-anchor rotateKey's `newController`; the lineage freezes at the
+ * first btco migrate). Unsigned and unchecked — see the module doc: this is
+ * for display.
  */
 export function classifyLogEntries(log: EventLog): ClassifiedEntry[] {
   const events = log?.events ?? [];
-  const lineage = new Set<string>();
-  const genesisController = (events[0]?.data as { controller?: unknown } | null | undefined)?.controller;
-  if (typeof genesisController === 'string') lineage.add(genesisController);
+  const lineage = new Set<string>(genesisLineageDids(events[0]));
 
   // The anchor boundary: the first migrate to the btco layer.
   const anchorIndex = events.findIndex(
@@ -100,10 +119,8 @@ export interface CustodyFoldState {
   custody: NonNullable<AssetState['custody']>;
 }
 
-export function beginCustodyFold(genesisController: unknown): CustodyFoldState {
-  const lineage = new Set<string>();
-  if (typeof genesisController === 'string') lineage.add(genesisController);
-  return { lineage, anchored: false, custody: [] };
+export function beginCustodyFold(createEvent: LogEntry | undefined): CustodyFoldState {
+  return { lineage: new Set(genesisLineageDids(createEvent)), anchored: false, custody: [] };
 }
 
 /**

@@ -6,6 +6,8 @@
  * and a summary of the signed did:webvh version-history log.
  */
 import type { OriginalRow } from './YourOriginals';
+import { claimedSignerDid, genesisLineageDids } from '@originals/sdk/cel';
+import type { LogEntry } from '@originals/sdk/cel';
 
 /* ——— CEL log shapes (what LifecycleManager publishes as cel.json) ——— */
 
@@ -194,9 +196,11 @@ export interface CustodyRow {
  */
 export function celCustody(cel: CelLog | null): CustodyRow[] {
   const events = cel?.events ?? [];
-  const lineage = new Set<string>();
-  const genesisController = events[0]?.data?.controller;
-  if (typeof genesisController === 'string') lineage.add(genesisController);
+  // Shared lineage + signer readers from the SDK (genesis controller/creator/
+  // create-proof VM; author, else the first NON-WITNESS proof's VM DID) — a
+  // hand-rolled proof[0] read here previously mislabeled a witness-first proof
+  // array's `did:btco:witness` as the author.
+  const lineage = new Set<string>(genesisLineageDids(events[0] as LogEntry | undefined));
   let anchored = false;
   const rows: CustodyRow[] = [];
   for (let i = 1; i < events.length; i++) {
@@ -211,9 +215,7 @@ export function celCustody(cel: CelLog | null): CustodyRow[] {
       continue;
     }
     if (anchored && e.type === 'update') {
-      const author = typeof data.author === 'string'
-        ? data.author
-        : e.proof?.[0]?.verificationMethod?.split('#')[0];
+      const author = claimedSignerDid(e as { data?: unknown; proof?: unknown });
       if (author === undefined || !lineage.has(author)) {
         rows.push({
           author: author ?? '(unverified author)',

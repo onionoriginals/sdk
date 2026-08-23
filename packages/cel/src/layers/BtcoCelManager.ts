@@ -428,7 +428,7 @@ export class BtcoCelManager {
     // did/layer or the metadata catch-all — and a post-anchor rotateKey (never
     // valid) touches nothing. This fold does not trust the verifier to have
     // caught a bad entry.
-    const custodyFold = beginCustodyFold(createData.controller);
+    const custodyFold = beginCustodyFold(log.events[0]);
 
     // Apply subsequent events
     for (let i = 1; i < log.events.length; i++) {

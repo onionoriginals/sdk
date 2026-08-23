@@ -2649,6 +2649,21 @@ export class LifecycleManager {
               `did:key verification method (got ${vm}). Nothing was appended or inscribed.`
             );
           }
+          // A caller-supplied data.author is preserved verbatim by
+          // withCommittedAuthor, but the verifier requires signer ≡ author —
+          // a mismatch would append AND inscribe (fee paid) before failing at
+          // verify time. Refuse it up front, like the other pre-flight gates.
+          if (data && typeof data === 'object' && !Array.isArray(data) && 'author' in data) {
+            const declaredAuthor = (data as { author?: unknown }).author;
+            if (declaredAuthor !== vm.split('#')[0]) {
+              throw new StructuredError(
+                'CEL_APPEND_FAILED',
+                `Cannot append the '${type}' event for ${asset.id}: data.author (${String(declaredAuthor)}) does ` +
+                `not match the signing key (${vm.split('#')[0]}) — the verifier requires the committed author to ` +
+                'BE the signer, so this entry could never verify. Nothing was appended or inscribed.'
+              );
+            }
+          }
           this.assertHolderShapeIfNotLineage(logBefore, data, vm);
         }
         const eventData = this.withCommittedAuthor(logBefore, data, vm);

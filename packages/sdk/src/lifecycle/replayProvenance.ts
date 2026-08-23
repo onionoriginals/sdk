@@ -97,7 +97,7 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
     result.bindings['did:cel'] = deriveDidCel(log);
   }
 
-  const custodyFold = beginCustodyFold(genesisData.controller);
+  const custodyFold = beginCustodyFold(log.events[0]);
 
   for (let i = 1; i < log.events.length; i++) {
     const event = log.events[i];

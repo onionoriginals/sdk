@@ -12,6 +12,7 @@ export { verifyEventLog, verifyDidKeyEd25519Proof, selectNewestAnchorInscription
 export {
   classifyLogEntries,
   claimedSignerDid,
+  genesisLineageDids,
   beginCustodyFold,
   custodyFoldStep,
   finishCustodyFold,
