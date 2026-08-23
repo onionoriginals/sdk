@@ -175,6 +175,58 @@ export function celTimeline(cel: CelLog | null): TimelineStep[] {
   ];
 }
 
+/* ——— Custody chain (holder entries), item 5 ——— */
+
+export interface CustodyRow {
+  /** The holder's claimed did:key (a display CLAIM — only verification promotes it). */
+  author: string;
+  statement?: string;
+  occurredAt?: string;
+  eventIndex: number;
+}
+
+/**
+ * Fold the holder entries (post-anchor updates signed outside the creator
+ * lineage) out of the CEL — the detail page's custody section. Mirrors the
+ * SDK managers' defensive fold: lineage is the genesis controller plus
+ * pre-anchor rotations; the anchor is the btco migrate; nothing here is
+ * verified, so the page labels these as the holders' claims.
+ */
+export function celCustody(cel: CelLog | null): CustodyRow[] {
+  const events = cel?.events ?? [];
+  const lineage = new Set<string>();
+  const genesisController = events[0]?.data?.controller;
+  if (typeof genesisController === 'string') lineage.add(genesisController);
+  let anchored = false;
+  const rows: CustodyRow[] = [];
+  for (let i = 1; i < events.length; i++) {
+    const e = events[i];
+    const data = e.data ?? {};
+    if (e.type === 'migrate' && data.layer === 'btco') {
+      anchored = true;
+      continue;
+    }
+    if (!anchored && e.type === 'rotateKey' && typeof data.newController === 'string') {
+      lineage.add(data.newController);
+      continue;
+    }
+    if (anchored && e.type === 'update') {
+      const author = typeof data.author === 'string'
+        ? data.author
+        : e.proof?.[0]?.verificationMethod?.split('#')[0];
+      if (author === undefined || !lineage.has(author)) {
+        rows.push({
+          author: author ?? '(unverified author)',
+          ...(typeof data.statement === 'string' ? { statement: data.statement } : {}),
+          ...(typeof data.occurredAt === 'string' ? { occurredAt: data.occurredAt } : {}),
+          eventIndex: i,
+        });
+      }
+    }
+  }
+  return rows;
+}
+
 /** The resources sealed at genesis (id + media type + content digest). */
 export function celResources(cel: CelLog | null): CelResourceRef[] {
   const create = cel?.events?.find((e) => e.type === 'create');

@@ -78,27 +78,15 @@ High-security environments should rotate keys every 90 days.
 
 Once an asset is on the `did:btco` layer, the signing key lives in an on-chain DID document. You cannot rotate it by editing a document in memory and republishing over HTTPS — every rotation reinscribes the DID document (pinned to the existing anchoring sat) and appends a signed `rotateKey` event to the asset's CEL. Two operations cover this, differing only in **who signs the rotation**:
 
-### `rotateBtcoKeys()` — cooperative rotation
+### `rotateBtcoKeys()` — removed capability (always throws)
 
-Use this when the **current controller** is available to authorize the change. The outgoing controller signs the `rotateKey` event, folding authority forward to the new key. This is the normal, planned-rotation path.
-
-```typescript
-// The current controller's keyStore must hold the outgoing signing key.
-const newKeyPair = await keyManager.generateKeyPair('ES256K');
-
-const { inscriptionId, did } = await sdk.lifecycle.rotateBtcoKeys(
-  asset,
-  {
-    publicKeyMultibase: newKeyPair.publicKey, // KeyPair.publicKey is multibase-encoded
-    privateKey: newKeyPair.privateKey // optional here; asserted if supplied
-  },
-  feeRate // optional sat/vB
-);
-```
-
-- Appends a `rotateKey` CEL event **signed by the outgoing controller**.
-- Reinscribes the same did:btco document with the new verification method, re-embedding a fresher `#cel` anchor committing to the log head.
-- Requires the asset to be on the `did:btco` layer.
+Under sat-gated appends, `rotateKey` is rejected after the btco anchor — and a
+did:btco asset is definitionally past the anchor — so `rotateBtcoKeys()` now
+always throws `KEY_ROTATION_NOT_PERMITTED` before appending or spending
+anything. **The controller key lineage is frozen at inscription time.** A sat
+holder authors new provenance signed with their OWN key
+(`asset.appendStatement(...)`), authorized by the reinscription on the
+anchoring sat — no rotation is needed or possible.
 
 ### There is no non-cooperative rotation
 

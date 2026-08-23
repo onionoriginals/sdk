@@ -16,6 +16,7 @@ import { witnessEvent } from '../algorithms/witnessEvent.js';
 import type { WitnessService } from '../witnesses/WitnessService.js';
 import type { CelSigner } from './PeerCelManager.js';
 import { deriveDidCel } from '../celDid.js';
+import { beginCustodyFold, custodyFoldStep, finishCustodyFold } from '../algorithms/classifyEntries.js';
 
 /**
  * Configuration options for WebVHCelManager
@@ -308,9 +309,19 @@ export class WebVHCelManager {
       metadata: {},
     };
 
+    // Creator-vs-holder gate (defensive fold, item 5's second line of
+    // defense): post-anchor updates signed outside the creator lineage fold
+    // ONLY into state.custody — never into name/resources/creator/controller/
+    // did/layer or the metadata catch-all — and a post-anchor rotateKey (never
+    // valid) touches nothing. This fold does not trust the verifier to have
+    // caught a bad entry.
+    const custodyFold = beginCustodyFold(createData.controller);
+
     // Apply subsequent events
     for (let i = 1; i < log.events.length; i++) {
       const event = log.events[i];
+      const custodyAction = custodyFoldStep(custodyFold, event, i);
+      if (custodyAction === 'holder' || custodyAction === 'ignore') continue;
 
       if (event.type === 'update' || event.type === 'migrate') {
         const updateData = event.data as Record<string, unknown>;
@@ -355,7 +366,7 @@ export class WebVHCelManager {
         
         // Store other fields in metadata
         for (const [key, value] of Object.entries(updateData)) {
-          if (!['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt'].includes(key)) {
+          if (!['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt', 'author'].includes(key)) {
             state.metadata = state.metadata || {};
             state.metadata[key] = value;
           }
@@ -398,6 +409,8 @@ export class WebVHCelManager {
         }
       }
     }
+
+    finishCustodyFold(custodyFold, state);
 
     return state;
   }

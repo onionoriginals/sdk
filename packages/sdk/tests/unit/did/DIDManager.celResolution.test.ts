@@ -48,33 +48,31 @@ describe('persistence-backed did:cel resolution (#Phase3 Task 3)', () => {
     expect(doc!.id).toBe(asset.id);
   });
 
-  test('post-rotation resolution reflects the NEW controller (witness-proofed log verifies via provider)', async () => {
+  test('post-anchor resolution still announces the frozen controller (rotation is refused after the anchor)', async () => {
     const provider = new OrdMockProvider();
     const sdk = makeSdk({ ordinalsProvider: provider });
     const asset = await sdk.lifecycle.createAsset(RES);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
-    // Pre-rotation: current controller is the genesis key.
     const genesisKey = asset.did.verificationMethod![0].publicKeyMultibase;
     const before = await sdk.did.resolveDID(asset.id, { skipCache: true });
     expect(before?.verificationMethod?.[0]?.publicKeyMultibase).toBe(genesisKey);
 
     const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
-    await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey });
+    await expect(sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey }))
+      .rejects.toMatchObject({ code: 'KEY_ROTATION_NOT_PERMITTED' });
 
+    // The controller key lineage is frozen at the anchor — resolution is unchanged.
     const after = await sdk.did.resolveDID(asset.id, { skipCache: true });
     expect(after).not.toBeNull();
     expect(after!.id).toBe(asset.id);
-    expect(after!.verificationMethod?.[0]?.publicKeyMultibase).toBe(newKey);
-    expect(after!.alsoKnownAs).toContain(`did:key:${newKey}`);
+    expect(after!.verificationMethod?.[0]?.publicKeyMultibase).toBe(genesisKey);
   });
 
   test('btco-anchored log fails closed when the resolving SDK has no ordinalsProvider', async () => {
     const sdk = makeSdk();
     const asset = await sdk.lifecycle.createAsset(RES);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
-    const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
-    await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey });
 
     // Same storage, but no provider: the stored log carries a bitcoin witness
     // proof that cannot be verified — resolution must stay honest-null.

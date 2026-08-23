@@ -48,7 +48,7 @@ describe('remote-custody lifecycle (MockRemoteSigner, no keyStore)', () => {
     await assertSignerConformance(new MockRemoteSigner());
   });
 
-  test('create -> publish -> inscribe -> rotate: every event signed remotely, chain verifies', async () => {
+  test('create -> publish -> inscribe -> statement append: every event signed remotely, chain verifies', async () => {
     const remote = new MockRemoteSigner();
     const { sdk, ordinalsProvider } = makeSdk();
 
@@ -76,29 +76,31 @@ describe('remote-custody lifecycle (MockRemoteSigner, no keyStore)', () => {
     // publish DOES emit key:unpersisted for the minted did:webvh UPDATE key
     // (separate honest signal about the webvh log, not the CEL) — tolerated.
 
-    // ---- inscribe: btco migrate + witness acknowledgment, both remote-signed. ----
+    // ---- inscribe: the btco migrate, remote-signed; its witness proof is
+    // attached to the migrate itself (no acknowledgment append exists under
+    // sat-gated appends). ----
     await sdk.lifecycle.inscribeOnBitcoin(asset, { signer: remote });
     expect(asset.currentLayer).toBe('did:btco');
     expect(skipped).toHaveLength(0);
     expect(asset.celLog!.events.map(e => e.type))
-      .toEqual(['create', 'migrate', 'migrate', 'update']);
+      .toEqual(['create', 'migrate', 'migrate']);
 
-    // ---- cooperative rotate to a SECOND remote key: the rotateKey is signed
-    // by the OUTGOING remote controller. ----
+    // ---- rotation is REFUSED post-anchor: the lineage is frozen. ----
     const remote2 = new MockRemoteSigner();
-    await sdk.lifecycle.rotateBtcoKeys(
+    await expect(sdk.lifecycle.rotateBtcoKeys(
       asset, { publicKeyMultibase: remote2.publicKeyMultibase }, undefined, { signer: remote }
-    );
-    const rotate1 = asset.celLog!.events.find(e => e.type === 'rotateKey')!;
-    expect(rotate1.proof[0].verificationMethod).toBe(remote.verificationMethodId);
-    // The post-rotation witness ack folds to remote2, whose signer was not
-    // supplied on THIS call — that single append degrades honestly.
-    expect(skipped).toHaveLength(1);
-    expect(skipped[0].reason).toBe('NO_SIGNING_KEY');
-    expect(asset.celLog!.events.map(e => e.type))
-      .toEqual(['create', 'migrate', 'migrate', 'update', 'rotateKey']);
+    )).rejects.toMatchObject({ code: 'KEY_ROTATION_NOT_PERMITTED' });
 
-    // ---- the WHOLE chain verifies, including the rotation's bitcoin witness
+    // ---- a sat-gated statement append, remote-signed, commits the remote
+    // key as author and reinscribes. ----
+    await asset.appendStatement({ statement: 'remote custody, still authoring' }, { signer: remote });
+    expect(skipped).toHaveLength(0);
+    const head = asset.celLog!.events[asset.celLog!.events.length - 1];
+    expect(head.type).toBe('update');
+    expect((head.data as { author?: string }).author)
+      .toBe(remote.verificationMethodId.split('#')[0]);
+
+    // ---- the WHOLE chain verifies, including the append's bitcoin witness
     // proof, with zero private keys ever leaving custody. ----
     const result = await verifyEventLog(asset.celLog!, { expectedDid: asset.id, ordinalsProvider });
     expect(result.verified).toBe(true);

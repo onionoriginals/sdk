@@ -1,13 +1,13 @@
 /**
- * Head-freshness end-to-end attack (#366): the seller hands the buyer a
- * pre-rotation prefix of the log. It is a VALID prefix — it verifies on its
- * own — but the anchored satoshi's newest inscription commits to the rotation
- * the seller sliced off. loadAsset with a provider sets checkHeadFreshness and
+ * Head-freshness end-to-end attack: the seller hands the buyer a truncated
+ * prefix of the log. It is a VALID prefix — it verifies on its own — but the
+ * anchored satoshi's newest inscription commits to the sat-gated append the
+ * seller sliced off. loadAsset with a provider sets checkHeadFreshness and
  * catches it as STALE_LOG; the honest full log loads; a no-provider load of a
  * btco-anchored envelope surfaces a "cannot check freshness" warning.
  *
- * Drives the REAL write path: createAsset → inscribeOnBitcoin → rotateBtcoKeys
- * (a cooperative rotation) reinscribes the rotated anchor doc on the shared
+ * Drives the REAL write path: createAsset → inscribeOnBitcoin →
+ * addResourceVersion (a sat-gated creator append) reinscribes on the shared
  * OrdMock.
  */
 import { describe, test, expect } from 'bun:test';
@@ -15,10 +15,10 @@ import { OriginalsSDK } from '../../src';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';
-import { KeyManager } from '../../src/did/KeyManager';
 import type { AssetEnvelope } from '../../src/lifecycle/assetEnvelope';
 
-const RES = [{ id: 'art', type: 'image', contentType: 'image/png', hash: 'ab'.repeat(32) }];
+import { hashResource } from '../../src/utils/validation';
+const RES = [{ id: 'art', type: 'image', contentType: 'image/png', hash: hashResource(Buffer.from('v1', 'utf8')), content: 'v1' }];
 
 function makeSdk(provider: OrdMockProvider) {
   return OriginalsSDK.create({
@@ -30,39 +30,39 @@ function makeSdk(provider: OrdMockProvider) {
   } as any);
 }
 
-// create → inscribeOnBitcoin → rotateBtcoKeys: the cooperative rotation
-// reinscribes the anchor doc on the sat. Returns the full envelope + the
-// rotateKey index.
-async function buildRotatedAsset(provider: OrdMockProvider) {
+// create → inscribeOnBitcoin → addResourceVersion: the sat-gated creator
+// append reinscribes on the sat. Returns the full envelope + the index of the
+// appended update event.
+async function buildAppendedAsset(provider: OrdMockProvider) {
   const sdk = makeSdk(provider);
-  const asset = await sdk.lifecycle.createAsset(RES);
+  const asset = await sdk.lifecycle.createAsset(RES.map(r => ({ ...r })));
   await sdk.lifecycle.inscribeOnBitcoin(asset);
 
-  const newSigner = await new KeyManager().generateKeyPair('Ed25519');
-  await sdk.lifecycle.rotateBtcoKeys(asset, {
-    publicKeyMultibase: newSigner.publicKey,
-    privateKey: newSigner.privateKey,
-  });
+  await asset.addResourceVersion('art', 'v2', 'image/png', 'to v2');
 
   const envelope = asset.serialize();
-  const rotateIdx = envelope.eventLog.events.findIndex(e => e.type === 'rotateKey');
-  expect(rotateIdx).toBeGreaterThan(0);
-  return { sdk, envelope, rotateIdx };
+  const appendIdx = envelope.eventLog.events.findIndex(e => e.type === 'update');
+  expect(appendIdx).toBeGreaterThan(0);
+  return { sdk, envelope, appendIdx };
 }
 
 // Honest re-serialization of a prefix: slice events, keep everything else.
-function truncateBeforeRotation(envelope: AssetEnvelope, rotateIdx: number): AssetEnvelope {
+// Drop the v2 resource too — an honest prefix seller serializes the asset as
+// it stood BEFORE the append (an envelope whose resources outrun its log
+// would trip the resource↔log cross-checks instead of the freshness gate).
+function truncateBeforeAppend(envelope: AssetEnvelope, appendIdx: number): AssetEnvelope {
   return {
     ...envelope,
-    eventLog: { ...envelope.eventLog, events: envelope.eventLog.events.slice(0, rotateIdx) },
+    eventLog: { ...envelope.eventLog, events: envelope.eventLog.events.slice(0, appendIdx) },
+    resources: envelope.resources.filter(r => (r as { version?: number }).version === undefined || (r as { version?: number }).version === 1),
   };
 }
 
 describe('head-freshness e2e: truncated-log hand-off attack', () => {
-  test('the truncated (pre-rotation) envelope fails loadAsset with STALE_LOG', async () => {
+  test('the truncated (pre-append) envelope fails loadAsset with STALE_LOG', async () => {
     const provider = new OrdMockProvider();
-    const { sdk, envelope, rotateIdx } = await buildRotatedAsset(provider);
-    const truncated = truncateBeforeRotation(envelope, rotateIdx);
+    const { sdk, envelope, appendIdx } = await buildAppendedAsset(provider);
+    const truncated = truncateBeforeAppend(envelope, appendIdx);
 
     // Without verification it "loads" (the prefix is structurally valid) —
     // proving the prefix is a genuine, honestly re-serialized valid prefix.
@@ -84,7 +84,7 @@ describe('head-freshness e2e: truncated-log hand-off attack', () => {
 
   test('the honest FULL envelope loads and verifies', async () => {
     const provider = new OrdMockProvider();
-    const { sdk, envelope } = await buildRotatedAsset(provider);
+    const { sdk, envelope } = await buildAppendedAsset(provider);
 
     const { asset, verification, warnings } = await sdk.lifecycle.loadAsset(envelope);
     expect(verification?.verified).toBe(true);
@@ -95,7 +95,7 @@ describe('head-freshness e2e: truncated-log hand-off attack', () => {
 
   test('a no-provider load of a btco-anchored envelope carries a freshness warning', async () => {
     const provider = new OrdMockProvider();
-    const { envelope } = await buildRotatedAsset(provider);
+    const { envelope } = await buildAppendedAsset(provider);
 
     // A manager with NO ordinals provider cannot check freshness on a btco log.
     const offlineSdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),

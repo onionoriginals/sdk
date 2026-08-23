@@ -67,30 +67,34 @@ describe('post-anchor appends commit data.author', () => {
     expect(doc?.verificationMethod?.[0]?.publicKeyMultibase).toBe(author.slice('did:key:'.length));
   });
 
-  test("the inscribe-time witness acknowledgment carries the signer's author", async () => {
-    const { sdk } = makeSdk();
+  test('inscribeOnBitcoin appends NO acknowledgment: the migrate head carries the witness proof itself', async () => {
+    // A post-anchor acknowledgment append would need its own reinscription
+    // under sat-gated appends; the SDK no longer writes one.
+    const { sdk, provider } = makeSdk();
     const asset = await sdk.lifecycle.createAsset(RES());
     await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
 
-    const ack = asset.celLog!.events.find(
-      (e) => e.type === 'update' && (e.data as { operation?: unknown }).operation === 'acknowledgeWitness'
-    );
-    expect(ack).toBeDefined();
-    const controllerDid = currentControllerVm(asset.celLog!).split('#')[0];
-    expect((ack!.data as { author?: string }).author).toBe(controllerDid);
+    expect(asset.celLog!.events.map((e) => e.type)).toEqual(['create', 'migrate']);
+    const head = asset.celLog!.events[1];
+    expect(head.proof.some((p) => (p as { cryptosuite?: string }).cryptosuite === 'bitcoin-ordinals-2024')).toBe(true);
+    expect(await asset.verify({ ordinalsProvider: provider })).toBe(true);
   });
 
-  test('a post-anchor rotateKey commits the OUTGOING controller as author', async () => {
-    const { sdk } = makeSdk();
+  test('a statement append commits its author and verifies (rotateKey is refused post-anchor)', async () => {
+    const { sdk, provider } = makeSdk();
     const asset = await sdk.lifecycle.createAsset(RES());
     await sdk.lifecycle.inscribeOnBitcoin(asset, 5);
-    const outgoingDid = currentControllerVm(asset.celLog!).split('#')[0];
+    const controllerDid = currentControllerVm(asset.celLog!).split('#')[0];
 
     const rotated = await new KeyManager().generateKeyPair('Ed25519');
-    await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: rotated.publicKey, privateKey: rotated.privateKey });
+    await expect(
+      sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: rotated.publicKey, privateKey: rotated.privateKey })
+    ).rejects.toMatchObject({ code: 'KEY_ROTATION_NOT_PERMITTED' });
 
-    const rotate = asset.celLog!.events.find((e) => e.type === 'rotateKey')!;
-    expect((rotate.data as { author?: string }).author).toBe(outgoingDid);
+    await asset.appendStatement({ statement: 'still mine' });
+    const head = asset.celLog!.events[asset.celLog!.events.length - 1];
+    expect((head.data as { author?: string }).author).toBe(controllerDid);
+    expect(await asset.verify({ ordinalsProvider: provider })).toBe(true);
   });
 
   test('pre-anchor events carry NO author (key lineage governs before the anchor)', async () => {

@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import {
   webvhArtifacts,
   celTimeline,
+  celCustody,
   celResources,
   parseDidLog,
   didLogSummary,
@@ -218,5 +219,47 @@ describe('detailMode', () => {
   });
   test('ready with a row', () => {
     expect(detailMode({ authLoading: false, authenticated: true, loaded: true, row })).toBe('ready');
+  });
+});
+
+describe('celCustody (item 5: the custody chain, folded from the CEL)', () => {
+  const CREATOR = 'did:key:z6MkCreatorX';
+  const HOLDER = 'did:key:z6MkHolderY';
+  const log = (events: unknown[]) => ({ events }) as never;
+
+  test('a post-anchor non-lineage update folds into custody; creator entries never do', () => {
+    const rows = celCustody(log([
+      { type: 'create', data: { controller: CREATOR, resources: [] } },
+      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
+      { type: 'update', data: { author: CREATOR, name: 'renamed' } },
+      { type: 'update', data: { author: HOLDER, statement: 'held it', occurredAt: 't1' } },
+    ]));
+    expect(rows).toEqual([{ author: HOLDER, statement: 'held it', occurredAt: 't1', eventIndex: 3 }]);
+  });
+
+  test('pre-anchor updates are never custody, and a pre-anchor rotation extends the lineage', () => {
+    const ROTATED = 'did:key:z6MkRotatedZ';
+    const rows = celCustody(log([
+      { type: 'create', data: { controller: CREATOR, resources: [] } },
+      { type: 'update', data: { name: 'pre-anchor rename' }, proof: [{ verificationMethod: `${CREATOR}#k` }] },
+      { type: 'rotateKey', data: { newController: ROTATED } },
+      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
+      { type: 'update', data: { author: ROTATED, name: 'post-anchor, still creator lineage' } },
+    ]));
+    expect(rows).toEqual([]);
+  });
+
+  test('an authorless post-anchor update is custody with the unverified-author placeholder', () => {
+    const rows = celCustody(log([
+      { type: 'create', data: { controller: CREATOR, resources: [] } },
+      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
+      { type: 'update', data: { statement: 'no author' } },
+    ]));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].author).toBe('(unverified author)');
+  });
+
+  test('a null log folds to no custody', () => {
+    expect(celCustody(null)).toEqual([]);
   });
 });

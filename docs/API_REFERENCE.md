@@ -358,16 +358,25 @@ Read ownership **live** from Bitcoin (never from a log event). Returns
 const owner = await sdk.lifecycle.getCurrentOwner(asset);
 ```
 
-#### `rotateBtcoKeys(asset, newVerificationMethod, feeRate?)`
+#### `rotateBtcoKeys(asset, newVerificationMethod, feeRate?)` — removed capability
 
-Cooperative key rotation: reinscribe the same-id did:btco doc with a new key, signed by
-the outgoing controller (appends a `rotateKey` event). `privateKey` is optional here.
+Always throws `KEY_ROTATION_NOT_PERMITTED`: `rotateKey` is rejected after the
+btco anchor, and a did:btco asset is definitionally past it. The controller key
+lineage is FROZEN at inscription time. A sat holder authors with their OWN key
+via `asset.appendStatement(...)` — a sat-gated append, no rotation involved.
 
-> **Removed:** `authorizeSigner` (formerly `claimOwnership`, #366) — the
-> non-cooperative rotation path. Holding the sat grants no control of the key
-> set, so a `rotateKey` not signed by the current controller never verifies.
-> `rotateBtcoKeys` is the only rotation, and the controller key lineage is
-> frozen once the asset is inscribed.
+> **Also removed:** `authorizeSigner` (formerly `claimOwnership`, #366) — the
+> non-cooperative rotation path. Holding the sat grants the right to APPEND,
+> never control of the key set.
+
+#### `asset.appendStatement(data, opts?)`
+
+Append a free-form provenance statement (`{ statement?, occurredAt?, links?,
+ext? }`) — the write a sat holder makes. On a did:btco asset the entry commits
+the signer's `data.author` and is inscribed on the anchoring sat (the sat gate
+is its authorization); a non-lineage signer attempting authenticity fields
+(e.g. via `addResourceVersion`) fails locally with
+`CEL_HOLDER_FIELD_NOT_PERMITTED` before anything is paid.
 
 #### `resolveAssetFromSat(sat)`
 

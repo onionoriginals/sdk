@@ -98,9 +98,27 @@ export interface EventVerification {
    * when the event carries no witness proofs.
    */
   witnessProofs?: { verificationMethod: string; verified: boolean }[];
+  /** The signer's did:key, resolved from the event's controller proof. Absent on the custom-verifier path or when unresolvable. */
+  authorKey?: string;
+  /** Which kind of claim this entry makes (derived, never stored in the log). Absent on the custom-verifier path. */
+  authorClass?: EntryAuthorClass;
   /** Any errors encountered during verification */
   errors: string[];
 }
+
+/**
+ * Which kind of claim an entry makes. Derived, never stored in the log.
+ * - `creator`: signed by a key of the creator lineage (genesis controller plus
+ *   pre-anchor rotations) — the authenticity claim about what the work IS.
+ * - `holder`: a post-anchor entry signed by a sat holder outside the creator
+ *   lineage whose sat gate passed — chain of custody, never an authenticity
+ *   claim.
+ * - `unattributed`: the signer's key could not be resolved or no lineage was
+ *   established; always accompanies an event that already failed. Exists so a
+ *   consumer displaying classes has a total function and can never default a
+ *   mystery entry to `creator`.
+ */
+export type EntryAuthorClass = 'creator' | 'holder' | 'unattributed';
 
 /**
  * Result of verifying an entire event log
@@ -119,6 +137,20 @@ export interface VerificationResult {
    * Informational: it is a trust statement only when `verified` is true.
    */
   assetDid?: string;
+  /**
+   * The creator lineage as did:keys, genesis controller first, then each
+   * pre-anchor rotation's newController. Frozen at the btco anchor (post-anchor
+   * rotateKey is rejected). Absent on the custom-verifier path.
+   */
+  creatorKeys?: string[];
+  /**
+   * Distinct holder keys (post-anchor `data.author` did:keys outside the
+   * creator lineage) in first-append order — the custody chain as the log
+   * knows it. It lists holders who WROTE: a silent holder leaves no entry, and
+   * the log cannot invent one; the sat's UTXO history on Bitcoin is the
+   * complete custody record. Absent on the custom-verifier path.
+   */
+  holders?: string[];
 }
 
 /**
@@ -251,7 +283,17 @@ export interface CelBitcoinManager {
  * Options for verifying an event log
  */
 export interface VerifyOptions {
-  /** Optional custom proof verifier */
+  /**
+   * Optional custom proof verifier.
+   *
+   * UNSAFE FOR BTCO LOGS: the custom path owns proof semantics entirely and
+   * never establishes the on-chain authority anchor, so NONE of the btco
+   * authority machinery runs — no sat gate on post-anchor events, no
+   * post-anchor type rejections, no head freshness, no uniqueness walk, and no
+   * author classes (`authorKey`/`authorClass`/`creatorKeys`/`holders` are all
+   * absent, never guessed). A btco-anchored log verified this way is checked
+   * only as far as the supplied verifier checks it.
+   */
   verifier?: (proof: DataIntegrityProof, data: unknown) => Promise<boolean>;
   /**
    * Resolves the Ed25519 public key bytes for a proof's verificationMethod.
@@ -321,4 +363,12 @@ export interface AssetState {
   deactivated: boolean;
   /** Custom metadata */
   metadata?: Record<string, unknown>;
+  /**
+   * Holder entries (post-anchor updates signed outside the creator lineage),
+   * in log order. Holder entries fold ONLY here — never into name/resources/
+   * creator/controller/metadata, which are creator claims.
+   */
+  custody?: Array<{ author: string; statement?: string; occurredAt?: string; eventIndex: number }>;
+  /** Distinct custody authors in first-append order (derived from `custody`). */
+  holders?: string[];
 }

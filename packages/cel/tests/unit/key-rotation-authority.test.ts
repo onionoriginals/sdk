@@ -179,7 +179,10 @@ describe('rotateKey authority evolution', () => {
       { name: 'A', controller: a.didKey, resources: [], createdAt: 'x', nonce: 'u7' },
       { signer: a.signer, verificationMethod: a.vm }
     );
-    log = await appendEvent(log, 'transfer', { newController: b.didKey, transferredAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
+    // v0 legacy shape (previousOwner/newOwner, NO newController): read path
+    // only, no authority effect. A v1 transfer (data.newController) is
+    // rejected anywhere — asserted separately below.
+    log = await appendEvent(log, 'transfer', { previousOwner: 'bc1qa', newOwner: 'bc1qb', transferredAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
     log = await appendEvent(log, 'update', { note: 'a still signs' }, { signer: a.signer, verificationMethod: a.vm });
     expect((await verifyEventLog(log)).verified).toBe(true);
     // transfer is NOT a key rotation: b's key does not become a log signer.

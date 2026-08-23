@@ -598,13 +598,13 @@ await secretsManager.createSecret({
 
 ### Key Rotation
 
-> **For `did:btco` assets, use the lifecycle API — not manual DID-doc edits.**
-> Rotating the signing key that authors provenance is a first-class operation:
-> `sdk.lifecycle.rotateBtcoKeys(...)` (COOPERATIVE — signed by the outgoing
-> controller; the only rotation the verifier accepts — the former
-> non-cooperative `authorizeSigner` is removed). It
-> reinscribes the same-id `did:btco` doc with the new key and appends a
-> signed `rotateKey` event to the asset's CEL. **Key rotation does not change
+> **For `did:btco` assets there is NO key rotation.** `rotateKey` is rejected
+> after the btco anchor (holding the sat grants the right to append, not
+> control of the key set), so `rotateBtcoKeys(...)` always throws
+> `KEY_ROTATION_NOT_PERMITTED` and the former non-cooperative
+> `authorizeSigner` is removed. The controller key lineage is frozen at
+> inscription time; a sat holder authors with their own key via sat-gated
+> appends (`asset.appendStatement`). **Key rotation does not change
 > ownership**: ownership IS live Bitcoin sat control, so it is never rotated or
 > transferred by editing a DID document. The generic pattern below illustrates
 > a grace-period rotation workflow for keys the SDK does not manage for you.

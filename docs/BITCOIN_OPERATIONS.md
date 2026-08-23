@@ -819,8 +819,9 @@ provenance truth.
 
 - **Authorship ops append CEL events:** `createAsset` (`create`), `publishToWeb`
   (`migrate` → did:webvh), `inscribeOnBitcoin` (`migrate` → did:btco),
-  `addResourceVersion` (`update`), and key rotation (`rotateBtcoKeys` →
-  `rotateKey`, cooperative only).
+  `addResourceVersion` (`update`), and holder/creator statements
+  (`appendStatement` → `update`). Key rotation does not exist on did:btco:
+  `rotateKey` is rejected after the anchor and `rotateBtcoKeys` always throws.
 - **Ownership transfers append NOTHING.** `transferOwnership` is a pure Bitcoin sat
   move; ownership is read live via `getCurrentOwner`, never from a log event.
 - The did:btco anchoring inscription commits to the log head (via a `#cel` anchor in

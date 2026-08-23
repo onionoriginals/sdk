@@ -693,14 +693,16 @@ append signed events the new holder must establish a signing key in the log.
 await sdk.lifecycle.transferOwnership(asset, newOwnerBtcAddress);
 const owner = await sdk.lifecycle.getCurrentOwner(asset);  // { address, outpoint }
 
-// AUTHORING (optional) — COOPERATIVE: the outgoing controller signs the rotateKey,
-// rotating the incoming key in so the new holder can author.
-await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase, privateKey });
+// AUTHORING is sat-gated: the holder appends with their OWN key. The entry
+// commits data.author inside the signed data and is authorized by its
+// reinscription on the anchoring sat — no rotation, no key-set change.
+await asset.appendStatement({ statement: 'acquired' }, { signer: holderSigner });
 
-// There is NO non-cooperative path: the former authorizeSigner (a self-signed
-// rotation accepted once a reinscription proved sat control) is REMOVED.
-// Holding the sat grants no control of the key set — a rotateKey not signed by
-// the current controller never verifies, so a buyer cannot rotate themselves in.
+// There is NO rotation on did:btco: rotateBtcoKeys always throws
+// KEY_ROTATION_NOT_PERMITTED (the controller key lineage is frozen at
+// inscription time), and the non-cooperative authorizeSigner is removed.
+// Holder entries carry ONLY statement/occurredAt/links/ext; authenticity
+// fields are creator-lineage only (CEL_HOLDER_FIELD_NOT_PERMITTED).
 ```
 
 A holder who owns the sat but has not enabled authoring (holds no controller key)

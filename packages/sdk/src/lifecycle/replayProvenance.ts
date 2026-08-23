@@ -43,6 +43,7 @@
 import type { EventLog } from '@originals/cel';
 import { deriveDidCel } from '@originals/cel';
 import { parseSatoshiIdentifier } from '@originals/cel';
+import { beginCustodyFold, custodyFoldStep } from '@originals/cel';
 
 /** Honest sentinel: a btco migration whose satoshi cannot be recovered from the log. */
 export const BTCO_SATOSHI_UNKNOWN = 'did:btco:?';
@@ -62,6 +63,14 @@ export interface ReplayedProvenance {
     timestamp: string;
     changes?: string;
   }>;
+  /**
+   * Holder entries (post-anchor updates signed outside the creator lineage),
+   * in log order — chain of custody as the log knows it. The fold-level twin
+   * of the verifier's holder allowlist: `resourceUpdates` above only ever
+   * accepts creator-lineage entries, so a holder-shaped update can never
+   * appear as a resource version.
+   */
+  custody: Array<{ author: string; statement?: string; occurredAt?: string; timestamp: string }>;
 }
 
 export function replayProvenance(log: EventLog): ReplayedProvenance {
@@ -79,6 +88,7 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
     bindings: {},
     migrations: [],
     resourceUpdates: [],
+    custody: [],
   };
 
   const genesisData = genesis.data as Record<string, unknown>;
@@ -87,9 +97,29 @@ export function replayProvenance(log: EventLog): ReplayedProvenance {
     result.bindings['did:cel'] = deriveDidCel(log);
   }
 
+  const custodyFold = beginCustodyFold(genesisData.controller);
+
   for (let i = 1; i < log.events.length; i++) {
     const event = log.events[i];
     const data = (event.data ?? {}) as Record<string, unknown>;
+
+    // Holder entries fold into `custody` and NOWHERE else — the inverse
+    // assertion for resourceUpdates below: a non-lineage post-anchor update
+    // can never appear as a resource version, whatever fields it carries.
+    const custodyAction = custodyFoldStep(custodyFold, event, i);
+    if (custodyAction === 'ignore') continue;
+    if (custodyAction === 'holder') {
+      const captured = custodyFold.custody[custodyFold.custody.length - 1];
+      const proofs = event.proof as ReadonlyArray<{ created?: unknown; witnessedAt?: unknown }> | undefined;
+      const controllerProof = proofs?.find((p) => !(p && typeof p === 'object' && 'witnessedAt' in p));
+      result.custody.push({
+        author: captured.author,
+        ...(captured.statement !== undefined ? { statement: captured.statement } : {}),
+        ...(captured.occurredAt !== undefined ? { occurredAt: captured.occurredAt } : {}),
+        timestamp: typeof controllerProof?.created === 'string' ? controllerProof.created : '',
+      });
+      continue;
+    }
 
     if (event.type === 'update') {
       // Resource-update events (resourceId + previousVersionHash) fold into the

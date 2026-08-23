@@ -14,6 +14,7 @@ import type {
   VerifyOptions,
   VerificationResult,
   EventVerification,
+  EntryAuthorClass,
   DataIntegrityProof,
   OrdinalsLookup
 } from '../types.js';
@@ -31,6 +32,7 @@ import {
   verifyDidKeyProof,
 } from '../proofVerification.js';
 import { hashResource } from '../utils/hash.js';
+import { hexToBytes } from '../utils/encoding.js';
 import { mostRecentResourceHead } from '../resourceHead.js';
 
 /** getInscriptionById result shape (narrowed for reuse). */
@@ -777,11 +779,125 @@ async function verifyAnchorContentMatchesHead(
 /**
  * The log's current on-sat authority anchor: the satoshi a verified migrate
  * event bound the log to, and the inscription that most recently attested
- * authority on it (the migrate inscription).
+ * authority on it (the migrate inscription, then each accepted post-anchor
+ * append's reinscription).
  */
 interface AnchoredSat {
   satoshi: string;
   inscriptionId: string;
+}
+
+/**
+ * The sat gate for a post-anchor event: authority is sat control, proven by
+ * the reinscription itself — only the current UTXO holder can reinscribe the
+ * sat. Requires (the event's own bitcoin witness proofs were already verified
+ * IN FULL against its chain digest — they gate proofValid — so this checks the
+ * remaining conditions):
+ *  - a bitcoin witness proof ON the anchoring sat exists (an off-chain append,
+ *    or one witnessed only on some other sat, is simply unauthorized);
+ *  - the reinscription STRICTLY POSTDATES the current anchor inscription,
+ *    proven by per-inscription confirmed block heights (order-independent of
+ *    getInscriptionsBySatoshi's list order); the list index is only a
+ *    same-height tiebreak, and everything unprovable fails closed.
+ * On success the accepted inscription becomes the new anchor.
+ */
+async function postAnchorSatGate(
+  event: LogEntry,
+  index: number,
+  anchoredSat: AnchoredSat,
+  ordinalsProvider: OrdinalsLookup | undefined
+): Promise<{ inscriptionId: string } | { error: string }> {
+  const candidates = bitcoinWitnessProofs(event).filter(w => w.satoshi === anchoredSat.satoshi);
+  if (candidates.length === 0) {
+    return {
+      error: `Event ${index}: post-anchor events must be inscribed on the anchoring satoshi ${anchoredSat.satoshi} - only the sat holder can append`
+    };
+  }
+  if (!ordinalsProvider || typeof ordinalsProvider.getInscriptionsBySatoshi !== 'function') {
+    return { error: `Event ${index}: ordinals provider cannot enumerate inscriptions on satoshi ${anchoredSat.satoshi}; reinscription order is unprovable` };
+  }
+
+  let anchorHeight: number | undefined;
+  try {
+    anchorHeight = inscriptionBlockHeight(await ordinalsProvider.getInscriptionById(anchoredSat.inscriptionId));
+  } catch (e) {
+    return { error: `Event ${index}: failed to fetch anchor inscription ${anchoredSat.inscriptionId}: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  let onSat: Array<{ inscriptionId: string }>;
+  try {
+    onSat = await ordinalsProvider.getInscriptionsBySatoshi(anchoredSat.satoshi);
+  } catch (e) {
+    return { error: `Event ${index}: failed to list inscriptions on satoshi ${anchoredSat.satoshi}: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  const anchorIdx = onSat.findIndex(i => i.inscriptionId === anchoredSat.inscriptionId);
+
+  let reason = `Event ${index}: no witness proof on satoshi ${anchoredSat.satoshi} satisfied the reinscription-ordering conditions`;
+  for (const candidate of candidates) {
+    let candidateHeight: number | undefined;
+    try {
+      candidateHeight = inscriptionBlockHeight(await ordinalsProvider.getInscriptionById(candidate.inscriptionId));
+    } catch (e) {
+      reason = `Event ${index}: failed to fetch inscription ${candidate.inscriptionId}: ${e instanceof Error ? e.message : String(e)}`;
+      continue;
+    }
+    const candidateIdx = onSat.findIndex(i => i.inscriptionId === candidate.inscriptionId);
+    if (anchorIdx === -1 || candidateIdx === -1) {
+      reason = `Event ${index}: inscription ${candidate.inscriptionId} or anchor inscription ${anchoredSat.inscriptionId} is not enumerated on satoshi ${anchoredSat.satoshi}`;
+      continue;
+    }
+    if (candidateHeight === undefined || anchorHeight === undefined) {
+      reason = `Event ${index}: cannot order inscription ${candidate.inscriptionId} against anchor inscription ${anchoredSat.inscriptionId}: block heights unavailable from the provider; ordering is unprovable`;
+      continue;
+    }
+    if (candidateHeight < anchorHeight) {
+      reason = `Event ${index}: inscription ${candidate.inscriptionId} (block ${candidateHeight}) predates anchor inscription ${anchoredSat.inscriptionId} (block ${anchorHeight}) on satoshi ${anchoredSat.satoshi}`;
+      continue;
+    }
+    if (candidateHeight === anchorHeight && candidateIdx <= anchorIdx) {
+      reason = `Event ${index}: inscription ${candidate.inscriptionId} does not appear strictly after anchor inscription ${anchoredSat.inscriptionId} on satoshi ${anchoredSat.satoshi}`;
+      continue;
+    }
+    return { inscriptionId: candidate.inscriptionId };
+  }
+  return { error: reason };
+}
+
+/**
+ * The fields a HOLDER entry's data may carry — an allowlist, deliberately: a
+ * field added to the create/update shape next year must not become silently
+ * assertable by a holder. Everything else is an authenticity claim only a key
+ * in the creator's lineage may make.
+ */
+const HOLDER_DATA_ALLOWLIST = new Set(['author', 'statement', 'occurredAt', 'links', 'ext']);
+const HOLDER_STATEMENT_MAX_CHARS = 4096;
+
+/** Errors for a holder entry's data shape; empty when the shape is allowed. */
+function holderDataShapeErrors(data: unknown, index: number): string[] {
+  const errors: string[] = [];
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return [`Event ${index}: a holder entry's data must be an object`];
+  }
+  const record = data as Record<string, unknown>;
+  for (const key of Object.keys(record).sort()) {
+    if (!HOLDER_DATA_ALLOWLIST.has(key)) {
+      errors.push(
+        `Event ${index}: a holder entry may not set \`${key}\`; only a key in the creator's lineage can make authenticity claims about the work`
+      );
+    }
+  }
+  if (record.statement !== undefined && (typeof record.statement !== 'string' || record.statement.length > HOLDER_STATEMENT_MAX_CHARS)) {
+    errors.push(`Event ${index}: a holder entry's \`statement\` must be a string of at most ${HOLDER_STATEMENT_MAX_CHARS} characters`);
+  }
+  if (record.occurredAt !== undefined && typeof record.occurredAt !== 'string') {
+    errors.push(`Event ${index}: a holder entry's \`occurredAt\` must be a string`);
+  }
+  if (record.links !== undefined && (!Array.isArray(record.links) || record.links.some(l => typeof l !== 'string'))) {
+    errors.push(`Event ${index}: a holder entry's \`links\` must be an array of string URLs`);
+  }
+  if (record.ext !== undefined && (record.ext === null || typeof record.ext !== 'object' || Array.isArray(record.ext))) {
+    errors.push(`Event ${index}: a holder entry's \`ext\` must be an object`);
+  }
+  return errors;
 }
 
 /**
@@ -948,7 +1064,11 @@ async function verifyEvent(
   previousEvent: LogEntry | undefined,
   resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>,
   authorizedKeyIds?: Set<string>,
-  ordinalsProvider?: OrdinalsLookup
+  ordinalsProvider?: OrdinalsLookup,
+  // Post-anchor events (except the legacy v0 transfer read path) are exempt
+  // from the key-lineage check: their authority is sat control, enforced by
+  // the walk's sat gate. The walk decides this — pre-anchor events never skip.
+  skipAuthorization?: boolean
 ): Promise<EventVerification> {
   const errors: string[] = [];
 
@@ -1009,7 +1129,7 @@ async function verifyEvent(
   // in one DID document nor tripped up by the same key under an equivalent VM
   // id. A custom verifier takes full responsibility for authorization, so this
   // check is skipped there.
-  if (!customVerifier && authorizedKeyIds && index > 0) {
+  if (!customVerifier && authorizedKeyIds && index > 0 && !skipAuthorization) {
     for (const { proof, originalIndex } of controllerProofs) {
       const keyHex = await resolveControllerKeyHex(proof.verificationMethod, resolveKey);
       if (keyHex === null || !authorizedKeyIds.has(keyHex)) {
@@ -1158,6 +1278,31 @@ async function verifyEvent(
 
   if (witnessResults.length > 0) {
     result.witnessProofs = witnessResults;
+  }
+
+  // The signer's did:key (default path only; a custom verifier owns proof
+  // semantics and no class machinery runs there). When the event committed a
+  // (verified-bound) author, that IS the signer; otherwise it is derived from
+  // the first controller proof — offline for did:key VMs, via the resolver
+  // for the rest.
+  if (!customVerifier) {
+    if (typeof declaredAuthor === 'string') {
+      result.authorKey = declaredAuthor;
+    } else {
+      const vm0 = controllerProofs[0].proof.verificationMethod;
+      if (vm0.startsWith('did:key:')) {
+        result.authorKey = vm0.split('#')[0];
+      } else {
+        const hex = await resolveControllerKeyHex(vm0, resolveKey);
+        if (hex) {
+          try {
+            result.authorKey = `did:key:${multikey.encodePublicKey(hexToBytes(hex), 'Ed25519')}`;
+          } catch {
+            // non-encodable key material: leave authorKey absent
+          }
+        }
+      }
+    }
   }
 
   return result;
@@ -1408,20 +1553,131 @@ export async function verifyEventLog(
   }
 
   // Verify each event's proofs and hash chain. The loop is index-ordered and
-  // `authorizedKeyIds` EVOLVES: each event is authorized against the set as it
-  // stood when the event was appended, and a fully valid rotateKey event swaps
-  // the set for subsequent iterations.
+  // authority is SPLIT AT THE BTCO ANCHOR:
+  //  - PRE-anchor, authority is key lineage: each event is authorized against
+  //    `authorizedKeyIds` as it stood when the event was appended, and a fully
+  //    valid rotateKey event swaps the set for subsequent iterations.
+  //  - POST-anchor (every event after the verified btco migrate), authority is
+  //    SAT CONTROL: an event is authorized iff it commits its author in
+  //    `data.author`, its single controller proof is that author's key, and it
+  //    carries a fully verified `bitcoin-ordinals-2024` witness proof on the
+  //    anchoring sat whose inscription strictly postdates the current anchor.
+  //    The signer does NOT have to be in `authorizedKeyIds`, and appending
+  //    never modifies it — rotateKey/deactivate/migrate are rejected outright
+  //    post-anchor (holding the sat grants the right to append, not control of
+  //    the key set). The legacy v0 `transfer` read path keeps the key-lineage
+  //    check so pre-existing logs stay verifiable.
   //
-  // Companion walk state (#366): once a btco migrate's SIGNED anchoring sat is
+  // Companion walk state: once a btco migrate's SIGNED anchoring sat is
   // confirmed by a matching bitcoin witness proof, the log's authority is
-  // anchored to that sat. Default-path only; a custom verifier owns semantics.
+  // anchored to that sat, and the creator lineage is FROZEN (`creatorKeyHexes`
+  // snapshot). Default-path only; a custom verifier owns semantics.
   let anchoredSat: AnchoredSat | undefined;
+  // The creator lineage frozen at the anchor (item 5): exactly authorizedKeyIds
+  // at the moment anchoredSat is first set. Post-anchor entries signed by these
+  // keys are creator entries; everything else that passes the sat gate is a
+  // holder entry.
+  let creatorKeyHexes: Set<string> | undefined;
+  // The creator lineage as did:keys, genesis first (reported on the result).
+  const creatorKeys: string[] = [];
+  // Distinct holder authors (did:keys) in first-append order, and their key
+  // hexes for the #402 uniqueness union: the asset's own later reinscriptions
+  // are holder-authored, so competitor authentication must recognize them.
+  const holders: string[] = [];
+  const holderKeyHexes = new Set<string>();
   // Seed the history union with the genesis-authorized key(s) established above.
   for (const k of authorizedKeyIds) allAuthorizedKeyHexes.add(k);
+  if (!options?.verifier) {
+    for (const k of authorizedKeyIds) {
+      try {
+        creatorKeys.push(`did:key:${multikey.encodePublicKey(hexToBytes(k), 'Ed25519')}`);
+      } catch { /* non-encodable key material: omit from the reported lineage */ }
+    }
+  }
   for (let i = 0; i < log.events.length; i++) {
     const event = log.events[i];
     const previousEvent = i > 0 ? log.events[i - 1] : undefined;
-    const eventResult = await verifyEvent(event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds, options?.ordinalsProvider);
+    // Post-anchor events (except legacy v0 transfers) are authorized by the
+    // sat gate below, not by key lineage.
+    const isV1Transfer = event.type === 'transfer' &&
+      (event.data as { newController?: unknown } | null | undefined)?.newController !== undefined;
+    const isLegacyV0Transfer = event.type === 'transfer' && !isV1Transfer;
+    const postAnchor = !options?.verifier && anchoredSat !== undefined;
+    const eventResult = await verifyEvent(
+      event, i, options?.verifier, previousEvent, options?.resolveKey, authorizedKeyIds,
+      options?.ordinalsProvider, postAnchor && !isLegacyV0Transfer
+    );
+    // The class this iteration derives for the entry (default path only).
+    let entryClass: EntryAuthorClass | undefined;
+
+    // There is no transfer event in this model: ownership is the sat, moved by
+    // a plain Bitcoin transaction, never a log event. A v1 transfer (one that
+    // assigns a controller) is rejected ANYWHERE; the v0 legacy shape
+    // (previousOwner/newOwner/txid, no authority effect) stays readable.
+    if (!options?.verifier && isV1Transfer) {
+      eventResult.proofValid = false;
+      eventResult.errors.push(
+        `Event ${i}: transfer events cannot assign a controller (data.newController); ownership is the sat, moved by a Bitcoin transaction, never a log event`
+      );
+    }
+
+    // Post-anchor policy: the sat decides. Type rejections first, then the sat
+    // gate for updates.
+    if (postAnchor && anchoredSat) {
+      if (event.type === 'rotateKey') {
+        eventResult.proofValid = false;
+        eventResult.errors.push(
+          `Event ${i}: rotateKey is not permitted after the btco anchor; holding the sat grants the right to append, not control of the key set`
+        );
+      } else if (event.type === 'deactivate') {
+        eventResult.proofValid = false;
+        eventResult.errors.push(
+          `Event ${i}: deactivate is not permitted after the btco anchor`
+        );
+      } else if (event.type === 'migrate') {
+        eventResult.proofValid = false;
+        eventResult.errors.push(
+          `Event ${i}: migrate is not permitted after the btco anchor`
+        );
+      } else if (event.type === 'update' && eventResult.proofValid && eventResult.chainValid) {
+        const author = (event.data as { author?: unknown } | null | undefined)?.author;
+        if (typeof author !== 'string') {
+          eventResult.proofValid = false;
+          eventResult.errors.push(
+            `Event ${i}: post-anchor events must commit the appending key in data.author`
+          );
+        } else {
+          // verifyEvent already bound the (present) author: exactly one
+          // controller proof, self-certifying author, signer ≡ author.
+          const gate = await postAnchorSatGate(event, i, anchoredSat, options?.ordinalsProvider);
+          if ('error' in gate) {
+            eventResult.proofValid = false;
+            eventResult.errors.push(gate.error);
+          } else {
+            const authorHexes = await selfCertifyingKeyHexes(author);
+            const isCreatorEntry = [...(authorHexes ?? [])].some(h => creatorKeyHexes?.has(h) === true);
+            if (isCreatorEntry) {
+              entryClass = 'creator';
+              anchoredSat = { satoshi: anchoredSat.satoshi, inscriptionId: gate.inscriptionId };
+            } else {
+              const shapeErrors = holderDataShapeErrors(event.data, i);
+              if (shapeErrors.length > 0) {
+                eventResult.proofValid = false;
+                eventResult.errors.push(...shapeErrors);
+                entryClass = 'holder';
+              } else {
+                entryClass = 'holder';
+                anchoredSat = { satoshi: anchoredSat.satoshi, inscriptionId: gate.inscriptionId };
+                if (!holders.includes(author)) holders.push(author);
+                for (const h of authorHexes ?? []) holderKeyHexes.add(h);
+              }
+            }
+          }
+        }
+      }
+      // Legacy v0 transfers pass through on the key-lineage path (no sat gate,
+      // no author requirement) — the legacy read path.
+    }
 
     // Resource-update continuity (default path only; a custom verifier owns
     // proof semantics). Only engage for resource-shaped updates that otherwise
@@ -1473,6 +1729,11 @@ export async function verifyEventLog(
         // anchoring signed by this now-superseded controller must still be
         // recognizable as a legit competitor.
         for (const k of newKeys) allAuthorizedKeyHexes.add(k);
+        // Only PRE-anchor rotations reach here (post-anchor rotateKey fails
+        // above), so this extends the reported creator lineage.
+        if (typeof newController === 'string' && !creatorKeys.includes(newController)) {
+          creatorKeys.push(newController);
+        }
       }
     }
 
@@ -1515,10 +1776,26 @@ export async function verifyEventLog(
               );
             } else {
               anchoredSat = { satoshi: signedSat, inscriptionId: onSignedSat.inscriptionId };
+              // Freeze the creator lineage at the anchor (item 5): post-anchor
+              // rotateKey is rejected, so the set can never legitimately change
+              // again. Snapshot explicitly rather than relying on that.
+              creatorKeyHexes = new Set(authorizedKeyIds);
             }
           }
         }
       }
+    }
+
+    // Entry class (default path only; total — a mystery entry never defaults
+    // to `creator`). Post-anchor updates were classified by the sat-gate
+    // branch above; everything else is a creator entry iff the lineage was
+    // established and the event verified under it.
+    if (!options?.verifier) {
+      eventResult.authorClass = entryClass ?? (
+        !authorityError && eventResult.proofValid && eventResult.chainValid && eventResult.authorKey !== undefined
+          ? 'creator'
+          : 'unattributed'
+      );
     }
 
     eventVerifications.push(eventResult);
@@ -1561,7 +1838,13 @@ export async function verifyEventLog(
   // path (which owns proof semantics and never establishes `anchoredSat`).
   let uniquenessError: string | undefined;
   if (!options?.verifier && anchoredSat && typeof assetDid === 'string' && assetDid.startsWith('did:cel:')) {
-    uniquenessError = (await verifyUniqueness(assetDid, anchoredSat, allAuthorizedKeyHexes, options?.ordinalsProvider, options?.resolveKey)) ?? undefined;
+    // Union with the verified post-anchor holder keys: the asset's own later
+    // reinscriptions are holder-authored, so competitor authentication (#402)
+    // must recognize them in the cross-sat case.
+    const recognizedKeyHexes = holderKeyHexes.size > 0
+      ? new Set([...allAuthorizedKeyHexes, ...holderKeyHexes])
+      : allAuthorizedKeyHexes;
+    uniquenessError = (await verifyUniqueness(assetDid, anchoredSat, recognizedKeyHexes, options?.ordinalsProvider, options?.resolveKey)) ?? undefined;
   }
 
   // Content-as-ordinal integrity (#407 phase 2): a phase-2 anchor inscription's
@@ -1613,5 +1896,8 @@ export async function verifyEventLog(
     errors,
     events: eventVerifications,
     ...(assetDid !== undefined ? { assetDid } : {}),
+    // Class machinery is default-path only; never synthesized under a custom
+    // verifier.
+    ...(options?.verifier ? {} : { creatorKeys, holders }),
   };
 }

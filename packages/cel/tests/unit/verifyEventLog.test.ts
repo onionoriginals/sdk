@@ -1354,7 +1354,9 @@ describe('unauthorized rotateKey with a valid on-sat reinscription witness (dele
 
     const result = await verifyEventLog(full, { ordinalsProvider: provider });
     expect(result.verified).toBe(false);
-    expect(result.errors.some(e => /is not authorized by the log's create event/.test(e))).toBe(true);
+    // Under sat-gated appends the failure is the post-anchor rotateKey
+    // rejection — the key-set message that IS the whole distinction.
+    expect(result.errors.some(e => /rotateKey is not permitted after the btco anchor; holding the sat grants the right to append, not control of the key set/.test(e))).toBe(true);
     // And the removed public field is gone from the result shape.
     expect('nonCooperativeRotation' in result.events[2]).toBe(false);
   });

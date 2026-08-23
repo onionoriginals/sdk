@@ -56,14 +56,14 @@ const { asset, verification, warnings } = await sdk.lifecycle.loadAsset(wire);
 await sdk.lifecycle.transferOwnership(asset, 'bcrt1q...');
 const owner = await sdk.lifecycle.getCurrentOwner(asset); // { address, outpoint } | null (read live)
 
-// AUTHORING is separate from ownership. Rotation is COOPERATIVE ONLY: the
-// outgoing controller signs the new key in. There is NO non-cooperative path
-// (authorizeSigner is removed — holding the sat grants no control of the key
-// set, so a buyer cannot rotate themselves in).
-await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase, privateKey });
-// A holder without the controller key: appends DEGRADE (cel:append-skipped/
-// NO_SIGNING_KEY) yet they still own and can transfer the sat. Post-genesis
-// resource versions ride unverified.resourceUpdates (advisory) until Phase 4.
+// AUTHORING is sat-gated after the anchor: the holder appends with their OWN
+// key — the entry commits data.author and is reinscribed on the anchoring sat.
+await asset.appendStatement({ statement: 'in my collection' }, { signer: holderSigner });
+// Holder entries carry ONLY statement/occurredAt/links/ext — authenticity
+// fields (name/resources/…) are creator-lineage only and refuse locally
+// (CEL_HOLDER_FIELD_NOT_PERMITTED). There is NO rotation on did:btco:
+// rotateBtcoKeys always throws KEY_ROTATION_NOT_PERMITTED (the lineage is
+// frozen at inscription; authorizeSigner is removed).
 ```
 
 ## Typed Originals (Kinds System)

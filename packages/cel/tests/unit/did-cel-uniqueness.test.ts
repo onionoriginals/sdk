@@ -181,7 +181,7 @@ describe('did:cel uniqueness — first-anchor-wins', () => {
     expect(xResult.verified).toBe(true);
   });
 
-  test('ROTATION IS NOT A COMPETITOR: migrate + N reinscriptions on the SAME sat X still verify', async () => {
+  test('REINSCRIPTION IS NOT A COMPETITOR: migrate + a sat-gated holder append on the SAME sat X still verify', async () => {
     const p = new OrdMockProvider();
     const a = await makeKey();
     const b = await makeKey();
@@ -189,20 +189,22 @@ describe('did:cel uniqueness — first-anchor-wins', () => {
     const X = '111000111';
     const bx = await branch(base, a, p, X, didCel);
 
-    // A cooperative rotation (signed by the outgoing controller) reinscribes
-    // the SAME sat X (a second anchoring for the same did:cel on the same sat
-    // — must NOT count as a rival sat).
-    const rotated = await appendEvent(
+    // A sat-gated holder append (b commits data.author and reinscribes) lands
+    // on the SAME sat X (a second anchoring for the same did:cel on the same
+    // sat — must NOT count as a rival sat). The anchoring is authored by b's
+    // key — OUTSIDE the creator lineage — so this also pins the holder-key
+    // union in competitor authentication.
+    const appended = await appendEvent(
       bx.log,
-      'rotateKey',
-      { newController: b.didKey, rotatedAt: '2026-07-13T00:00:02Z' },
-      { signer: a.signer, verificationMethod: a.vm }
+      'update',
+      { author: b.didKey, statement: 'held', occurredAt: '2026-07-13T00:00:02Z' },
+      { signer: b.signer, verificationMethod: b.vm }
     );
-    const rotInsc = await inscribeDoc(p, X, chainDigest(rotated.events[rotated.events.length - 1]), didCel, { publicKeyMultibase: b.pubMb, signer: b.signer });
-    const full = attachWitness(rotated, rotInsc, X);
+    const appInsc = await inscribeDoc(p, X, chainDigest(appended.events[appended.events.length - 1]), didCel, { publicKeyMultibase: b.pubMb, signer: b.signer });
+    const full = attachWitness(appended, appInsc, X);
 
-    // Migrate at block 100, rotation reinscription at block 200 — both on X.
-    const provider = withHeights(p, { [bx.inscriptionId]: 100, [rotInsc.inscriptionId]: 200 });
+    // Migrate at block 100, append reinscription at block 200 — both on X.
+    const provider = withHeights(p, { [bx.inscriptionId]: 100, [appInsc.inscriptionId]: 200 });
     const result = await verifyEventLog(full, { ordinalsProvider: provider });
     expect(result.errors).toEqual([]);
     expect(result.verified).toBe(true);

@@ -19,6 +19,7 @@ import { btcoDidPrefix, btcoDidFromSatoshi } from '../btcoDid.js';
 import { deriveDidCel } from '../celDid.js';
 import { computeDigestMultibase } from '../hash.js';
 import { canonicalizeEntryForChain } from '../canonicalize.js';
+import { beginCustodyFold, custodyFoldStep, finishCustodyFold } from '../algorithms/classifyEntries.js';
 
 /**
  * Configuration options for BtcoCelManager
@@ -421,9 +422,19 @@ export class BtcoCelManager {
       metadata: {},
     };
 
+    // Creator-vs-holder gate (defensive fold, item 5's second line of
+    // defense): post-anchor updates signed outside the creator lineage fold
+    // ONLY into state.custody — never into name/resources/creator/controller/
+    // did/layer or the metadata catch-all — and a post-anchor rotateKey (never
+    // valid) touches nothing. This fold does not trust the verifier to have
+    // caught a bad entry.
+    const custodyFold = beginCustodyFold(createData.controller);
+
     // Apply subsequent events
     for (let i = 1; i < log.events.length; i++) {
       const event = log.events[i];
+      const custodyAction = custodyFoldStep(custodyFold, event, i);
+      if (custodyAction === 'holder' || custodyAction === 'ignore') continue;
 
       if (event.type === 'update' || event.type === 'migrate') {
         const updateData = event.data as Record<string, unknown>;
@@ -516,7 +527,7 @@ export class BtcoCelManager {
         // migration events, so exclude them here for those events alone — for an
         // ordinary update, an application-defined `network`/`to` field must still
         // flow through to metadata rather than being silently stripped.
-        const excludedKeys = ['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt', 'txid', 'inscriptionId'];
+        const excludedKeys = ['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt', 'txid', 'inscriptionId', 'author'];
         const isBtcoMigration = updateData.layer === 'btco' &&
           (event.type === 'migrate' || (updateData.sourceDid && updateData.migratedAt));
         if (isBtcoMigration) {
@@ -566,6 +577,8 @@ export class BtcoCelManager {
         }
       }
     }
+
+    finishCustodyFold(custodyFold, state);
 
     return state;
   }

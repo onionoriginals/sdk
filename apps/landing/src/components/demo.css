@@ -916,6 +916,27 @@
   color: var(--warn, var(--text-tertiary));
 }
 
+/* The two-section split (item 5): authenticity (creator) vs custody (holders).
+   One hash chain runs through both, so the lists sit flush. */
+.cel-section-label {
+  list-style: none;
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding: var(--sp-2) 0;
+}
+
+.cel-chain-custody {
+  margin-top: var(--sp-2);
+  border-top: 1px dashed var(--border);
+}
+
+.cel-entry-unattributed {
+  font-size: var(--text-xs);
+  color: var(--warn, var(--text-tertiary));
+}
+
 /* The link belongs BETWEEN entries — it is entry N's claim about entry N-1. */
 .cel-link {
   display: flex;

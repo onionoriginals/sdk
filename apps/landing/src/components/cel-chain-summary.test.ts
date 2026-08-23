@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { summarize, accentFor } from './CelChain';
+import { summarize, accentFor, isCustodyEntry } from './CelChain';
 import type { CelEntry } from '../sdk/engine';
 
 /**
@@ -56,5 +56,54 @@ describe('CEL entry glosses', () => {
     expect(accentFor(entry('migrate', { layer: 'webvh' }))).toBe('var(--webvh)');
     expect(accentFor(entry('migrate', { layer: 'btco', to: 'did:btco:1' }))).toBe('var(--btco)');
     expect(accentFor(entry('create'))).toBe('var(--cel)');
+  });
+});
+
+describe('creator vs holder rendering (item 5)', () => {
+  const holder = (data: Record<string, unknown> = {}): CelEntry => ({
+    type: 'update',
+    data: { author: 'did:key:z6MkHolderHolderHolderHolder', statement: 'in my collection', ...data },
+    proof: [],
+    authorClass: 'holder',
+    authorKey: 'did:key:z6MkHolderHolderHolderHolder'
+  });
+
+  test('a holder entry renders its statement and author — never a name or resource count', () => {
+    const text = summarize(holder({ name: 'smuggled name', resources: [{}, {}] }));
+    expect(text).toContain('Held by');
+    expect(text).toContain('in my collection');
+    expect(text).toContain('did:key:z6MkHolderHolderHol'); // truncated author
+    expect(text).not.toContain('smuggled name');
+    expect(text).not.toContain('2');
+  });
+
+  test('holder entries carry the custody accent, not the creator palette', () => {
+    expect(accentFor(holder())).toBe('var(--holder, var(--text-secondary))');
+    // A creator update keeps the creator palette.
+    const creatorUpdate: CelEntry = { type: 'update', data: {}, proof: [], authorClass: 'creator' };
+    expect(accentFor(creatorUpdate)).toBe('var(--cel)');
+  });
+
+  test('holder and class-absent entries belong to the custody section; creator entries never do', () => {
+    expect(isCustodyEntry(holder())).toBe(true);
+    const classAbsent: CelEntry = { type: 'update', data: {}, proof: [] };
+    expect(isCustodyEntry(classAbsent)).toBe(true); // unverified author → custody, labeled
+    const unattributed: CelEntry = { type: 'update', data: {}, proof: [], authorClass: 'unattributed' };
+    expect(isCustodyEntry(unattributed)).toBe(true);
+    const creator: CelEntry = { type: 'create', data: {}, proof: [], authorClass: 'creator' };
+    expect(isCustodyEntry(creator)).toBe(false);
+  });
+
+  test('a creator statement renders as a statement gloss (not the holder shape)', () => {
+    const creatorStatement: CelEntry = {
+      type: 'update',
+      data: { author: 'did:key:z6MkCreator', statement: 'exhibited' },
+      proof: [],
+      authorClass: 'creator'
+    };
+    const text = summarize(creatorStatement);
+    expect(text).toContain('Statement');
+    expect(text).toContain('exhibited');
+    expect(text).not.toContain('Held by');
   });
 });

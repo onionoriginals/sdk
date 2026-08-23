@@ -19,6 +19,8 @@ import {
   OriginalsSDK,
   type OriginalsAsset
 } from '@originals/sdk';
+import { classifyLogEntries, type EntryAuthorClass } from '@originals/sdk/cel';
+export type { EntryAuthorClass };
 // Test doubles moved out of the root entry in plan 043 so they are not shipped
 // to production consumers.
 import { OrdMockProvider } from '@originals/sdk/testing';
@@ -74,6 +76,14 @@ export interface CelEntry {
     verificationMethod?: string;
     proofValue?: string;
   }>;
+  /**
+   * Which kind of claim the entry makes (creator = authenticity, holder =
+   * custody), derived by the pure display fold (classifyLogEntries) — a CLAIM,
+   * not a verification result; the renderer labels it accordingly.
+   */
+  authorClass?: EntryAuthorClass;
+  /** The DID the entry claims as its signer. */
+  authorKey?: string;
 }
 
 export interface DemoAssetState {
@@ -659,14 +669,25 @@ function celEntries(asset: unknown): CelEntry[] {
   const log = (asset as { celLog?: { events?: unknown } }).celLog;
   const events = log?.events;
   if (!Array.isArray(events)) return [];
-  return events.map((e) => {
+  // Author classes from the pure display fold: unverified CLAIMS the renderer
+  // labels as such (only verifyEventLog can promote a class; anything
+  // security-relevant reads the verification result, never this).
+  let classes: Array<{ authorClass: EntryAuthorClass; authorKey?: string }> = [];
+  try {
+    classes = classifyLogEntries(log as never);
+  } catch {
+    classes = [];
+  }
+  return events.map((e, i) => {
     const entry = (e ?? {}) as Record<string, unknown>;
     return {
       type: typeof entry.type === 'string' ? entry.type : 'unknown',
       data: (entry.data ?? {}) as Record<string, unknown>,
       previousEvent:
         typeof entry.previousEvent === 'string' ? entry.previousEvent : undefined,
-      proof: Array.isArray(entry.proof) ? (entry.proof as CelEntry['proof']) : []
+      proof: Array.isArray(entry.proof) ? (entry.proof as CelEntry['proof']) : [],
+      authorClass: classes[i]?.authorClass,
+      authorKey: classes[i]?.authorKey
     };
   });
 }
