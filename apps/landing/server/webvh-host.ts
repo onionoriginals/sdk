@@ -81,7 +81,7 @@ const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
 // webvhResourceLocation: `{domain}/{userPath}/{did.jsonl|cel.json}` and
 // `{domain}/{userPath}/resources/{multibase}`, with the pathless DID writing
 // its log under `.well-known` while its resources stay at the domain root.
-const GROUP_MEMBER_SUFFIX = /\/(?:resources\/[^/]+|did\.jsonl|did\.json|cel\.json)$/;
+const GROUP_MEMBER_SUFFIX = /\/(?:resources\/[^/]+|did\.jsonl|did\.json|cel\.jsonl|cel\.json)$/;
 
 /**
  * The publish a stored object belongs to. Unrecognised keys are their own group

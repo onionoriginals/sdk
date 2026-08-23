@@ -5,6 +5,7 @@ import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 import { hashResource } from '../../../src/utils/validation';
 import { encodeBase64UrlMultibase, hexToBytes } from '@originals/cel/encoding';
+import { resourcePathSegment } from '@originals/cel';
 
 /**
  * A published asset serves its resource bytes from its own origin. An `update`
@@ -26,37 +27,45 @@ const resources = () => [
   }
 ];
 
-/** The location publishResources uses: {domain} + {userPath}/resources/{multibase(hash)}. */
-function hostedAt(webvhDid: string, hash: string): { domain: string; path: string } {
+/**
+ * The location publishResources uses:
+ * {domain} + {userPath}/resources/{segment}, where the CANONICAL segment is
+ * the multibase multihash ("uEi...") and the legacy raw-digest segment
+ * ("ud...") is dual-written while legacyResourceUrlCompat is on.
+ */
+function hostedAt(webvhDid: string, hash: string, form: 'canonical' | 'legacy' = 'canonical'): { domain: string; path: string } {
   const parts = webvhDid.split(':');
   const domain = decodeURIComponent(parts[3]);
   const userPath = parts.slice(4).join('/');
-  const multibase = encodeBase64UrlMultibase(hexToBytes(hash));
+  const segment = form === 'canonical'
+    ? resourcePathSegment(hash)
+    : encodeBase64UrlMultibase(hexToBytes(hash));
   return {
     domain,
-    path: userPath ? `${userPath}/resources/${multibase}` : `resources/${multibase}`
+    path: userPath ? `${userPath}/resources/${segment}` : `resources/${segment}`
   };
 }
 
 /** Read back whatever is hosted for a resource version, or null. */
-function served(storage: MemoryStorageAdapter, webvhDid: string, hash: string) {
-  const { domain, path } = hostedAt(webvhDid, hash);
+function served(storage: MemoryStorageAdapter, webvhDid: string, hash: string, form: 'canonical' | 'legacy' = 'canonical') {
+  const { domain, path } = hostedAt(webvhDid, hash, form);
   return storage.getObject(domain, path);
 }
 
-function makeSdk(storage: MemoryStorageAdapter, keyStore: MockKeyStore = new MockKeyStore()) {
+function makeSdk(storage: MemoryStorageAdapter, keyStore: MockKeyStore = new MockKeyStore(), config?: Record<string, unknown>) {
   const sdk = OriginalsSDK.create({
     network: 'regtest',
     defaultKeyType: 'Ed25519',
     ordinalsProvider: new OrdMockProvider(),
     keyStore,
-    storageAdapter: storage
+    storageAdapter: storage,
+    ...config
   } as never);
   return { sdk, keyStore };
 }
 
-async function publishedAsset(storage: MemoryStorageAdapter) {
-  const { sdk, keyStore } = makeSdk(storage);
+async function publishedAsset(storage: MemoryStorageAdapter, config?: Record<string, unknown>) {
+  const { sdk, keyStore } = makeSdk(storage, new MockKeyStore(), config);
   const asset = await sdk.lifecycle.createAsset(resources() as never);
   const publisher = await sdk.did.createDIDWebVH({ domain: 'example.com', paths: ['pub'] });
   await sdk.lifecycle.publishToWeb(asset, (publisher as { did: string }).did);
@@ -83,6 +92,32 @@ describe('addResourceVersion on a published (did:webvh) asset', () => {
     const head = asset.celLog!.events[asset.celLog!.events.length - 1];
     expect(head.type).toBe('update');
     expect((head.data as { toHash: string }).toHash).toBe(v2.hash);
+  });
+
+  test('an update dual-writes the canonical and legacy keys while compat is on (default)', async () => {
+    const storage = new MemoryStorageAdapter();
+    const { asset } = await publishedAsset(storage);
+    const webvhDid = asset.bindings!['did:webvh']!;
+
+    const v2 = await asset.addResourceVersion('doc.txt', V2, 'text/plain');
+
+    const canonical = await served(storage, webvhDid, v2.hash, 'canonical');
+    const legacy = await served(storage, webvhDid, v2.hash, 'legacy');
+    expect(canonical).not.toBeNull();
+    expect(legacy).not.toBeNull();
+    expect(new TextDecoder().decode(canonical!.content)).toBe(V2);
+    expect(new TextDecoder().decode(legacy!.content)).toBe(V2);
+  });
+
+  test('with legacyResourceUrlCompat: false an update writes only the canonical key', async () => {
+    const storage = new MemoryStorageAdapter();
+    const { asset } = await publishedAsset(storage, { legacyResourceUrlCompat: false });
+    const webvhDid = asset.bindings!['did:webvh']!;
+
+    const v2 = await asset.addResourceVersion('doc.txt', V2, 'text/plain');
+
+    expect(await served(storage, webvhDid, v2.hash, 'canonical')).not.toBeNull();
+    expect(await served(storage, webvhDid, v2.hash, 'legacy')).toBeNull();
   });
 
   test('the previous version stays hosted — old URLs keep resolving', async () => {

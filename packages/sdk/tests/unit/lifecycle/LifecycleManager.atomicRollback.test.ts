@@ -24,7 +24,9 @@ function makeResources(): AssetResource[] {
 /**
  * Adapter that fails on the Nth putObject call. Call #1 is createAsset's
  * best-effort genesis persist (cel/<suffix>.json, Phase 3), so the first
- * RESOURCE write during publish is call #2.
+ * RESOURCE write during publish is call #2. Each resource is dual-written
+ * (canonical multihash key, then the legacy raw-digest key while
+ * legacyResourceUrlCompat is on), so r1 = calls #2-#3, r2 = calls #4-#5.
  */
 function makeFailingAdapter(failOnCall: number) {
   const objects = new Map<string, string>();
@@ -58,7 +60,7 @@ function makeFailingAdapter(failOnCall: number) {
 
 describe('publishToWeb atomicRollback', () => {
   test('default (atomicRollback on): a mid-publish failure reverts resource.url mutations and stays on did:cel', async () => {
-    // Fail on the SECOND resource write (call 1 = genesis cel persist).
+    // Fail on r1's legacy dual-write (call 2 = r1 canonical, call 3 = r1 legacy).
     const { adapter, deleted } = makeFailingAdapter(3);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', storageAdapter: adapter as any });
@@ -78,8 +80,9 @@ describe('publishToWeb atomicRollback', () => {
   });
 
   test('atomicRollback: false preserves partial writes for inspection', async () => {
-    // Fail on the SECOND resource write (call 1 = genesis cel persist).
-    const { adapter, deleted } = makeFailingAdapter(3);
+    // Fail on the SECOND resource's canonical write (calls 2-3 = r1's
+    // canonical + legacy dual-write), so r1 is fully published with its url set.
+    const { adapter, deleted } = makeFailingAdapter(4);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', storageAdapter: adapter as any });
     const asset = await sdk.lifecycle.createAsset(makeResources());
@@ -100,7 +103,8 @@ describe('publishToWeb atomicRollback', () => {
     const adapter = {
       async putObject(domain: string, path: string, content: Uint8Array | string): Promise<string> {
         calls++;
-        // Second resource write (call 1 = createAsset's genesis cel persist).
+        // r1's legacy dual-write (call 1 = createAsset's genesis cel persist,
+        // call 2 = r1 canonical).
         if (calls === 3) throw new Error('storage write exploded');
         objects.set(`${domain}/${path}`, String(content));
         return `mem://${domain}/${path}`;

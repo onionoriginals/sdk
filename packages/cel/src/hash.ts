@@ -8,6 +8,7 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { multibase } from './utils/encoding.js';
 
 /**
@@ -122,4 +123,32 @@ export function decodeDigestMultibase(digest: string): Uint8Array {
     return bytes;
   }
   throw new Error('Invalid digestMultibase: expected a Multibase-encoded sha2-256 multihash (or legacy 32-byte bare digest)');
+}
+
+/**
+ * Canonical path segment for a published resource: multibase multihash of its
+ * sha256 (`u` + base64url-nopad(0x12 0x20 || digest), i.e. "uEi..."). This is
+ * the ONLY wire form for resource identifiers; hex stays in-process only.
+ *
+ * @param hashHex - 64-char hex sha256 of the resource bytes
+ */
+export function resourcePathSegment(hashHex: string): string {
+  if (!/^[0-9a-f]{64}$/i.test(hashHex)) {
+    throw new Error(`Invalid resource hash: expected 64-char hex sha256, got ${hashHex.length} chars`);
+  }
+  const digest = Uint8Array.from(hashHex.match(/.{2}/g)!.map((b) => parseInt(b, 16)));
+  const multihash = new Uint8Array(SHA2_256_MULTIHASH_PREFIX.length + digest.length);
+  multihash.set(SHA2_256_MULTIHASH_PREFIX, 0);
+  multihash.set(digest, SHA2_256_MULTIHASH_PREFIX.length);
+  return multibase.encode(multihash, 'base64url');
+}
+
+/**
+ * Parses a published-resource path segment back to its hex sha256. Accepts the
+ * canonical multihash form ("uEi...") AND the legacy raw-digest form ("ud...")
+ * that pre-standardization URLs carry — the single named home for that
+ * dual-form tolerance, so it is never re-derived at call sites.
+ */
+export function parseResourcePathSegment(segment: string): string {
+  return bytesToHex(decodeDigestMultibase(segment));
 }

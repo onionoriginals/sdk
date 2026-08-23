@@ -143,6 +143,13 @@ describe('webvh-host publish groups', () => {
     expect(publishGroupOf('demo.test/u/alice/resources/zAbC')).toBe('demo.test/u/alice');
   });
 
+  test('a JSONL-served CEL is a group member, not its own publish group', () => {
+    // Without cel.jsonl in the member suffix, the log served as JSONL became
+    // its own group and a session could evict its own log (item 4c).
+    expect(publishGroupOf('demo.test/u/alice/cel.jsonl')).toBe('demo.test/u/alice');
+    expect(publishGroupOf('demo.test/cel.jsonl')).toBe('demo.test');
+  });
+
   test('a domain-root DID groups its .well-known log with its resources', () => {
     expect(publishGroupOf('demo.test/.well-known/did.jsonl')).toBe('demo.test');
     expect(publishGroupOf('demo.test/.well-known/did.json')).toBe('demo.test');

@@ -3,7 +3,9 @@ import {
   computeDigestMultibase,
   verifyDigestMultibase,
   decodeDigestMultibase,
-  digestMultibaseEquals
+  digestMultibaseEquals,
+  resourcePathSegment,
+  parseResourcePathSegment
 } from '../../src/hash';
 import { multibase } from '../../src/utils/encoding';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -179,6 +181,40 @@ describe('CEL Hash Utilities', () => {
       expect(digestMultibaseEquals(modern, other)).toBe(false);
       expect(digestMultibaseEquals(legacy, other)).toBe(false);
       expect(digestMultibaseEquals('not-multibase', modern)).toBe(false);
+    });
+  });
+
+  describe('resource path segments (one hash encoding)', () => {
+    // Golden vectors from the real mainnet inscription
+    // 8ad88c2ab862cb311da677e56ba5aea2edbfab459650decaad3406cf1081360bi0:
+    // three encodings of the SAME sha256 digest of artwork.svg.
+    const HEX = '74a170a58ea0fcb71ef08acab6facb6d199315fcb4821b5827199bcd8f2e6c23';
+    const CANONICAL = 'uEiB0oXCljqD8tx7wisq2-sttGZMV_LSCG1gnGZvNjy5sIw';
+    const LEGACY = 'udKFwpY6g_Lce8IrKtvrLbRmTFfy0ghtYJxmbzY8ubCM';
+
+    test('resourcePathSegment emits the canonical multihash form (on-chain golden vector)', () => {
+      expect(resourcePathSegment(HEX)).toBe(CANONICAL);
+    });
+
+    test('parseResourcePathSegment accepts the legacy raw-digest form (on-chain golden vector)', () => {
+      expect(parseResourcePathSegment(LEGACY)).toBe(HEX);
+    });
+
+    test('parseResourcePathSegment round-trips resourcePathSegment output', () => {
+      const digest = computeDigestMultibase(new TextEncoder().encode('round trip'));
+      const hex = parseResourcePathSegment(digest);
+      expect(resourcePathSegment(hex)).toBe(digest);
+      expect(parseResourcePathSegment(resourcePathSegment(HEX))).toBe(HEX);
+    });
+
+    test('parseResourcePathSegment rejects 31- and 33-byte payloads', () => {
+      expect(() => parseResourcePathSegment(multibase.encode(new Uint8Array(31), 'base64url'))).toThrow();
+      expect(() => parseResourcePathSegment(multibase.encode(new Uint8Array(33), 'base64url'))).toThrow();
+    });
+
+    test('resourcePathSegment rejects non-hex and wrong-length input', () => {
+      expect(() => resourcePathSegment('nothex')).toThrow();
+      expect(() => resourcePathSegment(HEX.slice(0, 62))).toThrow();
     });
   });
 

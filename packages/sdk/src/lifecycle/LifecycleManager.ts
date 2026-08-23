@@ -40,7 +40,7 @@ import { verifyEventLog } from '@originals/cel';
 import { createDidManagerKeyResolver } from '@originals/cel';
 import { PeerCelManager } from '@originals/cel';
 import { appendEvent } from '@originals/cel';
-import { computeDigestMultibase, digestMultibaseEquals, decodeDigestMultibase } from '@originals/cel';
+import { computeDigestMultibase, digestMultibaseEquals, decodeDigestMultibase, resourcePathSegment } from '@originals/cel';
 import { mostRecentResourceHead } from '@originals/cel';
 import { canonicalizeEntryForChain } from '@originals/cel';
 import { serializeEventLogJson, parseEventLogJson } from '@originals/cel';
@@ -857,11 +857,14 @@ export class LifecycleManager {
     }
     const provenance = this.buildRestoredProvenance(log, folded, env, warnings);
 
-    // CRITICAL (#377): DERIVE the did:cel document from the VERIFIED genesis
-    // controller — never trust envelope.didDocuments['did:cel']. A tampered VM
-    // or rogue service in that doc would otherwise flow into the buyer's minted
+    // CRITICAL (#377): DERIVE the did:cel document from the VERIFIED log —
+    // never trust envelope.didDocuments['did:cel']. A tampered VM or rogue
+    // service in that doc would otherwise flow into the buyer's minted
     // did:webvh and inscribed did:btco identity. The rebuilt doc is a pure
-    // function of the genesis, so re-serialization stays lossless.
+    // function of the log, so re-serialization stays lossless. The announced
+    // key is the CURRENT controller (genesis folded through any rotateKey
+    // events) — announcing the genesis key handed verifiers a retired key
+    // after a rotation.
     const genesisController = (log.events[0]?.data as { controller?: unknown })?.controller;
     if (typeof genesisController !== 'string' || !genesisController.startsWith('did:key:')) {
       throw new StructuredError(
@@ -870,7 +873,15 @@ export class LifecycleManager {
         { verification }
       );
     }
-    const celDidDocument = createCelDidDocument(env.assetDid, genesisController.slice('did:key:'.length));
+    const loadedController = currentControllerVm(log).split('#')[0];
+    if (!loadedController.startsWith('did:key:')) {
+      throw new StructuredError(
+        'ASSET_LOAD_VERIFICATION_FAILED',
+        `Cannot derive did:cel document: current controller is not a did:key (got ${loadedController}).`,
+        { verification }
+      );
+    }
+    const celDidDocument = createCelDidDocument(env.assetDid, loadedController.slice('did:key:'.length));
 
     // Important (#377): validate envelope credentials — a verified-reported load
     // must not silently attach forged/malformed ones. Structural validation runs
@@ -1136,7 +1147,16 @@ export class LifecycleManager {
     if (typeof genesisController !== 'string' || !genesisController.startsWith('did:key:')) {
       throw new StructuredError('CHAIN_ASSET_INVALID', `Reconstructed genesis controller is not a did:key (only did:key controllers are supported by resolveAssetFromSat; got: ${String(genesisController)}).`);
     }
-    const celDoc = createCelDidDocument(assetDid, genesisController.slice('did:key:'.length));
+    // Announce the CURRENT controller key, folded through any rotateKey events
+    // — announcing the genesis key here handed verifiers a retired key after a
+    // rotation. The genesis did:key gate above is unchanged (genesis controller
+    // is still did:key under every ruling).
+    const currentVm = currentControllerVm(reconstructedLog);
+    const currentController = currentVm.split('#')[0];
+    if (!currentController.startsWith('did:key:')) {
+      throw new StructuredError('CHAIN_ASSET_INVALID', `Reconstructed current controller is not a did:key (only did:key controllers are supported by resolveAssetFromSat; got: ${currentController}).`);
+    }
+    const celDoc = createCelDidDocument(assetDid, currentController.slice('did:key:'.length));
 
     const envelope: AssetEnvelope = {
       format: ASSET_ENVELOPE_FORMAT,
@@ -2140,15 +2160,23 @@ export class LifecycleManager {
     }
 
     for (const resource of asset.resources) {
-      const hashBytes = hexToBytes(resource.hash);
-      const multibase = encodeBase64UrlMultibase(hashBytes);
-      const resourceUrl = `${publisherDid}/resources/${multibase}`;
+      // Canonical wire form: multibase multihash ("uEi..."). The legacy
+      // raw-digest form ("ud...") is written as a second key during the
+      // transition (legacyResourceUrlCompat) so URLs copied before the
+      // encoding standardization keep resolving; only the canonical URL goes
+      // into resource.url, the log, and resource:published events.
+      const segment = resourcePathSegment(resource.hash);
+      const legacySegment = encodeBase64UrlMultibase(hexToBytes(resource.hash));
+      const resourceUrl = `${publisherDid}/resources/${segment}`;
       // A canonical did:webvh with no user path (did:webvh:{SCID}:{domain})
       // yields an empty userPath; omit it so the storage key is
       // `${domain}/resources/...` rather than `${domain}//resources/...`.
       const relativePath = userPath
-        ? `${userPath}/resources/${multibase}`
-        : `resources/${multibase}`;
+        ? `${userPath}/resources/${segment}`
+        : `resources/${segment}`;
+      const legacyRelativePath = userPath
+        ? `${userPath}/resources/${legacySegment}`
+        : `resources/${legacySegment}`;
 
       // Hash-only resources (content hosted elsewhere) cannot be published:
       // writing the hash string as the body would serve bytes that fail the
@@ -2175,6 +2203,16 @@ export class LifecycleManager {
       );
       if (wrote) writtenObjects?.push({ domain, relativePath });
 
+      if (this.legacyResourceUrlCompat) {
+        const wroteLegacy = await this.writeResourceBytes(
+          domain,
+          legacyRelativePath,
+          resource.content,
+          resource.contentType
+        );
+        if (wroteLegacy) writtenObjects?.push({ domain, relativePath: legacyRelativePath });
+      }
+
       (resource as { url?: string }).url = resourceUrl;
 
       await this.emitResourcePublishedEvent(asset, resource, resourceUrl, publisherDid, domain);
@@ -2183,17 +2221,33 @@ export class LifecycleManager {
 
   /**
    * The hosted location of one resource version's bytes under a did:webvh —
-   * `{domain}/{userPath}/resources/{multibase(hash)}`. Split out so the update
-   * path (hostUpdatedResourceBytes) writes the EXACT key publishResources does;
-   * two derivations of this would drift and serve 404s at URLs the log names.
+   * `{domain}/{userPath}/resources/{multibase-multihash(hash)}`. Split out so
+   * the update path (hostUpdatedResourceBytes) writes the EXACT key
+   * publishResources does; two derivations of this would drift and serve 404s
+   * at URLs the log names. `legacyRelativePath` is the retired raw-digest key
+   * ("ud..."), written alongside the canonical one while
+   * `legacyResourceUrlCompat` is on.
    */
-  private webvhResourceLocation(webvhDid: string, hash: string): { domain: string; relativePath: string } {
+  private webvhResourceLocation(webvhDid: string, hash: string): { domain: string; relativePath: string; legacyRelativePath: string } {
     const { domain, userPath } = this.parseWebVHDid(webvhDid);
-    const multibase = encodeBase64UrlMultibase(hexToBytes(hash));
+    const segment = resourcePathSegment(hash);
+    const legacySegment = encodeBase64UrlMultibase(hexToBytes(hash));
     return {
       domain,
-      relativePath: userPath ? `${userPath}/resources/${multibase}` : `resources/${multibase}`
+      relativePath: userPath ? `${userPath}/resources/${segment}` : `resources/${segment}`,
+      legacyRelativePath: userPath ? `${userPath}/resources/${legacySegment}` : `resources/${legacySegment}`
     };
+  }
+
+  /**
+   * Transition switch for the resource-URL encoding standardization: while on
+   * (the default), resource bytes are written under BOTH the canonical
+   * multihash key and the legacy raw-digest key, so URLs copied before the
+   * cutover keep resolving. Removable once nothing published before the
+   * cutover is still being fetched.
+   */
+  private get legacyResourceUrlCompat(): boolean {
+    return (this.config as { legacyResourceUrlCompat?: boolean }).legacyResourceUrlCompat !== false;
   }
 
   /** Writes resource bytes through whichever storage interface the adapter implements. */
@@ -2251,13 +2305,16 @@ export class LifecycleManager {
     const pending = asset.pendingHeadMedia;
     if (!webvhDid || !pending) return;
 
-    const { domain, relativePath } = this.webvhResourceLocation(webvhDid, pending.hash);
+    const { domain, relativePath, legacyRelativePath } = this.webvhResourceLocation(webvhDid, pending.hash);
     const wrote = await this.writeResourceBytes(
       domain,
       relativePath,
       pending.content,
       pending.contentType
     );
+    if (wrote && this.legacyResourceUrlCompat) {
+      await this.writeResourceBytes(domain, legacyRelativePath, pending.content, pending.contentType);
+    }
     if (!wrote) {
       throw new StructuredError(
         'STORAGE_REQUIRED',
@@ -3352,10 +3409,12 @@ export class LifecycleManager {
 
     const tx = await bm.transferInscription(inscription, newOwner);
 
-    // Ownership = sat control (this Bitcoin tx). The CEL is authorship only, so
-    // a transfer writes NOTHING to the log. Emit asset:transferred on BOTH the
-    // asset's private emitter and the manager emitter (issue #346: the asset
-    // emitter alone left sdk.lifecycle.on(...) subscribers unnotified).
+    // Ownership = sat control (this Bitcoin tx). The sat move transfers the
+    // right to append — it hands the pen to the buyer with no log write at
+    // all; the log records the hand-off only when the new holder writes their
+    // first entry. Emit asset:transferred on BOTH the asset's private emitter
+    // and the manager emitter (issue #346: the asset emitter alone left
+    // sdk.lifecycle.on(...) subscribers unnotified).
     const transferredEvent = {
       type: 'asset:transferred' as const,
       timestamp: new Date().toISOString(),

@@ -86,6 +86,14 @@ export interface OriginalsConfig {
   webvhNetwork?: WebVHNetworkName;
   // Optional pluggable adapters
   storageAdapter?: StorageAdapter;
+  /**
+   * Transition switch for the resource-URL encoding standardization (default
+   * true). While on, published resource bytes are ALSO written under the
+   * legacy raw-digest storage key ("ud...") beside the canonical multihash key
+   * ("uEi..."), so URLs copied before the cutover keep resolving. Removable
+   * once nothing published before the cutover is still being fetched.
+   */
+  legacyResourceUrlCompat?: boolean;
   // Optional DID cache configuration
   didCache?: DIDCacheConfig;
   feeOracle?: FeeOracleAdapter;
