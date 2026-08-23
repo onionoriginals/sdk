@@ -1,14 +1,18 @@
 /**
- * Long-form did:peer:4 controller compatibility (PR #508 review findings).
+ * did:key-only forward paths (PR #508 review follow-up, maintainer ruling).
  *
- * The verifier accepts a SELF-CERTIFYING rotation target — did:key OR
- * long-form did:peer:4 — so a valid log can fold to a did:peer:4 current
- * controller. The SDK must not (1) reject such logs at load with a
- * did:key-only gate, nor (2) corrupt the announced key by slicing a did:key
- * prefix off a peer DID when reinscribing.
+ * The VERIFIER keeps a legacy READ path for pre-existing long-form did:peer:4
+ * logs, but the SDK's forward paths are did:key-only: a log whose controller
+ * folded to a did:peer:4 DID is refused LOUDLY at load (never silently
+ * mis-derived), and a post-anchor append under a non-did:key verification
+ * method is refused BEFORE anything is appended or inscribed — the earlier
+ * failure modes were a corrupted announced key (prefix-slicing a peer DID) and
+ * a silently omitted `data.author` discovered only after the inscription fee
+ * was burned.
  */
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
+import { OriginalsAsset } from '../../../src/lifecycle/OriginalsAsset';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
@@ -22,10 +26,8 @@ import {
   hexSha256ToDigestMultibase,
   computeDigestMultibase,
   canonicalizeEntryForChain,
-  verifyEventLog,
-  multikey,
 } from '@originals/cel';
-import type { EventLog, LogEntry, DataIntegrityProof } from '@originals/cel';
+import type { EventLog, LogEntry, DataIntegrityProof, DIDDocument } from '@originals/cel';
 import { hashResource } from '../../../src/utils/validation';
 
 const contentHex = hashResource(Buffer.from('the-work', 'utf8'));
@@ -52,7 +54,7 @@ const chainDigest = (e: LogEntry) => computeDigestMultibase(canonicalizeEntryFor
 
 async function inscribeAnchorDoc(provider: OrdMockProvider, headDigest: string, didCel: string, pubMb?: string) {
   const id = `did:btco:reg:${SAT}`;
-  const res = await provider.createInscription({
+  return provider.createInscription({
     data: Buffer.from(JSON.stringify({
       '@context': ['https://www.w3.org/ns/did/v1'],
       id,
@@ -63,7 +65,6 @@ async function inscribeAnchorDoc(provider: OrdMockProvider, headDigest: string, 
     contentType: 'application/did+json',
     targetSatoshi: SAT,
   });
-  return res;
 }
 
 function attachWitness(log: EventLog, insc: { inscriptionId: string; txid: string }): EventLog {
@@ -97,7 +98,7 @@ async function peerRotatedLog() {
       controller: genesis.controller,
       resources: [{ id: 'art', digestMultibase: hexSha256ToDigestMultibase(contentHex), mediaType: 'text/plain' }],
       createdAt: '2026-08-23T00:00:00Z',
-      nonce: 'peer-compat',
+      nonce: 'peer-refusal',
     },
     { signer: genesis.signer, verificationMethod: genesis.verificationMethod }
   );
@@ -110,36 +111,54 @@ async function peerRotatedLog() {
   return { log, genesisKp, rotatedKp, peerDid };
 }
 
-describe('long-form did:peer:4 controller compatibility', () => {
-  test('loadAsset accepts a log rotated to a did:peer:4 controller and announces its EMBEDDED key', async () => {
-    const { log, genesisKp, rotatedKp, peerDid } = await peerRotatedLog();
+function envelopeFor(log: EventLog) {
+  return {
+    format: 'originals/asset',
+    version: 1,
+    assetDid: deriveDidCel(log),
+    eventLog: log,
+    didDocuments: { 'did:cel': { '@context': ['https://www.w3.org/ns/did/v1'], id: deriveDidCel(log) } },
+    resources: [{ id: 'art', type: 'text', contentType: 'text/plain', hash: contentHex, content: 'the-work' }],
+  } as never;
+}
+
+describe('did:key-only forward paths (did:peer is a legacy verifier read path only)', () => {
+  test('loadAsset refuses a log rotated to a did:peer:4 controller — loudly, naming did:key', async () => {
+    const { log } = await peerRotatedLog();
     const sdk = makeSdk();
 
-    const { asset, verification } = await sdk.lifecycle.loadAsset({
-      format: 'originals/asset',
-      version: 1,
-      assetDid: deriveDidCel(log),
-      eventLog: log,
-      didDocuments: { 'did:cel': { '@context': ['https://www.w3.org/ns/did/v1'], id: deriveDidCel(log) } },
-      resources: [{ id: 'art', type: 'text', contentType: 'text/plain', hash: contentHex, content: 'the-work' }],
-    } as never);
-
-    expect(verification?.verified).toBe(true);
-    // The current controller IS the peer DID…
-    expect(currentControllerVm(asset.celLog!).split('#')[0]).toBe(peerDid);
-    // …and the derived document announces the key it EMBEDS (K2), not the
-    // retired genesis key, and not a corrupted slice of the peer DID.
-    const announced = asset.did.verificationMethod?.[0]?.publicKeyMultibase;
-    expect(announced).toBe(rotatedKp.publicKey);
-    expect(announced).not.toBe(genesisKp.publicKey);
-    expect(() => multikey.decodePublicKey(announced!)).not.toThrow();
+    let thrown: unknown;
+    try {
+      await sdk.lifecycle.loadAsset(envelopeFor(log));
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeDefined();
+    expect((thrown as { code?: string }).code).toBe('ASSET_LOAD_VERIFICATION_FAILED');
+    expect(String((thrown as Error).message)).toMatch(/did:key/);
+    expect(String((thrown as Error).message)).toMatch(/did:peer/);
   });
 
-  test('a keyStore append on a peer-controlled btco asset commits the PEER author and reinscribes the embedded key intact', async () => {
+  test('loadAsset refuses the same log under skipVerification — the gate is not skippable', async () => {
+    const { log } = await peerRotatedLog();
+    const sdk = makeSdk();
+
+    let thrown: unknown;
+    try {
+      await sdk.lifecycle.loadAsset(envelopeFor(log), { skipVerification: true });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeDefined();
+    expect((thrown as { code?: string }).code).toBe('ASSET_LOAD_VERIFICATION_FAILED');
+    expect(String((thrown as Error).message)).toMatch(/did:key/);
+  });
+
+  test('a post-anchor keyStore append under a peer controller VM refuses BEFORE appending', async () => {
     const provider = new OrdMockProvider();
     const { log: rotated, rotatedKp, peerDid } = await peerRotatedLog();
-    // Migrate to btco: signed by the peer controller's embedded key (its
-    // did:key VM — authorization compares resolved KEYS, not DID strings).
+    // Anchor on btco: the migrate is signed by the peer controller's embedded
+    // key via its did:key VM (pre-anchor authorization compares resolved KEYS).
     const rotatedSigner = celSignerFromKeyPair({ publicKey: rotatedKp.publicKey, privateKey: rotatedKp.privateKey });
     let log = await appendEvent(
       rotated,
@@ -151,46 +170,37 @@ describe('long-form did:peer:4 controller compatibility', () => {
 
     const keyStore = new MockKeyStore();
     const sdk = makeSdk(provider, keyStore);
-    const { asset } = await sdk.lifecycle.loadAsset({
-      format: 'originals/asset',
-      version: 1,
-      assetDid: deriveDidCel(log),
-      eventLog: log,
-      didDocuments: { 'did:cel': { '@context': ['https://www.w3.org/ns/did/v1'], id: deriveDidCel(log) } },
-      resources: [{ id: 'art', type: 'text', contentType: 'text/plain', hash: contentHex, content: 'the-work' }],
-    } as never);
 
-    // The keyStore path signs under the folded controller VM `<peer>#key-0`.
-    const controllerVm = currentControllerVm(asset.celLog!);
+    // loadAsset refuses peer-controlled logs, so build the asset directly —
+    // the guard under test sits in the append path itself.
+    const controllerVm = currentControllerVm(log);
     expect(controllerVm).toBe(`${peerDid}#key-0`);
     await keyStore.setPrivateKey(controllerVm, rotatedKp.privateKey);
+    const btcoDoc: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: `did:btco:reg:${SAT}` };
+    const asset = new OriginalsAsset(
+      [{ id: 'art', type: 'text', contentType: 'text/plain', hash: contentHex, content: 'the-work' }],
+      btcoDoc,
+      [],
+      log
+    );
 
-    const digest = await asset.appendStatement({ statement: 'still curated' });
-    expect(digest).not.toBeNull();
+    const lengthBefore = asset.celLog!.events.length;
+    const satBefore = (await provider.getInscriptionsBySatoshi(SAT)).length;
+    const append = (sdk.lifecycle as unknown as {
+      appendCelEventOrSkip: (a: OriginalsAsset, t: string, d: unknown) => Promise<string | null>;
+    }).appendCelEventOrSkip.bind(sdk.lifecycle);
 
-    // The committed author is the PEER DID (self-certifying — the verifier's
-    // author binding accepts it), not silently omitted.
-    const head = asset.celLog!.events[asset.celLog!.events.length - 1];
-    expect((head.data as { author?: string }).author).toBe(peerDid);
-
-    // The reinscribed btco document announces the peer controller's EMBEDDED
-    // key — decodable Multikey material, not a prefix-sliced peer DID.
-    const onSat = await provider.getInscriptionsBySatoshi(SAT);
-    const newest = await provider.getInscriptionById(onSat[onSat.length - 1].inscriptionId);
-    const doc = (newest!.metadata as { didDocument?: { verificationMethod?: Array<{ publicKeyMultibase?: string }> } }).didDocument;
-    const announcedKey = doc?.verificationMethod?.[0]?.publicKeyMultibase;
-    expect(announcedKey).toBe(rotatedKp.publicKey);
-    expect(() => multikey.decodePublicKey(announcedKey!)).not.toThrow();
-
-    // And the whole log verifies once the peer VM is resolvable (test-local
-    // resolver mapping the folded `<peer>#key-0` VM to its embedded key).
-    const rotatedKeyBytes = multikey.decodePublicKey(rotatedKp.publicKey).key;
-    const result = await verifyEventLog(asset.celLog!, {
-      ordinalsProvider: provider,
-      resolveKey: async (vm: string) => (vm === controllerVm ? rotatedKeyBytes : null),
-    });
-    expect(result.errors).toEqual([]);
-    expect(result.verified).toBe(true);
-    expect(result.events[result.events.length - 1].authorClass).toBe('creator');
+    let thrown: unknown;
+    try {
+      await append(asset, 'update', { statement: 'still curated' });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeDefined();
+    expect((thrown as { code?: string }).code).toBe('CEL_APPEND_FAILED');
+    expect(String((thrown as Error).message)).toMatch(/did:key/);
+    // Refused BEFORE any mutation: the log did not grow and nothing was inscribed.
+    expect(asset.celLog!.events.length).toBe(lengthBefore);
+    expect((await provider.getInscriptionsBySatoshi(SAT)).length).toBe(satBefore);
   });
 });
