@@ -335,3 +335,52 @@ describe('inscribeOnSat — multi-input funding', () => {
       .rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 });
+
+/**
+ * `broadcast` — how far broadcasting actually got.
+ *
+ * From the first real mainnet inscription: the provider reported
+ * `status: 'commit_broadcast'` (commit on-chain, reveal persisted for
+ * rebroadcast), the SDK discarded submitInscription's return value, and the
+ * caller had no way to tell that from a completed pair. A UI built on that
+ * announced an inscription and linked to a reveal txid that 404'd.
+ */
+describe('inscribeOnSat reports how far broadcasting got', () => {
+  it('reports reveal_broadcast when both transactions reached the network', async () => {
+    const provider = providerDouble({
+      submitInscription: async () => ({ commitTxId: 'a', revealTxId: 'b', status: 'reveal_broadcast' })
+    });
+    const res = await inscribeOnSat({ ...baseParams(), satSigner: signer, provider });
+    expect(res.broadcast).toBe('reveal_broadcast');
+  });
+
+  it('reports commit_broadcast when only the commit did — the case that used to be invisible', async () => {
+    const provider = providerDouble({
+      submitInscription: async () => ({ commitTxId: 'a', revealTxId: 'b', status: 'commit_broadcast' })
+    });
+    const res = await inscribeOnSat({ ...baseParams(), satSigner: signer, provider });
+    expect(res.broadcast).toBe('commit_broadcast');
+    // Still a success: the reveal completes without the caller re-signing.
+    expect(res.revealTxId).toBeTruthy();
+    expect(res.inscriptionId).toBeTruthy();
+  });
+
+  it('treats a provider that reports no status as complete, not as doubt', async () => {
+    // Pre-dates the field. It has always meant "both broadcast", so inventing
+    // uncertainty here would regress every existing implementation.
+    const provider = providerDouble({
+      submitInscription: async () => ({ commitTxId: 'a', revealTxId: 'b' })
+    });
+    const res = await inscribeOnSat({ ...baseParams(), satSigner: signer, provider });
+    expect(res.broadcast).toBe('reveal_broadcast');
+  });
+
+  it('reports reveal_broadcast on the two-broadcast fallback path', async () => {
+    // No submitInscription seam: both broadcasts must have succeeded to get
+    // here at all, since a failed reveal throws REVEAL_BROADCAST_FAILED.
+    const provider = providerDouble();
+    delete (provider as any).submitInscription;
+    const res = await inscribeOnSat({ ...baseParams(), satSigner: signer, provider });
+    expect(res.broadcast).toBe('reveal_broadcast');
+  });
+});

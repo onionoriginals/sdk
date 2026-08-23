@@ -28,6 +28,23 @@ export interface InscribeOnSatResult {
   inscriptionId: string;
   commitTxId: string;
   revealTxId: string;
+  /**
+   * How far broadcasting actually got.
+   *
+   * `'reveal_broadcast'` — both transactions reached the network; the
+   * inscription exists.
+   * `'commit_broadcast'` — the commit is on the network and the reveal is
+   * persisted by the provider for rebroadcast. STILL A SUCCESS: it completes
+   * without the caller re-signing anything, usually once the commit confirms.
+   * But the inscription does NOT exist yet, so a caller must not announce one
+   * or link to `revealTxId` — that transaction is not findable.
+   *
+   * This used to be dropped: `submitInscription` returns it, the value was not
+   * captured, and callers had no way to tell the two apart. A UI built on that
+   * told a creator their inscription was done and linked to a reveal txid that
+   * 404'd.
+   */
+  broadcast: 'commit_broadcast' | 'reveal_broadcast';
 }
 
 /**
@@ -159,9 +176,10 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
   // commit and reveal can never strand the committed funds (the reveal is
   // rebroadcast from the persisted copy). Otherwise fall back to the two
   // sequential broadcasts with in-memory recovery data.
+  let broadcast: InscribeOnSatResult['broadcast'] = 'reveal_broadcast';
   if (typeof provider.submitInscription === 'function') {
     try {
-      await provider.submitInscription({
+      const submitted = await provider.submitInscription({
         signedCommitHex: signedCommit,
         revealTxHex: reveal.revealTxHex,
         fundingUtxos,
@@ -170,6 +188,9 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
         fundingUtxo: identityUtxo,
         changeAddress
       });
+      // An implementation predating this field reports nothing; treat that as
+      // the complete case it has always meant, rather than inventing doubt.
+      if (submitted?.status === 'commit_broadcast') broadcast = 'commit_broadcast';
     } catch (e) {
       // Ambiguous by construction: the submit may have failed before anything
       // was persisted/broadcast (nothing spent) or after (server-side recovery
@@ -199,5 +220,5 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
     }
   }
 
-  return { satoshi, inscriptionId: reveal.inscriptionId, commitTxId, revealTxId: reveal.revealTxId };
+  return { satoshi, inscriptionId: reveal.inscriptionId, commitTxId, revealTxId: reveal.revealTxId, broadcast };
 }

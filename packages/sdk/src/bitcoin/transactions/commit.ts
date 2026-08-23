@@ -8,6 +8,7 @@
  */
 
 import * as btc from '@scure/btc-signer';
+import { StructuredError } from '@originals/cel';
 import * as ordinals from 'micro-ordinals';
 import { schnorr } from '@noble/curves/secp256k1.js';
 import { Utxo, ResourceUtxo } from '../../types/bitcoin.js';
@@ -297,6 +298,64 @@ export async function createRevealTransaction(
  * @param changeOutputVBytes - Size of one change output, per the change address's script class
  * @returns Estimated transaction size in virtual bytes
  */
+/**
+ * The bytes of `utxo.prevTxHex`, once proved to be the transaction this UTXO
+ * says it is.
+ *
+ * A `nonWitnessUtxo` is what a signer reads to learn an input's true value, so
+ * an unverified one is precisely what the fee-inflation attack substitutes:
+ * hand a signer a transaction claiming a larger input and it approves a fee
+ * far bigger than the user agreed to. Returns bytes rather than a boolean so a
+ * caller cannot forget to check the result.
+ */
+function verifiedPrevTx(utxo: Utxo): Uint8Array {
+  const at = `${utxo.txid}:${utxo.vout}`;
+  const raw = utxo.prevTxHex as string;
+  if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length % 2 !== 0) {
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex for ${at} is not raw transaction hex.`, { outpoint: at });
+  }
+  const bytes = Uint8Array.from(Buffer.from(raw, 'hex'));
+  // Even-length hex can still be anything. Left unguarded, @scure's parser
+  // error ("Reader(inputs/arrayLen): readByte: Unexpected end of buffer")
+  // escapes with no code, so a consumer cannot classify the very failure this
+  // function exists to report.
+  let prev: btc.Transaction;
+  try {
+    prev = btc.Transaction.fromRaw(bytes, { allowUnknownInputs: true, allowUnknownOutputs: true });
+  } catch (e) {
+    throw new StructuredError(
+      'INVALID_PREV_TX',
+      `prevTxHex for ${at} is not a decodable Bitcoin transaction: ${e instanceof Error ? e.message : String(e)}`,
+      { outpoint: at }
+    );
+  }
+  if (prev.id !== utxo.txid) {
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex hashes to ${prev.id}, not ${utxo.txid}.`, {
+      outpoint: at, hashedTo: prev.id
+    });
+  }
+  if (utxo.vout < 0 || utxo.vout >= prev.outputsLength) {
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex for ${utxo.txid} has no output ${utxo.vout}.`, { outpoint: at });
+  }
+  const out = prev.getOutput(utxo.vout);
+  if (!out?.script || typeof out.amount !== 'bigint') {
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex output ${at} is unreadable.`, { outpoint: at });
+  }
+  if (out.amount !== BigInt(utxo.value)) {
+    throw new StructuredError(
+      'INVALID_PREV_TX',
+      `prevTxHex says ${at} is ${out.amount} sats, but the UTXO says ${utxo.value}.`,
+      { outpoint: at, prevTxSats: String(out.amount), utxoSats: utxo.value }
+    );
+  }
+  if (Buffer.from(out.script).toString('hex') !== String(utxo.scriptPubKey).toLowerCase()) {
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex output ${at} pays a different script than the UTXO.`, {
+      outpoint: at
+    });
+  }
+  return bytes;
+}
+
 function estimateCommitTxSize(inputs: Utxo[], outputCount: number, changeOutputVBytes: number): number {
   // Transaction overhead
   const overhead = 10.5;
@@ -729,7 +788,15 @@ export async function createCommitTransaction(
       witnessUtxo: {
         script: Buffer.from(utxo.scriptPubKey, 'hex'),
         amount: BigInt(utxo.value)
-      }
+      },
+      // Optional, and only when the caller supplied it (see Utxo.prevTxHex).
+      // Some signers refuse a SegWit v0 input carrying witnessUtxo alone —
+      // Turnkey answers "code 3: input N is missing non_witness_utxo". It is
+      // VERIFIED before being attached; see verifiedPrevTx.
+      // `!== undefined`, not truthiness: prevTxHex: '' is a SUPPLIED value —
+      // a fetch that returned nothing — and skipping it silently produces a
+      // misleading signer-side error later instead of a clear one here.
+      ...(utxo.prevTxHex !== undefined ? { nonWitnessUtxo: verifiedPrevTx(utxo) } : {})
     });
   }
 
