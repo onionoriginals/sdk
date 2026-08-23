@@ -50,9 +50,9 @@ Free       Hosted     Permanent + ownership
 | Layer 3 | `did:btco` | Permanent on Bitcoin; the sat IS ownership | Transferable ownership |
 
 > **Genesis is `did:cel`, not `did:peer`.** `createAsset` mints a `did:cel` from the
-> create-event hash (`asset.id` is that did:cel), while `asset.currentLayer` is `'did:cel'`. **`createDIDPeer` no longer exists** — the verifier keeps a
-> read-only path for pre-existing `did:peer:4` logs, but new assets are never created as
-> did:peer. Once an asset reaches `did:btco` there is **no `did:webvh` fallback**.
+> create-event hash (`asset.id` is that did:cel), while `asset.currentLayer` is `'did:cel'`. **`did:peer` support is removed entirely** — no creation, no
+> resolution, and no verifier read path; pre-existing `did:peer` logs no longer
+> verify. Once an asset reaches `did:btco` there is **no `did:webvh` fallback**.
 
 ### Network Mapping
 
@@ -437,7 +437,7 @@ const btcoDoc = await sdk.did.migrateToDIDBTCO(
 
 ```typescript
 const didDoc = await sdk.did.resolveDID(did: string): Promise<DIDDocument | null>
-// Supports: did:cel:*, did:webvh:*, did:btco:* (+ legacy did:peer:4 read path)
+// Supports: did:cel:*, did:webvh:*, did:btco:* (did:peer is not supported)
 ```
 
 ### Validating DID Documents

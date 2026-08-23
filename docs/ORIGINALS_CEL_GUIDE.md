@@ -139,8 +139,8 @@ Assets exist in one of three **trust layers**, each providing different levels o
    │  • No external witnesses                                 │
    │  • Instant, free, offline creation                       │
    │  • Verification: cryptographic proof only                │
-   │  • (did:peer is deprecated as a creation method;         │
-   │     verifiers keep a read-only path for legacy logs)     │
+   │  • (did:peer support is removed entirely — no read     │
+   │     path; legacy did:peer logs no longer verify)         │
    │                                                          │
    └───────────────────────────┬──────────────────────────────┘
                                │ migrate()

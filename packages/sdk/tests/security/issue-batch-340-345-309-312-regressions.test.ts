@@ -27,7 +27,7 @@ import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import type { MultiSigPolicy, VerifiableCredential } from '../../src/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 
-const did = 'did:peer:batch-issuer';
+const did = 'did:key:batch-issuer';
 const sk = new Uint8Array(32).map((_, i) => (i + 11) & 0xff);
 const pk = ed25519.getPublicKey(sk);
 const vm = {
@@ -51,7 +51,7 @@ async function issueSigned(extra: Record<string, unknown> = {}): Promise<Verifia
       type: ['VerifiableCredential', 'Test'],
       issuer: did,
       issuanceDate: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:subject1' },
+      credentialSubject: { id: 'did:key:subject1' },
       ...extra
     } as never,
     { proofPurpose: 'assertionMethod' }
@@ -118,7 +118,7 @@ describe('#345 — low-level revocation helpers bind the supplied list', () => {
       type: ['VerifiableCredential'],
       issuer: did,
       issuanceDate: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:subject1' },
+      credentialSubject: { id: 'did:key:subject1' },
       credentialStatus: entry
     } as unknown as VerifiableCredential;
 
@@ -141,7 +141,7 @@ describe('#309 — fail-closed signing refusal keys on typed error codes', () =>
     expect(isSecuritySigningRefusal(new StructuredError('ISSUER_BINDING_MISMATCH', 'nope'))).toBe(true);
     expect(isSecuritySigningRefusal(new StructuredError('VM_RETIRED', 'nope'))).toBe(true);
     // Non-security errors still fall through to the legacy signer path.
-    expect(isSecuritySigningRefusal(new Error('DID not resolved: did:peer:x'))).toBe(false);
+    expect(isSecuritySigningRefusal(new Error('DID not resolved: did:key:x'))).toBe(false);
     expect(isSecuritySigningRefusal(new StructuredError('SOME_OTHER_CODE', 'nope'))).toBe(false);
   });
 
@@ -155,9 +155,9 @@ describe('#309 — fail-closed signing refusal keys on typed error codes', () =>
     const err = await issuer.issueCredential(
       {
         type: ['VerifiableCredential'],
-        issuer: 'did:peer:victim',
+        issuer: 'did:key:victim',
         issuanceDate: new Date().toISOString(),
-        credentialSubject: { id: 'did:peer:subject1' }
+        credentialSubject: { id: 'did:key:subject1' }
       } as never,
       { proofPurpose: 'assertionMethod' }
     ).then(() => null, (e) => e as StructuredError);

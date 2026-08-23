@@ -16,8 +16,8 @@ const keyManager = new KeyManager();
 describe('validateCredential VC 2.0 support (issue #264)', () => {
   const base = {
     type: ['VerifiableCredential'],
-    issuer: 'did:peer:issuer123',
-    credentialSubject: { id: 'did:peer:subject' },
+    issuer: 'did:key:issuer123',
+    credentialSubject: { id: 'did:key:subject' },
   };
 
   test('accepts a v2-context credential with validFrom', () => {
@@ -122,7 +122,7 @@ describe('signer selection from key multicodec (issue #261)', () => {
       type: ['VerifiableCredential', 'ResourceCreated'],
       issuer: issuerDid,
       issuanceDate: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:subject' },
+      credentialSubject: { id: 'did:key:subject' },
     };
 
     // Issuer signs on an Ed25519-default instance (no didManager -> legacy path)
@@ -147,7 +147,7 @@ describe('signer selection from key multicodec (issue #261)', () => {
       type: ['VerifiableCredential'],
       issuer: issuerDid,
       issuanceDate: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:subject' },
+      credentialSubject: { id: 'did:key:subject' },
     };
 
     // Config says ES256K but the key is Ed25519: signing must follow the key.
@@ -171,9 +171,9 @@ describe('signer selection from key multicodec (issue #261)', () => {
     const credential: VerifiableCredential = {
       '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:issuer',
+      issuer: 'did:key:issuer',
       issuanceDate: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:subject' },
+      credentialSubject: { id: 'did:key:subject' },
     };
 
     const signerConfig: OriginalsConfig = { network: 'regtest', defaultKeyType: 'Ed25519' };
@@ -198,7 +198,7 @@ describe('signing-side issuer binding (issue #259)', () => {
   let didManager: DIDManager;
   let privateKey: string;
   let publicKey: string;
-  const signerDid = 'did:peer:signer-me';
+  const signerDid = 'did:key:signer-me';
   const vmId = `${signerDid}#key-1`;
 
   beforeAll(async () => {
@@ -223,9 +223,9 @@ describe('signing-side issuer binding (issue #259)', () => {
     const impersonating: VerifiableCredential = {
       '@context': ['https://www.w3.org/ns/credentials/v2', 'https://originals.build/context'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:victim',
+      issuer: 'did:key:victim',
       issuanceDate: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:subject' },
+      credentialSubject: { id: 'did:key:subject' },
     };
     await expect(manager.signCredential(impersonating, privateKey, vmId)).rejects.toThrow(
       /does not match the verification method controller/
@@ -242,7 +242,7 @@ describe('signing-side issuer binding (issue #259)', () => {
       type: ['VerifiableCredential'],
       issuer: signerDid,
       issuanceDate: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:subject' },
+      credentialSubject: { id: 'did:key:subject' },
     };
     const signed = await manager.signCredential(legitimate, privateKey, vmId);
     expect(signed.proof).toBeDefined();

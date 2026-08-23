@@ -51,7 +51,7 @@ describe('VC-001/error – credential with missing issuer fails verification', (
   const cm = new CredentialManager(config, new DIDManager(config as never));
 
   test('createResourceCredential stores the issuer as-is (no validation at factory time)', () => {
-    const vc = cm.createResourceCredential('ResourceCreated', { id: 'did:peer:s' }, '');
+    const vc = cm.createResourceCredential('ResourceCreated', { id: 'did:key:s' }, '');
     // Factory does NOT throw – it just stores whatever was passed
     expect(vc.issuer).toBe('');
   });
@@ -76,12 +76,12 @@ describe('VC-001/boundary – very large credentialSubject signs and can be hash
   const cm = new CredentialManager(config, new DIDManager(config as never));
 
   test('credential with 500-field subject is created and canonicalized without error', async () => {
-    const subject: Record<string, unknown> = { id: 'did:peer:largesubject' };
+    const subject: Record<string, unknown> = { id: 'did:key:largesubject' };
     for (let i = 0; i < 500; i++) {
       subject[`field_${i}`] = `value_${'x'.repeat(50)}_${i}`;
     }
 
-    const vc = cm.createResourceCredential('ResourceCreated', subject, 'did:peer:issuer');
+    const vc = cm.createResourceCredential('ResourceCreated', subject, 'did:key:issuer');
     expect(Object.keys(vc.credentialSubject).length).toBe(501); // 500 fields + id
 
     // computeCredentialHash exercises canonicalization on the large document
@@ -98,12 +98,12 @@ describe('VC-003/happy – statusListResolver called during Verifier.checkCreden
     const slMgr = new StatusListManager();
     const statusListVC = slMgr.createStatusListCredential({
       id: 'https://example.com/status/list-1',
-      issuer: 'did:peer:issuer',
+      issuer: 'did:key:issuer',
       statusPurpose: 'revocation',
     });
     // DI-labeled dummy proof: the trust check dispatches on cryptosuite, and
     // the DI path is stubbed below (see verifyCredential override).
-    (statusListVC as any).proof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zstub', verificationMethod: 'did:peer:issuer#key-0', proofPurpose: 'assertionMethod' };
+    (statusListVC as any).proof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zstub', verificationMethod: 'did:key:issuer#key-0', proofPurpose: 'assertionMethod' };
 
     let resolverCallCount = 0;
     let resolvedUrl = '';
@@ -129,9 +129,9 @@ describe('VC-003/happy – statusListResolver called during Verifier.checkCreden
     const credentialWithStatus: VerifiableCredential = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:issuer',
+      issuer: 'did:key:issuer',
       issuanceDate: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:subject' },
+      credentialSubject: { id: 'did:key:subject' },
       credentialStatus: entry,
     };
 
@@ -150,10 +150,10 @@ describe('VC-003/happy – statusListResolver called during Verifier.checkCreden
     const slMgr = new StatusListManager();
     let statusListVC = slMgr.createStatusListCredential({
       id: 'https://example.com/status/list-rev',
-      issuer: 'did:peer:issuer',
+      issuer: 'did:key:issuer',
       statusPurpose: 'revocation',
     });
-    (statusListVC as any).proof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zstub', verificationMethod: 'did:peer:issuer#key-0', proofPurpose: 'assertionMethod' };
+    (statusListVC as any).proof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zstub', verificationMethod: 'did:key:issuer#key-0', proofPurpose: 'assertionMethod' };
     // Revoke index 5
     statusListVC = slMgr.setStatus(statusListVC, 5, true);
 
@@ -172,9 +172,9 @@ describe('VC-003/happy – statusListResolver called during Verifier.checkCreden
     const credentialWithStatus: VerifiableCredential = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:issuer',
+      issuer: 'did:key:issuer',
       issuanceDate: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:subject' },
+      credentialSubject: { id: 'did:key:subject' },
       credentialStatus: entry,
     };
 
@@ -194,9 +194,9 @@ describe('VC-006/happy – multi-sig session collects m-of-n and threshold passe
   const baseVC: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
     type: ['VerifiableCredential'],
-    issuer: 'did:peer:issuer',
+    issuer: 'did:key:issuer',
     issuanceDate: new Date().toISOString(),
-    credentialSubject: { id: 'did:peer:subject' },
+    credentialSubject: { id: 'did:key:subject' },
   };
 
   beforeEach(async () => {
@@ -255,9 +255,9 @@ describe('VC-006/error – finalize before threshold throws insufficient-signatu
   const baseVC: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
     type: ['VerifiableCredential'],
-    issuer: 'did:peer:issuer',
+    issuer: 'did:key:issuer',
     issuanceDate: new Date().toISOString(),
-    credentialSubject: { id: 'did:peer:subject' },
+    credentialSubject: { id: 'did:key:subject' },
   };
 
   beforeEach(async () => {
@@ -464,10 +464,10 @@ describe('VC-010 – prepareSelectiveDisclosure requires a BBS+ key', () => {
   const credential: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
     type: ['VerifiableCredential'],
-    issuer: 'did:peer:issuer',
+    issuer: 'did:key:issuer',
     issuanceDate: '2024-01-01T00:00:00Z',
     credentialSubject: {
-      id: 'did:peer:subject',
+      id: 'did:key:subject',
       name: 'Alice',
       email: 'alice@example.com',
       age: 30,
@@ -502,9 +502,9 @@ describe('VC-010/invalid-input – invalid JSON Pointer in selective or mandator
   const credential: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1'],
     type: ['VerifiableCredential'],
-    issuer: 'did:peer:issuer',
+    issuer: 'did:key:issuer',
     issuanceDate: '2024-01-01T00:00:00Z',
-    credentialSubject: { id: 'did:peer:subject' },
+    credentialSubject: { id: 'did:key:subject' },
   };
 
   test('rejects selective pointer missing leading slash with "Invalid JSON Pointer"', async () => {
@@ -536,10 +536,10 @@ describe('VC-011 – deriveSelectiveProof refuses a credential with no BBS+ base
   const credential: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
     type: ['VerifiableCredential'],
-    issuer: 'did:peer:issuer',
+    issuer: 'did:key:issuer',
     issuanceDate: '2024-01-01T00:00:00Z',
     credentialSubject: {
-      id: 'did:peer:subject',
+      id: 'did:key:subject',
       name: 'Alice',
       email: 'alice@example.com',
     },
@@ -570,9 +570,9 @@ describe('VC-011/boundary – deriveSelectiveProof rejects unsigned credentials 
   const credential: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1'],
     type: ['VerifiableCredential'],
-    issuer: 'did:peer:issuer',
+    issuer: 'did:key:issuer',
     issuanceDate: '2024-01-01T00:00:00Z',
-    credentialSubject: { id: 'did:peer:subject', name: 'Alice' },
+    credentialSubject: { id: 'did:key:subject', name: 'Alice' },
   };
 
   // The empty list was the worst case of the old fallback: it reported EVERY
@@ -609,12 +609,12 @@ describe('VC-013/happy – BBSCryptosuiteManager.createProof (selective-disclosu
       {
         '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
         type: ['VerifiableCredential'],
-        issuer: 'did:peer:issuer',
+        issuer: 'did:key:issuer',
         issuanceDate: '2024-01-01T00:00:00Z',
-        credentialSubject: { id: 'did:peer:subject' },
+        credentialSubject: { id: 'did:key:subject' },
       },
       {
-        verificationMethod: 'did:peer:issuer#bbs-1',
+        verificationMethod: 'did:key:issuer#bbs-1',
         proofPurpose: 'assertionMethod',
         // public key is derived from the secret key when omitted
         privateKey: sk,
@@ -637,12 +637,12 @@ describe('VC-013/happy – BBSCryptosuiteManager.createProof (selective-disclosu
         {
           '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
           type: ['VerifiableCredential'],
-          issuer: 'did:peer:issuer',
+          issuer: 'did:key:issuer',
           issuanceDate: '2024-01-01T00:00:00Z',
-          credentialSubject: { id: 'did:peer:subject' },
+          credentialSubject: { id: 'did:key:subject' },
         },
         {
-          verificationMethod: 'did:peer:issuer#bbs-1',
+          verificationMethod: 'did:key:issuer#bbs-1',
           proofPurpose: 'assertionMethod',
           // No privateKey provided
           documentLoader: preloadedLoader,
@@ -662,7 +662,7 @@ describe('VC-016/boundary – verifyPresentation with string (non-array) @contex
   const dm = new DIDManager({} as any);
 
   test('verifyPresentation processes string @context without crashing', async () => {
-    const did = 'did:peer:vc016';
+    const did = 'did:key:vc016';
     const sk = new Uint8Array(32).map((_, i) => (i + 16) & 0xff);
     const pk = ed25519.getPublicKey(sk);
     const vm = {
@@ -701,10 +701,10 @@ describe('VC-017 – getFieldByPointer', () => {
   const credential: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1'],
     type: ['VerifiableCredential'],
-    issuer: 'did:peer:issuer',
+    issuer: 'did:key:issuer',
     issuanceDate: '2024-01-01T00:00:00Z',
     credentialSubject: {
-      id: 'did:peer:subject',
+      id: 'did:key:subject',
       profile: {
         name: 'Alice',
         address: {
@@ -716,7 +716,7 @@ describe('VC-017 – getFieldByPointer', () => {
   };
 
   test('happy – retrieves top-level field with JSON Pointer', () => {
-    expect(cm.getFieldByPointer(credential, '/issuer')).toBe('did:peer:issuer');
+    expect(cm.getFieldByPointer(credential, '/issuer')).toBe('did:key:issuer');
     expect(cm.getFieldByPointer(credential, '/issuanceDate')).toBe('2024-01-01T00:00:00Z');
   });
 
@@ -735,10 +735,10 @@ describe('VC-017 – getFieldByPointer', () => {
     const specialCred: VerifiableCredential = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:issuer',
+      issuer: 'did:key:issuer',
       issuanceDate: '2024-01-01T00:00:00Z',
       credentialSubject: {
-        id: 'did:peer:subject',
+        id: 'did:key:subject',
         'a/b': 'slash-value',   // key contains literal /
         'c~d': 'tilde-value',   // key contains literal ~
       },
@@ -764,11 +764,11 @@ describe('VC-018/performance – verification method caching (behavioral, not wa
   // This test asserts the caching property (identity equality on repeated lookups).
 
   test('registered VM returns same object reference on repeated lookups', () => {
-    const vmId = `did:peer:cache-vm-test#key-${Date.now()}`;
+    const vmId = `did:key:cache-vm-test#key-${Date.now()}`;
     const vm = {
       id: vmId,
       type: 'Multikey',
-      controller: 'did:peer:cache-vm-test',
+      controller: 'did:key:cache-vm-test',
       publicKeyMultibase: 'zPubKey',
     };
 
@@ -785,11 +785,11 @@ describe('VC-018/performance – verification method caching (behavioral, not wa
   });
 
   test('cache stores the exact registered object (no defensive copy)', () => {
-    const vmId = `did:peer:cache-exact-${Date.now()}`;
+    const vmId = `did:key:cache-exact-${Date.now()}`;
     const vm: Record<string, unknown> & { id: string } = {
       id: vmId,
       type: 'Multikey',
-      controller: 'did:peer:cache-exact',
+      controller: 'did:key:cache-exact',
       publicKeyMultibase: 'zExactPubKey',
     };
 
@@ -801,11 +801,11 @@ describe('VC-018/performance – verification method caching (behavioral, not wa
   });
 
   test('different VMs are cached independently under their own IDs', () => {
-    const vm1Id = `did:peer:cache-a-${Date.now()}`;
-    const vm2Id = `did:peer:cache-b-${Date.now()}`;
+    const vm1Id = `did:key:cache-a-${Date.now()}`;
+    const vm2Id = `did:key:cache-b-${Date.now()}`;
 
-    const vm1 = { id: vm1Id, type: 'Multikey', controller: 'did:peer:a', publicKeyMultibase: 'zKey1' };
-    const vm2 = { id: vm2Id, type: 'Multikey', controller: 'did:peer:b', publicKeyMultibase: 'zKey2' };
+    const vm1 = { id: vm1Id, type: 'Multikey', controller: 'did:key:a', publicKeyMultibase: 'zKey1' };
+    const vm2 = { id: vm2Id, type: 'Multikey', controller: 'did:key:b', publicKeyMultibase: 'zKey2' };
 
     registerVerificationMethod(vm1);
     registerVerificationMethod(vm2);
@@ -824,9 +824,9 @@ describe('Issue #239 – multi-sig Data Integrity proofs verify across both veri
   const baseVC: VerifiableCredential = {
     '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
     type: ['VerifiableCredential'],
-    issuer: 'did:peer:issuer',
+    issuer: 'did:key:issuer',
     issuanceDate: new Date().toISOString(),
-    credentialSubject: { id: 'did:peer:subject' },
+    credentialSubject: { id: 'did:key:subject' },
   };
 
   test('the same multi-sig credential verifies at its threshold through BOTH verify paths', async () => {

@@ -13,24 +13,25 @@ describe('OriginalsSDK', () => {
   });
 
   test('should validate DIDs correctly', () => {
-    expect(validateDID('did:peer:123456')).toBe(true);
+    expect(validateDID('did:key:z6Mk123456')).toBe(true);
     expect(validateDID('did:webvh:example.com:123')).toBe(true);
     expect(validateDID('did:btco:1234567890abcdef')).toBe(true);
     expect(validateDID('invalid-did')).toBe(false);
     expect(validateDID('did:web:example.com')).toBe(false); // wrong method
+    expect(validateDID('did:peer:123456')).toBe(false); // did:peer support removed
   });
 
   test('should validate layer transitions', () => {
     // Test cases for valid layer transitions
     const validTransitions = [
-      ['did:peer', 'did:webvh'],
-      ['did:peer', 'did:btco'],
+      ['did:cel', 'did:webvh'],
+      ['did:cel', 'did:btco'],
       ['did:webvh', 'did:btco']
     ];
 
     const invalidTransitions = [
-      ['did:webvh', 'did:peer'],
-      ['did:btco', 'did:peer'],
+      ['did:webvh', 'did:cel'],
+      ['did:btco', 'did:cel'],
       ['did:btco', 'did:webvh']
     ];
 

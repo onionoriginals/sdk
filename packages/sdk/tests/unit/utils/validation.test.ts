@@ -2,16 +2,19 @@ import { describe, test, expect, spyOn } from 'bun:test';
 import { validateDID, validateCredential, validateDIDDocument, hashResource } from '../../../src/utils/validation';
 
 describe('validation utils', () => {
-  test('validateDID supports peer, webvh, btco', () => {
-    expect(validateDID('did:peer:123')).toBe(true);
+  test('validateDID supports key, webvh, btco, cel — and no longer did:peer', () => {
+    expect(validateDID('did:key:123')).toBe(true);
     expect(validateDID('did:webvh:example.com:abc')).toBe(true);
     expect(validateDID('did:btco:123')).toBe(true);
     expect(validateDID('did:web:example.com')).toBe(false);
+    // did:peer support is removed entirely — no longer a valid method.
+    expect(validateDID('did:peer:123')).toBe(false);
+    expect(validateDID('did:peer:4zQmHash:zEncodedDoc')).toBe(false);
     expect(validateDID('invalid')).toBe(false);
     // Cover defensive branch: regex.test returns true but match returns null
     const testSpy = spyOn(RegExp.prototype, 'test').mockReturnValueOnce(true);
     const matchSpy = spyOn(String.prototype, 'match').mockReturnValueOnce(null as any);
-    expect(validateDID('did:peer:abc')).toBe(false);
+    expect(validateDID('did:key:abc')).toBe(false);
     testSpy.mockRestore();
     matchSpy.mockRestore();
   });
@@ -20,9 +23,9 @@ describe('validation utils', () => {
     const vc: any = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential', 'Test'],
-      issuer: 'did:peer:abc',
+      issuer: 'did:key:abc',
       issuanceDate: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:abc', foo: 'bar' }
+      credentialSubject: { id: 'did:key:abc', foo: 'bar' }
     };
     expect(validateCredential(vc)).toBe(true);
   });
@@ -33,9 +36,9 @@ describe('validation utils', () => {
     const vc: any = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:abc',
+      issuer: 'did:key:abc',
       validFrom: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:abc', foo: 'bar' }
+      credentialSubject: { id: 'did:key:abc', foo: 'bar' }
     };
     expect(validateCredential(vc)).toBe(true);
   });
@@ -44,8 +47,8 @@ describe('validation utils', () => {
     const vc: any = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:abc',
-      credentialSubject: { id: 'did:peer:abc' }
+      issuer: 'did:key:abc',
+      credentialSubject: { id: 'did:key:abc' }
     };
     expect(validateCredential(vc)).toBe(false);
   });
@@ -54,9 +57,9 @@ describe('validation utils', () => {
     const vc: any = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:abc',
+      issuer: 'did:key:abc',
       validFrom: 'not-a-date',
-      credentialSubject: { id: 'did:peer:abc' }
+      credentialSubject: { id: 'did:key:abc' }
     };
     expect(validateCredential(vc)).toBe(false);
   });
@@ -65,9 +68,9 @@ describe('validation utils', () => {
     const vc: any = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:abc',
+      issuer: 'did:key:abc',
       validFrom: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:abc' }
+      credentialSubject: { id: 'did:key:abc' }
     };
     expect(validateCredential(vc)).toBe(false);
   });
@@ -76,10 +79,10 @@ describe('validation utils', () => {
     const vc: any = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:abc',
+      issuer: 'did:key:abc',
       validFrom: new Date().toISOString(),
       issuanceDate: 'not-a-date',
-      credentialSubject: { id: 'did:peer:abc' }
+      credentialSubject: { id: 'did:key:abc' }
     };
     // validFrom takes precedence over issuanceDate, so the invalid legacy field
     // is ignored and the credential validates.
@@ -111,29 +114,29 @@ describe('validation utils', () => {
   test('validateCredential negative cases', () => {
     expect(validateCredential({} as any)).toBe(false);
     // Fails on missing type array
-    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: undefined, issuer: 'did:peer:x', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: undefined, issuer: 'did:key:x', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
     // Fails on missing VerifiableCredential type
-    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['Other'], issuer: 'did:peer:x', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['Other'], issuer: 'did:key:x', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
     // Fails on missing issuanceDate
-    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:peer:x', credentialSubject: {} } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:key:x', credentialSubject: {} } as any)).toBe(false);
     // Fails on missing credentialSubject
-    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:peer:x', issuanceDate: new Date().toISOString() } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:key:x', issuanceDate: new Date().toISOString() } as any)).toBe(false);
     // Fails when the VCDM 2.0 credentials context is missing
-    expect(validateCredential({ '@context': ['https://example.com/ctx'], type: ['VerifiableCredential'], issuer: 'did:peer:x', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://example.com/ctx'], type: ['VerifiableCredential'], issuer: 'did:key:x', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
     // Fails when issuer is not DID
     expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'https://example.com', issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
     // Fails when issuer object has non-DID id
     expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: { id: 'example.com' }, issuanceDate: new Date().toISOString(), credentialSubject: {} } as any)).toBe(false);
     // Fails when issuanceDate is not valid ISO
-    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:peer:x', issuanceDate: 'not-a-date', credentialSubject: {} } as any)).toBe(false);
+    expect(validateCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:key:x', issuanceDate: 'not-a-date', credentialSubject: {} } as any)).toBe(false);
   });
 
   test('validateDIDDocument shape', () => {
     const didDoc: any = {
       '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:peer:abc',
+      id: 'did:key:abc',
       verificationMethod: [
-        { id: '#key-1', type: 'Ed25519VerificationKey2020', controller: 'did:peer:abc', publicKeyMultibase: 'z...' }
+        { id: '#key-1', type: 'Ed25519VerificationKey2020', controller: 'did:key:abc', publicKeyMultibase: 'z...' }
       ]
     };
     expect(validateDIDDocument(didDoc)).toBe(true);
@@ -144,28 +147,28 @@ describe('validation utils', () => {
     expect(validateDIDDocument({ '@context': [], id: 'invalid' } as any)).toBe(false);
     const badVm: any = {
       '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:peer:abc',
+      id: 'did:key:abc',
       verificationMethod: [{ id: '#1', type: 'X', controller: '', publicKeyMultibase: '' }, { id: null }]
     };
     expect(validateDIDDocument(badVm)).toBe(false);
     // invalid multibase prefix for VM
     const badMultibase: any = {
       '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:peer:abc',
-      verificationMethod: [{ id: '#key', type: 'Ed25519VerificationKey2020', controller: 'did:peer:abc', publicKeyMultibase: 'xabc' }]
+      id: 'did:key:abc',
+      verificationMethod: [{ id: '#key', type: 'Ed25519VerificationKey2020', controller: 'did:key:abc', publicKeyMultibase: 'xabc' }]
     };
     expect(validateDIDDocument(badMultibase)).toBe(false);
     // invalid controller on verificationMethod
     const badVmController: any = {
       '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:peer:abc',
+      id: 'did:key:abc',
       verificationMethod: [{ id: '#key', type: 'Ed25519VerificationKey2020', controller: 'not-a-did', publicKeyMultibase: 'zabc' }]
     };
     expect(validateDIDDocument(badVmController)).toBe(false);
     // invalid controller array
     const badControllers: any = {
       '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:peer:abc',
+      id: 'did:key:abc',
       controller: ['not-a-did']
     };
     expect(validateDIDDocument(badControllers)).toBe(false);
@@ -174,8 +177,8 @@ describe('validation utils', () => {
   test('validateDIDDocument with controller array passes when entries are DIDs', () => {
     const ok: any = {
       '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:peer:abc',
-      controller: ['did:peer:abc', 'did:webvh:example.com:abc']
+      id: 'did:key:abc',
+      controller: ['did:key:abc', 'did:webvh:example.com:abc']
     };
     expect(validateDIDDocument(ok)).toBe(true);
   });

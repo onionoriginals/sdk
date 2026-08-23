@@ -878,8 +878,7 @@ export class LifecycleManager {
       throw new StructuredError(
         'ASSET_LOAD_VERIFICATION_FAILED',
         `Cannot derive did:cel document: current controller ${loadedController} is not a did:key. ` +
-        'SDK forward paths are did:key-only; did:peer is a deprecated legacy read path of the verifier and ' +
-        'cannot control an asset loaded through the SDK.',
+        'Only did:key controllers are supported (did:peer support is removed entirely).',
         { verification }
       );
     }
@@ -1171,9 +1170,8 @@ export class LifecycleManager {
     if (!currentControllerKey) {
       throw new StructuredError(
         'CHAIN_ASSET_INVALID',
-        `Reconstructed current controller ${currentController} is not a did:key. SDK forward paths are ` +
-        'did:key-only; did:peer is a deprecated legacy read path of the verifier and cannot control an asset ' +
-        'resolved through the SDK.'
+        `Reconstructed current controller ${currentController} is not a did:key. ` +
+        'Only did:key controllers are supported (did:peer support is removed entirely).'
       );
     }
     const celDoc = createCelDidDocument(assetDid, currentControllerKey);
@@ -2643,8 +2641,7 @@ export class LifecycleManager {
           // author as a did:key the verifier can bind offline. Refuse any
           // other signing VM BEFORE appending — appending first and letting
           // the author be silently omitted would burn a real inscription fee
-          // on an entry that can never verify. (did:peer survives only as the
-          // verifier's legacy read path for pre-existing logs.)
+          // on an entry that can never verify.
           if (!LifecycleManager.didKeyPublicKeyMultibase(vm.split('#')[0])) {
             throw new StructuredError(
               'CEL_APPEND_FAILED',
@@ -2692,11 +2689,11 @@ export class LifecycleManager {
 
   /**
    * The Multikey publicKeyMultibase a did:key embeds; undefined for every
-   * other method. SDK FORWARD paths are did:key-only: the verifier keeps a
-   * legacy READ path for pre-existing long-form did:peer:4 logs, but the SDK
-   * never signs under, announces, or derives documents from a non-did:key
-   * controller — a bare prefix slice of some other DID would corrupt the key
-   * material, so callers must refuse loudly when this returns undefined.
+   * other method. did:key is the only supported controller method (did:peer
+   * support is removed entirely): the SDK never signs under, announces, or
+   * derives documents from a non-did:key controller — a bare prefix slice of
+   * some other DID would corrupt the key material, so callers must refuse
+   * loudly when this returns undefined.
    */
   private static didKeyPublicKeyMultibase(did: string): string | undefined {
     if (!did.startsWith('did:key:')) return undefined;

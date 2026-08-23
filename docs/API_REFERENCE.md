@@ -112,8 +112,8 @@ Manages Decentralized Identifier operations across all three protocol layers.
 > **Genesis is not created here.** Assets are minted offline via
 > `sdk.lifecycle.createAsset(...)`, which appends a `create` event to the asset's
 > CEL and derives a `did:cel` genesis identifier (`asset.id`). There is no
-> `createDIDPeer` — `did:peer` is deprecated as a creation method (the verifier
-> keeps a read-only path for pre-existing `did:peer:4` logs). `DIDManager` covers
+> `createDIDPeer` — `did:peer` support is removed entirely (no creation,
+> resolution, or verifier read path). `DIDManager` covers
 > the public/on-chain layers (`did:webvh`, `did:btco`) and resolution.
 
 #### `createDIDWebVH(options)`
@@ -193,7 +193,7 @@ const document = await sdk.did.resolveDID('did:webvh:example.com:alice');
 ```
 
 **Supported Methods:** `did:cel` (genesis), `did:webvh`, `did:btco`, `did:key`
-(`did:peer` resolves for legacy read only).
+(`did:peer` is not supported and resolves to null).
 
 #### `loadDIDLog(path)`
 

@@ -90,10 +90,10 @@ function makeMockSigner(_vm?: string): (data: unknown) => Promise<DataIntegrityP
 function makePeerAssetData(name: string) {
   return {
     name,
-    did: 'did:peer:4z123456789abcdef',
+    did: 'did:webvh:legacy.example:4z123456789abcdef',
     layer: 'peer' as const,
     resources: [],
-    creator: 'did:peer:4z123456789abcdef',
+    creator: 'did:webvh:legacy.example:4z123456789abcdef',
     createdAt: new Date().toISOString(),
   };
 }
@@ -248,7 +248,7 @@ describe('CEL-CLI-003/happy: inspect layer history (peer→webvh)', () => {
     // Simulate a webvh migration update event (legacy shape — kept as the
     // legacy-fixture case for the update-sniff fallback).
     log = await updateEventLog(log, {
-      sourceDid: 'did:peer:4z123456789abcdef',
+      sourceDid: 'did:webvh:legacy.example:4z123456789abcdef',
       targetDid: 'did:webvh:example.com:asset1',
       layer: 'webvh',
       domain: 'example.com',
@@ -265,7 +265,7 @@ describe('CEL-CLI-003/happy: inspect layer history (peer→webvh)', () => {
     // State should reflect the migrated layer and DID.
     expect(result.state?.layer).toBe('webvh');
     expect(result.state?.did).toBe('did:webvh:example.com:asset1');
-    expect(result.state?.metadata?.sourceDid).toBe('did:peer:4z123456789abcdef');
+    expect(result.state?.metadata?.sourceDid).toBe('did:webvh:legacy.example:4z123456789abcdef');
     // The log has 2 events — the create (peer) and the migration update (webvh).
     // extractLayerHistory in inspect.ts picks up both when layerHistory.length > 1.
     // Success without error is sufficient to assert layer history was computed.
@@ -280,7 +280,7 @@ describe('CEL-CLI-003/happy: inspect layer history (peer→webvh)', () => {
 
     let log = await createEventLog({ ...makePeerAssetData('TS Asset'), createdAt }, opts);
     log = await updateEventLog(log, {
-      sourceDid: 'did:peer:4z123456789abcdef',
+      sourceDid: 'did:webvh:legacy.example:4z123456789abcdef',
       targetDid: 'did:webvh:example.com:ts-asset',
       layer: 'webvh',
       domain: 'example.com',

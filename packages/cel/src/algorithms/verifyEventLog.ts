@@ -138,29 +138,35 @@ async function dispatchVerify(
 }
 
 /**
- * Extracts the Ed25519 public key(s) embedded in a SELF-CERTIFYING DID
- * (did:key, or long-form did:peer numalgo-4 which embeds its DID document).
+ * Extracts the Ed25519 public key(s) embedded in a SELF-CERTIFYING DID.
+ * did:key is the ONLY supported self-certifying method — did:peer support is
+ * removed entirely, including the former long-form did:peer:4 legacy read
+ * path, so pre-existing did:peer logs no longer verify.
  *
  * Returns:
- * - a Set of hex-encoded keys when the DID is self-certifying (possibly empty —
- *   no Ed25519 key is embedded, or a long-form did:peer:4 whose embedded
- *   document fails to parse — callers MUST fail closed on an empty set);
- * - null when the DID is not self-certifying / not checkable offline
- *   (short-form did:peer:4, other DID methods). Caller semantics on null
- *   differ: the legacy `data.did` path keeps trust-on-first-use, the did:cel
- *   genesis path falls back to VM-DID equality + resolver vouching, and the
- *   rotateKey path fails closed (no proof-of-possession design yet).
+ * - a Set of hex-encoded keys for did:key (possibly empty — no Ed25519 key
+ *   embedded — callers MUST fail closed on an empty set), and ALWAYS the
+ *   empty set for did:peer (refused outright);
+ * - null when the DID is not self-certifying / not checkable offline (other
+ *   DID methods). Caller semantics on null differ: the legacy `data.did`
+ *   path keeps trust-on-first-use, the did:cel genesis path falls back to
+ *   VM-DID equality + resolver vouching, and the rotateKey path fails closed
+ *   (no proof-of-possession design yet).
  */
-async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null> {
+function selfCertifyingKeyHexes(did: unknown): Set<string> | null {
   if (typeof did !== 'string') return null;
 
-  // Cap before base58 decode (O(n²), per-event amplifiable via rotateKey): over
-  // the bound, fail closed (empty) for the prefixes we'd otherwise decode; null
-  // for everything else, matching this function's null-vs-empty semantics.
+  // did:peer is refused with an EMPTY set so every caller fails closed
+  // (rotation target, committed author, genesis controller, legacy data.did).
+  // Returning null instead would route a did:peer controller into the
+  // resolver-backed / trust-on-first-use fallbacks — a quiet read path this
+  // deliberately closes.
+  if (did.startsWith('did:peer:')) return new Set();
+
+  // Cap before base58 decode (O(n²), per-event amplifiable via rotateKey):
+  // over the bound, fail closed (empty) rather than decode.
   if (did.length > 2048) {
-    const selfCertifying = did.startsWith('did:key:')
-      || (did.startsWith('did:peer:4') && did.split(':').length >= 4);
-    return selfCertifying ? new Set() : null;
+    return did.startsWith('did:key:') ? new Set() : null;
   }
 
   if (did.startsWith('did:key:')) {
@@ -169,39 +175,6 @@ async function selfCertifyingKeyHexes(did: unknown): Promise<Set<string> | null>
     // fail closed at the caller).
     const key = extractEd25519FromDidKey(did);
     return new Set(key ? [bytesToHex(key)] : []);
-  }
-
-  if (did.startsWith('did:peer:4')) {
-    // Only the LONG form (did:peer:4<hash>:<encodedDoc>) embeds the document
-    // and is checkable offline; the short form carries only a hash.
-    if (did.split(':').length < 4) return null;
-    try {
-      const mod = await import('@aviarytech/did-peer') as unknown as {
-        resolve: (did: string) => Promise<Record<string, unknown>>;
-      };
-      const doc = await mod.resolve(did);
-      const keys = new Set<string>();
-      const vms = (doc as { verificationMethod?: Array<{ publicKeyMultibase?: unknown }> }).verificationMethod;
-      if (Array.isArray(vms)) {
-        for (const vm of vms) {
-          if (vm && typeof vm.publicKeyMultibase === 'string') {
-            try {
-              const dec = multikey.decodePublicKey(vm.publicKeyMultibase);
-              if (dec.type === 'Ed25519') keys.add(bytesToHex(dec.key));
-            } catch {
-              // skip non-decodable verification methods
-            }
-          }
-        }
-      }
-      return keys;
-    } catch {
-      // A LONG-FORM did:peer:4 embeds its own document; if that document
-      // cannot be parsed the DID is malformed. Fail closed (empty set) rather
-      // than returning null and silently degrading to the caller's weaker
-      // fallback branch (TOFU / VM-equality).
-      return new Set();
-    }
   }
 
   return null;
@@ -1176,10 +1149,10 @@ async function verifyEvent(
         `Event ${index}: an authored event must carry exactly one controller proof (found ${controllerProofs.length})`
       );
     }
-    const authorKeys = await selfCertifyingKeyHexes(declaredAuthor);
+    const authorKeys = selfCertifyingKeyHexes(declaredAuthor);
     if (!authorKeys || authorKeys.size === 0) {
       return fail(
-        `Event ${index}: data.author (${declaredAuthor}) is not a self-certifying DID with an Ed25519 key (did:key or long-form did:peer:4)`
+        `Event ${index}: data.author (${declaredAuthor}) is not a self-certifying DID with an Ed25519 key (did:key)`
       );
     }
     const { proof, originalIndex } = controllerProofs[0];
@@ -1490,16 +1463,17 @@ export async function verifyEventLog(
           // the attacker's key.
           //
           // Two ways to bind, both fail-closed:
-          //  - self-certifying controller (did:key / long-form did:peer:4): its
-          //    key material is embedded, so the root key MUST be one of those
-          //    keys — checked offline, no resolver, no fallback.
+          //  - self-certifying controller (did:key): its key material is
+          //    embedded, so the root key MUST be one of those keys — checked
+          //    offline, no resolver, no fallback. (did:peer is refused: its
+          //    key set comes back empty, so a peer controller fails here.)
           //  - resolver-backed controller (did:webvh, …): its keys cannot be
           //    enumerated offline, so the root proof's verificationMethod MUST
           //    belong to the controller DID (proof VM DID === controller). The
           //    resolver then vouches for that key and the signature is checked
           //    downstream. A foreign-DID signer (e.g. a did:key claiming a
           //    did:webvh controller) is not the controller and fails closed.
-          const controllerKeys = await selfCertifyingKeyHexes(celController);
+          const controllerKeys = selfCertifyingKeyHexes(celController);
           const rootProofVm = createControllerProofs[0].verificationMethod;
           const bound = controllerKeys !== null
             ? controllerKeys.has(rootKeyHex)
@@ -1513,23 +1487,23 @@ export async function verifyEventLog(
           }
         } else {
           // Legacy / shapeless self-certifying binding (unchanged): when the
-          // create event's `data.did` is a did:key or long-form did:peer:4, the
-          // identifier itself embeds the controller's key material, so the
-          // create-event signing key can be checked against it offline. Without
+          // create event's `data.did` is a did:key, the identifier itself
+          // embeds the controller's key material, so the create-event signing
+          // key can be checked against it offline. Without
           // this, an attacker can copy a victim's create event `data` verbatim,
           // re-sign event 0 with their own did:key, and produce a "valid"
           // provenance log for the victim's DID under the attacker's key.
           //
           // The check applies only when the create proof's verificationMethod
           // is itself a did:key: that is the offline-checkable pattern the SDK
-          // emits (PeerCelManager embeds the signer's key in the generated
-          // did:peer). Resolver-backed verification methods (did:webvh, …)
+          // emits. Resolver-backed verification methods (did:webvh, …)
           // cannot embed their key in the asset DID at create time, so they
           // keep trust-on-first-use — their authority is whatever the
           // verifier's resolveKey vouches for. Non-self-certifying `data.did`
-          // methods and shapeless logs also keep trust-on-first-use.
+          // methods and shapeless logs also keep trust-on-first-use — except
+          // did:peer, which is refused outright (empty key set → error).
           const embeddedKeys = createControllerProofs[0].verificationMethod.startsWith('did:key:')
-            ? await selfCertifyingKeyHexes(legacyDid)
+            ? selfCertifyingKeyHexes(legacyDid)
             : null;
           if (embeddedKeys !== null && !embeddedKeys.has(rootKeyHex)) {
             authorityError =
@@ -1654,7 +1628,7 @@ export async function verifyEventLog(
             eventResult.proofValid = false;
             eventResult.errors.push(gate.error);
           } else {
-            const authorHexes = await selfCertifyingKeyHexes(author);
+            const authorHexes = selfCertifyingKeyHexes(author);
             const isCreatorEntry = [...(authorHexes ?? [])].some(h => creatorKeyHexes?.has(h) === true);
             if (isCreatorEntry) {
               entryClass = 'creator';
@@ -1707,12 +1681,12 @@ export async function verifyEventLog(
     if (!options?.verifier && event.type === 'rotateKey' && eventResult.proofValid && eventResult.chainValid) {
       const rotation = event.data as { newController?: unknown } | null | undefined;
       const newController = typeof rotation?.newController === 'string' ? rotation.newController : undefined;
-      // v1 requires a SELF-CERTIFYING newController (did:key, or long-form
-      // did:peer:4): its key material is embedded, so the hand-off target is
+      // v1 requires a SELF-CERTIFYING newController (did:key — did:peer is
+      // refused): its key material is embedded, so the hand-off target is
       // checkable offline. Resolver-backed newControllers (did:webvh, …) fail
       // closed — VM-DID equality has no meaning here (nothing is signed by the
       // new key yet); supporting them needs a proof-of-possession design.
-      const newKeys = newController !== undefined ? await selfCertifyingKeyHexes(newController) : null;
+      const newKeys = newController !== undefined ? selfCertifyingKeyHexes(newController) : null;
       if (!newKeys || newKeys.size === 0) {
         // Unbindable target fails the EVENT (and therefore the log) — an
         // accepted rotation to nowhere would strand or hijack the log.

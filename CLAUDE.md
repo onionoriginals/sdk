@@ -16,7 +16,7 @@ This is a TypeScript SDK for the Originals Protocol - enabling creation, discove
 - **`did:webvh`** - Public discovery via HTTPS hosting
 - **`did:btco`** - Transferable ownership on Bitcoin (ownership IS live sat control)
 
-Assets migrate unidirectionally through these layers: did:cel → did:webvh → did:btco. (`did:peer` is deprecated as a creation method — the verifier keeps a legacy read path for pre-existing `did:peer:4` logs, but new assets are minted as `did:cel`.)
+Assets migrate unidirectionally through these layers: did:cel → did:webvh → did:btco. (`did:peer` support is REMOVED entirely — no creation, no resolution, no verifier read path; pre-existing `did:peer` logs and credentials no longer verify.)
 
 ## Build and Test Commands
 
@@ -77,7 +77,7 @@ The DID system supports three DID methods with unified interfaces:
 - `createDIDWebVH()` - Create a did:webvh identifier for public hosting
 - `migrateToDIDWebVH()` - Upgrade a genesis (did:cel) asset to did:webvh for public hosting
 - `migrateToDIDBTCO()` - Inscribe DID on Bitcoin for transferable ownership (sat = identity)
-- `resolveDID()` - Universal resolver for all DID methods (incl. legacy did:peer read path)
+- `resolveDID()` - Universal resolver for all supported DID methods (did:peer is not one — it resolves to null)
 
 > Genesis is minted via `sdk.lifecycle.createAsset()` (a `did:cel` `create` event) — there is no `createDIDPeer()`.
 

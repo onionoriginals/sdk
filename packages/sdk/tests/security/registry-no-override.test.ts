@@ -21,7 +21,7 @@ describe('verificationMethodRegistry must not override the DID document', () => 
   afterEach(() => verificationMethodRegistry.clear());
 
   test('DID-document verification method wins over a registered forgery', async () => {
-    const did = 'did:peer:victim1';
+    const did = 'did:key:victim1';
     const vmId = `${did}#keys-1`;
 
     // The victim's REAL key, published in the DID document.
@@ -64,7 +64,7 @@ describe('verificationMethodRegistry must not override the DID document', () => 
   });
 
   test('registry still serves as fallback when the DID document omits the VM', async () => {
-    const did = 'did:peer:stub1';
+    const did = 'did:key:stub1';
     const vmId = `${did}#keys-1`;
     const sk = new Uint8Array(32).map((_, i) => (i + 7) & 0xff);
     const pk = ed25519.getPublicKey(sk);

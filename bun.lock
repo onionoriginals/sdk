@@ -81,7 +81,6 @@
       "name": "@originals/cel",
       "version": "0.2.0-next.1",
       "dependencies": {
-        "@aviarytech/did-peer": "^1.1.2",
         "@noble/curves": "^2.2.0",
         "@noble/ed25519": "^3.1.0",
         "@noble/hashes": "^2.0.1",
@@ -108,7 +107,6 @@
         "originals-cel": "./dist/cel/cli/index.js",
       },
       "dependencies": {
-        "@aviarytech/did-peer": "^1.1.2",
         "@digitalbazaar/bbs-signatures": "^3.1.0",
         "@noble/curves": "^2.2.0",
         "@noble/ed25519": "^3.1.0",
@@ -145,8 +143,6 @@
   },
   "packages": {
     "@adraffy/ens-normalize": ["@adraffy/ens-normalize@1.11.1", "", {}, "sha512-nhCBV3quEgesuf7c7KYfperqSS14T8bYuvJ8PcLJp6znkZpFc0AuW4qBtr8eKVyPPe/8RSr7sglCWPU5eaxwKQ=="],
-
-    "@aviarytech/did-peer": ["@aviarytech/did-peer@1.1.2", "", { "dependencies": { "buffer": "^6.0.3" } }, "sha512-5epYnyduIhp+xs7GtpI3IMLqbryjgHEtAqaKVZHtjTz+hQEgm2rPspm5LB2sHG+04dy6v/gbxNDOCO+hxaix4g=="],
 
     "@babel/code-frame": ["@babel/code-frame@7.29.7", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.29.7", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw=="],
 

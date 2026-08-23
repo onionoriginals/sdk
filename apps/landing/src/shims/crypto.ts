@@ -1,7 +1,6 @@
 // Browser shim for node `crypto`, covering the hash algorithms the SDK's
-// dependency graph can reach in the browser: @aviarytech/did-peer hashes the
-// encoded DID document with createHash('sha256'); sha512 is included so any
-// other bundled path that needs it fails soft instead of hard.
+// dependency graph can reach in the browser (createHash('sha256')); sha512 is
+// included so any other bundled path that needs it fails soft instead of hard.
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { Buffer } from 'buffer';
 

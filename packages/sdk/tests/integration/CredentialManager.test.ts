@@ -20,7 +20,7 @@ describe('Integration: CredentialManager issue/verify roundtrip', () => {
   });
 
   test('issue and verify using Issuer/Verifier wiring', async () => {
-    const did = 'did:peer:issuer1';
+    const did = 'did:key:issuer1';
     const sk = ed25519.utils.randomSecretKey();
     const pk = await (ed25519 as any).getPublicKeyAsync(sk);
     const secretKeyMultibase = multikey.encodePrivateKey(sk, 'Ed25519');
@@ -32,7 +32,7 @@ describe('Integration: CredentialManager issue/verify roundtrip', () => {
       type: ['VerifiableCredential', 'Test'],
       issuer: did,
       issuanceDate: new Date().toISOString(),
-      credentialSubject: { id: 'did:peer:subject1' }
+      credentialSubject: { id: 'did:key:subject1' }
     } as any;
 
     const signed = await sdk.credentials.signCredential(base, secretKeyMultibase, vm);

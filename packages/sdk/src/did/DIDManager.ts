@@ -434,17 +434,11 @@ export class DIDManager {
       // resolve, pushing the error far downstream.
       let result: DIDDocument | null = null;
       try {
-        if (did.startsWith('did:peer:')) {
-          try {
-            const mod = await import('@aviarytech/did-peer') as unknown as { resolve: (did: string) => Promise<Record<string, unknown>> };
-            const doc = await mod.resolve(did);
-            result = doc as unknown as DIDDocument;
-          } catch (err) {
-            if (this.config.enableLogging) {
-              console.warn('Failed to resolve did:peer:', err);
-            }
-          }
-        } else if (did.startsWith('did:btco:')) {
+        // did:peer is not a supported method (removed entirely — protocol
+        // forward paths and read paths are did:key/did:cel-based); it falls
+        // through to the unsupported-method null below like any other
+        // unknown method.
+        if (did.startsWith('did:btco:')) {
           if (this.config.ordinalsProvider) {
             // Cross-network guard already enforced pre-cache by
             // assertBtcoNetworkMatchesProvider (issues #267/#312).

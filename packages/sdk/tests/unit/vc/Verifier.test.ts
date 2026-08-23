@@ -9,7 +9,7 @@ import { StatusListManager } from '../../../src/vc/StatusListManager';
 
 describe('diwings Verifier', () => {
   const didManager = new DIDManager({} as any);
-  const did = 'did:peer:issuer1';
+  const did = 'did:key:issuer1';
   const sk = new Uint8Array(32).map((_, i) => (i + 1) & 0xff);
   const pk = ed25519.getPublicKey(sk);
   const vm = {
@@ -31,7 +31,7 @@ describe('diwings Verifier', () => {
         type: ['VerifiableCredential', 'Test'],
         issuer: did,
         issuanceDate: new Date().toISOString(),
-        credentialSubject: { id: 'did:peer:subject1' }
+        credentialSubject: { id: 'did:key:subject1' }
       } as any,
       { proofPurpose: 'assertionMethod' }
     );
@@ -47,7 +47,7 @@ describe('diwings Verifier', () => {
         type: ['VerifiableCredential', 'Nested'],
         issuer: did,
         issuanceDate: new Date().toISOString(),
-        credentialSubject: { id: 'did:peer:subject2' }
+        credentialSubject: { id: 'did:key:subject2' }
       } as any,
       { proofPurpose: 'assertionMethod' }
     );
@@ -79,8 +79,8 @@ describe('diwings Verifier', () => {
     const vc = {
       '@context': { '@vocab': 'https://example.com/vocab#' },
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:issuer1',
-      credentialSubject: { id: 'did:peer:subject1' },
+      issuer: 'did:key:issuer1',
+      credentialSubject: { id: 'did:key:subject1' },
       proof: { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zDummy', verificationMethod: `${did}#keys-1` }
     } as any;
     const verifier = new Verifier(didManager);
@@ -95,7 +95,7 @@ describe('diwings Verifier', () => {
         type: ['VerifiableCredential', 'WrongPurpose'],
         issuer: did,
         issuanceDate: new Date().toISOString(),
-        credentialSubject: { id: 'did:peer:subject1' }
+        credentialSubject: { id: 'did:key:subject1' }
       } as any,
       { proofPurpose: 'authentication' }
     );
@@ -140,7 +140,7 @@ describe('diwings Verifier', () => {
         // Well in the past (not just barely) so a slow/loaded CI runner can't
         // race this into a false pass.
         expirationDate: new Date(Date.now() - 30_000).toISOString(),
-        credentialSubject: { id: 'did:peer:subject1' }
+        credentialSubject: { id: 'did:key:subject1' }
       } as any,
       { proofPurpose: 'assertionMethod' }
     );
@@ -157,7 +157,7 @@ describe('diwings Verifier', () => {
         type: ['VerifiableCredential', 'Test'],
         issuer: did,
         validFrom: new Date(Date.now() + 3600_000).toISOString(),
-        credentialSubject: { id: 'did:peer:subject1' }
+        credentialSubject: { id: 'did:key:subject1' }
       } as any,
       { proofPurpose: 'assertionMethod' }
     );
@@ -173,7 +173,7 @@ describe('diwings Verifier', () => {
     // own verificationMethod. The signature is cryptographically valid and the
     // attacker's key resolves, so without an issuer<->verificationMethod binding
     // check this would verify as `true` — full issuer impersonation.
-    const attackerDid = 'did:peer:attacker';
+    const attackerDid = 'did:key:attacker';
     const attackerSk = new Uint8Array(32).map((_, i) => (i + 7) & 0xff);
     const attackerPk = ed25519.getPublicKey(attackerSk);
     const attackerVm = {
@@ -199,7 +199,7 @@ describe('diwings Verifier', () => {
         type: ['VerifiableCredential', 'Test'],
         issuer: attackerDid,
         issuanceDate: new Date().toISOString(),
-        credentialSubject: { id: 'did:peer:victim' }
+        credentialSubject: { id: 'did:key:victim' }
       } as any,
       { proofPurpose: 'assertionMethod' }
     );
@@ -226,7 +226,7 @@ describe('diwings Verifier', () => {
   });
 
   test('rejects holder impersonation: presentation proof signed by a non-holder key', async () => {
-    const attackerDid = 'did:peer:attacker2';
+    const attackerDid = 'did:key:attacker2';
     const attackerSk = new Uint8Array(32).map((_, i) => (i + 11) & 0xff);
     const attackerPk = ed25519.getPublicKey(attackerSk);
     const attackerVm = {
@@ -279,7 +279,7 @@ describe('diwings Verifier', () => {
           statusListIndex: '0',
           statusListCredential: 'https://example.com/status/1'
         },
-        credentialSubject: { id: 'did:peer:subject1' }
+        credentialSubject: { id: 'did:key:subject1' }
       } as any,
       { proofPurpose: 'assertionMethod' }
     );
@@ -327,7 +327,7 @@ describe('diwings Verifier', () => {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
       issuer: did,
-      credentialSubject: { id: 'did:peer:subject-304' },
+      credentialSubject: { id: 'did:key:subject-304' },
       credentialStatus: {
         type: 'BitstringStatusListEntry',
         statusPurpose: 'revocation',
@@ -384,7 +384,7 @@ describe('diwings Verifier', () => {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential'],
       issuer: did,
-      credentialSubject: { id: 'did:peer:subject-304b' },
+      credentialSubject: { id: 'did:key:subject-304b' },
       credentialStatus: {
         type: 'BitstringStatusListEntry',
         statusPurpose: 'revocation',
@@ -436,7 +436,7 @@ describe('diwings Verifier', () => {
         type: ['VerifiableCredential', 'Test'],
         issuer: did,
         issuanceDate: new Date().toISOString(),
-        credentialSubject: { id: 'did:peer:subject1' }
+        credentialSubject: { id: 'did:key:subject1' }
       } as any,
       { proofPurpose: 'assertionMethod' }
     );
@@ -463,7 +463,7 @@ describe('diwings Verifier', () => {
         type: ['VerifiableCredential', 'Test'],
         issuer: did,
         issuanceDate: new Date().toISOString(),
-        credentialSubject: { id: 'did:peer:subject1' }
+        credentialSubject: { id: 'did:key:subject1' }
       } as any,
       { proofPurpose: 'assertionMethod' }
     );
@@ -542,7 +542,7 @@ describe('Verifier additional error branches', () => {
 
 describe('Verifier with string @context branches', () => {
   const dm = new DIDManager({} as any);
-  const did = 'did:peer:stringctx';
+  const did = 'did:key:stringctx';
   const sk = new Uint8Array(32).map((_, i) => (i + 7) & 0xff);
   const pk = ed25519.getPublicKey(sk);
   const vm = {

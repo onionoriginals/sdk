@@ -3,14 +3,14 @@ import { serializeDIDDocument, deserializeDIDDocument, serializeCredential, dese
 
 describe('serialization utils', () => {
   test('serialize/deserialize DID document roundtrip', () => {
-    const doc: any = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:abc' };
+    const doc: any = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:key:abc' };
     const ser = serializeDIDDocument(doc);
     const round = deserializeDIDDocument(ser);
     expect(round).toEqual(doc);
   });
 
   test('serialize/deserialize VC roundtrip', () => {
-    const vc: any = { '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:peer:abc', validFrom: new Date().toISOString(), credentialSubject: { id: 'did:peer:abc' } };
+    const vc: any = { '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:key:abc', validFrom: new Date().toISOString(), credentialSubject: { id: 'did:key:abc' } };
     const ser = serializeCredential(vc);
     const round = deserializeCredential(ser);
     expect(round).toEqual(vc);
@@ -77,9 +77,9 @@ describe('serialization utils', () => {
     // Invalid DID format for id
     expect(() => deserializeDIDDocument('{"@context":["https://www.w3.org/ns/did/v1"],"id":"not-a-did"}')).toThrow('Invalid DID Document JSON');
     // @context not an array
-    expect(() => deserializeDIDDocument('{"@context":"https://www.w3.org/ns/did/v1","id":"did:peer:abc"}')).toThrow('Invalid DID Document JSON');
+    expect(() => deserializeDIDDocument('{"@context":"https://www.w3.org/ns/did/v1","id":"did:key:abc"}')).toThrow('Invalid DID Document JSON');
     // Malformed verification method (missing publicKeyMultibase)
-    expect(() => deserializeDIDDocument('{"@context":["https://www.w3.org/ns/did/v1"],"id":"did:peer:abc","verificationMethod":[{"id":"did:peer:abc#k","type":"Multikey","controller":"did:peer:abc"}]}')).toThrow('Invalid DID Document JSON');
+    expect(() => deserializeDIDDocument('{"@context":["https://www.w3.org/ns/did/v1"],"id":"did:key:abc","verificationMethod":[{"id":"did:key:abc#k","type":"Multikey","controller":"did:key:abc"}]}')).toThrow('Invalid DID Document JSON');
     // Non-object parse results
     expect(() => deserializeDIDDocument('5')).toThrow('Invalid DID Document JSON');
     expect(() => deserializeDIDDocument('null')).toThrow('Invalid DID Document JSON');
@@ -92,9 +92,9 @@ describe('serialization utils', () => {
     // Invalid issuer DID
     expect(() => deserializeCredential('{"@context":["https://www.w3.org/2018/credentials/v1"],"type":["VerifiableCredential"],"issuer":"not-a-did","issuanceDate":"2020-01-01T00:00:00Z","credentialSubject":{}}')).toThrow('Invalid Verifiable Credential JSON');
     // Missing credentialSubject
-    expect(() => deserializeCredential('{"@context":["https://www.w3.org/2018/credentials/v1"],"type":["VerifiableCredential"],"issuer":"did:peer:abc","issuanceDate":"2020-01-01T00:00:00Z"}')).toThrow('Invalid Verifiable Credential JSON');
+    expect(() => deserializeCredential('{"@context":["https://www.w3.org/2018/credentials/v1"],"type":["VerifiableCredential"],"issuer":"did:key:abc","issuanceDate":"2020-01-01T00:00:00Z"}')).toThrow('Invalid Verifiable Credential JSON');
     // Missing VC v1 context
-    expect(() => deserializeCredential('{"@context":["https://example.com/other"],"type":["VerifiableCredential"],"issuer":"did:peer:abc","issuanceDate":"2020-01-01T00:00:00Z","credentialSubject":{}}')).toThrow('Invalid Verifiable Credential JSON');
+    expect(() => deserializeCredential('{"@context":["https://example.com/other"],"type":["VerifiableCredential"],"issuer":"did:key:abc","issuanceDate":"2020-01-01T00:00:00Z","credentialSubject":{}}')).toThrow('Invalid Verifiable Credential JSON');
     // Non-object parse results
     expect(() => deserializeCredential('5')).toThrow('Invalid Verifiable Credential JSON');
     expect(() => deserializeCredential('null')).toThrow('Invalid Verifiable Credential JSON');

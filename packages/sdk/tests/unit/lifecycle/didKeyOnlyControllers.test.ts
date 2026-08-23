@@ -1,14 +1,14 @@
 /**
- * did:key-only forward paths (PR #508 review follow-up, maintainer ruling).
+ * did:key-only controllers — did:peer support is removed ENTIRELY (maintainer
+ * ruling, PR #508).
  *
- * The VERIFIER keeps a legacy READ path for pre-existing long-form did:peer:4
- * logs, but the SDK's forward paths are did:key-only: a log whose controller
- * folded to a did:peer:4 DID is refused LOUDLY at load (never silently
- * mis-derived), and a post-anchor append under a non-did:key verification
- * method is refused BEFORE anything is appended or inscribed — the earlier
- * failure modes were a corrupted announced key (prefix-slicing a peer DID) and
- * a silently omitted `data.author` discovered only after the inscription fee
- * was burned.
+ * There is no legacy read path left: the cel verifier refuses did:peer DIDs
+ * outright (rotation targets, committed authors, genesis controllers, legacy
+ * `data.did`), and the SDK refuses them loudly at load and before any append —
+ * the earlier failure modes were a corrupted announced key (prefix-slicing a
+ * peer DID) and a silently omitted `data.author` discovered only after the
+ * inscription fee was burned. did:peer strings below are static fixtures; the
+ * did-peer library is no longer a dependency and nothing resolves them.
  */
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
@@ -26,6 +26,7 @@ import {
   hexSha256ToDigestMultibase,
   computeDigestMultibase,
   canonicalizeEntryForChain,
+  verifyEventLog,
 } from '@originals/cel';
 import type { EventLog, LogEntry, DataIntegrityProof, DIDDocument } from '@originals/cel';
 import { hashResource } from '../../../src/utils/validation';
@@ -33,12 +34,16 @@ import { hashResource } from '../../../src/utils/validation';
 const contentHex = hashResource(Buffer.from('the-work', 'utf8'));
 const SAT = '8383838383';
 
-async function peerDidFor(publicKeyMultibase: string): Promise<string> {
-  const mod = await import('@aviarytech/did-peer') as unknown as {
-    createNumAlgo4: (vms: Array<{ type: string; publicKeyMultibase: string }>, services?: unknown, alsoKnownAs?: unknown) => Promise<string>;
-  };
-  return mod.createNumAlgo4([{ type: 'Multikey', publicKeyMultibase }], undefined, undefined);
-}
+// Frozen, GENUINE long-form did:peer:4 (generated once with
+// @aviarytech/did-peer, which is no longer a dependency) embedding
+// ROTATED_KP's public key. Under the old legacy read path a log rotated to
+// this DID verified; now the did:peer prefix is refused before any
+// resolution could happen.
+const PEER_DID = 'did:peer:4zQmdZX2kFmuSknngEjNgkPAijmakC9YcqfcS8cbMJRzsCBH:z2E3ApMRVSzHJcKffrpLi1ex4H6YDtwSuhNERf4QcAFcSQEZ2CA8o3wuTuHDhk1qPmXof4zgH9LtPMY1FhMT5yBjiSUQgDRrcC35e4HTG3YgWZ4Et8w19JAHuHQxsk9WkoshRpCj5MfTXwtbSSwH8LfwFAMHsAYfAbidTBaeRmNKFDTmUE42Y4rygYHXKHTJqPdczvk9SBoExqtEsAHprvPNWqtWcAU5CVzv1S6tmEBP1kpBCvuGkD41MKmdGX6YNyZBH8a5baiVx5UDaZk6VMrtDnegnATnNNZShXQ6UxpoRGQTDNjQu8thVe6HRdE9CqeBfH8MQZHw7Lg';
+const ROTATED_KP = {
+  publicKey: 'z6Mkvu7X4wxDXTpRTQgtMMpkedyJJgnXZYPnMVD9DjjbXFPD',
+  privateKey: 'z3u2WxZ8zoixSwjPjKaB4K9sPp3kkFDjnvddozvHjRTvVMHT',
+};
 
 function makeSdk(provider = new OrdMockProvider(), keyStore = new MockKeyStore()) {
   return OriginalsSDK.create({
@@ -84,13 +89,12 @@ function attachWitness(log: EventLog, insc: { inscriptionId: string; txid: strin
   return { events: [...log.events.slice(0, -1), { ...last, proof: [...last.proof, witnessProof] }] };
 }
 
-/** create(did:key A) → rotateKey(→ long-form did:peer:4 embedding K2). */
+/** create(did:key A) → rotateKey(→ the frozen long-form did:peer:4). */
 async function peerRotatedLog() {
   const km = new KeyManager();
   const genesisKp = await km.generateKeyPair('Ed25519');
-  const rotatedKp = await km.generateKeyPair('Ed25519');
+  const rotatedKp = ROTATED_KP;
   const genesis = celSignerFromKeyPair({ publicKey: genesisKp.publicKey, privateKey: genesisKp.privateKey });
-  const peerDid = await peerDidFor(rotatedKp.publicKey);
 
   let log = await createEventLog(
     {
@@ -105,10 +109,10 @@ async function peerRotatedLog() {
   log = await appendEvent(
     log,
     'rotateKey',
-    { newController: peerDid, rotatedAt: '2026-08-23T00:00:01Z' },
+    { newController: PEER_DID, rotatedAt: '2026-08-23T00:00:01Z' },
     { signer: genesis.signer, verificationMethod: genesis.verificationMethod }
   );
-  return { log, genesisKp, rotatedKp, peerDid };
+  return { log, genesisKp, rotatedKp };
 }
 
 function envelopeFor(log: EventLog) {
@@ -122,8 +126,15 @@ function envelopeFor(log: EventLog) {
   } as never;
 }
 
-describe('did:key-only forward paths (did:peer is a legacy verifier read path only)', () => {
-  test('loadAsset refuses a log rotated to a did:peer:4 controller — loudly, naming did:key', async () => {
+describe('did:key-only controllers (did:peer support removed entirely)', () => {
+  test('the verifier refuses a rotateKey whose target is a did:peer — no legacy read path', async () => {
+    const { log } = await peerRotatedLog();
+    const result = await verifyEventLog(log);
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /unbindable newController/.test(e) && e.includes(PEER_DID))).toBe(true);
+  });
+
+  test('loadAsset refuses a peer-rotated log at verification', async () => {
     const { log } = await peerRotatedLog();
     const sdk = makeSdk();
 
@@ -135,11 +146,13 @@ describe('did:key-only forward paths (did:peer is a legacy verifier read path on
     }
     expect(thrown).toBeDefined();
     expect((thrown as { code?: string }).code).toBe('ASSET_LOAD_VERIFICATION_FAILED');
-    expect(String((thrown as Error).message)).toMatch(/did:key/);
-    expect(String((thrown as Error).message)).toMatch(/did:peer/);
+    const verification = (thrown as { details?: { verification?: { errors?: string[] } } }).details?.verification
+      ?? (thrown as { verification?: { errors?: string[] } }).verification;
+    const errors = verification?.errors ?? [];
+    expect(errors.some(e => /unbindable newController/.test(e))).toBe(true);
   });
 
-  test('loadAsset refuses the same log under skipVerification — the gate is not skippable', async () => {
+  test('loadAsset refuses the same log under skipVerification — the did:key gate is not skippable', async () => {
     const { log } = await peerRotatedLog();
     const sdk = makeSdk();
 
@@ -156,9 +169,11 @@ describe('did:key-only forward paths (did:peer is a legacy verifier read path on
 
   test('a post-anchor keyStore append under a peer controller VM refuses BEFORE appending', async () => {
     const provider = new OrdMockProvider();
-    const { log: rotated, rotatedKp, peerDid } = await peerRotatedLog();
-    // Anchor on btco: the migrate is signed by the peer controller's embedded
-    // key via its did:key VM (pre-anchor authorization compares resolved KEYS).
+    const { log: rotated, rotatedKp } = await peerRotatedLog();
+    // Hand-built continuation: migrate to btco signed by the rotated key's
+    // did:key VM. The log can no longer VERIFY (the peer rotation is refused),
+    // but the append path folds the controller without verifying — exactly why
+    // its own guard must refuse before mutating anything.
     const rotatedSigner = celSignerFromKeyPair({ publicKey: rotatedKp.publicKey, privateKey: rotatedKp.privateKey });
     let log = await appendEvent(
       rotated,
@@ -171,10 +186,8 @@ describe('did:key-only forward paths (did:peer is a legacy verifier read path on
     const keyStore = new MockKeyStore();
     const sdk = makeSdk(provider, keyStore);
 
-    // loadAsset refuses peer-controlled logs, so build the asset directly —
-    // the guard under test sits in the append path itself.
     const controllerVm = currentControllerVm(log);
-    expect(controllerVm).toBe(`${peerDid}#key-0`);
+    expect(controllerVm).toBe(`${PEER_DID}#key-0`);
     await keyStore.setPrivateKey(controllerVm, rotatedKp.privateKey);
     const btcoDoc: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: `did:btco:reg:${SAT}` };
     const asset = new OriginalsAsset(
