@@ -5,7 +5,7 @@
 
 .footer-inner {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-10);
 }
 
@@ -30,8 +30,18 @@
 
 .footer-columns {
   display: grid;
-  grid-template-columns: repeat(2, minmax(150px, 1fr));
-  gap: var(--sp-10);
+  /* Was minmax(150px, 1fr): two 150px floors plus a 40px gap demand 340px,
+     more than the 272px content box a 320px viewport leaves — which is what
+     made the whole page scroll sideways on a small phone. The link labels
+     wrap perfectly well below 150px. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-6) var(--sp-5);
+}
+
+@media (min-width: 480px) {
+  .footer-columns {
+    gap: var(--sp-10);
+  }
 }
 
 /* Three columns once there is room; below it the third wraps under the pair. */

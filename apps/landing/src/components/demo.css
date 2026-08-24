@@ -25,7 +25,12 @@
 
 .demo-body {
   display: grid;
-  grid-template-columns: 1fr;
+  /* NOT `1fr`. A bare `1fr` is `minmax(auto, 1fr)`, whose floor is the
+     content's min-content width — so a single unbreakable did:webvh string
+     inside grew this track past the shell, and .demo-shell's overflow:hidden
+     sliced every line in the card. `minmax(0, ...)` lets it shrink, which is
+     what the desktop rule below has always done. */
+  grid-template-columns: minmax(0, 1fr);
 }
 
 @media (min-width: 980px) {
@@ -35,6 +40,9 @@
 }
 
 .demo-controls {
+  /* A grid item's automatic minimum size is min-content; without this the
+     column re-inflates even inside a minmax(0, ...) track. */
+  min-width: 0;
   padding: var(--sp-6);
   border-bottom: 1px solid var(--border);
 }
@@ -289,6 +297,13 @@
   font-size: var(--text-sm);
   line-height: 1.6;
   margin-bottom: var(--sp-3);
+}
+
+/* The cost line now follows the button, so it needs the gap that
+   `.demo-step-copy > p` puts below a paragraph put above it instead. */
+.demo-cost-note {
+  margin-top: var(--sp-3);
+  margin-bottom: 0;
 }
 
 .demo-step-btn {
@@ -616,6 +631,7 @@
 .demo-output {
   display: flex;
   flex-direction: column;
+  min-width: 0; /* same automatic-minimum trap as .demo-controls */
   min-height: 420px;
   background: var(--bg);
 }
@@ -961,6 +977,10 @@
   margin: var(--sp-1) 0 0;
   font-size: var(--text-sm);
   color: var(--text-secondary);
+  /* This is prose with a raw did:webvh in it ("Moves to the web at … —
+     did:webvh:QmZtCG…"). That identifier has nothing to break at, so it set
+     a 379px min-content floor on a 325px column. */
+  overflow-wrap: anywhere;
 }
 
 .cel-entry-proof {
@@ -971,6 +991,9 @@
   flex-wrap: wrap;
   font-size: var(--text-xs);
   color: var(--text-tertiary);
+  /* "signed by did:key:z6Mkm…" — another identifier with nothing to break
+     at, 245px of min-content in a 196px column at 320px. */
+  overflow-wrap: anywhere;
 }
 
 .cel-entry-proof code {
@@ -1070,4 +1093,51 @@
 @keyframes cel-entry-in {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: none; }
+}
+
+/* ——— Narrow phones ———
+   At 320–420px the demo card had three separate ways to exceed its own shell:
+   a 128px art thumbnail leaving the title field 78px wide, a nowrap step
+   button wider than its column, and a three-tab strip wider than the panel.
+   Measured at 320, 375 and 414. */
+@media (max-width: 420px) {
+  /* 16px of gutter instead of 24 gives the steps column the 11px its button
+     was short by, and the form the room the art column was taking. */
+  .demo-controls {
+    padding: var(--sp-4);
+  }
+
+  /* Art above the form rather than beside it. Side by side, a 320px viewport
+     left the asset-title input 78px wide — narrower than the word it holds. */
+  .demo-asset {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+
+  .demo-art {
+    width: 100%;
+    max-width: 200px;
+  }
+
+  /* The tab strip stays one row and scrolls, the standard phone pattern —
+     the labels are fixed copy, so wrapping them would leave a ragged second
+     row under a border that reads as the strip's baseline. Scrolling keeps
+     every tab reachable; the clipping this replaces did not. */
+  .demo-tabs {
+    padding: var(--sp-3) var(--sp-2) 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .demo-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .demo-tabs [role='tab'] {
+    padding: var(--sp-2) var(--sp-2) var(--sp-3);
+  }
+
+  .cel-chain-scroll {
+    padding: var(--sp-4) var(--sp-3);
+  }
 }
