@@ -23,8 +23,8 @@ import {
   deriveDidCel,
 } from '@originals/sdk';
 import type { AssetEnvelope } from '@originals/sdk';
-import type { CelLog, CelResourceRef } from '../pages/original-detail-data';
-import { digestMultibaseSha256Hex } from '../pages/original-detail-data';
+import type { CelLog } from '../pages/original-detail-data';
+import { digestMultibaseSha256Hex, sha256HexToResourceMultibase } from '../pages/original-detail-data';
 
 /**
  * `AssetResource.type` from a media type — the same coarse split
@@ -49,14 +49,84 @@ export interface HydrationProblem {
   message: string;
 }
 
+/** One hosted version of one resource. */
+export interface HostedResourceRef {
+  id: string;
+  /** 1 for genesis; ≥2 for every version a signed `update` event introduced. */
+  version: number;
+  /** hex sha-256 of THIS version's bytes. */
+  hash: string;
+  /** The segment this version is served under (`resources/<segment>`). */
+  segment: string;
+  mediaType?: string;
+  previousVersionHash?: string;
+}
+
 /**
- * The resources a hosted CEL declares, with the URL segment each is served
- * under. The caller fetches these; keeping the fetch outside makes the mapping
- * testable and lets the page report a partial failure per resource.
+ * EVERY resource version the hosted CEL declares — genesis, and every version a
+ * signed `update` event introduced after it.
+ *
+ * Reading genesis alone was a silent correctness bug: a revised Original would
+ * rebuild with only its v1 bytes, `loadAsset` would accept that (v1 binds to
+ * genesis perfectly well, and nothing requires an envelope to carry the LATEST
+ * version), and inscribing would then anchor the SUPERSEDED artwork to Bitcoin
+ * permanently. Caught by review on #515; `hosted-envelope.test.ts` reproduces
+ * it.
+ *
+ * The caller fetches these; keeping the fetch outside makes the mapping
+ * testable and lets the page report a partial failure per version.
  */
-export function hostedResourceRefs(cel: CelLog | null): CelResourceRef[] {
-  const genesis = cel?.events?.find((e) => e.type === 'create');
-  return genesis?.data?.resources ?? [];
+export function hostedResourceRefs(cel: CelLog | null): HostedResourceRef[] {
+  const events = cel?.events ?? [];
+  const refs: HostedResourceRef[] = [];
+
+  const genesis = events[0]?.type === 'create' ? events[0] : undefined;
+  for (const r of genesis?.data?.resources ?? []) {
+    const hash = r.digestMultibase ? digestMultibaseSha256Hex(r.digestMultibase) : null;
+    const segment = hash ? sha256HexToResourceMultibase(hash) : null;
+    // A ref we cannot address is still reported, so the envelope builder can
+    // name it in BAD_DIGEST rather than quietly dropping a sealed resource.
+    refs.push({
+      id: r.id,
+      version: 1,
+      hash: hash ?? '',
+      segment: segment ?? '',
+      ...(r.mediaType ? { mediaType: r.mediaType } : {}),
+    });
+  }
+
+  // Later versions. `update` events carry the hex hash directly, and the
+  // envelope's post-genesis binding requires each v≥2 to match the exact
+  // `toVersion` of a verified update event — so these are emitted verbatim
+  // from the log rather than inferred.
+  for (const e of events) {
+    if (e.type !== 'update') continue;
+    const d = (e.data ?? {}) as {
+      resourceId?: unknown;
+      toHash?: unknown;
+      toVersion?: unknown;
+      contentType?: unknown;
+      previousVersionHash?: unknown;
+    };
+    if (typeof d.resourceId !== 'string' || typeof d.toHash !== 'string') continue;
+    if (typeof d.toVersion !== 'number') continue;
+    const segment = sha256HexToResourceMultibase(d.toHash);
+    refs.push({
+      id: d.resourceId,
+      version: d.toVersion,
+      hash: d.toHash,
+      segment: segment ?? '',
+      ...(typeof d.contentType === 'string' ? { mediaType: d.contentType } : {}),
+      ...(typeof d.previousVersionHash === 'string'
+        ? { previousVersionHash: d.previousVersionHash }
+        : {}),
+    });
+  }
+
+  // Ascending version per resource: the fold expects a version chain, and a
+  // v2 ahead of its v1 is not one.
+  refs.sort((a, b) => (a.id === b.id ? a.version - b.version : 0));
+  return refs;
 }
 
 /**
@@ -82,30 +152,37 @@ export function hostedAssetEnvelope(
   if (typeof controller !== 'string' || !controller.startsWith('did:key:')) {
     return { problem: { code: 'NO_CONTROLLER', message: 'This Original’s genesis event names no controller key.' } };
   }
-  const refs = genesis.data?.resources ?? [];
+  if ((genesis.data?.resources ?? []).length === 0) {
+    return { problem: { code: 'NO_RESOURCES', message: 'This Original’s genesis event seals no resources.' } };
+  }
+  const refs = hostedResourceRefs(cel);
   if (refs.length === 0) {
     return { problem: { code: 'NO_RESOURCES', message: 'This Original’s genesis event seals no resources.' } };
   }
 
   const resources = [];
   for (const ref of refs) {
-    const hash = ref.digestMultibase ? digestMultibaseSha256Hex(ref.digestMultibase) : null;
-    if (!hash) {
+    if (!ref.hash || !ref.segment) {
       return {
         problem: { code: 'BAD_DIGEST', message: `Resource “${ref.id}” has no readable content digest.` },
       };
     }
-    const content = contents[ref.digestMultibase!];
+    const content = contents[ref.segment];
     if (content === undefined) {
       return {
-        problem: { code: 'MISSING_CONTENT', message: `Resource “${ref.id}” could not be fetched back from this origin.` },
+        problem: {
+          code: 'MISSING_CONTENT',
+          message: `Resource “${ref.id}”${ref.version > 1 ? ` v${ref.version}` : ''} could not be fetched back from this origin.`,
+        },
       };
     }
     resources.push({
       id: ref.id,
       type: resourceKind(ref.mediaType),
       contentType: ref.mediaType ?? 'application/octet-stream',
-      hash,
+      hash: ref.hash,
+      version: ref.version,
+      ...(ref.previousVersionHash ? { previousVersionHash: ref.previousVersionHash } : {}),
       content,
     });
   }

@@ -44,10 +44,10 @@ const REAL_CEL: CelLog = {
   ],
 };
 
-const CONTENTS: Record<string, string> = {
-  uEiCa7YhDsJKiCLu84Gz_4QdSecy3Jz_65YR8OLfyXpbVvw: '<svg/>',
-  'uEiCITXva8WrVO0iHWM-XPCA3mVMLMhtrSQcDcstcE8xQOg': '{}',
-};
+/** Keyed by hosted segment, which the refs themselves report. */
+const CONTENTS: Record<string, string> = Object.fromEntries(
+  hostedResourceRefs(REAL_CEL).map((r) => [r.segment, r.id.endsWith('.json') ? '{}' : '<svg/>'])
+);
 
 const ok = <T,>(r: T | { problem: unknown }): T => {
   if (r && typeof r === 'object' && 'problem' in r) {
@@ -68,6 +68,7 @@ describe('resourceKind', () => {
 describe('hostedResourceRefs', () => {
   test('reads the resources genesis sealed', () => {
     expect(hostedResourceRefs(REAL_CEL).map((r) => r.id)).toEqual(['artwork.svg', 'metadata.json']);
+    expect(hostedResourceRefs(REAL_CEL).every((r) => r.version === 1)).toBe(true);
   });
 
   test('empty for no log', () => {
@@ -189,8 +190,10 @@ describe('hydrate then inscribe', () => {
     const cel = JSON.parse(JSON.stringify({ events: asset.celLog.events })) as CelLog;
     const contents: Record<string, string> = {};
     for (const ref of hostedResourceRefs(cel)) {
-      const live = asset.resources.find((r) => r.id === ref.id);
-      contents[ref.digestMultibase!] = String(live?.content ?? '');
+      const live = asset.resources.find(
+        (r) => r.id === ref.id && (r.version ?? 1) === ref.version
+      );
+      contents[ref.segment] = String(live?.content ?? '');
     }
 
     const { envelope } = ok(hostedAssetEnvelope(cel, contents));
@@ -226,4 +229,74 @@ describe('hydrate then inscribe', () => {
 
     void sdk;
   }, 30_000);
+});
+
+/**
+ * The bug review caught on #515, pinned so it cannot come back.
+ *
+ * Reading genesis alone rebuilt a revised Original with only its v1 bytes.
+ * `loadAsset` ACCEPTED that — v1 binds to genesis perfectly well, and nothing
+ * requires an envelope to carry the latest version — so the failure was
+ * silent, and inscribing would have anchored the superseded artwork to Bitcoin
+ * permanently. The first assertion below is the one that failed before the fix.
+ */
+describe('a revised Original', () => {
+  test('rebuilds with every version, not just genesis', async () => {
+    const { KeyManager } = await import('@originals/sdk');
+    const { sha256 } = await import('@noble/hashes/sha2.js');
+    const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+    const kp = await new KeyManager().generateKeyPair('Ed25519');
+    const signer = signerFromKeyPair(kp);
+    const sdk = OriginalsSDK.create({
+      network: 'regtest', webvhNetwork: 'magby', defaultKeyType: 'Ed25519',
+      ordinalsProvider: new OrdMockProvider(), enableLogging: false, signer,
+      storageAdapter: {
+        async put(_b: string, k: string) { return { url: `https://example.test/${k}` }; },
+        async get() { return null; },
+        async delete() { return true; },
+      },
+    } as unknown as Parameters<typeof OriginalsSDK.create>[0]);
+
+    const v1 = '<svg id="v1"/>';
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'artwork.svg', type: 'image', content: v1, contentType: 'image/svg+xml', hash: hex(sha256(new TextEncoder().encode(v1))), size: v1.length },
+    ]);
+    const v2 = '<svg id="v2-revised"/>';
+    await asset.addResourceVersion('artwork.svg', v2, 'image/svg+xml', hex(sha256(new TextEncoder().encode(v2))));
+
+    const cel = JSON.parse(JSON.stringify({ events: asset.celLog.events })) as CelLog;
+    const refs = hostedResourceRefs(cel);
+    expect(refs.map((r) => r.version)).toEqual([1, 2]);
+
+    const contents = Object.fromEntries(refs.map((r) => [r.segment, r.version === 1 ? v1 : v2]));
+    const { envelope } = ok(hostedAssetEnvelope(cel, contents));
+
+    const fresh = OriginalsSDK.create({
+      network: 'regtest', webvhNetwork: 'magby', defaultKeyType: 'Ed25519',
+      ordinalsProvider: new OrdMockProvider(), enableLogging: false, signer,
+    } as unknown as Parameters<typeof OriginalsSDK.create>[0]);
+    const { asset: revived } = await fresh.lifecycle.loadAsset(envelope);
+
+    // The revised bytes are what a later inscription must anchor.
+    const versions = revived.resources.filter((r) => r.id === 'artwork.svg');
+    expect(versions.map((r) => r.version ?? 1).sort()).toEqual([1, 2]);
+    expect(versions.find((r) => (r.version ?? 1) === 2)?.content).toBe(v2);
+  }, 30_000);
+
+  test('reports a version whose bytes will not load, rather than dropping it', () => {
+    const cel: CelLog = {
+      events: [
+        REAL_CEL.events[0],
+        { type: 'update', data: { resourceId: 'artwork.svg', contentType: 'image/svg+xml', toHash: 'aa'.repeat(32), toVersion: 2 } },
+      ],
+    };
+    // Genesis bytes present, the v2 bytes missing: silently anchoring v1 is
+    // exactly the failure this guards.
+    const partial = Object.fromEntries(
+      hostedResourceRefs(cel).filter((r) => r.version === 1).map((r) => [r.segment, '<svg/>'])
+    );
+    const r = hostedAssetEnvelope(cel, partial);
+    expect('problem' in r && r.problem.code).toBe('MISSING_CONTENT');
+    expect('problem' in r && r.problem.message).toContain('v2');
+  });
 });
