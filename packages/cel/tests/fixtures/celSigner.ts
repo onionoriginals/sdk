@@ -15,7 +15,7 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { multikey } from '../../src/crypto/Multikey';
 import { celProofSigningInput, committedFields } from '../../src/canonicalize';
-import { CEL_CRYPTOSUITE } from '../../src/proofVerification';
+import { CEL_CRYPTOSUITE, CEL_PROOF_TYPE } from '../../src/proofVerification';
 import type { DataIntegrityProof } from '../../src/types';
 
 export interface RealCelSigner {
@@ -61,7 +61,7 @@ export function createRealCelSigner(proofPurpose = 'assertionMethod'): RealCelSi
     // Mirrors what the SDK emits since plan 042: the proof configuration is
     // built first and signed along with the event.
     const config = {
-      type: 'DataIntegrityProof' as const,
+      type: CEL_PROOF_TYPE,
       cryptosuite: CEL_CRYPTOSUITE,
       created: new Date().toISOString(),
       verificationMethod,

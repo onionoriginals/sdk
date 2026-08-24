@@ -10,6 +10,7 @@ import { PeerCelManager } from '../../src/layers/PeerCelManager';
 import type { EventLog, DataIntegrityProof, WitnessProof } from '../../src/types';
 import type { WitnessService } from '../../src/witnesses/WitnessService';
 import { createRealCelSigner } from '../fixtures/celSigner';
+import { CEL_PROOF_TYPE } from '../../src/proofVerification';
 
 // One real Ed25519 did:key signer shared by every manager in this file: seal-time
 // self-verification (plan 034) rejects unverifiable proofs, and CEL authority
@@ -223,7 +224,7 @@ describe('WebVHCelManager', () => {
       const migrationEvent = webvhLog.events[1];
       expect(migrationEvent.proof).toBeDefined();
       expect(migrationEvent.proof.length).toBeGreaterThanOrEqual(1);
-      expect(migrationEvent.proof[0].type).toBe('DataIntegrityProof');
+      expect(migrationEvent.proof[0].type).toBe(CEL_PROOF_TYPE);
     });
 
     it('should not mutate input log', async () => {

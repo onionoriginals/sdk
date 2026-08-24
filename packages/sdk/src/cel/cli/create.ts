@@ -17,7 +17,7 @@ import { serializeEventLogJson } from '@originals/cel';
 import { serializeEventLogCbor } from '@originals/cel';
 import { multikey } from '@originals/cel';
 import { signingInput } from '../../crypto/signingInput.js';
-import { CEL_CRYPTOSUITE } from '@originals/cel';
+import { CEL_CRYPTOSUITE, CEL_PROOF_TYPE } from '@originals/cel';
 
 /**
  * Flags parsed from command line arguments
@@ -147,7 +147,7 @@ function createSigner(privateKey: string, publicKey: string): CelSigner {
     
     // The proof configuration is signed along with the event (plan 042).
     const config = {
-      type: 'DataIntegrityProof' as const,
+      type: CEL_PROOF_TYPE,
       cryptosuite: CEL_CRYPTOSUITE,
       created: new Date().toISOString(),
       verificationMethod: `did:key:${publicKey}#${publicKey}`,

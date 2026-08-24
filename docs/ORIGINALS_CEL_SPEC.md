@@ -83,24 +83,33 @@ support is removed entirely (such logs no longer verify). New logs derive a
 
 Every event MUST include at least one proof from the asset controller.
 
-#### 2.2.1 DataIntegrityProof Structure
+#### 2.2.1 Proof Structure
 
 ```json
 {
-  "type": "DataIntegrityProof",
-  "cryptosuite": "eddsa-jcs-2022",
+  "type": "OriginalsCelProof",
+  "cryptosuite": "originals-cel-ed25519-jcs-v1",
   "created": "2026-01-20T12:00:00Z",
-  "verificationMethod": "did:peer:4zQm...#key-0",
+  "verificationMethod": "did:key:z6Mk...#z6Mk...",
   "proofPurpose": "assertionMethod",
   "proofValue": "z3FXQkcW..."
 }
 ```
 
+**This is not a W3C Data Integrity proof, and no conforming Data Integrity
+implementation can verify it.** The field shape is borrowed from that
+specification and the hashing step mirrors it, but the cryptosuite is an
+Originals construction, unregistered, and the payload is canonicalized with
+plain JCS — no JSON-LD expansion, no RDF canonicalization, no `@context`
+processing. The `type` and `cryptosuite` values say so rather than implying
+otherwise; earlier releases wrote `DataIntegrityProof`/`eddsa-jcs-2022`, both
+of which claimed a conformance this protocol never implemented.
+
 #### 2.2.2 Required Proof Fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `type` | string | Yes | Must be `"DataIntegrityProof"` |
+| `type` | string | Yes | Must be `"OriginalsCelProof"`. Verifiers MUST also accept `"DataIntegrityProof"` on logs sealed before the rename |
 | `cryptosuite` | string | Yes | Cryptographic suite identifier |
 | `created` | string | Yes | ISO 8601 timestamp |
 | `verificationMethod` | string | Yes | DID URL of signing key |
@@ -111,8 +120,17 @@ Every event MUST include at least one proof from the asset controller.
 
 | Cryptosuite | Key Type | Use Case |
 |-------------|----------|----------|
-| `eddsa-jcs-2022` | Ed25519 | Primary signing |
-| `eddsa-rdfc-2022` | Ed25519 | RDF canonicalization |
+| `originals-cel-ed25519-jcs-v1` | Ed25519 | Controller event signatures |
+| `bitcoin-ordinals-2024` | — | Bitcoin witness attestations (an inscription reference, not a signature) |
+| `eddsa-jcs-2022` | Ed25519 | Accepted on read only; never written. Logs sealed before the rename |
+
+Signing input for `originals-cel-ed25519-jcs-v1` is
+`sha256(JCS(proofConfig)) || sha256(JCS(payload))`, where `proofConfig` is the
+proof without `proofValue`. The proof configuration is therefore inside the
+signature: `created`, `verificationMethod`, `proofPurpose`, `cryptosuite` and
+`type` are all attested. Under the read-only `eddsa-jcs-2022` label the
+signature covers the event alone and those fields are unattested — which is
+why it was retired.
 | `bitcoin-ordinals-2024` | secp256k1 | Bitcoin witnessing |
 
 ### 2.3 Hash Chain Integrity
@@ -238,11 +256,11 @@ Witnesses provide independent attestation that an event existed at a specific ti
 
 ### 4.3 WitnessProof Structure
 
-A WitnessProof extends DataIntegrityProof with additional fields:
+A WitnessProof extends the proof envelope with additional fields:
 
 ```json
 {
-  "type": "DataIntegrityProof",
+  "type": "OriginalsCelProof",
   "cryptosuite": "eddsa-jcs-2022",
   "created": "2026-01-20T12:00:00Z",
   "verificationMethod": "did:web:witness.example.com#key-0",
@@ -272,7 +290,7 @@ Content-Type: application/json
 
 ```json
 {
-  "type": "DataIntegrityProof",
+  "type": "OriginalsCelProof",
   "cryptosuite": "eddsa-jcs-2022",
   "created": "2026-01-20T12:00:00Z",
   "verificationMethod": "did:web:witness.example.com#key-0",
@@ -288,7 +306,7 @@ Content-Type: application/json
 
 ```json
 {
-  "type": "DataIntegrityProof",
+  "type": "OriginalsCelProof",
   "cryptosuite": "bitcoin-ordinals-2024",
   "created": "2026-01-20T12:00:00Z",
   "verificationMethod": "did:btco:abc123#key-0",
@@ -352,7 +370,7 @@ this event and therefore MUST NOT be embedded in it.
   },
   "proof": [
     {
-      "type": "DataIntegrityProof",
+      "type": "OriginalsCelProof",
       "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-01-20T12:00:00Z",
       "verificationMethod": "did:key:z6Mk...#z6Mk...",
@@ -424,7 +442,7 @@ Modifies asset state (metadata, resources, or custom fields).
   "previousEvent": "uABC...",
   "proof": [
     {
-      "type": "DataIntegrityProof",
+      "type": "OriginalsCelProof",
       "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-01-21T12:00:00Z",
       "verificationMethod": "did:peer:4zQm...#key-0",
@@ -458,7 +476,7 @@ Permanently seals the event log, preventing further modifications.
   "previousEvent": "uDEF...",
   "proof": [
     {
-      "type": "DataIntegrityProof",
+      "type": "OriginalsCelProof",
       "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-01-22T12:00:00Z",
       "verificationMethod": "did:peer:4zQm...#key-0",
@@ -642,7 +660,7 @@ readers MUST still recognize that legacy shape, but writers MUST emit `migrate`:
   "previousEvent": "uGHI...",
   "proof": [
     {
-      "type": "DataIntegrityProof",
+      "type": "OriginalsCelProof",
       "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-01-23T12:00:00Z",
       "verificationMethod": "did:webvh:example.com:abc123#key-0",
@@ -650,7 +668,7 @@ readers MUST still recognize that legacy shape, but writers MUST emit `migrate`:
       "proofValue": "z6DEF..."
     },
     {
-      "type": "DataIntegrityProof",
+      "type": "OriginalsCelProof",
       "cryptosuite": "eddsa-jcs-2022",
       "witnessedAt": "2026-01-23T12:00:01Z",
       "verificationMethod": "did:web:witness.example.com#key-0",
@@ -867,7 +885,7 @@ interface EventVerification {
         "createdAt": "2026-01-20T10:00:00Z"
       },
       "proof": [{
-        "type": "DataIntegrityProof",
+        "type": "OriginalsCelProof",
         "cryptosuite": "eddsa-jcs-2022",
         "created": "2026-01-20T10:00:00Z",
         "verificationMethod": "did:peer:4zQmR...#key-0",
@@ -883,7 +901,7 @@ interface EventVerification {
       },
       "previousEvent": "uH4sI...",
       "proof": [{
-        "type": "DataIntegrityProof",
+        "type": "OriginalsCelProof",
         "cryptosuite": "eddsa-jcs-2022",
         "created": "2026-01-20T11:00:00Z",
         "verificationMethod": "did:peer:4zQmR...#key-0",
@@ -903,7 +921,7 @@ interface EventVerification {
       "previousEvent": "uK7tP...",
       "proof": [
         {
-          "type": "DataIntegrityProof",
+          "type": "OriginalsCelProof",
           "cryptosuite": "eddsa-jcs-2022",
           "created": "2026-01-21T10:00:00Z",
           "verificationMethod": "did:webvh:example.com:abc123#key-0",
@@ -911,7 +929,7 @@ interface EventVerification {
           "proofValue": "z5XRt..."
         },
         {
-          "type": "DataIntegrityProof",
+          "type": "OriginalsCelProof",
           "cryptosuite": "eddsa-jcs-2022",
           "created": "2026-01-21T10:00:01Z",
           "verificationMethod": "did:web:witness.example.com#key-0",

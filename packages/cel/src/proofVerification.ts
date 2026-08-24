@@ -42,6 +42,48 @@ export const CEL_CRYPTOSUITE_LEGACY = 'eddsa-jcs-2022';
 /** Suites a CEL proof may carry: one written, one read-only. */
 export const CEL_CRYPTOSUITES = [CEL_CRYPTOSUITE, CEL_CRYPTOSUITE_LEGACY] as const;
 
+/**
+ * The `type` CEL proofs are WRITTEN with.
+ *
+ * Same reasoning as the cryptosuite above, applied to the field a reader looks
+ * at first. `DataIntegrityProof` is W3C's type, and a proof carrying it is
+ * asserting that a conforming Data Integrity implementation can verify it.
+ * None can verify ours: the suite is bespoke and unregistered, so a conforming
+ * verifier reaches the cryptosuite, fails to recognise it, and rejects. Naming
+ * the envelope after the spec only moved that discovery one field later while
+ * claiming a conformance we never implemented.
+ *
+ * Carried by every proof in a CEL log — the controller's event signatures and
+ * the `bitcoin-ordinals-2024` witness attestations alike. Both are Originals
+ * constructions; neither is Data Integrity.
+ *
+ * This renames the CLAIM, not the cryptography. Nothing about which bytes are
+ * signed changes here.
+ */
+export const CEL_PROOF_TYPE = 'OriginalsCelProof';
+
+/**
+ * The pre-rename type, accepted on READ and never written again.
+ *
+ * Logs already sealed — including the mainnet asset — carry it and cannot be
+ * re-signed, so they keep verifying. External artifacts written by other
+ * implementations (a competing anchoring's DID document) may carry it too.
+ *
+ * Accepting both is safe because the type is not a dispatch key: the
+ * CRYPTOSUITE selects the preimage, and since plan 042 the proof configuration
+ * — `type` included — is inside the signature, so a new-suite proof cannot be
+ * relabelled in either direction without breaking it.
+ */
+export const CEL_PROOF_TYPE_LEGACY = 'DataIntegrityProof';
+
+/** Types a CEL proof may carry: one written, one read-only. */
+export const CEL_PROOF_TYPES = [CEL_PROOF_TYPE, CEL_PROOF_TYPE_LEGACY] as const;
+
+/** Whether `type` is one a CEL proof may carry. */
+export function isCelProofType(type: unknown): boolean {
+  return typeof type === 'string' && (CEL_PROOF_TYPES as readonly string[]).includes(type);
+}
+
 /** Why a proof could not be verified. Surfaced in `VerificationResult.errors`. */
 export type ProofFailureReason =
   | 'malformed proof'
@@ -58,14 +100,14 @@ export interface ProofCheck {
 }
 
 /**
- * Validates the structural requirements of a DataIntegrityProof (field
- * presence, multibase prefix, supported cryptosuite). A precondition for the
+ * Validates the structural requirements of a CEL proof (field presence,
+ * multibase prefix, supported type and cryptosuite). A precondition for the
  * cryptographic verifiers — never sufficient on its own.
  *
  * @returns `null` when structurally valid, else the reason it is not.
  */
 export function structuralCheckReason(proof: DataIntegrityProof): string | null {
-  if (!proof.type || proof.type !== 'DataIntegrityProof') return 'malformed proof';
+  if (!isCelProofType(proof.type)) return 'malformed proof';
   if (!proof.cryptosuite) return 'malformed proof';
   if (!proof.proofValue || typeof proof.proofValue !== 'string' || proof.proofValue.length === 0) {
     return 'malformed proof';
