@@ -4,9 +4,18 @@
  */
 
 export const site = {
-  title: 'Originals SDK — Provenance that survives the internet',
+  /**
+   * The tab, the Google result and every link preview. This is the FIRST
+   * Originals copy most people meet, so it speaks to the creator the rest of
+   * the page was rewritten for — not to a developer shopping for a package.
+   * The old pair ('Originals SDK — …', 'Create, publish, and inscribe digital
+   * assets … did:cel → did:webvh → did:btco') named the library and three DID
+   * methods before it named anything a creator wants. Title stays under 60
+   * characters and description under 155 so neither is truncated in search.
+   */
+  title: 'Originals — Proof you made it, carved into Bitcoin',
   description:
-    'Create, publish, and inscribe digital assets with cryptographically verifiable provenance. did:cel → did:webvh → did:btco.',
+    'Screenshots are free. Provenance is not. Give your work a signed history of who made it and who owns it — anchored on Bitcoin, verifiable by anyone.',
   /**
    * The production origin. Single source of truth: injected into index.html
    * (canonical, og:url, og:image, twitter:image) at build time, and
@@ -277,6 +286,27 @@ export const demo = {
         'Inscribes the published Original onto a satoshi as did:btco — real Bitcoin transactions, signed by your key in this browser and paid for out of your own deposit.'
     }
   ],
+  /**
+   * What step 3 costs, for everyone who is NOT being handed a live quote — an
+   * anonymous visitor, or any visitor on a deploy with real Bitcoin off. They
+   * used to reach the end of the page without meeting a single number; the
+   * Protocol table's "One-time network fees" is not a price.
+   *
+   * The figures are the server's own deposit quote, not an invention. See
+   * `estimateInscriptionCostSats` in server/bitcoin.ts: a commit of
+   * COMMIT_OVERHEAD_VB + P2TR_OUTPUT_VB + P2WPKH_OUTPUT_VB + one 68 vB input
+   * (153 vB) plus a reveal of REVEAL_BASE_VB + ceil((contentBytes + 300) / 4)
+   * — 2,186 vB at the 8,000-byte default the deposit route quotes when the
+   * client sends no size hint, which this one never does. 2,339 vB total,
+   * times the 1.5x buffer, plus POSTAGE_SATS: 4,055 sats at 1 sat/vB and
+   * 18,089 at 5. Rounded here, because the input the whole thing multiplies
+   * by is a live mempool reading (`currentFeeRate` -> provider.estimateFee),
+   * and quoting four significant figures off a number that moves would be a
+   * more precise lie than "around 4,000". Re-derive both if the buffer, the
+   * postage, the default content size or the output set changes.
+   */
+  inscribeCost:
+    'Inscribing costs real BTC: around 4,000 sats at 1 sat/vB, or 18,000 at 5 sat/vB, including the 546-sat output the inscription rides on. The rate moves, so the exact amount is quoted live when you sign in — a one-time on-chain fee you pay the Bitcoin network, and none of it is refundable.',
   /**
    * The simulated tier (R6). An anonymous visitor CAN complete step 3, so the
    * copy names it a simulation outright rather than promising a real

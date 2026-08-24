@@ -236,6 +236,17 @@ export function publishDurabilityNote(authenticated: boolean): string | null {
   return authenticated ? null : demo.hosting.temporaryNote;
 }
 
+/**
+ * What step 3 costs, shown to everyone the deposit panel will never quote: a
+ * signed-out visitor, or any visitor on a deploy with real Bitcoin off. A real
+ * mainnet creator gets the live figure from GET /api/btc/deposit a few lines
+ * down, so this static estimate is withheld there rather than sitting beside
+ * an exact number and disagreeing with it.
+ */
+export function inscribeCostNote(real: boolean): string | null {
+  return real ? null : demo.inscribeCost;
+}
+
 /** A confirmed output at the creator's own deposit address. */
 export interface FundingUtxo {
   txid: string;
@@ -653,6 +664,7 @@ export function Demo() {
   const done = completionCopy(inscribeView.simulated);
   const resolved = resolvedCopy(isAuthenticated);
   const durabilityNote = publishDurabilityNote(isAuthenticated);
+  const costNote = inscribeCostNote(real);
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [medium, setMedium] = useState(demo.form.mediums[0]);
   const [nonce, setNonce] = useState(() => getArtSeed().nonce);
@@ -1107,6 +1119,12 @@ export function Demo() {
                               late to decide to sign in first. */}
                           {i === 1 && durabilityNote && (
                             <p className="demo-step-note">{durabilityNote}</p>
+                          )}
+                          {/* The one price a signed-out visitor ever sees, and
+                              it belongs HERE — beside the button that would
+                              spend it, not in a table further down the page. */}
+                          {i === 2 && costNote && (
+                            <p className="demo-step-note">{costNote}</p>
                           )}
                           {state !== 'done' && (
                             // Step 3 in the simulated tier runs the SDK's mock
