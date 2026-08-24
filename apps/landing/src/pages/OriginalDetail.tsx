@@ -88,6 +88,8 @@ export function OriginalDetail({ did }: { did: string }) {
   const [allRows, setAllRows] = useState<OriginalRow[]>([]);
   const [authorshipDid, setAuthorshipDid] = useState<string | null>(null);
   const [inscribing, setInscribing] = useState(false);
+  /** Which half of the inscribe the button is in — rebuild, then broadcast. */
+  const [stage, setStage] = useState<'hydrating' | 'inscribing'>('hydrating');
   const [inscribeNote, setInscribeNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [data, setData] = useState<DetailData | null>(null);
@@ -206,6 +208,7 @@ export function OriginalDetail({ did }: { did: string }) {
   const startInscribe = async () => {
     if (!bitcoin || !data?.row) return;
     setInscribing(true);
+    setStage('hydrating');
     setInscribeNote(null);
     const outcome = await resumeInscribe({
       did,
@@ -214,6 +217,7 @@ export function OriginalDetail({ did }: { did: string }) {
       fundingAddress: bitcoin.fundingAddress,
       signingClient: bitcoin.signingClient,
       cel: data.cel,
+      onProgress: (stage) => setStage(stage),
     });
     setInscribeNote(
       outcome.ok
@@ -313,7 +317,9 @@ export function OriginalDetail({ did }: { did: string }) {
             )}
             {data.resources.length > 0 && <Resources data={data} />}
             {data.row.btcoDid && <Bitcoin row={data.row} />}
-            {action && (action.kind === 'inscribe' || action.kind === 'disabled') && (
+            {action &&
+              (action.kind === 'inscribe' ||
+                (action.kind === 'disabled' && action.reason !== 'reading')) && (
               <section className="od-section od-inscribe">
                 <p className="eyebrow">{yourOriginals.inscribe.sectionEyebrow}</p>
                 {action.kind === 'inscribe' ? (
@@ -323,7 +329,11 @@ export function OriginalDetail({ did }: { did: string }) {
                     disabled={inscribing}
                     onClick={() => void startInscribe()}
                   >
-                    {inscribing ? yourOriginals.inscribe.busy : yourOriginals.inscribe.cta}
+                    {!inscribing
+                      ? yourOriginals.inscribe.cta
+                      : stage === 'hydrating'
+                        ? yourOriginals.inscribe.hydrating
+                        : yourOriginals.inscribe.busy}
                   </button>
                 ) : (
                   <p className="od-note">{yourOriginals.inscribe.reasons[action.reason]}</p>

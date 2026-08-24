@@ -657,7 +657,6 @@ export const yourOriginals = {
      */
     commitOnly:
       'Your funding transaction is on the network. The second transaction — the one that carries the inscription — has not propagated yet, which is expected while the first is unconfirmed. It is signed and saved, and goes out automatically. Nothing is stuck and nothing more is owed.',
-    failed: 'Could not inscribe this Original — nothing was broadcast and nothing was spent.',
     /** Shown under a disabled action, keyed by `DisabledReason`. */
     reasons: {
       'signed-out': 'Sign in to inscribe this Original on Bitcoin.',
@@ -665,7 +664,15 @@ export const yourOriginals = {
         'This browser can’t reach your signing key right now, so it can’t sign the event inscribing adds. Sign in again and it will come back.',
       'foreign-controller':
         'This Original was made before signing keys were kept for you, so the key that could add to its history only ever existed in the browser that created it — and it’s gone. Everything already in its history stays signed, verifiable and hosted; it just can’t be carried on to Bitcoin. Anything you make from now on can be.',
-      unknown: 'Reading this Original’s signed log…',
+      /**
+       * Not fetched yet. Rendered as NOTHING, not as this text: on first paint
+       * no row's log has been read, so showing it flashed a note under every
+       * card. Kept as a string for a caller that wants to say it out loud.
+       */
+      reading: 'Reading this Original’s signed log…',
+      /** Fetched, and it did not come back readable. A real answer, so it shows. */
+      unreadable:
+        'This Original’s signed log could not be read from where it is hosted, so there is nothing to carry to Bitcoin yet. Reloading may fix it.',
       /**
        * An inscription is already built and paid for and waiting to be pushed,
        * and we cannot tell which Original it belongs to. Rebuilding would

@@ -40,8 +40,10 @@ export type DisabledReason =
   | 'no-authorship-key'
   /** The Original's controller is a key nobody holds any more. */
   | 'foreign-controller'
-  /** Its log has not been read yet, so we cannot say either way. */
-  | 'unknown'
+  /** Its log has not been read yet. Renders as nothing — see the copy note. */
+  | 'reading'
+  /** Its log WAS read and did not come back usable. A real answer, so it shows. */
+  | 'unreadable'
   /** Signed hex is waiting that we cannot rule out belonging to this row. */
   | 'pending-elsewhere';
 
@@ -113,10 +115,13 @@ export function inscribeAvailability(input: AvailabilityInput): InscribeAvailabi
 
   if (!signedIn) return { kind: 'disabled', reason: 'signed-out' };
   if (!authorshipDid) return { kind: 'disabled', reason: 'no-authorship-key' };
-  if (cel === undefined) return { kind: 'disabled', reason: 'unknown' };
+  // Not fetched yet vs fetched-and-unusable. Collapsing the two made every row
+  // flash "Reading this Original's signed log…" on first paint, and told a user
+  // whose log genuinely would not load that it was still loading.
+  if (cel === undefined) return { kind: 'disabled', reason: 'reading' };
 
   const controller = genesisController(cel);
-  if (!controller) return { kind: 'disabled', reason: 'unknown' };
+  if (!controller) return { kind: 'disabled', reason: 'unreadable' };
   if (controller !== authorshipDid) return { kind: 'disabled', reason: 'foreign-controller' };
 
   return { kind: 'inscribe' };

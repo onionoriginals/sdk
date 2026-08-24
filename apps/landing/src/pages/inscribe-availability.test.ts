@@ -12,6 +12,7 @@ import {
 } from './inscribe-availability';
 import { inscribeIsComplete } from '../components/Demo';
 import { yourOriginals } from '../content';
+import type { DisabledReason } from './inscribe-availability';
 import type { OriginalRow, PendingInscription } from './YourOriginals';
 import type { CelLog } from './original-detail-data';
 
@@ -118,18 +119,26 @@ describe('a row with no usable key', () => {
     });
   });
 
-  test('disabled as unknown while the log has not been read', () => {
+  test('reading — not inscribable — while the log has not been fetched', () => {
+    // Distinct from a log that came back bad: this is first paint, and it
+    // renders as NOTHING rather than flashing a note under every row.
     expect(inscribeAvailability({ ...base, row: row(), cel: undefined })).toEqual({
       kind: 'disabled',
-      reason: 'unknown',
+      reason: 'reading',
     });
   });
 
-  test('unknown, not inscribable, when the log came back unreadable', () => {
+  test('unreadable — a real answer — when the log came back unusable', () => {
     expect(inscribeAvailability({ ...base, row: row(), cel: null })).toEqual({
       kind: 'disabled',
-      reason: 'unknown',
+      reason: 'unreadable',
     });
+  });
+
+  test('unreadable too when the log has no genesis controller to sign as', () => {
+    expect(
+      inscribeAvailability({ ...base, row: row(), cel: { events: [{ type: 'create', data: {} }] } })
+    ).toEqual({ kind: 'disabled', reason: 'unreadable' });
   });
 });
 
@@ -294,5 +303,41 @@ describe('signed hex waiting that no row accounts for', () => {
     expect(copy).toMatch(/finish/i);
     // and never implies the Original itself is the problem
     expect(copy).not.toMatch(/can’t|cannot/i);
+  });
+});
+
+/**
+ * Every reason the selector can return has copy, and every string in the copy
+ * block is reachable. Two were dead when review caught them: `hydrating` (the
+ * button never said which half of the work it was in) and `failed`, which also
+ * promised "nothing was spent" — untrue for a failure after the commit
+ * broadcast, so it was removed rather than wired up.
+ */
+describe('the disabled copy', () => {
+  const reasons: DisabledReason[] = [
+    'signed-out',
+    'no-authorship-key',
+    'foreign-controller',
+    'reading',
+    'unreadable',
+    'pending-elsewhere',
+  ];
+
+  test('every reason has a string', () => {
+    for (const r of reasons) {
+      expect(yourOriginals.inscribe.reasons[r]).toBeTruthy();
+    }
+  });
+
+  test('and there are no strings without a reason', () => {
+    expect(Object.keys(yourOriginals.inscribe.reasons).sort()).toEqual([...reasons].sort());
+  });
+
+  test('no reason claims nothing was spent', () => {
+    // Only the provider's own submit status can say that, and it is read
+    // separately. A blanket reassurance here would be a guess about money.
+    for (const r of reasons) {
+      expect(yourOriginals.inscribe.reasons[r]).not.toMatch(/nothing was spent/i);
+    }
   });
 });

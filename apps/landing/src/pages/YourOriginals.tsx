@@ -227,6 +227,8 @@ export function YourOriginals() {
   const [cels, setCels] = useState<Record<string, CelLog | null>>({});
   const [authorshipDid, setAuthorshipDid] = useState<string | null>(null);
   const [inscribing, setInscribing] = useState<string | null>(null);
+  /** Which half of the inscribe the button is in — rebuild, then broadcast. */
+  const [stage, setStage] = useState<'hydrating' | 'inscribing'>('hydrating');
   const [inscribeNote, setInscribeNote] = useState<string | null>(null);
 
   useEffect(() => {
@@ -276,6 +278,7 @@ export function YourOriginals() {
   const startInscribe = async (row: OriginalRow) => {
     if (!bitcoin) return;
     setInscribing(row.did);
+    setStage('hydrating');
     setInscribeNote(null);
     const outcome = await resumeInscribe({
       did: row.did,
@@ -284,6 +287,7 @@ export function YourOriginals() {
       fundingAddress: bitcoin.fundingAddress,
       signingClient: bitcoin.signingClient,
       cel: cels[row.did],
+      onProgress: (stage) => setStage(stage),
     });
     setInscribeNote(
       outcome.ok
@@ -456,12 +460,14 @@ export function YourOriginals() {
                       disabled={inscribing === row.did}
                       onClick={() => void startInscribe(row)}
                     >
-                      {inscribing === row.did
-                        ? yourOriginals.inscribe.busy
-                        : yourOriginals.inscribe.cta}
+                      {inscribing !== row.did
+                        ? yourOriginals.inscribe.cta
+                        : stage === 'hydrating'
+                          ? yourOriginals.inscribe.hydrating
+                          : yourOriginals.inscribe.busy}
                     </button>
                   )}
-                  {action.kind === 'disabled' && (
+                  {action.kind === 'disabled' && action.reason !== 'reading' && (
                     <p className="your-original-action-note">
                       {yourOriginals.inscribe.reasons[action.reason]}
                     </p>
