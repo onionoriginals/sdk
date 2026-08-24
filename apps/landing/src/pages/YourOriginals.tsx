@@ -276,7 +276,13 @@ export function YourOriginals() {
       signingClient: bitcoin.signingClient,
       cel: cels[row.did],
     });
-    setInscribeNote(outcome.ok ? yourOriginals.inscribe.done : outcome.message);
+    setInscribeNote(
+      outcome.ok
+        ? outcome.complete
+          ? yourOriginals.inscribe.done
+          : yourOriginals.inscribe.commitOnly
+        : outcome.message
+    );
     if (outcome.ok) {
       // Reflect it immediately; the durable record catches up on the next load.
       setOriginals((rows) =>

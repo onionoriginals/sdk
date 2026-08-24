@@ -5,6 +5,8 @@
  */
 import { describe, test, expect } from 'bun:test';
 import { inscribeAvailability, genesisController } from './inscribe-availability';
+import { inscribeIsComplete } from '../components/Demo';
+import { yourOriginals } from '../content';
 import type { OriginalRow, PendingInscription } from './YourOriginals';
 import type { CelLog } from './original-detail-data';
 
@@ -147,5 +149,32 @@ describe('rows already on chain', () => {
         authorshipDid: null,
       })
     ).toEqual({ kind: 'none' });
+  });
+});
+
+/**
+ * #506 removed "inscribed" from a commit-only broadcast in the demo. The
+ * resume path reintroduced it — any inscription snapshot read as done — until
+ * review caught it on #515. These pin the distinction and the copy.
+ */
+describe('a resumed inscription that only got its commit out', () => {
+  test('only a broadcast reveal counts as complete', () => {
+    expect(inscribeIsComplete('reveal_broadcast')).toBe(true);
+    expect(inscribeIsComplete('commit_broadcast')).toBe(false);
+    // Fail closed: a status we cannot read is not a landed reveal.
+    expect(inscribeIsComplete(null)).toBe(false);
+    expect(inscribeIsComplete(undefined)).toBe(false);
+  });
+
+  test('the commit-only copy never claims the inscription exists', () => {
+    const copy = yourOriginals.inscribe.commitOnly;
+    expect(copy).not.toMatch(/\binscribed\b/i);
+    // and it says the obligation is discharged, so nobody goes looking.
+    expect(copy).toMatch(/nothing more is owed/i);
+  });
+
+  test('the done copy is reserved for a reveal that actually landed', () => {
+    expect(yourOriginals.inscribe.done).toMatch(/inscribed/i);
+    expect(yourOriginals.inscribe.done).not.toBe(yourOriginals.inscribe.commitOnly);
   });
 });

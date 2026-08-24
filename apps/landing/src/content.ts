@@ -649,6 +649,14 @@ export const yourOriginals = {
     busy: 'Inscribing…',
     hydrating: 'Rebuilding from its signed log…',
     done: 'Inscribed — the transactions are on their way to the network.',
+    /**
+     * Only the commit reached the network. The reveal carries the inscription,
+     * so until it propagates there is nothing on chain — saying "inscribed"
+     * here is the same lie #506 removed from the demo. Nothing more is owed;
+     * the server re-pushes the reveal on its own.
+     */
+    commitOnly:
+      'Your funding transaction is on the network. The second transaction — the one that carries the inscription — has not propagated yet, which is expected while the first is unconfirmed. It is signed and saved, and goes out automatically. Nothing is stuck and nothing more is owed.',
     failed: 'Could not inscribe this Original — nothing was broadcast and nothing was spent.',
     /** Shown under a disabled action, keyed by `DisabledReason`. */
     reasons: {

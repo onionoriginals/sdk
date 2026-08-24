@@ -204,7 +204,13 @@ export function OriginalDetail({ did }: { did: string }) {
       signingClient: bitcoin.signingClient,
       cel: data.cel,
     });
-    setInscribeNote(outcome.ok ? yourOriginals.inscribe.done : outcome.message);
+    setInscribeNote(
+      outcome.ok
+        ? outcome.complete
+          ? yourOriginals.inscribe.done
+          : yourOriginals.inscribe.commitOnly
+        : outcome.message
+    );
     setInscribing(false);
   };
 

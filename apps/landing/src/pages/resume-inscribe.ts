@@ -9,7 +9,7 @@
  */
 import { webvhArtifacts, sameOriginUrl, type CelLog } from './original-detail-data';
 import { hostedAssetEnvelope, hostedResourceRefs } from '../sdk/hosted-envelope';
-import { selectFundingUtxos, type DepositInfo } from '../components/Demo';
+import { selectFundingUtxos, inscribeIsComplete, type DepositInfo } from '../components/Demo';
 import { ensureAuthorshipAccount, type TurnkeyBitcoinClient } from '../auth/turnkey-session';
 import { authorshipPublicKeyMultibase, canAuthor } from '../sdk/turnkey-cel-signer';
 
@@ -27,9 +27,12 @@ export async function fetchHostedCel(did: string, host?: string): Promise<CelLog
 }
 
 /**
- * Fetch the sealed bytes back, keyed by the digest segment they are hosted
- * under. A resource that will not load is simply absent, which
- * `hostedAssetEnvelope` reports as MISSING_CONTENT rather than papering over.
+ * Fetch the sealed bytes back, keyed by the segment each version is hosted
+ * under. EVERY version, not just genesis: a revised Original that rebuilt from
+ * its v1 bytes alone would anchor superseded artwork to Bitcoin.
+ *
+ * A version that will not load is simply absent, which `hostedAssetEnvelope`
+ * reports as MISSING_CONTENT rather than papering over.
  */
 export async function fetchHostedResources(
   did: string,
@@ -41,12 +44,12 @@ export async function fetchHostedResources(
   if (!artifacts) return contents;
   await Promise.all(
     hostedResourceRefs(cel).map(async (ref) => {
-      if (!ref.digestMultibase) return;
+      if (!ref.segment) return;
       try {
-        const res = await fetch(sameOriginUrl(artifacts.resourceUrl(ref.digestMultibase), host), {
+        const res = await fetch(sameOriginUrl(artifacts.resourceUrl(ref.segment), host), {
           credentials: 'same-origin',
         });
-        if (res.ok) contents[ref.digestMultibase] = await res.text();
+        if (res.ok) contents[ref.segment] = await res.text();
       } catch {
         /* absent → MISSING_CONTENT, reported by the envelope builder */
       }
@@ -76,7 +79,17 @@ export async function resolveAuthorshipDid(
 }
 
 export type ResumeOutcome =
-  | { ok: true; inscription: { commitTxId?: string; txid?: string; satoshi?: string } }
+  | {
+      ok: true;
+      inscription: { commitTxId?: string; txid?: string; satoshi?: string };
+      /**
+       * FALSE when only the commit reached the network. The reveal carries the
+       * inscription, so until it propagates there is nothing on chain to point
+       * at — and #506 fixed exactly this lie in the demo. The resume path
+       * repeated it: any inscription snapshot read as done.
+       */
+      complete: boolean;
+    }
   | { ok: false; message: string };
 
 /**
@@ -140,7 +153,17 @@ export async function resumeInscribe(opts: {
       funding: { fundingUtxos: selection.selected, changeAddress: fundingAddress, signingClient },
     });
     if (!state.inscription) return { ok: false, message: 'The inscription did not complete.' };
-    return { ok: true, inscription: state.inscription };
+
+    // What actually reached the network. The SDK discards submitInscription's
+    // return, so the browser reads it back off the provider — the same seam
+    // the demo's completion panel reads. A status we cannot read means the
+    // reveal is NOT known to have landed, so nothing is claimed.
+    const submitted = (engine.ordinalsProvider as { lastSubmit?: { status?: string } }).lastSubmit;
+    return {
+      ok: true,
+      inscription: state.inscription,
+      complete: inscribeIsComplete(submitted?.status),
+    };
   } catch (err) {
     return { ok: false, message: (err as Error)?.message ?? 'Could not inscribe this Original.' };
   }
