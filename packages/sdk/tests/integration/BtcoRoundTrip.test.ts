@@ -119,9 +119,11 @@ describe('inscribeOnBitcoin commits to the CEL head digest (#365)', () => {
     const anchored = await verifyEventLog(asset.celLog!, { expectedDid: asset.id, ordinalsProvider });
     expect(anchored.verified).toBe(true);
 
-    // asset.verify() delegates: gated without the provider dep, true with it.
-    expect(await asset.verify()).toBe(false);
-    expect(await asset.verify({ ordinalsProvider })).toBe(true);
+    // asset.verify() delegates, and reaches the chain through the provider the
+    // SDK was configured with — the documented create/publish/inscribe/verify
+    // flow ends `true`, not `false`, and needs no hand-threaded dependency.
+    expect((await asset.verify()).verified).toBe(true);
+    expect((await asset.verify({ ordinalsProvider })).verified).toBe(true);
   });
 
   test('keyStore-less inscribe degrades: cel:append-skipped, no #cel anchor, log untouched', async () => {

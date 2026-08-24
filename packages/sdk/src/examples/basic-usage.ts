@@ -39,8 +39,8 @@ async function basicExample() {
     console.log('Provenance:', provenance);
     
     // Verify asset integrity
-    const isValid = await asset.verify();
-    console.log('Asset is valid:', isValid);
+    const verification = await asset.verify();
+    console.log('Asset is valid:', verification.verified, verification.code ?? '');
     
   } catch (error) {
     console.error('Error:', error);

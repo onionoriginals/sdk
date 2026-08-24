@@ -72,6 +72,13 @@ const published = await originals.lifecycle.publish(draft, 'did:webvh:my-domain.
 // Inscribe on Bitcoin for permanent ownership (mints did:btco:<sat>)
 const inscribed = await originals.lifecycle.inscribe(published);
 
+// Verify the whole signed chain. No argument needed: verify() uses the
+// ordinalsProvider from the SDK config, so the Bitcoin witness proof is
+// actually checked. On failure the report names a reason — `report.code` tells
+// a proof that does not hold apart from a check that could not run.
+const report = await inscribed.verify();
+console.log(report.verified, report.code ?? '');
+
 // Transfer ownership: a pure Bitcoin sat move. Ownership IS live sat control,
 // so this writes NOTHING to the CEL — read the owner back with getCurrentOwner().
 // await originals.lifecycle.transfer(inscribed, 'bc1q...newowner');

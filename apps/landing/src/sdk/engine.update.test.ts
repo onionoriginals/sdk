@@ -129,7 +129,7 @@ describe('revise a created asset', () => {
     const engine = new DemoEngine();
     await engine.create('One', 'Artwork', SVG);
     await engine.update('Two', 'Artwork', SVG_V2);
-    expect(await engine.asset!.verify()).toBe(true);
+    expect((await engine.asset!.verify()).verified).toBe(true);
   });
 
   test('a PUBLISHED asset is still revisable, and the new bytes are hosted', async () => {

@@ -59,13 +59,13 @@ describe('OriginalsAsset', () => {
 
   test('verifies asset integrity (inline content hash match)', async () => {
     const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
-    await expect(asset.verify()).resolves.toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
   });
 
   test('verify returns false on invalid DID Document', async () => {
     const badDid: any = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:abc', controller: ['not-a-did'] };
     const asset = new OriginalsAsset(resources, badDid, emptyCreds as any);
-    await expect(asset.verify()).resolves.toBe(false);
+    expect((await asset.verify()).verified).toBe(false);
   });
 
   test('verify uses injected fetch if provided for URL resources', async () => {
@@ -78,7 +78,7 @@ describe('OriginalsAsset', () => {
     };
     const asset = new OriginalsAsset([resWithUrl], buildDid('did:cel:abc'), emptyCreds);
     const mockFetch = async () => ({ arrayBuffer: async () => new ArrayBuffer(0) }) as any;
-    await expect(asset.verify({ fetch: mockFetch })).resolves.toBe(true);
+    expect((await asset.verify({ fetch: mockFetch })).verified).toBe(true);
   });
 
   test('verify rejects a URL-only resource whose hash is not entirely hex', async () => {
@@ -95,13 +95,13 @@ describe('OriginalsAsset', () => {
     };
     const asset = new OriginalsAsset([resWithUrl], buildDid('did:cel:abc'), emptyCreds);
     // No fetch provided → structural check is the only gate.
-    await expect(asset.verify()).resolves.toBe(false);
+    expect((await asset.verify()).verified).toBe(false);
   });
 
   test('verify validates attached credentials structure and returns false on bad', async () => {
     const badVc: any = { '@context': ['https://example.com'], type: ['VerifiableCredential'], issuer: 'did:cel:x', issuanceDate: new Date().toISOString(), credentialSubject: {} };
     const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), [badVc]);
-    await expect(asset.verify()).resolves.toBe(false);
+    expect((await asset.verify()).verified).toBe(false);
   });
 
   test('verify with credentialManager performs cryptographic verification', async () => {
@@ -119,7 +119,7 @@ describe('OriginalsAsset', () => {
     const didManager = new DIDManager({} as any);
     const cm = new CredentialManager({ defaultKeyType: 'ES256K', network: 'regtest' } as any, didManager);
     const spy = spyOn(cm, 'verifyCredential').mockResolvedValue(true);
-    await expect(asset.verify({ credentialManager: cm, didManager })).resolves.toBe(true);
+    expect((await asset.verify({ credentialManager: cm, didManager })).verified).toBe(true);
     spy.mockRestore();
   });
 
@@ -138,7 +138,7 @@ describe('OriginalsAsset', () => {
     const didManager = new DIDManager({} as any);
     const cm = new CredentialManager({ defaultKeyType: 'ES256K', network: 'regtest' } as any, didManager);
     const spy = spyOn(cm, 'verifyCredential').mockResolvedValue(false);
-    await expect(asset.verify({ credentialManager: cm, didManager })).resolves.toBe(false);
+    expect((await asset.verify({ credentialManager: cm, didManager })).verified).toBe(false);
     spy.mockRestore();
   });
 
@@ -149,7 +149,7 @@ describe('OriginalsAsset', () => {
     };
     const asset = new OriginalsAsset([resWithUrl], buildDid('did:cel:abc'), emptyCreds);
     const failingFetch = async () => { throw new Error('network'); };
-    await expect(asset.verify({ fetch: failingFetch as any })).resolves.toBe(false);
+    expect((await asset.verify({ fetch: failingFetch as any })).verified).toBe(false);
   });
 
   test('verify fails closed for a hosted (URL-only) resource when no fetcher is provided (#368)', async () => {
@@ -163,7 +163,7 @@ describe('OriginalsAsset', () => {
       hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' // valid hex, sha256 of empty
     };
     const asset = new OriginalsAsset([resWithUrl], buildDid('did:cel:abc'), emptyCreds);
-    await expect(asset.verify()).resolves.toBe(false);
+    expect((await asset.verify()).verified).toBe(false);
   });
 
   test('verify passes for a resource with BOTH inline content and url via the inline path, no fetcher (#368)', async () => {
@@ -177,19 +177,19 @@ describe('OriginalsAsset', () => {
       hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
     };
     const asset = new OriginalsAsset([resBoth], buildDid('did:cel:abc'), emptyCreds);
-    await expect(asset.verify()).resolves.toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
   });
 
   test('verify returns false when resource has invalid id type', async () => {
     const badResource: any = { id: 123, type: 'text', contentType: 'text/plain', hash: 'abc' };
     const asset = new OriginalsAsset([badResource], buildDid('did:cel:abc'), emptyCreds);
-    await expect(asset.verify()).resolves.toBe(false);
+    expect((await asset.verify()).verified).toBe(false);
   });
 
   test('verify returns false when resource hash has non-hex characters', async () => {
     const badResource: AssetResource = { id: 'r', type: 'text', contentType: 'text/plain', hash: 'zzzz' };
     const asset = new OriginalsAsset([badResource], buildDid('did:cel:abc'), emptyCreds);
-    await expect(asset.verify()).resolves.toBe(false);
+    expect((await asset.verify()).verified).toBe(false);
   });
 
   test('verify returns false when inline content hash mismatch', async () => {
@@ -201,7 +201,7 @@ describe('OriginalsAsset', () => {
       hash: 'wrong0000000000000000000000000000000000000000000000000000000000'
     };
     const asset = new OriginalsAsset([badResource], buildDid('did:cel:abc'), emptyCreds);
-    await expect(asset.verify()).resolves.toBe(false);
+    expect((await asset.verify()).verified).toBe(false);
   });
 
   test('verify returns false when fetched URL content hash mismatch', async () => {
@@ -214,7 +214,7 @@ describe('OriginalsAsset', () => {
     };
     const asset = new OriginalsAsset([resWithUrl], buildDid('did:cel:abc'), emptyCreds);
     const mockFetch = async () => ({ arrayBuffer: async () => Buffer.from('test').buffer }) as any;
-    await expect(asset.verify({ fetch: mockFetch })).resolves.toBe(false);
+    expect((await asset.verify({ fetch: mockFetch })).verified).toBe(false);
   });
 
   test('verify catches and returns false on unexpected error', async () => {
@@ -224,7 +224,7 @@ describe('OriginalsAsset', () => {
     spyOn(require('../../../src/utils/validation'), 'validateDIDDocument').mockImplementationOnce(() => {
       throw new Error('unexpected');
     });
-    await expect(asset.verify()).resolves.toBe(false);
+    expect((await asset.verify()).verified).toBe(false);
   });
 
   test('constructor throws on unknown DID method (coverage for error path)', () => {
@@ -253,13 +253,13 @@ describe('verify() gates on whole-chain CEL verification (#Phase2 Task 8)', () =
   test('intact celLog: verify() is true', async () => {
     const asset = await makeCelAsset();
     expect(asset.celLog).toBeDefined();
-    await expect(asset.verify()).resolves.toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
   });
 
   test('tampered log (event data mutated post-hoc) flips verify() to false', async () => {
     const asset = await makeCelAsset();
     (asset.celLog!.events[0].data as { name?: string }).name = 'tampered';
-    await expect(asset.verify()).resolves.toBe(false);
+    expect((await asset.verify()).verified).toBe(false);
   });
 
   test('a swapped-in FOREIGN log (individually valid) flips verify() to false — the _replaceCelLog binding check', async () => {
@@ -269,13 +269,13 @@ describe('verify() gates on whole-chain CEL verification (#Phase2 Task 8)', () =
     expect((await verifyEventLog(b.celLog!)).verified).toBe(true);
     // ...but it does not back A's DID, so verify() must reject the swap.
     a._replaceCelLog(b.celLog!);
-    await expect(a.verify()).resolves.toBe(false);
+    expect((await a.verify()).verified).toBe(false);
   });
 
   test('legacy asset without a celLog keeps its current verify behavior', async () => {
     const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     expect(asset.celLog).toBeUndefined();
-    await expect(asset.verify()).resolves.toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
   });
 });
 

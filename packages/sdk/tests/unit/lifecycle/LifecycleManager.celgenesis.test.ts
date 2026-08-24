@@ -96,7 +96,7 @@ describe('verify() binds in-memory resources to the CEL genesis', () => {
       { id: 'res-1', type: 'data', contentType: 'text/plain', hash: 'ab'.repeat(32) }
     ]);
     // Baseline: genuine asset with the resource the genesis committed to.
-    expect(await asset.verify()).toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
 
     // Same verified log + facade DID doc, but a DIFFERENT resource (different
     // hash). The genesis digest is no longer among the current resources → fail.
@@ -106,6 +106,6 @@ describe('verify() binds in-memory resources to the CEL genesis', () => {
       [],
       asset.celLog!
     );
-    expect(await swapped.verify()).toBe(false);
+    expect((await swapped.verify()).verified).toBe(false);
   });
 });

@@ -57,7 +57,7 @@ describe('sat-gated appends (SDK write side)', () => {
     const captured = (asset.serialize().didDocuments as { 'did:btco'?: { verificationMethod?: Array<{ publicKeyMultibase?: string }> } })['did:btco'];
     expect(captured?.verificationMethod?.[0]?.publicKeyMultibase).toBe(holderKp.publicKey);
     // And the whole log verifies: the sat gate, not the key set, authorized it.
-    expect(await asset.verify({ ordinalsProvider: provider })).toBe(true);
+    expect((await asset.verify({ ordinalsProvider: provider })).verified).toBe(true);
   });
 
   test('a non-lineage signer with an authenticity field throws CEL_HOLDER_FIELD_NOT_PERMITTED before ANY inscription', async () => {

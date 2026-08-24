@@ -172,8 +172,8 @@ describe('inscribeOnBitcoin (sat-selected)', () => {
     expect(asset.bindings!['did:btco']).toBe('did:btco:reg:1777');
 
     // verify / replay fold from the log without blowing up (return, not throw).
-    const ok = await asset.verify({ ordinalsProvider: provider as any });
-    expect(typeof ok).toBe('boolean');
+    const report = await asset.verify({ ordinalsProvider: provider as any });
+    expect(typeof report.verified).toBe('boolean');
     expect(() => asset.getProvenance()).not.toThrow();
   });
 

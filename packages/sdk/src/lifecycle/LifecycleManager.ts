@@ -20,6 +20,7 @@ import type { CredentialManager } from '../vc/CredentialManager.js';
 import { OriginalsAsset, type ProvenanceChain } from './OriginalsAsset.js';
 import { replayProvenance } from './replayProvenance.js';
 import { checkGenesisResourceBinding } from './genesisBinding.js';
+import type { VerificationReport } from './VerificationReport.js';
 import {
   ASSET_ENVELOPE_FORMAT,
   ASSET_ENVELOPE_VERSION,
@@ -515,6 +516,9 @@ export class LifecycleManager {
     // stale inside it. Later appends take a signer per call, or `config.signer`.
     asset._bindCelAppender((type, data, opts) =>
       this.appendCelEventAndMaybeInscribe(asset, type, data, opts));
+    // So `asset.verify()` checks the Bitcoin witness proof instead of failing
+    // closed on a provider the SDK was handed at construction (launch review).
+    asset._bindVerificationDefaults({ ordinalsProvider: this.config.ordinalsProvider });
 
     // Persist the genesis CEL at the conventional cel/<suffix>.json key so
     // the did:cel resolves from storage immediately (best-effort, never gates).
@@ -930,6 +934,7 @@ export class LifecycleManager {
       { currentLayer: folded.currentLayer, bindings: folded.bindings, provenance }
     );
     asset._bindCelAppender((type, data, opts) => this.appendCelEventAndMaybeInscribe(asset, type, data, opts));
+    asset._bindVerificationDefaults({ ordinalsProvider: this.config.ordinalsProvider });
 
     // Repopulate captured DID docs so re-serializing a loaded asset is
     // lossless. Only for layers cross-checked against the fold in step 5
@@ -1289,7 +1294,7 @@ export class LifecycleManager {
   async verifyAsset(
     asset: OriginalsAsset,
     overrides?: { ordinalsProvider?: OrdinalsLookup }
-  ): Promise<boolean> {
+  ): Promise<VerificationReport> {
     return asset.verify({
       didManager: this.didManager,
       credentialManager: this.credentialManager,

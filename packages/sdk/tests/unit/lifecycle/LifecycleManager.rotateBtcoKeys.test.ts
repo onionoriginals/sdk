@@ -56,6 +56,6 @@ describe('rotateBtcoKeys (removed capability: lineage frozen at the anchor)', ()
 
     const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
     await expect(sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey })).rejects.toThrow(/not permitted after the btco anchor/);
-    expect(await asset.verify({ ordinalsProvider: provider })).toBe(true);
+    expect((await asset.verify({ ordinalsProvider: provider })).verified).toBe(true);
   });
 });

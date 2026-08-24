@@ -104,7 +104,7 @@ describe('remote-custody lifecycle (MockRemoteSigner, no keyStore)', () => {
     // proof, with zero private keys ever leaving custody. ----
     const result = await verifyEventLog(asset.celLog!, { expectedDid: asset.id, ordinalsProvider });
     expect(result.verified).toBe(true);
-    expect(await asset.verify({ ordinalsProvider })).toBe(true);
+    expect((await asset.verify({ ordinalsProvider })).verified).toBe(true);
   });
 
   test('config-level signer: OriginalsSDK.create({ signer }) is the ambient authorship signer', async () => {
@@ -130,7 +130,7 @@ describe('remote-custody lifecycle (MockRemoteSigner, no keyStore)', () => {
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
     expect(skipped).toHaveLength(0);
     expect(asset.celLog!.events.map(e => e.type)).toEqual(['create', 'update', 'migrate']);
-    expect(await asset.verify()).toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
   });
 
   test('the minting signer is NOT retained — a later append with no signer degrades', async () => {
@@ -163,7 +163,7 @@ describe('remote-custody lifecycle (MockRemoteSigner, no keyStore)', () => {
     expect(asset.celLog!.events.map(e => e.type)).toEqual(['create', 'update']);
     expect(asset.celLog!.events[1].proof[0].verificationMethod)
       .toBe(canonicalDidKeyVm(remote.publicKeyMultibase));
-    expect(await asset.verify()).toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
   });
 
   test('config.signer still serves later appends — explicit config, not carried state', async () => {
@@ -173,7 +173,7 @@ describe('remote-custody lifecycle (MockRemoteSigner, no keyStore)', () => {
 
     await asset.addResourceVersion('art', 'remote-art-v2', 'image/png');
     expect(asset.celLog!.events.map(e => e.type)).toEqual(['create', 'update']);
-    expect(await asset.verify()).toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
   });
 
   test('a non-Ed25519 signer is rejected loudly at createAsset (CEL is Ed25519-only)', async () => {

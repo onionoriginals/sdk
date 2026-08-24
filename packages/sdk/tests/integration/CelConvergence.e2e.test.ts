@@ -97,9 +97,11 @@ describe('CEL convergence end-to-end (#Phase2 Task9)', () => {
     // The creator still holds the pen: their post-anchor entry is a CREATOR claim.
     expect(result.events[3].authorClass).toBe('creator');
     expect(result.holders).toEqual([]);
-    // Same guarantee via the asset façade, and fail-closed without the dep.
-    expect(await asset.verify({ ordinalsProvider })).toBe(true);
-    expect(await asset.verify()).toBe(false);
+    // Same guarantee via the asset façade. No argument needed: the asset was
+    // minted through an SDK configured with this provider, and verify() uses it
+    // rather than reporting `false` for a check it never ran.
+    expect((await asset.verify({ ordinalsProvider })).verified).toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
 
     // ---- The pure fold agrees with the live in-memory caches. ----
     const folded = replayProvenance(log);

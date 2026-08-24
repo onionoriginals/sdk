@@ -47,7 +47,7 @@ describe('post-anchor appends commit data.author', () => {
     expect(updates.length).toBe(1);
     expect((updates[0].data as { author?: string }).author).toBe(controllerDid);
     // The committed author binds to the actual signer — the log verifies.
-    expect(await asset.verify({ ordinalsProvider: provider })).toBe(true);
+    expect((await asset.verify({ ordinalsProvider: provider })).verified).toBe(true);
   });
 
   test('the reinscribed btco document announces the appending key the entry commits to', async () => {
@@ -77,7 +77,7 @@ describe('post-anchor appends commit data.author', () => {
     expect(asset.celLog!.events.map((e) => e.type)).toEqual(['create', 'migrate']);
     const head = asset.celLog!.events[1];
     expect(head.proof.some((p) => (p as { cryptosuite?: string }).cryptosuite === 'bitcoin-ordinals-2024')).toBe(true);
-    expect(await asset.verify({ ordinalsProvider: provider })).toBe(true);
+    expect((await asset.verify({ ordinalsProvider: provider })).verified).toBe(true);
   });
 
   test('a statement append commits its author and verifies (rotateKey is refused post-anchor)', async () => {
@@ -94,7 +94,7 @@ describe('post-anchor appends commit data.author', () => {
     await asset.appendStatement({ statement: 'still mine' });
     const head = asset.celLog!.events[asset.celLog!.events.length - 1];
     expect((head.data as { author?: string }).author).toBe(controllerDid);
-    expect(await asset.verify({ ordinalsProvider: provider })).toBe(true);
+    expect((await asset.verify({ ordinalsProvider: provider })).verified).toBe(true);
   });
 
   test('pre-anchor events carry NO author (key lineage governs before the anchor)', async () => {
