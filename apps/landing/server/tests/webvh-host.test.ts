@@ -1,6 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { createWebvhHostStore, publishGroupOf, altResourceKey } from '../webvh-host';
-import { resourcePathSegment, encoding } from '@originals/sdk/cel';
+import { createWebvhHostStore, publishGroupOf } from '../webvh-host';
 
 function putReq(key: string, body: string, contentType: string) {
   return new Request(`http://host/api/host/${encodeURIComponent(key)}`, {
@@ -65,46 +64,6 @@ describe('webvh-host store', () => {
     expect(store.serve(new Request(url), url)).toBeNull();
   });
 
-  // The READ half of the hash-encoding standardization (parseResourcePathSegment):
-  // a resource stored under one segment form is served under the OTHER, so old
-  // links keep resolving once the SDK's dual-write retires.
-  describe('resource segment dual-read', () => {
-    const HASH = 'a'.repeat(64);
-    const canonical = resourcePathSegment(HASH);
-    const legacy = encoding.encodeBase64UrlMultibase(encoding.hexToBytes(HASH));
-
-    test('altResourceKey maps canonical ↔ legacy and refuses non-resource keys', () => {
-      expect(altResourceKey(`d/resources/${canonical}`)).toBe(`d/resources/${legacy}`);
-      expect(altResourceKey(`d/resources/${legacy}`)).toBe(`d/resources/${canonical}`);
-      expect(altResourceKey('d/did.jsonl')).toBeUndefined();
-      expect(altResourceKey('d/resources/not-a-digest')).toBeUndefined();
-    });
-
-    test('stored under the CANONICAL segment, served under the LEGACY url (and via read())', async () => {
-      const store = createWebvhHostStore();
-      const key = `demo.example.com/studio/you/resources/${canonical}`;
-      await store.handlePut(putReq(key, 'bytes', 'image/png'), new URL(`http://host/api/host/${encodeURIComponent(key)}`));
-
-      const legacyUrl = new URL(`http://demo.example.com/studio/you/resources/${legacy}`);
-      const served = store.serve(new Request(legacyUrl), legacyUrl);
-      expect(served).not.toBeNull();
-      expect(await served!.text()).toBe('bytes');
-
-      const readRes = store.read(new URL(`http://host/api/host/${encodeURIComponent(`demo.example.com/studio/you/resources/${legacy}`)}`));
-      expect(readRes.status).toBe(200);
-    });
-
-    test('stored under the LEGACY segment, served under the CANONICAL url', async () => {
-      const store = createWebvhHostStore();
-      const key = `demo.example.com/studio/you/resources/${legacy}`;
-      await store.handlePut(putReq(key, 'old-bytes', 'image/png'), new URL(`http://host/api/host/${encodeURIComponent(key)}`));
-
-      const canonicalUrl = new URL(`http://demo.example.com/studio/you/resources/${canonical}`);
-      const served = store.serve(new Request(canonicalUrl), canonicalUrl);
-      expect(served).not.toBeNull();
-      expect(await served!.text()).toBe('old-bytes');
-    });
-  });
 
   test('TTL expiry: serve returns null after ttl elapses', async () => {
     let clock = 1000;

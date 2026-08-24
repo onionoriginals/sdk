@@ -8,7 +8,6 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js';
-import { bytesToHex } from '@noble/hashes/utils.js';
 import { multibase } from './utils/encoding.js';
 
 /**
@@ -143,12 +142,3 @@ export function resourcePathSegment(hashHex: string): string {
   return multibase.encode(multihash, 'base64url');
 }
 
-/**
- * Parses a published-resource path segment back to its hex sha256. Accepts the
- * canonical multihash form ("uEi...") AND the legacy raw-digest form ("ud...")
- * that pre-standardization URLs carry — the single named home for that
- * dual-form tolerance, so it is never re-derived at call sites.
- */
-export function parseResourcePathSegment(segment: string): string {
-  return bytesToHex(decodeDigestMultibase(segment));
-}

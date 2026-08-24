@@ -282,56 +282,49 @@ describe('sat-gated appends', () => {
     expect(result.errors.some(e => /deactivate is not permitted after the btco anchor/.test(e))).toBe(true);
   });
 
-  test('post-anchor v1 transfer (data.newController): fails', async () => {
+  test('transfer events are rejected ANYWHERE — there is no transfer event in the model', async () => {
+    // Ownership is the sat, moved by a Bitcoin transaction, never a log
+    // event. No shape is readable (the protocol starts fresh — no legacy log
+    // exists): pre-anchor, post-anchor, controller-assigning or not, a
+    // transfer entry fails the log.
     const provider = new OrdMockProvider();
     const a = await makeKey();
     const b = await makeKey();
-    const { log } = await makeAnchoredLog(provider, a);
-    const transferred = await appendEvent(
-      log, 'transfer', { newController: b.didKey, transferredAt: '2026-08-23T00:00:02Z' },
-      { signer: a.signer, verificationMethod: a.vm }
-    );
-    const result = await verifyEventLog(transferred, { ordinalsProvider: provider });
-    expect(result.verified).toBe(false);
-    expect(result.errors.some(e => /transfer events cannot assign a controller/.test(e))).toBe(true);
-  });
 
-  test('legacy v0 transfer on a pre-anchor log: verifies, no authority effect', async () => {
-    const a = await makeKey();
-    let log = await createEventLog(
-      { name: 'Asset', controller: a.didKey, resources: [], createdAt: 'x', nonce: 'v0-transfer' },
+    // PRE-anchor, signed by the controller.
+    let preLog = await createEventLog(
+      { name: 'Asset', controller: a.didKey, resources: [], createdAt: 'x', nonce: 'no-transfer' },
       { signer: a.signer, verificationMethod: a.vm }
     );
-    log = await appendEvent(
-      log, 'transfer', { previousOwner: 'bc1qa', newOwner: 'bc1qb', txid: 'a'.repeat(64), transferredAt: 'x' },
+    preLog = await appendEvent(
+      preLog, 'transfer', { previousOwner: 'bc1qa', newOwner: 'bc1qb', txid: 'a'.repeat(64), transferredAt: 'x' },
       { signer: a.signer, verificationMethod: a.vm }
     );
-    // a still signs afterwards — the transfer changed nothing about authority.
-    log = await appendEvent(log, 'update', { note: 'still a' }, { signer: a.signer, verificationMethod: a.vm });
-    const result = await verifyEventLog(log);
-    expect(result.errors).toEqual([]);
-    expect(result.verified).toBe(true);
-  });
+    const pre = await verifyEventLog(preLog);
+    expect(pre.verified).toBe(false);
+    expect(pre.errors.some(e => /transfer events are not part of the model/.test(e))).toBe(true);
 
-  test('legacy v0 transfer AFTER the anchor, signed by the creator key: REJECTED — no post-anchor path skips the sat', async () => {
-    // The v0 read path holds only at or before the anchor. Post-anchor, a v0
-    // transfer signed by the creator's frozen key is indistinguishable from a
-    // fresh forgery written after selling the sat — and it used to verify
-    // clean (no sat gate, no witness) and render as a creator entry.
-    const provider = new OrdMockProvider();
-    const a = await makeKey();
+    // POST-anchor, signed by the creator's frozen key (would otherwise be a
+    // forgery path: no sat gate, no witness).
     const { log } = await makeAnchoredLog(provider, a);
     const withTransfer = await appendEvent(
       log, 'transfer',
       { previousOwner: 'bc1qseller', newOwner: 'bc1qbuyer', txid: 'f'.repeat(64), transferredAt: '2026-08-23T00:00:02Z' },
       { signer: a.signer, verificationMethod: a.vm }
     );
+    const post = await verifyEventLog(withTransfer, { ordinalsProvider: provider });
+    expect(post.verified).toBe(false);
+    expect(post.errors.some(e => /transfer events are not part of the model/.test(e))).toBe(true);
+    expect(post.events[post.events.length - 1].authorClass).not.toBe('creator');
 
-    const result = await verifyEventLog(withTransfer, { ordinalsProvider: provider });
-    expect(result.verified).toBe(false);
-    expect(result.errors.some(e => /'transfer' events are not permitted after the btco anchor/.test(e))).toBe(true);
-    // And the forged entry is never presented as a creator entry.
-    expect(result.events[result.events.length - 1].authorClass).not.toBe('creator');
+    // Controller-assigning shape (data.newController): same rejection.
+    const assigning = await appendEvent(
+      log, 'transfer', { newController: b.didKey, transferredAt: '2026-08-23T00:00:02Z' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+    const v1 = await verifyEventLog(assigning, { ordinalsProvider: provider });
+    expect(v1.verified).toBe(false);
+    expect(v1.errors.some(e => /transfer events are not part of the model/.test(e))).toBe(true);
   });
 
   test('CHAINED HOLDERS: A pre-anchor, migrate, B appends, C appends — verifies, holder chain reads [B, C]', async () => {

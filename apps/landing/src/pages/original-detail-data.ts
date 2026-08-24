@@ -6,8 +6,7 @@
  * and a summary of the signed did:webvh version-history log.
  */
 import type { OriginalRow } from './YourOriginals';
-import { claimedSignerDid, genesisLineageDids } from '@originals/sdk/cel';
-import type { LogEntry } from '@originals/sdk/cel';
+import { claimedSignerDid } from '@originals/sdk/cel';
 
 /* ——— CEL log shapes (what LifecycleManager publishes as cel.json) ——— */
 
@@ -196,11 +195,15 @@ export interface CustodyRow {
  */
 export function celCustody(cel: CelLog | null): CustodyRow[] {
   const events = cel?.events ?? [];
-  // Shared lineage + signer readers from the SDK (genesis controller/creator/
-  // create-proof VM; author, else the first NON-WITNESS proof's VM DID) — a
-  // hand-rolled proof[0] read here previously mislabeled a witness-first proof
-  // array's `did:btco:witness` as the author.
-  const lineage = new Set<string>(genesisLineageDids(events[0] as LogEntry | undefined));
+  // Lineage is genesis `data.controller` only (the model's sole genesis
+  // identity; there is no legacy shape to read) plus pre-anchor rotations.
+  // The signer is read via the SDK's shared `claimedSignerDid` (author, else
+  // the first NON-WITNESS proof's VM DID) — a hand-rolled proof[0] read here
+  // previously mislabeled a witness-first proof array's `did:btco:witness` as
+  // the author.
+  const lineage = new Set<string>();
+  const genesisController = events[0]?.data?.controller;
+  if (typeof genesisController === 'string') lineage.add(genesisController);
   let anchored = false;
   const rows: CustodyRow[] = [];
   for (let i = 1; i < events.length; i++) {
@@ -333,15 +336,15 @@ export function sameOriginUrl(url: string, currentHost?: string): string {
 }
 
 /**
- * The multibase segment a published resource is HOSTED under. The SDK hosts
- * resources at `…/resources/<base64url multibase of the RAW sha-256 bytes>`
- * (LifecycleManager.publishResources), while the CEL create event records the
- * multihash-wrapped `digestMultibase` — this converts the declared hex back to
- * the hosted key segment.
+ * The multibase segment a published resource is HOSTED under: the CANONICAL
+ * multibase multihash of the sha-256 (`u` + base64url-nopad(0x12 0x20 ||
+ * digest), "uEi…") — the only segment form the SDK writes
+ * (LifecycleManager.publishResources). Converts the CEL-declared hex back to
+ * that hosted key segment.
  */
 export function sha256HexToResourceMultibase(hex: string): string | null {
   if (!/^[0-9a-f]{64}$/.test(hex)) return null;
-  const bytes = hex.match(/../g)!.map((b) => parseInt(b, 16));
+  const bytes = [0x12, 0x20, ...hex.match(/../g)!.map((b) => parseInt(b, 16))];
   const b64 = btoa(String.fromCharCode(...bytes));
   return 'u' + b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }

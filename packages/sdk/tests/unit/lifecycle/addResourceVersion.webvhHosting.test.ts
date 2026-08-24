@@ -29,9 +29,9 @@ const resources = () => [
 
 /**
  * The location publishResources uses:
- * {domain} + {userPath}/resources/{segment}, where the CANONICAL segment is
- * the multibase multihash ("uEi...") and the legacy raw-digest segment
- * ("ud...") is dual-written while legacyResourceUrlCompat is on.
+ * {domain} + {userPath}/resources/{segment} — the CANONICAL multibase
+ * multihash segment ("uEi..."), the only form ever written. The 'legacy' form
+ * below exists only to assert it is NOT written.
  */
 function hostedAt(webvhDid: string, hash: string, form: 'canonical' | 'legacy' = 'canonical'): { domain: string; path: string } {
   const parts = webvhDid.split(':');
@@ -94,7 +94,7 @@ describe('addResourceVersion on a published (did:webvh) asset', () => {
     expect((head.data as { toHash: string }).toHash).toBe(v2.hash);
   });
 
-  test('an update dual-writes the canonical and legacy keys while compat is on (default)', async () => {
+  test('an update writes ONLY the canonical key — the legacy raw-digest key never exists', async () => {
     const storage = new MemoryStorageAdapter();
     const { asset } = await publishedAsset(storage);
     const webvhDid = asset.bindings!['did:webvh']!;
@@ -102,21 +102,8 @@ describe('addResourceVersion on a published (did:webvh) asset', () => {
     const v2 = await asset.addResourceVersion('doc.txt', V2, 'text/plain');
 
     const canonical = await served(storage, webvhDid, v2.hash, 'canonical');
-    const legacy = await served(storage, webvhDid, v2.hash, 'legacy');
     expect(canonical).not.toBeNull();
-    expect(legacy).not.toBeNull();
     expect(new TextDecoder().decode(canonical!.content)).toBe(V2);
-    expect(new TextDecoder().decode(legacy!.content)).toBe(V2);
-  });
-
-  test('with legacyResourceUrlCompat: false an update writes only the canonical key', async () => {
-    const storage = new MemoryStorageAdapter();
-    const { asset } = await publishedAsset(storage, { legacyResourceUrlCompat: false });
-    const webvhDid = asset.bindings!['did:webvh']!;
-
-    const v2 = await asset.addResourceVersion('doc.txt', V2, 'text/plain');
-
-    expect(await served(storage, webvhDid, v2.hash, 'canonical')).not.toBeNull();
     expect(await served(storage, webvhDid, v2.hash, 'legacy')).toBeNull();
   });
 

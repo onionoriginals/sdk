@@ -126,31 +126,51 @@ describe('classifyLogEntries (pure fold)', () => {
     expect(verified.creatorKeys).toEqual([a.didKey]);
   });
 
-  test('LEGACY genesis (no controller): lineage falls back to the create proof VM, so the creator\'s post-anchor entry classifies as creator', async () => {
-    // A controller-only lineage read is empty on a legacy-shape genesis, and
-    // an empty lineage labeled EVERY entry unattributed/holder — including the
-    // creator's own post-anchor writes, disagreeing with the verifier.
+  test('a genesis WITHOUT data.controller yields an empty lineage: every entry is unattributed or holder — controller is the only genesis identity', async () => {
+    // The protocol starts fresh: there is no legacy `data.did`/`data.creator`
+    // shape to read, so the fold deliberately does NOT fall back to other
+    // genesis fields or the create proof's VM. A controller-less genesis has
+    // no lineage and can vouch for nothing.
     const a = await makeKey();
-    const legacyCreate: LogEntry = {
+    const controllerless: LogEntry = {
       type: 'create',
-      data: { name: 'Asset', did: 'did:webvh:legacy.example:abc', layer: 'peer', resources: [], creator: 'did:webvh:legacy.example:abc', createdAt: 'x' },
+      data: { name: 'Asset', resources: [], createdAt: 'x' },
       proof: [await a.signer({ probe: true })],
     } as LogEntry;
-    const log: EventLog = { events: [legacyCreate] };
+    const log: EventLog = { events: [controllerless] };
     const withMigrate: EventLog = await appendEvent(
       log, 'migrate',
-      { sourceDid: 'did:webvh:legacy.example:abc', layer: 'btco', network: 'regtest', to: `did:btco:reg:${SAT}`, migratedAt: 'x' },
+      { sourceDid: 'did:cel:uPlaceholder', layer: 'btco', network: 'regtest', to: `did:btco:reg:${SAT}`, migratedAt: 'x' },
       { signer: a.signer, verificationMethod: a.vm }
     );
     const full: EventLog = await appendEvent(
       withMigrate, 'update',
-      { author: a.didKey, name: 'Renamed' },
+      { author: a.didKey, statement: 'held' },
       { signer: a.signer, verificationMethod: a.vm }
     );
 
     const classified = classifyLogEntries(full);
-    expect(classified[0].authorClass).toBe('creator');
-    expect(classified[2].authorClass).toBe('creator');
-    expect(classified[2].authorKey).toBe(a.didKey);
+    expect(classified[0].authorClass).toBe('unattributed');
+    expect(classified[2].authorClass).toBe('unattributed');
+  });
+
+  test('a post-anchor NON-update entry is unattributed regardless of lineage — the fold agrees with the verifier', async () => {
+    // The verifier REJECTS every post-anchor non-update entry and classes it
+    // unattributed; the display fold must not label the same entry "creator"
+    // just because its signer string matches the lineage.
+    const { provider, a, log } = await anchoredWithHolder();
+    // Post-anchor rotateKey SIGNED BY THE LINEAGE KEY — a rejected forgery.
+    const forged = await appendEvent(
+      log, 'rotateKey', { newController: a.didKey, rotatedAt: 'x' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+
+    const classified = classifyLogEntries(forged);
+    expect(classified[3].type).toBe('rotateKey');
+    expect(classified[3].authorClass).toBe('unattributed');
+
+    const verified = await verifyEventLog(forged, { ordinalsProvider: provider });
+    expect(verified.verified).toBe(false);
+    expect(verified.events[3].authorClass).toBe('unattributed');
   });
 });

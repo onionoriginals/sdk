@@ -6,7 +6,7 @@ import { OriginalsSDK } from '../../src';
 import { AssetResource } from '../../src/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
-import { resourcePathSegment, parseResourcePathSegment } from '@originals/cel';
+import { resourcePathSegment } from '@originals/cel';
 import { encodeBase64UrlMultibase, hexToBytes } from '@originals/cel/encoding';
 
 describe('WebVH publish end-to-end', () => {
@@ -53,11 +53,11 @@ describe('WebVH publish end-to-end', () => {
 
 /**
  * One hash encoding: published resource URLs carry the canonical multibase
- * multihash segment ("uEi..."), never the legacy raw-digest form ("ud...").
- * During the legacyResourceUrlCompat transition (default on) the bytes are
- * ALSO stored under the legacy key so previously-copied URLs keep resolving.
+ * multihash segment ("uEi...") — the ONLY segment form; the legacy raw-digest
+ * form ("ud...") is never written (the protocol starts fresh, no legacy URL
+ * exists).
  */
-describe('resource URL hash encoding (canonical multihash + legacy compat)', () => {
+describe('resource URL hash encoding (canonical multihash only)', () => {
   beforeEach(() => MemoryStorageAdapter.clear());
 
   const HELLO_HASH = '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
@@ -76,13 +76,12 @@ describe('resource URL hash encoding (canonical multihash + legacy compat)', () 
     return { domain, path: userPath ? `${userPath}/resources/${segment}` : `resources/${segment}` };
   }
 
-  async function publish(config?: { legacyResourceUrlCompat?: boolean }) {
+  async function publish() {
     const storage = new MemoryStorageAdapter();
     const sdk = OriginalsSDK.create({
       storageAdapter: storage,
       network: 'regtest',
-      keyStore: new MockKeyStore(),
-      ...config
+      keyStore: new MockKeyStore()
     } as never);
     const asset = await sdk.lifecycle.createAsset(resources());
     const published = await sdk.lifecycle.publishToWeb(asset, 'did:webvh:example.com:alice');
@@ -96,33 +95,20 @@ describe('resource URL hash encoding (canonical multihash + legacy compat)', () 
     const segment = url.split('/resources/')[1];
     expect(segment.startsWith('uEi')).toBe(true);
     expect(segment).toBe(resourcePathSegment(HELLO_HASH));
-    // And it decodes back to the declared hash.
-    expect(parseResourcePathSegment(segment)).toBe(HELLO_HASH);
   });
 
-  test('with compat on (default), identical bytes are stored at BOTH the canonical and legacy keys', async () => {
+  test('only the canonical key is written — the legacy raw-digest key never is', async () => {
     const { storage, webvhDid } = await publish();
     const canonical = pathFor(webvhDid, resourcePathSegment(HELLO_HASH));
     const legacy = pathFor(webvhDid, encodeBase64UrlMultibase(hexToBytes(HELLO_HASH)));
 
     const canonicalObj = await storage.getObject(canonical.domain, canonical.path);
-    const legacyObj = await storage.getObject(legacy.domain, legacy.path);
     expect(canonicalObj).not.toBeNull();
-    expect(legacyObj).not.toBeNull();
     expect(new TextDecoder().decode(canonicalObj!.content)).toBe('hello');
-    expect(new TextDecoder().decode(legacyObj!.content)).toBe('hello');
-  });
-
-  test('with legacyResourceUrlCompat: false, only the canonical key is written', async () => {
-    const { storage, webvhDid } = await publish({ legacyResourceUrlCompat: false });
-    const canonical = pathFor(webvhDid, resourcePathSegment(HELLO_HASH));
-    const legacy = pathFor(webvhDid, encodeBase64UrlMultibase(hexToBytes(HELLO_HASH)));
-
-    expect(await storage.getObject(canonical.domain, canonical.path)).not.toBeNull();
     expect(await storage.getObject(legacy.domain, legacy.path)).toBeNull();
   });
 
-  test('a mid-publish failure rolls back BOTH written keys', async () => {
+  test('a mid-publish failure rolls back the written resource key', async () => {
     // Adapter with delete support that fails the publish AFTER resources are
     // written (at the did.jsonl host step), so atomicRollback runs.
     const objects = new Map<string, Uint8Array>();
@@ -153,29 +139,12 @@ describe('resource URL hash encoding (canonical multihash + legacy compat)', () 
     await expect(sdk.lifecycle.publishToWeb(asset, 'did:webvh:example.com:alice')).rejects.toThrow('host outage');
 
     const canonicalSegment = resourcePathSegment(HELLO_HASH);
-    const legacySegment = encodeBase64UrlMultibase(hexToBytes(HELLO_HASH));
     expect(deleted.some((p) => p.endsWith(`resources/${canonicalSegment}`))).toBe(true);
-    expect(deleted.some((p) => p.endsWith(`resources/${legacySegment}`))).toBe(true);
     // Nothing at either key survived the rollback.
     for (const key of objects.keys()) {
       expect(key.includes('/resources/')).toBe(false);
     }
     // And the resource url was reverted.
     expect(asset.resources[0].url).toBeUndefined();
-  });
-
-  test('legacy URLs from assets published before the change still resolve via parseResourcePathSegment', async () => {
-    // Simulate a pre-change publish: bytes seeded at the LEGACY key only.
-    const storage = new MemoryStorageAdapter();
-    const legacySegment = encodeBase64UrlMultibase(hexToBytes(HELLO_HASH));
-    await storage.putObject('example.com', `alice/resources/${legacySegment}`, new TextEncoder().encode('hello'));
-
-    // A reader that decodes the path segment with parseResourcePathSegment
-    // recovers the hex hash from EITHER form, so it can locate the bytes by
-    // re-deriving whichever key the publisher wrote.
-    expect(parseResourcePathSegment(legacySegment)).toBe(HELLO_HASH);
-    expect(parseResourcePathSegment(resourcePathSegment(HELLO_HASH))).toBe(HELLO_HASH);
-    const found = await storage.getObject('example.com', `alice/resources/${legacySegment}`);
-    expect(found).not.toBeNull();
   });
 });

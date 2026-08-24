@@ -5,7 +5,6 @@ import {
   decodeDigestMultibase,
   digestMultibaseEquals,
   resourcePathSegment,
-  parseResourcePathSegment
 } from '../../src/hash';
 import { multibase } from '../../src/utils/encoding';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -196,20 +195,20 @@ describe('CEL Hash Utilities', () => {
       expect(resourcePathSegment(HEX)).toBe(CANONICAL);
     });
 
-    test('parseResourcePathSegment accepts the legacy raw-digest form (on-chain golden vector)', () => {
-      expect(parseResourcePathSegment(LEGACY)).toBe(HEX);
+    test('resourcePathSegment never emits the legacy raw-digest form', () => {
+      // parseResourcePathSegment (the dual-form reader) is deleted — nothing
+      // reads segments back and no legacy URL exists. The write side is
+      // canonical-only: the golden vectors prove the two forms differ and
+      // that only the canonical one is ever produced.
+      expect(resourcePathSegment(HEX)).not.toBe(LEGACY);
+      expect(resourcePathSegment(HEX).startsWith('uEi')).toBe(true);
     });
 
-    test('parseResourcePathSegment round-trips resourcePathSegment output', () => {
-      const digest = computeDigestMultibase(new TextEncoder().encode('round trip'));
-      const hex = parseResourcePathSegment(digest);
+    test('resourcePathSegment agrees with computeDigestMultibase for the same content', () => {
+      const content = new TextEncoder().encode('round trip');
+      const digest = computeDigestMultibase(content);
+      const hex = Array.from(sha256(content)).map((b) => b.toString(16).padStart(2, '0')).join('');
       expect(resourcePathSegment(hex)).toBe(digest);
-      expect(parseResourcePathSegment(resourcePathSegment(HEX))).toBe(HEX);
-    });
-
-    test('parseResourcePathSegment rejects 31- and 33-byte payloads', () => {
-      expect(() => parseResourcePathSegment(multibase.encode(new Uint8Array(31), 'base64url'))).toThrow();
-      expect(() => parseResourcePathSegment(multibase.encode(new Uint8Array(33), 'base64url'))).toThrow();
     });
 
     test('resourcePathSegment rejects non-hex and wrong-length input', () => {

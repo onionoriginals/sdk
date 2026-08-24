@@ -189,24 +189,6 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     expect(result.verified).toBe(true);
   });
 
-  test('a post-anchor legacy v0 transfer no longer rides past the sat gate — the log fails', async () => {
-    const provider = new OrdMockProvider();
-    const a = await makeKey();
-    const b = await makeKey();
-    const { log: prefix } = await makeAnchoredLog(provider, a);
-    const { log: full } = await addHolderAppend(prefix, provider, b);
-    const withLegacyTransfer = await appendEvent(
-      full,
-      'transfer',
-      { previousOwner: 'bc1qseller', newOwner: 'bc1qbuyer', txid: 'f'.repeat(64), transferredAt: '2026-07-10T00:00:03Z' },
-      { signer: a.signer, verificationMethod: a.vm }
-    );
-
-    const result = await verifyEventLog(withLegacyTransfer, { ordinalsProvider: provider, checkHeadFreshness: true });
-    expect(result.verified).toBe(false);
-    expect(result.errors.some(e => /'transfer' events are not permitted after the btco anchor/.test(e))).toBe(true);
-  });
-
   test('FOREIGN anchor: newest on-sat anchor commits to a digest absent from the log → STALE_LOG', async () => {
     const provider = new OrdMockProvider();
     const a = await makeKey();

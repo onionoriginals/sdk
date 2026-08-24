@@ -1554,8 +1554,8 @@ export async function verifyEventLog(
   //    The signer does NOT have to be in `authorizedKeyIds`, and appending
   //    never modifies it — rotateKey/deactivate/migrate are rejected outright
   //    post-anchor (holding the sat grants the right to append, not control of
-  //    the key set). The legacy v0 `transfer` read path keeps the key-lineage
-  //    check so pre-existing logs stay verifiable.
+  //    the key set), and `transfer` events are rejected ANYWHERE (there is no
+  //    transfer event in this model, and no legacy log to read).
   //
   // Companion walk state: once a btco migrate's SIGNED anchoring sat is
   // confirmed by a matching bitcoin witness proof, the log's authority is
@@ -1592,8 +1592,6 @@ export async function verifyEventLog(
     // to lineage authorization here or is rejected outright by the policy
     // block below (both, for a hand-built mid-log `create`): a skip any wider
     // than the gate that replaces it is an authorization hole.
-    const isV1Transfer = event.type === 'transfer' &&
-      (event.data as { newController?: unknown } | null | undefined)?.newController !== undefined;
     const postAnchor = !options?.verifier && anchoredSat !== undefined;
     const satGated = postAnchor && event.type === 'update';
     const eventResult = await verifyEvent(
@@ -1604,15 +1602,13 @@ export async function verifyEventLog(
     let entryClass: EntryAuthorClass | undefined;
 
     // There is no transfer event in this model: ownership is the sat, moved by
-    // a plain Bitcoin transaction, never a log event. A v1 transfer (one that
-    // assigns a controller) is rejected ANYWHERE; the v0 legacy shape
-    // (previousOwner/newOwner/txid, no authority effect) stays readable only
-    // AT OR BEFORE the anchor — post-anchor it falls to the default-deny
-    // policy block below like every other non-update type.
-    if (!options?.verifier && isV1Transfer) {
+    // a plain Bitcoin transaction, never a log event. Every `transfer` entry
+    // is rejected, pre- and post-anchor alike — the protocol starts fresh, so
+    // there is no legacy transfer-bearing log to read.
+    if (!options?.verifier && event.type === 'transfer') {
       eventResult.proofValid = false;
       eventResult.errors.push(
-        `Event ${i}: transfer events cannot assign a controller (data.newController); ownership is the sat, moved by a Bitcoin transaction, never a log event`
+        `Event ${i}: transfer events are not part of the model; ownership is the sat, moved by a Bitcoin transaction, never a log event`
       );
     }
 
@@ -1681,18 +1677,14 @@ export async function verifyEventLog(
             }
           }
         }
-      } else if (event.type !== 'update' && !isV1Transfer) {
+      } else if (event.type !== 'update' && event.type !== 'transfer') {
         // DEFAULT-DENY: the arms above enumerate every type this model gives
         // post-anchor semantics (rotateKey/deactivate/migrate rejected, update
-        // sat-gated, v1 transfer rejected earlier with its specific message).
-        // Everything else lands here — a legacy v0 transfer included: the
-        // legacy read path holds only AT OR BEFORE the anchor, because
-        // post-anchor a v0 transfer signed by the creator's frozen key is
-        // indistinguishable from a fresh forgery written after selling the
-        // sat, and it would verify with no sat gate and no witness. Also a
-        // hand-built `create` (rejected structurally above too) or an unknown
-        // type from a foreign writer — nothing slides through as an
-        // implicitly trusted entry.
+        // sat-gated; transfer already rejected everywhere with its own
+        // message, so it is excluded only to avoid a duplicate error).
+        // Everything else lands here — a hand-built `create` (rejected
+        // structurally above too) or an unknown type from a foreign writer —
+        // nothing slides through as an implicitly trusted entry.
         eventResult.proofValid = false;
         eventResult.errors.push(
           `Event ${i}: '${String(event.type)}' events are not permitted after the btco anchor`

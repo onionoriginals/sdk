@@ -173,20 +173,25 @@ describe('rotateKey authority evolution', () => {
     expect(forgedResult.events[3].proofValid).toBe(false);
   });
 
-  test('migrate/transfer cause no authority change (old key keeps working)', async () => {
+  test('a webvh migrate causes no authority change (old key keeps working; a transfer entry is not even readable)', async () => {
     const a = await makeRealSigner(); const b = await makeRealSigner();
     let log = await createEventLog(
       { name: 'A', controller: a.didKey, resources: [], createdAt: 'x', nonce: 'u7' },
       { signer: a.signer, verificationMethod: a.vm }
     );
-    // v0 legacy shape (previousOwner/newOwner, NO newController): read path
-    // only, no authority effect. A v1 transfer (data.newController) is
-    // rejected anywhere — asserted separately below.
-    log = await appendEvent(log, 'transfer', { previousOwner: 'bc1qa', newOwner: 'bc1qb', transferredAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
+    // Only rotateKey moves authority: a webvh migrate leaves the key set
+    // untouched.
+    log = await appendEvent(log, 'migrate', { sourceDid: 'did:cel:uPlaceholder', layer: 'webvh', domain: 'example.com', migratedAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
     log = await appendEvent(log, 'update', { note: 'a still signs' }, { signer: a.signer, verificationMethod: a.vm });
     expect((await verifyEventLog(log)).verified).toBe(true);
-    // transfer is NOT a key rotation: b's key does not become a log signer.
+    // b's key never became a log signer.
     const forged = await appendEvent(log, 'update', { note: 'b forges' }, { signer: b.signer, verificationMethod: b.vm });
     expect((await verifyEventLog(forged)).verified).toBe(false);
+    // And a transfer entry cannot express an authority change because it is
+    // rejected outright — there is no transfer event in the model.
+    const withTransfer = await appendEvent(log, 'transfer', { previousOwner: 'bc1qa', newOwner: 'bc1qb', transferredAt: 'x' }, { signer: a.signer, verificationMethod: a.vm });
+    const result = await verifyEventLog(withTransfer);
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /transfer events are not part of the model/.test(e))).toBe(true);
   });
 });

@@ -39,30 +39,6 @@
  */
 import { json } from './router';
 import { createRateLimiter } from './rate-limit';
-import { resourcePathSegment, parseResourcePathSegment, encoding } from '@originals/sdk/cel';
-
-/**
- * The ALTERNATE encoding of a `/resources/<segment>` key — canonical multihash
- * ("uEi…") ↔ legacy raw digest ("ud…") — via `parseResourcePathSegment`, the
- * single named home of the dual-form tolerance. This is the READ half of the
- * hash-encoding standardization: the SDK dual-writes both forms today, and
- * this fallback keeps every stored link resolving under either form so the
- * dual-write can retire without breaking old URLs. Undefined when the key is
- * not a resource key or the segment decodes to neither form.
- */
-export function altResourceKey(key: string): string | undefined {
-  const m = key.match(/^(.*\/resources\/)([^/]+)$/);
-  if (!m) return undefined;
-  let hex: string;
-  try {
-    hex = parseResourcePathSegment(m[2]);
-  } catch {
-    return undefined;
-  }
-  const canonical = resourcePathSegment(hex);
-  const alt = canonical === m[2] ? encoding.encodeBase64UrlMultibase(encoding.hexToBytes(hex)) : canonical;
-  return alt === m[2] ? undefined : m[1] + alt;
-}
 
 interface Entry {
   body: Uint8Array;
@@ -331,8 +307,7 @@ export function createWebvhHostStore(opts?: {
   function read(url: URL): Response {
     sweep();
     const key = decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
-    const alt = altResourceKey(key);
-    const entry = hit(key) ?? (alt !== undefined ? hit(alt) : undefined);
+    const entry = hit(key);
     if (!entry) return json({ error: 'not_found' }, 404);
     // Copy so the caller can't mutate stored bytes.
     return new Response(entry.body.slice(), { status: 200, headers: untrustedHeaders(entry.contentType) });
@@ -341,8 +316,7 @@ export function createWebvhHostStore(opts?: {
   function serve(_req: Request, url: URL): Response | null {
     sweep();
     const key = `${url.host}${url.pathname}`;
-    const alt = altResourceKey(key);
-    const entry = hit(key) ?? (alt !== undefined ? hit(alt) : undefined);
+    const entry = hit(key);
     if (!entry) return null;
     // Copy so the caller can't mutate stored bytes.
     return new Response(entry.body.slice(), { status: 200, headers: untrustedHeaders(entry.contentType) });

@@ -171,10 +171,10 @@ describe('digestMultibaseSha256Hex', () => {
 describe('sha256HexToResourceMultibase', () => {
   // Real pair from a live publish: resource.hash hex vs the multibase segment
   // LifecycleManager.publishResources hosts the bytes under.
-  test('encodes a raw sha-256 as the hosted base64url multibase', () => {
+  test('encodes a sha-256 as the hosted CANONICAL multihash multibase (uEi…)', () => {
     expect(
       sha256HexToResourceMultibase('5d53804fc73b572e35ddbe52354379ef11b2ac295b92d84c1589bd473700d3e0')
-    ).toBe('uXVOAT8c7Vy413b5SNUN57xGyrClbkthMFYm9RzcA0-A');
+    ).toBe('uEiBdU4BPxztXLjXdvlI1Q3nvEbKsKVuS2EwVib1HNwDT4A');
   });
   test('null for a non-sha-256 hex', () => {
     expect(sha256HexToResourceMultibase('abc')).toBeNull();
@@ -282,17 +282,22 @@ describe('celCustody (item 5: the custody chain, folded from the CEL)', () => {
     expect(rows).toEqual([]);
   });
 
-  test('LEGACY genesis (creator, no controller): the creator\'s own post-anchor entry is not custody', () => {
+  test('a genesis WITHOUT data.controller has no lineage: every post-anchor entry is custody, the create-proof signer\'s included', () => {
+    // Genesis lineage is data.controller only — no fallback to other genesis
+    // fields or the create proof's VM (there is no legacy shape to read).
     const rows = celCustody(log([
       {
         type: 'create',
-        data: { did: 'did:webvh:legacy.example:abc', creator: 'did:webvh:legacy.example:abc', layer: 'peer', resources: [] },
+        data: { resources: [] },
         proof: [{ verificationMethod: `${CREATOR}#k`, cryptosuite: 'eddsa-jcs-2022' }],
       },
       { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
-      { type: 'update', data: { author: CREATOR, name: 'renamed' } },
+      { type: 'update', data: { author: CREATOR, statement: 'renamed attempt' } },
       { type: 'update', data: { author: HOLDER, statement: 'held it' } },
     ]));
-    expect(rows).toEqual([{ author: HOLDER, statement: 'held it', eventIndex: 3 }]);
+    expect(rows).toEqual([
+      { author: CREATOR, statement: 'renamed attempt', eventIndex: 2 },
+      { author: HOLDER, statement: 'held it', eventIndex: 3 },
+    ]);
   });
 });

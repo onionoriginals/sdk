@@ -28,12 +28,13 @@ const SVG_V3 = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="3"/></svg>';
 
 const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 
-/** Where the SDK hosts a resource version: {origin}/{path}/resources/{multibase}. */
+/** Where the SDK hosts a resource version: {origin}/{path}/resources/{multibase}
+ *  — the CANONICAL multihash segment ("uEi…"), the only form written. */
 function resourceUrl(webvhDid: string, hashHex: string): string {
   const parts = webvhDid.split(':');
   const domain = decodeURIComponent(parts[3]);
   const path = parts.slice(4).map(decodeURIComponent).join('/');
-  const bytes = Uint8Array.from(hashHex.match(/../g)!.map((h) => parseInt(h, 16)));
+  const bytes = Uint8Array.from([0x12, 0x20, ...hashHex.match(/../g)!.map((h) => parseInt(h, 16))]);
   const multibase =
     'u' + btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   return `https://${domain}/${path}/resources/${multibase}`;

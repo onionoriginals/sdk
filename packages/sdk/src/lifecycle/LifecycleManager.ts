@@ -25,7 +25,6 @@ import {
   ASSET_ENVELOPE_VERSION,
   type AssetEnvelope
 } from './assetEnvelope.js';
-import { encodeBase64UrlMultibase, hexToBytes } from '@originals/cel/encoding';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { hashResource, validateCredential } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
@@ -2196,13 +2195,10 @@ export class LifecycleManager {
     }
 
     for (const resource of asset.resources) {
-      // Canonical wire form: multibase multihash ("uEi..."). The legacy
-      // raw-digest form ("ud...") is written as a second key during the
-      // transition (legacyResourceUrlCompat) so URLs copied before the
-      // encoding standardization keep resolving; only the canonical URL goes
-      // into resource.url, the log, and resource:published events.
+      // Canonical wire form: multibase multihash ("uEi...") — the ONLY
+      // segment form; it goes into resource.url, the storage key, the log,
+      // and resource:published events.
       const segment = resourcePathSegment(resource.hash);
-      const legacySegment = encodeBase64UrlMultibase(hexToBytes(resource.hash));
       const resourceUrl = `${publisherDid}/resources/${segment}`;
       // A canonical did:webvh with no user path (did:webvh:{SCID}:{domain})
       // yields an empty userPath; omit it so the storage key is
@@ -2210,9 +2206,6 @@ export class LifecycleManager {
       const relativePath = userPath
         ? `${userPath}/resources/${segment}`
         : `resources/${segment}`;
-      const legacyRelativePath = userPath
-        ? `${userPath}/resources/${legacySegment}`
-        : `resources/${legacySegment}`;
 
       // Hash-only resources (content hosted elsewhere) cannot be published:
       // writing the hash string as the body would serve bytes that fail the
@@ -2239,16 +2232,6 @@ export class LifecycleManager {
       );
       if (wrote) writtenObjects?.push({ domain, relativePath });
 
-      if (this.legacyResourceUrlCompat) {
-        const wroteLegacy = await this.writeResourceBytes(
-          domain,
-          legacyRelativePath,
-          resource.content,
-          resource.contentType
-        );
-        if (wroteLegacy) writtenObjects?.push({ domain, relativePath: legacyRelativePath });
-      }
-
       (resource as { url?: string }).url = resourceUrl;
 
       await this.emitResourcePublishedEvent(asset, resource, resourceUrl, publisherDid, domain);
@@ -2260,30 +2243,15 @@ export class LifecycleManager {
    * `{domain}/{userPath}/resources/{multibase-multihash(hash)}`. Split out so
    * the update path (hostUpdatedResourceBytes) writes the EXACT key
    * publishResources does; two derivations of this would drift and serve 404s
-   * at URLs the log names. `legacyRelativePath` is the retired raw-digest key
-   * ("ud..."), written alongside the canonical one while
-   * `legacyResourceUrlCompat` is on.
+   * at URLs the log names.
    */
-  private webvhResourceLocation(webvhDid: string, hash: string): { domain: string; relativePath: string; legacyRelativePath: string } {
+  private webvhResourceLocation(webvhDid: string, hash: string): { domain: string; relativePath: string } {
     const { domain, userPath } = this.parseWebVHDid(webvhDid);
     const segment = resourcePathSegment(hash);
-    const legacySegment = encodeBase64UrlMultibase(hexToBytes(hash));
     return {
       domain,
-      relativePath: userPath ? `${userPath}/resources/${segment}` : `resources/${segment}`,
-      legacyRelativePath: userPath ? `${userPath}/resources/${legacySegment}` : `resources/${legacySegment}`
+      relativePath: userPath ? `${userPath}/resources/${segment}` : `resources/${segment}`
     };
-  }
-
-  /**
-   * Transition switch for the resource-URL encoding standardization: while on
-   * (the default), resource bytes are written under BOTH the canonical
-   * multihash key and the legacy raw-digest key, so URLs copied before the
-   * cutover keep resolving. Removable once nothing published before the
-   * cutover is still being fetched.
-   */
-  private get legacyResourceUrlCompat(): boolean {
-    return (this.config as { legacyResourceUrlCompat?: boolean }).legacyResourceUrlCompat !== false;
   }
 
   /** Writes resource bytes through whichever storage interface the adapter implements. */
@@ -2341,16 +2309,13 @@ export class LifecycleManager {
     const pending = asset.pendingHeadMedia;
     if (!webvhDid || !pending) return;
 
-    const { domain, relativePath, legacyRelativePath } = this.webvhResourceLocation(webvhDid, pending.hash);
+    const { domain, relativePath } = this.webvhResourceLocation(webvhDid, pending.hash);
     const wrote = await this.writeResourceBytes(
       domain,
       relativePath,
       pending.content,
       pending.contentType
     );
-    if (wrote && this.legacyResourceUrlCompat) {
-      await this.writeResourceBytes(domain, legacyRelativePath, pending.content, pending.contentType);
-    }
     if (!wrote) {
       throw new StructuredError(
         'STORAGE_REQUIRED',

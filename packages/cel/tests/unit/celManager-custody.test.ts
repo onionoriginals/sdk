@@ -118,51 +118,33 @@ describe('getCurrentState custody fold', () => {
     expect(state.custody).toBeUndefined();
   });
 
-  test('LEGACY genesis (data.did/creator, no controller): the creator\'s own post-anchor rename folds as a CREATOR claim, not custody', () => {
-    // A controller-only lineage read is empty on a legacy-shape genesis, which
-    // misfolded every post-anchor update — the creator's own included — into
-    // custody (and dropped the rename). Lineage must fall back to
-    // data.creator and the create proof's VM DID, mirroring the verifier
-    // (which seeds creatorKeyHexes from the create proof key and calls the
-    // same entry `creator`).
+  test('a genesis WITHOUT data.controller has no lineage: EVERY post-anchor update folds to custody, the creator\'s own included', () => {
+    // Genesis lineage comes from data.controller only — the fold deliberately
+    // does not fall back to other genesis fields (data.did / data.creator) or
+    // the create proof's VM. With no lineage, nothing can make a post-anchor
+    // authenticity claim: the rename is routed to custody, never into
+    // state.name. (The genesis carries `did` so getCurrentState's shape guard
+    // accepts the log at all — that field is deliberately NOT lineage.)
     const log: EventLog = {
       events: [
         entry('create', {
           name: 'Original Name',
-          did: 'did:webvh:legacy.example:abc',
-          layer: 'peer',
+          did: 'did:webvh:example.com:abc',
+          creator: 'did:webvh:example.com:abc',
           resources: [],
-          creator: 'did:webvh:legacy.example:abc',
           createdAt: 'x',
         }, CREATOR),
         entry('migrate', { sourceDid: 'x', layer: 'btco', network: 'regtest', to: 'did:btco:reg:123', migratedAt: 'x' }, CREATOR, 'uEiFake1'),
         entry('update', { author: CREATOR, name: 'Renamed after anchor' }, CREATOR, 'uEiFake2'),
-      ],
-    };
-    const state = manager.getCurrentState(log);
-    expect(state.name).toBe('Renamed after anchor');
-    expect(state.custody).toBeUndefined();
-    expect(state.holders).toBeUndefined();
-  });
-
-  test('LEGACY genesis: a stranger\'s post-anchor update still folds to custody', () => {
-    const log: EventLog = {
-      events: [
-        entry('create', {
-          name: 'Original Name',
-          did: 'did:webvh:legacy.example:abc',
-          layer: 'peer',
-          resources: [],
-          creator: 'did:webvh:legacy.example:abc',
-          createdAt: 'x',
-        }, CREATOR),
-        entry('migrate', { sourceDid: 'x', layer: 'btco', network: 'regtest', to: 'did:btco:reg:123', migratedAt: 'x' }, CREATOR, 'uEiFake1'),
-        entry('update', { author: HOLDER, statement: 'mine now' }, HOLDER, 'uEiFake2'),
+        entry('update', { author: HOLDER, statement: 'mine now' }, HOLDER, 'uEiFake3'),
       ],
     };
     const state = manager.getCurrentState(log);
     expect(state.name).toBe('Original Name');
-    expect(state.custody).toEqual([{ author: HOLDER, statement: 'mine now', eventIndex: 2 }]);
-    expect(state.holders).toEqual([HOLDER]);
+    expect(state.custody).toEqual([
+      { author: CREATOR, eventIndex: 2 },
+      { author: HOLDER, statement: 'mine now', eventIndex: 3 },
+    ]);
+    expect(state.holders).toEqual([CREATOR, HOLDER]);
   });
 });
