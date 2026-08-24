@@ -1,6 +1,7 @@
 import { file } from 'bun';
 import { normalize } from 'node:path';
 import { route, json, type Handler } from './router';
+import { serveContextDocument } from './context-document';
 import type { OriginalsRoutes } from './originals-routes';
 import {
   resolveClientIp,
@@ -161,7 +162,13 @@ export function buildFetch(deps: {
       if (durable) return durable;
     }
 
-    // 4. Static SPA + fallback (with traversal guard).
+    // 4. The JSON-LD context every issued credential points at. Must come
+    // before the SPA fallback, which is exactly what used to answer here —
+    // with index.html, under text/html (see context-document.ts).
+    const context = serveContextDocument(req, url);
+    if (context) return context;
+
+    // 5. Static SPA + fallback (with traversal guard).
     return serveStatic(url, distDir);
   };
 }
