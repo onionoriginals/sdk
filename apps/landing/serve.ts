@@ -43,7 +43,12 @@ import { checkConfig, isStrictConfig, resolveDataDir } from './server/config';
 
 // The configuration contract (R10/R23), FIRST: a deployed instance missing or
 // malforming a required value says so by name here, before a single request is
-// served. Warn-only until CONFIG_STRICT=1 — see server/config.ts for why.
+// served. Warn-only until CONFIG_STRICT=1 — see server/config.ts for why —
+// EXCEPT the durable data directory, which THROWS here on a deployed instance
+// no matter what CONFIG_STRICT says. That directory holds the only copies of
+// signed reveal transactions; a process that boots without it takes strangers'
+// Bitcoin and writes the one artifact that could recover it to storage a
+// redeploy deletes. Crash-looping is the better failure.
 const configIssues = checkConfig();
 
 const DIST = new URL('./dist/', import.meta.url).pathname;

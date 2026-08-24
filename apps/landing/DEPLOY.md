@@ -25,7 +25,15 @@ state, so the checklist below is the only place they are written down.
 ## Environment contract
 
 `apps/landing/server/config.ts` validates this at boot and reports every
-violation by name. It is **warn-only** unless `CONFIG_STRICT=1`. See
+violation by name. It is **warn-only** unless `CONFIG_STRICT=1`, with one
+exception: **the durable data directory is always fatal on a deploy.**
+
+`ORIGINALS_DATA_DIR` unset, unwritable, or writable-but-not-a-mounted-volume
+**refuses the boot regardless of `CONFIG_STRICT`.** That path holds the only
+copies of signed reveal transactions, so booting past it means accepting a
+stranger's Bitcoin while writing the one artifact that could recover it to
+storage a redeploy deletes. A service that is down is recoverable in minutes;
+that data is not recoverable at all. Every other rule is unchanged — see
 "Turning on strict mode" before you set that flag.
 
 ### Server, read at runtime
@@ -59,9 +67,13 @@ real-money action; a mismatch is reported in both directions.
 Run one deploy with the code as-is and read the boot log. Do not proceed while
 any of these is outstanding.
 
-1. **Volume attached and mounted.** The log must not say the data directory is
-   writable but not a mounted volume. Writability alone passes on exactly the
-   ephemeral path this check exists to catch.
+1. **Volume attached and mounted.** Enforced at boot: the server now refuses
+   to start if the data directory is unset, unwritable, or writable but not a
+   mounted volume — regardless of `CONFIG_STRICT`. Writability alone passes on
+   exactly the ephemeral path this check exists to catch, which is why the
+   mount check and not the write probe is the gate. If the deploy is crash-
+   looping with `[fatal] ORIGINALS_DATA_DIR`, the volume is the problem; attach
+   it and point `ORIGINALS_DATA_DIR` at its mount path.
 2. **Scheduled backup enabled.** Railway backups are opt-in and there is no
    published durability SLA. Record the schedule and who enabled it in the log
    at the bottom of this file — the setting is dashboard-only and cannot
@@ -97,9 +109,13 @@ any of these is outstanding.
 
 ## Turning on strict mode
 
-`CONFIG_STRICT=1` turns every contract violation into a refusal to start.
-`/railway.json` caps restarts at 5, so flipping it against an environment that
-does not satisfy the contract takes the site down rather than degrading it.
+`CONFIG_STRICT=1` turns every remaining contract violation into a refusal to
+start. `/railway.json` caps restarts at 5, so flipping it against an environment
+that does not satisfy the contract takes the site down rather than degrading it.
+
+It does **not** govern the data directory: those violations are fatal either
+way (see "Environment contract"), so unsetting `CONFIG_STRICT` is not a way to
+boot past a missing volume, and was never meant to be.
 
 Deploy warn-only first, read the boot log, and fix everything it names —
 `NODE_ENV` and `TRUSTED_PROXY_HOPS` in particular are ones Railway does not
