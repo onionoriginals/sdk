@@ -4,9 +4,18 @@
  */
 
 export const site = {
-  title: 'Originals SDK — Provenance that survives the internet',
+  /**
+   * The tab, the Google result and every link preview. This is the FIRST
+   * Originals copy most people meet, so it speaks to the creator the rest of
+   * the page was rewritten for — not to a developer shopping for a package.
+   * The old pair ('Originals SDK — …', 'Create, publish, and inscribe digital
+   * assets … did:cel → did:webvh → did:btco') named the library and three DID
+   * methods before it named anything a creator wants. Title stays under 60
+   * characters and description under 155 so neither is truncated in search.
+   */
+  title: 'Originals — Proof you made it, carved into Bitcoin',
   description:
-    'Create, publish, and inscribe digital assets with cryptographically verifiable provenance. did:cel → did:webvh → did:btco.',
+    'Screenshots are free. Provenance is not. Give your work a signed history of who made it and who owns it — anchored on Bitcoin, verifiable by anyone.',
   /**
    * The production origin. Single source of truth: injected into index.html
    * (canonical, og:url, og:image, twitter:image) at build time, and
