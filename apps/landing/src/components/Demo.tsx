@@ -1120,12 +1120,6 @@ export function Demo() {
                           {i === 1 && durabilityNote && (
                             <p className="demo-step-note">{durabilityNote}</p>
                           )}
-                          {/* The one price a signed-out visitor ever sees, and
-                              it belongs HERE — beside the button that would
-                              spend it, not in a table further down the page. */}
-                          {i === 2 && costNote && (
-                            <p className="demo-step-note">{costNote}</p>
-                          )}
                           {state !== 'done' && (
                             // Step 3 in the simulated tier runs the SDK's mock
                             // provider for real — completable, not disabled —
@@ -1156,6 +1150,15 @@ export function Demo() {
                                 s.action
                               )}
                             </button>
+                          )}
+                          {/* The one price a signed-out visitor ever sees, and
+                              it belongs in this step — beside the thing that
+                              would spend it, not in a table further down the
+                              page. BELOW the button, though: above it, this
+                              sat directly on top of "Run the simulation" and
+                              read as that button's price. */}
+                          {i === 2 && costNote && (
+                            <p className="demo-step-note demo-cost-note">{costNote}</p>
                           )}
                         </div>
                       </li>

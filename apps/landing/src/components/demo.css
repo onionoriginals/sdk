@@ -299,6 +299,13 @@
   margin-bottom: var(--sp-3);
 }
 
+/* The cost line now follows the button, so it needs the gap that
+   `.demo-step-copy > p` puts below a paragraph put above it instead. */
+.demo-cost-note {
+  margin-top: var(--sp-3);
+  margin-bottom: 0;
+}
+
 .demo-step-btn {
   height: 36px;
   padding: 0 var(--sp-4);
