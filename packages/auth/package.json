@@ -60,7 +60,7 @@
   },
   "dependencies": {
     "@turnkey/crypto": "^2.10.0",
-    "@turnkey/sdk-server": "^7.0.0",
+    "@turnkey/sdk-server": "^8.2.1",
     "@originals/sdk": "^3.0.0-next.0",
     "jsonwebtoken": "^9.0.2",
     "@noble/hashes": "^2.0.1",
